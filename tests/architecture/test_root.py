@@ -103,6 +103,7 @@ def _prediction_hyperparameters() -> Hyperparameters:
                     "query": "[*].color",
                     "embed": False,
                     "max_vocab_size": 16,
+                    "p_unavailable": 0.0,
                 },
                 {
                     "name": "label",
@@ -111,6 +112,7 @@ def _prediction_hyperparameters() -> Hyperparameters:
                     "embed": False,
                     "p_prune": 1.0,
                     "max_vocab_size": 16,
+                    "p_unavailable": 0.0,
                     "topk": [2],
                 },
             ],
@@ -995,6 +997,34 @@ def _patch_manual_optimization(
     monkeypatch.setattr(Model, "manual_backward", manual_backward)
 
 
+def test_training_step_handles_batch_without_trainable_fields(monkeypatch) -> None:
+    class OptimizerStub:
+        def zero_grad(self) -> None:
+            pass
+
+        def step(self) -> None:
+            pass
+
+    _patch_manual_optimization(monkeypatch, optimizer=OptimizerStub())
+    model = j2v.Model.from_schema(
+        j2v.Number("amount"),
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+    )
+    inputs = model.encode(
+        [{"amount": 1.0}, {"amount": 2.0}],
+        strata=Strata.train,
+    )
+
+    output = model.training_step(inputs, 0)
+
+    loss = output["loss"]
+    assert loss.shape == (1,)
+    assert loss.requires_grad
+    assert torch.equal(loss.detach(), torch.zeros(1))
+
+
 def test_training_step_with_multi_loss_produces_finite_weighted_gradients(monkeypatch) -> None:
     class OptimizerStub:
         def zero_grad(self) -> None:
@@ -1676,4 +1706,3 @@ def test_mean_all_reduce_grads_submits_all_buckets_async_before_waiting(monkeypa
     assert submits == ["submit:0", "submit:1", "submit:2"]
     assert waits == ["wait:0", "wait:1", "wait:2"]
     assert events.index("submit:2") < events.index("wait:0")
-

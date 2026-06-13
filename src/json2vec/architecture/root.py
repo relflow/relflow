@@ -20,16 +20,11 @@ from torchjd.autojac import jac_to_grad, mtl_backward
 from json2vec.architecture.checkpoint import CheckpointState, RollbackCheckpoint
 from json2vec.architecture.contracts import ContractScheduler
 from json2vec.architecture.graph import ModelGraph
-from json2vec.architecture.mutations import (
-    MutationLockCallback,
-    RuntimePlacementCallback,
-    SchemaEditor,
-    immutable,
-)
+from json2vec.architecture.mutations import SchemaEditor
 from json2vec.architecture.runtime import ModelRuntime, Postprocessor, Preprocessor, step
 from json2vec.data.datasets.base import EncodedBatch, EncodedInput
-from json2vec.logging.throughput import ThroughputLogger
 from json2vec.distributed import is_distributed, mean_all_reduce_grads
+from json2vec.logging.throughput import ThroughputLogger
 from json2vec.structs.enums import AttentionMode, Metric, Strata
 from json2vec.structs.experiment import (
     Hyperparameters,
@@ -59,6 +54,7 @@ __all__ = [
     "RollbackCheckpoint",
     "RuntimePlacementCallback",
 ]
+
 
 def immutable(name: str | Strata) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     def decorator(method: Callable[..., Any]) -> Callable[..., Any]:
@@ -528,18 +524,10 @@ class Model(lit.LightningModule, Renderable):
 
     @property
     def shared_submodules(self) -> list[Any]:
-        embedders = [
-            node.embedder
-            for node in self.nodes.values()
-            if hasattr(node,'embedder')
-        ]
-        encoders = [
-            node.encoder
-            for node in self.nodes.values()
-            if hasattr(node,'encoder')
-        ]
+        embedders = [node.embedder for node in self.nodes.values() if hasattr(node, "embedder")]
+        encoders = [node.encoder for node in self.nodes.values() if hasattr(node, "encoder")]
         return embedders + encoders
-    
+
     @property
     def shared_params(self) -> list[Any]:
         params = []
@@ -653,15 +641,22 @@ class Model(lit.LightningModule, Renderable):
         is_accumulation_boundary = (batch_idx + 1) % accumulate == 0
 
         output = step(self, batch, batch_idx, strata=Strata.train)
-        no_losses: bool = "losses" not in output.keys()
-        losses: list[torch.Tensor] = output.get("losses", [output['loss'],])
+        if "losses" in output:
+            no_losses = False
+            losses = output["losses"]
+        elif "loss" in output:
+            no_losses = True
+            losses = [output["loss"]]
+        else:
+            raise RuntimeError("training step produced no loss")
+
         loss_vec = torch.stack(losses)
 
         if self.distributed_jd == "off" or no_losses:
             self.manual_backward(loss_vec.sum())
         else:
             addresses: list[Address] = output["addresses"]
-            root_embedding: torch.Tensor = output['root_embedding']
+            root_embedding: torch.Tensor = output["root_embedding"]
             shared_param_ids: set[int] = {id(parameter) for parameter in self.shared_params}
             tasks_params: list[list[torch.nn.Parameter]] = [
                 [
@@ -678,10 +673,11 @@ class Model(lit.LightningModule, Renderable):
                 shared_params=self.shared_params,
                 parallel_chunk_size=None,
             )
+            has_jd_hooks = any(getattr(module, "_forward_hooks", None) for module in self._jd_aggregation.modules())
             jac_to_grad(
                 self.shared_params,
                 self._jd_aggregation,
-                optimize_gramian_computation=True
+                optimize_gramian_computation=not has_jd_hooks,
             )
 
         self.track((Metric.loss, Strata.train), value=loss_vec.detach().sum())
