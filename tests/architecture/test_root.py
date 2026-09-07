@@ -59,6 +59,12 @@ def test_model_rejects_schema_combined_with_tree_configuration() -> None:
     with pytest.raises(TypeError, match="schema cannot be combined"):
         Model(schema=configuration(), d_model=8)
 
+    with pytest.raises(TypeError, match="schema cannot be combined with a root reduction"):
+        Model(schema=configuration(), reduction=None)
+
+    with pytest.raises(TypeError, match="schema cannot be combined with a root reduction"):
+        Model(schema=configuration(), reduction=rf.Mean())
+
 
 def test_model_tree_constructor_requires_architecture_options() -> None:
     with pytest.raises(TypeError, match="requires n_layers, n_heads"):

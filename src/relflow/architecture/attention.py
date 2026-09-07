@@ -5,7 +5,14 @@ from relflow.architecture.rotary import RotaryEmbedding
 
 
 class RotaryMultiheadAttention(torch.nn.Module):
-    def __init__(self, d_model: int, nhead: int, dropout: float, n_kv_heads: int | None = None):
+    def __init__(
+        self,
+        d_model: int,
+        nhead: int,
+        dropout: float,
+        n_kv_heads: int | None = None,
+        position: bool = True,
+    ):
         super().__init__()
 
         if d_model % nhead != 0:
@@ -27,7 +34,7 @@ class RotaryMultiheadAttention(torch.nn.Module):
         self.v_proj = torch.nn.Linear(d_model, n_kv_heads * self.head_dim)
         self.out_proj = torch.nn.Linear(d_model, d_model)
 
-        self.rotary = RotaryEmbedding(d_model=self.head_dim)
+        self.rotary = RotaryEmbedding(d_model=self.head_dim) if position else None
         self.dropout_p = dropout
 
     def splitheads(self, inputs: torch.Tensor, nhead: int) -> torch.Tensor:
@@ -35,6 +42,8 @@ class RotaryMultiheadAttention(torch.nn.Module):
         return inputs.reshape(batch, seq_len, nhead, self.head_dim).transpose(1, 2)
 
     def rotate(self, inputs: torch.Tensor) -> torch.Tensor:
+        if self.rotary is None:
+            return inputs
         batch, nhead, seq_len, head_dim = inputs.shape
         rotated = self.rotary(inputs.reshape(batch * nhead, seq_len, head_dim))
         return rotated.reshape(batch, nhead, seq_len, head_dim)

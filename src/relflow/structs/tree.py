@@ -258,6 +258,7 @@ class Leaf(Node):
     query: str | None = None
     nullable: bool = True
     pooling: Literal["query", "mean"] = "query"
+    decoder_position: pydantic.StrictBool | None = None
     weight: Annotated[float, pydantic.Field(gt=0.0, default=1.0)] = 1.0
     mask: tuple[Mask, ...] = pydantic.Field(default=False)
     n_linear: Annotated[int, pydantic.Field(gt=0, default=1)] = 1
@@ -344,7 +345,14 @@ class Leaf(Node):
             heading.append(self.query, style="cyan")
         yield heading
 
-        common_names = ("pooling", "weight", "n_heads", "n_linear", "dropout")
+        common_names = (
+            "pooling",
+            "decoder_position",
+            "weight",
+            "n_heads",
+            "n_linear",
+            "dropout",
+        )
         common = Text()
         first = True
         for name in common_names:

@@ -144,6 +144,26 @@ def test_cluster_status_returns_detached_cpu_native_snapshot() -> None:
     assert snapshot["usage"] == pytest.approx((0.1, 0.2, 0.7))
 
 
+def test_cluster_decoder_does_not_condition_identity_on_row_siblings() -> None:
+    model = rf.Model(
+        name="record",
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        merchant_id=rf.Cluster(
+            capacity=CAPACITY,
+            n_clusters=(2, N_CLUSTERS),
+            mask=rf.Mask(rate=0.1, reconstruct=True),
+        ),
+        amount=rf.Number,
+    )
+
+    decoder = model.nodes[ADDRESS].decoder
+
+    assert decoder.context_addresses == ()
+    assert decoder.context_projection is None
+
+
 def test_cluster_status_preserves_usage_precision() -> None:
     model = build().double()
     field = embedder(model)

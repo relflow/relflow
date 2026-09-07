@@ -192,9 +192,9 @@ of the model version, not as independent request metadata.
   validate the result and save it as a new artifact with a new version.
 - `batch_size` is persisted, but it may be changed deliberately after loading.
   Rebuild or keep a model-linked data module so it reads the current value.
-- Loading a checkpoint produced by another RelFlow version is not guaranteed
-  to migrate its schema. Test compatibility before replacing a production
-  runtime.
+- Checkpoint schemas are validated exactly as saved; RelFlow does not rewrite
+  older schemas. Use the version that produced an artifact, or retrain and save
+  a new checkpoint under the current version.
 
 Vocabulary labels and numeric normalization statistics live in the model state
 and are preserved. They should be learned from training data, not rebuilt by

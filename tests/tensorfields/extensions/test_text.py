@@ -385,6 +385,8 @@ def test_text_jitters_only_training_valued_finite_embeddings(
 
     payload = _structure_payload(jitter=Jitter(add=0.5, normalize=normalize))
     payload["d_model"] = 4
+    payload["fields"]["n_heads"] = 2
+    payload["fields"]["fields"][0]["n_heads"] = 2
     structure = Schema.model_validate(payload)
     field = _new_tensorfield(
         values=[[["alpha", None]], [["gamma", "delta"]]],

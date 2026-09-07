@@ -27,7 +27,8 @@ extension internals and should be treated as more version-coupled.
 | Export | Purpose | Guide |
 | --- | --- | --- |
 | `Model` | Build, train, mutate, save, load, encode, and predict with a schema-backed Lightning module. | [Getting Started](../getting-started.qmd), [Model Configuration](../guides/model-configuration.qmd) |
-| `Branch` | Define a fixed-length nested/repeated context. | [Branch](../data-types/branch.qmd) |
+| `Branch` | Define a fixed-length nested/repeated context and how its encoded tokens are reduced before routing upward. | [Branch](../data-types/branch.qmd) |
+| `Attention`, `Mean`, `ReductionConfig` | Configure or type a Branch reduction. Pass `reduction=None` to preserve routed encoded child slots and their presence state. | [Branch](../data-types/branch.qmd#reduce-branch-memory) |
 | `Mask` | Select coordinates and configure learned masking, structural skipping, dropout, or reconstruction on any node. | [Dynamic Masking](../core-concepts/dynamic-masking.qmd) |
 | `Jitter` | Configure bounded additive and multiplicative triangular noise for continuous `Number`, `Vector`, `DateParts`, and `Text` representations. | [Jitter And Input Noise](../core-concepts/jitter.qmd) |
 | `Address` | Represent a stable slash-delimited node/output path. | [Model Tree](../core-concepts/model-tree.qmd) |
@@ -43,20 +44,35 @@ extension internals and should be treated as more version-coupled.
 | `fields` | `None` | Sequence form of the same root children; cannot duplicate names supplied positionally or by keyword. |
 | `d_model` | Required | Shared representation width. |
 | `n_layers` | Required | Generated root self-attention depth. |
-| `n_heads` | Required | Generated root attention/pooling heads; positive, even, a divisor of `d_model`, and small enough that `d_model // n_heads >= 2`. |
+| `n_heads` | Required | Generated root self-attention heads and the fallback head count for an `Attention` reduction; positive, even, a divisor of `d_model`, and small enough that `d_model // n_heads >= 2`. |
 | `batch_size` | `1` | Expected batch size used by data modules, examples, and logging. |
 | `name` | `"record"` | Generated singleton root name and address prefix. |
 | `description` | `None` | Human-readable root metadata. |
-| `embed` | `False` | Emit the normalized root embedding during prediction. |
+| `embed` | `False` | Emit the root reduction output during prediction. Its leading shape follows that reduction. |
 | `mask` | `False` | One root mask shorthand or a list/tuple of `Mask` policies, applied atomically to all active descendants. |
 | `attention` | `"mha"` | Root self-attention mode: `mha`, `gqa`, `mqa`, or `none`. |
-| `n_linear` | `1` | Root learned-query cross-attention pooling block count. Each block also contains a feed-forward network. |
-| `dropout` | `None` | Root attention/feed-forward dropout rate. |
+| `reduction` | `rf.Attention()` | Root reduction: `rf.Attention(n_outputs=...)`, `rf.Mean()`, or `None` for no reduction. Output count belongs to `Attention`; `Mean` produces one averaged encoded token and `None` preserves routed slots plus presence. |
+| `dropout` | `None` | Root self-attention/feed-forward dropout and the fallback for reductions whose own `dropout` is `None`. |
 | `optimizer` | `None` | Optimizer instance or factory; required before fitting. |
 | `scheduler` | `None` | Optional scheduler configuration or factory. |
 
 Passing `schema=...` is a lower-level/load integration and cannot be combined
 with tree fields or root architecture arguments.
+
+`attention` and `reduction` control separate phases. `attention` mixes the
+root's input tokens; `reduction` determines how many of those encoded tokens
+flow onward or become the root embedding. An `rf.Attention` reduction accepts
+positive `n_outputs` and `n_layers`, an optional `n_heads` and `dropout`
+override, and `position` to control rotary position in this reducer only. A
+reducer `n_heads` override may be odd when it divides `d_model` and leaves at
+least two dimensions per head; the root and Branch `n_heads` values remain
+even. `rf.Mean()` has no parameters. The configuration objects are frozen
+schema values; they do not share learned parameters when reused.
+
+The former root/Branch `n_linear` option is removed. Put that depth on the
+Attention reduction with `reduction=rf.Attention(n_layers=...)`. The
+same-named option on a leaf remains a decoder-pooling setting and is a separate
+API.
 
 `model.version` is immutable checkpoint provenance. New models initialize it
 from `rf.__version__`; loaded models retain the checkpoint's top-level `version`
@@ -180,7 +196,7 @@ installation error with the required command.
 | `TensorFieldBase` | Base state/content tensor container contract. |
 | `TensorInput` | Compact state/content view passed to a datatype embedder for present coordinates only. |
 | `EmbedderBase` | Base encoder that gathers present coordinates and scatters extension payloads back into fixed geometry. |
-| `DecoderBase` | Base heritage pooling and prediction decoder. |
+| `DecoderBase` | Base heritage pooling, optional sibling query conditioning, and prediction decoder. |
 
 These objects are importable, but the extension surface is experimental rather
 than a stable extension SDK. A dynamically registered request type can round-trip

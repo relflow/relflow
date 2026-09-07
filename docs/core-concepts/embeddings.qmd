@@ -78,8 +78,10 @@ space.
 
 ## Root Embeddings
 
-Set `embed=True` on `Model(...)` to emit one representation for the
-whole record.
+Set `embed=True` on `Model(...)` to emit the generated root's reduced
+representation for the whole record. The default reduction emits one vector;
+Attention can emit several, and `reduction=None` emits every encoded root input
+token.
 
 ```{python .marimo}
 #| echo: true
@@ -125,7 +127,9 @@ deduplication, or downstream models.
 
 ## Branch Embeddings
 
-Set `embed=True` on a `Branch` to emit a representation for a repeated context.
+Set `embed=True` on a `Branch` to emit its reduction output for a repeated
+context. Its configured reduction determines whether that output contains one,
+several, or every routed encoded child slot.
 
 ```{python .marimo}
 #| echo: true
@@ -299,10 +303,16 @@ pixels = pc.struct_field(
 )
 ```
 
-Root embeddings return one vector per input observation. A branch pools its
-retained child slots and returns one vector per parent coordinate, not one vector
-for every retained child slot. Nested branch output therefore keeps the relevant
-ancestor coordinates while summarizing the branch's own repeated dimension.
+By default, root embeddings return one vector per input observation and a
+branch returns one vector per parent coordinate. That shape follows the default
+one-output Attention reduction. `rf.Attention(n_outputs=...)` retains the
+configured output axis, while `reduction=None` preserves every routed encoded
+child slot. Presence remains
+attached to those slots while RelFlow routes them internally, but the exported
+branch embedding contains only the normalized vectors. Nested branch output
+keeps the relevant ancestor coordinates and the outputs selected by its
+reduction. Budget both the prediction payload and downstream consumer for that
+shape.
 
 ## Combining Learning Signals
 

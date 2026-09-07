@@ -49,11 +49,17 @@ def test_model_constructor_supports_direct_binding_and_opt_in_queries():
     assert params.reconstruct == ["record/label"]
 
 
-def test_model_from_tree_remains_a_compatibility_wrapper():
-    direct = rf.Model(rf.Number("amount"), d_model=16, n_layers=1, n_heads=4)
-    compatible = rf.Model.from_tree(rf.Number("amount"), d_model=16, n_layers=1, n_heads=4)
+def test_model_uses_constructor_without_from_tree_alternative():
+    model = rf.Model(
+        rf.Number("amount"),
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+        reduction=rf.Mean(),
+    )
 
-    assert compatible.schema.model_dump(mode="python") == direct.schema.model_dump(mode="python")
+    assert model.schema.requests["record/amount"].name == "amount"
+    assert not hasattr(rf.Model, "from_tree")
 
 
 def test_model_constructor_rejects_duplicate_sources():
@@ -165,7 +171,7 @@ def test_model_constructor_accepts_root_branch_options():
         description="event records",
         embed=True,
         attention="none",
-        n_linear=2,
+        reduction=rf.Attention(n_outputs=3, n_layers=2),
         dropout=0.2,
     )
     params = model.schema
@@ -175,11 +181,55 @@ def test_model_constructor_accepts_root_branch_options():
     assert params.fields.embed is True
     assert params.fields.attention == "none"
     assert params.fields.length == 1
-    assert params.fields.n_linear == 2
+    assert params.fields.reduction == rf.Attention(n_outputs=3, n_layers=2)
     assert params.fields.dropout == 0.2
+    assert not hasattr(params.fields, "n_linear")
     assert not hasattr(params.fields, "p_mask")
     assert params.embed == ["events"]
     assert params.shapes["events/amount"] == (1,)
+
+
+def test_model_constructor_rejects_removed_root_n_linear() -> None:
+    with pytest.raises(ValueError, match="n_linear was removed from Model"):
+        rf.Model(
+            rf.Number("amount"),
+            d_model=16,
+            n_layers=1,
+            n_heads=4,
+            n_linear=2,
+        )
+
+
+def test_removed_root_options_remain_available_as_data_field_names() -> None:
+    model = rf.Model(
+        n_linear=rf.Number,
+        n_outputs=rf.Number,
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+    )
+
+    assert list(model.schema.requests) == ["record/n_linear", "record/n_outputs"]
+
+
+def test_schema_rejects_embedding_a_branch_without_active_output() -> None:
+    with pytest.raises(ValueError, match="embed=True but no active descendant output"):
+        rf.Model(
+            empty=rf.Branch(embed=True, value=rf.Number(active=False)),
+            target=rf.Number(mask=True),
+            d_model=8,
+            n_layers=1,
+            n_heads=2,
+        )
+
+    with pytest.raises(ValueError, match="n_outputs belongs to a reduction"):
+        rf.Model(
+            rf.Number("amount"),
+            d_model=16,
+            n_layers=1,
+            n_heads=4,
+            n_outputs=2,
+        )
 
 
 def test_model_constructor_rejects_root_length_argument():

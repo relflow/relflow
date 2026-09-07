@@ -246,7 +246,7 @@ Choose the data module by where the records live:
 | PyTorch `IterableDataset` mappings | `CustomDataModule` |
 | Restartable mapping generators | `SyntheticDataModule` |
 
-Polars is an optional ingress adapter and converts each frame once. Custom and
+Polars is an in-memory ingress adapter and converts each frame once. Custom and
 synthetic adapters convert bounded mapping groups once per chunk. Thereafter,
 all four use the same Arrow preprocessing, shuffling, coalescing, and encoding
 path. The first Arrow release deliberately limits Dataset and factory sources

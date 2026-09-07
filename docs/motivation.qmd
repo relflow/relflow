@@ -65,9 +65,11 @@ structure earns its memory, latency, and operational cost.
 
 Preserving hierarchy also does not invent relationships that are absent from
 the schema. `Hash` gives repeated identifiers matching representations, but
-separate sibling branches pool their tokens before interacting. Cross-context
-correspondence may therefore need restructuring or preprocessing so matching
-roles meet before pooling.
+fixed-width reductions on separate sibling branches can discard their tokens
+before interaction. Cross-context correspondence may therefore need
+pass-through reduction, restructuring, or preprocessing so matching roles meet
+before they are compressed. More reduction outputs add capacity; they do not
+perform a relational join.
 
 ## Schema As Model Blueprint
 
@@ -76,7 +78,7 @@ RelFlow makes the record schema executable:
 - leaf declarations choose datatype-specific validation, tensorization,
   embedding, loss, metrics, and prediction behavior;
 - `Branch` declarations define bounded contexts whose children can interact
-  before a pooled representation flows upward;
+  before a configured reduction routes their representations upward;
 - learning roles choose values to hide and reconstruct;
 - `embed=True` chooses representations to expose;
 - names and queries bind source values to stable model addresses.

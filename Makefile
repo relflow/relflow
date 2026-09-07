@@ -6,7 +6,7 @@ PORT ?= 4200
 PREVIEW_FLAGS ?= --no-browser --host $(HOST) --port $(PORT)
 DOCS_PYTHONPATH ?= $(CURDIR)/src
 
-.PHONY: help dev preview render check-docs build clean
+.PHONY: help dev preview render check-docs proofs build clean
 
 help: ## Show available targets.
 	@awk 'BEGIN {FS = ":.*##"; print "Targets:"} /^[a-zA-Z_-]+:.*##/ {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -25,6 +25,9 @@ check-docs: ## Validate docs quietly without touching the workspace.
 		trap 'rm -rf "$${DOCS_CHECK_DIR:?}"' EXIT HUP INT TERM; \
 		rsync -a --exclude='site/' --exclude='.quarto/' --exclude='__pycache__/' docs/ "$$DOCS_CHECK_DIR/docs/"; \
 		PYTHONPATH="$(DOCS_PYTHONPATH)" $(QUARTO) render "$$DOCS_CHECK_DIR/docs" --quiet
+
+proofs: ## Run synthetic proofs of learned model behavior.
+	uv run pytest -n 0 proofs
 
 build: render ## Alias for render.
 

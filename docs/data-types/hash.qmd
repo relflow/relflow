@@ -13,9 +13,8 @@ pyproject: |
 Use `Hash` for large or unbounded identifiers when equality is useful but
 the values should not become a learned vocabulary. Typical examples include
 device, account, counterparty, product, and hostname identifiers.
-In serialized schemas, select it with `"type": "hash"`.
-
-Install its native hashing backend with `pip install "relflow[hash]"`.
+In serialized schemas, select it with `"type": "hash"`. Its Polars-backed
+hashing implementation is included in the base RelFlow installation.
 
 ```{python .marimo}
 #| echo: true
@@ -83,7 +82,7 @@ the original raw value cannot be decoded from model output.
 
 Matching hashes allow attention to recognize equal values while their tokens
 remain together. They do not guarantee correspondence after a branch has been
-compressed into a pooled representation.
+compressed by a fixed-width reduction.
 
 ## Prediction Output
 
@@ -96,4 +95,4 @@ identifier across separately tensorized training batches.
 - Use [Category](category.qmd) for persistent bounded labels.
 - Use [Branch](branch.qmd) to configure repeated observations.
 - Read [Field Stacking](../guides/field-stacking.qmd) when several semantic
-  roles need token-level interaction before pooling.
+  roles need token-level interaction before reduction.

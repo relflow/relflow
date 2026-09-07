@@ -6,7 +6,11 @@ import relflow.tensorfields as tensorfields
 
 def test_common_resources_are_available_from_package_root():
     assert relflow.Model.__name__ == "Model"
+    assert relflow.Attention().type == "attention"
     assert relflow.AttentionMode.mha == "mha"
+    assert relflow.Mean().type == "mean"
+    assert not hasattr(relflow, "Convolution")
+    assert relflow.ReductionConfig is not None
     assert not hasattr(relflow, "Dataset")
     assert relflow.ArrowDataModule.__name__ == "ArrowDataModule"
     assert relflow.CustomDataModule.__name__ == "CustomDataModule"

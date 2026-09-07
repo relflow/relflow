@@ -128,6 +128,41 @@ def test_default_jitter_does_not_advance_rng_during_training():
     assert torch.equal(torch.random.get_rng_state(), before)
 
 
+def test_number_embedding_retains_standardized_value_in_monotone_lane():
+    structure = Schema.model_validate(structure_payload())
+    field = tensorfield(rows=[[8.0, 12.0]], schema=structure, strata=Strata.predict)
+    embedder = Embedder(schema=structure, address=ADDRESS).eval()
+    embedder.normalizer.mean.fill_(10.0)
+    embedder.normalizer.var.fill_(4.0)
+
+    parcel = embedder.embed(field)
+
+    assert parcel.payload[0, 0, 0, -1].item() == pytest.approx(-1.0, abs=1e-4)
+    assert parcel.payload[0, 0, 1, -1].item() == pytest.approx(1.0, abs=1e-4)
+
+
+def test_number_monotone_lane_retains_autograd_at_model_width_one():
+    schema = rf.Schema.from_tree(
+        rf.Number("amount"),
+        d_model=1,
+        n_layers=1,
+        n_heads=2,
+        attention="none",
+        reduction=rf.Mean(),
+    )
+    embedder = Embedder(schema=schema, address="record/amount")
+    inputs = TensorInput(
+        state=torch.tensor([Tokens.valued, Tokens.valued]),
+        content=torch.tensor([1.0, 2.0]),
+        batch_size=[2],
+    )
+
+    parcel = embedder(inputs)
+    parcel.payload.sum().backward()
+
+    assert all(parameter.grad is not None for parameter in embedder.parameters())
+
+
 def test_number_jitters_only_finite_valued_coordinates(monkeypatch: pytest.MonkeyPatch):
     structure = Schema.model_validate(structure_payload(jitter=Jitter(add=0.5)))
     embedder = Embedder(schema=structure, address=ADDRESS)

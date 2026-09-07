@@ -587,7 +587,10 @@ class ClusterRuntime:
 @cluster.register
 class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
-        super().__init__(schema=schema, address=address)
+        # Cluster assignments belong to stable identities. Row-varying sibling
+        # values may supervise them through downstream objectives, but must not
+        # alter the query used to reconstruct the identity itself.
+        super().__init__(schema=schema, address=address, conditioned=False)
 
         request: Request = schema.requests[address]
         n_clusters: int = request.size

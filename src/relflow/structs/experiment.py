@@ -12,6 +12,7 @@ from anytree import LevelOrderGroupIter, PreOrderIter
 from rich.text import Text
 
 from relflow.structs.enums import AttentionMode, Component, Overflow, Strata
+from relflow.structs.reduction import Attention, ReductionConfig
 from relflow.structs.selectors import (
     ExtendArg,
     NodeAttribute,
@@ -173,12 +174,23 @@ class Schema(Node):
         description: str | None = None,
         embed: bool = False,
         attention: AttentionMode | str = AttentionMode.mha,
-        n_linear: Annotated[int, pydantic.Field(gt=0)] = 1,
+        reduction: ReductionConfig | None = Attention(),
         dropout: Rate | None = None,
         mask: MaskInput = False,
         **field_kwargs: TreeFieldInput,
     ) -> Self:
         """Build schema from tree fields."""
+        if "n_linear" in field_kwargs and not (
+            isinstance(field_kwargs["n_linear"], (Branch, Leaf))
+            or (isinstance(field_kwargs["n_linear"], type) and issubclass(field_kwargs["n_linear"], Leaf))
+        ):
+            raise ValueError("n_linear was removed from Model; use reduction=Attention(n_layers=...)")
+        if "n_outputs" in field_kwargs and not (
+            isinstance(field_kwargs["n_outputs"], (Branch, Leaf))
+            or (isinstance(field_kwargs["n_outputs"], type) and issubclass(field_kwargs["n_outputs"], Leaf))
+        ):
+            raise ValueError("n_outputs belongs to a reduction; use reduction=Attention(n_outputs=...)")
+
         normalized = [
             *(bind_tree_field(None, field) for field in (fields or ())),
             *(bind_tree_field(None, field) for field in field_args),
@@ -211,7 +223,7 @@ class Schema(Node):
             attention=attention,
             n_layers=n_layers,
             n_heads=n_heads,
-            n_linear=n_linear,
+            reduction=reduction,
             length=1,
             overflow=Overflow.error,
             dropout=dropout,
@@ -301,6 +313,33 @@ class Schema(Node):
     def shapes(self) -> dict[Address, tuple[int, ...]]:
         return {request.address: request.shape for request in self.requests.values()}
 
+    @functools.cached_property
+    def branch_outputs(self) -> dict[Address, int]:
+        """Static routed token width produced by every structurally active branch."""
+
+        outputs: dict[Address, int] = {}
+        for depth in reversed(self.depthwise):
+            for address in depth:
+                branch = self.branches[address]
+                child_width = 0
+                for child in branch.fields:
+                    if isinstance(child, Leaf):
+                        child_width += int(child.active)
+                    elif child.address in outputs:
+                        child_width += outputs[child.address]
+
+                input_width = branch.length * child_width
+                if input_width == 0:
+                    outputs[address] = 0
+                elif branch.reduction is None:
+                    outputs[address] = input_width
+                elif isinstance(branch.reduction, Attention):
+                    outputs[address] = branch.reduction.n_outputs
+                else:
+                    outputs[address] = 1
+
+        return outputs
+
     def overflows(self, address: Address) -> tuple[Overflow, ...]:
         return (Overflow.error, *self.requests[Address(str(address))].overflows)
 
@@ -326,7 +365,7 @@ class Schema(Node):
         return out
 
     def clear_tree_caches(self) -> None:
-        for name in ("branches", "requests", "active_requests", "shapes", "depthwise"):
+        for name in ("branches", "requests", "active_requests", "shapes", "branch_outputs", "depthwise"):
             self.__dict__.pop(name, None)
 
         for node in PreOrderIter(self.fields):
@@ -354,6 +393,18 @@ class Schema(Node):
     def post_bind_validate(self) -> None:
         for branch in self.branches.values():
             branch.post_bind_validate()
+            if branch.embed and self.branch_outputs[branch.address] == 0:
+                raise ValueError(
+                    f"branch '{branch.address}' has embed=True but no active descendant output; "
+                    "activate at least one descendant leaf or disable branch embedding"
+                )
+            if isinstance(branch.reduction, Attention):
+                n_heads = branch.reduction.n_heads or branch.n_heads
+                if self.d_model % n_heads != 0 or self.d_model // n_heads < 2:
+                    raise ValueError(
+                        f"branch '{branch.address}' Attention reduction requires n_heads to divide "
+                        "d_model with at least two dimensions per head"
+                    )
 
         for request in self.requests.values():
             request.post_bind_validate()

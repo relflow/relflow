@@ -93,6 +93,11 @@ mask with `reconstruct=True`, or use `mask=True` for an always-skipped target,
 when that head should train.
 :::
 
+Cluster reconstruction opts out of the direct sibling query shortcut.
+Row-varying siblings can still participate through normal branch memory and
+affect downstream targets. This separation keeps a sibling value from directly
+redefining the identity-reconstruction query on every row.
+
 `p_unavailable` uses Torch randomness during training. The data-module seed
 reproduces row sampling and ordering; it does not make unavailable simulation
 identity- or chunk-invariant. Seed the Torch/Lightning runtime as well when

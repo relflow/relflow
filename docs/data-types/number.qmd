@@ -52,7 +52,12 @@ missing branch positions are encoded as padded state. For repeated values, place
 the field inside a `Branch`.
 
 Numeric content is normalized online by the embedder before Fourier features are
-computed, so models do not require pre-normalized inputs.
+computed, so models do not require pre-normalized inputs. The embedding retains
+the periodic Fourier representation and one clamped standardized scalar lane.
+Within the documented Fourier safety bound, that lane gives learned additive
+and multiplicative paths a monotone signal when they must extrapolate beyond
+the phases observed during fitting. Configured jitter also perturbs it during
+training.
 
 ## Jitter
 

@@ -70,7 +70,7 @@ its own representation before the order is represented at the root.
 | Node kind | Created by | Public role |
 | --- | --- | --- |
 | Root | `Model(..., name=...)` | Singleton context for one processed observation. |
-| Branch | `Branch(..., length=...)` | Bounded child context whose aligned values can interact before pooling to its parent. |
+| Branch | `Branch(..., length=...)` | Bounded child context whose aligned values can interact before a configured reduction routes them to its parent. |
 | Leaf tensorfield | `Number`, `Category`, `Set`, `Hash`, `DateParts`, `Text`, `Vector`, `Boolean` | Binds and represents a typed source value; optionally decodes a prediction. |
 
 The generated root is named `record` by default. `Model(name="order", ...)`
@@ -120,12 +120,15 @@ customer
 ```
 
 Events interact inside a session; session representations interact in the
-login-session context; the pooled result reaches the customer. Transactions
-have a separate local context before their pooled result reaches the same root.
+login-session context; the reduced result reaches the customer. Transactions
+have a separate local context before their reduced result reaches the same
+root.
 
-This hierarchy does not automatically join values across sibling branches.
-Identity matching or alignment across contexts must be represented explicitly
-in the observation shape or preprocessing.
+This hierarchy does not perform a deterministic database join across sibling
+branches. A decoder can learn from sibling evidence that survives the ordinary
+Branch route, but it receives no automatic pairwise comparison operator. Stack
+roles into one aligned branch or use preprocessing when exact correspondence is
+part of the data contract.
 
 ## Schema Roles And Mutations
 
@@ -173,8 +176,9 @@ remaining sections explain the tensor shapes and routing that implement them.
 They are most useful for debugging, performance work, and tensorfield extension.
 
 The runtime tree is backed by Pydantic schema models and installed node
-objects. Vector payloads are routed internally in `Parcel` objects; a decoder's
-`heritage` is the path of contexts it can gather for one target.
+objects. Vector payloads are routed internally in `Parcel` objects. A decoder's
+canonical pooling memory follows its `heritage`; visible siblings travel on a
+separate conditioning route described below.
 
 ### Tensor Shapes
 
@@ -224,8 +228,8 @@ leaves from the context available along their path.
 3. Datatype codecs tensorize those projections once. Present leaf coordinates
    embed state and content and send vector parcels to their parent branches.
 4. Branch encoders run from the deepest branches toward the root. Each branch
-   combines child parcels, applies configured local attention, pools the child
-   context, and sends one representation to its parent.
+   combines child parcels, applies configured local attention, reduces the
+   child context, and sends one, several, or all encoded tokens to its parent.
 5. Nodes configured with `embed=True` make their representations available to
    prediction output.
 6. Leaves compiled as fitting objectives, deterministic prediction decodes, or
@@ -234,11 +238,17 @@ leaves from the context available along their path.
    trainable targets. During prediction, writers serialize decoded values and
    configured embeddings.
 
-### Pooling And Heritage
+### Branch Reduction And Leaf Heritage
 
-Branch pooling compresses a child context before it flows upward. After local
-attention, learned-query cross-attention produces the branch vector passed to
-the parent.
+Branch `attention` and `reduction` are distinct. After optional local
+self-attention, the default `rf.Attention()` reduction produces one learned
+summary. `rf.Attention(n_outputs=...)` produces a configured fixed number of
+anonymous summaries, `rf.Mean()` produces one presence-normalized mean of
+encoded token vectors, and `reduction=None` preserves every routed encoded
+child slot and its presence state. None of these choices assigns entity or
+target semantics to an output. A wider or pass-through child can still be
+compressed by the next Branch, so capacity must be considered along the
+complete path.
 
 Decoder pooling builds context for a leaf. A leaf's **heritage** contains the
 addresses on its root-to-leaf path. For `order/line_items/price`:
@@ -254,16 +264,26 @@ into the target leaf shape. The default `pooling="query"` uses learned-query
 cross-attention. `pooling="mean"` repeats the mean heritage context for each
 target slot.
 
-This lets a decoded leaf use ancestor contexts and visible information in its
-own branch. A learned mask can communicate masked state without its original
-content. A skipped coordinate has no input parcel at all; its original value
-exists only in the target projection when reconstruction is enabled.
+Visible same-parent siblings do not become duplicate pooling memory. Instead,
+shape-aligned siblings condition learned queries for repeated or scalar
+targets. With the default `decoder_position=None`, scalar target queries omit
+position and repeated target queries use it; a leaf can explicitly choose
+`True` or `False`. A sibling branch always exposes its routed branch parcel;
+its individual descendant parcels remain visible only with `reduction=None`.
+This is why pass-through is the clearest starting point for item-level
+reasoning, while a tested fixed-width reduction can be used when it retains
+enough evidence.
+
+These routes let a decoded leaf use ancestor contexts and visible information
+in its own branch. A learned mask can communicate masked state without its
+original content. A skipped coordinate has no input parcel at all; its original
+value exists only in the target projection when reconstruction is enabled.
 
 ## Where Next
 
 - Follow the complete pipeline in [Data Flow](data-flow.qmd).
 - Use [Branch](../data-types/branch.qmd) for lengths, overflow, attention, and
-  pooling configuration.
+  reduction configuration.
 - Use [Built-In Data Types](data-types.qmd) to choose leaf tensorfields.
 - Use [Learning Modes & Embeddings](embeddings.qmd) for reconstruction,
   regularization, and exported representations.

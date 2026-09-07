@@ -158,7 +158,9 @@ def axes(module: Model, address: Address) -> tuple[int, ...]:
         lengths = tuple(
             node.length for node in module.schema.branches[address].path if getattr(node, "type", None) == "branch"
         )
-        return lengths[1:-1]
+        structural = lengths[1:-1]
+        outputs = module.schema.branch_outputs[address]
+        return (*structural, outputs) if outputs > 1 else structural
     raise KeyError(f"prediction address {str(address)!r} is absent from the model schema")
 
 
@@ -433,13 +435,15 @@ class ModelRuntime:
             if not selected:
                 continue
 
-            heritage: list[Address] = module.schema.requests[address].heritage
-            parcels = [outgoing[item] for item in heritage if item in outgoing]
+            request = module.schema.requests[address]
+            parcels = [outgoing[item] for item in request.heritage if item in outgoing]
 
             node_module = cast(NodeModule, module.nodes[address])
             decoder: DecoderBase = node_module.decoder
+            contexts = [outgoing[item] for item in decoder.context_addresses if item in outgoing]
             prediction = decoder(
                 parcels,
+                contexts=contexts,
                 batch_size=tensorfield.state.shape[0],
                 device=tensorfield.state.device,
                 embed=address in embeds,
