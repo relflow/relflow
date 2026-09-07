@@ -61,9 +61,17 @@ summarize irrelevant events in a preprocessor before expanding model capacity.
 
 - `d_model` widens datatype embeddings, projections, attention, pooling, and
   decoders across the entire tree.
-- `n_layers` adds sequential self-attention blocks to a branch.
-- `n_linear` adds learned-query cross-attention pooling blocks; each block also
-  contains a feed-forward network.
+- Branches with multiple direct leaf fields use one coordinate-local attention
+  block before their sequence encoder. It follows the branch attention mode,
+  head count, and dropout.
+- `n_layers` adds sequential self-attention blocks to the branch sequence
+  encoder after that coordinate-local block.
+- `reduction=rf.Attention(n_layers=...)` adds learned-query reduction blocks;
+  each block also contains a feed-forward network.
+- Attention `n_outputs` increases both the reduction output and the sequence
+  routed into the parent.
+- `reduction=None` routes every encoded child slot with its presence state and
+  can make a parent's sequence much larger than any fixed output count.
 - `dropout` may improve generalization but does not reduce inference cost.
 
 Increase width only after verifying the input contract and observing
@@ -78,11 +86,43 @@ key/value heads (minimum one); MQA uses one. This reduces key/value projection
 width, but local attention still considers the same positions.
 
 `attention="none"` removes the branch's self-attention stack while retaining
-learned query pooling. It is useful for short branches, low-cost baselines, or
-testing whether cross-position interaction adds value.
+its independently configured reduction. With the default `rf.Attention()`,
+learned-query attention still runs. It is useful for short branches, low-cost
+baselines, or testing whether pre-reduction cross-position interaction adds
+value.
 
 Benchmark each mode on the intended PyTorch version and accelerator. Kernel
 support and shape can matter more than theoretical parameter savings.
+
+## Budget The Reduction Route
+
+Branch reduction changes both information capacity and the shape seen by the
+parent:
+
+| Reduction | Approximate local reduction work | Parent tokens |
+| --- | --- | ---: |
+| `rf.Attention(n_outputs=Q)` | Proportional to `Q × L` per reduction layer | `Q` per branch coordinate |
+| `rf.Mean()` | Linear in `L` | `1` per branch coordinate |
+| `None` | No reduction module | All `L` encoded tokens per branch coordinate |
+
+Here `L` is the branch's assembled child-memory length, not merely
+`Branch.length`. Child fields contribute field-major token segments, and child
+Branch outputs contribute their own segments.
+
+`None` saves local reduction work but is not automatically cheaper. Those
+tokens move to the parent, whose self-attention remains quadratic in its total
+sequence length. Nested pass-through branches can therefore multiply activation
+memory and compute. Measure the complete tree rather than timing the child in
+isolation.
+
+The cheapest reduction can also be the wrong model. Mean directly retains only
+the average encoded vector; the preceding self-attention would have to encode
+cardinality, identity, extrema, order, or item-specific statistics before that
+average. More learned outputs retain additional latent capacity but do not
+perform keyed joins. A downstream one-output reduction can erase the extra
+capacity immediately. Profile paired configurations that differ only in the
+reduction, and retain a synthetic behavior check for any relationship the
+application depends on.
 
 ## Budget Datatype Capacity
 
@@ -241,6 +281,7 @@ branch_length_percentiles: {p50: 12, p95: 48, max_configured: 64}
 d_model: 64
 layers_by_branch: {record: 2, events: 1}
 attention_by_branch: {record: mha, events: gqa}
+reduction_by_branch: {record: "attention:4", events: "none"}
 output: {targets: [label], embeddings: [record], topk: 3}
 measurement_boundary: "raw parquet read through parquet prediction write"
 ```
@@ -253,6 +294,8 @@ The values above are a reporting template, not a benchmark result.
 | --- | --- | --- |
 | Accelerator utilization is low | Time read/each preprocess stage/encode separately from forward | Simplify or combine the measured bottleneck, remove an unnecessary dataset barrier, or fix remote I/O before widening the model. |
 | Memory is high with mostly short histories | Compare observed lengths with configured branch shapes | Shorten/window branches or choose a justified overflow policy. |
+| Parent memory jumps after enabling pass-through | Inspect child `reduction=None` and the assembled parent sequence | Restore a bounded reduction, shorten the branch, or budget the larger parent attention when token-level evidence is required. |
+| Quality collapses as branch length grows | Compare reduction output count, pass-through, and downstream bottlenecks | Preserve more child outputs and ensure a parent does not immediately collapse them; verify with a paired behavior proof. |
 | More ranks do not improve throughput | Check ownership, remote I/O, worker multiplication, and synchronization time | Correct sharding and remove the serial bottleneck before adding ranks. |
 | Prediction is slower than training forward | Measure CPU conversion, top-k, embeddings, postprocessing, and writes | Narrow the output contract and use partitioned `Writer` output. |
 | Callback throughput disagrees with load tests | Compare measurement boundaries and partial final batches | Publish both callback and end-to-end measurements with their exact boundaries. |

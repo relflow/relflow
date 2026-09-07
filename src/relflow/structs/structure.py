@@ -7,6 +7,7 @@ import pydantic
 from rich.text import Text
 
 from relflow.structs.enums import AttentionMode, Overflow
+from relflow.structs.reduction import Attention, ReductionConfig
 from relflow.structs.tree import Leaf, Mask, Node
 from relflow.tensorfields import extensions as _extensions  # noqa: F401
 from relflow.tensorfields.base import TENSORFIELDS
@@ -28,8 +29,8 @@ class Branch(Node):
     attention: AttentionMode = AttentionMode.mha
     length: Annotated[int, pydantic.Field(gt=0, default=1)] = 1
     overflow: Overflow = Overflow.head
-    n_linear: Annotated[int, pydantic.Field(gt=0, default=1)] = 1
     n_layers: Annotated[int, pydantic.Field(gt=0, default=1)] = 1
+    reduction: ReductionConfig | None = pydantic.Field(default_factory=Attention)
     mask: tuple[Mask, ...] = pydantic.Field(default=False)
     fields: list[Self | pydantic.SerializeAsAny[pydantic.InstanceOf[Leaf]]] = pydantic.Field(default_factory=list)
 
@@ -45,6 +46,16 @@ class Branch(Node):
 
         if "max_length" in data:
             raise ValueError("max_length was removed; use length")
+        if "n_linear" in data and not (
+            isinstance(data["n_linear"], (type(self), Leaf))
+            or (isinstance(data["n_linear"], type) and issubclass(data["n_linear"], Leaf))
+        ):
+            raise ValueError("n_linear was removed from Branch; use reduction=Attention(n_layers=...)")
+        if "n_outputs" in data and not (
+            isinstance(data["n_outputs"], (type(self), Leaf))
+            or (isinstance(data["n_outputs"], type) and issubclass(data["n_outputs"], Leaf))
+        ):
+            raise ValueError("n_outputs belongs to a reduction; use reduction=Attention(n_outputs=...)")
 
         if data.get("type") not in (None, "branch"):
             super().__init__(**data)
@@ -136,7 +147,7 @@ class Branch(Node):
     def __rich_console__(self, console, options):
         is_root = getattr(getattr(self, "parent", None), "type", None) == "schema"
         display_type = "root" if is_root else self.type
-        attributes = ("query", "attention", "n_layers", "n_heads", "n_linear", "dropout")
+        attributes = ("query", "attention", "n_layers", "n_heads", "reduction", "dropout")
         if not is_root:
             attributes = ("length", "overflow", *attributes)
 
@@ -149,9 +160,20 @@ class Branch(Node):
             heading.append("embed", style="bold #065f46")
         for name in attributes:
             value = getattr(self, name, None)
-            if value is None:
+            if value is None and name != "reduction":
                 continue
-            if isinstance(value, float) and value.is_integer():
+            if name == "reduction":
+                if value is None:
+                    value = "none"
+                elif isinstance(value, Attention):
+                    settings = value.model_dump(exclude={"type"}, exclude_none=True)
+                    if settings.get("position") is True:
+                        settings.pop("position")
+                    parameters = ", ".join(f"{key}={setting}" for key, setting in settings.items())
+                    value = f"{value.type}({parameters})"
+                else:
+                    value = value.type
+            elif isinstance(value, float) and value.is_integer():
                 value = int(value)
             elif hasattr(value, "value"):
                 value = value.value

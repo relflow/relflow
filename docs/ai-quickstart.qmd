@@ -217,8 +217,9 @@ postprocessor stage. See
   using `pooling="query"`, require `d_model % n_heads == 0` and
   `d_model // n_heads >= 2`.
 - Use `Hash` for large identifiers whose equality matters. Matching values
-  align across leaves in one encoded batch, though branch pooling can discard
-  token-level correspondence.
+  align across leaves in one encoded batch, though a fixed-width Branch
+  reduction can discard token-level correspondence. Use `reduction=None` only
+  when preserving every encoded token justifies the larger parent sequence.
 - Use `Cluster` when a high-cardinality learned vocabulary should share a much
   smaller set of latent representations.
 - Set bounded capacity for Category, Cluster, and Set fields, then monitor

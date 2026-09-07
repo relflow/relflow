@@ -37,9 +37,10 @@ future split.
 ## Use One Shared Event Context
 
 `Hash` gives matching identifiers the same representation across fields in
-an encoded batch. However, sibling branches pool their individual tokens before
-they interact, so that equality alone does not preserve which login token
-matches which transaction token.
+an encoded batch. However, a fixed-width reduction on each sibling can discard
+individual tokens before the siblings interact, so equality alone does not
+preserve which login token matches which transaction token. Increasing
+Attention outputs adds capacity but is not a keyed join.
 
 To retain token-level correspondence, stack login and transaction events into
 one repeated context and keep source/role as an explicit category:
@@ -116,8 +117,8 @@ model
 
 Within one encoded batch, equal `events/device_id` values receive the same
 salted hash representation. Repeated device IDs can therefore attend to one
-another before branch pooling. `source` keeps those roles distinguishable after
-stacking.
+another before branch reduction. `source` keeps those roles distinguishable
+after stacking.
 
 The preprocessor below writes every sparse key on every event. RelFlow's direct
 extractor for these simple inferred paths preserves the explicit `None`

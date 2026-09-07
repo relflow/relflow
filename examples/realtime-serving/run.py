@@ -51,7 +51,7 @@ def records() -> pl.DataFrame:
 
 
 def build_model() -> rf.Model:
-    model = rf.Model.from_tree(
+    model = rf.Model(
         d_model=16,
         n_layers=1,
         n_heads=4,

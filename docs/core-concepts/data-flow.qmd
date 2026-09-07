@@ -226,7 +226,7 @@ supervised reconstruction.
 
 Every `TensorField` carries `present`, `trainable`, and `inferred` alongside
 state and content. Embedders process only present coordinates and scatter their
-payloads back into fixed schema geometry. Branch attention and pooling ignore
+payloads back into fixed schema geometry. Branch attention and reduction ignore
 absent slots; decoders still have a defined zero-context path when an entire row
 is skipped.
 

@@ -36,7 +36,7 @@ direct Arrow field selection OR explicit structural query
 | One bounded label | [`Category`](../data-types/category.qmd) | The value is a massive or unstable identifier; keep it as metadata or use `Hash` for equality without a vocabulary. |
 | High-cardinality label with shared latent groups | [`Cluster`](../data-types/cluster.qmd) | Each label needs an independent representation; use `Category`. |
 | Zero or more labels | [`Set`](../data-types/set.qmd) | Labels have attributes or order; use `Branch`. |
-| Repeated objects | [`Branch`](../data-types/branch.qmd) | Repetition is only an upstream storage artifact; preprocess or flatten. |
+| Repeated objects | [`Branch`](../data-types/branch.qmd) | Repetition is only an upstream storage artifact; preprocess or flatten. Choose its reduction from the information that must survive into the parent. |
 | Timestamp/calendar value | [`DateParts`](../data-types/dateparts.qmd) | Elapsed time or recency matters; derive a `Number`. |
 | Large or unbounded identifier | [`Hash`](../data-types/hash.qmd) | The ID is intentionally a small, stable, globally learned label; use `Category`. |
 | Precomputed dense vector | [`Vector`](../data-types/vector.qmd) | `relflow` should compute embeddings from strings; use `Text`. |
@@ -134,6 +134,29 @@ empty valued Set, or type-specific unavailable content. Tensorfield embedders
 combine content with a separate state embedding before the value enters the
 model.
 
+## Branch Reduction Is A Modeling Choice
+
+A `Branch` first embeds its children and optionally mixes them with its
+`attention` stack. It then applies `reduction` before sending representations
+to its parent:
+
+| Reduction | Useful default interpretation | Information at risk |
+| --- | --- | --- |
+| `rf.Attention(n_outputs=...)` | Learn a fixed number of latent summaries from all present tokens. | Exact item correspondence is not guaranteed; too few outputs create an information bottleneck. |
+| `rf.Mean()` | Send one inexpensive global average. | It does not directly retain count, order, or individual tokens; upstream mixing must encode any needed statistic into the vectors being averaged. |
+| `None` | Preserve every present encoded token for the parent. | No local information is deliberately reduced, but the parent's sequence and attention cost grow. |
+
+`n_outputs` belongs to `Attention`, is positive, and defaults to `1`. `Mean`
+intrinsically produces one output. `reduction=None` needs no output count
+because its effective width is the complete input memory.
+
+More outputs add representational capacity; they do not perform a join or
+guarantee identity matching between sibling branches. Also inspect the next
+reduction in the tree: a child can preserve several or all tokens only for its
+parent to collapse them immediately. See
+[Branch](../data-types/branch.qmd#reduce-branch-memory) for configuration and
+failure modes.
+
 ## Shared Leaf Options
 
 Every tensorfield inherits shared leaf options. Individual datatype pages own
@@ -188,6 +211,7 @@ policies make one atomic decision for the full descendant subtree. See
 | `n_heads` | `4` | Even positive attention-head count. With `pooling="query"`, it must divide `d_model` and leave at least two dimensions per head; mean pooling constructs no query attention. |
 | `dropout` | `None` | Optional query-pooling dropout rate below `1.0`. |
 | `n_linear` | `1` | Positive number of learned-query cross-attention pooling blocks. Each block contains cross-attention and a feed-forward network. |
+| `decoder_position` | `None` | Automatic decoder position policy: off for scalar targets and on for repeated targets. Set `True` or `False` to override it. |
 
 ## Prediction Support
 

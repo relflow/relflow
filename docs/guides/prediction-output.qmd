@@ -153,10 +153,11 @@ RelFlow does not echo every visible field. Public prediction output includes:
 - configured node embeddings;
 - both at the same address when a decoded field also has `embed=True`.
 
-A branch embedding contains only `embedding`. `Text`, `Hash`, and `DateParts`
-currently define no decoded public value, but can still appear when
-`embed=True`. Consumers should depend on configured addresses, not assume all
-schema nodes are present.
+A branch embedding contains only `embedding`; its leading shape follows the
+Branch reduction, including several Attention outputs or the full
+pass-through width. `Text`, `Hash`, and `DateParts` currently define no decoded
+public value, but can still appear when `embed=True`. Consumers should depend
+on configured addresses, not assume all schema nodes are present.
 
 When no address is writable, `predictions` is a typed Arrow null column rather
 than an empty struct, which Parquet cannot persist. Likewise, `retain=()` makes

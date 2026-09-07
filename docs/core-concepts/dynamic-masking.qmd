@@ -208,7 +208,7 @@ or when expensive input embedding should be avoided for selected values.
 - a reconstructing skip still tensorizes its target representation;
 - `retain="*"` can still copy source columns into prediction output;
 - only input tensorization, input embedding, attention participation, and
-  pooling are omitted for the selected coordinate.
+  reduction participation are omitted for the selected coordinate.
 
 For Text, structural skip avoids tokenizing and frozen-encoding the input. A
 Text reconstruction target may still need target-side encoding for its loss.
@@ -217,7 +217,7 @@ or data minimization is the requirement.
 
 Skipping preserves fixed schema geometry. Tensorfields carry Boolean presence,
 the shared embedder gathers the `K` present coordinates, embeds a compact
-`[K, d_model]` input, then scatters it back. Attention and pooling ignore absent
+`[K, d_model]` input, then scatters it back. Attention and reduction ignore absent
 positions. Dense attention still uses the fixed sequence extent, so skip saves
 selected input tensorization and embedding work but does not shrink its
 quadratic attention matrix.

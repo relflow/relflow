@@ -45,6 +45,7 @@ from relflow.structs.experiment import (
     predicate,
     where,
 )
+from relflow.structs.reduction import Attention, Mean, ReductionConfig
 from relflow.structs.structure import Branch, Mask
 from relflow.structs.tree import Address, Leaf
 from relflow.tensorfields import (
@@ -114,6 +115,7 @@ __all__ = [
     "__version__",
     "Address",
     "Accelerator",
+    "Attention",
     "Branch",
     "Boolean",
     "AttentionMode",
@@ -136,6 +138,7 @@ __all__ = [
     "Leaf",
     "Metric",
     "Mask",
+    "Mean",
     "Model",
     "ModelSource",
     "MutationLockCallback",
@@ -151,6 +154,7 @@ __all__ = [
     "PreprocessorProvider",
     "RaggedField",
     "RequestBase",
+    "ReductionConfig",
     "RollbackCheckpoint",
     "RuntimePlacementCallback",
     "Set",

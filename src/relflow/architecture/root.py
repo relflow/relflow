@@ -41,7 +41,8 @@ from relflow.structs.experiment import (
     TreeFieldInput,
 )
 from relflow.structs.packages import Prediction
-from relflow.structs.tree import Address, MaskInput, Node, Rate, Renderable
+from relflow.structs.reduction import Attention, ReductionConfig
+from relflow.structs.tree import Address, Leaf, MaskInput, Node, Rate, Renderable
 from relflow.tensorfields.base import TENSORFIELDS, Extension, TensorFieldBase
 
 OptimizerConfig = torch.optim.Optimizer | Callable[["Model"], torch.optim.Optimizer]
@@ -53,6 +54,8 @@ __all__ = [
     "RollbackCheckpoint",
     "RuntimePlacementCallback",
 ]
+
+_DEFAULT_REDUCTION = Attention()
 
 
 class Model(lit.LightningModule, Renderable):
@@ -78,79 +81,6 @@ class Model(lit.LightningModule, Renderable):
         ```
     """
 
-    @classmethod
-    def from_tree(
-        cls,
-        *field_args: TreeFieldInput,
-        d_model: int,
-        n_layers: int,
-        n_heads: int,
-        batch_size: int = 1,
-        fields: Sequence[TreeFieldInput] | None = None,
-        name: str = "record",
-        query: str | None = None,
-        description: str | None = None,
-        embed: bool = False,
-        attention: AttentionMode | str = AttentionMode.mha,
-        n_linear: int = 1,
-        dropout: Rate | None = None,
-        mask: MaskInput = False,
-        optimizer: OptimizerConfig | None = None,
-        scheduler: SchedulerConfig | None = None,
-        **field_kwargs: TreeFieldInput,
-    ) -> Self:
-        """Compatibility wrapper for constructing a model from tree fields.
-
-        New code should call ``Model(...)`` directly with these same arguments.
-
-        Args:
-            *field_args: Field constructors such as `Category`, `Number`, or
-                nested `Branch` nodes.
-            d_model: Shared model width.
-            n_layers: Number of encoder layers on generated branch nodes.
-            n_heads: Even attention-head count used by the generated root. It
-                must divide `d_model` and leave at least two dimensions per
-                head.
-            batch_size: Batch size used by data modules, examples, and mocked
-                Lightning example inputs.
-            fields: Optional sequence form of `field_args`.
-            name: Root branch name. Defaults to `record`.
-            query: Optional source path selected by the generated root.
-            description: Optional description on the generated root branch.
-            embed: Configure the generated root branch as an embedding output.
-            attention: Attention mode for the generated root branch.
-            n_linear: Learned-query cross-attention pooling block count on the
-                generated root branch. Each block also contains a feed-forward
-                network.
-            dropout: Optional dropout rate on the generated root branch.
-            mask: One mask policy or a list/tuple of policies applied to the
-                generated root and all active descendants.
-            optimizer: Optimizer instance or factory used by Lightning training.
-            scheduler: Optional scheduler config or factory.
-
-        Returns:
-            A compiled `Model` with modules built for the schema.
-        """
-        return cls(
-            *field_args,
-            d_model=d_model,
-            n_layers=n_layers,
-            n_heads=n_heads,
-            batch_size=batch_size,
-            fields=fields,
-            name=name,
-            query=query,
-            description=description,
-            embed=embed,
-            attention=attention,
-            n_linear=n_linear,
-            dropout=dropout,
-            mask=mask,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            **field_kwargs,
-        )
-
     @beartype
     def __init__(
         self,
@@ -166,7 +96,7 @@ class Model(lit.LightningModule, Renderable):
         description: str | None = None,
         embed: bool = False,
         attention: AttentionMode | str = AttentionMode.mha,
-        n_linear: int = 1,
+        reduction: ReductionConfig | None = _DEFAULT_REDUCTION,
         dropout: Rate | None = None,
         mask: MaskInput = False,
         optimizer: OptimizerConfig | None = None,
@@ -175,10 +105,20 @@ class Model(lit.LightningModule, Renderable):
     ):
         """Build a model from tree fields, or from an existing ``schema``.
 
-        The public constructor accepts the same field and root-architecture
-        options as :meth:`from_tree`. Passing ``schema=...`` is retained for
-        checkpoint loading and lower-level integrations.
+        Passing ``schema=...`` is retained for checkpoint loading and
+        lower-level integrations.
         """
+        if "n_linear" in field_kwargs and not (
+            isinstance(field_kwargs["n_linear"], Node)
+            or (isinstance(field_kwargs["n_linear"], type) and issubclass(field_kwargs["n_linear"], Leaf))
+        ):
+            raise ValueError("n_linear was removed from Model; use reduction=Attention(n_layers=...)")
+        if "n_outputs" in field_kwargs and not (
+            isinstance(field_kwargs["n_outputs"], Node)
+            or (isinstance(field_kwargs["n_outputs"], type) and issubclass(field_kwargs["n_outputs"], Leaf))
+        ):
+            raise ValueError("n_outputs belongs to a reduction; use reduction=Attention(n_outputs=...)")
+
         if field_args and isinstance(field_args[0], Schema):
             if len(field_args) != 1 or schema is not None:
                 raise TypeError("a positional Schema cannot be combined with other fields or schema=")
@@ -190,6 +130,8 @@ class Model(lit.LightningModule, Renderable):
                 raise TypeError("schema cannot be combined with tree fields")
             if d_model is not None or n_layers is not None or n_heads is not None:
                 raise TypeError("schema cannot be combined with d_model, n_layers, or n_heads")
+            if reduction is not _DEFAULT_REDUCTION:
+                raise TypeError("schema cannot be combined with a root reduction")
         else:
             required = {"d_model": d_model, "n_layers": n_layers, "n_heads": n_heads}
             missing = [key for key, value in required.items() if value is None]
@@ -208,7 +150,7 @@ class Model(lit.LightningModule, Renderable):
                 description=description,
                 embed=embed,
                 attention=attention,
-                n_linear=n_linear,
+                reduction=reduction,
                 dropout=dropout,
                 mask=mask,
                 **field_kwargs,

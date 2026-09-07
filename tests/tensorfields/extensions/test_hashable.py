@@ -1,6 +1,3 @@
-import importlib.util
-import sys
-
 import pyarrow as pa
 import pytest
 import torch
@@ -83,7 +80,7 @@ def _new_tensorfield(
 # --- request / schema validation --------------------------------------------------
 
 
-def test_hashable_request_defaults_load_without_extra_config():
+def test_hashable_request_defaults_load():
     payload = _structure_payload()
     del payload["fields"]["fields"][0]["fields"][0]["n_hashes"]
     del payload["fields"]["fields"][0]["fields"][0]["n_bands"]
@@ -172,21 +169,6 @@ def test_hash_value_is_consistent_across_arrow_integer_widths():
 def test_hashable_rejects_non_identifier_scalars(value):
     with pytest.raises(TypeError, match="extension 'hash'.*does not accept Arrow type"):
         _hash_matrix([value], n_hashes=4)
-
-
-def test_hashable_raises_when_polars_is_missing(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delitem(sys.modules, "polars", raising=False)
-    find_spec = importlib.util.find_spec
-
-    def missing_polars(name, *args, **kwargs):
-        return None if name == "polars" else find_spec(name, *args, **kwargs)
-
-    monkeypatch.setattr(importlib.util, "find_spec", missing_polars)
-
-    with pytest.raises(ModuleNotFoundError, match="relflow\\[hash\\]"):
-        rf.Model(identifier=rf.Hash, d_model=8, n_layers=1, n_heads=2)
-
-    assert hashable.requires == {"polars": "relflow[hash]"}
 
 
 # --- tensorfield content behaviour ------------------------------------------------

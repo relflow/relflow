@@ -303,6 +303,7 @@ class Embedder(EmbedderBase):
 
         weights = torch.logspace(start=-n_bands, end=offset, steps=n_bands + offset + 1, base=2)
         self.linear = torch.nn.Linear(2 * len(weights), schema.d_model)
+        self.scalar = torch.nn.Linear(1, schema.d_model, bias=False)
         self.register_buffer("weights", weights.mul(math.pi).unsqueeze(dim=0))
         self.register_buffer("max_fourier_input", torch.tensor(FOURIER_SAFE_MAX_ANGLE) / self.weights.abs().max())
 
@@ -371,8 +372,21 @@ class Embedder(EmbedderBase):
 
         embeddings = self.embeddings(state).reshape(N, *dims, -1)
 
+        payload = embeddings + projection + self.scalar(content.reshape(-1, 1)).reshape(N, *dims, -1)
+        # Keep one clamped monotone lane alongside the Fourier features.
+        # This gives downstream additive and multiplicative interactions direct
+        # access to numerical scale instead of forcing them to invert a periodic
+        # basis outside the values observed during fitting.
+        scalar = torch.where(
+            eligible.reshape(N, *dims),
+            content.reshape(N, *dims),
+            embeddings[..., -1],
+        )
+        scalar = scalar + payload[..., -1] * 0.0
+        payload = torch.cat((payload[..., :-1], scalar.unsqueeze(-1)), dim=-1)
+
         return Parcel(
-            payload=embeddings + projection,
+            payload=payload,
             present=torch.ones(N, dtype=torch.bool, device=embeddings.device),
             origin=self.origin,
             destination=self.destination,

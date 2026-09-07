@@ -35,7 +35,7 @@ others are required only when the field's configured role needs them:
 | `Request` | Always | Define Pydantic schema options and bound-tree validation. |
 | `TensorField` | Always | Tensorize separate input and target `RaggedField` projections and retain shared routing bits. |
 | `Embedder` | Always | Convert compact present state/content into a `d_model` parcel sent to the parent branch. |
-| `Decoder` | A reconstructing mask reaches the leaf, or the leaf has `embed=True` | Pool heritage context and produce raw predictions or a contextual leaf embedding. |
+| `Decoder` | A reconstructing mask reaches the leaf, or the leaf has `embed=True` | Pool canonical heritage, optionally condition on visible siblings, and produce raw predictions or a contextual leaf embedding. |
 | `loss` | A reconstructing mask reaches the leaf | Compare decoded tensors with cached targets and log address-qualified metrics. |
 | `output` | Optional | Declare extension-owned decoded Arrow content; the default declares none. |
 | `write` | Optional | Convert decoded tensors to the declared flat Arrow content; the default writes none. |
@@ -409,8 +409,17 @@ synchronization callback when distributed updates require one.
 
 ## Decode Heritage
 
-`DecoderBase` provides query or mean pooling across the field's heritage. The
-subclass implements `decode(...)` and returns raw tensors keyed by `TensorKey`:
+`DecoderBase` provides query or mean pooling across the field's canonical
+heritage. By default it also discovers visible same-parent sibling addresses:
+aligned sibling parcels can condition learned queries. The public leaf option
+`decoder_position=None | True | False` controls decoder rotary position.
+Descendants of a sibling branch are visible only when that branch uses
+`reduction=None`.
+Extensions that should opt out of all direct sibling shortcuts can call
+`super().__init__(..., conditioned=False)`; canonical heritage memory remains
+available. `Cluster` uses this contract so row-varying siblings do not redefine
+its reconstruction query. The subclass implements `decode(...)` and returns raw
+tensors keyed by `TensorKey`:
 
 ```python
 @signed_scalar.register

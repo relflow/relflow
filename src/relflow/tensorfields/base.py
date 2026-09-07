@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.ragged import RaggedField
     from relflow.structs.experiment import Schema
+    from relflow.structs.structure import Branch
 
 RequestBase: TypeAlias = Leaf
 CallbackFactory: TypeAlias = type[Callback] | Callable[[], Callback]
@@ -180,7 +181,7 @@ class EmbedderBase(torch.nn.Module):
 class DecoderBase(torch.nn.Module):
     """Base class for tensorfield decoders."""
 
-    def __init__(self, schema: Schema, address: Address):
+    def __init__(self, schema: Schema, address: Address, *, conditioned: bool = True):
         super().__init__()
 
         self.address: Address = address
@@ -192,6 +193,45 @@ class DecoderBase(torch.nn.Module):
             n_context *= dimension
         self.n_context = n_context
         self.d_model = schema.d_model
+
+        def visible(node: Branch | Leaf) -> list[Address]:
+            if isinstance(node, Leaf):
+                return [node.address] if node.active and node.address != address else []
+
+            if schema.branch_outputs[node.address] == 0:
+                return []
+            addresses = [node.address]
+            if getattr(node, "type", None) == "branch" and node.reduction is None:
+                for child in node.fields:
+                    addresses.extend(visible(child))
+            return addresses
+
+        context_addresses: list[Address] = []
+        if conditioned:
+            for child in request.parent.fields:
+                if child.address == address:
+                    continue
+                context_addresses.extend(visible(child))
+        self.context_addresses = tuple(dict.fromkeys(context_addresses))
+
+        def aligns(context_address: Address) -> bool:
+            if context_address in schema.requests:
+                return math.prod(schema.shapes[context_address]) == n_context
+
+            branch = schema.branches[context_address]
+            lengths = tuple(node.length for node in branch.path if getattr(node, "type", None) == "branch")
+            return math.prod((*lengths[1:-1], schema.branch_outputs[context_address])) == n_context
+
+        self.context_projection = (
+            torch.nn.Sequential(
+                torch.nn.LayerNorm(schema.d_model),
+                torch.nn.Linear(schema.d_model, schema.d_model),
+                torch.nn.GELU(),
+                torch.nn.Linear(schema.d_model, schema.d_model),
+            )
+            if any(aligns(item) for item in self.context_addresses) and request.pooling == "query"
+            else None
+        )
         match request.pooling:
             case "query":
                 self.pool = LearnedQueryCrossAttention(
@@ -200,6 +240,11 @@ class DecoderBase(torch.nn.Module):
                     nhead=request.n_heads,
                     dropout=float(request.dropout or 0.0),
                     n_linear=request.n_linear,
+                    # By default scalar answers do not acquire an ordering over
+                    # an otherwise unordered evidence set, while repeated
+                    # targets retain position as one routing signal. Ordered
+                    # scalar tasks can opt in explicitly.
+                    position=n_context > 1 if request.decoder_position is None else request.decoder_position,
                 )
             case "mean":
                 self.pool = MeanPool(n_context=n_context)
@@ -213,6 +258,7 @@ class DecoderBase(torch.nn.Module):
         self,
         parcels: list[Parcel],
         *,
+        contexts: list[Parcel] | None = None,
         batch_size: int,
         device: torch.device,
         embed: bool = False,
@@ -246,7 +292,13 @@ class DecoderBase(torch.nn.Module):
                 dim=1,
             )
             present = torch.cat([parcel.present.reshape(batch_size, -1) for parcel in parcels], dim=1)
-            pooled = self.pool(stacked, present=present)
+            context = self.context(contexts or (), batch_size=batch_size)
+            if isinstance(self.pool, LearnedQueryCrossAttention):
+                pooled = self.pool(stacked, present=present, context=context)
+            else:
+                pooled = self.pool(stacked, present=present)
+            if context is not None:
+                pooled = pooled + context * 0.0
 
         payload = self.decode(pooled)
         if embed:
@@ -257,6 +309,34 @@ class DecoderBase(torch.nn.Module):
             address=self.address,
             batch_size=pooled.shape[0],
         )
+
+    def context(self, parcels: tuple[Parcel, ...] | list[Parcel], *, batch_size: int) -> torch.Tensor | None:
+        """Build one data-conditioned decoder query per target coordinate."""
+
+        if self.context_projection is None:
+            return None
+
+        aligned: list[torch.Tensor] = []
+        presence: list[torch.Tensor] = []
+        expected = (batch_size, self.n_context, self.d_model)
+        for parcel in parcels:
+            payload = parcel.payload.reshape(batch_size, -1, self.d_model)
+            present = parcel.present.reshape(batch_size, -1)
+            if tuple(payload.shape) != expected:
+                continue
+            aligned.append(payload)
+            presence.append(present)
+
+        if not aligned:
+            return None
+
+        payload = torch.stack(aligned, dim=2)
+        present = torch.stack(presence, dim=2)
+        weights = present.unsqueeze(-1).to(dtype=payload.dtype)
+        combined = payload.masked_fill(~present.unsqueeze(-1), 0.0).sum(dim=2)
+        combined = combined / weights.sum(dim=2).clamp_min(1.0)
+        combined = combined + self.context_projection(combined)
+        return combined.masked_fill(~present.any(dim=2).unsqueeze(-1), 0.0)
 
 
 class TensorFieldBase(Renderable):

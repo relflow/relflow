@@ -189,6 +189,80 @@ def test_embedding_only_address_has_no_state_or_inferred_fields():
     assert root.field("embedding").type == pa.list_(pa.float32(), 8)
 
 
+def test_root_embedding_exposes_each_configured_reduction_output():
+    configured = rf.Model(
+        value=rf.Number,
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        embed=True,
+        reduction=rf.Attention(n_outputs=3),
+    )
+
+    result = configured.predict(pa.table({"value": [1.0, 2.0]}))
+    root = result["predictions"].combine_chunks().type.field("record").type
+
+    assert pa.types.is_fixed_size_list(root)
+    assert root.list_size == 3
+    assert root.value_type.field("embedding").type == pa.list_(pa.float32(), 8)
+
+
+def test_none_reduction_root_embedding_exposes_every_input_token():
+    configured = rf.Model(
+        first=rf.Number,
+        second=rf.Number,
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        embed=True,
+        attention="none",
+        reduction=None,
+    )
+
+    result = configured.predict(pa.table({"first": [1.0], "second": [2.0]}))
+    root = result["predictions"].combine_chunks().type.field("record").type
+
+    assert pa.types.is_fixed_size_list(root)
+    assert root.list_size == 2
+
+
+def test_nested_branch_embedding_preserves_parent_and_reduction_axes():
+    configured = rf.Model(
+        parents=rf.Branch(
+            name="parents",
+            length=3,
+            children=rf.Branch(
+                name="children",
+                length=2,
+                embed=True,
+                reduction=rf.Attention(n_outputs=2),
+                value=rf.Number,
+            ),
+        ),
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+    )
+    source = pa.Table.from_pylist(
+        [
+            {
+                "parents": [
+                    {"children": [{"value": 1.0}, {"value": 2.0}]},
+                    {"children": [{"value": 3.0}]},
+                ]
+            }
+        ]
+    )
+
+    result = configured.predict(source)
+    children = result["predictions"].combine_chunks().type.field("record/parents/children").type
+
+    assert pa.types.is_fixed_size_list(children)
+    assert children.list_size == 3
+    assert pa.types.is_fixed_size_list(children.value_type)
+    assert children.value_type.list_size == 2
+
+
 def test_empty_retain_uses_typed_null_without_changing_row_count():
     result = model().predict(pa.table({"value": [1.0, 2.0, 3.0]}))
 

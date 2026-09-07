@@ -5,15 +5,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+import polars as pl
+
 import relflow
 from relflow.data.datasets.arrow import ArrowDataModule, Retain
 from relflow.data.processors import PreprocessorInput
 from relflow.structs.enums import Strata
-
-try:
-    import polars as pl
-except ImportError:
-    pass
 
 
 class PolarsDataModule(ArrowDataModule):
@@ -44,11 +41,6 @@ class PolarsDataModule(ArrowDataModule):
         pin_memory: bool | Mapping[Strata | str, bool] = False,
         retain: Retain | Mapping[Strata | str, Retain] = (),
     ):
-        try:
-            import polars as pl
-        except ImportError as error:
-            raise ImportError("PolarsDataModule requires `polars`; install `relflow[hash]`.") from error
-
         frames = {
             "train": train,
             "validate": validate,

@@ -1,6 +1,6 @@
 [project]
 name = "relflow"
-version = "0.1.4"
+version = "0.2.0"
 description = "Relationship Flow: schema-first PyTorch models for hierarchical, nested, and sequence data"
 readme = "README.md"
 authors = [
@@ -15,6 +15,7 @@ dependencies = [
     "pydantic>=2.11.7",
     "anytree>=2.13.0",
     "pyarrow>=21.0.0",
+    "polars>=1.35.2",
     "numpy>=2.2.6",
     "lightning>=2.6.4",
     "tensordict>=0.10.0",
@@ -32,12 +33,8 @@ serving = [
 text = [
     "transformers>=4.55.0",
 ]
-hash = [
-    "polars>=1.35.2",
-]
 docs = [
     "marimo>=0.23.8",
-    "polars>=1.35.2",
 ]
 
 [dependency-groups]
@@ -45,17 +42,12 @@ dev = [
     "ruff>=0.12.12",
     "pytest>=8.4.1",
     "pytest-xdist>=3.8.0",
-    "ipython>=9.9.0",
-    "ipykernel>=6.29.5",
-    "nbclient>=0.10.2",
-    "nbformat>=5.10.4",
     "fastapi>=0.124.0",
     "orjson>=3.10.0",
     "pydantic-settings>=2.10.1",
     "uvicorn>=0.38.0",
     "ty>=0.0.1a20",
     "pre-commit>=4.3.0",
-    "polars>=1.35.2",
 ]
 
 [build-system]
@@ -72,7 +64,11 @@ include = ["relflow*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+pythonpath = ["."]
 addopts = ["-n", "auto"]
+markers = [
+    "proof: deterministic synthetic-data checks of learned model behavior",
+]
 
 [tool.ruff]
 line-length = 120

@@ -350,8 +350,8 @@ preprocessor.
 
 ## Use Polars Deliberately
 
-Install the adapter with `pip install "relflow[hash]"`. A collected Polars
-frame crosses into Arrow once:
+Polars and its ingress adapter are included in the base RelFlow installation.
+A collected Polars frame crosses into Arrow once:
 
 ```python
 import polars as pl

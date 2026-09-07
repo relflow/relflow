@@ -5,6 +5,7 @@ import math
 from typing import TYPE_CHECKING, Annotated, Literal
 
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import pyarrow.compute as pc
 import pydantic
@@ -34,7 +35,6 @@ if TYPE_CHECKING:
 hashable: Extension = Extension(
     name="hash",
     types=(int, str, bytes),
-    requires={"polars": "relflow[hash]"},
 )
 
 
@@ -146,9 +146,6 @@ class TensorField(TensorFieldBase):
                 family = _BINARY_SEED
             else:
                 raise ValueError(f"hash field at '{address}' only accepts integer, string, or binary scalar values")
-
-            # polars is the easiest (and fastest) way to hash arrow data (!)
-            import polars as pl
 
             series = pl.from_arrow(values, rechunk=False)
             if not isinstance(series, pl.Series):

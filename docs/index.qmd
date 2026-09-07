@@ -46,8 +46,9 @@ model
 ```
 
 This model reads an order as a structured object. The line items interact in
-their own repeated context before that context is pooled into the order. The
-`returned` value is skipped by the encoder and learned as a supervised
+their own repeated context before the default Attention reduction routes one
+summary into the order. The `returned` value is skipped by the encoder and
+learned as a supervised
 reconstruction. The root address is `order`, so its prediction is written at
 `order/returned`.
 
@@ -75,7 +76,8 @@ of the approach.
 - Leaf types such as `Number`, `Category`, `Cluster`, `Set`, `Hash`,
   `DateParts`, `Text`, and `Vector` own value encoding, loss, metrics, and
   prediction output.
-- `Branch` nodes preserve repeated contexts and pool them into their parent.
+- `Branch` nodes preserve repeated contexts, mix them locally, and apply a
+  configurable reduction before routing representations to their parent.
 - One `mask` policy controls learned masking, structural skipping, and
   reconstruction from context.
 - `embed=True` selects root, branch, or leaf representations to export during

@@ -245,7 +245,7 @@ global superbatches of `model.batch_size * world_size` rows.
 
 ## `PolarsDataModule`
 
-Install the optional adapter with `pip install "relflow[hash]"`:
+Polars and `PolarsDataModule` are included in the base RelFlow installation:
 
 ```python
 import polars as pl

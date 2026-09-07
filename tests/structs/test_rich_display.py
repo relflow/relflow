@@ -43,6 +43,12 @@ def test_leaf_rich_display_shows_only_explicit_query() -> None:
     assert "amount [number] active query=payload.amount" in queried
 
 
+def test_leaf_rich_display_shows_nondefault_decoder_position() -> None:
+    rendered = render_text(rf.Number("answer", decoder_position=True))
+
+    assert "decoder_position=True" in rendered
+
+
 def test_leaf_display_flags() -> None:
     reconstruct = render_text(rf.Category("returned", mask=True, size=2)).splitlines()[0].split()
     embedded = render_text(rf.Number("amount", embed=True)).splitlines()[0].split()
@@ -107,7 +113,10 @@ def test_branch_rich_display_renders_child_subtree() -> None:
         )
     )
 
-    assert "line_items [branch] length=32 overflow=head attention=mha n_layers=1 n_heads=4 n_linear=1" in rendered
+    assert (
+        "line_items [branch] length=32 overflow=head attention=mha n_layers=1 n_heads=4 "
+        "reduction=attention(n_outputs=1, n_layers=1)" in " ".join(rendered.split())
+    )
     assert "embed=False" not in rendered
     assert "|-- sku [category] active" in rendered
     assert "`-- quantity [number] active" in rendered
@@ -137,6 +146,42 @@ def test_branch_embed_renders_as_flag() -> None:
 
     assert "line_items [branch] embed length=32 overflow=head" in rendered
     assert "embed=True" not in rendered
+
+
+def test_branch_rich_display_renders_reduction_configuration() -> None:
+    attention = render_text(
+        rf.Branch(
+            rf.Number("amount"),
+            name="items",
+            reduction=rf.Attention(n_outputs=4, n_heads=2, n_layers=3, dropout=0.2),
+        )
+    )
+    position_free = render_text(
+        rf.Branch(
+            rf.Number("amount"),
+            name="items",
+            reduction=rf.Attention(position=False),
+        )
+    )
+    mean = render_text(
+        rf.Branch(
+            rf.Number("amount"),
+            name="items",
+            reduction=rf.Mean(),
+        )
+    )
+    passthrough = render_text(
+        rf.Branch(
+            rf.Number("amount"),
+            name="items",
+            reduction=None,
+        )
+    )
+
+    assert "reduction=attention(n_outputs=4, n_heads=2, n_layers=3, dropout=0.2" in " ".join(attention.split())
+    assert "reduction=attention(n_outputs=1, n_layers=1, position=False)" in " ".join(position_free.split())
+    assert "reduction=mean" in mean
+    assert "reduction=none" in passthrough
 
 
 def test_root_branch_embed_renders_as_flag() -> None:

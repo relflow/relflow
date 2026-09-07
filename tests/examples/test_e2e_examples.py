@@ -181,6 +181,7 @@ def test_datatype_option_tables_cover_public_type_specific_fields() -> None:
         "active",
         "nullable",
         "pooling",
+        "decoder_position",
         "weight",
         "mask",
         "n_linear",
