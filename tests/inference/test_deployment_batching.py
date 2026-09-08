@@ -4,6 +4,7 @@ import asyncio
 from types import SimpleNamespace
 
 import orjson
+import polars as pl
 import pyarrow as pa
 import pydantic
 import pytest
@@ -12,7 +13,7 @@ import torch
 import relflow as rf
 import relflow.inference.deployment as deployment_module
 from relflow import Model, Number, where
-from relflow.data.datasets.arrow import identity
+from relflow.data.processors import apply
 from relflow.inference.deployment import Deployment, ErrorItem
 
 
@@ -29,17 +30,12 @@ class PredictModel:
                 "retain": retain,
             }
         )
-        ids = source.data["id"].combine_chunks()
+        ids = source["id"].combine_chunks()
         inputs = pa.StructArray.from_arrays([ids], names=["id"])
         labels = pa.array([str(value) for value in ids.to_pylist()], type=pa.large_string())
         predictions = pa.StructArray.from_arrays([labels], names=["label"])
-        result = rf.Batch(
-            data=pa.table({"inputs": inputs, "predictions": predictions}),
-            identity=source.identity,
-        )
-        for processor in rf.Postprocessor.normalize(postprocess):
-            result = processor.run(result)
-        return result.data
+        result = pa.table({"inputs": inputs, "predictions": predictions})
+        return apply(result, postprocess)
 
 
 def runtime(model=None, **kwargs) -> deployment_module.FastAPIRuntime:
@@ -88,20 +84,19 @@ def test_batcher_runs_processors_once_for_one_collated_arrow_batch():
     postprocessed = []
 
     @rf.preprocess
-    def prepare(batch: rf.Batch) -> rf.Batch:
-        preprocessed.append(batch)
-        return batch.take(pa.array([2, 0, 1], type=pa.int64()))
+    def prepare(frame: pl.DataFrame) -> pl.DataFrame:
+        preprocessed.append(frame)
+        return frame
 
-    @rf.postprocess(requires=("inputs",), produces=("value",))
-    def compact(batch: rf.Batch) -> rf.Batch:
+    @rf.postprocess
+    def compact(frame: pl.DataFrame) -> pl.DataFrame:
         postprocessed.append("compact")
-        values = pa.compute.struct_field(batch.data["inputs"], "value")
-        return batch.replace(pa.table({"value": values}))
+        return frame.select(value=pl.col("inputs").struct.field("value"))
 
-    @rf.postprocess(requires=("value",), produces=("value",))
-    def finish(batch: rf.Batch) -> rf.Batch:
+    @rf.postprocess
+    def finish(frame: pl.DataFrame) -> pl.DataFrame:
         postprocessed.append("finish")
-        return batch.replace(pa.table({"value": batch.data["value"]}))
+        return frame.select("value")
 
     async def run():
         model = Model(
@@ -137,8 +132,8 @@ def test_batcher_runs_processors_once_for_one_collated_arrow_batch():
 
     assert len(preprocessed) == 1
     assert postprocessed == ["compact", "finish"]
-    assert isinstance(preprocessed[0], rf.Batch)
-    assert preprocessed[0].data["value"].to_pylist() == [3.0, 1.0, 2.0]
+    assert isinstance(preprocessed[0], pl.DataFrame)
+    assert preprocessed[0]["value"].to_list() == [3.0, 1.0, 2.0]
     assert responses == [{"value": 3.0}, {"value": 1.0}, {"value": 2.0}]
 
 
@@ -146,20 +141,19 @@ def test_runtime_converts_valid_requests_to_one_arrow_prediction_call():
     model = PredictModel()
 
     @rf.preprocess
-    def prepare(batch: rf.Batch) -> rf.Batch:
-        return batch
+    def prepare(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
 
     server = runtime(model=model, preprocessor=prepare, retain=("id",))
     outputs = server.predict_payloads([{"id": 3}, {"id": 1}])
 
     assert len(model.calls) == 1
     call = model.calls[0]
-    assert isinstance(call["source"], rf.Batch)
-    assert call["source"].data.to_pylist() == [{"id": 3}, {"id": 1}]
+    assert isinstance(call["source"], pa.Table)
+    assert call["source"].to_pylist() == [{"id": 3}, {"id": 1}]
     assert call["preprocess"] == (prepare,)
     assert isinstance(call["postprocess"], tuple)
-    assert len(call["postprocess"]) == 1
-    assert isinstance(call["postprocess"][0], rf.Postprocessor)
+    assert call["postprocess"] == ()
     assert call["retain"] == ("id",)
     assert outputs == [
         {"predictions": {"label": "3"}},
@@ -186,7 +180,7 @@ def test_runtime_preserves_request_fields_introduced_after_the_first_row():
 
     server.predict_payloads([{"id": 3}, {"id": 1, "context": "kept"}])
 
-    assert model.calls[0]["source"].data.to_pylist() == [
+    assert model.calls[0]["source"].to_pylist() == [
         {"id": 3, "context": None},
         {"id": 1, "context": "kept"},
     ]
@@ -202,7 +196,7 @@ def test_runtime_preserves_request_order_around_validation_errors():
     outputs = server.predict_payloads([{"id": 2}, {"id": 0}, "wrong", {"id": 4}])
 
     assert len(model.calls) == 1
-    assert model.calls[0]["source"].data.to_pylist() == [{"id": 2}, {"id": 4}]
+    assert model.calls[0]["source"].to_pylist() == [{"id": 2}, {"id": 4}]
     assert outputs[0] == {"predictions": {"label": "2"}}
     assert outputs[1]["error"]["status_code"] == 422
     assert "greater than 0" in outputs[1]["error"]["message"]
@@ -213,7 +207,7 @@ def test_runtime_preserves_request_order_around_validation_errors():
     assert outputs[3] == {"predictions": {"label": "4"}}
 
 
-def test_runtime_restores_order_after_arrow_preprocessing():
+def test_runtime_uses_model_output_order_positionally():
     class ReorderingModel(PredictModel):
         def predict(self, source, *, preprocess, postprocess, retain):
             reversed_source = source.take(pa.array([1, 0], type=pa.int64()))
@@ -227,8 +221,8 @@ def test_runtime_restores_order_after_arrow_preprocessing():
     server = runtime(model=ReorderingModel())
 
     assert server.predict_payloads([{"id": 3}, {"id": 9}]) == [
-        {"predictions": {"label": "3"}},
         {"predictions": {"label": "9"}},
+        {"predictions": {"label": "3"}},
     ]
 
 
@@ -245,22 +239,18 @@ def test_default_response_never_exposes_retained_inputs():
 def test_postprocessors_run_inside_the_single_model_prediction_call():
     seen = []
 
-    @rf.postprocess(requires=("inputs", "predictions"), produces=("request_id", "label"))
-    def compact(batch: rf.Batch) -> rf.Batch:
+    @rf.postprocess
+    def compact(frame: pl.DataFrame) -> pl.DataFrame:
         seen.append("compact")
-        return batch.replace(
-            pa.table(
-                {
-                    "request_id": pa.compute.struct_field(batch.data["inputs"], "id"),
-                    "label": pa.compute.struct_field(batch.data["predictions"], "label"),
-                }
-            )
+        return frame.select(
+            request_id=pl.col("inputs").struct.field("id"),
+            label=pl.col("predictions").struct.field("label"),
         )
 
-    @rf.postprocess(requires=("request_id", "label"), produces=("request_id", "label"))
-    def finish(batch: rf.Batch) -> rf.Batch:
+    @rf.postprocess
+    def finish(frame: pl.DataFrame) -> pl.DataFrame:
         seen.append("finish")
-        return batch.replace(batch.data.select(["request_id", "label"]))
+        return frame.select("request_id", "label")
 
     model = PredictModel()
     server = runtime(model=model, postprocessor=(compact, finish), retain=("id",))
@@ -271,45 +261,19 @@ def test_postprocessors_run_inside_the_single_model_prediction_call():
     pipeline = model.calls[0]["postprocess"]
     assert isinstance(pipeline, tuple)
     assert pipeline[:2] == (compact, finish)
-    assert len(pipeline) == 3
-    assert isinstance(pipeline[-1], rf.Postprocessor)
+    assert len(pipeline) == 2
     assert seen == ["compact", "finish"]
     assert output == {"request_id": 5, "label": "5"}
 
 
-def test_postprocessor_cannot_claim_the_deployment_identity_column():
+def test_deployment_postprocessor_must_preserve_request_cardinality():
     @rf.postprocess
-    def collide(batch: rf.Batch) -> rf.Batch:
-        return batch.replace(
-            batch.data.append_column(
-                deployment_module.TRANSPORT_IDENTITY,
-                pa.array(["mine"] * len(batch)),
-            )
-        )
+    def discard(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.head(0)
 
-    server = runtime(postprocessor=collide)
+    server = runtime(postprocessor=discard)
 
-    with pytest.raises(ValueError, match="reserved column"):
-        server.predict_payloads([{"id": 1}])
-
-
-def test_runtime_rejects_replaced_request_identity():
-    class ReplacingModel(PredictModel):
-        def predict(self, source, *, preprocess, postprocess, retain):
-            replaced = rf.Batch(
-                data=source.data,
-                identity=identity(len(source), namespace="replaced"),
-            )
-            return super().predict(
-                replaced,
-                preprocess=preprocess,
-                postprocess=postprocess,
-                retain=retain,
-            )
-
-    server = runtime(model=ReplacingModel())
-
-    with pytest.raises(ValueError, match="exactly one output for each request"):
+    with pytest.raises(ValueError, match="returned 0 rows for 1 valid"):
         server.predict_payloads([{"id": 1}])
 
 
@@ -407,14 +371,14 @@ def test_runtime_setup_uses_an_in_memory_model(monkeypatch):
     assert server.model is model
 
 
-def test_deployment_builder_keeps_arrow_processors_and_retention():
+def test_deployment_builder_keeps_polars_processors_and_retention():
     @rf.preprocess
-    def prepare(batch: rf.Batch) -> rf.Batch:
-        return batch
+    def prepare(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
 
     @rf.postprocess
-    def compact(batch: rf.Batch) -> rf.Batch:
-        return batch
+    def compact(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
 
     deployment = Deployment(checkpoint="unused", retain=("request_id",)).preprocess(prepare).postprocess(compact)
 
@@ -425,20 +389,20 @@ def test_deployment_builder_keeps_arrow_processors_and_retention():
 
 def test_deployment_builder_replaces_processor_collections():
     @rf.preprocess
-    def prepare(batch: rf.Batch) -> rf.Batch:
-        return batch
+    def prepare(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
 
     @rf.preprocess
-    def replace(batch: rf.Batch) -> rf.Batch:
-        return batch
+    def replace(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
 
     @rf.postprocess
-    def compact(batch: rf.Batch) -> rf.Batch:
-        return batch
+    def compact(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
 
     @rf.postprocess
-    def finish(batch: rf.Batch) -> rf.Batch:
-        return batch
+    def finish(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
 
     deployment = (
         Deployment(checkpoint="unused")
@@ -649,8 +613,8 @@ def test_multiworker_deployment_uses_the_importable_asgi_app(monkeypatch):
 
 def test_multiworker_deployment_rejects_in_process_builder_configuration():
     @rf.postprocess
-    def compact(batch: rf.Batch) -> rf.Batch:
-        return batch
+    def compact(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
 
     with pytest.raises(ValueError, match="cannot serialize in-process"):
         Deployment(checkpoint="model.ckpt", workers=2).postprocess(compact).serve()

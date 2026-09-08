@@ -4,8 +4,8 @@ eval: false
 
 # Field Stacking
 
-**Example status — reference:** processor examples are columnar Arrow
-transforms intended to be tested against the application's exact source schema.
+**Example status — reference:** processor examples are eager Polars transforms
+intended to be tested against the application's exact source schema.
 
 Field stacking maps several source roles into one repeated schema field so they
 share datatype parameters, vocabulary, decoder behavior, and embeddings.
@@ -14,7 +14,7 @@ values.
 
 Stacking changes structure rather than merely selecting a path. RelFlow's query
 language deliberately has no multiselect or flatten operation, so build the
-shared collection in one Arrow preprocessor.
+shared collection in one Polars preprocessor.
 
 ## Stack Two Scalar Columns
 
@@ -29,32 +29,17 @@ This preprocessor creates one fixed-size list containing two location structs
 per observation without walking Python rows:
 
 ```python
-import numpy as np
-import pyarrow as pa
-import pyarrow.compute as pc
+import polars as pl
 import relflow as rf
 
-@rf.preprocess(
-    requires=("origin", "destination"),
-    produces=("locations",),
-)
-def stack_locations(batch: rf.Batch) -> rf.Batch:
-    origin = pc.cast(batch.data["origin"], pa.large_string()).combine_chunks()
-    destination = pc.cast(
-        batch.data["destination"],
-        pa.large_string(),
-    ).combine_chunks()
-
-    size = len(batch)
-    source = pa.concat_arrays([origin, destination])
-    indices = np.column_stack(
-        [np.arange(size), np.arange(size) + size]
-    ).reshape(-1)
-    location = pc.take(source, pa.array(indices, type=pa.int64()))
-    values = pa.StructArray.from_arrays([location], names=["location"])
-    locations = pa.FixedSizeListArray.from_arrays(values, list_size=2)
-
-    return batch.replace(batch.data.append_column("locations", locations))
+@rf.preprocess
+def stack_locations(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(
+        locations=pl.concat_list(
+            pl.struct(location=pl.col("origin").cast(pl.String)),
+            pl.struct(location=pl.col("destination").cast(pl.String)),
+        )
+    )
 ```
 
 The model binds the produced field directly:
@@ -83,31 +68,20 @@ Stacking removes role-specific field addresses. Add a role field when the model
 should distinguish positions:
 
 ```python
-@rf.preprocess(
-    requires=("buyer_account_id", "seller_account_id"),
-    produces=("parties",),
-)
-def stack_parties(batch: rf.Batch) -> rf.Batch:
-    buyer = batch.data["buyer_account_id"].combine_chunks()
-    seller = batch.data["seller_account_id"].combine_chunks()
-    size = len(batch)
-
-    source = pa.concat_arrays([buyer, seller])
-    indices = np.column_stack(
-        [np.arange(size), np.arange(size) + size]
-    ).reshape(-1)
-    accounts = pc.take(source, pa.array(indices, type=pa.int64()))
-
-    roles = pc.take(
-        pa.array(["buyer", "seller"], type=pa.large_string()),
-        pa.array(np.tile([0, 1], size), type=pa.int8()),
+@rf.preprocess
+def stack_parties(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(
+        parties=pl.concat_list(
+            pl.struct(
+                account_id=pl.col("buyer_account_id"),
+                role=pl.lit("buyer"),
+            ),
+            pl.struct(
+                account_id=pl.col("seller_account_id"),
+                role=pl.lit("seller"),
+            ),
+        )
     )
-    values = pa.StructArray.from_arrays(
-        [accounts, roles],
-        names=["account_id", "role"],
-    )
-    parties = pa.FixedSizeListArray.from_arrays(values, list_size=2)
-    return batch.replace(batch.data.append_column("parties", parties))
 
 
 model = rf.Model(
@@ -131,54 +105,24 @@ learned.
 
 ## Stack Roles Inside A Ragged Collection
 
-When every segment has an origin and destination, flatten the Arrow child
-records, interleave both roles, and double the list offsets:
+When every segment has an origin and destination, explode the child records,
+stack both roles, then aggregate them back by source row:
 
 ```python
-import numpy as np
-import pyarrow as pa
-import pyarrow.compute as pc
-
-@rf.preprocess(requires=("segments",), produces=("locations",))
-def stack_segments(batch: rf.Batch) -> rf.Batch:
-    lists = batch.data["segments"].combine_chunks()
-    segments = pc.list_flatten(lists)
-    size = len(segments)
-    locations = pa.concat_arrays(
-        [segments.field("origin"), segments.field("destination")]
+@rf.preprocess
+def stack_segments(frame: pl.DataFrame) -> pl.DataFrame:
+    rows = frame.with_row_index("_row").explode("segments").unnest("segments")
+    origin = rows.select("_row", location="origin", role=pl.lit(0))
+    destination = rows.select("_row", location="destination", role=pl.lit(1))
+    locations = (
+        pl.concat([origin, destination])
+        .sort("_row", "role")
+        .group_by("_row", maintain_order=True)
+        .agg(pl.struct("location", "role").alias("locations"))
     )
-    roles = pa.array(
-        np.concatenate(
-            [np.zeros(size, dtype=np.int8), np.ones(size, dtype=np.int8)]
-        )
-    )
-    order = pa.array(
-        np.column_stack((np.arange(size), np.arange(size) + size)).reshape(-1),
-        type=pa.int64(),
-    )
-    records = pa.StructArray.from_arrays(
-        [pc.take(locations, order), pc.take(roles, order)],
-        names=["location", "role"],
-    )
-    datatype = pa.large_list(
-        pa.struct(
-            [
-                pa.field("location", pa.large_string()),
-                pa.field("role", pa.int8()),
-            ]
-        )
-    )
-    offsets = pc.multiply(
-        pc.subtract(lists.offsets, lists.offsets[0]),
-        2,
-    )
-    values = pa.LargeListArray.from_arrays(
-        offsets,
-        records,
-        type=datatype,
-        mask=pc.is_null(lists),
-    )
-    return batch.replace(batch.data.append_column("locations", values))
+    return frame.with_row_index("_row").join(
+        locations, on="_row", how="left", maintain_order="left"
+    ).drop("_row")
 ```
 
 Each source segment contributes adjacent origin (`role=0`) and destination
@@ -243,8 +187,8 @@ source = pa.table(
     }
 )
 
-# Exercise through model.encode or an ArrowDataModule so RelFlow supplies
-# identity and calls the processor at its real boundary.
+# Exercise through model.encode or an ArrowDataModule so RelFlow performs the
+# Arrow/Polars conversion and calls the processor at its real boundary.
 encoded = model.encode(
     source,
     preprocess=stack_locations,

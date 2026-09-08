@@ -10,21 +10,20 @@ from typing import Any, Literal, TypeAlias
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import pyarrow as pa
-import pyarrow.compute as pc
 import pyarrow.dataset as ds
 import torch
 from torch.utils.data import DataLoader, IterableDataset
 
 import relflow
-from relflow.data.arrow import IDENTITY, Batch, matrix, mix
 from relflow.data.datasets.base import InterprocessEncodingContext
 from relflow.data.iterables import encode
-from relflow.data.processors import Preprocessor, PreprocessorInput
+from relflow.data.processors import Preprocessor, PreprocessorInput, arrow, polars
 from relflow.distributed import rank, world_size
 from relflow.structs.enums import Strata
 
-ArrowUnit: TypeAlias = Batch | pa.Table | pa.RecordBatch
+ArrowUnit: TypeAlias = pa.Table | pa.RecordBatch
 ArrowStream: TypeAlias = pa.RecordBatchReader | Iterable[ArrowUnit]
 ArrowSource: TypeAlias = ArrowUnit | ds.Dataset | Callable[[], ArrowStream]
 Retain: TypeAlias = tuple[str, ...] | Literal["*"]
@@ -50,7 +49,7 @@ def lock(schemas: Schemas, stage: Literal["source", "processed"], actual: pa.Sch
 
 
 def passthrough(value: Any) -> Any:
-    """Keep batches intact when Lightning's DataLoader has batching disabled."""
+    """Keep values intact when Lightning's DataLoader has batching disabled."""
 
     return value
 
@@ -85,7 +84,7 @@ def expand(value: Any, *, default: Any) -> dict[Strata, Any]:
 def accept(source: Any, *, strata: Strata) -> ArrowSource:
     """Validate the restartable Arrow source boundary."""
 
-    if isinstance(source, (Batch, pa.Table, pa.RecordBatch, ds.Dataset)) or callable(source):
+    if isinstance(source, (pa.Table, pa.RecordBatch, ds.Dataset)) or callable(source):
         return source
     if isinstance(source, ds.Scanner):
         raise TypeError(f"{strata} source is a configured Scanner; pass its Dataset so RelFlow can plan each scan")
@@ -96,59 +95,37 @@ def accept(source: Any, *, strata: Strata) -> ArrowSource:
     if isinstance(source, (str, os.PathLike)):
         raise TypeError(f"{strata} source is a path; build a pyarrow Dataset before using ArrowDataModule")
     raise TypeError(
-        f"{strata} source must be an rf.Batch, pyarrow Table, pyarrow RecordBatch, Dataset, "
+        f"{strata} source must be a pyarrow Table, pyarrow RecordBatch, Dataset, "
         f"or restartable Arrow factory; got {type(source).__name__}"
     )
 
 
-def identity(size: int, *, namespace: str, offset: int = 0) -> pa.StructArray:
-    """Build stable source-position identities without constructing Python rows."""
+def convert(unit: ArrowUnit) -> pa.Table:
+    """Normalize one Arrow unit to a table."""
 
-    if size < 0 or offset < 0:
-        raise ValueError("identity size and offset must be non-negative")
-
-    prefix = np.frombuffer(hashlib.sha256(namespace.encode()).digest()[:24], dtype=np.uint8)
-    values = np.empty((size, 32), dtype=np.uint8)
-    values[:, :24] = prefix
-    positions = np.arange(offset, offset + size, dtype=">u8")
-    values[:, 24:] = positions.view(np.uint8).reshape(size, 8)
-    logical = pa.FixedSizeBinaryArray.from_buffers(pa.binary(32), size, [None, pa.py_buffer(values)])
-
-    offsets = np.arange(size + 1, dtype=np.int64) * 8
-    order = pa.LargeBinaryArray.from_buffers(
-        pa.large_binary(),
-        size,
-        [None, pa.py_buffer(offsets), pa.py_buffer(positions)],
-    )
-    return pa.StructArray.from_arrays([logical, logical, order], fields=list(IDENTITY))
-
-
-def convert(unit: ArrowUnit, *, namespace: str, offset: int) -> Batch:
-    """Normalize one Arrow unit to the shared carrier."""
-
-    if isinstance(unit, Batch):
-        return unit
     if isinstance(unit, pa.RecordBatch):
         table = pa.Table.from_batches([unit])
     elif isinstance(unit, pa.Table):
         table = unit
     else:
-        raise TypeError(f"Arrow factories must yield rf.Batch, Table, or RecordBatch; got {type(unit).__name__}")
-    return Batch(data=table, identity=identity(table.num_rows, namespace=namespace, offset=offset))
+        raise TypeError(f"Arrow factories must yield Table or RecordBatch; got {type(unit).__name__}")
+    if table.num_columns == 0:
+        raise ValueError("Arrow observations must contain at least one column")
+    return table
 
 
-def scan(source: ArrowSource, *, namespace: str, schemas: Schemas | None = None) -> Iterator[Batch]:
+def scan(source: ArrowSource, *, schemas: Schemas | None = None) -> Iterator[pa.Table]:
     """Read an in-memory unit or restartable Arrow factory without row conversion."""
 
     schemas = Schemas() if schemas is None else schemas
-    if isinstance(source, (Batch, pa.Table, pa.RecordBatch)):
-        current = convert(source, namespace=namespace, offset=0)
-        lock(schemas, "source", current.data.schema, context="Arrow source schema changed")
+    if isinstance(source, (pa.Table, pa.RecordBatch)):
+        current = convert(source)
+        lock(schemas, "source", current.schema, context="Arrow source schema changed")
         yield current
         return
 
     stream = source.scanner().to_reader() if isinstance(source, ds.Dataset) else source()
-    if isinstance(stream, (Batch, pa.Table, pa.RecordBatch)):
+    if isinstance(stream, (pa.Table, pa.RecordBatch)):
         raise TypeError("an Arrow source factory must return a reader or iterable, not one Arrow unit")
     if not isinstance(stream, (pa.RecordBatchReader, Iterable)):
         raise TypeError(
@@ -160,13 +137,11 @@ def scan(source: ArrowSource, *, namespace: str, schemas: Schemas | None = None)
     if declared is not None:
         lock(schemas, "source", declared, context="Arrow source schema changed")
 
-    offset = 0
     emitted = False
     for unit in stream:
-        current = convert(unit, namespace=namespace, offset=offset)
-        lock(schemas, "source", current.data.schema, context="Arrow source schema changed")
+        current = convert(unit)
+        lock(schemas, "source", current.schema, context="Arrow source schema changed")
         emitted = True
-        offset += len(current)
         yield current
     if emitted:
         return
@@ -174,42 +149,35 @@ def scan(source: ArrowSource, *, namespace: str, schemas: Schemas | None = None)
         raise ValueError("an empty Arrow factory must yield an empty Arrow unit carrying its schema")
 
     empty = pa.Table.from_batches([], schema=declared)
-    yield convert(empty, namespace=namespace, offset=0)
+    yield convert(empty)
 
 
-def merge(batches: Iterable[Batch]) -> Batch | None:
-    """Concatenate aligned Arrow batches with one exact schema."""
+def merge(batches: Iterable[pa.Table]) -> pa.Table | None:
+    """Concatenate Arrow tables with one exact schema."""
 
     items = list(batches)
     if not items:
         return None
 
-    schema = items[0].data.schema
+    schema = items[0].schema
     for item in items[1:]:
-        if not schema.equals(item.data.schema, check_metadata=True):
-            raise TypeError(f"Arrow batch schema changed: expected {schema}, got {item.data.schema}")
+        if not schema.equals(item.schema, check_metadata=True):
+            raise TypeError(f"Arrow batch schema changed: expected {schema}, got {item.schema}")
 
-    data = pa.concat_tables([item.data for item in items]) if len(schema) else pa.Table.from_arrays([], schema=schema)
-    chunks: list[pa.Array] = []
-    for item in items:
-        if isinstance(item.identity, pa.ChunkedArray):
-            chunks.extend(item.identity.chunks)
-        else:
-            chunks.append(item.identity)
-    return Batch(data=data, identity=pa.chunked_array(chunks, type=IDENTITY))
+    return pa.concat_tables(items)
 
 
 def stage(
-    batches: Iterable[Batch],
+    frames: Iterable[pl.DataFrame],
     *,
     preprocessor: Preprocessor,
     strata: Strata,
     schema: Any,
     encoding_context: InterprocessEncodingContext,
-) -> Iterator[Batch]:
-    """Apply one preprocessor to every batch emitted by the preceding stage."""
+) -> Iterator[pl.DataFrame]:
+    """Apply one preprocessor to every frame emitted by the preceding stage."""
 
-    for item in batches:
+    for item in frames:
         yield from preprocessor.run(
             item,
             strata=strata,
@@ -219,21 +187,34 @@ def stage(
 
 
 def process(
-    batches: Iterable[Batch],
+    batches: Iterable[pa.Table],
     *,
     preprocessor: PreprocessorInput = (),
     strata: Strata,
     schema: Any,
     encoding_context: InterprocessEncodingContext,
     schemas: Schemas | None = None,
-) -> Iterator[Batch]:
+) -> Iterator[pa.Table]:
     """Apply an ordered preprocessor pipeline and enforce its final schema."""
 
-    current = batches
-    for processor in Preprocessor.normalize(preprocessor):
+    pipeline = Preprocessor.normalize(preprocessor)
+    schemas = Schemas() if schemas is None else schemas
+    if not pipeline:
+        for table in batches:
+            lock(
+                schemas,
+                "processed",
+                table.schema,
+                context=f"processed schema changed in {strata}",
+            )
+            yield table
+        return
+
+    current: Iterable[pl.DataFrame] = (polars(batch, context="preprocessor input") for batch in batches)
+    for processor in pipeline:
         if processor.scope == "dataset":
-            materialized = merge(current)
-            current = () if materialized is None else (materialized,)
+            frames = list(current)
+            current = () if not frames else (pl.concat(frames, how="vertical"),)
         current = stage(
             current,
             preprocessor=processor,
@@ -242,59 +223,49 @@ def process(
             encoding_context=encoding_context,
         )
 
-    schemas = Schemas() if schemas is None else schemas
     for output in current:
+        table = arrow(output, context="preprocessor output")
         lock(
             schemas,
             "processed",
-            output.data.schema,
+            table.schema,
             context=f"preprocessor schema changed in {strata}",
         )
-        yield output
+        yield table
 
 
-def randomizer(seed: int, *, strata: Strata, epoch: int, operation: str) -> np.uint64:
-    """Create one operation-isolated deterministic random salt."""
+def randomizer(seed: int, *, strata: Strata, epoch: int, operation: str) -> np.random.Generator:
+    """Create one operation-isolated deterministic random generator."""
 
     payload = f"{seed}:{strata}:{epoch}:{operation}".encode()
-    return np.uint64(int.from_bytes(hashlib.sha256(payload).digest()[:8], "big"))
+    return np.random.default_rng(int.from_bytes(hashlib.sha256(payload).digest()[:8], "big"))
 
 
-def scores(batch: Batch, *, salt: np.uint64, field: str) -> np.ndarray:
-    """Derive stable pseudorandom keys from Arrow identity."""
+def arrange(table: pa.Table, *, random: np.random.Generator) -> pa.Table:
+    """Randomly permute one bounded table."""
 
-    words = matrix(pc.struct_field(batch.identity, field))
-    result = np.full(len(batch), salt, dtype=np.uint64)
-    with np.errstate(over="ignore"):
-        for column in range(words.shape[1]):
-            lane = np.uint64((0x9E3779B97F4A7C15 * (column + 1)) & ((1 << 64) - 1))
-            result = mix(result ^ mix(words[:, column] + lane))
-    return result
+    indices = random.permutation(table.num_rows)
+    return table.take(pa.array(indices, type=pa.int64()))
 
 
-def arrange(batch: Batch, *, salt: np.uint64) -> Batch:
-    """Order one bounded batch by its stable random identity key."""
-
-    identities = matrix(pc.struct_field(batch.identity, "instance"))
-    random = scores(batch, salt=salt, field="instance")
-    order = np.lexsort((*reversed(identities.T), random))
-    return batch.take(pa.array(order, type=pa.int64()))
-
-
-def sample(batches: Iterable[Batch], *, rate: float, salt: np.uint64) -> Iterator[Batch]:
-    """Select observations with an identity-stable Arrow boolean mask."""
+def sample(
+    batches: Iterable[pa.Table],
+    *,
+    rate: float,
+    random: np.random.Generator,
+) -> Iterator[pa.Table]:
+    """Select observations with one seeded positional random stream."""
 
     if rate >= 1.0:
         yield from batches
         return
-    threshold = np.uint64(int(rate * np.iinfo(np.uint64).max))
     for item in batches:
-        selected = item.filter(pa.array(scores(item, salt=salt, field="logical") <= threshold))
-        if len(selected):
+        selected = item.filter(pa.array(random.random(item.num_rows) < rate))
+        if selected.num_rows:
             yield selected
 
 
-def limit(batches: Iterable[Batch], *, size: int | None) -> Iterator[Batch]:
+def limit(batches: Iterable[pa.Table], *, size: int | None) -> Iterator[pa.Table]:
     """Stop after a fixed number of logical observations."""
 
     if size is None:
@@ -308,67 +279,72 @@ def limit(batches: Iterable[Batch], *, size: int | None) -> Iterator[Batch]:
             item = next(iterator)
         except StopIteration:
             return
-        selected = item.slice(0, min(remaining, len(item)))
-        remaining -= len(selected)
-        if len(selected):
+        selected = item.slice(0, min(remaining, item.num_rows))
+        remaining -= selected.num_rows
+        if selected.num_rows:
             yield selected
 
 
-def shuffle(batches: Iterable[Batch], *, rows: int, salt: np.uint64) -> Iterator[Batch]:
-    """Mix Arrow batches in a chunk-invariant bounded row buffer."""
+def shuffle(
+    batches: Iterable[pa.Table],
+    *,
+    rows: int,
+    random: np.random.Generator,
+) -> Iterator[pa.Table]:
+    """Mix Arrow batches in a bounded row buffer."""
 
     if rows == 1:
         yield from batches
         return
 
-    held: Batch | None = None
+    held: pa.Table | None = None
     capacity = rows * 2
     for item in batches:
         offset = 0
-        while offset < len(item):
-            available = capacity - (len(held) if held is not None else 0)
-            selected = item.slice(offset, min(available, len(item) - offset))
+        while offset < item.num_rows:
+            available = capacity - (held.num_rows if held is not None else 0)
+            selected = item.slice(offset, min(available, item.num_rows - offset))
             held = merge((held, selected)) if held is not None else selected
-            offset += len(selected)
-            if held is not None and len(held) == capacity:
-                ordered = arrange(held, salt=salt)
+            offset += selected.num_rows
+            if held is not None and held.num_rows == capacity:
+                ordered = arrange(held, random=random)
                 yield ordered.slice(0, rows)
                 held = ordered.slice(rows)
 
-    if held is not None and len(held):
-        yield arrange(held, salt=salt)
+    if held is not None and held.num_rows:
+        yield arrange(held, random=random)
 
 
-def rebatch(batches: Iterable[Batch], *, size: int, drop_last: bool) -> Iterator[Batch]:
+def rebatch(batches: Iterable[pa.Table], *, size: int, drop_last: bool) -> Iterator[pa.Table]:
     """Form exact model batches by slicing and concatenating Arrow buffers."""
 
-    held: Batch | None = None
+    held: pa.Table | None = None
     for item in batches:
         held = merge((held, item)) if held is not None else item
-        while held is not None and len(held) >= size:
+        while held is not None and held.num_rows >= size:
             yield held.slice(0, size)
             held = held.slice(size)
 
-    if held is not None and len(held) and not drop_last:
+    if held is not None and held.num_rows and not drop_last:
         yield held
 
 
 def distribute(
-    batches: Iterable[Batch],
+    batches: Iterable[pa.Table],
     *,
     size: int,
     global_rank: int,
     world_size: int,
     drop_last: bool,
-) -> Iterator[Batch]:
+) -> Iterator[pa.Table]:
     """Give every distributed rank disjoint batches with an equal step count."""
 
     global_size = size * world_size
     for item in rebatch(batches, size=global_size, drop_last=False):
-        if len(item) < global_size and drop_last:
+        if item.num_rows < global_size and drop_last:
             return
 
-        usable = len(item) - len(item) % world_size
+        usable = item.num_rows - item.num_rows % world_size
         if not usable:
             return
         indices = pa.array(np.arange(global_rank, usable, world_size), type=pa.int64())
@@ -425,12 +401,11 @@ class ArrowDataset(IterableDataset):
             if callable(configure):
                 configure(global_rank=global_rank, world_size=replicas)
 
-        scanned: Iterable[Batch] = scan(
+        scanned: Iterable[pa.Table] = scan(
             self.source,
-            namespace=f"{self.strata}:source",
             schemas=self.schemas,
         )
-        batches: Iterable[Batch] = process(
+        batches: Iterable[pa.Table] = process(
             scanned,
             preprocessor=self.preprocessors,
             strata=self.strata,
@@ -441,16 +416,16 @@ class ArrowDataset(IterableDataset):
         batches = sample(
             batches,
             rate=self.sample_rate,
-            salt=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="sample"),
+            random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="sample"),
         )
 
-        if isinstance(self.source, (Batch, pa.Table, pa.RecordBatch)):
+        if isinstance(self.source, (pa.Table, pa.RecordBatch)):
             materialized = merge(batches)
             batches = () if materialized is None else (materialized,)
             if self.shuffle_data and materialized is not None:
                 materialized = arrange(
                     materialized,
-                    salt=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="shuffle"),
+                    random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="shuffle"),
                 )
                 batches = (materialized,)
             batches = limit(batches, size=self.epoch_size)
@@ -461,7 +436,7 @@ class ArrowDataset(IterableDataset):
                 batches = shuffle(
                     batches,
                     rows=self.shuffle_rows,
-                    salt=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="shuffle"),
+                    random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="shuffle"),
                 )
             batches = limit(batches, size=self.epoch_size)
 
@@ -625,7 +600,7 @@ class ArrowDataModule(lit.LightningDataModule):
         if any(not isinstance(value, bool) for value in self.replacement.values()):
             raise TypeError("replacement must contain booleans")
         if any(self.replacement.values()):
-            raise NotImplementedError("replacement sampling is deferred until the Arrow identity index is implemented")
+            raise NotImplementedError("replacement sampling is not implemented")
 
         self.epoch_size = expand(epoch_size, default=None)
         if any(

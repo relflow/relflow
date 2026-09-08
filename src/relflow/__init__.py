@@ -16,7 +16,6 @@ from relflow.architecture.root import (
     OptimizerConfig,
     SchedulerConfig,
 )
-from relflow.data.arrow import Batch
 from relflow.data.datasets import ArrowDataModule, CustomDataModule, PolarsDataModule, SyntheticDataModule
 from relflow.data.processors import (
     Postprocessor,
@@ -120,7 +119,6 @@ __all__ = [
     "Boolean",
     "AttentionMode",
     "ArrowDataModule",
-    "Batch",
     "Cluster",
     "Category",
     "Component",

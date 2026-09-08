@@ -14,7 +14,6 @@ from typing import Any, Literal, TypeAlias, cast
 import fastapi
 import orjson
 import pyarrow as pa
-import pyarrow.compute as pc
 import pyarrow.ipc as ipc
 import pydantic
 import torch
@@ -26,9 +25,8 @@ from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from relflow.architecture.root import Model
-from relflow.data.arrow import Batch, mappings
-from relflow.data.datasets.arrow import identity
-from relflow.data.processors import Postprocessor, PostprocessorInput, Preprocessor, PreprocessorInput, equal
+from relflow.data.arrow import mappings
+from relflow.data.processors import Postprocessor, PostprocessorInput, Preprocessor, PreprocessorInput
 from relflow.structs.experiment import NodeAttribute, NodePredicate
 from relflow.structs.tree import Node
 
@@ -36,7 +34,6 @@ Input: TypeAlias = dict[str, Any]
 ModelSource: TypeAlias = str | Path | Model
 Retain: TypeAlias = tuple[str, ...] | Literal["*"]
 UpdateOperation: TypeAlias = tuple[tuple[NodePredicate | NodeAttribute | Callable[[Node], bool], ...], dict[str, Any]]
-TRANSPORT_IDENTITY = "__relflow_identity__"
 JSON_MEDIA_TYPE = "application/json"
 ARROW_MEDIA_TYPE = "application/vnd.apache.arrow.stream"
 
@@ -206,20 +203,10 @@ class FastAPIRuntime:
         if not isinstance(data, pa.Table):
             raise TypeError(f"deployment prediction input must be a pyarrow.Table, got {type(data).__name__}")
 
-        source = Batch(
-            data=data,
-            identity=identity(data.num_rows, namespace="deployment"),
-        )
-
-        def transport(batch: Batch) -> Batch:
-            if TRANSPORT_IDENTITY in batch.data.column_names:
-                raise ValueError(f"postprocessor output cannot use reserved column {TRANSPORT_IDENTITY!r}")
-            return batch.replace(batch.data.append_column(TRANSPORT_IDENTITY, batch.identity))
-
         result = self.model.predict(
-            source,
+            data,
             preprocess=self.preprocessors,
-            postprocess=(*self.postprocessors, Postprocessor(func=transport)),
+            postprocess=self.postprocessors,
             retain=self.retain,
         )
         if not isinstance(result, pa.Table):
@@ -228,28 +215,6 @@ class FastAPIRuntime:
             raise ValueError(
                 f"Model.predict returned {result.num_rows} rows for {data.num_rows} valid deployment requests"
             )
-        if TRANSPORT_IDENTITY not in result.column_names:
-            raise ValueError("Model.predict did not preserve deployment identity through postprocessing")
-
-        source_instances = pc.struct_field(source.identity, "instance")
-        source_logical = pc.struct_field(source.identity, "logical")
-        result_identity = result[TRANSPORT_IDENTITY]
-        result_instances = pc.struct_field(result_identity, "instance")
-        result_logical = pc.struct_field(result_identity, "logical")
-        if not equal(result_instances, source_instances) or not equal(result_logical, source_logical):
-            if pc.count_distinct(result_instances).as_py() != len(result_instances):
-                raise ValueError("deployment preprocessing produced duplicate request identities")
-            alignment = pc.index_in(source_instances, value_set=result_instances)
-            if alignment.null_count:
-                raise ValueError("deployment preprocessing must produce exactly one output for each request")
-            result = result.take(alignment)
-            aligned = result[TRANSPORT_IDENTITY]
-            if not equal(pc.struct_field(aligned, "logical"), source_logical) or not equal(
-                pc.struct_field(aligned, "instance"), source_instances
-            ):
-                raise ValueError("deployment preprocessing must produce exactly one output for each request")
-        result = result.drop([TRANSPORT_IDENTITY])
-
         if not self.postprocessors:
             if "predictions" not in result.column_names:
                 raise ValueError("canonical model output is missing its 'predictions' column")
@@ -402,7 +367,7 @@ class Deployment(BaseSettings):
 
     Pydantic request signatures validate each item before the valid rows are
     converted into one Arrow table. ``retain`` controls which processed input
-    columns are available to an Arrow postprocessor. Deployment responses add
+    columns are available to a Polars postprocessor. Deployment responses add
     loaded-model provenance after application response validation.
     """
 
@@ -502,14 +467,14 @@ class Deployment(BaseSettings):
 
     @beartype
     def preprocess(self, preprocessor: PreprocessorInput) -> Deployment:
-        """Attach an ordered Arrow batch preprocessor collection."""
+        """Attach an ordered eager Polars preprocessor collection."""
 
         self._preprocessors = Preprocessor.normalize(preprocessor)
         return self
 
     @beartype
     def postprocess(self, postprocessor: PostprocessorInput) -> Deployment:
-        """Attach an ordered Arrow output postprocessor collection."""
+        """Attach an ordered eager Polars postprocessor collection."""
 
         self._postprocessors = Postprocessor.normalize(postprocessor)
         return self

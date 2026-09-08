@@ -533,41 +533,37 @@ after normalization to an immutable tuple. The same ordered pipeline should
 normally serve training, batch inference, and online inference to avoid skew.
 
 Preprocessing runs before mask resolution and, in an `ArrowDataModule`, before
-sampling, shuffling, and model rebatching. `requires` and `produces` name
-top-level Arrow columns. A nested edit therefore declares the containing branch
-column, such as `produces=("events",)`. They are checked at each pipeline stage
-but never used to reorder stages.
+sampling, shuffling, and model rebatching. Each callback receives and returns
+an eager Polars DataFrame. A nested edit replaces the containing list/struct
+column with an ordinary Polars expression.
 
 See [Dynamic Mask Preprocessors](../guides/dynamic-mask-preprocessors.qmd) for
-complete Arrow recipes covering nested selectors, exact counts,
+complete Polars recipes covering nested selectors, exact counts,
 shared decisions, stratum-aware rules, user-bound thresholds, schema stability,
 and wiring.
 
 ## Reproducible Uniform Selection
 
-Random masks use a stateless score derived from:
+Random masks use a seeded positional score derived from:
 
 ```text
-seed + stratum + training epoch + Batch identity
-     + owner address + normalized (query, rate) + nested slot
+seed + stratum + training epoch + owner address
+     + normalized (query, rate) + coordinate position
 ```
 
-This gives the following contract when the same `rf.Batch.identity` and nested
-geometry are preserved:
+This gives the following contract when the same input stream and nested geometry
+are preserved:
 
-- rebatching, Arrow rechunking, filtering, and shuffling do not change which
-  logical coordinates are selected;
+- identical calls select the same coordinates;
 - changing the training epoch changes the score stream;
 - repeated validation selections are stable;
 - repeated test selections are stable, but separately salted from validation;
 - changes to `skip`, `dropout`, or `reconstruct` preserve selection when
   `(query, rate)` and owner are unchanged.
 
-Nested reordering, a different overflow/capacity result, or a different owner
-address changes the coordinate identity. Each direct call with a raw Arrow
-table restarts positional identity at zero; it is deterministic but not
-content-keyed, so separately sliced calls do not match one full-table call.
-Preserve an `rf.Batch` when comparing selections across manual slices or calls.
+Reordering, slicing, a different overflow/capacity result, or a different owner
+address changes coordinate positions. Each call restarts its positional stream,
+so separately sliced calls need not match one full-table call.
 
 For diagnostics, pass explicit controls:
 
@@ -636,14 +632,14 @@ the schema and selected by stratum. For a temporary persistent experiment, use
 | A child remains hidden after `mask=False` | An ancestor policy selected it | Ancestor effects cannot be undone; move or narrow the ancestor policy |
 | Vocabulary/statistics include skipped values | Extensions observe pristine training data | This is intentional; redact in preprocessing if necessary |
 | Query-backed target cannot be omitted in prediction | Source-less vacancy is only available to directly bound unconditional targets | Keep the queried structure or bind the target directly |
-| Changing model batch size changes a manual test | Raw tables were submitted in separate calls | Preserve `rf.Batch.identity` across slices |
+| Separately sliced calls choose different random coordinates | Random masking is positional per call | Compare identical input geometry or materialize a selector in preprocessing |
 
 ## Where Next
 
 - [Dynamic Mask Preprocessors](../guides/dynamic-mask-preprocessors.qmd) gives
   complete source-to-model recipes.
 - [Query Paths](querypaths.qmd) defines the node-relative Arrow path grammar.
-- [Working with Arrow](../guides/working-with-arrow.qmd) covers processor scope,
-  lineage and Arrow kernels.
+- [Working with Arrow](../guides/working-with-arrow.qmd) covers processor scope
+  and Arrow/Polars boundaries.
 - [Learning Modes & Embeddings](embeddings.qmd) explains decoder and output
   roles.

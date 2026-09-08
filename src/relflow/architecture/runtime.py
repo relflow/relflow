@@ -15,7 +15,7 @@ from tensordict import TensorDict
 from relflow.architecture.contracts import sanitize
 from relflow.architecture.encoder import BranchEncoder
 from relflow.architecture.node import NodeModule
-from relflow.data.arrow import Batch, Encoded, mappings
+from relflow.data.arrow import Encoded, mappings
 from relflow.data.datasets.base import EncodedInput
 from relflow.data.iterables import encode as encode_batch
 from relflow.data.processors import (
@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from relflow.architecture.root import Model
 
 Retain = tuple[str, ...] | Literal["*"]
-PredictionInput: TypeAlias = Batch | pa.Table | pa.RecordBatch | Sequence[Mapping[str, Any]]
+PredictionInput: TypeAlias = pa.Table | pa.RecordBatch | Sequence[Mapping[str, Any]]
 RESERVED = frozenset({TensorKey.state.name, TensorKey.inferred.name, TensorKey.embedding.name})
 
 
@@ -92,25 +92,18 @@ class OutputPlan:
     entries: tuple[OutputEntry, ...]
 
 
-def ingress(source: PredictionInput) -> Batch | pa.Table | pa.RecordBatch:
+def ingress(source: PredictionInput) -> pa.Table | pa.RecordBatch:
     """Adapt one small Python prediction collection to Arrow exactly once."""
 
-    if isinstance(source, (Batch, pa.Table, pa.RecordBatch)):
+    if isinstance(source, (pa.Table, pa.RecordBatch)):
         return source
     if isinstance(source, (str, bytes)) or not isinstance(source, Sequence):
         raise TypeError(
-            "prediction input must be an rf.Batch, pyarrow Table, pyarrow RecordBatch, "
+            "prediction input must be a pyarrow Table, pyarrow RecordBatch, "
             f"or a sequence of mappings; got {type(source).__name__}"
         )
     if not source:
         raise ValueError("an empty Python prediction sequence has no Arrow schema; pass a typed Arrow table")
-    if all(isinstance(value, Mapping) and not value for value in source):
-        from relflow.data.datasets.arrow import identity
-
-        return Batch(
-            data=pa.table({}),
-            identity=identity(len(source), namespace="direct:predict", offset=0),
-        )
     try:
         return pa.Table.from_pylist(mappings(source, context="Python prediction observations"))
     except (pa.ArrowException, TypeError, ValueError) as error:
@@ -131,21 +124,21 @@ def retention(names: Retain) -> Retain:
     return names
 
 
-def project(source: Batch, names: Retain) -> pa.Array:
+def project(source: pa.Table, names: Retain) -> pa.Array:
     """Build the canonical retained-input value for each source row."""
 
     normalized = retention(names)
-    selected = tuple(source.data.column_names) if normalized == "*" else normalized
+    selected = tuple(source.column_names) if normalized == "*" else normalized
 
-    missing = [name for name in selected if name not in source.data.column_names]
+    missing = [name for name in selected if name not in source.column_names]
     if missing:
         formatted = ", ".join(repr(name) for name in missing)
         raise KeyError(f"retained column(s) are absent after preprocessing: {formatted}")
     if not selected:
-        return pa.nulls(len(source))
+        return pa.nulls(source.num_rows)
 
-    fields = [source.data.schema.field(name) for name in selected]
-    arrays = [source.data[name].combine_chunks() for name in selected]
+    fields = [source.schema.field(name) for name in selected]
+    arrays = [source[name].combine_chunks() for name in selected]
     return pa.StructArray.from_arrays(arrays, fields=fields)
 
 
@@ -463,7 +456,7 @@ class ModelRuntime:
         dataloader_idx: int = 0,
         *,
         strata: Strata,
-    ) -> Output | Batch | None:
+    ) -> Output | pa.Table | None:
         inputs = batch.tensors if isinstance(batch, Encoded) else batch
         if isinstance(batch, Encoded):
             ModelRuntime.learn(module, batch.observations, strata=strata)
@@ -553,46 +546,46 @@ class ModelRuntime:
         module: Model,
         predictions: list[Prediction],
         *,
-        source: Batch,
+        source: pa.Table,
         retain: Retain = (),
         compiled: OutputPlan | None = None,
-    ) -> Batch:
-        """Convert tensor predictions to one canonical Arrow output batch."""
+    ) -> pa.Table:
+        """Convert tensor predictions to one canonical Arrow output table."""
 
-        if not isinstance(source, Batch):
-            raise TypeError(f"source must be an rf.Batch, got {type(source).__name__}")
+        if not isinstance(source, pa.Table):
+            raise TypeError(f"source must be a pyarrow.Table, got {type(source).__name__}")
         active = plan(module, retain, refresh=True) if compiled is None else compiled
         if active.retain != retention(retain):
             raise ValueError(f"compiled output plan retain {active.retain!r} does not match write retain {retain!r}")
         inputs = project(source, active.retain)
         outputs = (
             vacant(active)
-            if not len(source) and not predictions
-            else envelope(module, predictions, len(source), active)
+            if not source.num_rows and not predictions
+            else envelope(module, predictions, source.num_rows, active)
         )
         data = pa.Table.from_arrays(
             [inputs, outputs],
             names=["inputs", "predictions"],
         )
-        if len(inputs) != len(source):
-            raise ValueError("retained input output is not aligned with source identity")
-        return source.replace(data)
+        if len(inputs) != source.num_rows:
+            raise ValueError("retained input output is not aligned with the canonical source")
+        return data
 
     @staticmethod
     def prepare(
         module: Model,
-        batch: Batch | pa.Table | pa.RecordBatch,
+        batch: pa.Table | pa.RecordBatch,
         *,
         preprocess: PreprocessorInput,
         strata: Strata,
         seed: int = 0,
         epoch: int = 0,
     ) -> Encoded:
-        """Normalize Arrow input, preprocess it, and encode one carrier."""
+        """Normalize Arrow input, preprocess it, and encode one table."""
 
         from relflow.data.datasets.arrow import convert, merge, process
 
-        source = batch if isinstance(batch, Batch) else convert(batch, namespace=f"direct:{strata}", offset=0)
+        source = convert(batch)
         processors = Preprocessor.normalize(preprocess)
         if processors:
             source = merge(
@@ -659,7 +652,7 @@ class ModelRuntime:
     @staticmethod
     def encode(
         module: Model,
-        batch: Batch | pa.Table | pa.RecordBatch,
+        batch: pa.Table | pa.RecordBatch,
         preprocess: PreprocessorInput = (),
         strata: Strata | str = Strata.predict,
         seed: int = 0,
@@ -700,7 +693,7 @@ class ModelRuntime:
         inputs = encoded.tensors.to(module.device)
         compiled = plan(module, retain, refresh=True)
         raw: list[Prediction] = []
-        if len(source):
+        if source.num_rows:
             was_training = module.training
             module.eval()
             try:
@@ -711,7 +704,7 @@ class ModelRuntime:
                     module.train()
 
         written = ModelRuntime.write(module, raw, source=source, retain=retain, compiled=compiled)
-        return apply(written, postprocessors).data
+        return apply(written, postprocessors)
 
 
 step = ModelRuntime.step

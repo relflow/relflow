@@ -151,34 +151,24 @@ inference-only preprocessor can deliberately turn unseen values into `null`
 instead of leaving them as valued-but-unavailable content:
 
 ```python
-import pyarrow as pa
-import pyarrow.compute as pc
+import polars as pl
 
 @rf.preprocess
 def null_unseen_category(
-    batch: rf.Batch,
+    frame: pl.DataFrame,
     *,
     encoding_context,
-) -> rf.Batch:
+) -> pl.DataFrame:
     vocabulary = rf.Category.vocabulary(
         encoding_context,
         "record/merchant_category",
     )
-    values = pc.utf8_lower(
-        pc.utf8_trim_whitespace(batch.data["merchant_category"])
-    )
-    known = pc.is_in(
-        values,
-        value_set=pa.array(vocabulary, type=pa.large_string()),
-    )
-    values = pc.if_else(
-        known,
-        values,
-        pa.scalar(None, type=pa.large_string()),
-    )
-    index = batch.data.schema.get_field_index("merchant_category")
-    return batch.replace(
-        batch.data.set_column(index, "merchant_category", values)
+    values = pl.col("merchant_category").str.strip_chars().str.to_lowercase()
+    return frame.with_columns(
+        pl.when(values.is_in(vocabulary))
+        .then(values)
+        .otherwise(None)
+        .alias("merchant_category")
     )
 
 

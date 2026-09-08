@@ -10,7 +10,7 @@ from tensordict import TensorDict
 from torch.utils.data import IterableDataset
 
 import relflow as rf
-from relflow.data.arrow import Batch, Encoded
+from relflow.data.arrow import Encoded
 from relflow.data.datasets import arrow
 from relflow.data.datasets.custom import adapt
 from relflow.structs.enums import Strata
@@ -34,7 +34,7 @@ class Records(IterableDataset):
         yield from self.values
 
 
-def collect(dataset: arrow.ArrowDataset, monkeypatch: pytest.MonkeyPatch) -> list[Batch]:
+def collect(dataset: arrow.ArrowDataset, monkeypatch: pytest.MonkeyPatch) -> list[pa.Table]:
     monkeypatch.setattr(
         arrow,
         "encode",
@@ -134,13 +134,13 @@ def test_source_schema_lock_survives_repeated_dataloader_creation(monkeypatch: p
 def test_processed_schema_lock_survives_repeated_dataloader_creation(monkeypatch: pytest.MonkeyPatch):
     calls = 0
 
-    @rf.preprocess(produces=("id",))
-    def change(batch: rf.Batch) -> rf.Batch:
+    @rf.preprocess
+    def change(frame: pl.DataFrame) -> pl.DataFrame:
         nonlocal calls
         calls += 1
         if calls == 1:
-            return batch
-        return batch.replace(pa.table({"id": pa.compute.cast(batch.data["id"], pa.string())}))
+            return frame
+        return frame.with_columns(pl.col("id").cast(pl.String))
 
     module = rf.ArrowDataModule(
         model=model(),
@@ -162,15 +162,7 @@ def test_arrow_pipeline_batches_without_materializing_rows(monkeypatch: pytest.M
     batches = collect(dataset, monkeypatch)
 
     assert [len(batch) for batch in batches] == [2, 2, 1]
-    assert pa.concat_tables([batch.data for batch in batches]).equals(source)
-    logical = pa.concat_arrays(
-        [
-            part
-            for batch in batches
-            for part in (batch.identity.chunks if isinstance(batch.identity, pa.ChunkedArray) else [batch.identity])
-        ]
-    ).field("logical")
-    assert len(set(logical.to_pylist())) == 5
+    assert pa.concat_tables(batches).equals(source)
 
 
 @pytest.mark.parametrize(
@@ -181,7 +173,7 @@ def test_arrow_pipeline_batches_without_materializing_rows(monkeypatch: pytest.M
     ],
 )
 def test_distributed_batches_are_disjoint_and_have_equal_tails(drop_last, expected_sizes, expected_values):
-    source = arrow.convert(pa.table({"id": list(range(23))}), namespace="distributed", offset=0)
+    source = arrow.convert(pa.table({"id": list(range(23))}))
     ranks = [
         list(
             arrow.distribute(
@@ -196,7 +188,7 @@ def test_distributed_batches_are_disjoint_and_have_equal_tails(drop_last, expect
     ]
 
     assert [[len(batch) for batch in batches] for batches in ranks] == [expected_sizes] * 4
-    values = [{value for batch in batches for value in batch.data["id"].to_pylist()} for batches in ranks]
+    values = [{value for batch in batches for value in batch["id"].to_pylist()} for batches in ranks]
     assert set().union(*values) == expected_values
     assert sum(map(len, values)) == len(set().union(*values))
 
@@ -208,7 +200,7 @@ def test_distributed_ownership_is_independent_of_arrow_batch_boundaries():
         offset = 0
         batches = []
         for size in sizes:
-            batches.append(arrow.convert(table.slice(offset, size), namespace="distributed", offset=offset))
+            batches.append(arrow.convert(table.slice(offset, size)))
             offset += size
         return [
             [
@@ -220,7 +212,7 @@ def test_distributed_ownership_is_independent_of_arrow_batch_boundaries():
                     world_size=4,
                     drop_last=False,
                 )
-                for value in batch.data["id"].to_pylist()
+                for value in batch["id"].to_pylist()
             ]
             for global_rank in range(4)
         ]
@@ -247,7 +239,7 @@ def test_arrow_dataset_uses_distributed_rank_and_world_size(monkeypatch: pytest.
     dataset = module.val_dataloader().dataset
     batches = collect(dataset, monkeypatch)
 
-    assert [batch.data["id"].to_pylist() for batch in batches] == [["b", "d"]]
+    assert [batch["id"].to_pylist() for batch in batches] == [["b", "d"]]
     context = dataset.encoding_context[next(iter(dataset.encoding_context))]
     assert context.global_rank == 1
 
@@ -259,16 +251,16 @@ def test_arrow_dataset_source_scans_through_the_shared_pipeline(monkeypatch: pyt
     batches = collect(module.val_dataloader().dataset, monkeypatch)
 
     assert [len(batch) for batch in batches] == [2, 2, 1]
-    assert pa.concat_tables([batch.data for batch in batches])["id"].to_pylist() == list(range(5))
+    assert pa.concat_tables(batches)["id"].to_pylist() == list(range(5))
 
 
 def test_dataset_scope_preprocessor_receives_one_logical_split(monkeypatch: pytest.MonkeyPatch):
     calls: list[int] = []
 
     @rf.preprocess(scope="dataset")
-    def inspect(batch: rf.Batch) -> rf.Batch:
-        calls.append(len(batch))
-        return batch
+    def inspect(frame: pl.DataFrame) -> pl.DataFrame:
+        calls.append(len(frame))
+        return frame
 
     source = ds.dataset(pa.table({"id": list(range(9))}))
     module = rf.ArrowDataModule(model=model(), validate=source, preprocessor=inspect, shuffle=False)
@@ -281,15 +273,15 @@ def test_dataset_scope_preprocessor_receives_one_logical_split(monkeypatch: pyte
 def test_preprocessor_pipeline_runs_in_order_and_is_stored_as_a_tuple(monkeypatch: pytest.MonkeyPatch):
     calls: list[str] = []
 
-    @rf.preprocess(requires=("id",), produces=("amount",))
-    def derive(batch: rf.Batch) -> rf.Batch:
+    @rf.preprocess
+    def derive(frame: pl.DataFrame) -> pl.DataFrame:
         calls.append("derive")
-        return batch.replace(batch.data.append_column("amount", pa.compute.add(batch.data["id"], 1)))
+        return frame.with_columns(amount=pl.col("id") + 1)
 
-    @rf.preprocess(requires=("amount",), produces=("id",))
-    def replace(batch: rf.Batch) -> rf.Batch:
+    @rf.preprocess
+    def replace(frame: pl.DataFrame) -> pl.DataFrame:
         calls.append("replace")
-        return batch.replace(pa.table({"id": pa.compute.multiply(batch.data["amount"], 2)}))
+        return frame.select(id=pl.col("amount") * 2)
 
     configured = [derive, replace]
     module = rf.ArrowDataModule(
@@ -304,21 +296,21 @@ def test_preprocessor_pipeline_runs_in_order_and_is_stored_as_a_tuple(monkeypatc
 
     assert module.preprocessors[Strata.validate] == (derive, replace)
     assert calls == ["derive", "replace"]
-    assert pa.concat_tables([batch.data for batch in batches])["id"].to_pylist() == [4, 6, 8]
+    assert pa.concat_tables(batches)["id"].to_pylist() == [4, 6, 8]
 
 
 def test_preprocessor_mapping_accepts_an_ordered_pipeline_per_split(monkeypatch: pytest.MonkeyPatch):
     calls: list[tuple[Strata, str]] = []
 
     @rf.preprocess
-    def first(batch: rf.Batch, *, strata: Strata) -> rf.Batch:
+    def first(frame: pl.DataFrame, *, strata: Strata) -> pl.DataFrame:
         calls.append((strata, "first"))
-        return batch
+        return frame
 
     @rf.preprocess
-    def second(batch: rf.Batch, *, strata: Strata) -> rf.Batch:
+    def second(frame: pl.DataFrame, *, strata: Strata) -> pl.DataFrame:
         calls.append((strata, "second"))
-        return batch
+        return frame
 
     source = pa.table({"id": [1, 2]})
     module = rf.ArrowDataModule(
@@ -348,16 +340,16 @@ def test_preprocessor_pipeline_flat_maps_each_stage():
     calls: list[int] = []
 
     @rf.preprocess
-    def split(batch: rf.Batch):
-        yield batch.slice(0, 1)
-        yield batch.slice(1)
+    def split(frame: pl.DataFrame):
+        yield frame.slice(0, 1)
+        yield frame.slice(1)
 
     @rf.preprocess
-    def inspect(batch: rf.Batch) -> rf.Batch:
-        calls.append(len(batch))
-        return batch
+    def inspect(frame: pl.DataFrame) -> pl.DataFrame:
+        calls.append(len(frame))
+        return frame
 
-    source = arrow.convert(pa.table({"id": [1, 2, 3]}), namespace="pipeline", offset=0)
+    source = arrow.convert(pa.table({"id": [1, 2, 3]}))
     outputs = list(
         arrow.process(
             (source,),
@@ -369,30 +361,30 @@ def test_preprocessor_pipeline_flat_maps_each_stage():
     )
 
     assert calls == [1, 2]
-    assert [batch.data["id"].to_pylist() for batch in outputs] == [[1], [2, 3]]
+    assert [batch["id"].to_pylist() for batch in outputs] == [[1], [2, 3]]
 
 
 def test_dataset_scope_materializes_at_its_ordered_pipeline_stage():
     calls: list[tuple[str, int]] = []
 
     @rf.preprocess
-    def before(batch: rf.Batch) -> rf.Batch:
-        calls.append(("before", len(batch)))
-        return batch.replace(batch.data.append_column("ready", pa.repeat(True, len(batch))))
+    def before(frame: pl.DataFrame) -> pl.DataFrame:
+        calls.append(("before", len(frame)))
+        return frame.with_columns(ready=pl.lit(True))
 
-    @rf.preprocess(scope="dataset", requires=("ready",))
-    def global_order(batch: rf.Batch) -> rf.Batch:
-        calls.append(("global", len(batch)))
-        return batch
+    @rf.preprocess(scope="dataset")
+    def global_order(frame: pl.DataFrame) -> pl.DataFrame:
+        calls.append(("global", len(frame)))
+        return frame
 
     @rf.preprocess
-    def after(batch: rf.Batch) -> rf.Batch:
-        calls.append(("after", len(batch)))
-        return batch
+    def after(frame: pl.DataFrame) -> pl.DataFrame:
+        calls.append(("after", len(frame)))
+        return frame
 
     sources = (
-        arrow.convert(pa.table({"id": [1, 2]}), namespace="pipeline", offset=0),
-        arrow.convert(pa.table({"id": [3, 4, 5]}), namespace="pipeline", offset=2),
+        arrow.convert(pa.table({"id": [1, 2]})),
+        arrow.convert(pa.table({"id": [3, 4, 5]})),
     )
     outputs = list(
         arrow.process(
@@ -406,17 +398,17 @@ def test_dataset_scope_materializes_at_its_ordered_pipeline_stage():
 
     assert calls == [("before", 2), ("before", 3), ("global", 5), ("after", 5)]
     assert len(outputs) == 1
-    assert outputs[0].data["id"].to_pylist() == [1, 2, 3, 4, 5]
+    assert outputs[0]["id"].to_pylist() == [1, 2, 3, 4, 5]
 
 
 def test_callable_source_rejects_dataset_scope_anywhere_in_pipeline():
     @rf.preprocess
-    def local(batch: rf.Batch) -> rf.Batch:
-        return batch
+    def local(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
 
     @rf.preprocess(scope="dataset")
-    def global_order(batch: rf.Batch) -> rf.Batch:
-        return batch
+    def global_order(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
 
     def source():
         yield pa.record_batch({"id": [1]})
@@ -430,9 +422,9 @@ def test_training_shuffle_is_reproducible_and_changes_by_epoch(monkeypatch: pyte
     first = rf.ArrowDataModule(model=model(8), train=source, seed=7).train_dataloader().dataset
     second = rf.ArrowDataModule(model=model(8), train=source, seed=7).train_dataloader().dataset
 
-    first_epoch = pa.concat_tables([batch.data for batch in collect(first, monkeypatch)])["id"].to_pylist()
-    repeated_epoch = pa.concat_tables([batch.data for batch in collect(second, monkeypatch)])["id"].to_pylist()
-    next_epoch = pa.concat_tables([batch.data for batch in collect(first, monkeypatch)])["id"].to_pylist()
+    first_epoch = pa.concat_tables(collect(first, monkeypatch))["id"].to_pylist()
+    repeated_epoch = pa.concat_tables(collect(second, monkeypatch))["id"].to_pylist()
+    next_epoch = pa.concat_tables(collect(first, monkeypatch))["id"].to_pylist()
 
     assert first_epoch == repeated_epoch
     assert next_epoch != first_epoch
@@ -444,12 +436,8 @@ def test_training_epoch_survives_dataloader_recreation(monkeypatch: pytest.Monke
     source = pa.table({"id": list(range(32))})
     module = rf.ArrowDataModule(model=model(8), train=source, seed=7)
 
-    first = pa.concat_tables([batch.data for batch in collect(module.train_dataloader().dataset, monkeypatch)])[
-        "id"
-    ].to_pylist()
-    second = pa.concat_tables([batch.data for batch in collect(module.train_dataloader().dataset, monkeypatch)])[
-        "id"
-    ].to_pylist()
+    first = pa.concat_tables(collect(module.train_dataloader().dataset, monkeypatch))["id"].to_pylist()
+    second = pa.concat_tables(collect(module.train_dataloader().dataset, monkeypatch))["id"].to_pylist()
 
     assert first != second
     assert sorted(first) == sorted(second) == list(range(32))
@@ -469,8 +457,8 @@ def test_evaluation_sampling_and_shuffle_are_stable_across_iterations(monkeypatc
         .dataset
     )
 
-    first = pa.concat_tables([batch.data for batch in collect(dataset, monkeypatch)])["id"].to_pylist()
-    second = pa.concat_tables([batch.data for batch in collect(dataset, monkeypatch)])["id"].to_pylist()
+    first = pa.concat_tables(collect(dataset, monkeypatch))["id"].to_pylist()
+    second = pa.concat_tables(collect(dataset, monkeypatch))["id"].to_pylist()
 
     assert first == second
 
@@ -495,7 +483,7 @@ def test_stream_epoch_limit_selects_before_shuffling(monkeypatch: pytest.MonkeyP
         .dataset
     )
 
-    selected = pa.concat_tables([batch.data for batch in collect(dataset, monkeypatch)])["id"].to_pylist()
+    selected = pa.concat_tables(collect(dataset, monkeypatch))["id"].to_pylist()
 
     assert len(selected) == 2
     assert sorted(selected) == [0, 1]
@@ -518,8 +506,8 @@ def test_stream_randomization_is_independent_of_record_batch_boundaries(monkeypa
     left = rf.ArrowDataModule(model=model(5), train=source([1] * 64), **options).train_dataloader().dataset
     right = rf.ArrowDataModule(model=model(5), train=source([17, 3, 29, 15]), **options).train_dataloader().dataset
 
-    left_ids = pa.concat_tables([batch.data for batch in collect(left, monkeypatch)])["id"].to_pylist()
-    right_ids = pa.concat_tables([batch.data for batch in collect(right, monkeypatch)])["id"].to_pylist()
+    left_ids = pa.concat_tables(collect(left, monkeypatch))["id"].to_pylist()
+    right_ids = pa.concat_tables(collect(right, monkeypatch))["id"].to_pylist()
 
     assert left_ids == right_ids
 
@@ -539,7 +527,7 @@ def test_one_row_stream_shuffle_window_preserves_order(monkeypatch: pytest.Monke
         .dataset
     )
 
-    selected = pa.concat_tables([batch.data for batch in collect(dataset, monkeypatch)])["id"].to_pylist()
+    selected = pa.concat_tables(collect(dataset, monkeypatch))["id"].to_pylist()
 
     assert selected == list(range(8))
 
@@ -548,26 +536,26 @@ def test_arrow_preprocessor_runs_before_model_batching(monkeypatch: pytest.Monke
     calls: list[int] = []
 
     @rf.preprocess
-    def positive(batch: rf.Batch) -> rf.Batch:
-        calls.append(len(batch))
-        return batch.filter(pa.compute.greater_equal(batch.data["id"], 0))
+    def positive(frame: pl.DataFrame) -> pl.DataFrame:
+        calls.append(len(frame))
+        return frame.filter(pl.col("id") >= 0)
 
     source = pa.table({"id": [-2, -1, 0, 1, 2]})
     module = rf.ArrowDataModule(model=model(), validate=source, preprocessor=positive, shuffle=False)
     batches = collect(module.val_dataloader().dataset, monkeypatch)
 
     assert calls == [5]
-    assert [batch.data["id"].to_pylist() for batch in batches] == [[0, 1], [2]]
+    assert [batch["id"].to_pylist() for batch in batches] == [[0, 1], [2]]
 
 
 def test_polars_is_a_one_time_conversion_adapter(monkeypatch: pytest.MonkeyPatch):
     calls = 0
     original = pl.DataFrame.to_arrow
 
-    def track(frame):
+    def track(frame, *args, **kwargs):
         nonlocal calls
         calls += 1
-        return original(frame)
+        return original(frame, *args, **kwargs)
 
     monkeypatch.setattr(pl.DataFrame, "to_arrow", track)
     frame = pl.DataFrame({"id": [1, 2]})
@@ -661,7 +649,7 @@ def test_deferred_parallel_and_replacement_modes_fail_explicitly():
     source = pa.table({"id": [1, 2]})
     with pytest.raises(NotImplementedError, match="workers are deferred"):
         rf.ArrowDataModule(model=model(), train=source, num_workers=1)
-    with pytest.raises(NotImplementedError, match="replacement sampling is deferred"):
+    with pytest.raises(NotImplementedError, match="replacement sampling is not implemented"):
         rf.ArrowDataModule(model=model(), train=source, replacement=True)
 
 

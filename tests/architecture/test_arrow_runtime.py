@@ -1,5 +1,5 @@
+import polars as pl
 import pyarrow as pa
-import pyarrow.compute as pc
 import pytest
 
 import relflow as rf
@@ -60,8 +60,8 @@ def test_lightning_predict_step_uses_the_datamodule_retain_plan():
 
     result = configured.predict_step(batch, 0)
 
-    assert isinstance(result, rf.Batch)
-    assert result.data["inputs"].to_pylist() == [{"request_id": "a"}]
+    assert isinstance(result, pa.Table)
+    assert result["inputs"].to_pylist() == [{"request_id": "a"}]
 
 
 def test_training_dataloader_carries_pristine_observations_into_step():
@@ -95,7 +95,7 @@ def test_predict_adapts_a_small_python_record_sequence_once():
     assert len(result) == 2
 
 
-def test_predict_preserves_empty_mapping_rows_for_source_less_reconstruction():
+def test_predict_rejects_fieldless_mapping_rows():
     configured = rf.Model(
         label=rf.Boolean(mask=True),
         d_model=8,
@@ -103,12 +103,8 @@ def test_predict_preserves_empty_mapping_rows_for_source_less_reconstruction():
         n_heads=2,
     )
 
-    result = configured.predict([{}, {}])
-
-    assert len(result) == 2
-    predictions = result["predictions"].combine_chunks()
-    label = predictions.field("record/label")
-    assert label.field(TensorKey.inferred.name).to_pylist() == [True, True]
+    with pytest.raises(TypeError, match="without fields"):
+        configured.predict([{}, {}])
 
 
 def test_python_prediction_ingress_preserves_keys_introduced_after_the_first_row():
@@ -146,9 +142,9 @@ def test_typed_empty_prediction_compiles_the_exact_output_schema_without_forward
 
 
 def test_preprocessor_may_filter_every_prediction_row_without_erasing_schema():
-    @rf.preprocess(requires=("value",))
-    def discard(batch: rf.Batch) -> rf.Batch:
-        return batch.filter(pa.array([False] * len(batch)))
+    @rf.preprocess
+    def discard(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.filter(pl.lit(False))
 
     result = model().predict(
         pa.table({"request_id": ["a"], "value": [1.0]}),
@@ -157,7 +153,7 @@ def test_preprocessor_may_filter_every_prediction_row_without_erasing_schema():
     )
 
     assert len(result) == 0
-    assert result["inputs"].type == pa.struct([pa.field("request_id", pa.string())])
+    assert result["inputs"].type == pa.struct([pa.field("request_id", pa.large_string())])
     assert result["predictions"].type.get_field_index("record/label") == 0
 
 
@@ -286,20 +282,18 @@ def test_reconstruction_without_public_extension_output_keeps_a_typed_null_predi
     assert result["predictions"].null_count == 2
 
 
-def test_predict_runs_arrow_preprocessor_and_postprocessor_once():
+def test_predict_runs_polars_preprocessor_and_postprocessor_once():
     calls = {"pre": 0, "post": 0}
 
-    @rf.preprocess(requires=("value",), produces=("value",))
-    def prepare(batch: rf.Batch) -> rf.Batch:
+    @rf.preprocess
+    def prepare(frame: pl.DataFrame) -> pl.DataFrame:
         calls["pre"] += 1
-        data = batch.data.set_column(0, "value", pc.multiply(batch.data["value"], 2))
-        return batch.replace(data)
+        return frame.with_columns(pl.col("value") * 2)
 
     @rf.postprocess
-    def compact(batch: rf.Batch) -> rf.Batch:
+    def compact(frame: pl.DataFrame) -> pl.DataFrame:
         calls["post"] += 1
-        inputs = pc.struct_field(batch.data["inputs"], "value")
-        return batch.replace(pa.table({"prepared": inputs}))
+        return frame.select(prepared=pl.col("inputs").struct.field("value"))
 
     result = model().predict(
         pa.table({"value": [1.0, 2.0]}),
@@ -315,16 +309,15 @@ def test_predict_runs_arrow_preprocessor_and_postprocessor_once():
 def test_predict_runs_postprocessors_in_order():
     calls = []
 
-    @rf.postprocess(requires=("inputs",), produces=("prepared",))
-    def project(batch: rf.Batch) -> rf.Batch:
+    @rf.postprocess
+    def project(frame: pl.DataFrame) -> pl.DataFrame:
         calls.append("project")
-        values = pc.struct_field(batch.data["inputs"], "value")
-        return batch.replace(pa.table({"prepared": values}))
+        return frame.select(prepared=pl.col("inputs").struct.field("value"))
 
-    @rf.postprocess(requires=("prepared",), produces=("doubled",))
-    def double(batch: rf.Batch) -> rf.Batch:
+    @rf.postprocess
+    def double(frame: pl.DataFrame) -> pl.DataFrame:
         calls.append("double")
-        return batch.replace(pa.table({"doubled": pc.multiply(batch.data["prepared"], 2)}))
+        return frame.select(doubled=pl.col("prepared") * 2)
 
     result = model().predict(
         pa.table({"value": [1.0, 2.0]}),
@@ -340,21 +333,21 @@ def test_predict_snapshots_postprocessors_before_preprocessing():
     calls: list[str] = []
 
     @rf.postprocess
-    def first(batch: rf.Batch) -> rf.Batch:
+    def first(frame: pl.DataFrame) -> pl.DataFrame:
         calls.append("first")
-        return batch
+        return frame
 
     @rf.postprocess
-    def late(batch: rf.Batch) -> rf.Batch:
+    def late(frame: pl.DataFrame) -> pl.DataFrame:
         calls.append("late")
-        return batch
+        return frame
 
     configured = [first]
 
     @rf.preprocess
-    def mutate(batch: rf.Batch) -> rf.Batch:
+    def mutate(frame: pl.DataFrame) -> pl.DataFrame:
         configured.append(late)
-        return batch
+        return frame
 
     model().predict(
         pa.table({"value": [1.0]}),

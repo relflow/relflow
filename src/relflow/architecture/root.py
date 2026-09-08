@@ -27,7 +27,7 @@ from relflow.architecture.mutations import (
     immutable,
 )
 from relflow.architecture.runtime import ModelRuntime, PredictionInput, Retain, step
-from relflow.data.arrow import Batch, Encoded
+from relflow.data.arrow import Encoded
 from relflow.data.datasets.base import EncodedInput
 from relflow.data.processors import PostprocessorInput, PreprocessorInput
 from relflow.logging import logger
@@ -462,17 +462,17 @@ class Model(lit.LightningModule, Renderable):
         self,
         predictions: list[Prediction],
         *,
-        source: Batch,
+        source: pa.Table,
         retain: Retain = (),
-    ) -> Batch:
-        """Convert tensor predictions into the canonical Arrow output batch."""
+    ) -> pa.Table:
+        """Convert tensor predictions into the canonical Arrow output table."""
 
         return ModelRuntime.write(self, predictions, source=source, retain=retain)
 
     @immutable("inference")
     def encode(
         self,
-        batch: Batch | pa.Table | pa.RecordBatch,
+        batch: pa.Table | pa.RecordBatch,
         preprocess: PreprocessorInput = (),
         strata: Strata | str = Strata.predict,
         seed: int = 0,

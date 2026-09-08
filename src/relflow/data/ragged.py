@@ -13,7 +13,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from relflow.data.arrow import Batch, matrix, mix, variants
+from relflow.data.arrow import variants
 from relflow.data.query import listed, parts, query
 from relflow.structs.enums import Overflow, Strata, Tokens
 from relflow.structs.tree import Address
@@ -465,7 +465,6 @@ def eligible(layout: Layout, mask: Mask, *, address: Address) -> np.ndarray:
 
 
 def scores(
-    batch: Batch,
     layout: Layout,
     *,
     address: Address,
@@ -474,33 +473,22 @@ def scores(
     epoch: int,
     strata: Strata,
 ) -> np.ndarray:
-    """Hash owner identity and nested slot into stable policy scores."""
+    """Draw reproducible scores in canonical record order."""
 
     if not len(layout.records):
         return np.empty(0, dtype=np.uint64)
 
-    row_size = math.prod(layout.shape[1:])
-    rows = layout.placement // row_size
-    slots = layout.placement % row_size
-    identities = matrix(pc.struct_field(batch.identity, "instance"))[rows]
     effective_epoch = epoch if strata == Strata.train else 0
     selection = json.dumps(
         (mask.query, float(mask.rate).hex() if mask.rate is not None else None),
         separators=(",", ":"),
     )
-    payload = f"relflow-mask-v1:{seed}:{strata}:{effective_epoch}:{address}:{selection}".encode()
-    salt = np.uint64(int.from_bytes(hashlib.sha256(payload).digest()[:8], "big"))
-    result = np.full(len(layout.records), salt, dtype=np.uint64)
-    with np.errstate(over="ignore"):
-        for column in range(identities.shape[1]):
-            lane = np.uint64((0x9E3779B97F4A7C15 * (column + 1)) & ((1 << 64) - 1))
-            result = mix(result ^ mix(identities[:, column] + lane))
-        result = mix(result ^ mix(slots.astype(np.uint64, copy=False) + salt))
-    return result
+    payload = f"relflow-mask-v2:{seed}:{strata}:{effective_epoch}:{address}:{selection}".encode()
+    random = np.random.default_rng(int.from_bytes(hashlib.sha256(payload).digest()[:8], "big"))
+    return random.integers(0, np.iinfo(np.uint64).max, len(layout.records), dtype=np.uint64)
 
 
 def select(
-    batch: Batch,
     layout: Layout,
     mask: Mask,
     *,
@@ -520,7 +508,6 @@ def select(
             threshold = np.uint64(int(rate * np.iinfo(np.uint64).max))
             chosen &= (
                 scores(
-                    batch,
                     layout,
                     address=address,
                     mask=mask,
@@ -537,7 +524,6 @@ def select(
 
 
 def resolve(
-    batch: Batch,
     layout: Layout,
     node: Any,
     *,
@@ -551,7 +537,6 @@ def resolve(
         Decision(
             mask=mask,
             selected=select(
-                batch,
                 layout,
                 mask,
                 address=node.address,
@@ -632,7 +617,7 @@ def project(
 
 
 def coalesce(
-    values: Batch,
+    values: pa.Table,
     schema: Schema,
     strata: Strata | str,
     *,
@@ -640,8 +625,8 @@ def coalesce(
     epoch: int = 0,
 ) -> dict[Address, Projection]:
     """Resolve schema geometry and masks before datatype conversion."""
-    if not isinstance(values, Batch):
-        raise TypeError(f"coalesce values must be an Arrow Batch, got {type(values).__name__}")
+    if not isinstance(values, pa.Table):
+        raise TypeError(f"coalesce values must be a pyarrow.Table, got {type(values).__name__}")
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise TypeError(f"coalesce seed must be an integer, got {type(seed).__name__}")
     if not isinstance(epoch, int) or isinstance(epoch, bool) or epoch < 0:
@@ -667,7 +652,6 @@ def coalesce(
                 if active:
                     child_layout = descend(layout, child, active[0])
                     decisions = resolve(
-                        values,
                         child_layout,
                         child,
                         seed=seed,
@@ -677,7 +661,6 @@ def coalesce(
                     visit(child, child_layout, (*inherited, *decisions))
             elif child.address in schema.active_requests:
                 decisions = resolve(
-                    values,
                     layout,
                     child,
                     seed=seed,
@@ -686,8 +669,8 @@ def coalesce(
                 )
                 fields[child.address] = project(layout, child, (*inherited, *decisions), strata=strata)
 
-    layout = root(values.data, schema.fields, size=len(values))
-    decisions = resolve(values, layout, schema.fields, seed=seed, epoch=epoch, strata=strata)
+    layout = root(values, schema.fields)
+    decisions = resolve(layout, schema.fields, seed=seed, epoch=epoch, strata=strata)
     visit(schema.fields, layout, decisions)
 
     return fields

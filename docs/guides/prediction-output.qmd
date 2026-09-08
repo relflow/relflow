@@ -18,8 +18,8 @@ result = model.predict(
 )
 ```
 
-For the canonical path, `requests` is an `rf.Batch`, `pa.Table`, or
-`pa.RecordBatch`. A nonempty sequence of Python mappings is also accepted as a
+For the canonical path, `requests` is a `pa.Table` or `pa.RecordBatch`. A
+nonempty sequence of Python mappings is also accepted as a
 small-request convenience and is converted to one Arrow table at ingress:
 
 ```python
@@ -246,28 +246,22 @@ only the scalar tuple or `"*"` forms.
 
 ## Postprocessed Output
 
-Pass a same-row Arrow postprocessor when a consumer needs flat or renamed
+Pass an eager Polars postprocessor when a consumer needs flat or renamed
 columns:
 
 ```python
-@rf.postprocess(
-    requires=("inputs", "predictions"),
-    produces=("request_id", "fraud", "fraud_probability"),
-)
-def warehouse(batch: rf.Batch) -> rf.Batch:
-    inputs = batch.data["inputs"]
-    predictions = batch.data["predictions"]
-    fraud = pc.struct_field(predictions, "record/fraud")
-    content = pc.struct_field(fraud, "content")
+import polars as pl
 
-    table = pa.table(
-        {
-            "request_id": pc.struct_field(inputs, "request_id"),
-            "fraud": pc.struct_field(content, "value"),
-            "fraud_probability": pc.struct_field(content, "probability"),
-        }
+@rf.postprocess
+def warehouse(frame: pl.DataFrame) -> pl.DataFrame:
+    inputs = pl.col("inputs")
+    fraud = pl.col("predictions").struct.field("record/fraud")
+    content = fraud.struct.field("content")
+    return frame.select(
+        request_id=inputs.struct.field("request_id"),
+        fraud=content.struct.field("value"),
+        fraud_probability=content.struct.field("probability"),
     )
-    return batch.replace(table)
 
 result = model.predict(
     requests,
@@ -282,45 +276,42 @@ table schema as an application contract. See [Postprocessors](postprocessors.qmd
 
 `postprocess=` also accepts a list or tuple of decorated postprocessors. RelFlow
 snapshots it as an immutable tuple, then applies stages strictly left to right.
-Each stage's `requires` is checked against the table returned by its predecessor
-and `produces` against its own result. Row count, identity, and a nonempty table
-are enforced after every stage. The retained `inputs` struct is available
-before the first stage; if an early stage removes it, later stages cannot read
-it.
+Each stage returns the authoritative eager DataFrame and may change rows or
+columns. The retained `inputs` struct is available before the first stage; if
+an early stage removes it, later stages cannot read it.
 
 ## Lower-Level `Model.write`
 
 Most callers use `predict`. Framework integrations that already own tensor
-predictions and their source lineage can use:
+predictions and their source table can use:
 
 ```python
 written = model.write(
     raw_predictions,
-    source=source_batch,
+    source=source_table,
     retain=("request_id",),
 )
 
-assert isinstance(written, rf.Batch)
+assert isinstance(written, pa.Table)
 ```
 
-`Model.write` is deliberately lower-level: `source` must be an `rf.Batch`, and
-the result retains its identity for callbacks and persistence. Lightning's
-`predict_step` calls it once; `rf.Writer` consumes that already-written batch
+`Model.write` is deliberately lower-level: `source` must be a `pa.Table`.
+Lightning's `predict_step` calls it once; `rf.Writer` consumes that already-written table
 instead of converting tensors again.
 
 ## Interactive, Parquet, And JSON Boundaries
 
-| Path | Public result | Identity | Python conversion |
-| --- | --- | --- | --- |
-| `model.predict(...)` | `pa.Table` | removed | none |
-| Lightning `predict_step` | `rf.Batch` | retained internally | none |
-| `rf.Writer` | rank Parquet file | persisted as protected `identity` column | none |
-| deployment JSON | JSON response rows | removed | one terminal `Table.to_pylist()` |
+| Path | Public result | Python conversion |
+| --- | --- | --- |
+| `model.predict(...)` | `pa.Table` | none |
+| Lightning `predict_step` | `pa.Table` | none |
+| `rf.Writer` | rank Parquet file | none |
+| deployment JSON | JSON response rows | one terminal `Table.to_pylist()` |
 
 Without a deployment postprocessor, JSON responses expose predictions and the
 deployment's `model` provenance, but not retained inputs. With a postprocessor,
 its columns define the application fields and deployment adds `model` afterward.
-Identity is never serialized to an ordinary HTTP response.
+RelFlow does not add a hidden identity column to any output path.
 
 Call `.to_pylist()` yourself only when an application boundary actually needs
 Python objects:

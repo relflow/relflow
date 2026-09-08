@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
+import polars as pl
 import pyarrow as pa
-import pyarrow.compute as pc
 import pytest
 
 import relflow as rf
@@ -108,13 +107,9 @@ def test_documented_mask_configuration_matrix(
     assert purpose in {"dropout", "reconstruction", "ablation"}
 
 
-@rf.preprocess(
-    requires=("amount",),
-    produces=("mask_amount",),
-)
-def threshold(batch: rf.Batch, *, cutoff: float) -> rf.Batch:
-    values = pc.fill_null(pc.greater(batch.data["amount"], cutoff), False)
-    return batch.replace(batch.data.append_column("mask_amount", values))
+@rf.preprocess
+def threshold(frame: pl.DataFrame, *, cutoff: float) -> pl.DataFrame:
+    return frame.with_columns((pl.col("amount") > cutoff).fill_null(False).alias("mask_amount"))
 
 
 def test_documented_arrow_preprocessor_selector_and_partial_binding():
@@ -174,17 +169,10 @@ def test_documented_arrow_preprocessor_attaches_to_data_module():
     assert field.present[:, 0].tolist() == [True, False, True]
 
 
-@rf.preprocess(
-    requires=("deny_amount",),
-    produces=("mask_amount",),
-)
-def prediction_policy(batch: rf.Batch, *, strata: rf.Strata) -> rf.Batch:
-    values = (
-        pc.fill_null(batch.data["deny_amount"], False)
-        if strata == rf.Strata.predict
-        else pa.repeat(pa.scalar(False, type=pa.bool_()), len(batch))
-    )
-    return batch.replace(batch.data.append_column("mask_amount", values))
+@rf.preprocess
+def prediction_policy(frame: pl.DataFrame, *, strata: rf.Strata) -> pl.DataFrame:
+    values = pl.col("deny_amount").fill_null(False) if strata == rf.Strata.predict else pl.lit(False)
+    return frame.with_columns(values.alias("mask_amount"))
 
 
 def test_documented_stratum_aware_selector():
@@ -228,34 +216,10 @@ MASKED_EVENTS = pa.large_list(
 )
 
 
-def masked_lists(
-    lists: pa.LargeListArray,
-    records: pa.StructArray,
-    selected: pa.Array,
-    datatype: pa.LargeListType,
-) -> pa.LargeListArray:
-    """Append a non-null selector while preserving list offsets and records."""
-
-    fields = list(datatype.value_type)
-    values = pa.StructArray.from_arrays(
-        [selected if field.name == "mask_event" else records.field(field.name) for field in fields],
-        fields=fields,
-    )
-    offsets = pc.subtract(lists.offsets, lists.offsets[0])
-    return pa.LargeListArray.from_arrays(offsets, values, type=datatype, mask=pc.is_null(lists))
-
-
-@rf.preprocess(
-    requires=("events",),
-    produces=("events",),
-)
-def refunds(batch: rf.Batch) -> rf.Batch:
-    index = batch.data.schema.get_field_index("events")
-    lists = batch.data["events"].combine_chunks()
-    records = pc.list_flatten(lists)
-    selected = pc.fill_null(pc.less(records.field("amount"), 0), False)
-    values = masked_lists(lists, records, selected, MASKED_EVENTS)
-    return batch.replace(batch.data.set_column(index, "events", values))
+@rf.preprocess
+def refunds(frame: pl.DataFrame) -> pl.DataFrame:
+    selected = (pl.element().struct.field("amount") < 0).fill_null(False).alias("mask_event")
+    return frame.with_columns(pl.col("events").list.eval(pl.element().struct.with_fields(selected)))
 
 
 def events() -> pa.Table:
@@ -328,20 +292,10 @@ def test_documented_shared_selector_can_drive_different_leaf_effects():
     assert kind.state.tolist() == [[[rf.Tokens.valued, rf.Tokens.masked, rf.Tokens.valued]]]
 
 
-@rf.preprocess(
-    requires=("events",),
-    produces=("events",),
-)
-def recent(batch: rf.Batch) -> rf.Batch:
-    index = batch.data.schema.get_field_index("events")
-    lists = batch.data["events"].combine_chunks()
-    records = pc.list_flatten(lists)
-    offsets = lists.offsets.to_numpy(zero_copy_only=False)
-    lengths = np.diff(offsets)
-    positions = np.arange(len(records)) - np.repeat(offsets[:-1] - offsets[0], lengths)
-    selected = pa.array(positions >= np.repeat(lengths - 2, lengths), type=pa.bool_())
-    converted = masked_lists(lists, records, selected, MASKED_EVENTS)
-    return batch.replace(batch.data.set_column(index, "events", converted))
+@rf.preprocess
+def recent(frame: pl.DataFrame) -> pl.DataFrame:
+    selected = (pl.int_range(pl.len()) >= pl.len() - 2).alias("mask_event")
+    return frame.with_columns(pl.col("events").list.eval(pl.element().struct.with_fields(selected)))
 
 
 def test_documented_last_n_selector():
@@ -389,28 +343,12 @@ MASKED_RISK_EVENTS = pa.large_list(
 )
 
 
-@rf.preprocess(
-    requires=("events",),
-    produces=("events",),
-)
-def top_risk(batch: rf.Batch, *, count: int = 2) -> rf.Batch:
-    index = batch.data.schema.get_field_index("events")
-    lists = batch.data["events"].combine_chunks()
-    records = pc.list_flatten(lists)
-    offsets = lists.offsets.to_numpy(zero_copy_only=False)
-    lengths = np.diff(offsets)
-    parents = np.repeat(np.arange(len(lists)), lengths)
-    positions = np.arange(len(records))
-    risk = pc.fill_null(records.field("risk"), float("-inf")).to_numpy(zero_copy_only=False)
-    order = np.lexsort((positions, -risk, parents))
-    ordered_parents = parents[order]
-    starts = np.flatnonzero(np.r_[True, ordered_parents[1:] != ordered_parents[:-1]])
-    group_starts = np.repeat(starts, np.diff(np.r_[starts, len(records)]))
-    rank = np.empty(len(records), dtype=np.int64)
-    rank[order] = np.arange(len(records)) - group_starts
-    selected = pa.array(rank < count, type=pa.bool_())
-    converted = masked_lists(lists, records, selected, MASKED_RISK_EVENTS)
-    return batch.replace(batch.data.set_column(index, "events", converted))
+@rf.preprocess
+def top_risk(frame: pl.DataFrame, *, count: int = 2) -> pl.DataFrame:
+    selected = (
+        pl.element().struct.field("risk").fill_null(float("-inf")).rank("ordinal", descending=True) <= count
+    ).alias("mask_event")
+    return frame.with_columns(pl.col("events").list.eval(pl.element().struct.with_fields(selected)))
 
 
 def test_documented_exact_k_selector():
@@ -489,19 +427,11 @@ def test_documented_nested_selectors_preserve_all_null_schema(preprocess, dataty
     assert not field.present.any()
 
 
-@rf.preprocess(
-    requires=("events", "deny_events"),
-    produces=("events",),
-)
-def broadcast(batch: rf.Batch) -> rf.Batch:
-    index = batch.data.schema.get_field_index("events")
-    lists = batch.data["events"].combine_chunks()
-    records = pc.list_flatten(lists)
-    parents = pc.list_parent_indices(lists)
-    denied = pc.fill_null(batch.data["deny_events"], False).combine_chunks()
-    selected = pc.take(denied, parents)
-    converted = masked_lists(lists, records, selected, MASKED_EVENTS)
-    return batch.replace(batch.data.set_column(index, "events", converted))
+@rf.preprocess
+def broadcast(frame: pl.DataFrame) -> pl.DataFrame:
+    denied = pl.col("events").list.eval(pl.element().struct.with_fields(pl.lit(True).alias("mask_event")))
+    allowed = pl.col("events").list.eval(pl.element().struct.with_fields(pl.lit(False).alias("mask_event")))
+    return frame.with_columns(pl.when(pl.col("deny_events").fill_null(False)).then(denied).otherwise(allowed))
 
 
 def test_documented_observation_selector_broadcasts_into_nested_records():

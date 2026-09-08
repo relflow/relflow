@@ -11,7 +11,7 @@ RelFlow has one Arrow data engine and four ways to enter it:
 
 | Your source | Use |
 | --- | --- |
-| `pyarrow.Table`, `RecordBatch`, `Dataset`, `rf.Batch`, or restartable Arrow factory | `rf.ArrowDataModule` |
+| `pyarrow.Table`, `RecordBatch`, `Dataset`, or restartable Arrow factory | `rf.ArrowDataModule` |
 | collected `polars.DataFrame` | `rf.PolarsDataModule` |
 | restartable PyTorch `IterableDataset` yielding mappings | `rf.CustomDataModule` |
 | restartable zero-argument generator yielding mappings | `rf.SyntheticDataModule` |
@@ -88,7 +88,7 @@ schema rather than a tuning override.
 
 | Option | Meaning |
 | --- | --- |
-| `preprocessor` | One Arrow `Batch` transform, an ordered collection, or one such value per split |
+| `preprocessor` | One eager Polars transform, an ordered collection, or one such value per split |
 | `retain` | Processed top-level columns copied into prediction `inputs` |
 | `seed` | Root seed for sampling, shuffling, and uniform mask selection |
 | `shuffle` | Train defaults to `True`; other splits default to `False` |
@@ -101,7 +101,7 @@ schema rather than a tuning override.
 | `pin_memory` | Accepted for DataLoader compatibility; leave `False` because the current encoded carrier does not expose PyTorch's recursive pinning protocol |
 
 `replacement` is present as a reserved constructor option but currently
-rejects `True`; exact replacement waits for the Arrow identity index.
+rejects `True`.
 
 ## What Is An Observation?
 
@@ -151,12 +151,11 @@ same source, seed, and epoch, they reproduce the same sequence. Training uses
 a new epoch in the key, so its order changes across epochs. Evaluation and
 prediction remain stable.
 
-The same seed also drives uniform mask selection. Selection is keyed by batch
-identity, schema address, policy, stratum, and training epoch, so changing a
-source chunk or model-batch boundary does not change which logical coordinates
-are selected. Training selections change by epoch; validation, test, and
-prediction selections remain stable. Datatype-specific transforms such as
-`p_unavailable` retain their own random contract.
+The same seed also drives uniform mask selection. Selection is keyed by schema
+address, policy, stratum, training epoch, and coordinate position in the
+current batch. Training selections change by epoch; repeated evaluation calls
+with identical input geometry remain stable. Datatype-specific transforms such
+as `p_unavailable` retain their own random contract.
 
 ::: {.callout-warning}
 Set `shuffle=False` for training only when order is part of the learning
@@ -181,7 +180,7 @@ The canonical module accepts a finite Arrow unit, an Arrow Dataset, or a
 restartable factory:
 
 ```text
-rf.Batch | pa.Table | pa.RecordBatch
+pa.Table | pa.RecordBatch
 pyarrow.dataset.Dataset
 Callable[[], pa.RecordBatchReader | Iterable[Arrow unit]]
 ```
@@ -221,10 +220,9 @@ non-Arrow source.
 
 The Arrow-native release supports in-memory Arrow, Dataset scans, single-reader
 factories, and deterministic distributed rank ownership. These features remain
-deferred until their identity and scheduling contracts are complete:
+deferred until their scheduling contracts are complete:
 
-- RelFlow-planned source projection pushdown (`requires` is validated metadata
-  today, but the scanner currently reads the Dataset schema as supplied);
+- RelFlow-planned source projection pushdown;
 - multiple DataLoader workers;
 - source-native distributed scans;
 - coordinated caches;
@@ -348,29 +346,15 @@ Every module accepts one decorated `Preprocessor`, a list, a tuple, or `None`.
 The module snapshots each configured value as an immutable ordered tuple:
 
 ```python
-import pyarrow.compute as pc
+import polars as pl
 
-@rf.preprocess(
-    requires=("amount",),
-    produces=("amount_log",),
-)
-def logarithm(batch: rf.Batch) -> rf.Batch:
-    values = pc.ln(pc.add(pc.cast(batch.data["amount"], pa.float64()), 1.0))
-    data = batch.data.append_column("amount_log", values)
-    return batch.replace(data)
+@rf.preprocess
+def logarithm(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(amount_log=pl.col("amount").cast(pl.Float64).log1p())
 
-@rf.preprocess(
-    requires=("amount_log",),
-    produces=("amount_log",),
-)
-def cap(batch: rf.Batch, *, maximum: float) -> rf.Batch:
-    values = pc.if_else(
-        pc.greater(batch.data["amount_log"], maximum),
-        maximum,
-        batch.data["amount_log"],
-    )
-    index = batch.data.schema.get_field_index("amount_log")
-    return batch.replace(batch.data.set_column(index, "amount_log", values))
+@rf.preprocess
+def cap(frame: pl.DataFrame, *, maximum: float) -> pl.DataFrame:
+    return frame.with_columns(pl.col("amount_log").clip(upper_bound=maximum))
 
 prepare = (logarithm, cap.partial(maximum=12.0))
 
@@ -382,12 +366,10 @@ data = rf.ArrowDataModule(
 )
 ```
 
-Stages run strictly left to right. Before each stage, `requires` is checked
-against its actual input columns; after each stage, `produces` is checked on
-every emitted batch. RelFlow does not reorder stages. A partition-scoped stage
-flat-maps its outputs into the next stage. A dataset-scoped stage materializes
-all upstream outputs at its exact pipeline position before downstream stages
-resume.
+Stages receive eager Polars DataFrames and run strictly left to right. A
+partition-scoped stage flat-maps its outputs into the next stage. A
+dataset-scoped stage materializes all upstream outputs at its exact pipeline
+position before downstream stages resume.
 
 Use a per-split mapping only when the pipeline genuinely differs. Each mapping
 value independently accepts a singleton, list, tuple, or `None`:
@@ -448,11 +430,11 @@ loader; explicitly requesting an unconfigured split through
 When ingestion fails, inspect boundaries in this order:
 
 1. print `table.schema` and confirm nested field names and physical types;
-2. run each preprocessor stage in order, confirm its declared outputs, and
-   confirm one exact final pipeline schema across chunks;
+2. run each preprocessor stage in order and confirm one exact final pipeline
+   schema across chunks;
 3. verify the model's direct bindings and `query` roots exist after
    preprocessing;
-4. set `shuffle=False` temporarily when investigating row identity or order;
+4. set `shuffle=False` temporarily when investigating row order;
 5. use `num_workers=0`—the current Arrow scheduler requires it;
 6. provide `arrow_schema` for empty, all-null, or evolving mapping sources;
 7. ensure a factory returns a fresh reader or iterator on every invocation.

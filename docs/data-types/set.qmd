@@ -121,43 +121,16 @@ appropriate way to consult a trained vocabulary during inference
 preprocessing:
 
 ```python
-import numpy as np
-import pyarrow as pa
-import pyarrow.compute as pc
+import polars as pl
 
 @rf.preprocess
-def keep_known_tags(batch: rf.Batch, *, encoding_context) -> rf.Batch:
+def keep_known_tags(frame: pl.DataFrame, *, encoding_context) -> pl.DataFrame:
     vocabulary = rf.Set.vocabulary(encoding_context, "record/tags")
-    index = batch.data.schema.get_field_index("tags")
-    field = batch.data.schema.field(index)
-    tags = batch.data.column(index).combine_chunks()
-    flattened = pc.list_flatten(tags)
-    keep = pc.fill_null(
-        pc.is_in(flattened, value_set=pa.array(vocabulary, type=flattened.type)),
-        False,
-    )
-    values = pc.filter(flattened, keep)
-    parents = pc.filter(pc.list_parent_indices(tags), keep)
-    counts = np.bincount(
-        parents.to_numpy(zero_copy_only=False),
-        minlength=len(tags),
-    )
-    offsets = pa.array(
-        np.concatenate(([0], np.cumsum(counts))),
-        type=pa.int64(),
-    )
-    mask = pc.is_null(tags)
-    values = (
-        pa.LargeListArray.from_arrays(offsets, values, type=field.type, mask=mask)
-        if pa.types.is_large_list(field.type)
-        else pa.ListArray.from_arrays(
-            pc.cast(offsets, pa.int32()),
-            values,
-            type=field.type,
-            mask=mask,
+    return frame.with_columns(
+        pl.col("tags").list.eval(
+            pl.element().filter(pl.element().is_in(vocabulary))
         )
     )
-    return batch.replace(batch.data.set_column(index, field, values))
 ```
 
 Avoid making training-preprocessor decisions from the current learned

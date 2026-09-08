@@ -2,18 +2,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import polars as pl
 import pyarrow as pa
-import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 
 import relflow as rf
-from relflow.data.datasets.arrow import identity
 from relflow.inference.callback import Writer
-
-
-def result(data: pa.Table, *, namespace: str = "writer") -> rf.Batch:
-    return rf.Batch(data=data, identity=identity(data.num_rows, namespace=namespace))
 
 
 def write(writer: Writer, output: object, *, rank: int = 0, batch_idx: int = 0) -> None:
@@ -28,14 +23,12 @@ def write(writer: Writer, output: object, *, rank: int = 0, batch_idx: int = 0) 
     )
 
 
-def test_writer_persists_the_written_arrow_batch_and_identity(tmp_path):
-    output = result(
-        pa.table(
-            {
-                "inputs": pa.array([{"request_id": "a"}, {"request_id": "b"}]),
-                "predictions": pa.array([{"score": 0.25}, {"score": 0.75}]),
-            }
-        )
+def test_writer_persists_the_written_arrow_table(tmp_path):
+    output = pa.table(
+        {
+            "inputs": pa.array([{"request_id": "a"}, {"request_id": "b"}]),
+            "predictions": pa.array([{"score": 0.25}, {"score": 0.75}]),
+        }
     )
     writer = Writer(tmp_path)
 
@@ -45,51 +38,31 @@ def test_writer_persists_the_written_arrow_batch_and_identity(tmp_path):
     path = tmp_path / "rank-7.parquet"
     assert path.exists()
     assert not (tmp_path / "rank-0.parquet").exists()
-    table = pq.read_table(path)
-    assert table.column_names == ["identity", "inputs", "predictions"]
-    assert table.select(["inputs", "predictions"]).equals(output.data)
-    assert (
-        pc.struct_field(table["identity"], "logical").to_pylist()
-        == pc.struct_field(output.identity, "logical").to_pylist()
-    )
+    assert pq.read_table(path).equals(output)
     assert writer.writer is None
 
 
-def test_writer_applies_arrow_postprocessors_in_order_before_persistence(tmp_path):
+def test_writer_applies_polars_postprocessors_in_order_before_persistence(tmp_path):
     calls = []
 
-    @rf.postprocess(requires=("inputs", "predictions"), produces=("request_id", "score"))
-    def compact(batch: rf.Batch) -> rf.Batch:
+    @rf.postprocess
+    def compact(frame: pl.DataFrame) -> pl.DataFrame:
         calls.append("compact")
-        predictions = batch.data["predictions"]
-        return batch.replace(
-            pa.table(
-                {
-                    "request_id": pc.struct_field(batch.data["inputs"], "request_id"),
-                    "score": pc.struct_field(predictions, "score"),
-                }
-            )
+        return frame.select(
+            request_id=pl.col("inputs").struct.field("request_id"),
+            score=pl.col("predictions").struct.field("score"),
         )
 
-    @rf.postprocess(requires=("request_id", "score"), produces=("request_id", "review"))
-    def decide(batch: rf.Batch) -> rf.Batch:
+    @rf.postprocess
+    def decide(frame: pl.DataFrame) -> pl.DataFrame:
         calls.append("decide")
-        return batch.replace(
-            pa.table(
-                {
-                    "request_id": batch.data["request_id"],
-                    "review": pc.greater_equal(batch.data["score"], 0.5),
-                }
-            )
-        )
+        return frame.select("request_id", review=pl.col("score") >= 0.5)
 
-    output = result(
-        pa.table(
-            {
-                "inputs": pa.array([{"request_id": "a"}]),
-                "predictions": pa.array([{"score": 0.5}]),
-            }
-        )
+    output = pa.table(
+        {
+            "inputs": pa.array([{"request_id": "a"}]),
+            "predictions": pa.array([{"score": 0.5}]),
+        }
     )
     writer = Writer(tmp_path, postprocessor=[compact, decide])
 
@@ -99,45 +72,28 @@ def test_writer_applies_arrow_postprocessors_in_order_before_persistence(tmp_pat
     assert calls == ["compact", "decide"]
     assert writer.postprocessors == (compact, decide)
     table = pq.read_table(tmp_path / "rank-0.parquet")
-    assert table.column_names == ["identity", "request_id", "review"]
-    assert table.select(["request_id", "review"]).to_pylist() == [{"request_id": "a", "review": True}]
+    assert table.column_names == ["request_id", "review"]
+    assert table.to_pylist() == [{"request_id": "a", "review": True}]
 
 
-def test_writer_stops_after_a_middle_postprocessor_breaks_identity(tmp_path):
-    calls = []
-
+def test_writer_accepts_postprocessor_row_changes(tmp_path):
     @rf.postprocess
-    def first(batch: rf.Batch) -> rf.Batch:
-        calls.append("first")
-        return batch
+    def reorder(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.sort("score", descending=True).head(1)
 
-    @rf.postprocess
-    def reorder(batch: rf.Batch) -> rf.Batch:
-        calls.append("reorder")
-        return batch.take(pa.array([1, 0], type=pa.int64())).replace(batch.data)
+    writer = Writer(tmp_path, postprocessor=reorder)
+    write(writer, pa.table({"score": [0.25, 0.75]}))
+    writer.close()
 
-    @rf.postprocess
-    def last(batch: rf.Batch) -> rf.Batch:
-        calls.append("last")
-        return batch
-
-    writer = Writer(tmp_path, postprocessor=(first, reorder, last))
-    output = result(pa.table({"score": [0.25, 0.75]}))
-
-    with pytest.raises(ValueError, match="postprocessor 'reorder'.*preserve Batch identity"):
-        write(writer, output)
-
-    assert calls == ["first", "reorder"]
-    assert writer.writer is None
-    assert not list(tmp_path.glob("*.parquet"))
+    assert pq.read_table(tmp_path / "rank-0.parquet").to_pydict() == {"score": [0.75]}
 
 
 def test_writer_locks_the_exact_first_batch_schema_and_closes_on_drift(tmp_path):
     writer = Writer(tmp_path)
-    write(writer, result(pa.table({"score": pa.array([1], type=pa.int64())})), batch_idx=0)
+    write(writer, pa.table({"score": pa.array([1], type=pa.int64())}), batch_idx=0)
 
     with pytest.raises(ValueError, match="schema differs from the first batch"):
-        write(writer, result(pa.table({"score": pa.array([1.0], type=pa.float64())})), batch_idx=1)
+        write(writer, pa.table({"score": pa.array([1.0], type=pa.float64())}), batch_idx=1)
 
     assert writer.writer is None
     table = pq.read_table(tmp_path / "rank-0.parquet")
@@ -145,20 +101,19 @@ def test_writer_locks_the_exact_first_batch_schema_and_closes_on_drift(tmp_path)
     assert table["score"].to_pylist() == [1]
 
 
-def test_writer_rejects_the_reserved_identity_column(tmp_path):
+def test_writer_treats_identity_as_an_ordinary_user_column(tmp_path):
     writer = Writer(tmp_path)
 
-    with pytest.raises(ValueError, match="reserved column name 'identity'"):
-        write(writer, result(pa.table({"identity": ["user-owned"]})))
+    write(writer, pa.table({"identity": ["user-owned"]}))
+    writer.close()
 
-    assert writer.writer is None
-    assert not list(tmp_path.glob("*.parquet"))
+    assert pq.read_table(tmp_path / "rank-0.parquet").to_pydict() == {"identity": ["user-owned"]}
 
 
-def test_writer_requires_predict_step_to_return_batch(tmp_path):
+def test_writer_requires_predict_step_to_return_arrow_table(tmp_path):
     writer = Writer(tmp_path)
 
-    with pytest.raises(TypeError, match="predict_step.*rf.Batch"):
-        write(writer, pa.table({"score": [1.0]}))
+    with pytest.raises(TypeError, match="predict_step.*pyarrow.Table"):
+        write(writer, [{"score": 1.0}])
 
     assert writer.writer is None

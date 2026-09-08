@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from relflow.data.arrow import Batch
 from relflow.data.processors import (
     Postprocessor,
     Preprocessor,
@@ -13,7 +12,6 @@ from relflow.data.processors import (
 from relflow.data.ragged import RaggedField
 
 __all__ = [
-    "Batch",
     "Postprocessor",
     "Preprocessor",
     "PreprocessorProvider",

@@ -109,22 +109,20 @@ run. See
 
 | Export | Purpose | Guide |
 | --- | --- | --- |
-| `Batch` | Carry a `pa.Table` with protected, aligned row identity through processors and writers. | [Working With Arrow](../guides/working-with-arrow.qmd) |
 | `ArrowDataModule` | Canonical in-memory, Dataset, or restartable Arrow input. | [Data Modules](../guides/data-modules.qmd) |
 | `PolarsDataModule` | Convert collected Polars frames once and delegate to Arrow. | [Data Modules](../guides/data-modules.qmd) |
 | `CustomDataModule` | Convert bounded `IterableDataset` mapping groups to Arrow. | [Data Modules](../guides/data-modules.qmd) |
 | `SyntheticDataModule` | Convert bounded restartable mapping generators to Arrow. | [Data Modules](../guides/data-modules.qmd) |
-| `preprocess`, `Preprocessor` | Define one stage in an ordered Arrow input pipeline, including dynamic mask selectors. | [Binding Data](../core-concepts/binding-data.qmd), [Dynamic Mask Preprocessors](../guides/dynamic-mask-preprocessors.qmd) |
-| `postprocess`, `Postprocessor` | Define one stage in an ordered, same-row Arrow output pipeline. | [Postprocessors](../guides/postprocessors.qmd) |
+| `preprocess`, `Preprocessor` | Define one eager Polars stage in an ordered input pipeline, including dynamic mask selectors. | [Binding Data](../core-concepts/binding-data.qmd), [Dynamic Mask Preprocessors](../guides/dynamic-mask-preprocessors.qmd) |
+| `postprocess`, `Postprocessor` | Define one eager Polars stage in an ordered output pipeline. | [Postprocessors](../guides/postprocessors.qmd) |
 
 `PreprocessorProvider` describes the optional `strata`, `schema`, and
-`encoding_context` names that the pipeline can inject after `batch`. All other
+`encoding_context` names that the pipeline can inject after `frame`. All other
 keyword-only parameters are bound by users with `.partial(...)`.
-Both decorators accept top-level `requires=(...)` and `produces=(...)`
-declarations. Processor arguments accept a decorated singleton, list, tuple,
-or `None`, normalize it to an immutable tuple, and execute it left to right.
-RelFlow validates declared columns at every stage and never topologically sorts
-the tuple.
+Processor arguments accept a decorated singleton, list, tuple, or `None`,
+normalize it to an immutable tuple, and execute it left to right. Each callback
+must accept and return an eager `polars.DataFrame`; preprocessors may also emit
+an iterable of frames or `None`.
 
 ### Direct model data methods
 
@@ -143,12 +141,12 @@ result = model.predict(
 )
 ```
 
-`batch` is normally `rf.Batch`, `pa.Table`, or `pa.RecordBatch`. `predict` also
+`batch` is a `pa.Table` or `pa.RecordBatch`. `predict` also
 accepts a nonempty sequence of mappings for a small request and converts it to
 one Arrow table; typed Arrow is required when the input is empty.
 `model.encode(...)` remains Arrow-only. `predict` returns a `pa.Table`. The
-lower-level `model.write(predictions, source=batch, retain=())` returns an
-identity-aligned `rf.Batch`.
+lower-level `model.write(predictions, source=batch, retain=())` returns a
+`pa.Table`.
 
 ## Prediction And Operation
 

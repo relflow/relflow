@@ -202,43 +202,22 @@ The language excludes:
 
 This boundary is intentional. Structural navigation compiles cleanly and
 keeps nested siblings aligned. Data-dependent transformations belong in one
-Arrow preprocessor where their schema and lineage are explicit.
+eager Polars preprocessor.
 
 For example, filter login events once and let the branch bind directly:
 
 ```python
-import numpy as np
-import pyarrow as pa
-import pyarrow.compute as pc
+import polars as pl
 
-@rf.preprocess(
-    requires=("events",),
-    produces=("login_events",),
-)
-def select_logins(batch: rf.Batch) -> rf.Batch:
-    field = batch.data.schema.field("events")
-    lists = batch.data["events"].combine_chunks()
-    records = pc.list_flatten(lists)
-    parents = pc.list_parent_indices(lists)
-    keep = pc.fill_null(pc.equal(records.field("type"), "login"), False)
-    values = pc.filter(records, keep)
-    parents = pc.filter(parents, keep)
-    counts = np.bincount(
-        parents.to_numpy(zero_copy_only=False),
-        minlength=len(lists),
+@rf.preprocess
+def select_logins(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(
+        login_events=pl.col("events").list.eval(
+            pl.element().filter(
+                pl.element().struct.field("type").eq("login").fill_null(False)
+            )
+        )
     )
-    offsets = pa.array(
-        np.concatenate(([0], np.cumsum(counts))),
-        type=pa.int64(),
-    )
-    values = pa.LargeListArray.from_arrays(
-        offsets,
-        values,
-        type=field.type,
-        mask=pc.is_null(lists),
-    )
-    data = batch.data.append_column("login_events", values)
-    return batch.replace(data)
 
 model = rf.Model(
     login_events=rf.Branch(
