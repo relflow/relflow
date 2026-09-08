@@ -11,18 +11,15 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from lightning.pytorch import callbacks
 
-from relflow.data.arrow import Batch
 from relflow.data.processors import Postprocessor, PostprocessorInput, apply
 
 
 class Writer(callbacks.BasePredictionWriter):
-    """Persist each written prediction batch as one Arrow Parquet shard.
+    """Persist each written prediction table as one Arrow Parquet shard.
 
-    ``Model.predict_step`` has already converted tensors into an
-    identity-aligned :class:`~relflow.Batch`. The callback therefore does no
-    model writing, shape inference, or Python-row assembly. Configured Arrow
-    postprocessors run in order before the protected ``identity`` column is
-    added. The first result locks the exact Parquet schema for the rank.
+    ``Model.predict_step`` has already converted tensors into the canonical
+    Arrow prediction envelope. Configured Polars postprocessors run in order,
+    and the first result locks the exact Parquet schema for the rank.
     """
 
     def __init__(
@@ -40,26 +37,19 @@ class Writer(callbacks.BasePredictionWriter):
         self,
         trainer: lit.Trainer,
         pl_module: lit.LightningModule,
-        output: Batch,
+        output: pa.Table,
         batch_indices: list[int] | None,
         batch: Any,
         batch_idx: int,
         dataloader_idx: int,
     ) -> None:  # ty:ignore[invalid-method-override]
-        """Write the Arrow result returned by one prediction step."""
+        """Write the Arrow table returned by one prediction step."""
 
         try:
-            if not isinstance(output, Batch):
-                raise TypeError(f"Writer requires predict_step to return an rf.Batch, got {type(output).__name__}")
+            if not isinstance(output, pa.Table):
+                raise TypeError(f"Writer requires predict_step to return a pyarrow.Table, got {type(output).__name__}")
 
-            result = apply(output, self.postprocessors)
-            if "identity" in result.data.column_names:
-                raise ValueError("prediction output cannot use the reserved column name 'identity'")
-
-            table = pa.table(
-                [result.identity, *result.data.columns],
-                names=["identity", *result.data.column_names],
-            )
+            table = apply(output, self.postprocessors)
 
             if self.writer is None:
                 self.path.mkdir(parents=True, exist_ok=True)

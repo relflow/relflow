@@ -99,29 +99,26 @@ content value in isolation.
 ## Debug A Preprocessor
 
 A RelFlow preprocessor is an object produced by `@rf.preprocess` and must return
-`rf.Batch`, `None`, or an iterable of batches. A processor argument may contain
-one such object, a list, a tuple, or `None`; RelFlow snapshots it as an immutable
-tuple and runs it left to right. A bare Arrow table drops lineage and is not a
-valid processor result.
+an eager `polars.DataFrame`, `None`, or an iterable of eager frames. A processor
+argument may contain one such object, a list, a tuple, or `None`; RelFlow
+snapshots it as an immutable tuple and runs it left to right.
 
-Exercise it through `model.encode` to include RelFlow identity and any
-runtime-provided values:
+Exercise it through `model.encode` to include conversion and any runtime-provided
+values:
 
 ```{python .marimo}
 #| echo: true
 #| output: true
 
-@rf.preprocess(requires=("raw_amount",), produces=("amount",))
-def rename_amount(batch: rf.Batch) -> rf.Batch:
-    data = batch.data.rename_columns(
-        ["amount" if name == "raw_amount" else name for name in batch.data.column_names]
-    )
-    return batch.replace(data)
+import polars as pl
 
-@rf.preprocess(requires=("amount",), produces=("amount_copy",))
-def derive_features(batch: rf.Batch) -> rf.Batch:
-    data = batch.data.append_column("amount_copy", batch.data["amount"])
-    return batch.replace(data)
+@rf.preprocess
+def rename_amount(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.rename({"raw_amount": "amount"})
+
+@rf.preprocess
+def derive_features(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(amount_copy=pl.col("amount"))
 
 records = pa.table({"raw_amount": [12.5]})
 encoded = model.encode(
@@ -135,10 +132,8 @@ through a data module or `model.encode(..., strata=...)` so those providers are
 present. Bind required user parameters with `.partial(...)`.
 
 When a pipeline fails, inspect the named stage's actual input schema. RelFlow
-checks `requires` before every stage and `produces` on every emitted output; it
-does not move a producer ahead of its consumer. A missing requirement therefore
-usually means the tuple is reversed, an earlier stage dropped a column, or that
-stage did not return a declared output. For mixed scopes, remember that each
+does not move a producer ahead of its consumer. A missing column usually means
+the tuple is reversed or an earlier stage dropped it. For mixed scopes, each
 dataset-scoped stage materializes all upstream outputs exactly where it appears.
 
 ## Debug Prediction Output
@@ -160,11 +155,10 @@ that were masked in prediction input. Read [Prediction Output](prediction-output
 for the full envelope before flattening it in a postprocessor.
 
 Postprocessor arguments use the same singleton/list/tuple/`None` forms and run
-strictly left to right. RelFlow checks `requires` before each stage, then checks
-`produces`, row count, identity, and nonempty output on that stage's result. If
-a later stage cannot see `inputs`, confirm both that prediction retained the
-needed source columns and that no earlier postprocessor removed the canonical
-envelope.
+strictly left to right. Every stage must return an eager DataFrame with at least
+one column. If a later stage cannot see `inputs`, confirm both that prediction
+retained the needed source columns and that no earlier postprocessor removed the
+canonical envelope.
 
 ## Reduce A Distributed Failure
 

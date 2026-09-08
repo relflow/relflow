@@ -154,10 +154,11 @@ Use a preprocessor for predicates or coordinated data-dependent reshaping:
 #| echo: true
 #| output: true
 
-@rf.preprocess(requires=("line_items",), produces=("items",))
-def prepare_items(batch: rf.Batch) -> rf.Batch:
-    data = batch.data.append_column("items", batch.data["line_items"])
-    return batch.replace(data)
+import polars as pl
+
+@rf.preprocess
+def prepare_items(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(items=pl.col("line_items"))
 
 
 items = rf.Branch(

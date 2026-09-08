@@ -406,7 +406,7 @@ def test_iris_case_study_reproduces_documented_result(tmp_path: Path) -> None:
 
     trainer.fit(model=model, datamodule=datamodule)
     metrics = trainer.test(model=model, datamodule=datamodule, verbose=False)[0]
-    assert metrics["flower.species/test.accuracy.content"] == pytest.approx(9 / 10)
+    assert metrics["flower.species/test.accuracy.content"] == pytest.approx(14 / 15)
 
     artifact = tmp_path / "iris-model.rf"
     model.save(artifact)

@@ -11,7 +11,7 @@ import pyarrow as pa
 import torch
 from tensordict import TensorDict
 
-from relflow.data.arrow import Batch, Encoded
+from relflow.data.arrow import Encoded
 from relflow.data.datasets.base import EncodedInput, InterprocessEncodingContext
 from relflow.data.ragged import RaggedField, boolean, coalesce
 from relflow.structs.enums import Component, Strata, Tokens
@@ -21,7 +21,7 @@ from relflow.tensorfields.base import TENSORFIELDS, Context, TensorFieldBase
 
 
 def encode(
-    batch: Batch,
+    batch: pa.Table,
     schema: Schema,
     strata: Strata,
     interprocess_encoding_context: InterprocessEncodingContext,

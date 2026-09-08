@@ -142,178 +142,62 @@ recurrence matters.
 
 Real histories need one deterministic event-time contract. This public
 preprocessor example stacks both sources, filters events after `as_of`, derives
-recency, and preserves the input row identity. It assumes `as_of` and both
-`timestamp` fields already have an Arrow timestamp type; parse strings once at
+recency. It assumes `as_of` and both `timestamp` fields already have a datetime
+type; parse strings once at
 ingress rather than inside this hot path:
 
 ```{python .marimo}
 #| echo: true
 #| output: true
 
-import numpy as np
-import pyarrow as pa
-import pyarrow.compute as pc
+import polars as pl
 
 import relflow as rf
 
-EVENTS = pa.large_list(
-    pa.struct(
-        [
-            pa.field("source", pa.large_string()),
-            pa.field("device_id", pa.large_string()),
-            pa.field("event_type", pa.large_string()),
-            pa.field("days_since_event", pa.float64()),
-            pa.field("ip_country", pa.large_string()),
-            pa.field("amount", pa.float64()),
-            pa.field("merchant_category", pa.large_string()),
-        ]
+@rf.preprocess
+def customer_window(frame: pl.DataFrame) -> pl.DataFrame:
+    indexed = frame.with_row_index("_row")
+    logins = (
+        indexed.explode("login_sessions")
+        .unnest("login_sessions")
+        .filter(pl.col("timestamp") <= pl.col("as_of"))
+        .select(
+            "_row", "as_of", "timestamp", "device_id", "event_type", "ip_country",
+            source=pl.lit("login"), amount=pl.lit(None, dtype=pl.Float64),
+            merchant_category=pl.lit(None, dtype=pl.String),
+        )
     )
-)
-
-
-@rf.preprocess(
-    requires=("as_of", "login_sessions", "transactions"),
-    produces=("events",),
-)
-def customer_window(batch: rf.Batch) -> rf.Batch:
-    as_of = batch.data["as_of"].combine_chunks()
-    login_lists = batch.data["login_sessions"].combine_chunks()
-    transaction_lists = batch.data["transactions"].combine_chunks()
-
-    logins = pc.list_flatten(login_lists)
-    login_parents = pc.list_parent_indices(login_lists)
-    login_keep = pc.fill_null(
-        pc.less_equal(
-            logins.field("timestamp"),
-            pc.take(as_of, login_parents),
-        ),
-        False,
+    transactions = (
+        indexed.explode("transactions")
+        .unnest("transactions")
+        .filter(pl.col("timestamp") <= pl.col("as_of"))
+        .select(
+            "_row", "as_of", "timestamp", "device_id", "amount", "merchant_category",
+            source=pl.lit("transaction"), event_type=pl.lit("purchase"),
+            ip_country=pl.lit(None, dtype=pl.String),
+        )
     )
-    logins = pc.filter(logins, login_keep)
-    login_parents = pc.filter(login_parents, login_keep)
-
-    transactions = pc.list_flatten(transaction_lists)
-    transaction_parents = pc.list_parent_indices(transaction_lists)
-    transaction_keep = pc.fill_null(
-        pc.less_equal(
-            transactions.field("timestamp"),
-            pc.take(as_of, transaction_parents),
-        ),
-        False,
+    events = (
+        pl.concat([logins, transactions], how="diagonal_relaxed")
+        .sort("_row", "timestamp")
+        .with_columns(
+            days_since_event=(pl.col("as_of") - pl.col("timestamp")).dt.total_days()
+        )
+        .group_by("_row", maintain_order=True)
+        .agg(
+            pl.struct(
+                "source", "device_id", "event_type", "days_since_event",
+                "ip_country", "amount", "merchant_category",
+            ).alias("events")
+        )
     )
-    transactions = pc.filter(transactions, transaction_keep)
-    transaction_parents = pc.filter(transaction_parents, transaction_keep)
-
-    timestamp_type = logins.field("timestamp").type
-    working_fields = [
-        pa.field("timestamp", timestamp_type),
-        pa.field("source", pa.large_string()),
-        pa.field("device_id", pa.large_string()),
-        pa.field("event_type", pa.large_string()),
-        pa.field("ip_country", pa.large_string()),
-        pa.field("amount", pa.float64()),
-        pa.field("merchant_category", pa.large_string()),
-    ]
-    login_events = pa.StructArray.from_arrays(
-        [
-            logins.field("timestamp"),
-            pa.repeat(pa.scalar("login", pa.large_string()), len(logins)),
-            pc.cast(logins.field("device_id"), pa.large_string()),
-            pc.cast(logins.field("event_type"), pa.large_string()),
-            pc.cast(logins.field("ip_country"), pa.large_string()),
-            pa.nulls(len(logins), pa.float64()),
-            pa.nulls(len(logins), pa.large_string()),
-        ],
-        fields=working_fields,
-    )
-    transaction_events = pa.StructArray.from_arrays(
-        [
-            transactions.field("timestamp"),
-            pa.repeat(
-                pa.scalar("transaction", pa.large_string()),
-                len(transactions),
-            ),
-            pc.cast(transactions.field("device_id"), pa.large_string()),
-            pa.repeat(
-                pa.scalar("purchase", pa.large_string()),
-                len(transactions),
-            ),
-            pa.nulls(len(transactions), pa.large_string()),
-            pc.cast(transactions.field("amount"), pa.float64()),
-            pc.cast(
-                transactions.field("merchant_category"),
-                pa.large_string(),
-            ),
-        ],
-        fields=working_fields,
-    )
-
-    events = pa.concat_arrays([login_events, transaction_events])
-    parents = pa.concat_arrays([login_parents, transaction_parents])
-    ordinal = pa.array(np.arange(len(events)), type=pa.int64())
-    order = pc.sort_indices(
-        pa.table(
-            {
-                "parent": parents,
-                "timestamp": events.field("timestamp"),
-                "ordinal": ordinal,
-            }
-        ),
-        sort_keys=[
-            ("parent", "ascending"),
-            ("timestamp", "ascending"),
-            ("ordinal", "ascending"),
-        ],
-    )
-    events = pc.take(events, order)
-    parents = pc.take(parents, order)
-
-    elapsed = pc.subtract(
-        pc.take(as_of, parents),
-        events.field("timestamp"),
-    )
-    microseconds = pc.cast(
-        pc.cast(elapsed, pa.duration("us")),
-        pa.int64(),
-    )
-    days = pc.divide(pc.cast(microseconds, pa.float64()), 86_400_000_000)
-    records = pa.StructArray.from_arrays(
-        [
-            events.field("source"),
-            events.field("device_id"),
-            events.field("event_type"),
-            days,
-            events.field("ip_country"),
-            events.field("amount"),
-            events.field("merchant_category"),
-        ],
-        fields=list(EVENTS.value_type),
-    )
-    counts = np.bincount(
-        parents.to_numpy(zero_copy_only=False),
-        minlength=len(batch),
-    )
-    offsets = pa.array(
-        np.concatenate(([0], np.cumsum(counts))),
-        type=pa.int64(),
-    )
-    parent_null = pc.and_(
-        pc.is_null(login_lists),
-        pc.is_null(transaction_lists),
-    )
-    values = pa.LargeListArray.from_arrays(
-        offsets,
-        records,
-        type=EVENTS,
-        mask=parent_null,
-    )
-    return batch.replace(batch.data.append_column("events", values))
+    return indexed.join(events, on="_row", how="left", maintain_order="left").drop("_row")
 ```
 
 The model branch uses `overflow="tail"`, so sorting oldest to newest retains the
-most recent configured positions if a history exceeds 160 events. The explicit
-`EVENTS` type prevents empty partitions or all-null optional fields from
-changing the produced schema. A production preprocessor should also enforce a
+most recent configured positions if a history exceeds 160 events. Explicit
+Polars casts keep empty or all-null optional fields from changing the produced
+schema. A production preprocessor should also enforce a
 maximum lookback window and the source's actual data-availability lag.
 
 ## Train With Honest Splits

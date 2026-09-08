@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import pyarrow as pa
-import pyarrow.compute as pc
+import polars as pl
 import pytest
 
 import relflow as rf
@@ -87,15 +86,17 @@ def test_category_vocabulary_is_available_to_inference_preprocessor() -> None:
     seen: list[tuple[object, ...]] = []
     contexts: list[object] = []
 
-    @rf.preprocess(requires=("raw_category",), produces=("category",))
-    def keep_known_category(batch: rf.Batch, *, encoding_context):
+    @rf.preprocess
+    def keep_known_category(frame: pl.DataFrame, *, encoding_context):
         contexts.append(encoding_context)
         vocabulary = rf.Category.vocabulary(encoding_context, ADDRESS)
         seen.append(vocabulary)
-        values = batch.data["raw_category"]
-        known = pc.is_in(values, value_set=pa.array(vocabulary, type=values.type))
-        category = pc.if_else(known, values, pa.scalar(None, type=values.type))
-        return batch.replace(pa.table({"category": category}))
+        return frame.select(
+            pl.when(pl.col("raw_category").is_in(vocabulary))
+            .then(pl.col("raw_category"))
+            .otherwise(None)
+            .alias("category")
+        )
 
     predictions = model.predict(
         table(

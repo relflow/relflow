@@ -240,9 +240,8 @@ For an ordered preprocessor pipeline, time each stage separately as well as the
 complete tuple. A partition-scoped stage streams its outputs into the next;
 each dataset-scoped stage is a full materialization barrier at its exact tuple
 position. Moving that barrier changes both memory and semantics, so RelFlow
-never reorders stages from `requires` and `produces`. Record processor order,
-scope, input rows, emitted rows, and Arrow schemas with a preprocessing
-benchmark.
+never reorders stages. Record processor order, scope, input rows, emitted rows,
+and Arrow schemas with a preprocessing benchmark.
 
 ## Optimize Prediction Output
 
@@ -251,7 +250,7 @@ Prediction can spend substantial time moving and serializing data:
 - enable `embed=True` only at addresses consumers need;
 - request only useful Category top-k values;
 - retain only source fields an output consumer needs;
-- use an Arrow postprocessor to flatten or remove unused fields;
+- use a Polars postprocessor to flatten or remove unused fields;
 - use `Writer` for partitioned batch output rather than collecting a whole
   dataset in memory;
 - set service `max_batch_size` and latency against the real request-size
@@ -259,9 +258,9 @@ Prediction can spend substantial time moving and serializing data:
 - benchmark JSON backend and response schema validation separately.
 
 When several postprocessors are installed, benchmark the ordered tuple and
-each stage. Every stage receives a complete Arrow batch and must preserve rows
-and identity; splitting one vectorized expression into many tiny stages can
-make fixed dispatch and schema validation visible at real-time batch sizes.
+each stage. Every stage receives a complete eager DataFrame; splitting one
+vectorized expression into many tiny stages can make fixed dispatch and schema
+validation visible at real-time batch sizes.
 
 An online latency target and an offline throughput target usually need different
 batch sizes.

@@ -246,10 +246,9 @@ documented output contract. Avoid asserting exact floating-point scores across
 hardware unless deterministic equivalence is a requirement.
 
 Processor arguments normalize a singleton, list, tuple, or `None` to an
-immutable ordered tuple. Persist the ordered names and each stage's
-`requires`/`produces` declarations with release metadata; the same functions in
-a different order are a different contract. RelFlow validates dependencies but
-does not sort the pipeline.
+immutable ordered tuple. Persist the ordered names, bound configuration, and
+scope with release metadata; the same functions in a different order are a
+different contract.
 
 ## Common Failures
 

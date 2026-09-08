@@ -30,11 +30,11 @@ def request(field_type: str, *, query: str | None = None):
     raise AssertionError(f"unsupported test field type: {field_type}")
 
 
-def test_coalesce_requires_arrow_batch():
+def test_coalesce_requires_arrow_table():
     model = build(rf.Number("value"))
 
-    with pytest.raises(TypeError, match="must be an Arrow Batch"):
-        coalesce(pa.table({"value": [1.0]}), schema=model.schema, strata=Strata.predict)
+    with pytest.raises(TypeError, match="must be a pyarrow.Table"):
+        coalesce({"value": [1.0]}, schema=model.schema, strata=Strata.predict)  # type: ignore[arg-type]
 
 
 def test_ragged_field_distinguishes_value_null_and_missing():
@@ -137,7 +137,7 @@ def test_sibling_fields_share_branch_geometry_without_sharing_leaf_state():
 )
 def test_union_leaf_uses_selected_child_validity(values):
     model = build(rf.Number("value"))
-    source = convert(pa.table({"value": values}), namespace="union", offset=0)
+    source = convert(pa.table({"value": values}))
 
     field = coalesce(source, schema=model.schema, strata=Strata.train)["record/value"].pristine
 
@@ -149,7 +149,7 @@ def test_union_leaf_uses_selected_child_validity(values):
     assert field.values.to_pylist() == [1, 2]
     assert field.placement.to_pylist() == [0, 1]
 
-    encoded = model.encode(source.data, strata=Strata.predict)["record/value"]
+    encoded = model.encode(source, strata=Strata.predict)["record/value"]
     assert encoded.content.tolist() == [[1.0], [2.0], [0.0]]
     assert encoded.state.tolist() == field.dense.tolist()
 
@@ -230,7 +230,7 @@ def test_branch_overflow_precedes_queries_on_discarded_children():
     )
 
     field = coalesce(
-        convert(source, namespace="overflow", offset=0),
+        convert(source),
         schema=model.schema,
         strata=Strata.train,
     )["record/items/value"].pristine
@@ -362,7 +362,7 @@ def test_coalesce_ignores_unmodeled_arrow_columns():
 
     field = coalesce(source, schema=model.schema, strata=Strata.train)["record/identifier"].pristine
 
-    assert source.data["metadata"].to_pylist() == [{"tags": [1, 2]}]
+    assert source["metadata"].to_pylist() == [{"tags": [1, 2]}]
     assert field.values.to_pylist() == ["A"]
 
 
@@ -372,7 +372,7 @@ def test_coalesce_does_not_ingest_inactive_field_values():
 
     field = coalesce(source, schema=model.schema, strata=Strata.train)["record/value"].pristine
 
-    assert source.data["unused"].to_pylist() == [{"opaque": True}]
+    assert source["unused"].to_pylist() == [{"opaque": True}]
     assert field.values.to_pylist() == [1.0]
 
 
@@ -420,7 +420,7 @@ def test_inactive_only_branch_does_not_ingest_same_named_source_value():
 
     field = coalesce(source, schema=model.schema, strata=Strata.train)["record/value"].pristine
 
-    assert source.data["synthetic"].to_pylist() == [{"opaque": True}]
+    assert source["synthetic"].to_pylist() == [{"opaque": True}]
     assert field.values.to_pylist() == [1.0]
 
 

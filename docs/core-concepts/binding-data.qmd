@@ -1,466 +1,229 @@
 ---
-eval: false
+title: Binding Data
 ---
 
 # Binding Data
 
-Binding is how a source Arrow schema becomes the values named by a RelFlow
-model schema. Use the least powerful mechanism that expresses the change:
+**Example status — reference:** examples show the eager Polars processor
+contract used by the shipped runtime.
 
-| Need | Mechanism |
-| --- | --- |
-| Same names and nesting | direct binding |
-| A different structural path | node `query=...` |
-| Derivation, filtering, sorting, joining, or coordinated nested work | `@rf.preprocess` |
-| A genuinely new atomic value family | tensorfield extension |
-
-That order keeps ordinary schemas declarative without forcing complex source
-preparation into datatype extensions.
+RelFlow binds a schema to canonical observations in three steps: direct field
+selection, optional structural queries, and an ordered preprocessing pipeline.
+The preprocessor result is the source of truth consumed by query/coalescing.
 
 ## Direct Binding
 
-Names and nesting match by default:
+By default, a node reads its own name relative to its parent. A root field named
+`amount` reads the top-level `amount` column; a field named `sku` under an
+`items` branch reads `sku` from each item struct.
 
 ```python
 model = rf.Model(
-    amount=rf.Number,
-    merchant=rf.Category(size=1024),
-    line_items=rf.Branch(
-        length=32,
-        sku=rf.Category(size=4096),
-        quantity=rf.Number,
-    ),
-)
-```
-
-The corresponding Arrow schema is structurally equivalent to:
-
-```text
-amount: double
-merchant: large_string
-line_items: large_list<struct<sku: large_string, quantity: int64>>
-```
-
-One Arrow row is one root observation. A child branch holds a list of structs;
-its leaves read fields from each struct. Source lists stay ragged—RelFlow
-applies `Branch(length=...)` and `overflow=...` while encoding.
-
-## Structural Queries
-
-An explicit query replaces same-name selection for that node and is relative to
-the value selected by its parent:
-
-```python
-model = rf.Model(
-    query="payload",
     d_model=32,
     n_layers=1,
     n_heads=4,
-    items=rf.Branch(
-        query="line_items[-32:]",
-        length=32,
-        sku=rf.Category(query="product.sku", size=4096),
-        quantity=rf.Number(query="qty"),
-    ),
-    returned=rf.Category(query="outcome", mask=True, size=2),
+    amount=rf.Number,
+    items=rf.Branch(length=16, sku=rf.Category(size=2048)),
 )
 ```
 
-Queries perform structural Arrow selection only. They support struct members,
-list traversal/index/slice, and literal map lookup. They do not filter, sort,
-join, compute, or flatten. [Query Paths](querypaths.qmd) defines the grammar and
-missing-value behavior.
+Missing modeled columns are errors. Null values are data and follow the field's
+`nullable` contract.
 
-## Arrow Preprocessors
+## Structural Queries
 
-A preprocessor receives an `rf.Batch`. Its `data` is a `pyarrow.Table`; its
-`identity` is RelFlow's aligned lineage sidecar.
+Set `query=` only when a node needs a different structural path:
 
 ```python
-import pyarrow as pa
-import pyarrow.compute as pc
+model = rf.Model(
+    d_model=32,
+    n_layers=1,
+    n_heads=4,
+    recent_skus=rf.Category(query="orders[-8:][*].sku", size=2048),
+)
+```
+
+Queries navigate members, list traversal, indices, and slices. They do not
+filter, join, sort, aggregate, or derive values. Put those operations in a
+preprocessor so users can express them directly with Polars.
+
+## Polars Preprocessors
+
+A preprocessor receives and returns an eager `polars.DataFrame`:
+
+```python
+import polars as pl
 import relflow as rf
 
-@rf.preprocess(
-    requires=("subtotal", "tax"),
-    produces=("amount",),
-)
-def total(batch: rf.Batch) -> rf.Batch:
-    subtotal = pc.cast(batch.data["subtotal"], pa.float64())
-    tax = pc.fill_null(batch.data["tax"], 0.0)
-    amount = pc.add(subtotal, tax)
-    data = batch.data.append_column("amount", amount)
-    return batch.replace(data)
+@rf.preprocess
+def total(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(
+        amount=pl.col("subtotal").cast(pl.Float64) + pl.col("tax").fill_null(0.0)
+    )
 ```
 
-The function operates on columns, not one Python dictionary at a time. It must
-return `rf.Batch`, an iterable of batches, or `None`.
+RelFlow converts Arrow to Polars before the ordered processor pipeline and back
+to Arrow afterward. A callback must not return a `LazyFrame`, Arrow object,
+mapping, Series, or scalar. A preprocessor may return one frame, an iterable of
+frames, or `None`.
 
-### Choose the correct lineage operation
-
-| Change | Return |
-| --- | --- |
-| Same rows, same order, different columns | `batch.replace(data)` |
-| Keep selected rows | `batch.filter(mask)` |
-| Select rows in index order | `batch.take(indices)` |
-| Establish a deliberate new processed order | `batch.order(indices)` |
-| One output per list item | `batch.explode(column, name=...)` |
-| General one-to-many output | `batch.expand(data, parents, ordinals)` |
-| Many inputs to one output | `batch.group(data, parents)` |
-
-These methods update data and identity together. Returning a bare Arrow table
-or changing row count through `replace` is an error.
-
-For `group`, `parents` is one ordered list of source row indices per output
-row. Parent order becomes part of the derived group identity: construct it
-deliberately, do not depend on hash-table arrival order, and use dataset scope
-when groups may cross source partitions.
-
-`None` or zero emitted rows discards that input. Returning several batches can
-bound memory during expansion. Every final pipeline output in a split must have
-exactly the same Arrow schema, including field order, nested types, and
-nullability. Intermediate stages may deliberately normalize differing input
-schemas before that final lock, although a dataset-scope barrier must still be
-able to merge its upstream batches.
-
-### Declare source and output columns
-
-`requires` is the complete set of top-level source columns the function reads.
-`produces` contains top-level columns it creates or replaces:
-
-```python
-@rf.preprocess(
-    requires=("gross", "currency"),
-    produces=("amount_usd",),
-)
-```
-
-Direct/query-bound model roots not in `produces` pass through automatically;
-you do not repeat them in `requires`. If the function reads and replaces
-`amount`, put `amount` in both tuples.
-
-- `requires=None` (the default) means dependencies are unknown, so RelFlow
-  performs no input-column validation for that processor.
-- `requires=()` explicitly means it reads no source columns.
-- `produces=()` means it creates or replaces no top-level columns.
-
-Declarations are contracts, not guesses made by inspecting Python code.
-`requires` is validated metadata in this release; Dataset scanner projection
-pushdown is deferred, so declaring it does not yet reduce columns read from
-storage.
+The returned rows are canonical observations. Users may filter, reorder, join,
+explode, duplicate, aggregate, or replace columns without preserving an input
+identity. A nonempty observation set must have at least one column.
 
 ### Compose processors in order
 
-Every processor argument accepts one decorated processor, a list, a tuple, or
-`None`. RelFlow snapshots that value as an immutable tuple:
-
-| Supplied value | Canonical pipeline |
-| --- | --- |
-| `None` | `()` |
-| `total` | `(total,)` |
-| `[total, logarithm]` | `(total, logarithm)` |
-| `(total, logarithm)` | `(total, logarithm)` |
-
-Only objects returned by `@rf.preprocess` are accepted; decorate a function
-before adding it to a pipeline. A tuple is the clearest form for a reusable
-pipeline, while accepting a list is convenient when configuration code builds
-the stages incrementally.
-
-Execution is strictly left to right. RelFlow does not topologically sort
-processors or infer dependencies from their Python bodies. Instead, it checks
-`requires` against the actual top-level columns entering each stage and checks
-`produces` on every batch emitted by that stage:
-
 ```python
-@rf.preprocess(
-    requires=("amount",),
-    produces=("amount_log",),
-)
-def logarithm(batch: rf.Batch) -> rf.Batch:
-    values = pc.ln(pc.add(batch.data["amount"], 1.0))
-    return batch.replace(batch.data.append_column("amount_log", values))
+@rf.preprocess
+def logarithm(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(amount_log=pl.col("amount").log1p())
 
-prepare = (total, logarithm)
+pipeline = (total, logarithm)
 ```
 
-Here `total` creates `amount` before `logarithm` requires it. Reversing the
-tuple is an error; RelFlow will not silently reorder business logic. If a stage
-returns several batches, each is passed through every remaining stage in the
-same emission order. Returning `None` ends only that output path. This is
-ordinary ordered flat-map composition, so filtering, expansion, and splitting
-remain explicit.
-
-A processor may replace a column produced by an earlier stage. Put the column
-in both its `requires` and `produces` declarations. `produces` does not promise
-that unrelated columns survive: the returned Arrow schema remains the source
-of truth.
+Processor arguments accept one decorated processor, a list, a tuple, or
+`None`. RelFlow snapshots them as an immutable tuple and executes them strictly
+left to right. There are no column declaration arguments; a missing column
+fails in the Polars expression that uses it, and the final Arrow schema is
+locked for each configured split.
 
 ### Partition and dataset scope
 
-Partition scope is the default:
+Partition scope is the default and processes each incoming Arrow partition:
 
 ```python
 @rf.preprocess(scope="partition")
-def prepare(batch: rf.Batch) -> rf.Batch:
-    ...
+def prepare(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(amount=pl.col("amount").cast(pl.Float64))
 ```
 
-Use it for column projection, derivation, filtering, a fixed lookup, a nested
-transform, or an expansion based only on that input partition. It scales
-without requiring one global materialization.
-
-Dataset scope is for operations whose answer depends on the whole split:
+Dataset scope materializes the logical split at that exact pipeline position:
 
 ```python
-@rf.preprocess(scope="dataset", requires=("event_time",))
-def chronological(batch: rf.Batch) -> rf.Batch:
-    indices = pc.sort_indices(
-        batch.data,
-        sort_keys=[("event_time", "ascending")],
-    )
-    return batch.order(indices)
+@rf.preprocess(scope="dataset")
+def chronological(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.sort("event_time")
 ```
 
-Sorting each partition is not a global sort. Dataset scope makes that cost and
-materialization requirement explicit. The initial release materializes the
-complete split before the processor for an in-memory Arrow unit or a
-`pyarrow.dataset.Dataset`; a callable factory requires a future coordinated
-cache and is rejected.
-
-Scope belongs to each stage, not to the pipeline as a whole. In a mixed
-pipeline such as `(clean, chronological, derive)`, partition-scoped `clean`
-streams first, dataset-scoped `chronological` materializes all of its upstream
-outputs at that exact position, and partition-scoped `derive` resumes over the
-result. Every dataset-scoped stage is such a barrier. A pipeline containing any
-dataset-scoped stage retains the callable-source restriction.
+Dataset scope is available for in-memory Arrow and Arrow Dataset sources.
+Restartable callable sources do not yet support it because coordinated
+materialization is not implemented.
 
 ## Bind User Configuration
 
-Parameters after `batch` must be keyword-only. RelFlow owns the optional
-pipeline parameters `strata`, `schema`, and `encoding_context`; all other names
-are user configuration bound immutably with `.partial(...)`:
-
-```python
-@rf.preprocess(
-    requires=("amount",),
-    produces=("amount",),
-)
-def standardize(
-    batch: rf.Batch,
-    *,
-    center: float,
-    spread: float,
-) -> rf.Batch:
-    values = pc.cast(batch.data["amount"], pa.float64())
-    values = pc.divide(pc.subtract(values, center), spread)
-    index = batch.data.schema.get_field_index("amount")
-    data = batch.data.set_column(index, "amount", values)
-    return batch.replace(data)
-
-prepare = standardize.partial(center=42.0, spread=8.5)
-```
-
-`.partial(...)` returns a configured processor; it does not mutate the shared
-decorated object. Missing required values, unknown names, attempts to bind a
-pipeline-owned name, and duplicate bindings fail before execution.
-
-You may request pipeline context only when needed:
+Additional parameters are keyword-only and configured immutably with
+`.partial(...)`:
 
 ```python
 @rf.preprocess
-def route(batch: rf.Batch, *, strata) -> rf.Batch:
-    if str(strata) == "train":
-        return batch
-    return batch
+def standardize(
+    frame: pl.DataFrame,
+    *,
+    center: float,
+    spread: float,
+) -> pl.DataFrame:
+    return frame.with_columns(amount=(pl.col("amount") - center) / spread)
+
+prepare = standardize.partial(center=12.5, spread=3.0)
 ```
 
-Keep most processors independent of the stratum. Different transformations
-between training and prediction are a common source of silent skew.
+The pipeline owns three optional parameter names: `strata`, `schema`, and
+`encoding_context`. They are injected only when explicitly present in the
+signature:
+
+```python
+@rf.preprocess
+def route(frame: pl.DataFrame, *, strata) -> pl.DataFrame:
+    return frame if str(strata) == "train" else frame.filter(pl.col("active"))
+```
 
 ## Fit State Outside Iteration
 
-Preprocessing transforms data; it does not implicitly learn parameters. Fit on
-training Arrow data once, validate the result, and bind immutable values:
-
-```python
-import math
-
-values = pc.cast(train["amount"], pa.float64())
-center = pc.mean(values).as_py()
-spread = pc.stddev(values).as_py()
-
-if center is None or spread is None or not math.isfinite(center + spread):
-    raise ValueError("amount statistics must be finite")
-
-prepare = standardize.partial(center=center, spread=spread or 1.0)
-```
-
-Use the same `prepare` object for training, validation, batch prediction, and
-deployment. Processor code and bound values are external to `Model.save(...)`;
-version them beside the artifact.
+Fit lookup tables, normalization statistics, encoders, or policy state before
+data iteration and bind the immutable result with `.partial(...)`. Do not fit
+inside a callback: it would make behavior depend on partition order and worker
+timing.
 
 ## Filter Rows
 
-Arrow boolean expressions preserve nulls. Decide what a null predicate means,
-then call the batch operation:
+Filtering is an ordinary Polars operation:
 
 ```python
-@rf.preprocess(requires=("status", "amount"))
-def valid(batch: rf.Batch) -> rf.Batch:
-    keep = pc.and_kleene(
-        pc.equal(batch.data["status"], "complete"),
-        pc.greater(batch.data["amount"], 0),
+@rf.preprocess
+def valid(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.filter(
+        (pl.col("status") == "complete") & pl.col("amount").is_not_null()
     )
-    return batch.filter(pc.fill_null(keep, False))
 ```
 
-Sampling and shuffling operate on the surviving observations because
-preprocessing comes first.
+Returning an empty frame is valid when its columns and dtypes remain known.
 
 ## Join A Small Lookup Without Reordering
 
-For a unique-key lookup, `index_in` and `take` make row preservation explicit:
-
 ```python
-lookup = pa.table(
-    {
-        "merchant_id": ["market", "pharmacy"],
-        "risk": [0.2, 0.1],
-    }
+lookup = pl.DataFrame(
+    {"merchant_id": [10, 20], "merchant_risk": [0.1, 0.8]}
 )
 
-@rf.preprocess(
-    requires=("merchant_id",),
-    produces=("merchant_risk",),
-)
-def enrich(batch: rf.Batch, *, lookup: pa.Table) -> rf.Batch:
-    positions = pc.index_in(
-        batch.data["merchant_id"],
-        value_set=lookup["merchant_id"],
-    )
-    risk = pc.take(lookup["risk"], positions)
-    return batch.replace(batch.data.append_column("merchant_risk", risk))
+@rf.preprocess
+def enrich(frame: pl.DataFrame, *, lookup: pl.DataFrame) -> pl.DataFrame:
+    return frame.join(lookup, on="merchant_id", how="left", maintain_order="left")
 
-prepare = enrich.partial(lookup=lookup)
+enrich_merchants = enrich.partial(lookup=lookup)
 ```
 
-Validate lookup keys as unique and non-null when building it. A join that can
-duplicate source rows is one-to-many and must use `expand` so lineage is not
-ambiguous.
+A one-to-many join may expand rows; that output is authoritative. Preserve a
+domain key as an ordinary column when downstream consumers need one.
 
 ## Transform A Nested Collection
 
-Operate on the flattened Arrow child records, then rebuild the list offsets:
+Use list expressions to transform nested records without Python row loops:
 
 ```python
-import numpy as np
-import pyarrow as pa
-import pyarrow.compute as pc
-
-@rf.preprocess(
-    requires=("events",),
-    produces=("events",),
-)
-def recent_logins(batch: rf.Batch) -> rf.Batch:
-    index = batch.data.schema.get_field_index("events")
-    field = batch.data.schema.field(index)
-    lists = batch.data.column(index).combine_chunks()
-    records = pc.list_flatten(lists)
-    parents = pc.list_parent_indices(lists)
-    keep = pc.fill_null(pc.equal(records.field("type"), "login"), False)
-    records = pc.filter(records, keep)
-    parents = pc.filter(parents, keep)
-
-    counts = np.bincount(
-        parents.to_numpy(zero_copy_only=False),
-        minlength=len(lists),
+@rf.preprocess
+def recent_logins(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(
+        events=pl.col("events").list.eval(
+            pl.element().filter(pl.element().struct.field("kind") == "login")
+        )
     )
-    offsets = np.concatenate(([0], np.cumsum(counts)))
-    positions = np.arange(len(records)) - np.repeat(offsets[:-1], counts)
-    tail = positions >= np.repeat(counts - 32, counts)
-    records = pc.filter(records, pa.array(tail))
-    counts = np.minimum(counts, 32)
-    offsets = pa.array(np.concatenate(([0], np.cumsum(counts))), type=pa.int64())
-    mask = pc.is_null(lists)
-    array = pa.LargeListArray.from_arrays(offsets, records, type=field.type, mask=mask)
-    return batch.replace(batch.data.set_column(index, field, array))
 ```
-
-The predicate moves whole event structs, so every sibling remains aligned.
-The function returns the same explicit Arrow type.
 
 ## Install The Same Pipeline Everywhere
 
-Data modules use `preprocessor=`. The value may be the singleton `total` or the
-ordered `prepare` tuple defined above:
+Attach the same ordered preprocessor tuple to every path that must share the
+same canonical observation contract:
 
 ```python
-data = rf.ArrowDataModule(
-    model=model,
-    train=train,
-    validate=validate,
-    preprocessor=prepare,
-)
+pipeline = (total, logarithm)
+
+data = rf.ArrowDataModule(model=model, train=train, preprocessor=pipeline)
+predictions = model.predict(requests, preprocess=pipeline)
+deployment = rf.Deployment(model=model).preprocess(pipeline)
 ```
-
-Direct prediction uses `preprocess=`:
-
-```python
-result = model.predict(requests, preprocess=prepare)
-```
-
-The existing singular noun and verb argument names remain stable even when the
-value contains several stages. `preprocessor=` configures a data module;
-`.preprocess(...)` configures a deployment; `preprocess=` is the action requested from
-`Model.encode` or `Model.predict`. Both normalize singleton, list, tuple, and
-`None` values identically.
-
-Reuse the same tuple, in the same order, at training and inference boundaries.
-For Boolean selectors consumed by `Mask.query`, including nested Arrow
-examples and exact-count decisions, see [Dynamic Mask Preprocessors](../guides/dynamic-mask-preprocessors.qmd).
 
 ## Retention Is Output, Not Binding
 
-`retain=("request_id",)` copies a processed column into prediction output so a
-postprocessor or downstream join can use it. It does not make that column a
-model input. Conversely, a modeled column does not appear in output merely
-because the encoder consumed it.
-
-This separation prevents accidental source-data leakage:
+`retain=` controls which processed input columns appear under the prediction
+table's `inputs` struct. It does not change model binding or preprocessing.
 
 ```python
-result = model.predict(
-    requests,
-    preprocess=prepare,
-    retain=("request_id",),
-)
+result = model.predict(requests, preprocess=pipeline, retain=("request_id",))
 ```
-
-Use `retain="*"` only when returning every processed source column is truly the
-desired application contract.
 
 ## What Belongs In An Extension?
 
-Preprocessors own representation changes between source Arrow and modeled
-fields. A tensorfield extension is appropriate only when the atomic value family
-needs its own request, codec, embedding, decoder, loss, metrics, or Arrow
-output. Extension raw-type compatibility is registered by the extension; shared
-request and ragged code must not hardcode datatype-specific Python classes.
+An extension owns datatype meaning: accepted Arrow families, semantic
+validation, tensorization, embedding, decoding, loss, and output writing.
+Application-specific renaming, joins, filters, normalization, and policy
+selectors belong in preprocessors.
 
 ## Binding Checklist
 
-- Start with direct same-name binding.
-- Put a structural mismatch in the nearest owning node's `query`.
-- Put coordinated or data-dependent work in an ordered Arrow preprocessor pipeline.
-- Declare `requires` and `produces` when the dependencies are knowable.
-- Order stages explicitly; RelFlow validates dependencies but never rearranges them.
-- Use a lineage-aware `Batch` method for every row change.
-- Keep one exact post-preprocessor Arrow schema per split.
-- Fit state before iteration and bind it with `.partial(...)`.
-- Reuse the same processor at training and inference boundaries.
-- Retain only output columns that a consumer actually needs.
-- Build an extension only for a new datatype contract, not ordinary source cleanup.
-
-Continue with [Working With Arrow](../guides/working-with-arrow.qmd) for Arrow
-recipes and [Data Flow](data-flow.qmd) for where binding sits in the complete
-pipeline.
+- Use direct names when source nesting matches the schema.
+- Use `query=` only for structural navigation.
+- Use eager Polars preprocessors for data-dependent transformations.
+- Treat preprocessor output as the canonical observation set.
+- Order stages explicitly and keep one final schema per split.
+- Fit external state before iteration and bind it with `.partial(...)`.
+- Keep required business identifiers as ordinary data columns.

@@ -1,4 +1,4 @@
-"""Arrow-native preprocessor and postprocessor contracts."""
+"""Polars preprocessor and postprocessor contracts."""
 
 from __future__ import annotations
 
@@ -8,9 +8,8 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any, Literal, Self, TypeAlias, overload
 
+import polars as pl
 import pyarrow as pa
-
-from relflow.data.arrow import Batch
 
 EMPTY = inspect.Signature.empty
 Scope = Literal["partition", "dataset"]
@@ -33,26 +32,42 @@ def label(func: Callable[..., Any]) -> str:
     return getattr(func, "__name__", type(func).__name__)
 
 
-def columns(value: tuple[str, ...] | None, *, name: str) -> tuple[str, ...] | None:
-    """Validate one ordered top-level column declaration."""
+def frame(value: Any, *, kind: str, name: str) -> pl.DataFrame:
+    """Validate one eager Polars processor result."""
 
-    if value is None:
-        return None
-    if not isinstance(value, tuple):
-        raise TypeError(f"{name} must be a tuple of top-level column names or None")
-    if any(not isinstance(item, str) or not item for item in value):
-        raise TypeError(f"{name} entries must be non-empty strings")
-    if len(set(value)) != len(value):
-        raise ValueError(f"{name} entries must be unique")
+    if isinstance(value, pl.LazyFrame):
+        raise TypeError(f"{kind} '{name}' must return a polars.DataFrame, not LazyFrame")
+    if not isinstance(value, pl.DataFrame):
+        raise TypeError(f"{kind} '{name}' must return a polars.DataFrame, got {type(value).__name__}")
+    if value.width == 0:
+        raise ValueError(f"{kind} '{name}' must return at least one Polars column")
     return value
 
 
-def equal(left: pa.Array | pa.ChunkedArray, right: pa.Array | pa.ChunkedArray) -> bool:
-    """Compare Arrow arrays independent of chunk boundaries."""
+def polars(table: pa.Table, *, context: str) -> pl.DataFrame:
+    """Convert one Arrow table to an eager Polars frame without row materialization."""
 
-    left_array = left.combine_chunks() if isinstance(left, pa.ChunkedArray) else left
-    right_array = right.combine_chunks() if isinstance(right, pa.ChunkedArray) else right
-    return left_array.equals(right_array)
+    if not isinstance(table, pa.Table):
+        raise TypeError(f"{context} must be a pyarrow.Table, got {type(table).__name__}")
+    if table.num_columns == 0:
+        raise ValueError(f"{context} must contain at least one Arrow column")
+    try:
+        result = pl.from_arrow(table, rechunk=False)
+    except Exception as error:
+        raise TypeError(f"{context} could not be converted from Arrow to Polars: {error}") from error
+    if not isinstance(result, pl.DataFrame):
+        raise TypeError(f"{context} Arrow conversion returned {type(result).__name__}; expected DataFrame")
+    return result
+
+
+def arrow(value: pl.DataFrame, *, context: str) -> pa.Table:
+    """Convert one eager Polars frame to the canonical Arrow representation."""
+
+    frame(value, kind=context, name="output")
+    try:
+        return value.to_arrow(compat_level=pl.CompatLevel.oldest())
+    except Exception as error:
+        raise TypeError(f"{context} could not be converted from Polars to Arrow: {error}") from error
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -63,20 +78,12 @@ class Processor:
     kind: str
     providers: frozenset[str]
     bound: Mapping[str, Any] = field(default_factory=dict)
-    requires: tuple[str, ...] | None = None
-    produces: tuple[str, ...] = ()
     signature: inspect.Signature = field(init=False)
     runtime: frozenset[str] = field(init=False)
     user: frozenset[str] = field(init=False)
     name: str = field(init=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "requires", columns(self.requires, name="requires"))
-        produces = columns(self.produces, name="produces")
-        if produces is None:
-            raise TypeError("produces must be a tuple of top-level column names")
-        object.__setattr__(self, "produces", produces)
-
         signature = inspect.signature(self.func)
         runtime, user = self.classify(signature)
         object.__setattr__(self, "signature", signature)
@@ -113,15 +120,15 @@ class Processor:
 
         parameters = list(signature.parameters.values())
         if not parameters:
-            raise TypeError(f"{self.kind} '{label(self.func)}' must accept 'batch'")
+            raise TypeError(f"{self.kind} '{label(self.func)}' must accept 'frame'")
 
         first = parameters[0]
-        if first.name != "batch" or first.kind in (
+        if first.name != "frame" or first.kind in (
             inspect.Parameter.VAR_POSITIONAL,
             inspect.Parameter.VAR_KEYWORD,
             inspect.Parameter.KEYWORD_ONLY,
         ):
-            raise TypeError(f"{self.kind} '{label(self.func)}' first parameter must be 'batch'")
+            raise TypeError(f"{self.kind} '{label(self.func)}' first parameter must be 'frame'")
 
         runtime: set[str] = set()
         user: set[str] = set()
@@ -174,39 +181,26 @@ class Processor:
 
         return replace(self, bound={**self.bound, **values})
 
-    def call(self, batch: Batch, runtime: Mapping[str, Any]) -> Any:
+    def call(self, value: pl.DataFrame, runtime: Mapping[str, Any]) -> Any:
         """Invoke the wrapped callable with validated arguments."""
 
-        if not isinstance(batch, Batch):
-            raise TypeError(f"{self.kind} '{self.name}' requires an rf.Batch, got {type(batch).__name__}")
-        if self.requires is not None:
-            missing = [name for name in self.requires if name not in batch.data.column_names]
-            if missing:
-                names = ", ".join(repr(name) for name in missing)
-                raise KeyError(f"{self.kind} '{self.name}' requires absent column(s): {names}")
+        if not isinstance(value, pl.DataFrame):
+            raise TypeError(f"{self.kind} '{self.name}' requires a polars.DataFrame, got {type(value).__name__}")
         self.ready()
         missing = sorted(self.runtime - runtime.keys())
         if missing:
             formatted = ", ".join(repr(name) for name in missing)
             raise ValueError(f"{self.kind} '{self.name}' is missing pipeline parameter(s): {formatted}")
         supplied = {name: runtime[name] for name in self.runtime}
-        return self.func(batch, **dict(self.bound), **supplied)
+        return self.func(value, **dict(self.bound), **supplied)
 
-    def verify(self, batch: Batch) -> None:
-        """Validate the processor's declared output columns."""
-
-        missing = [name for name in self.produces if name not in batch.data.column_names]
-        if missing:
-            names = ", ".join(repr(name) for name in missing)
-            raise KeyError(f"{self.kind} '{self.name}' did not produce declared column(s): {names}")
-
-    def __call__(self, batch: Batch, **runtime: Any) -> Any:
-        return self.call(batch, runtime)
+    def __call__(self, frame: pl.DataFrame, **runtime: Any) -> Any:
+        return self.call(frame, runtime)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Preprocessor(Processor):
-    """Arrow batch transform returned by :func:`preprocess`."""
+    """Polars frame transform returned by :func:`preprocess`."""
 
     func: Callable[..., Any]
     scope: Scope = "partition"
@@ -220,16 +214,16 @@ class Preprocessor(Processor):
 
     def run(
         self,
-        batch: Batch,
+        value: pl.DataFrame,
         *,
         strata: Any,
         schema: Any,
         encoding_context: Any,
-    ) -> Iterable[Batch]:
-        """Yield the zero, one, or many Arrow batches produced by one call."""
+    ) -> Iterable[pl.DataFrame]:
+        """Yield the zero, one, or many Polars frames produced by one call."""
 
         result = self.call(
-            batch,
+            value,
             {
                 PreprocessorProvider.strata.value: strata,
                 PreprocessorProvider.schema.value: schema,
@@ -238,57 +232,50 @@ class Preprocessor(Processor):
         )
         if result is None:
             return
-        if isinstance(result, Batch):
-            self.verify(result)
-            yield result
+        if isinstance(result, pl.DataFrame):
+            yield frame(result, kind=self.kind, name=self.name)
             return
-        if isinstance(result, (str, bytes, Mapping, pa.Table)) or not isinstance(result, Iterable):
+        invalid = (str, bytes, Mapping, pl.Series, pl.LazyFrame, pa.Table, pa.RecordBatch)
+        if isinstance(result, invalid) or not isinstance(result, Iterable):
             raise TypeError(
-                f"preprocessor '{self.name}' must return Batch, Iterable[Batch], or None; got {type(result).__name__}"
+                f"preprocessor '{self.name}' must return DataFrame, Iterable[DataFrame], or None; "
+                f"got {type(result).__name__}"
             )
 
         for item in result:
-            if not isinstance(item, Batch):
-                raise TypeError(f"preprocessor '{self.name}' yielded {type(item).__name__}; expected Batch")
-            self.verify(item)
-            yield item
+            if not isinstance(item, pl.DataFrame):
+                raise TypeError(f"preprocessor '{self.name}' yielded {type(item).__name__}; expected DataFrame")
+            yield frame(item, kind=self.kind, name=self.name)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Postprocessor(Processor):
-    """Same-row Arrow output transform returned by :func:`postprocess`."""
+    """Polars output transform returned by :func:`postprocess`."""
 
     func: Callable[..., Any]
     kind: str = field(default="postprocessor", init=False)
     providers: frozenset[str] = field(default_factory=frozenset, init=False)
 
-    def run(self, batch: Batch) -> Batch:
-        """Apply a same-row output transform and validate its Arrow contract."""
+    def run(self, value: pl.DataFrame) -> pl.DataFrame:
+        """Apply and validate one Polars output transform."""
 
-        result = self.call(batch, {})
-        if not isinstance(result, Batch):
-            raise TypeError(f"postprocessor '{self.name}' must return Batch, got {type(result).__name__}")
-        if len(result) != len(batch):
-            raise ValueError(f"postprocessor '{self.name}' returned {len(result)} rows; expected {len(batch)}")
-        if not equal(result.identity, batch.identity):
-            raise ValueError(f"postprocessor '{self.name}' must preserve Batch identity")
-        self.verify(result)
-        if result.data.num_columns == 0:
-            raise ValueError(f"postprocessor '{self.name}' must return at least one Arrow column")
-        return result
+        return frame(self.call(value, {}), kind=self.kind, name=self.name)
 
 
 PreprocessorInput: TypeAlias = Preprocessor | list[Preprocessor] | tuple[Preprocessor, ...] | None
 PostprocessorInput: TypeAlias = Postprocessor | list[Postprocessor] | tuple[Postprocessor, ...] | None
 
 
-def apply(batch: Batch, processors: PostprocessorInput = ()) -> Batch:
-    """Apply an ordered postprocessor pipeline to one Arrow batch."""
+def apply(table: pa.Table, processors: PostprocessorInput = ()) -> pa.Table:
+    """Apply an ordered Polars postprocessor pipeline to one Arrow table."""
 
-    result = batch
-    for processor in Postprocessor.normalize(processors):
+    pipeline = Postprocessor.normalize(processors)
+    if not pipeline:
+        return table
+    result = polars(table, context="postprocessor input")
+    for processor in pipeline:
         result = processor.run(result)
-    return result
+    return arrow(result, context="postprocessor output")
 
 
 @overload
@@ -297,8 +284,6 @@ def preprocess(
     /,
     *,
     scope: Scope = "partition",
-    requires: tuple[str, ...] | None = None,
-    produces: tuple[str, ...] = (),
 ) -> Preprocessor: ...
 
 
@@ -308,8 +293,6 @@ def preprocess(
     /,
     *,
     scope: Scope = "partition",
-    requires: tuple[str, ...] | None = None,
-    produces: tuple[str, ...] = (),
 ) -> Callable[[Callable[..., Any]], Preprocessor]: ...
 
 
@@ -318,15 +301,13 @@ def preprocess(
     /,
     *,
     scope: Scope = "partition",
-    requires: tuple[str, ...] | None = None,
-    produces: tuple[str, ...] = (),
 ) -> Callable[[Callable[..., Any]], Preprocessor] | Preprocessor:
-    """Wrap a callable as an Arrow preprocessor."""
+    """Wrap a callable as a Polars preprocessor."""
 
     def decorate(inner: Callable[..., Any]) -> Preprocessor:
         if not callable(inner):
             raise TypeError("preprocess can only decorate callables")
-        return Preprocessor(func=inner, scope=scope, requires=requires, produces=produces)
+        return Preprocessor(func=inner, scope=scope)
 
     if func is None:
         return decorate
@@ -334,38 +315,23 @@ def preprocess(
 
 
 @overload
-def postprocess(
-    func: Callable[..., Any],
-    /,
-    *,
-    requires: tuple[str, ...] | None = None,
-    produces: tuple[str, ...] = (),
-) -> Postprocessor: ...
+def postprocess(func: Callable[..., Any], /) -> Postprocessor: ...
 
 
 @overload
-def postprocess(
-    func: None = None,
-    /,
-    *,
-    requires: tuple[str, ...] | None = None,
-    produces: tuple[str, ...] = (),
-) -> Callable[[Callable[..., Any]], Postprocessor]: ...
+def postprocess(func: None = None, /) -> Callable[[Callable[..., Any]], Postprocessor]: ...
 
 
 def postprocess(
     func: Callable[..., Any] | None = None,
     /,
-    *,
-    requires: tuple[str, ...] | None = None,
-    produces: tuple[str, ...] = (),
 ) -> Callable[[Callable[..., Any]], Postprocessor] | Postprocessor:
-    """Wrap a callable as a same-row Arrow postprocessor."""
+    """Wrap a callable as a Polars postprocessor."""
 
     def decorate(inner: Callable[..., Any]) -> Postprocessor:
         if not callable(inner):
             raise TypeError("postprocess can only decorate callables")
-        return Postprocessor(func=inner, requires=requires, produces=produces)
+        return Postprocessor(func=inner)
 
     if func is None:
         return decorate

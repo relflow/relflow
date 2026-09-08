@@ -267,7 +267,7 @@ model = rf.Model(
     n_layers=1,
     n_heads=2,
 )
-field = coalesce(convert(source, namespace="empty", offset=0), model.schema, Strata.predict)["record/value"].pristine
+field = coalesce(convert(source), model.schema, Strata.predict)["record/value"].pristine
 assert field.shape == (0, 1)
 assert field.values.type == pa.float64()
 """

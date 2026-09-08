@@ -217,8 +217,8 @@ the values a decoder is asked to reconstruct.
 
 Noise comes from the active Torch random-number generator. Seeding Torch can
 make runs repeatable when the device, batch layout, execution order, and
-distributed topology are held fixed. Jitter is not keyed to `Batch` row
-identity, however, so changing batching, devices, or rank count can assign
+distributed topology are held fixed. Jitter is positional, so changing
+batching, devices, or rank count can assign
 different draws to the same observation. Do not rely on exact jitter samples as
 a persisted data transformation.
 

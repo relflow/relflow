@@ -1,5 +1,7 @@
 from typing import get_type_hints
 
+import pyarrow as pa
+
 import relflow
 import relflow.tensorfields as tensorfields
 
@@ -35,7 +37,7 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.postprocess.__name__ == "postprocess"
     assert relflow.Preprocessor.__name__ == "Preprocessor"
     assert relflow.PreprocessorProvider.strata == "strata"
-    assert relflow.Batch.__name__ == "Batch"
+    assert not hasattr(relflow, "Batch")
     assert relflow.Context().state is None
     assert relflow.Context().salt == 0
     assert not hasattr(relflow, "Observation")
@@ -82,4 +84,4 @@ def test_data_module_constructor_annotations_resolve_at_runtime():
         assert hints["model"] is relflow.Model
 
     writer_hints = get_type_hints(relflow.Writer.write_on_batch_end)
-    assert writer_hints["output"] is relflow.Batch
+    assert writer_hints["output"] is pa.Table

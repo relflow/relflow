@@ -92,13 +92,13 @@ model = rf.Model(
   `Extension(types=...)`; custom Python atoms add extension-owned physical matchers
   with `Extension(..., arrow={Type: matcher})`. Keep datatype contracts out of
   `Request` and the shared ragged engine.
-- Preprocessors accept and return identity-bearing `rf.Batch` objects before
-  query/coalescing. Use them for source renaming, Arrow compute, windowing,
-  joins, normalization, or explicit row expansion/grouping. Persisted pipeline
-  values and `RaggedField` members remain Arrow-backed.
-- Postprocessors accept and return same-row, same-identity `rf.Batch` objects
-  after prediction writing. Use them to reshape Arrow output for APIs or
-  warehouses.
+- Preprocessors accept and return eager `polars.DataFrame` objects before
+  query/coalescing. Use them for source renaming, expressions, windowing,
+  joins, normalization, or row expansion/grouping. Their output is the
+  canonical observation set. Persisted pipeline values and `RaggedField`
+  members remain Arrow-backed.
+- Postprocessors accept and return eager `polars.DataFrame` objects after
+  prediction writing. Use them to reshape output for APIs or warehouses.
 
 ## Data And Training
 
@@ -137,7 +137,7 @@ Top-level inference exports:
 
 RelFlow code should read as a short sequence of domain operations.
 
-- Prefer the shortest precise noun or verb, such as `Batch`, `Plan`, `compile`,
+- Prefer the shortest precise noun or verb, such as `Plan`, `compile`,
   `bind`, `query`, `coalesce`, and `write`. Use a longer name when one word
   would hide a distinction that matters. Do not repeat the surrounding module
   or class name in an identifier.
@@ -176,10 +176,10 @@ thousands of values is a signal to use Arrow, NumPy, or Torch.
   plane; Polars and Python values are ingress adapters, Torch owns model
   computation, and Python objects reappear only at an extension-local library
   boundary that requires them or an explicit application/JSON boundary.
-- Keep the batch dimension and `Batch` identity explicit through every row
-  selection, expansion, grouping, shuffle, and postprocessing operation.
+- Keep the batch dimension explicit through every row selection, expansion,
+  grouping, shuffle, and postprocessing operation.
 - Shared data code may understand Arrow containers, validity, offsets, shape,
-  and lineage. It must not know a built-in tensorfield name, configuration
+  and shape. It must not know a built-in tensorfield name, configuration
   attribute, or value interpretation.
 - A tensorfield extension owns its accepted Arrow families, semantic validation,
   tensorization, embedding, decoding, loss, output schema, writing, callbacks,

@@ -1,26 +1,16 @@
 from enum import StrEnum
 
+import polars as pl
 import pyarrow as pa
-import pyarrow.compute as pc
 import pytest
 
 import relflow as rf
 from relflow.data import processors
-from relflow.data.arrow import IDENTITY
 from relflow.structs.enums import Strata
 
 
-def make_batch(values: list[int]) -> rf.Batch:
-    size = len(values)
-    identity = pa.StructArray.from_arrays(
-        [
-            pa.array([index.to_bytes(32) for index in range(size)], type=pa.binary(32)),
-            pa.array([(index + 10).to_bytes(32) for index in range(size)], type=pa.binary(32)),
-            pa.array([index.to_bytes(8) for index in range(size)], type=pa.large_binary()),
-        ],
-        fields=list(IDENTITY),
-    )
-    return rf.Batch(pa.table({"value": values}), identity)
+def make_frame(values: list[int]) -> pl.DataFrame:
+    return pl.DataFrame({"value": values})
 
 
 def test_preprocessor_providers_are_string_enums():
@@ -32,68 +22,47 @@ def test_preprocessor_providers_are_string_enums():
 
 def test_preprocess_returns_callable_processor_object():
     @processors.preprocess
-    def increment(batch: rf.Batch):
-        return batch.replace(pa.table({"value": pc.add(batch.data["value"], 1)}))
+    def increment(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.with_columns(pl.col("value") + 1)
 
-    source = make_batch([1, 2])
+    source = make_frame([1, 2])
     assert isinstance(increment, processors.Preprocessor)
-    assert increment(source).data.to_pydict() == {"value": [2, 3]}
-    assert list(increment.run(source, strata=Strata.train, schema=None, encoding_context={}))[0].identity.equals(
-        source.identity
-    )
+    assert increment(source).to_dict(as_series=False) == {"value": [2, 3]}
+    [result] = increment.run(source, strata=Strata.train, schema=None, encoding_context={})
+    assert result.equals(pl.DataFrame({"value": [2, 3]}))
 
 
-def test_preprocess_declarations_are_validated():
-    @processors.preprocess(
-        scope="dataset",
-        requires=("source",),
-        produces=("value",),
-    )
-    def prepare(batch: rf.Batch):
-        return batch
+def test_preprocess_scope_is_the_only_decorator_option():
+    @processors.preprocess(scope="dataset")
+    def prepare(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
 
     assert prepare.scope == "dataset"
-    assert prepare.requires == ("source",)
-    assert prepare.produces == ("value",)
-
-    with pytest.raises(ValueError, match="must be unique"):
-        processors.preprocess(requires=("value", "value"))(lambda batch: batch)
+    assert not hasattr(prepare, "requires")
+    assert not hasattr(prepare, "produces")
 
     with pytest.raises(ValueError, match="scope must be"):
-        processors.preprocess(scope="global")(lambda batch: batch)  # type: ignore[arg-type]
+        processors.preprocess(scope="global")(lambda frame: frame)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="unexpected keyword argument 'requires'"):
+        processors.preprocess(requires="value")  # type: ignore[call-overload]
 
-    with pytest.raises(TypeError, match="produces must be a tuple"):
-        processors.preprocess(produces=None)(lambda batch: batch)  # type: ignore[arg-type]
 
-
-def test_processor_decorators_accept_direct_call_declarations():
-    prepare = processors.preprocess(
-        lambda batch: batch,
-        scope="dataset",
-        requires=("source",),
-        produces=("prepared",),
-    )
-    finish = processors.postprocess(
-        lambda batch: batch,
-        requires=("predictions",),
-        produces=("score",),
-    )
+def test_processor_decorators_accept_direct_calls():
+    prepare = processors.preprocess(lambda frame: frame, scope="dataset")
+    finish = processors.postprocess(lambda frame: frame)
 
     assert prepare.scope == "dataset"
-    assert prepare.requires == ("source",)
-    assert prepare.produces == ("prepared",)
-    assert finish.requires == ("predictions",)
-    assert finish.produces == ("score",)
+    assert isinstance(finish, processors.Postprocessor)
 
 
 def test_processor_pipelines_normalize_to_immutable_tuples():
     @rf.preprocess
-    def first(batch: rf.Batch) -> rf.Batch:
-        return batch
+    def first(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
 
     @rf.preprocess
-    def second(batch: rf.Batch) -> rf.Batch:
-        return batch
+    def second(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
 
     configured = [first, second, first]
 
@@ -109,12 +78,12 @@ def test_processor_pipelines_normalize_to_immutable_tuples():
 
 def test_processor_pipeline_rejects_wrong_and_nested_members_by_index():
     @rf.preprocess
-    def prepare(batch: rf.Batch) -> rf.Batch:
-        return batch
+    def prepare(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
 
     @rf.postprocess
-    def finish(batch: rf.Batch) -> rf.Batch:
-        return batch
+    def finish(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
 
     with pytest.raises(TypeError, match="preprocessor at index 1.*Postprocessor"):
         rf.Preprocessor.normalize([prepare, finish])
@@ -124,62 +93,58 @@ def test_processor_pipeline_rejects_wrong_and_nested_members_by_index():
         rf.Preprocessor.normalize(processor for processor in (prepare,))  # type: ignore[arg-type]
 
 
-def test_preprocessor_discards_none_and_expands_batches():
+def test_preprocessor_discards_none_and_expands_frames():
     @processors.preprocess
-    def discard(batch: rf.Batch):
+    def discard(frame: pl.DataFrame):
         return None
 
     @processors.preprocess
-    def split(batch: rf.Batch):
-        yield batch.slice(0, 1)
-        yield batch.slice(1)
+    def split(frame: pl.DataFrame):
+        yield frame.head(1)
+        yield frame.slice(1)
 
-    source = make_batch([1, 2, 3])
+    source = make_frame([1, 2, 3])
     assert list(discard.run(source, strata=Strata.train, schema=None, encoding_context={})) == []
     assert [
-        item.data["value"].to_pylist()
-        for item in split.run(
-            source,
-            strata=Strata.train,
-            schema=None,
-            encoding_context={},
-        )
+        item["value"].to_list() for item in split.run(source, strata=Strata.train, schema=None, encoding_context={})
     ] == [[1], [2, 3]]
 
 
-@pytest.mark.parametrize("value", [pa.table({"value": [1]}), {"value": [1]}, [1]])
-def test_preprocessor_rejects_non_batch_results(value):
+@pytest.mark.parametrize(
+    "value",
+    [pa.table({"value": [1]}), {"value": [1]}, [1], pl.Series("value", [1]), pl.LazyFrame({"value": [1]})],
+)
+def test_preprocessor_rejects_non_dataframe_results(value):
     @processors.preprocess
-    def invalid(batch: rf.Batch):
+    def invalid(frame: pl.DataFrame):
         return value
 
-    with pytest.raises(TypeError, match="Batch"):
-        list(invalid.run(make_batch([1]), strata=Strata.train, schema=None, encoding_context={}))
+    with pytest.raises(TypeError, match="DataFrame"):
+        list(invalid.run(make_frame([1]), strata=Strata.train, schema=None, encoding_context={}))
 
 
-def test_preprocessor_run_validates_its_declared_columns():
-    @rf.preprocess(requires=("source",), produces=("result",))
-    def prepare(batch: rf.Batch) -> rf.Batch:
-        return batch
+def test_preprocessor_accepts_arbitrary_canonical_row_changes():
+    @rf.preprocess
+    def canonicalize(frame: pl.DataFrame) -> pl.DataFrame:
+        return (
+            frame.filter(pl.col("value") > 1)
+            .sort("value", descending=True)
+            .select(pl.col("value").repeat_by(2).explode())
+        )
 
-    source = make_batch([1])
-    with pytest.raises(KeyError, match="requires absent column.*source"):
-        list(prepare.run(source, strata=Strata.train, schema=None, encoding_context={}))
-
-    renamed = source.replace(pa.table({"source": [1]}))
-    with pytest.raises(KeyError, match="did not produce declared column.*result"):
-        list(prepare.run(renamed, strata=Strata.train, schema=None, encoding_context={}))
+    [result] = canonicalize.run(make_frame([1, 2, 3]), strata=Strata.train, schema=None, encoding_context={})
+    assert result["value"].to_list() == [3, 3, 2, 2]
 
 
 def test_preprocessor_receives_only_named_pipeline_providers():
     @processors.preprocess
-    def inspect(batch: rf.Batch, *, strata, schema, encoding_context):
+    def inspect(frame: pl.DataFrame, *, strata, schema, encoding_context):
         assert strata is Strata.validate
         assert schema == "schema"
         assert encoding_context == {"marker": "seen"}
-        return batch
+        return frame
 
-    source = make_batch([1])
+    source = make_frame([1])
     assert list(
         inspect.run(
             source,
@@ -192,19 +157,17 @@ def test_preprocessor_receives_only_named_pipeline_providers():
 
 def test_required_user_parameters_are_bound_immutably():
     @processors.preprocess
-    def offset(batch: rf.Batch, *, amount: int):
-        data = pa.table({"value": pc.add(batch.data["value"], amount)})
-        return batch.replace(data)
+    def offset(frame: pl.DataFrame, *, amount: int) -> pl.DataFrame:
+        return frame.with_columns(pl.col("value") + amount)
 
     with pytest.raises(ValueError, match="requires unbound parameter"):
-        list(offset.run(make_batch([1]), strata=Strata.train, schema=None, encoding_context={}))
+        list(offset.run(make_frame([1]), strata=Strata.train, schema=None, encoding_context={}))
 
     configured = offset.partial(amount=4)
     assert configured.bound == {"amount": 4}
     assert offset.bound == {}
-    assert list(configured.run(make_batch([1]), strata=Strata.train, schema=None, encoding_context={}))[0].data[
-        "value"
-    ].to_pylist() == [5]
+    [result] = configured.run(make_frame([1]), strata=Strata.train, schema=None, encoding_context={})
+    assert result["value"].to_list() == [5]
 
     with pytest.raises(ValueError, match="already bound"):
         configured.partial(amount=5)
@@ -212,8 +175,8 @@ def test_required_user_parameters_are_bound_immutably():
 
 def test_pipeline_parameters_cannot_be_bound():
     @processors.preprocess
-    def inspect(batch: rf.Batch, *, strata):
-        return batch
+    def inspect(frame: pl.DataFrame, *, strata):
+        return frame
 
     with pytest.raises(ValueError, match="provided by the pipeline"):
         inspect.partial(strata=Strata.train)
@@ -222,8 +185,8 @@ def test_pipeline_parameters_cannot_be_bound():
 @pytest.mark.parametrize(
     ("function", "message"),
     [
-        (lambda value: value, "first parameter must be 'batch'"),
-        (lambda batch, value: batch, "must be keyword-only"),
+        (lambda value: value, "first parameter must be 'frame'"),
+        (lambda frame, value: frame, "must be keyword-only"),
     ],
 )
 def test_processor_signatures_are_explicit(function, message):
@@ -233,84 +196,82 @@ def test_processor_signatures_are_explicit(function, message):
 
 def test_preprocessor_normalize_rejects_raw_callable():
     with pytest.raises(TypeError, match="preprocessor must be a Preprocessor"):
-        processors.Preprocessor.normalize(lambda batch: batch)
+        processors.Preprocessor.normalize(lambda frame: frame)
 
 
-def test_postprocessor_preserves_rows_and_identity():
+def test_postprocessor_may_change_rows_and_columns():
     @rf.postprocess
-    def compact(batch: rf.Batch, *, threshold: int):
-        data = pa.table({"large": pc.greater_equal(batch.data["value"], threshold)})
-        return batch.replace(data)
+    def compact(frame: pl.DataFrame, *, threshold: int) -> pl.DataFrame:
+        return frame.filter(pl.col("value") >= threshold).select(large=pl.lit(True))
 
-    source = make_batch([1, 3])
-    output = compact.partial(threshold=2).run(source)
-    assert output.data.to_pydict() == {"large": [False, True]}
-    assert output.identity.equals(source.identity)
+    output = compact.partial(threshold=2).run(make_frame([1, 3]))
+    assert output.to_dict(as_series=False) == {"large": [True]}
 
 
-def test_postprocessor_pipeline_runs_in_order_with_declared_columns():
+def test_postprocessor_pipeline_runs_in_order():
     calls: list[str] = []
 
-    @rf.postprocess(requires=("value",), produces=("doubled",))
-    def double(batch: rf.Batch) -> rf.Batch:
+    @rf.postprocess
+    def double(frame: pl.DataFrame) -> pl.DataFrame:
         calls.append("double")
-        return batch.replace(pa.table({"doubled": pc.multiply(batch.data["value"], 2)}))
+        return frame.select(doubled=pl.col("value") * 2)
 
-    @rf.postprocess(requires=("doubled",), produces=("large",))
-    def classify(batch: rf.Batch) -> rf.Batch:
+    @rf.postprocess
+    def classify(frame: pl.DataFrame) -> pl.DataFrame:
         calls.append("classify")
-        return batch.replace(pa.table({"large": pc.greater(batch.data["doubled"], 3)}))
+        return frame.select(large=pl.col("doubled") > 3)
 
-    result = processors.apply(make_batch([1, 2]), [double, classify])
+    result = processors.apply(pa.table({"value": [1, 2]}), [double, classify])
 
     assert calls == ["double", "classify"]
-    assert result.data.to_pydict() == {"large": [False, True]}
-    assert double.requires == ("value",)
-    assert double.produces == ("doubled",)
-
-    with pytest.raises(KeyError, match="requires absent column.*doubled"):
-        processors.apply(make_batch([1]), (classify, double))
+    assert result.to_pydict() == {"large": [False, True]}
 
 
-def test_postprocessor_run_validates_declared_output_columns():
-    @rf.postprocess(produces=("result",))
-    def incomplete(batch: rf.Batch) -> rf.Batch:
-        return batch
+def test_processor_boundaries_convert_arrow_once(monkeypatch):
+    counts = {"from": 0, "to": 0}
+    from_arrow = pl.from_arrow
+    to_arrow = pl.DataFrame.to_arrow
 
-    with pytest.raises(KeyError, match="did not produce declared column.*result"):
-        incomplete.run(make_batch([1]))
+    def convert_from(*args, **kwargs):
+        counts["from"] += 1
+        return from_arrow(*args, **kwargs)
 
+    def convert_to(self, *args, **kwargs):
+        counts["to"] += 1
+        return to_arrow(self, *args, **kwargs)
 
-def test_postprocessor_rejects_invalid_output_contracts():
-    source = make_batch([1, 2])
-
-    @rf.postprocess
-    def table(batch: rf.Batch):
-        return batch.data
+    monkeypatch.setattr(pl, "from_arrow", convert_from)
+    monkeypatch.setattr(pl.DataFrame, "to_arrow", convert_to)
 
     @rf.postprocess
-    def rows(batch: rf.Batch):
-        return batch.slice(0, 1)
+    def first(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.with_columns(pl.col("value") + 1)
 
     @rf.postprocess
-    def identity(batch: rf.Batch):
-        other = batch.take(pa.array([1, 0], type=pa.int64()))
-        return rf.Batch(batch.data, other.identity)
+    def second(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.with_columns(pl.col("value") * 2)
+
+    result = processors.apply(pa.table({"value": [1]}), [first, second])
+
+    assert result.to_pydict() == {"value": [4]}
+    assert counts == {"from": 1, "to": 1}
+
+
+def test_processors_reject_zero_column_results():
+    @rf.preprocess
+    def empty(frame: pl.DataFrame) -> pl.DataFrame:
+        return pl.DataFrame()
 
     @rf.postprocess
-    def empty(batch: rf.Batch):
-        return batch.replace(pa.table({}))
+    def also_empty(frame: pl.DataFrame) -> pl.DataFrame:
+        return pl.DataFrame()
 
-    with pytest.raises(TypeError, match="must return Batch"):
-        table.run(source)
-    with pytest.raises(ValueError, match="returned 1 rows"):
-        rows.run(source)
-    with pytest.raises(ValueError, match="preserve Batch identity"):
-        identity.run(source)
-    with pytest.raises(ValueError, match="at least one Arrow column"):
-        empty.run(source)
+    with pytest.raises(ValueError, match="at least one Polars column"):
+        list(empty.run(make_frame([1]), strata=Strata.train, schema=None, encoding_context={}))
+    with pytest.raises(ValueError, match="at least one Polars column"):
+        also_empty.run(make_frame([1]))
 
 
 def test_postprocessor_normalize_rejects_raw_callable():
     with pytest.raises(TypeError, match="postprocessor must be a Postprocessor"):
-        rf.Postprocessor.normalize(lambda batch: batch)
+        rf.Postprocessor.normalize(lambda frame: frame)

@@ -3,7 +3,6 @@ import pyarrow as pa
 import pytest
 
 import relflow as rf
-from relflow.data.arrow import Batch
 from relflow.data.iterables import encode
 from relflow.data.ragged import boolean, coalesce
 from relflow.structs.enums import Strata, TensorKey, Tokens
@@ -55,7 +54,7 @@ def test_branch_query_skip_is_atomic_across_descendants():
     assert targets.dense.tolist() == [[[Tokens.padded.value, Tokens.valued.value, Tokens.padded.value]]]
 
 
-def test_rate_skip_is_stable_across_rebatching_and_changes_by_epoch():
+def test_rate_skip_is_stable_for_one_batch_and_changes_by_epoch():
     schema = model(
         rf.Number(
             "value",
@@ -65,12 +64,10 @@ def test_rate_skip_is_stable_across_rebatching_and_changes_by_epoch():
     source = arrow_batch([{"value": float(index)} for index in range(512)])
 
     whole = coalesce(source, schema, Strata.train, seed=17, epoch=3)["record/value"]
-    first = coalesce(source.slice(0, 173), schema, Strata.train, seed=17, epoch=3)["record/value"]
-    second = coalesce(source.slice(173), schema, Strata.train, seed=17, epoch=3)["record/value"]
-    rebatching = np.concatenate([boolean(first.present), boolean(second.present)])
+    repeated = coalesce(source, schema, Strata.train, seed=17, epoch=3)["record/value"]
     next_epoch = coalesce(source, schema, Strata.train, seed=17, epoch=4)["record/value"]
 
-    assert np.array_equal(boolean(whole.present), rebatching)
+    assert np.array_equal(boolean(whole.present), boolean(repeated.present))
     assert not np.array_equal(boolean(whole.present), boolean(next_epoch.present))
 
 
@@ -217,8 +214,7 @@ def test_query_selector_requires_non_null_scalar_booleans(selector, message):
 
 def test_source_less_prediction_uses_vacancy_and_fixed_routing():
     schema = model(rf.Category("label", size=8, mask=True)).schema
-    identity = arrow_batch([{"unused": 1}, {"unused": 2}]).identity
-    source = Batch(data=pa.table({}), identity=identity)
+    source = arrow_batch([{"unused": 1}, {"unused": 2}])
 
     projection = coalesce(source, schema, Strata.predict)["record/label"]
     inputs, targets = projection.split(projection.pristine.values)
@@ -249,8 +245,7 @@ def test_source_less_learned_mask_reconstruction_remains_present():
             mask=rf.Mask(dropout=False, reconstruct=True),
         )
     ).schema
-    identity = arrow_batch([{"unused": 1}, {"unused": 2}]).identity
-    source = Batch(data=pa.table({}), identity=identity)
+    source = arrow_batch([{"unused": 1}, {"unused": 2}])
 
     projection = coalesce(source, schema, Strata.predict)["record/label"]
     inputs, _ = projection.split(projection.pristine.values)

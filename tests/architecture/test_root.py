@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 
+import polars as pl
 import pyarrow as pa
 import pytest
 import torch
@@ -753,9 +754,9 @@ def test_encode_nullable_false_rejects_null_inputs() -> None:
 
 
 def test_encode_accepts_preprocess() -> None:
-    @rf.preprocess(requires=("hue",), produces=("color",))
-    def recolor(batch: rf.Batch) -> rf.Batch:
-        return batch.replace(pa.table({"color": batch.data["hue"]}))
+    @rf.preprocess
+    def recolor(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.select(color=pl.col("hue"))
 
     model = primed()
 
@@ -842,23 +843,23 @@ def test_inference_helpers_accept_postprocess() -> None:
     calls = []
 
     @rf.postprocess
-    def compact(batch: rf.Batch) -> rf.Batch:
-        calls.append(batch)
-        return batch.replace(pa.table({"label": ["postprocessed", "postprocessed"]}))
+    def compact(frame: pl.DataFrame) -> pl.DataFrame:
+        calls.append(frame)
+        return frame.with_columns(label=pl.lit("postprocessed")).select("label")
 
     batch = table([{"color": "red"}, {"color": "blue"}])
 
     predictions = model.predict(batch=batch, postprocess=compact)
 
     assert len(calls) == 1
-    assert calls[0].data.column_names == ["inputs", "predictions"]
+    assert calls[0].columns == ["inputs", "predictions"]
     assert predictions.to_pydict() == {"label": ["postprocessed", "postprocessed"]}
 
 
 def test_inference_helpers_accept_preprocess() -> None:
-    @rf.preprocess(requires=("hue",), produces=("color",))
-    def recolor(batch: rf.Batch) -> rf.Batch:
-        return batch.replace(pa.table({"color": batch.data["hue"]}))
+    @rf.preprocess
+    def recolor(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.select(color=pl.col("hue"))
 
     model = primed()
 

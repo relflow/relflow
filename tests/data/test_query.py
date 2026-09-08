@@ -4,24 +4,9 @@ import pyarrow as pa
 import pytest
 
 import relflow as rf
-from relflow.data.arrow import IDENTITY, Batch
 from relflow.data.query import Index, Literal, Member, Slice, Traverse, bind, compile, query
 from relflow.data.ragged import coalesce
 from relflow.structs.enums import Strata, Tokens
-
-
-def identities(size: int) -> pa.Array:
-    return pa.array(
-        [
-            {
-                "logical": index.to_bytes(32),
-                "instance": index.to_bytes(32),
-                "order": index.to_bytes(8),
-            }
-            for index in range(size)
-        ],
-        type=IDENTITY,
-    )
 
 
 def test_compile_structural_path():
@@ -279,7 +264,7 @@ def test_root_and_branch_queries_feed_coalesce_from_arrow():
         }
     )
 
-    fields = coalesce(Batch(data=table, identity=identities(2)), model.schema, Strata.predict)
+    fields = coalesce(table, model.schema, Strata.predict)
     sku = fields[rf.Address("record/events/sku")].pristine
     risk = fields[rf.Address("record/events/risk")].pristine
 
@@ -306,7 +291,7 @@ def test_arrow_query_treats_mask_spelling_as_ordinary_content():
     )
     table = pa.table({"payload": pa.array([{"amount": "<MASK>"}, {"amount": None}])})
 
-    field = coalesce(Batch(data=table, identity=identities(2)), model.schema, Strata.predict)["record/amount"].pristine
+    field = coalesce(table, model.schema, Strata.predict)["record/amount"].pristine
 
     assert field.dense.tolist() == [[Tokens.valued.value], [Tokens.null.value]]
     assert field.values.to_pylist() == ["<MASK>"]

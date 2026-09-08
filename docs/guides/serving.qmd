@@ -221,7 +221,7 @@ present.
 FastAPI's standard JSON parsing and response class. Validate numerical and
 non-string-key behavior if you switch backends.
 
-## Reuse Arrow Processors
+## Reuse Polars Processors
 
 Attach the same decorated RelFlow preprocessor pipeline and bound arguments
 used by the training data module. `.preprocess(...)` and `.postprocess(...)`
@@ -229,20 +229,20 @@ each accept a decorated singleton, a list, a tuple, or `None` and snapshot it
 as an immutable ordered tuple.
 
 In online serving, each HTTP object must produce exactly one
-processed Arrow observation. The runtime validates JSON objects individually,
+processed observation. The runtime validates JSON objects individually,
 converts all valid objects with one `pa.Table.from_pylist(...)`, and enters the
-preprocessor pipeline with one Arrow batch. Processing is vectorized over rows,
-not called once per request. Stages execute strictly left to right; `requires`
-and `produces` are checked at each boundary. If a preprocessor emits several
-batches, each downstream partition-scoped stage runs once for each emitted
-batch; a dataset-scoped stage merges its upstream stream at that point. Final
+preprocessor pipeline with one eager Polars DataFrame. Processing is vectorized
+over rows, not called once per request. Stages execute strictly left to right.
+If a preprocessor emits several frames, each downstream partition-scoped stage
+runs once for each emitted frame; a dataset-scoped stage merges its upstream
+stream at that point. Final
 preprocessor outputs are merged before one model call, and each postprocessor
 stage then runs once on that model microbatch.
 
-A preprocessor pipeline may reorder valid rows because protected identity
-restores caller order, but its final result may not drop or expand them at the
-request boundary. A one-to-zero or one-to-many result fails instead of
-associating a prediction with the wrong caller.
+A deployment processor pipeline must preserve valid request cardinality and
+order. Cardinality drift is rejected. With no hidden row identity, order is a
+positional application contract and cannot be restored after a callback
+reorders it.
 
 `max_batch_size` bounds that contract: a larger request list is split into
 separate Arrow/model microbatches. Preprocessor fan-out semantics apply inside
@@ -250,37 +250,28 @@ each one.
 Pydantic validation remains item-wise so malformed requests can fail without
 discarding valid neighbors.
 
-A deployment postprocessor receives the same canonical output `rf.Batch` as
+A deployment postprocessor receives the same eager Polars output frame as
 interactive prediction and `rf.Writer`. It has no request, observation,
 metadata, tensor, or batch-index providers. Retain every processed request
 field it needs on the deployment:
 
 ```python
-import pyarrow as pa
-import pyarrow.compute as pc
+import polars as pl
 
-@rf.postprocess(
-    requires=("inputs", "predictions"),
-    produces=("request_id", "fraud", "probability"),
-)
-def compact_response(batch: rf.Batch) -> rf.Batch:
-    inputs = batch.data["inputs"]
-    predictions = batch.data["predictions"]
-    fraud = pc.struct_field(predictions, "record/fraud")
-    content = pc.struct_field(fraud, "content")
-    return batch.replace(
-        pa.table(
-            {
-                "request_id": pc.struct_field(inputs, "request_id"),
-                "fraud": pc.struct_field(content, "value"),
-                "probability": pc.struct_field(content, "probability"),
-            }
-        )
+@rf.postprocess
+def compact_response(frame: pl.DataFrame) -> pl.DataFrame:
+    inputs = pl.col("inputs")
+    fraud = pl.col("predictions").struct.field("record/fraud")
+    content = fraud.struct.field("content")
+    return frame.select(
+        request_id=inputs.struct.field("request_id"),
+        fraud=content.struct.field("value"),
+        probability=content.struct.field("probability"),
     )
 
-@rf.postprocess(requires=("request_id", "fraud", "probability"))
-def public_response(batch: rf.Batch) -> rf.Batch:
-    return batch.replace(batch.data.drop(["request_id"]))
+@rf.postprocess
+def public_response(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.drop("request_id")
 
 # `prepare` is the ordered tuple installed on the training data module.
 prepare = training_preprocessors
@@ -310,8 +301,7 @@ Without a postprocessor, deployment discards the canonical `inputs` column and
 serializes `predictions` plus framework-owned `model` provenance. This prevents
 `retain` from exposing request data accidentally. With a postprocessor, its
 table columns define the application portion of each response row. `model` is a
-reserved response field, and framework identity is always removed before JSON
-serialization.
+reserved response field. RelFlow adds no hidden identity column.
 
 ## Validate Request And Response Schemas
 
