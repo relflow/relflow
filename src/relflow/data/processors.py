@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import importlib
 import inspect
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from enum import StrEnum
 from typing import Any, Literal, Self, TypeAlias, overload
 
@@ -91,6 +92,20 @@ class Processor:
         object.__setattr__(self, "user", frozenset(user))
         object.__setattr__(self, "name", label(self.func))
         self.bindings()
+
+    def __reduce__(self):
+        """Resolve decorated module functions by their public wrapper in workers."""
+
+        configuration = {item.name: getattr(self, item.name) for item in fields(self) if item.init}
+        reference = None
+        if inspect.isfunction(self.func) and "<locals>" not in self.func.__qualname__:
+            resolved = importlib.import_module(self.func.__module__)
+            for name in self.func.__qualname__.split("."):
+                resolved = getattr(resolved, name, None)
+            if isinstance(resolved, Processor) and resolved.func is self.func:
+                reference = (self.func.__module__, self.func.__qualname__)
+                configuration.pop("func")
+        return restore, (type(self), configuration, reference)
 
     @classmethod
     def normalize(cls, value: Self | list[Self] | tuple[Self, ...] | None) -> tuple[Self, ...]:
@@ -264,6 +279,20 @@ class Postprocessor(Processor):
 
 PreprocessorInput: TypeAlias = Preprocessor | list[Preprocessor] | tuple[Preprocessor, ...] | None
 PostprocessorInput: TypeAlias = Postprocessor | list[Postprocessor] | tuple[Postprocessor, ...] | None
+
+
+def restore(kind: type[Processor], configuration: dict[str, Any], reference: tuple[str, str] | None) -> Processor:
+    """Rebuild processor configuration around an importable decorated function."""
+
+    if reference is not None:
+        module, qualified = reference
+        resolved = importlib.import_module(module)
+        for name in qualified.split("."):
+            resolved = getattr(resolved, name)
+        if not isinstance(resolved, Processor):
+            raise TypeError(f"processor {module}.{qualified} must still refer to a decorated processor")
+        configuration = {**configuration, "func": resolved.func}
+    return kind(**configuration)
 
 
 def apply(table: pa.Table, processors: PostprocessorInput = ()) -> pa.Table:

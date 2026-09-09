@@ -1,3 +1,4 @@
+import pickle
 from enum import StrEnum
 
 import polars as pl
@@ -11,6 +12,35 @@ from relflow.structs.enums import Strata
 
 def make_frame(values: list[int]) -> pl.DataFrame:
     return pl.DataFrame({"value": values})
+
+
+@rf.preprocess(scope="dataset")
+def offset(frame: pl.DataFrame, *, amount: int, strata) -> pl.DataFrame:
+    return frame.with_columns(pl.col("value") + amount)
+
+
+@rf.postprocess
+def scale(frame: pl.DataFrame, *, amount: int) -> pl.DataFrame:
+    return frame.with_columns(pl.col("value") * amount)
+
+
+def identity(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame
+
+
+def test_decorated_processors_pickle_with_bound_configuration():
+    prepared = pickle.loads(pickle.dumps(offset.partial(amount=3)))
+    finished = pickle.loads(pickle.dumps(scale.partial(amount=2)))
+    assert prepared.scope == "dataset"
+    assert prepared.func is offset.func
+    assert prepared(make_frame([1]), strata=Strata.train).equals(make_frame([4]))
+    assert finished(make_frame([1])).equals(make_frame([2]))
+
+
+def test_directly_wrapped_importable_function_remains_picklable():
+    prepared = pickle.loads(pickle.dumps(rf.preprocess(identity)))
+    assert prepared.func is identity
+    assert prepared(make_frame([1])).equals(make_frame([1]))
 
 
 def test_preprocessor_providers_are_string_enums():

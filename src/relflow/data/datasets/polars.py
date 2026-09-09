@@ -39,6 +39,8 @@ class PolarsDataModule(ArrowDataModule):
         num_workers: int | Mapping[Strata | str, int] = 0,
         persistent_workers: bool | Mapping[Strata | str, bool] = False,
         pin_memory: bool | Mapping[Strata | str, bool] = False,
+        prefetch_factor: int | Mapping[Strata | str, int] = 2,
+        multiprocessing_context: str | None = None,
         retain: Retain | Mapping[Strata | str, Retain] = (),
     ):
         frames = {
@@ -75,6 +77,8 @@ class PolarsDataModule(ArrowDataModule):
             num_workers=num_workers,
             persistent_workers=persistent_workers,
             pin_memory=pin_memory,
+            prefetch_factor=prefetch_factor,
+            multiprocessing_context=multiprocessing_context,
             retain=retain,
         )
 

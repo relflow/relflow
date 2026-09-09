@@ -16,7 +16,12 @@ from relflow.architecture.root import (
     OptimizerConfig,
     SchedulerConfig,
 )
-from relflow.data.datasets import ArrowDataModule, CustomDataModule, PolarsDataModule, SyntheticDataModule
+from relflow.data.datasets import (
+    ArrowDataModule,
+    CustomDataModule,
+    PolarsDataModule,
+    SyntheticDataModule,
+)
 from relflow.data.processors import (
     Postprocessor,
     Preprocessor,
@@ -25,6 +30,7 @@ from relflow.data.processors import (
     preprocess,
 )
 from relflow.data.ragged import RaggedField
+from relflow.data.sources import source
 from relflow.helpers import Jitter
 from relflow.inference.callback import Writer
 from relflow.structs.enums import (
@@ -174,4 +180,5 @@ __all__ = [
     "postprocess",
     "preprocess",
     "where",
+    "source",
 ]

@@ -161,7 +161,7 @@ def test_documented_arrow_and_attention_constraints_match_runtime() -> None:
 
     assert "`rf.ArrowDataModule`" in readme
     assert "`ArrowDataModule`" in data_modules
-    assert "`num_workers=0`" in data_modules
+    assert "`rf.source`" in data_modules
     assert "StreamingDataModule" not in published
 
     for page in (model_configuration, public_api):

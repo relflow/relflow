@@ -88,6 +88,12 @@ same Arrow pipeline. The schema
 defines the model tree, typed losses, prediction outputs, and embeddings;
 Lightning runs `fit`, `validate`, `test`, and `predict`.
 
+For local or remote files, pass paths or globs directly to `ArrowDataModule`;
+use `rf.source(...)` for schema, parsing, and file-selection options. Parquet,
+CSV, JSON Lines, IPC/Feather, and ORC share the Arrow reader pipeline. The module
+supports persistent workers, prefetching, and pinned encoded tensors. Consumers
+currently replay source reads before selecting their disjoint rows.
+
 ```python
 import lightning.pytorch as lit
 import pyarrow as pa
@@ -241,7 +247,8 @@ Choose the data module by where the records live:
 | Use case | Module |
 | --- | --- |
 | In-memory Arrow or restartable Arrow factories | `ArrowDataModule` |
-| Local or remote Arrow datasets | `ArrowDataModule` |
+| Local or remote files and globs | `ArrowDataModule`, with `rf.source` for options |
+| Other local or remote Arrow datasets | `ArrowDataModule` |
 | Collected in-memory Polars frames | `PolarsDataModule` |
 | PyTorch `IterableDataset` mappings | `CustomDataModule` |
 | Restartable mapping generators | `SyntheticDataModule` |

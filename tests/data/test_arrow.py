@@ -66,6 +66,33 @@ def test_encoded_keeps_tensors_and_arrow_source_separate():
     assert encoded.observations == {}
 
 
+def test_encoded_pins_every_tensor_payload(monkeypatch: pytest.MonkeyPatch):
+    source = pa.table({"value": [10, 20]})
+    tensors = TensorDict({"value": torch.tensor([10, 20])}, batch_size=[2])
+    observation = TensorDict({"counts": torch.tensor([2])}, batch_size=[1])
+    calls = []
+
+    def pin(value):
+        calls.append(value)
+        return value.clone()
+
+    monkeypatch.setattr(TensorDict, "pin_memory", pin)
+    encoded = Encoded(
+        tensors=tensors,
+        source=source,
+        retain=("value",),
+        observations={Address("record/value"): observation},
+    )
+
+    pinned = encoded.pin_memory()
+
+    assert calls == [tensors, observation]
+    assert pinned.tensors is not tensors
+    assert pinned.observations["record/value"] is not observation
+    assert pinned.source is source
+    assert pinned.retain == ("value",)
+
+
 def test_encoded_copies_and_validates_pristine_observations():
     source = pa.table({"value": [10]})
     tensors = TensorDict({}, batch_size=[])

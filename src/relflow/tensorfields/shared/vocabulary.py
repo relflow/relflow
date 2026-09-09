@@ -415,11 +415,8 @@ class OnlineVocabularyModel(torch.nn.Module):
 
 
 def sync(_callback: Callback, trainer: Trainer, pl_module: Model, reason: str) -> None:
-    if not is_distributed():
-        return
-
     resources = OnlineVocabularyModel.from_model(pl_module)
-    if not resources:
+    if not resources or (not is_distributed() and not any(vocab.is_shared for vocab in resources.values())):
         return
 
     if reason == "train_epoch_end":
