@@ -8,11 +8,12 @@ from multiprocessing.managers import ListProxy, SyncManager
 from threading import RLock
 from typing import TYPE_CHECKING, Any, Callable
 
+import numpy as np
+import pyarrow as pa
+import pyarrow.compute as pc
 import torch
 from lightning.pytorch import Callback, Trainer
-from loguru import logger
 
-from relflow.data.nested import MASK_LITERAL
 from relflow.distributed import (
     all_gather_object,
     broadcast_object,
@@ -20,13 +21,14 @@ from relflow.distributed import (
     is_rank_zero,
     synchronize_epoch_metrics,
 )
+from relflow.logging import logger
 from relflow.structs.tree import Address
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
 
 
-class _LocalLock:
+class LocalLock:
     """Pickle-friendly local lock used outside multiprocessing data workers."""
 
     def __init__(self) -> None:
@@ -46,7 +48,7 @@ class _LocalLock:
 
 
 @dataclass
-class _VocabularyStorage:
+class VocabularyStorage:
     master: list[Any] | ListProxy[Any]
     lock: Any
     proposals: list[Any] | ListProxy[Any]
@@ -56,9 +58,9 @@ class _VocabularyStorage:
 class VocabularyState:
     def __init__(
         self,
-        storage: _VocabularyStorage,
+        storage: VocabularyStorage,
         size: int,
-        share: Callable[[], _VocabularyStorage] | None = None,
+        share: Callable[[], VocabularyStorage] | None = None,
     ):
         self.storage = storage
         self.size: int = size
@@ -137,7 +139,7 @@ class VocabularyState:
 
         candidates: list[Any] = []
         seen: set[Any] = set()
-        for word in self._tokens(values):
+        for word in self.tokens(values):
             if word is None or word in self.index or word in seen:
                 continue
 
@@ -189,20 +191,40 @@ class VocabularyState:
 
         return self.index.get(word, self.unavailable_index)
 
-    def _tokens(self, values: Any) -> Iterable[Any]:
+    def indices(self, values: pa.Array | pa.ChunkedArray, *, learn: bool) -> np.ndarray:
+        """Encode one whole non-null Arrow token column through unique values."""
+
+        array = values.combine_chunks() if isinstance(values, pa.ChunkedArray) else values
+        if array.null_count:
+            raise ValueError("vocabulary token arrays cannot contain nulls")
+        if not len(array):
+            self.reserve((), learn=learn)
+            return np.empty(0, dtype=np.int64)
+
+        unique = pc.unique(array)
+        candidates = unique.to_pylist()
+        self.reserve(candidates, learn=learn)
+        encoded = pa.array(
+            [self.encode(candidate) for candidate in candidates],
+            type=pa.int64(),
+        )
+        positions = pc.index_in(array, value_set=unique)
+        if positions.null_count:
+            raise RuntimeError("Arrow vocabulary lookup failed to resolve a source token")
+        selected = pc.take(encoded, positions)
+        return selected.to_numpy(zero_copy_only=False)
+
+    def tokens(self, values: Any) -> Iterable[Any]:
         if values is None:
             return
 
         if isinstance(values, str | bytes):
-            if values == MASK_LITERAL:
-                return
-
             yield values
             return
 
         if isinstance(values, Iterable):
             for value in values:
-                yield from self._tokens(value)
+                yield from self.tokens(value)
             return
 
         yield values
@@ -231,15 +253,17 @@ class OnlineVocabularyModel(torch.nn.Module):
         self.size: int = size
         self.manager: SyncManager | None = None
         self.master: list[Any] | ListProxy[Any] = []
-        self.lock: Any = _LocalLock()
+        self.lock: Any = LocalLock()
         self.proposals: list[Any] | ListProxy[Any] = []
-        self.proposal_lock: Any = _LocalLock()
+        self.proposal_lock: Any = LocalLock()
         self._snapshot_cache: list[Any] | None = None
         self._snapshot_size: int = -1
+        self._labels_cache: pa.Array | None = None
+        self._labels_source: list[Any] | None = None
 
     @property
-    def storage(self) -> _VocabularyStorage:
-        return _VocabularyStorage(
+    def storage(self) -> VocabularyStorage:
+        return VocabularyStorage(
             master=self.master,
             lock=self.lock,
             proposals=self.proposals,
@@ -272,15 +296,15 @@ class OnlineVocabularyModel(torch.nn.Module):
 
         manager = self.manager
         self.master = list(self.master)
-        self.lock = _LocalLock()
+        self.lock = LocalLock()
         self.proposals = []
-        self.proposal_lock = _LocalLock()
+        self.proposal_lock = LocalLock()
         self.manager = None
         self._snapshot_cache = None
         self._snapshot_size = -1
         manager.shutdown()
 
-    def _shared_state(self) -> _VocabularyStorage:
+    def shared_state(self) -> VocabularyStorage:
         self.share()
         return self.storage
 
@@ -322,7 +346,7 @@ class OnlineVocabularyModel(torch.nn.Module):
         return VocabularyState(
             storage=self.storage,
             size=self.size,
-            share=self._shared_state,
+            share=self.shared_state,
         )
 
     def snapshot(self) -> list[Any]:
@@ -334,6 +358,17 @@ class OnlineVocabularyModel(torch.nn.Module):
         self._snapshot_size = size
 
         return self._snapshot_cache
+
+    def labels(self) -> pa.Array:
+        """Return canonical string labels, rebuilding only after vocabulary changes."""
+        snapshot = self.snapshot()
+        if self._labels_cache is None or self._labels_source is not snapshot:
+            self._labels_cache = pa.array([str(value) for value in snapshot], type=pa.large_string())
+            self._labels_source = snapshot
+        elif len(self._labels_cache) != len(snapshot):
+            self._labels_cache = pa.array([str(value) for value in snapshot], type=pa.large_string())
+
+        return self._labels_cache
 
     def drain_proposals(self) -> list[Any]:
         with self.proposal_lock:
@@ -380,11 +415,8 @@ class OnlineVocabularyModel(torch.nn.Module):
 
 
 def sync(_callback: Callback, trainer: Trainer, pl_module: Model, reason: str) -> None:
-    if not is_distributed():
-        return
-
     resources = OnlineVocabularyModel.from_model(pl_module)
-    if not resources:
+    if not resources or (not is_distributed() and not any(vocab.is_shared for vocab in resources.values())):
         return
 
     if reason == "train_epoch_end":

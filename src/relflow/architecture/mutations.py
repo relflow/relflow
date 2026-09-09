@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from copy import deepcopy
 from functools import partialmethod, wraps
 from typing import TYPE_CHECKING, Any
 
@@ -11,9 +12,9 @@ import lightning.pytorch as lit
 import pydantic
 import torch
 from lightning.pytorch import Callback
-from loguru import logger
 
 from relflow.architecture.graph import ModelGraph
+from relflow.logging import logger
 from relflow.structs.enums import Strata
 from relflow.structs.experiment import NodeAttribute, NodePredicate, SchemaField
 from relflow.structs.structure import Branch
@@ -49,10 +50,12 @@ class MutationLockCallback(Callback):
 
     locks: tuple[Strata, ...] = (Strata.train, Strata.validate, Strata.test, Strata.predict)
 
-    def _on_loop_start(self, trainer: lit.Trainer, pl_module: "Model", strata: Strata) -> None:
+    def on_loop_start(self, trainer: lit.Trainer, pl_module: "Model", strata: Strata) -> None:
+        if strata == Strata.predict:
+            pl_module.output_plans.clear()
         pl_module.locks[strata] += 1
 
-    def _on_loop_end(self, trainer: lit.Trainer, pl_module: "Model", strata: Strata) -> None:
+    def on_loop_end(self, trainer: lit.Trainer, pl_module: "Model", strata: Strata) -> None:
         locks = pl_module.locks
         if locks[strata] <= 1:
             locks.pop(strata, None)
@@ -68,28 +71,28 @@ class MutationLockCallback(Callback):
         for lock in self.locks:
             pl_module.locks.pop(lock, None)
 
-    on_train_start = partialmethod(_on_loop_start, strata=Strata.train)
-    on_train_end = partialmethod(_on_loop_end, strata=Strata.train)
-    on_validation_start = partialmethod(_on_loop_start, strata=Strata.validate)
-    on_validation_end = partialmethod(_on_loop_end, strata=Strata.validate)
-    on_test_start = partialmethod(_on_loop_start, strata=Strata.test)
-    on_test_end = partialmethod(_on_loop_end, strata=Strata.test)
-    on_predict_start = partialmethod(_on_loop_start, strata=Strata.predict)
-    on_predict_end = partialmethod(_on_loop_end, strata=Strata.predict)
+    on_train_start = partialmethod(on_loop_start, strata=Strata.train)
+    on_train_end = partialmethod(on_loop_end, strata=Strata.train)
+    on_validation_start = partialmethod(on_loop_start, strata=Strata.validate)
+    on_validation_end = partialmethod(on_loop_end, strata=Strata.validate)
+    on_test_start = partialmethod(on_loop_start, strata=Strata.test)
+    on_test_end = partialmethod(on_loop_end, strata=Strata.test)
+    on_predict_start = partialmethod(on_loop_start, strata=Strata.predict)
+    on_predict_end = partialmethod(on_loop_end, strata=Strata.predict)
 
 
 class RuntimePlacementCallback(Callback):
     """Move late-created modules onto the Lightning module's active device."""
 
-    def _on_loop_start(self, trainer: lit.Trainer, pl_module: lit.LightningModule, strata: Strata) -> None:
+    def on_loop_start(self, trainer: lit.Trainer, pl_module: lit.LightningModule, strata: Strata) -> None:
         device = getattr(pl_module, "device", None)
         if isinstance(device, torch.device):
             pl_module.to(device=device)
 
-    on_train_start = partialmethod(_on_loop_start, strata=Strata.train)
-    on_validation_start = partialmethod(_on_loop_start, strata=Strata.validate)
-    on_test_start = partialmethod(_on_loop_start, strata=Strata.test)
-    on_predict_start = partialmethod(_on_loop_start, strata=Strata.predict)
+    on_train_start = partialmethod(on_loop_start, strata=Strata.train)
+    on_validation_start = partialmethod(on_loop_start, strata=Strata.validate)
+    on_test_start = partialmethod(on_loop_start, strata=Strata.test)
+    on_predict_start = partialmethod(on_loop_start, strata=Strata.predict)
 
 
 class AttributeChange(pydantic.BaseModel):
@@ -112,7 +115,22 @@ class SchemaEditor:
     def __init__(self, module: "Model") -> None:
         self.module = module
 
-    def _assert_mutation_allowed(self, action: str) -> None:
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Restore the schema and runtime graph when a mutation cannot rebuild."""
+
+        schema = deepcopy(self.module.schema)
+        nodes = self.module.nodes
+        example = self.module.example_input_array
+        try:
+            yield
+        except Exception:
+            self.module.schema = schema
+            self.module.nodes = nodes
+            self.module.example_input_array = example
+            raise
+
+    def assert_mutation_allowed(self, action: str) -> None:
         active = tuple(name for name, count in self.module.locks.items() if count > 0)
         if active:
             labels = ", ".join(active)
@@ -140,27 +158,28 @@ class SchemaEditor:
         use_cache: bool = False,
         **values: Any,
     ) -> None:
-        self._assert_mutation_allowed("update")
+        self.assert_mutation_allowed("update")
         values = self.module.schema.update_values(values)
-        changes = self._attribute_changes(
+        changes = self.attribute_changes(
             values=values,
             predicates=predicates,
             allow_extra=allow_extra,
             include_root=include_root,
             use_cache=use_cache,
         )
-        self.module.schema.update(
-            *predicates,
-            strict=strict,
-            allow_extra=allow_extra,
-            include_root=include_root,
-            validate=validate,
-            use_cache=use_cache,
-            **values,
-        )
-        ModelGraph.rebuild(self.module)
-        self.module._reset_contracts()
-        self._log_attribute_changes("update", changes)
+        with self.transaction():
+            self.module.schema.update(
+                *predicates,
+                strict=strict,
+                allow_extra=allow_extra,
+                include_root=include_root,
+                validate=validate,
+                use_cache=use_cache,
+                **values,
+            )
+            ModelGraph.rebuild(self.module)
+        self.module.reset_contracts()
+        self.log_attribute_changes("update", changes)
 
     def extend(
         self,
@@ -168,13 +187,14 @@ class SchemaEditor:
         include_root: bool = True,
         use_cache: bool = True,
     ) -> None:
-        self._assert_mutation_allowed("extend")
-        parent, field_count = self._extend_target(*args, include_root=include_root, use_cache=use_cache)
-        self.module.schema.extend(*args, include_root=include_root, use_cache=use_cache)
-        ModelGraph.rebuild(self.module)
-        self.module._reset_contracts()
+        self.assert_mutation_allowed("extend")
+        parent, field_count = self.extend_target(*args, include_root=include_root, use_cache=use_cache)
+        with self.transaction():
+            self.module.schema.extend(*args, include_root=include_root, use_cache=use_cache)
+            ModelGraph.rebuild(self.module)
+        self.module.reset_contracts()
         for field in parent.fields[-field_count:]:
-            self._log_node_mutation(
+            self.log_node_mutation(
                 action="extend",
                 message="extended schema node",
                 node=field,
@@ -187,13 +207,14 @@ class SchemaEditor:
         include_root: bool = False,
         use_cache: bool = True,
     ) -> None:
-        self._assert_mutation_allowed("delete")
-        roots = self._delete_roots(*predicates, include_root=include_root, use_cache=use_cache)
-        self.module.schema.delete(*predicates, include_root=include_root, use_cache=use_cache)
-        ModelGraph.rebuild(self.module)
-        self.module._reset_contracts()
+        self.assert_mutation_allowed("delete")
+        roots = self.delete_roots(*predicates, include_root=include_root, use_cache=use_cache)
+        with self.transaction():
+            self.module.schema.delete(*predicates, include_root=include_root, use_cache=use_cache)
+            ModelGraph.rebuild(self.module)
+        self.module.reset_contracts()
         for node in roots:
-            self._log_node_mutation(
+            self.log_node_mutation(
                 action="delete",
                 message="deleted schema node",
                 node=node,
@@ -207,7 +228,7 @@ class SchemaEditor:
         use_cache: bool = True,
         descendants: bool = False,
     ) -> None:
-        self._assert_mutation_allowed("reset")
+        self.assert_mutation_allowed("reset")
         selected = self.module.schema.select(
             *predicates,
             include_root=include_root,
@@ -216,11 +237,11 @@ class SchemaEditor:
         if not selected:
             raise ValueError("reset matched no nodes")
 
-        nodes = self._runtime_reset_nodes(selected, descendants=descendants)
+        nodes = self.runtime_reset_nodes(selected, descendants=descendants)
         ModelGraph.reset_selected(self.module, selected, descendants=descendants)
-        self.module._reset_contracts()
+        self.module.reset_contracts()
         for node in nodes:
-            self._log_node_mutation(
+            self.log_node_mutation(
                 action="reset",
                 message="reset runtime node",
                 node=node,
@@ -238,9 +259,9 @@ class SchemaEditor:
         use_cache: bool = False,
         **values: Any,
     ) -> Iterator[None]:
-        self._assert_mutation_allowed("override")
+        self.assert_mutation_allowed("override")
         values = self.module.schema.update_values(values)
-        changes = self._attribute_changes(
+        changes = self.attribute_changes(
             values=values,
             predicates=predicates,
             allow_extra=allow_extra,
@@ -260,16 +281,16 @@ class SchemaEditor:
             ):
                 entered = True
                 ModelGraph.rebuild(self.module)
-                self.module._reset_contracts()
-                self._log_attribute_changes("override", changes)
+                self.module.reset_contracts()
+                self.log_attribute_changes("override", changes)
                 yield
         finally:
             ModelGraph.rebuild(self.module)
-            self.module._reset_contracts()
+            self.module.reset_contracts()
             if entered:
-                self._log_attribute_changes("override_restore", changes, restored=True)
+                self.log_attribute_changes("override_restore", changes, restored=True)
 
-    def _attribute_changes(
+    def attribute_changes(
         self,
         *,
         values: dict[str, Any],
@@ -283,7 +304,7 @@ class SchemaEditor:
         for node in nodes:
             can_apply_extra = allow_extra and getattr(type(node), "model_config", {}).get("extra") == "allow"
             for name in values:
-                if not (_has_node_attribute(node, name) or can_apply_extra):
+                if not (has_node_attribute(node, name) or can_apply_extra):
                     continue
 
                 changes.append(
@@ -291,7 +312,7 @@ class SchemaEditor:
                         node=node,
                         name=name,
                         original=getattr(node, name, _MISSING),
-                        definition_attribute=_is_definition_attribute(node, name),
+                        definition_attribute=is_definition_attribute(node, name),
                         address=str(node.address),
                         node_name=node.name,
                         node_type=node.type,
@@ -300,7 +321,7 @@ class SchemaEditor:
 
         return changes
 
-    def _extend_target(
+    def extend_target(
         self,
         *args: NodePredicate | NodeAttribute | Callable[[Node], bool] | SchemaField,
         include_root: bool,
@@ -334,7 +355,7 @@ class SchemaEditor:
 
         return candidates[0], field_count
 
-    def _delete_roots(
+    def delete_roots(
         self,
         *predicates: NodePredicate | NodeAttribute | Callable[[Node], bool],
         include_root: bool,
@@ -352,7 +373,7 @@ class SchemaEditor:
             )
         ]
 
-    def _runtime_reset_nodes(self, selected: list[Node], *, descendants: bool) -> list[Node]:
+    def runtime_reset_nodes(self, selected: list[Node], *, descendants: bool) -> list[Node]:
         nodes: dict[str, Node] = {}
         for node in selected:
             if node.address in self.module.nodes:
@@ -365,7 +386,7 @@ class SchemaEditor:
 
         return list(nodes.values())
 
-    def _log_attribute_changes(self, action: str, changes: list[AttributeChange], *, restored: bool = False) -> None:
+    def log_attribute_changes(self, action: str, changes: list[AttributeChange], *, restored: bool = False) -> None:
         for change in changes:
             current_address = str(change.node.address)
             value = change.original if restored else getattr(change.node, change.name, _MISSING)
@@ -379,8 +400,8 @@ class SchemaEditor:
             address_context = (
                 current_address if previous_address == current_address else f"{previous_address} -> {current_address}"
             )
-            value_text = _format_log_value(value)
-            previous_value_text = _format_log_value(previous_value)
+            value_text = format_log_value(value)
+            previous_value_text = format_log_value(previous_value)
             logger.bind(
                 component="schema_mutation",
                 action=action,
@@ -395,17 +416,13 @@ class SchemaEditor:
                 previous_value=previous_value_text,
                 change=f"{change.name}: {previous_value_text} -> {value_text}",
             ).info(
-                "{} {}: {} {} -> {}",
-                "restored" if restored else "mutated",
-                address_context,
-                change.name,
-                previous_value_text,
-                value_text,
+                f"{'restored' if restored else 'mutated'} {address_context}: "
+                f"{change.name} {previous_value_text} -> {value_text}"
             )
 
-    def _log_node_mutation(self, *, action: str, message: str, node: Node, **kwargs: Any) -> None:
+    def log_node_mutation(self, *, action: str, message: str, node: Node, **kwargs: Any) -> None:
         extra = {key: str(value.address) if isinstance(value, Node) else value for key, value in kwargs.items()}
-        context = _format_node_log_context(node, extra)
+        context = format_node_log_context(node, extra)
         logger.bind(
             component="schema_mutation",
             action=action,
@@ -415,20 +432,20 @@ class SchemaEditor:
             attribute=None,
             definition_attribute=None,
             **extra,
-        ).info("{} {}", message, context)
+        ).info(f"{message} {context}")
 
 
-def _has_node_attribute(node: Node, name: str) -> bool:
+def has_node_attribute(node: Node, name: str) -> bool:
     fields = getattr(type(node), "model_fields", {})
     extra = getattr(node, "model_extra", None) or {}
     return name in fields or name in extra or hasattr(node, name)
 
 
-def _is_definition_attribute(node: Node, name: str) -> bool:
+def is_definition_attribute(node: Node, name: str) -> bool:
     return name in getattr(type(node), "model_fields", {})
 
 
-def _format_log_value(value: Any) -> str:
+def format_log_value(value: Any) -> str:
     if value is _MISSING:
         return "<missing>"
 
@@ -436,7 +453,7 @@ def _format_log_value(value: Any) -> str:
     return text if len(text) <= 160 else f"{text[:157]}..."
 
 
-def _format_node_log_context(node: Node, extra: dict[str, Any]) -> str:
+def format_node_log_context(node: Node, extra: dict[str, Any]) -> str:
     parts = [str(node.address)]
     if parent := extra.get("parent"):
         parts.append(f"under {parent}")

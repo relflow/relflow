@@ -1,25 +1,19 @@
-"""Typed preprocessor and postprocessor callable wrappers."""
+"""Polars preprocessor and postprocessor contracts."""
 
 from __future__ import annotations
 
+import importlib
 import inspect
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from enum import StrEnum
-from types import UnionType
-from typing import Any, Self, TypeAlias, Union, get_args, get_origin, overload
+from typing import Any, Literal, Self, TypeAlias, overload
 
-from loguru import logger
+import polars as pl
+import pyarrow as pa
 
-from relflow.structs.tree import Address
-
-RawObservation: TypeAlias = dict[str, Any]
-RawBatch: TypeAlias = list[RawObservation] | list[list[RawObservation]]
-Metadata: TypeAlias = list[Any]
-Predictions: TypeAlias = dict[Address, dict[str, Any]]
-PostprocessorResult: TypeAlias = Mapping[str | Address, Any] | None
-
-_EMPTY = inspect.Signature.empty
+EMPTY = inspect.Signature.empty
+Scope = Literal["partition", "dataset"]
 
 
 class PreprocessorProvider(StrEnum):
@@ -30,369 +24,353 @@ class PreprocessorProvider(StrEnum):
     encoding_context = "encoding_context"
 
 
-class PostprocessorProvider(StrEnum):
-    """Pipeline-owned postprocessor parameter names."""
-
-    metadata = "metadata"
-    input = "input"
-    batch = "batch"
-    observations = "observations"
-    request = "request"
-    batch_indices = "batch_indices"
-    batch_idx = "batch_idx"
-    dataloader_idx = "dataloader_idx"
+PREPROCESSOR_PROVIDERS = frozenset(provider.value for provider in PreprocessorProvider)
 
 
-ProviderName: TypeAlias = PreprocessorProvider | PostprocessorProvider
-PREPROCESSOR_PROVIDERS = frozenset(PreprocessorProvider)
-POSTPROCESSOR_PROVIDERS = frozenset(PostprocessorProvider)
+def label(func: Callable[..., Any]) -> str:
+    """Return a stable display name for a processor callable."""
 
-
-@dataclass(frozen=True)
-class Observation:
-    """Processed model-facing observation emitted by a preprocessor."""
-
-    data: Mapping[str, Any]
-
-
-def _processor_name(func: Callable[..., Any]) -> str:
     return getattr(func, "__name__", type(func).__name__)
 
 
-def _allows_none(annotation: Any) -> bool:
-    if annotation is _EMPTY:
-        return False
-    if annotation is None or annotation is type(None):
-        return True
+def frame(value: Any, *, kind: str, name: str) -> pl.DataFrame:
+    """Validate one eager Polars processor result."""
 
-    origin = get_origin(annotation)
-    if origin in (Union, UnionType):
-        return any(item is type(None) for item in get_args(annotation))
-
-    return False
-
-
-def _is_optional(parameter: inspect.Parameter) -> bool:
-    return parameter.default is not _EMPTY or _allows_none(parameter.annotation)
+    if isinstance(value, pl.LazyFrame):
+        raise TypeError(f"{kind} '{name}' must return a polars.DataFrame, not LazyFrame")
+    if not isinstance(value, pl.DataFrame):
+        raise TypeError(f"{kind} '{name}' must return a polars.DataFrame, got {type(value).__name__}")
+    if value.width == 0:
+        raise ValueError(f"{kind} '{name}' must return at least one Polars column")
+    return value
 
 
-@dataclass(frozen=True)
+def polars(table: pa.Table, *, context: str) -> pl.DataFrame:
+    """Convert one Arrow table to an eager Polars frame without row materialization."""
+
+    if not isinstance(table, pa.Table):
+        raise TypeError(f"{context} must be a pyarrow.Table, got {type(table).__name__}")
+    if table.num_columns == 0:
+        raise ValueError(f"{context} must contain at least one Arrow column")
+    try:
+        result = pl.from_arrow(table, rechunk=False)
+    except Exception as error:
+        raise TypeError(f"{context} could not be converted from Arrow to Polars: {error}") from error
+    if not isinstance(result, pl.DataFrame):
+        raise TypeError(f"{context} Arrow conversion returned {type(result).__name__}; expected DataFrame")
+    return result
+
+
+def arrow(value: pl.DataFrame, *, context: str) -> pa.Table:
+    """Convert one eager Polars frame to the canonical Arrow representation."""
+
+    frame(value, kind=context, name="output")
+    try:
+        return value.to_arrow(compat_level=pl.CompatLevel.oldest())
+    except Exception as error:
+        raise TypeError(f"{context} could not be converted from Polars to Arrow: {error}") from error
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Processor:
-    """Callable wrapper with explicit user parameter binding."""
+    """Callable wrapper with explicit pipeline and user parameter binding."""
 
     func: Callable[..., Any]
-    provider_names: frozenset[ProviderName]
-    primary_name: str
     kind: str
+    providers: frozenset[str]
+    bound: Mapping[str, Any] = field(default_factory=dict)
     signature: inspect.Signature = field(init=False)
-    runtime_params: frozenset[str] = field(init=False)
-    user_params: frozenset[str] = field(init=False)
-    bound_params: Mapping[str, Any] = field(default_factory=dict)
+    runtime: frozenset[str] = field(init=False)
+    user: frozenset[str] = field(init=False)
     name: str = field(init=False)
-    decorated: bool = False
 
     def __post_init__(self) -> None:
         signature = inspect.signature(self.func)
-        runtime_params, user_params = self._classify_signature(signature)
+        runtime, user = self.classify(signature)
         object.__setattr__(self, "signature", signature)
-        object.__setattr__(self, "runtime_params", frozenset(runtime_params))
-        object.__setattr__(self, "user_params", frozenset(user_params))
-        object.__setattr__(self, "name", _processor_name(self.func))
-        self._validate_bound_params()
+        object.__setattr__(self, "runtime", frozenset(runtime))
+        object.__setattr__(self, "user", frozenset(user))
+        object.__setattr__(self, "name", label(self.func))
+        self.bindings()
 
-    def _classify_signature(self, signature: inspect.Signature) -> tuple[set[str], set[str]]:
+    def __reduce__(self):
+        """Resolve decorated module functions by their public wrapper in workers."""
+
+        configuration = {item.name: getattr(self, item.name) for item in fields(self) if item.init}
+        reference = None
+        if inspect.isfunction(self.func) and "<locals>" not in self.func.__qualname__:
+            resolved = importlib.import_module(self.func.__module__)
+            for name in self.func.__qualname__.split("."):
+                resolved = getattr(resolved, name, None)
+            if isinstance(resolved, Processor) and resolved.func is self.func:
+                reference = (self.func.__module__, self.func.__qualname__)
+                configuration.pop("func")
+        return restore, (type(self), configuration, reference)
+
+    @classmethod
+    def normalize(cls, value: Self | list[Self] | tuple[Self, ...] | None) -> tuple[Self, ...]:
+        """Normalize optional processor configuration to an immutable pipeline."""
+
+        if value is None:
+            return ()
+        if isinstance(value, cls):
+            processors = (value,)
+        elif isinstance(value, (list, tuple)):
+            processors = tuple(value)
+        else:
+            raise TypeError(
+                f"{cls.__name__.lower()} must be a {cls.__name__}, list, tuple, or None; got {type(value).__name__}"
+            )
+
+        for index, processor in enumerate(processors):
+            if not isinstance(processor, cls):
+                raise TypeError(
+                    f"{cls.__name__.lower()} at index {index} must be a {cls.__name__}; got {type(processor).__name__}"
+                )
+            processor.ready()
+        return processors
+
+    def classify(self, signature: inspect.Signature) -> tuple[set[str], set[str]]:
+        """Classify callable parameters as pipeline-owned or user-bound."""
+
         parameters = list(signature.parameters.values())
         if not parameters:
-            raise TypeError(f"{self.kind} '{_processor_name(self.func)}' must accept {self.primary_name!r}")
+            raise TypeError(f"{self.kind} '{label(self.func)}' must accept 'frame'")
 
         first = parameters[0]
-        if first.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-            raise TypeError(f"{self.kind} '{_processor_name(self.func)}' has invalid first parameter")
+        if first.name != "frame" or first.kind in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        ):
+            raise TypeError(f"{self.kind} '{label(self.func)}' first parameter must be 'frame'")
 
-        if self.primary_name == "predictions" and first.name != "predictions":
-            raise TypeError(f"postprocessor '{_processor_name(self.func)}' first parameter must be 'predictions'")
-
-        provider_names = {provider.value for provider in self.provider_names}
-        runtime_params: set[str] = set()
-        user_params: set[str] = set()
+        runtime: set[str] = set()
+        user: set[str] = set()
         for parameter in parameters[1:]:
             if parameter.kind == inspect.Parameter.VAR_POSITIONAL:
-                raise TypeError(f"{self.kind} '{_processor_name(self.func)}' does not support *args")
+                raise TypeError(f"{self.kind} '{label(self.func)}' does not support *args")
             if parameter.kind == inspect.Parameter.VAR_KEYWORD:
-                raise TypeError(f"{self.kind} '{_processor_name(self.func)}' does not support **kwargs")
+                raise TypeError(f"{self.kind} '{label(self.func)}' does not support **kwargs")
             if parameter.kind is not inspect.Parameter.KEYWORD_ONLY:
-                raise TypeError(
-                    f"{self.kind} '{_processor_name(self.func)}' parameter '{parameter.name}' must be keyword-only"
-                )
-            if self.kind == "postprocessor" and parameter.name == "context":
-                raise TypeError("postprocessor context dictionaries were removed; request named providers instead")
-            if parameter.name in provider_names:
-                runtime_params.add(parameter.name)
+                raise TypeError(f"{self.kind} '{label(self.func)}' parameter '{parameter.name}' must be keyword-only")
+            if parameter.name in self.providers:
+                runtime.add(parameter.name)
             else:
-                user_params.add(parameter.name)
+                user.add(parameter.name)
 
-        return runtime_params, user_params
+        return runtime, user
 
-    def _validate_bound_params(self) -> None:
-        for name in self.bound_params:
-            if name in self.runtime_params:
+    def bindings(self) -> None:
+        """Validate explicitly bound user arguments."""
+
+        for name in self.bound:
+            if name in self.runtime:
                 raise ValueError(f"{self.kind} '{self.name}' parameter '{name}' is provided by the pipeline")
-            if name not in self.user_params:
+            if name not in self.user:
                 raise ValueError(f"{self.kind} '{self.name}' has no user-bound parameter '{name}'")
 
-    def partial(self, **values: Any) -> Self:
-        for name in values:
-            if name in self.runtime_params:
-                raise ValueError(f"{self.kind} '{self.name}' parameter '{name}' is provided by the pipeline")
-            if name not in self.user_params:
-                raise ValueError(f"{self.kind} '{self.name}' has no user-bound parameter '{name}'")
-            if name in self.bound_params:
-                raise ValueError(f"{self.kind} '{self.name}' parameter '{name}' is already bound")
+    def ready(self) -> None:
+        """Validate that every required user argument is bound."""
 
-        bound = {**self.bound_params, **values}
-        logger.bind(
-            component="processor",
-            processor=self.kind,
-            name=self.name,
-            bound=sorted(values),
-        ).debug("bound processor parameters")
-        return replace(self, bound_params=bound)
-
-    def validate_ready(self) -> None:
-        missing = []
-        for name in sorted(self.user_params):
-            if name in self.bound_params:
-                continue
-            parameter = self.signature.parameters[name]
-            if not _is_optional(parameter):
-                missing.append(name)
-
+        self.bindings()
+        missing = [
+            name
+            for name in sorted(self.user)
+            if name not in self.bound and self.signature.parameters[name].default is EMPTY
+        ]
         if missing:
             formatted = ", ".join(repr(name) for name in missing)
             raise ValueError(f"{self.kind} '{self.name}' requires unbound parameter(s): {formatted}")
 
-        # logger.bind(component="processor", processor=self.kind, name=self.name).debug("validated processor bindings")
+    def partial(self, **values: Any) -> Self:
+        """Return a processor with additional immutable user configuration."""
 
-    def _call(self, primary: Any, runtime_values: Mapping[str, Any]) -> Any:
-        self.validate_ready()
-        supplied = {name: runtime_values[name] for name in self.runtime_params if name in runtime_values}
-        # logger.bind(
-        #     component="processor",
-        #     processor=self.kind,
-        #     name=self.name,
-        #     providers=sorted(supplied),
-        # ).debug("resolved processor providers")
-        return self.func(primary, **dict(self.bound_params), **supplied)
+        for name in values:
+            if name in self.runtime:
+                raise ValueError(f"{self.kind} '{self.name}' parameter '{name}' is provided by the pipeline")
+            if name not in self.user:
+                raise ValueError(f"{self.kind} '{self.name}' has no user-bound parameter '{name}'")
+            if name in self.bound:
+                raise ValueError(f"{self.kind} '{self.name}' parameter '{name}' is already bound")
 
-    def __call__(self, primary: Any, **runtime_values: Any) -> Any:
-        return self._call(primary, runtime_values)
+        return replace(self, bound={**self.bound, **values})
+
+    def call(self, value: pl.DataFrame, runtime: Mapping[str, Any]) -> Any:
+        """Invoke the wrapped callable with validated arguments."""
+
+        if not isinstance(value, pl.DataFrame):
+            raise TypeError(f"{self.kind} '{self.name}' requires a polars.DataFrame, got {type(value).__name__}")
+        self.ready()
+        missing = sorted(self.runtime - runtime.keys())
+        if missing:
+            formatted = ", ".join(repr(name) for name in missing)
+            raise ValueError(f"{self.kind} '{self.name}' is missing pipeline parameter(s): {formatted}")
+        supplied = {name: runtime[name] for name in self.runtime}
+        return self.func(value, **dict(self.bound), **supplied)
+
+    def __call__(self, frame: pl.DataFrame, **runtime: Any) -> Any:
+        return self.call(frame, runtime)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Preprocessor(Processor):
-    """Callable preprocessor object returned by `@preprocess`."""
+    """Polars frame transform returned by :func:`preprocess`."""
 
     func: Callable[..., Any]
-    provider_names: frozenset[ProviderName] = field(default=PREPROCESSOR_PROVIDERS, init=False)
-    primary_name: str = field(default="observation", init=False)
+    scope: Scope = "partition"
     kind: str = field(default="preprocessor", init=False)
+    providers: frozenset[str] = field(default=PREPROCESSOR_PROVIDERS, init=False)
 
-    @classmethod
-    def normalize(cls, value: "Preprocessor | None") -> "Preprocessor | None":
-        if value is None:
-            return None
-        if isinstance(value, cls):
-            logger.bind(component="processor", processor="preprocessor", source="object", name=value.name).debug(
-                "using configured processor object"
-            )
-            value.validate_ready()
-            return value
+    def __post_init__(self) -> None:
+        if self.scope not in ("partition", "dataset"):
+            raise ValueError("preprocessor scope must be 'partition' or 'dataset'")
+        Processor.__post_init__(self)
 
-        raise TypeError(f"preprocessor must be a Preprocessor object or None, got {type(value).__name__}")
-
-    def outputs(
+    def run(
         self,
-        observation: RawObservation,
+        value: pl.DataFrame,
         *,
         strata: Any,
         schema: Any,
         encoding_context: Any,
-    ) -> Iterable[list[RawObservation]]:
-        result = self._call(
-            observation,
+    ) -> Iterable[pl.DataFrame]:
+        """Yield the zero, one, or many Polars frames produced by one call."""
+
+        result = self.call(
+            value,
             {
                 PreprocessorProvider.strata.value: strata,
                 PreprocessorProvider.schema.value: schema,
                 PreprocessorProvider.encoding_context.value: encoding_context,
             },
         )
-        yield from self._normalize_outputs(result)
-
-    def _normalize_outputs(self, result: Any) -> Iterable[list[RawObservation]]:
         if result is None:
-            logger.bind(component="processor", processor=self.kind, name=self.name, output="none").trace(
-                "discarded preprocessor output"
-            )
             return
-
-        if isinstance(result, Observation):
-            logger.bind(component="processor", processor=self.kind, name=self.name, output="observation").trace(
-                "accepted preprocessor output"
-            )
-            yield [dict(result.data)]
+        if isinstance(result, pl.DataFrame):
+            yield frame(result, kind=self.kind, name=self.name)
             return
-
-        if isinstance(result, (str, bytes, Mapping)):
+        invalid = (str, bytes, Mapping, pl.Series, pl.LazyFrame, pa.Table, pa.RecordBatch)
+        if isinstance(result, invalid) or not isinstance(result, Iterable):
             raise TypeError(
-                f"preprocessor '{self.name}' must return Observation, None, or an iterable of Observation | None; "
-                f"got {type(result).__name__}"
-            )
-        if not isinstance(result, Iterable):
-            raise TypeError(
-                f"preprocessor '{self.name}' must return Observation, None, or an iterable of Observation | None; "
+                f"preprocessor '{self.name}' must return DataFrame, Iterable[DataFrame], or None; "
                 f"got {type(result).__name__}"
             )
 
-        logger.bind(component="processor", processor=self.kind, name=self.name, output="iterable").trace(
-            "expanding preprocessor output"
-        )
-        for output in result:
-            if output is None:
-                logger.bind(component="processor", processor=self.kind, name=self.name, output="none").trace(
-                    "skipped preprocessor output item"
-                )
-                continue
-            if not isinstance(output, Observation):
-                raise TypeError(
-                    f"preprocessor '{self.name}' yielded {type(output).__name__}; expected Observation or None"
-                )
-            yield [dict(output.data)]
+        for item in result:
+            if not isinstance(item, pl.DataFrame):
+                raise TypeError(f"preprocessor '{self.name}' yielded {type(item).__name__}; expected DataFrame")
+            yield frame(item, kind=self.kind, name=self.name)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Postprocessor(Processor):
-    """Callable postprocessor object returned by `@postprocess`."""
+    """Polars output transform returned by :func:`postprocess`."""
 
     func: Callable[..., Any]
-    provider_names: frozenset[ProviderName] = field(default=POSTPROCESSOR_PROVIDERS, init=False)
-    primary_name: str = field(default="predictions", init=False)
     kind: str = field(default="postprocessor", init=False)
+    providers: frozenset[str] = field(default_factory=frozenset, init=False)
 
-    @classmethod
-    def normalize(cls, value: "Postprocessor | None") -> "Postprocessor | None":
-        if value is None:
-            return None
-        if isinstance(value, cls):
-            logger.bind(component="processor", processor="postprocessor", source="object", name=value.name).debug(
-                "using configured processor object"
-            )
-            value.validate_ready()
-            return value
+    def run(self, value: pl.DataFrame) -> pl.DataFrame:
+        """Apply and validate one Polars output transform."""
 
-        raise TypeError(f"postprocessor must be a Postprocessor object or None, got {type(value).__name__}")
+        return frame(self.call(value, {}), kind=self.kind, name=self.name)
 
-    def run(self, predictions: Predictions, *, available: Mapping[str, Any]) -> PostprocessorResult:
-        runtime_values: dict[str, Any] = {}
-        for name in self.runtime_params:
-            if name in available:
-                runtime_values[name] = available[name]
-                logger.bind(
-                    component="processor",
-                    processor=self.kind,
-                    name=self.name,
-                    provider=name,
-                    available=True,
-                ).debug("resolved postprocessor provider")
-                continue
 
-            parameter = self.signature.parameters[name]
-            if _is_optional(parameter):
-                runtime_values[name] = None
-                logger.bind(
-                    component="processor",
-                    processor=self.kind,
-                    name=self.name,
-                    provider=name,
-                    available=False,
-                    optional=True,
-                ).debug("resolved unavailable postprocessor provider as None")
-                continue
+PreprocessorInput: TypeAlias = Preprocessor | list[Preprocessor] | tuple[Preprocessor, ...] | None
+PostprocessorInput: TypeAlias = Postprocessor | list[Postprocessor] | tuple[Postprocessor, ...] | None
 
-            raise ValueError(
-                f"postprocessor parameter '{name}' is not available in this runtime; "
-                "make it optional or use this postprocessor only with a compatible runtime"
-            )
 
-        result = self._call(predictions, runtime_values)
-        if result is None:
-            logger.bind(component="processor", processor=self.kind, name=self.name, action="mutate").debug(
-                "postprocessor mutated predictions in place"
-            )
-            return None
-        if not isinstance(result, Mapping):
-            raise TypeError(f"postprocessor '{self.name}' must return a mapping or None, got {type(result).__name__}")
+def restore(kind: type[Processor], configuration: dict[str, Any], reference: tuple[str, str] | None) -> Processor:
+    """Rebuild processor configuration around an importable decorated function."""
 
-        logger.bind(component="processor", processor=self.kind, name=self.name, action="replace").debug(
-            "postprocessor replaced predictions"
-        )
-        return result
+    if reference is not None:
+        module, qualified = reference
+        resolved = importlib.import_module(module)
+        for name in qualified.split("."):
+            resolved = getattr(resolved, name)
+        if not isinstance(resolved, Processor):
+            raise TypeError(f"processor {module}.{qualified} must still refer to a decorated processor")
+        configuration = {**configuration, "func": resolved.func}
+    return kind(**configuration)
+
+
+def apply(table: pa.Table, processors: PostprocessorInput = ()) -> pa.Table:
+    """Apply an ordered Polars postprocessor pipeline to one Arrow table."""
+
+    pipeline = Postprocessor.normalize(processors)
+    if not pipeline:
+        return table
+    result = polars(table, context="postprocessor input")
+    for processor in pipeline:
+        result = processor.run(result)
+    return arrow(result, context="postprocessor output")
 
 
 @overload
-def preprocess(func: Callable[..., Any], **kwargs: Any) -> Preprocessor: ...
+def preprocess(
+    func: Callable[..., Any],
+    /,
+    *,
+    scope: Scope = "partition",
+) -> Preprocessor: ...
 
 
 @overload
 def preprocess(
     func: None = None,
-    **kwargs: Any,
+    /,
+    *,
+    scope: Scope = "partition",
 ) -> Callable[[Callable[..., Any]], Preprocessor]: ...
 
 
 def preprocess(
     func: Callable[..., Any] | None = None,
-    **kwargs: Any,
+    /,
+    *,
+    scope: Scope = "partition",
 ) -> Callable[[Callable[..., Any]], Preprocessor] | Preprocessor:
-    """Validate and wrap a callable as a relflow preprocessor."""
-    if kwargs:
-        unexpected = ", ".join(sorted(kwargs))
-        raise TypeError(f"unexpected preprocess keyword argument(s): {unexpected}")
+    """Wrap a callable as a Polars preprocessor."""
 
-    def decorator(inner: Callable[..., Any]) -> Preprocessor:
+    def decorate(inner: Callable[..., Any]) -> Preprocessor:
         if not callable(inner):
             raise TypeError("preprocess can only decorate callables")
-        return Preprocessor(func=inner, decorated=True)
+        return Preprocessor(func=inner, scope=scope)
 
     if func is None:
-        return decorator
-    return decorator(func)
+        return decorate
+    return decorate(func)
 
 
 @overload
-def postprocess(func: Callable[..., Any], **kwargs: Any) -> Postprocessor: ...
+def postprocess(func: Callable[..., Any], /) -> Postprocessor: ...
 
 
 @overload
-def postprocess(
-    func: None = None,
-    **kwargs: Any,
-) -> Callable[[Callable[..., Any]], Postprocessor]: ...
+def postprocess(func: None = None, /) -> Callable[[Callable[..., Any]], Postprocessor]: ...
 
 
 def postprocess(
     func: Callable[..., Any] | None = None,
-    **kwargs: Any,
+    /,
 ) -> Callable[[Callable[..., Any]], Postprocessor] | Postprocessor:
-    """Validate and wrap a callable as a relflow postprocessor."""
-    if kwargs:
-        unexpected = ", ".join(sorted(kwargs))
-        raise TypeError(f"unexpected postprocess keyword argument(s): {unexpected}")
+    """Wrap a callable as a Polars postprocessor."""
 
-    def decorator(inner: Callable[..., Any]) -> Postprocessor:
+    def decorate(inner: Callable[..., Any]) -> Postprocessor:
         if not callable(inner):
             raise TypeError("postprocess can only decorate callables")
-        return Postprocessor(func=inner, decorated=True)
+        return Postprocessor(func=inner)
 
     if func is None:
-        return decorator
-    return decorator(func)
+        return decorate
+    return decorate(func)
+
+
+__all__ = [
+    "Postprocessor",
+    "Preprocessor",
+    "PreprocessorProvider",
+    "postprocess",
+    "preprocess",
+]

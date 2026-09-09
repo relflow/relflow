@@ -34,6 +34,7 @@ model = rf.Model(
     n_heads=4,
     batch_size=64,
     attention="mha",
+    reduction=rf.Attention(n_outputs=2),
     dropout=0.10,
     optimizer=lambda module: torch.optim.AdamW(
         module.parameters(), lr=3e-4, weight_decay=1e-2
@@ -45,7 +46,7 @@ model = rf.Model(
         sku=rf.Category(size=2048),
         quantity=rf.Number,
     ),
-    returned=rf.Category(target=True, size=2),
+    returned=rf.Category(mask=True, size=2),
 )
 
 model
@@ -61,23 +62,30 @@ will need a different balance.
 | --- | --- | --- |
 | `d_model` | Positive; for the root, every Branch, and each query-pooled leaf, it must be divisible by `n_heads` with at least two dimensions per head | Width shared by datatype embeddings, branches, and decoders. Increasing it raises parameter memory and compute throughout the tree. |
 | `n_layers` | Positive | Self-attention layers on the generated root branch. More layers increase capacity and sequential compute. |
-| `n_heads` | Positive and even; must divide `d_model` with `d_model / n_heads >= 2` | Query heads on the generated root and its pooling block. More heads do not change total width, but each head becomes narrower. |
-| `attention` | `"mha"`, `"gqa"`, `"mqa"`, or `"none"` | Self-attention mode on the generated root. `"none"` skips root self-attention layers; the learned pooling block still uses attention. |
-| `n_linear` | Positive | Number of learned-query cross-attention pooling blocks; each also contains a feed-forward network. Increase only after measuring an under-capacity signal. |
-| `dropout` | `None` or a rate from `0.0` (inclusive) to `1.0` (exclusive) | Training-time dropout inside branch attention and feed-forward blocks. `None` behaves as zero. |
+| `n_heads` | Positive and even; must divide `d_model` with `d_model / n_heads >= 2` | Query heads on the generated root self-attention stack and the fallback for `rf.Attention` reduction. More heads do not change total width, but each head becomes narrower. |
+| `attention` | `"mha"`, `"gqa"`, `"mqa"`, or `"none"` | Self-attention mode on the generated root. `"none"` skips root self-attention layers; it does not disable reduction. |
+| `reduction` | `rf.Attention()`, `rf.Mean()`, or `None` | How encoded root memory is summarized. `Attention` owns its positive `n_outputs`; `Mean` emits one averaged encoded token; `None` preserves the routed slots and presence state. |
+| `dropout` | `None` or a rate from `0.0` (inclusive) to `1.0` (exclusive) | Training-time dropout inside branch self-attention and feed-forward blocks, and the fallback for reductions with no explicit dropout. `None` behaves as zero. |
 | `batch_size` | Positive | The model's expected batch size and the default used by data modules and logging. Larger batches trade memory for throughput and a different optimization regime. |
 | `name` | Non-empty schema-safe string | Generated root name and the first component of every public address. |
 | `description` | Optional string | Human-readable schema metadata; it does not change computation. |
-| `embed` | Boolean | Adds the normalized root representation to prediction output. It does not create a target. |
+| `embed` | Boolean | Adds the root reduction output to prediction output. Its leading shape follows that reduction, and it does not create a reconstruction objective. |
+| `mask` | `False`, a singleton shorthand, or a list/tuple of `rf.Mask` objects | Applies one decision atomically to every active descendant of the generated root. |
 | `optimizer` | Optimizer instance or factory | Required before `Trainer.fit(...)`. A factory is easier to reconstruct with a newly loaded or mutated model. |
 | `scheduler` | Scheduler config or factory | Optional Lightning optimizer scheduler configuration. |
 
-The schema validates that `n_heads` is even. Attention construction also
-requires `d_model % n_heads == 0` and `d_model // n_heads >= 2`, because each
-head receives a rotary embedding. Check both conditions for the root, every
-nested Branch override, and every leaf using `pooling="query"`. A leaf using
-`pooling="mean"` constructs no query attention, although its configured
-`n_heads` must still pass the even-positive schema validation.
+The schema validates that root, Branch, and leaf `n_heads` values are even.
+Attention construction also requires `d_model % n_heads == 0` and
+`d_model // n_heads >= 2`. An `rf.Attention(n_heads=...)` reduction override
+may be odd if it satisfies those two geometry constraints; it does not change
+the Branch's own head count. A leaf using `pooling="mean"` constructs no query
+attention, although its configured `n_heads` must still pass the even-positive
+schema validation.
+
+The numeric neural-layer `dropout` option is independent from the Boolean
+`Mask.dropout` purpose. The former drops activations inside attention and
+feed-forward blocks; the latter decides whether one data mask policy is active
+only during training.
 
 ## Choose An Attention Mode
 
@@ -86,17 +94,19 @@ nested Branch override, and every leaf using `pooling="query"`. A leaf using
 | `mha` | Same as query heads | Quality is the first priority or the model is still small. This is the default. |
 | `gqa` | Half the query heads, with a minimum of one | You want smaller key/value projections while retaining several key/value groups. |
 | `mqa` | One | Key/value projection memory matters more than maximum attention capacity. |
-| `none` | No self-attention layers | Children need only learned pooling, or you want a lower-cost ablation. |
+| `none` | No self-attention layers | Children need only the configured reduction, or you want a lower-cost ablation. |
 
 Grouped-query and multi-query attention reduce key/value projection width; they
 do not remove the quadratic interaction over positions. Benchmark them on the
 actual branch shapes and device. `attention="none"` disables the stack of
-self-attention layers but does not disable the branch's learned query pooling.
+self-attention layers but does not disable the branch's independently
+configured reduction. With the default `rf.Attention()` reduction, learned
+query attention still runs.
 
 ## Configure Nested Branches
 
 Every child `Branch` has its own context budget and can override depth, heads,
-attention mode, pooling depth, and dropout:
+attention mode, reduction, output count, and dropout:
 
 ```{python .marimo}
 #| echo: true
@@ -108,7 +118,7 @@ events = rf.Branch(
     attention="gqa",
     n_layers=1,
     n_heads=4,
-    n_linear=1,
+    reduction=rf.Attention(n_outputs=4, n_layers=1),
     dropout=0.05,
     event_type=rf.Category(size=128),
     amount=rf.Number,
@@ -122,8 +132,78 @@ should survive truncation, `"head"` when the earliest values matter, and
 `"error"` when silent truncation would violate the schema contract.
 
 Put more capacity where the structure requires it. A long event branch may
-benefit from local attention while a two-item role branch may need only pooling.
+benefit from local attention while a two-item role branch may need only a
+simple reduction.
 Root depth does not need to match every child depth.
+
+## Choose Reduction From The Downstream Question
+
+`attention` controls how a Branch mixes its child tokens. `reduction` is a
+separate operation that controls what it sends upward after that mixing. The
+three choices make different information and cost commitments:
+
+| Reduction | Output width | Good fit |
+| --- | ---: | --- |
+| `rf.Attention(n_outputs=Q)` | Fixed `Q` | Anonymous learned global summaries with a fixed parent width. `Q` supplies capacity, not item, group, or target semantics. |
+| `rf.Mean()` | One | A presence-normalized mean of encoded token vectors is a sufficient statistic. |
+| `None` | All encoded child slots | Identity or individual-value reasoning requires routed slot-level evidence and its presence state. |
+
+`rf.Attention` accepts optional `n_heads` and `dropout` overrides and a positive
+`n_layers`. It owns a positive `n_outputs`, defaulting to one, and its
+`position` flag controls rotary position inside the learned-query reducer only.
+Set both `position=False` and Branch `attention="none"` for a strict unordered
+ablation. `rf.Mean()` is parameter-free and intrinsically produces one output.
+
+::: {.callout-warning title="A wider reduction is not a relationship operator"}
+Several Attention outputs give the branch more latent capacity, but they do
+not join sibling entities or guarantee one output per item. Mean
+directly exposes only the average encoded vector—not the arithmetic mean of a
+raw Number field; upstream self-attention would
+have to encode any needed count, identity, order, extrema, or item statistic
+before that average. Passing everything with `reduction=None` preserves
+evidence but grows the parent's sequence and attention cost; it does not add
+semantic provenance or perform a join. Finally, inspect the full path: a
+one-output parent can
+immediately reintroduce the bottleneck a child reduction was configured to
+avoid.
+:::
+
+For example, this keeps entity-keyed evidence until the root, then gives the
+root four learned summary slots:
+
+```python
+model = rf.Model(
+    d_model=64,
+    n_layers=2,
+    n_heads=4,
+    reduction=rf.Attention(n_outputs=4),
+    entities=rf.Branch(
+        length=16,
+        reduction=None,
+        entity_id=rf.Hash(n_hashes=4),
+        value=rf.Number,
+    ),
+    target=rf.Number(mask=True),
+)
+```
+
+This configuration preserves encoded slots and presence across the child boundary; it does not
+prove that the four root summaries can implement a keyed lookup. Use a paired
+synthetic proof at the intended lengths before relying on that behavior.
+
+These reducers learn approximations on the training distribution. If an
+accounting result, filter, join, or derived value must be exact by contract,
+compute it in an `rf.Preprocessor` or the application data pipeline rather than
+using a neural proof as an arithmetic guarantee.
+
+## Configure Decoder Routing Deliberately
+
+Leaf decoders expose a positional control for focused ablations. The default
+`decoder_position=None` disables positional rotation for scalar targets and
+enables it for repeated targets. Set `decoder_position=True` when a scalar
+answer intentionally depends on input order. Set it to `False` as a repeated-
+target rotary-position ablation; learned target queries still remain distinct
+by output slot, so this does not make repeated outputs permutation-equivariant.
 
 ## Separate Model Width From Vocabulary Capacity
 
@@ -148,7 +228,7 @@ unexplained off-by-one slot to either type.
 
 Use this order so an architecture change is not confused with a data problem:
 
-1. Verify queries, states, split boundaries, and target omission with
+1. Verify queries, states, split boundaries, and reconstruction-field omission with
    `model.encode(...)`.
 2. Establish a simple baseline and one primary validation metric.
 3. Tune branch lengths and overflow policies; these determine what evidence is
@@ -156,9 +236,13 @@ Use this order so an architecture change is not confused with a data problem:
 4. Tune batch size and data-loader throughput for the target hardware.
 5. Increase `d_model` only if train and validation metrics both suggest
    underfitting.
-6. Increase branch/root depth only when wider representations are insufficient.
-7. Compare `mha`, `gqa`, `mqa`, and `none` on quality, memory, and latency.
-8. Add dropout when the train/validation gap indicates overfitting.
+6. Choose each reduction from the information its parent needs; compare a
+   fixed-width reduction with `None` before assuming the model needs more depth.
+7. Increase Attention `n_outputs` only when a paired control
+   demonstrates a reduction bottleneck.
+8. Increase branch/root depth only when wider representations are insufficient.
+9. Compare `mha`, `gqa`, `mqa`, and `none` on quality, memory, and latency.
+10. Add dropout when the train/validation gap indicates overfitting.
 
 Do not choose a model solely by total loss when the product decision depends on
 a specific target, threshold, or subgroup. Use the [Evaluation and Metrics](evaluation.qmd)
@@ -186,10 +270,12 @@ with production-like branch lengths.
 | Signal | Check first | Likely next move |
 | --- | --- | --- |
 | Out of memory on the first batch | Batch size and nested branch shapes | Reduce batch size or branch lengths before shrinking every model dimension. |
-| Train and validation metrics are both flat | Queries, target/trainable masks, optimizer, and baseline | Fix the data contract first; then add width or depth only if the model is genuinely underfitting. |
+| Train and validation metrics are both flat | Queries, trainable reconstruction masks, optimizer, and baseline | Fix the data contract first; then add width or depth only if the model is genuinely underfitting. |
 | Train improves while validation degrades | Split integrity and train/validation gap | Add dropout, reduce capacity, or improve data—not a larger model. |
 | Runtime rises sharply after one field change | Branch length, Category/Set capacity, or Text `max_length` | Profile that field's activations and scoring work; undo unexplained headroom. |
 | Head/attention construction fails | Even head count, divisibility into `d_model`, and at least two dimensions per head | Choose an even positive head count for which `d_model % n_heads == 0` and `d_model // n_heads >= 2`; check root, Branch, and query-pooled leaf overrides. |
+| A task works on short branches but collapses as length grows | Reduction output count and every downstream reduction | Compare more `Attention` outputs with `reduction=None`; preserve the signal through parents before adding unrelated model width. |
+| Parent attention memory jumps after a schema edit | A child changed to `reduction=None` or increased its fixed output count | Bound the child with an appropriate reduction, shorten the branch, or accept the measured cost when token-level evidence is required. |
 
 ## Where Next
 

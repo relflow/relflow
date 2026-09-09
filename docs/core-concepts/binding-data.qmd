@@ -1,311 +1,229 @@
 ---
-marimo-static-output: true
-eval: false
+title: Binding Data
 ---
 
 # Binding Data
 
-**Example status — excerpt:** blocks compare binding choices; use the tested
-[Getting Started](../getting-started.qmd) lifecycle for complete execution.
+**Example status — reference:** examples show the eager Polars processor
+contract used by the shipped runtime.
 
-Binding is the decision between letting schema names read source keys directly,
-writing an explicit JMESPath query, and reshaping the record with a
-preprocessor.
+RelFlow binds a schema to canonical observations in three steps: direct field
+selection, optional structural queries, and an ordered preprocessing pipeline.
+The preprocessor result is the source of truth consumed by query/coalescing.
 
-Start with the simplest option that expresses the input contract:
+## Direct Binding
 
-| Source relationship | Use |
-| --- | --- |
-| Field and branch names already match the record | inferred query |
-| The source shape is stable, but a key or path differs | explicit `query=...` |
-| Values require Python logic, sorting, windowing, coercion, or derivation | `@rf.preprocess` |
-| One raw record should produce zero, one, or several model observations | yielding preprocessor |
+By default, a node reads its own name relative to its parent. A root field named
+`amount` reads the top-level `amount` column; a field named `sku` under an
+`items` branch reads `sku` from each item struct.
 
-Queries select values. Preprocessors change observations. Keeping that boundary
-clear makes the input path easier to test and reuse.
-
-## Same Names Need No Configuration
-
-For flat records, a schema leaf reads the same-named source key:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-record = {
-    "amount": 12.50,
-    "merchant": "bookshop",
-    "approved": "true",
-}
-```
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-import relflow as rf
-
+```python
 model = rf.Model(
     d_model=32,
     n_layers=1,
     n_heads=4,
     amount=rf.Number,
-    merchant=rf.Category(size=4096),
-    approved=rf.Category(target=True, size=2),
+    items=rf.Branch(length=16, sku=rf.Category(size=2048)),
 )
 ```
 
-The inferred bindings are:
+Missing modeled columns are errors. Null values are data and follow the field's
+`nullable` contract.
 
-| Address | Request-level query |
-| --- | --- |
-| `record/amount` | `[*].amount` |
-| `record/merchant` | `[*].merchant` |
-| `record/approved` | `[*].approved` |
+## Structural Queries
 
-The leading `[*]` selects from one processed observation. Public methods accept
-raw dictionaries and create that observation wrapper automatically.
+Set `query=` only when a node needs a different structural path:
 
-Changing the root name changes addresses, not source keys:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-named_model = rf.Model(
-    name="transaction",
+```python
+model = rf.Model(
     d_model=32,
     n_layers=1,
     n_heads=4,
-    amount=rf.Number,
+    recent_skus=rf.Category(query="orders[-8:][*].sku", size=2048),
 )
 ```
 
-The address becomes `transaction/amount`; its query remains `[*].amount`.
+Queries navigate members, list traversal, indices, and slices. They do not
+filter, join, sort, aggregate, or derive values. Put those operations in a
+preprocessor so users can express them directly with Polars.
 
-## Branch Names Infer Repeated Paths
+## Polars Preprocessors
 
-Use `Branch` when sibling fields share positions in a repeated child list:
+A preprocessor receives and returns an eager `polars.DataFrame`:
 
-```{python .marimo}
-#| echo: true
-#| output: true
-
-order = {
-    "order_source": "web",
-    "line_items": [
-        {"sku": "A12", "quantity": 2, "price": 19.99},
-        {"sku": "B07", "quantity": 1, "price": 45.50},
-    ],
-}
-```
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-order_model = rf.Model(
-    d_model=32,
-    n_layers=1,
-    n_heads=4,
-    order_source=rf.Category(size=32),
-    line_items=rf.Branch(
-        length=32,
-        sku=rf.Category(size=2048),
-        quantity=rf.Number,
-        price=rf.Number,
-    ),
-)
-```
-
-| Address | Request-level query |
-| --- | --- |
-| `record/order_source` | `[*].order_source` |
-| `record/line_items/sku` | `[*].line_items[*].sku` |
-| `record/line_items/quantity` | `[*].line_items[*].quantity` |
-| `record/line_items/price` | `[*].line_items[*].price` |
-
-The child selector preserves the repeated dimension. Against one processed
-observation, `[*].line_items[*].sku` returns `[["A12", "B07"]]`: one root item
-containing two line-item values.
-
-Every additional nested `Branch` contributes another `.<name>[*]` segment.
-Branch overflow is applied after selection, in query-result order. Use
-`overflow="tail"` for histories whose newest items are last, or
-`overflow="error"` when silent truncation would violate the data contract.
-
-## Use A Query For Stable Selection
-
-An explicit query lets a stable schema use a differently shaped source:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-source_record = {
-    "transaction": {
-        "amount_usd": 12.50,
-        "merchant_name": "bookshop",
-    },
-    "outcome": "approved",
-}
-```
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-queried_model = rf.Model(
-    d_model=32,
-    n_layers=1,
-    n_heads=4,
-    amount=rf.Number(query="[*].transaction.amount_usd"),
-    merchant=rf.Category(query="[*].transaction.merchant_name", size=4096),
-    label=rf.Category(query="[*].outcome", target=True, size=2),
-)
-```
-
-Keep these rules in mind:
-
-- write a full request-level query from the processed observation, usually
-  beginning with `[*].`;
-- do not add the outer batch selector—`[*][*].amount` is normally one level too
-  deep;
-- explicit leaf queries are not relative to their parent `Branch`;
-- preserve one result dimension for every branch in the schema path;
-- use JMESPath syntax, not JSONPath syntax.
-
-The schema address remains `record/merchant` even though its value comes from
-`transaction.merchant_name`. Addresses describe the model contract; queries
-describe the source contract.
-
-## Use A Preprocessor For Logic
-
-JMESPath is a selection language. Use a RelFlow `Preprocessor` when the
-transformation needs business logic or needs to be unit tested as Python:
-
-```{python .marimo}
-#| echo: true
-#| output: true
+```python
+import polars as pl
+import relflow as rf
 
 @rf.preprocess
-def normalize_transaction(record: dict) -> rf.Observation:
-    return rf.Observation(
-        {
-            "amount": float(record["amount_usd"]),
-            "merchant": record["merchant"].strip().lower(),
-        }
+def total(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(
+        amount=pl.col("subtotal").cast(pl.Float64) + pl.col("tax").fill_null(0.0)
     )
 ```
 
-Pass the returned `Preprocessor` object to every path that consumes the raw
-shape:
+RelFlow converts Arrow to Polars before the ordered processor pipeline and back
+to Arrow afterward. A callback must not return a `LazyFrame`, Arrow object,
+mapping, Series, or scalar. A preprocessor may return one frame, an iterable of
+frames, or `None`.
 
-```{python .marimo}
-#| echo: true
-#| output: true
+The returned rows are canonical observations. Users may filter, reorder, join,
+explode, duplicate, aggregate, or replace columns without preserving an input
+identity. A nonempty observation set must have at least one column.
 
-raw_requests = [{"amount_usd": "12.50", "merchant": " Bookshop "}]
-predictions = model.predict(raw_requests, preprocess=normalize_transaction)
-```
-
-Data modules also accept a preprocessor for training, validation, test, and
-predict splits. The same object should travel with the model workflow; changing
-normalization or time-window rules between splits changes the effective data
-contract.
-
-Use a preprocessor for:
-
-- type coercion and source-version normalization;
-- sorting before head/tail selection;
-- point-in-time or `as_of` filtering;
-- derived values such as elapsed time or recency;
-- coordinated filtering of several sibling fields;
-- yielding multiple model observations or discarding a raw record.
-
-See [Data Modules: Preprocessors](../guides/data-modules.qmd#preprocessors) for
-the return contract, provider arguments, and yielding preprocessors.
-
-## Keep Sibling Fields Aligned
-
-Leaves under one branch describe the same repeated coordinates. If custom
-queries filter siblings differently, the first value in one field may no longer
-describe the same child object as the first value in another.
-
-RelFlow uses a direct extractor for simple projection paths such as
-`[*].events[*].amount`. It preserves explicit `None` values when every child
-mapping contains the key. A stacking preprocessor should therefore write each
-nullable sibling key on every child object.
-
-More complex explicit JMESPath expressions—filters, functions, or quoted
-paths—fall back to standard JMESPath evaluation, whose projections can omit
-null results. Preserve positions with `map`:
+### Compose processors in order
 
 ```python
-device_id=rf.Hash(
-    query="[*].map(&device_id, events[?event_type == 'login'])"
+@rf.preprocess
+def logarithm(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(amount_log=pl.col("amount").log1p())
+
+pipeline = (total, logarithm)
+```
+
+Processor arguments accept one decorated processor, a list, a tuple, or
+`None`. RelFlow snapshots them as an immutable tuple and executes them strictly
+left to right. There are no column declaration arguments; a missing column
+fails in the Polars expression that uses it, and the final Arrow schema is
+locked for each configured split.
+
+### Partition and dataset scope
+
+Partition scope is the default and processes each incoming Arrow partition:
+
+```python
+@rf.preprocess(scope="partition")
+def prepare(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(amount=pl.col("amount").cast(pl.Float64))
+```
+
+Dataset scope materializes the logical split at that exact pipeline position:
+
+```python
+@rf.preprocess(scope="dataset")
+def chronological(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.sort("event_time")
+```
+
+Dataset scope is available for in-memory Arrow and Arrow Dataset sources.
+Restartable callable sources do not yet support it because coordinated
+materialization is not implemented.
+
+## Bind User Configuration
+
+Additional parameters are keyword-only and configured immutably with
+`.partial(...)`:
+
+```python
+@rf.preprocess
+def standardize(
+    frame: pl.DataFrame,
+    *,
+    center: float,
+    spread: float,
+) -> pl.DataFrame:
+    return frame.with_columns(amount=(pl.col("amount") - center) / spread)
+
+prepare = standardize.partial(center=12.5, spread=3.0)
+```
+
+The pipeline owns three optional parameter names: `strata`, `schema`, and
+`encoding_context`. They are injected only when explicitly present in the
+signature:
+
+```python
+@rf.preprocess
+def route(frame: pl.DataFrame, *, strata) -> pl.DataFrame:
+    return frame if str(strata) == "train" else frame.filter(pl.col("active"))
+```
+
+## Fit State Outside Iteration
+
+Fit lookup tables, normalization statistics, encoders, or policy state before
+data iteration and bind the immutable result with `.partial(...)`. Do not fit
+inside a callback: it would make behavior depend on partition order and worker
+timing.
+
+## Filter Rows
+
+Filtering is an ordinary Polars operation:
+
+```python
+@rf.preprocess
+def valid(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.filter(
+        (pl.col("status") == "complete") & pl.col("amount").is_not_null()
+    )
+```
+
+Returning an empty frame is valid when its columns and dtypes remain known.
+
+## Join A Small Lookup Without Reordering
+
+```python
+lookup = pl.DataFrame(
+    {"merchant_id": [10, 20], "merchant_risk": [0.1, 0.8]}
 )
-risk_score=rf.Number(
-    query="[*].map(&risk_score, events[?event_type == 'login'])"
-)
+
+@rf.preprocess
+def enrich(frame: pl.DataFrame, *, lookup: pl.DataFrame) -> pl.DataFrame:
+    return frame.join(lookup, on="merchant_id", how="left", maintain_order="left")
+
+enrich_merchants = enrich.partial(lookup=lookup)
 ```
 
-These queries apply the same filter and retain a `None` placeholder when a
-selected login has no risk score.
+A one-to-many join may expand rows; that output is authoritative. Preserve a
+domain key as an ordinary column when downstream consumers need one.
 
-For sorting, time windows, or multi-step rules, preprocess the child objects as
-one list before leaf queries run. That keeps alignment explicit and testable.
+## Transform A Nested Collection
 
-Avoid JMESPath's flattening operator `[]` unless dropping an array dimension is
-intentional. A branch field commonly needs `[*].items[*].sku`, not
-`[*].items[].sku`.
+Use list expressions to transform nested records without Python row loops:
 
-## Verify The Boundary
-
-Test a custom expression against one processed observation:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-import jmespath
-
-observation = [source_record]
-assert jmespath.search("[*].transaction.amount_usd", observation) == [12.50]
+```python
+@rf.preprocess
+def recent_logins(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(
+        events=pl.col("events").list.eval(
+            pl.element().filter(pl.element().struct.field("kind") == "login")
+        )
+    )
 ```
 
-Then inspect tensorization when a field is still empty or has the wrong shape:
+## Install The Same Pipeline Everywhere
 
-```{python .marimo}
-#| echo: true
-#| output: true
+Attach the same ordered preprocessor tuple to every path that must share the
+same canonical observation contract:
 
-encoded = queried_model.encode([source_record])
-print(encoded)
+```python
+pipeline = (total, logarithm)
+
+data = rf.ArrowDataModule(model=model, train=train, preprocessor=pipeline)
+predictions = model.predict(requests, preprocess=pipeline)
+deployment = rf.Deployment(model=model).preprocess(pipeline)
 ```
 
-`model.encode(...)` is a diagnostic boundary: it confirms what preprocessing
-and queries supplied before architecture behavior is involved.
+## Retention Is Output, Not Binding
 
-## Decision Checklist
+`retain=` controls which processed input columns appear under the prediction
+table's `inputs` struct. It does not change model binding or preprocessing.
 
-Before training, verify that:
+```python
+result = model.predict(requests, preprocess=pipeline, retain=("request_id",))
+```
 
-- every inferred field name exists in representative source records;
-- every explicit query starts at the processed-observation level;
-- query result dimensions match the branch path;
-- sibling queries preserve coordinate alignment;
-- branch length and overflow match ordering semantics;
-- the same preprocessor is used for train, validate, test, batch, and online
-  prediction;
-- target fields are present where loss is computed and may be omitted from
-  prediction requests.
+## What Belongs In An Extension?
 
-## Where Next
+An extension owns datatype meaning: accepted Arrow families, semantic
+validation, tensorization, embedding, decoding, loss, and output writing.
+Application-specific renaming, joins, filters, normalization, and policy
+selectors belong in preprocessors.
 
-- Use [Advanced Query Paths](querypaths.qmd) for quoted keys, filters, indexes,
-  slices, mutations, and troubleshooting.
-- Use [Data Flow](data-flow.qmd) to place binding in the full model lifecycle.
-- Use [Model Tree](model-tree.qmd) for branch shapes and addresses.
-- Use [Temporal Validation](../guides/temporal-validation.qmd) for point-in-time
-  preprocessing and leakage controls.
+## Binding Checklist
+
+- Use direct names when source nesting matches the schema.
+- Use `query=` only for structural navigation.
+- Use eager Polars preprocessors for data-dependent transformations.
+- Treat preprocessor output as the canonical observation set.
+- Order stages explicitly and keep one final schema per split.
+- Fit external state before iteration and bind it with `.partial(...)`.
+- Keep required business identifiers as ordinary data columns.

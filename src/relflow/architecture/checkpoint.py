@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING, Any
 import lightning.pytorch as lit
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
-from loguru import logger
 
 from relflow._version import UNKNOWN_VERSION
 from relflow.architecture.graph import ModelGraph
+from relflow.logging import logger
 from relflow.structs.experiment import Schema
 
 if TYPE_CHECKING:
@@ -94,14 +94,27 @@ class CheckpointState:
 
         device = module.device
         was_training = module.training
-        module.schema = Schema.model_validate(checkpoint["schema"])
-        module.batch_size = checkpoint["batch_size"]
-        ModelGraph.install(module)
-        if isinstance(device, torch.device):
-            module.to(device=device)
-        module.load_state_dict(state_dict=checkpoint["state_dict"])
+        previous_schema = module.schema
+        previous_batch_size = module.batch_size
+        previous_nodes = module.nodes
+        previous_example = module.example_input_array
+        try:
+            module.schema = Schema.model_validate(checkpoint["schema"])
+            module.batch_size = checkpoint["batch_size"]
+            ModelGraph.install(module)
+            if isinstance(device, torch.device):
+                module.to(device=device)
+            module.load_state_dict(state_dict=checkpoint["state_dict"])
+        except Exception:
+            module.schema = previous_schema
+            module.batch_size = previous_batch_size
+            module.nodes = previous_nodes
+            module.example_input_array = previous_example
+            module.train(was_training)
+            raise
         module.train(was_training)
         CheckpointState.restore_version(module, checkpoint)
+        module.reset_contracts()
 
     @staticmethod
     def load(model_cls: type["Model"], checkpoint: str | Path) -> "Model":

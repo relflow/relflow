@@ -45,7 +45,7 @@ class NodePredicate(pydantic.BaseModel):
 
         if isinstance(value, NodeAttribute):
             return cls(
-                func=lambda node: _has_model_attribute(node, value.name) and value.get(node) is True,
+                func=lambda node: has_model_attribute(node, value.name) and value.get(node) is True,
                 key=("truthy", value.name),
             )
 
@@ -85,7 +85,7 @@ class NodePredicate(pydantic.BaseModel):
         )
 
 
-def _cache_value(value: Any) -> Any:
+def cache_value(value: Any) -> Any:
     try:
         hash(value)
     except TypeError:
@@ -105,7 +105,7 @@ _QUERYABLE_BUILTINS = frozenset(
         "children",
         "ancestors",
         "descendants",
-        "target",
+        "reconstruct",
     }
 )
 
@@ -118,7 +118,7 @@ class NodeAttribute(pydantic.BaseModel):
     name: str = pydantic.Field(
         description=(
             "Queryable node attribute. Built-ins include name, type, address, parent, "
-            "children, ancestors, descendants, and target. Pydantic fields and "
+            "children, ancestors, descendants, and reconstruct. Pydantic fields and "
             "extra metadata fields are also queryable."
         )
     )
@@ -139,8 +139,12 @@ class NodeAttribute(pydantic.BaseModel):
             return tuple(str(parent.address) for parent in getattr(node, "ancestors", ()) if parent.address)
         if self.name == "descendants":
             return tuple(str(child.address) for child in getattr(node, "descendants", ()))
-        if self.name == "target":
-            return isinstance(node, Leaf) and node.active and node.target
+        if self.name == "reconstruct":
+            return (
+                isinstance(node, Leaf)
+                and node.active
+                and any(policy.reconstruct for owner in node.path for policy in getattr(owner, "mask", ()))
+            )
 
         extra = getattr(node, "model_extra", None) or {}
         if self.name in extra:
@@ -150,7 +154,7 @@ class NodeAttribute(pydantic.BaseModel):
 
     def exists(self) -> NodePredicate:
         return NodePredicate(
-            func=lambda node: _has_model_attribute(node, self.name),
+            func=lambda node: has_model_attribute(node, self.name),
             key=("exists", self.name),
         )
 
@@ -176,7 +180,7 @@ class NodeAttribute(pydantic.BaseModel):
             key=(
                 "is_in",
                 self.name,
-                tuple(sorted((_cache_value(value) for value in cached_values), key=repr)),
+                tuple(sorted((cache_value(value) for value in cached_values), key=repr)),
             ),
         )
 
@@ -190,7 +194,7 @@ class NodeAttribute(pydantic.BaseModel):
     def contains(self, value: Any) -> NodePredicate:
         return NodePredicate(
             func=lambda node: value in (self.get(node) or ()),
-            key=("contains", self.name, _cache_value(value)),
+            key=("contains", self.name, cache_value(value)),
         )
 
     def is_null(self) -> NodePredicate:
@@ -208,13 +212,13 @@ class NodeAttribute(pydantic.BaseModel):
     def __eq__(self, other: Any) -> NodePredicate:  # type: ignore[override]  # ty: ignore[invalid-method-override]
         return NodePredicate(
             func=lambda node: self.get(node) == other,
-            key=("eq", self.name, _cache_value(other)),
+            key=("eq", self.name, cache_value(other)),
         )
 
     def __ne__(self, other: Any) -> NodePredicate:  # type: ignore[override]  # ty: ignore[invalid-method-override]
         return NodePredicate(
             func=lambda node: self.get(node) != other,
-            key=("ne", self.name, _cache_value(other)),
+            key=("ne", self.name, cache_value(other)),
         )
 
 
@@ -227,7 +231,7 @@ NodeSelector: TypeAlias = NodePredicate | NodeAttribute | Callable[[Node], bool]
 ExtendArg: TypeAlias = NodeSelector | SchemaField
 
 
-def _has_model_attribute(node: Node, name: str) -> bool:
+def has_model_attribute(node: Node, name: str) -> bool:
     if name in _QUERYABLE_BUILTINS:
         return True
 

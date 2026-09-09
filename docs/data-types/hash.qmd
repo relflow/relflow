@@ -3,7 +3,6 @@ marimo-static-output: true
 pyproject: |
   requires-python = ">=3.12"
   dependencies = [
-    "blake3>=1.0.8",
     "marimo>=0.23.8",
     "relflow[serving] @ git+https://github.com/relflow/relflow.git",
   ]
@@ -14,7 +13,8 @@ pyproject: |
 Use `Hash` for large or unbounded identifiers when equality is useful but
 the values should not become a learned vocabulary. Typical examples include
 device, account, counterparty, product, and hostname identifiers.
-In serialized schemas, select it with `"type": "hash"`.
+In serialized schemas, select it with `"type": "hash"`. Its Polars-backed
+hashing implementation is included in the base RelFlow installation.
 
 ```{python .marimo}
 #| echo: true
@@ -25,7 +25,7 @@ import relflow as rf
 transactions = rf.Branch(
     name="transactions",
     length=16,
-    account_id=rf.Hash(p_mask=0.15, n_hashes=4),
+    account_id=rf.Hash(mask=rf.Mask(rate=0.15, reconstruct=True), n_hashes=4),
     amount=rf.Number,
 )
 
@@ -38,10 +38,10 @@ no useful signal.
 
 ## Input Values
 
-`Hash` accepts MessagePack-compatible hashable scalar values such as
-strings, integers, floats, booleans, and bytes. `None` has state `null`, and a
-missing branch slot has state `padded`. Lists, mappings, and unsupported Python
-objects are rejected.
+`Hash` accepts Arrow integer, string, and binary values. `None` has state
+`null`, and a missing branch slot has state `padded`. Normalize floats,
+booleans, and application-specific identifiers in a preprocessor. Lists,
+mappings, and unsupported Python objects are rejected.
 
 The same value receives the same representation everywhere in one encoded
 batch, including across different `Hash` leaves. Training and validation
@@ -63,10 +63,18 @@ Shared leaf options are documented in
 
 ## Representation And Learning
 
-Tensorization encodes each value with keyed BLAKE3 into `n_hashes` signed
-64-bit integers. On the model device, each integer is normalized and expanded
-into a sinusoidal representation. The lane representations are summed directly
-in model space. Non-valued states use a field-local learned state embedding.
+Tensorization passes the retained Arrow column directly to Polars' native
+seeded hash operation. The Arrow atom family contributes to the seeds, keeping
+integer, string, and binary identities distinct. Each of the `n_hashes` lanes
+becomes one signed 64-bit integer. On the model device, each integer is
+normalized and expanded into a sinusoidal representation. The lane
+representations are summed directly in model space. Non-valued states use a
+field-local learned state embedding.
+
+These hashes need stability only within one local-rank batch. Training and
+validation share seeds across every `Hash` leaf in that batch, then rotate them
+for the next batch. They are not a durable serialization or cross-version
+identifier format.
 
 For reconstruction, each hash lane is uniformly quantized into `n_buckets` and
 trained with cross entropy. These metrics measure recovery of the fingerprint;
@@ -74,7 +82,7 @@ the original raw value cannot be decoded from model output.
 
 Matching hashes allow attention to recognize equal values while their tokens
 remain together. They do not guarantee correspondence after a branch has been
-compressed into a pooled representation.
+compressed by a fixed-width reduction.
 
 ## Prediction Output
 
@@ -87,4 +95,4 @@ identifier across separately tensorized training batches.
 - Use [Category](category.qmd) for persistent bounded labels.
 - Use [Branch](branch.qmd) to configure repeated observations.
 - Read [Field Stacking](../guides/field-stacking.qmd) when several semantic
-  roles need token-level interaction before pooling.
+  roles need token-level interaction before reduction.

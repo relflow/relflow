@@ -1,20 +1,33 @@
+import pickle
+
 import pytest
 
 import relflow as rf
 from relflow.structs.enums import TensorKey
 
 
-def test_model_constructor_builds_record_branch_and_infers_queries():
+def test_schema_pickle_discards_derived_selection_predicates():
+    model = rf.Model(id=rf.Category(size=32), d_model=8, n_layers=1, n_heads=2)
+    selected = model.select(rf.where("type") == "category")
+
+    restored = pickle.loads(pickle.dumps(model.schema))
+
+    assert selected == [model.schema.requests["record/id"]]
+    assert restored._selection_cache == {}
+    assert restored.select(rf.where("type") == "category") == [restored.requests["record/id"]]
+
+
+def test_model_constructor_supports_direct_binding_and_opt_in_queries():
     model = rf.Model(
         rf.Category(
             "job_code",
-            query='[*]."job code"',
+            query='source["job code"]',
             description="job code",
             size=128,
             source="openml",
         ),
         rf.Number("amount"),
-        rf.Category("label", target=True, embed=False, metric="roc_auc", topk=[2, 3]),
+        rf.Category("label", mask=True, embed=False, metric="roc_auc", topk=[2, 3]),
         d_model=32,
         n_layers=2,
         n_heads=4,
@@ -32,31 +45,34 @@ def test_model_constructor_builds_record_branch_and_infers_queries():
     job = params.requests["record/job_code"]
     assert job.name == "job_code"
     assert job.description == "job code"
-    assert job.query == '[*]."job code"'
+    assert job.query == 'source["job code"]'
     assert job.size == 128
     assert job.source == "openml"
 
     amount = params.requests["record/amount"]
-    # Inferred queries are request-level expressions. The encoder prepends the
-    # outer batch selector at search time, so this intentionally is not
-    # `[*][*].amount`.
-    assert amount.query == "[*].amount"
+    assert amount.query is None
     assert amount.active is True
     assert amount.embed is False
 
     label = params.requests["record/label"]
-    assert label.p_prune == 1.0
+    assert label.mask == (rf.Mask(skip=True, dropout=False, reconstruct=True),)
     assert label.embed is False
     assert label.metric == "roc_auc"
     assert label.topk == [2, 3]
-    assert params.target == ["record/label"]
+    assert params.reconstruct == ["record/label"]
 
 
-def test_model_from_tree_remains_a_compatibility_wrapper():
-    direct = rf.Model(rf.Number("amount"), d_model=16, n_layers=1, n_heads=4)
-    compatible = rf.Model.from_tree(rf.Number("amount"), d_model=16, n_layers=1, n_heads=4)
+def test_model_uses_constructor_without_from_tree_alternative():
+    model = rf.Model(
+        rf.Number("amount"),
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+        reduction=rf.Mean(),
+    )
 
-    assert compatible.schema.model_dump(mode="python") == direct.schema.model_dump(mode="python")
+    assert model.schema.requests["record/amount"].name == "amount"
+    assert not hasattr(rf.Model, "from_tree")
 
 
 def test_model_constructor_rejects_duplicate_sources():
@@ -70,13 +86,13 @@ def test_model_constructor_rejects_duplicate_sources():
         )
 
 
-def test_model_constructor_accepts_branch_nodes_and_infers_nested_queries():
+def test_model_constructor_accepts_branch_nodes_with_optional_leaf_queries():
     model = rf.Model(
         rf.Branch(
             rf.Number("amount"),
             rf.Category(
                 "merchant_code",
-                query='[*].transactions[*]."merchant code"',
+                query='source["merchant code"]',
                 description="merchant code",
                 size=32,
             ),
@@ -92,20 +108,18 @@ def test_model_constructor_accepts_branch_nodes_and_infers_nested_queries():
     assert "record/transactions" in params.branches
 
     amount = params.requests["record/transactions/amount"]
-    # Nested defaults follow the same convention: one leading selector here,
-    # with the outer batch selector added by the encoder.
-    assert amount.query == "[*].transactions[*].amount"
+    assert amount.query is None
     assert params.shapes["record/transactions/amount"] == (1, 4)
 
     merchant = params.requests["record/transactions/merchant_code"]
     assert merchant.name == "merchant_code"
     assert merchant.description == "merchant code"
-    assert merchant.query == '[*].transactions[*]."merchant code"'
+    assert merchant.query == 'source["merchant code"]'
     assert merchant.size == 32
 
 
 def test_branch_mask_shorthand_normalizes_and_exports_public_api():
-    policy = rf.Mask(name="recent", count=1, window=2)
+    policy = rf.Mask(query="recent", rate=0.5)
     branch = rf.Branch(
         rf.Number("amount"),
         name="transactions",
@@ -115,13 +129,11 @@ def test_branch_mask_shorthand_normalizes_and_exports_public_api():
     model = rf.Model(branch, d_model=16, n_layers=1, n_heads=4)
 
     bound = model.schema.branches["record/transactions"]
-    assert bound.masks == [policy]
-    assert rf.MASK_LITERAL == "<MASK>"
-    assert rf.MaskLiteral is not None
+    assert bound.mask == (policy,)
 
 
 def test_branch_mask_validation_rejects_invalid_bound_configs():
-    with pytest.raises(ValueError, match="root branch"):
+    with pytest.raises(ValueError, match="removed node field"):
         rf.Schema.model_validate(
             {
                 "d_model": 16,
@@ -130,44 +142,31 @@ def test_branch_mask_validation_rejects_invalid_bound_configs():
                     "type": "branch",
                     "length": 1,
                     "masks": [{"count": 1}],
-                    "fields": [{"name": "amount", "type": "number", "query": "[*].amount"}],
+                    "fields": [{"name": "amount", "type": "number"}],
                 },
             }
         )
 
-    with pytest.raises(ValueError, match="offset must be less than length=2"):
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
         rf.Model(
             rf.Branch(
                 rf.Number("amount"),
                 name="transactions",
                 length=2,
-                masks=[rf.Mask(count=1, offset=2)],
+                mask=rf.Mask.model_validate({"offset": 2}),
             ),
             d_model=16,
             n_layers=1,
             n_heads=4,
         )
 
-    with pytest.raises(ValueError, match="duplicate mask name"):
+    with pytest.raises(TypeError, match="entries must be Mask"):
         rf.Model(
             rf.Branch(
                 rf.Number("amount"),
                 name="transactions",
                 length=2,
-                masks=[rf.Mask(name="same", count=1), rf.Mask(name="same", rate=0.5)],
-            ),
-            d_model=16,
-            n_layers=1,
-            n_heads=4,
-        )
-
-    with pytest.raises(ValueError, match="excludes every active descendant leaf"):
-        rf.Model(
-            rf.Branch(
-                rf.Number("amount"),
-                name="transactions",
-                length=2,
-                masks=[rf.Mask(count=1, exclude="record/transactions/amount")],
+                mask=[0.5],
             ),
             d_model=16,
             n_layers=1,
@@ -185,7 +184,7 @@ def test_model_constructor_accepts_root_branch_options():
         description="event records",
         embed=True,
         attention="none",
-        n_linear=2,
+        reduction=rf.Attention(n_outputs=3, n_layers=2),
         dropout=0.2,
     )
     params = model.schema
@@ -195,11 +194,55 @@ def test_model_constructor_accepts_root_branch_options():
     assert params.fields.embed is True
     assert params.fields.attention == "none"
     assert params.fields.length == 1
-    assert params.fields.n_linear == 2
+    assert params.fields.reduction == rf.Attention(n_outputs=3, n_layers=2)
     assert params.fields.dropout == 0.2
+    assert not hasattr(params.fields, "n_linear")
     assert not hasattr(params.fields, "p_mask")
     assert params.embed == ["events"]
     assert params.shapes["events/amount"] == (1,)
+
+
+def test_model_constructor_rejects_removed_root_n_linear() -> None:
+    with pytest.raises(ValueError, match="n_linear was removed from Model"):
+        rf.Model(
+            rf.Number("amount"),
+            d_model=16,
+            n_layers=1,
+            n_heads=4,
+            n_linear=2,
+        )
+
+
+def test_removed_root_options_remain_available_as_data_field_names() -> None:
+    model = rf.Model(
+        n_linear=rf.Number,
+        n_outputs=rf.Number,
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+    )
+
+    assert list(model.schema.requests) == ["record/n_linear", "record/n_outputs"]
+
+
+def test_schema_rejects_embedding_a_branch_without_active_output() -> None:
+    with pytest.raises(ValueError, match="embed=True but no active descendant output"):
+        rf.Model(
+            empty=rf.Branch(embed=True, value=rf.Number(active=False)),
+            target=rf.Number(mask=True),
+            d_model=8,
+            n_layers=1,
+            n_heads=2,
+        )
+
+    with pytest.raises(ValueError, match="n_outputs belongs to a reduction"):
+        rf.Model(
+            rf.Number("amount"),
+            d_model=16,
+            n_layers=1,
+            n_heads=4,
+            n_outputs=2,
+        )
 
 
 def test_model_constructor_rejects_root_length_argument():
@@ -213,21 +256,23 @@ def test_model_constructor_rejects_root_length_argument():
         )
 
 
-def test_model_constructor_rejects_root_branch_mask_options():
-    with pytest.raises(TypeError, match="tree field 'p_mask'"):
-        rf.Model(
-            rf.Number("amount"),
-            d_model=16,
-            n_layers=2,
-            n_heads=4,
-            p_mask=0.1,
-        )
+def test_model_constructor_accepts_root_mask():
+    model = rf.Model(
+        rf.Number("amount"),
+        d_model=16,
+        n_layers=2,
+        n_heads=4,
+        mask=True,
+    )
+
+    assert model.schema.fields.mask == (rf.Mask(skip=True, dropout=False, reconstruct=True),)
+    assert model.schema.reconstruct == ["record/amount"]
 
 
 def test_model_select_returns_nodes_and_update_refreshes_cached_role_views():
     model = rf.Model(
         rf.Number("amount"),
-        rf.Category("label", target=True, embed=False),
+        rf.Category("label", mask=True, embed=False),
         d_model=16,
         n_layers=1,
         n_heads=4,
@@ -243,23 +288,19 @@ def test_model_select_returns_nodes_and_update_refreshes_cached_role_views():
     model.update(rf.where("name") == "amount", benchmark="schema_api", allow_extra=True)
     assert model.select(rf.where("benchmark") == "schema_api") == [params.requests["record/amount"]]
 
-    target = rf.where("target")
-    assert model.select(target, include_root=False) == [params.requests["record/label"]]
+    reconstruct = rf.where("reconstruct")
+    assert model.select(reconstruct, include_root=False) == [params.requests["record/label"]]
 
-    model.update(rf.where("name") == "amount", target=True)
-    assert params.requests["record/amount"].p_prune == 1.0
-    assert model.select(target, include_root=False) == [
+    model.update(rf.where("name") == "amount", mask=True)
+    assert params.requests["record/amount"].mask == (rf.Mask(skip=True, dropout=False, reconstruct=True),)
+    assert model.select(reconstruct, include_root=False) == [
         params.requests["record/amount"],
         params.requests["record/label"],
     ]
 
-    model.update(rf.where("name") == "amount", target=False)
-    assert params.requests["record/amount"].p_prune == 0.0
-    assert model.select(target, include_root=False) == [params.requests["record/label"]]
-
-    model.update(rf.where("name") == "amount", p_prune=0.25)
-    assert params.requests["record/amount"].p_prune == 0.25
-    assert model.select(target, include_root=False) == [params.requests["record/label"]]
+    model.update(rf.where("name") == "amount", mask=False)
+    assert params.requests["record/amount"].mask == ()
+    assert model.select(reconstruct, include_root=False) == [params.requests["record/label"]]
 
 
 def test_schema_helper_classmethods_back_public_dsl():
@@ -268,7 +309,6 @@ def test_schema_helper_classmethods_back_public_dsl():
 
     assert rf.predicate("amount-name", lambda node: node.name == "amount").key == predicate.key
     assert rf.where("name") == attribute
-    assert rf.Schema.update_values({"target": True}) == {"target": True}
 
 
 def test_schema_select_returns_nodes_and_accepts_boolean_predicates():
@@ -288,9 +328,9 @@ def test_schema_select_returns_nodes_and_accepts_boolean_predicates():
     assert active == [params.requests["record/amount"]]
     assert inactive == [params.requests["record/memo"]]
 
-    model.update(rf.where("name") == "memo", target=True)
-    assert params.requests["record/memo"].p_prune == 1.0
-    assert params.select(rf.where("target"), include_root=False) == []
+    model.update(rf.where("name") == "memo", mask=True)
+    assert params.requests["record/memo"].mask == (rf.Mask(skip=True, dropout=False, reconstruct=True),)
+    assert params.select(rf.where("reconstruct"), include_root=False) == []
 
     with pytest.raises(TypeError, match="Python 'not where"):
         not rf.where("active")
@@ -299,7 +339,7 @@ def test_schema_select_returns_nodes_and_accepts_boolean_predicates():
 def test_model_update_can_deactivate_and_reactivate_leaf_nodes():
     model = rf.Model(
         rf.Number("amount"),
-        rf.Number("memo", active=False, p_mask=0.5, embed=True),
+        rf.Number("memo", active=False, mask=0.5, embed=True),
         d_model=16,
         n_layers=1,
         n_heads=4,
@@ -381,7 +421,6 @@ def test_model_extend_appends_fields_under_one_selected_array_and_rebuilds_modul
 
     assert "record/transactions/risk_score" in params.requests
     assert "record/transactions/risk_score" in model.nodes
-    assert params.requests["record/transactions/risk_score"].query == "[*].transactions[*].risk_score"
 
 
 def test_model_extend_appends_category_field_and_preserves_existing_vocabulary():
@@ -399,7 +438,6 @@ def test_model_extend_appends_category_field_and_preserves_existing_vocabulary()
 
     assert "record/caretaker" in model.schema.requests
     assert "record/caretaker" in model.nodes
-    assert model.schema.requests["record/caretaker"].query == "[*].caretaker"
     assert model.nodes["record/label"].embedder.vocab.snapshot() == ["alpha", "beta"]
     assert model.nodes["record/caretaker"].embedder.vocab.snapshot() == []
 
@@ -477,21 +515,19 @@ def test_model_override_temporarily_updates_schema_and_rebuilds_modules():
     assert "record/amount" in model.schema.active_requests
 
 
-def test_model_override_target_restores_original_prune_rate():
+def test_model_override_mask_restores_original_policy():
     model = rf.Model(
-        rf.Number(name="amount", p_prune=0.25),
+        rf.Number(name="amount", mask=0.25),
         d_model=16,
         n_layers=1,
         n_heads=4,
     )
     request = model.schema.requests["record/amount"]
 
-    with model.override(rf.where("name") == "amount", target=True):
-        assert request.p_prune == 1.0
-        assert request.target is True
+    with model.override(rf.where("name") == "amount", mask=True):
+        assert request.mask == (rf.Mask(skip=True, dropout=False, reconstruct=True),)
 
-    assert request.p_prune == 0.25
-    assert request.target is False
+    assert request.mask == (rf.Mask(rate=0.25),)
 
 
 def test_model_mutations_are_blocked_inside_training_loop_lock():

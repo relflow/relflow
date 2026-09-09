@@ -1,279 +1,139 @@
 ---
-marimo-static-output: true
-eval: false
+title: Batch Inference
 ---
 
 # Batch Inference
 
-**Example status — excerpt:** blocks show the supported wiring but assume a
-trained artifact and application paths. Use the contract-tested
-[Getting Started](../getting-started.qmd) lifecycle first.
+**Example status — reference:** snippets use the shipped Arrow table writer and
+eager Polars postprocessor contract.
 
-Use `model.predict([...])` to inspect a small list in memory. Use a prediction
-data module, Lightning's `trainer.predict(...)`, and `rf.Writer` when results
-should stream to Parquet without accumulating the whole job in Python memory.
+Use Lightning prediction plus `rf.Writer` when results should go directly to
+Parquet. `predict_step` returns a `pa.Table`; the writer optionally runs an
+ordered Polars postprocessor pipeline and writes the resulting Arrow table.
 
-This guide assumes a saved, selected model and input records that match its
-training-time preprocessor contract. See [Model Lifecycle](model-lifecycle.qmd)
-and [Prediction Output](prediction-output.qmd) first when defining that
-contract.
+## Minimal Parquet Job
 
-## Write A DataFrame To Parquet
-
-This excerpt shows the complete prediction wiring; replace the artifact and
-frame with your own:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-import lightning.pytorch as lit
-import polars as pl
-
-import relflow as rf
-
-model = rf.Model.load("artifacts/fraud-model.ckpt")
-
-predict_frame = pl.DataFrame(
-    {
-        "request_id": ["r-001", "r-002"],
-        "amount": [12.5, 8.0],
-        "merchant": ["books", "coffee"],
-    }
-)
-
-datamodule = rf.PolarsDataModule(
-    model=model,
-    predict=predict_frame,
-    preprocessor=training_preprocessor,
-    num_workers=0,
-    persistent_workers=False,
-    pin_memory=False,
-)
-
-writer = rf.Writer("predictions/run-2026-08-01")
-
+```python
+writer = rf.Writer("predictions")
 trainer = lit.Trainer(
     accelerator="cpu",
     callbacks=[writer],
     logger=False,
 )
+trainer.predict(model=model, datamodule=data)
+```
 
-trainer.predict(
+Each rank writes `rank-{global_rank}.parquet`. Files contain exactly the
+canonical or postprocessed columns—RelFlow adds no identity column.
+
+## Configure Retained Inputs On The Data Module
+
+```python
+data = rf.ArrowDataModule(
     model=model,
-    datamodule=datamodule,
-    return_predictions=False,
+    predict=requests,
+    retain=("request_id", "event_time"),
+    shuffle=False,
 )
 ```
 
-Omit `preprocessor=...` only when training also used the raw source shape
-unchanged. `Writer` is a Lightning prediction callback; it belongs in
-`Trainer(callbacks=[...])` and writes during `trainer.predict(...)`.
-`return_predictions=False` prevents Lightning from also retaining every batch
-output in process memory after the callback has written it.
+Retained values appear inside the canonical `inputs` struct. Keep a stable
+business key there when consumers need to join output back to another system.
 
-## Output Files And Rows
+## Parquet Schema
 
-`Writer` opens one file per **global** rank:
+Without postprocessing, the file has the canonical envelope:
 
 ```text
-predictions/run-2026-08-01/
-  rank-0.parquet
-  rank-1.parquet
+inputs       struct or null
+predictions  struct or null
 ```
 
-A single-process job normally writes only `rank-0.parquet`. Each Parquet row
-contains:
+The exact nested prediction fields are declared by tensorfield extensions and
+the model schema.
 
-- `inputs`: the processed, model-facing observation captured during prediction;
-  and
-- `predictions`: a nested struct keyed by schema address.
+## Write A Consumer-Specific Schema
 
-The `inputs` struct preserves the processed metadata record's keys and values;
-it does not flatten them into top-level Parquet columns.
-
-Targets and reconstructed masked fields contain their decoded payloads. Nodes
-configured with `embed=True` also contain embeddings. Read
-[Prediction Output](prediction-output.qmd) for the canonical `state`, `content`,
-`inferred`, and `embedding` members.
-
-Use a new output directory for each run. Opening the same rank pathname again
-replaces that file; `Writer` does not create a run manifest, merge rank files,
-or publish an atomic success marker.
-
-Global-rank filenames remain unique across nodes when every process writes to a
-shared output directory. On node-local filesystems, collect every node's rank
-files downstream.
-
-## Writer Options
-
-| Argument | Meaning |
-| --- | --- |
-| `path` | Local or mounted output directory for rank-partitioned Parquet files. |
-| `flush_every_n_batches` | Optional best-effort flush interval when the active PyArrow writer exposes `flush`. |
-| `postprocessor` | Optional decorated `rf.Postprocessor` that reshapes a prediction batch before writing. |
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-writer = rf.Writer(
-    "predictions/run-2026-08-01",
-    flush_every_n_batches=100,
-)
-```
-
-The writer closes its Parquet handle at the end of the prediction loop. A
-process crash can leave a partial file; use an external job marker or atomic
-publish step when downstream readers require completeness.
-
-## Shape Rows Before Writing
-
-Use a writer postprocessor for flat warehouse fields, renamed addresses,
-filtering, or redaction. Writer values must stay aligned with the prediction
-batch.
-
-`metadata` is a list of processed observations. Each observation is represented
-as a list containing the model-facing record, so a one-to-one preprocessor uses
-`observation[0]`:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-import relflow as rf
-
+```python
+import polars as pl
 
 @rf.postprocess
-def compact_rows(predictions, *, metadata):
-    label = predictions.get(
-        rf.Address("record", "fraud"), {}
-    ).get("content", {})
+def warehouse(frame: pl.DataFrame) -> pl.DataFrame:
+    inputs = pl.col("inputs")
+    fraud = pl.col("predictions").struct.field("record/fraud")
+    content = fraud.struct.field("content")
+    return frame.select(
+        request_id=inputs.struct.field("request_id"),
+        fraud=content.struct.field("value"),
+        fraud_probability=content.struct.field("probability"),
+    )
 
-    return {
-        rf.Address("record", "warehouse_row"): {
-            "request_id": [
-                observation[0].get("request_id")
-                for observation in metadata
-            ],
-            "fraud": label.get("value"),
-            "fraud_probability": label.get("probability"),
-        }
-    }
-
+@rf.postprocess
+def triage(frame: pl.DataFrame, *, threshold: float) -> pl.DataFrame:
+    return frame.with_columns(review=pl.col("fraud_probability") >= threshold)
 
 writer = rf.Writer(
-    "predictions/warehouse-run",
-    postprocessor=compact_rows,
+    "warehouse-predictions",
+    postprocessor=(warehouse, triage.partial(threshold=0.8)),
 )
 ```
 
-Every returned column must have the same number of rows. The values under each
-top-level address/string key must form a mapping that Polars can turn into a
-frame. `Writer` rejects an address payload whose row count differs from the
-processed input batch, preventing Polars from silently padding either side with
-nulls. If the first batch establishes one Arrow schema and a later batch has an
-incompatible field structure, `Writer` rejects it before schema casting so new
-fields cannot be silently discarded. Safe leaf-value casts to the first schema
-remain supported.
+Stages run left to right and may change rows or columns. The first written
+result locks the exact schema for that rank's Parquet shard.
 
-Writer postprocessors can request these runtime values by name:
+## Read Output With Arrow
 
-| Parameter | Value in this runtime |
-| --- | --- |
-| `input` | Encoded tensorfield batch. |
-| `batch` | Alias for the encoded tensorfield batch. |
-| `metadata` | Row-aligned processed observations. |
-| `batch_indices` | Lightning batch indices when supplied. |
-| `batch_idx` | Prediction batch index. |
-| `dataloader_idx` | Prediction dataloader index. |
+```python
+import pyarrow.dataset as ds
 
-For reusable processor rules and the cross-runtime provider matrix, see
-[Postprocessors](postprocessors.qmd).
-
-## Stream File-Backed Inputs
-
-Use `StreamingDataModule` when local or S3-backed files should be read in
-chunks:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-datamodule = rf.StreamingDataModule(
-    model=model,
-    root="s3://my-bucket/events",
-    suffix="parquet",
-    predict=r"/predict/.*\.parquet$",
-    preprocessor=training_preprocessor,
-    sharding="chunk",
-)
-
-trainer = lit.Trainer(
-    accelerator="gpu",
-    devices=1,
-    callbacks=[rf.Writer("predictions/streaming-run")],
-)
-
-trainer.predict(
-    model=model,
-    datamodule=datamodule,
-    return_predictions=False,
-)
+result = ds.dataset("predictions", format="parquet").to_table()
 ```
 
-`StreamingDataModule` can read S3 sources. `Writer` writes to a local or mounted
-filesystem path, so a separate publish step must copy rank files to object
-storage when required.
+Convert to Python only at an application boundary that needs Python objects.
 
-Choose `file`, `chunk`, or `record` sharding based on file sizes and desired
-parallelism. See [Data Modules](data-modules.qmd#sharding) for the ownership
-rules and buffer options.
+## Reconstruct Canonical Order
 
-## Choose An Inference Path
+RelFlow does not generate row identity. If output must be globally reordered or
+joined back to source data, retain a stable domain key such as `request_id` and
+sort or join on that explicit column downstream.
 
-| Need | Use |
-| --- | --- |
-| Inspect one request shape | `model.predict([...])` |
-| Notebook or artifact smoke test | `model.predict([...])` |
-| DataFrame-to-Parquet job | `PolarsDataModule(..., predict=...)` with `rf.Writer` |
-| File/S3-to-Parquet job | `StreamingDataModule(..., predict=...)` with `rf.Writer` |
-| Latency-bound HTTP requests | [`rf.Deployment`](serving.qmd) |
+## Choose Interactive Or Batch Prediction
 
-Batch and online paths solve different operational problems. Do not loop over
-`model.predict([record])` for a large batch job, and do not introduce an HTTP
-service when an asynchronous Parquet job meets the requirement.
+- Use `model.predict(...)` for bounded in-process results.
+- Use `Trainer.predict(..., callbacks=[rf.Writer(...)])` for direct Parquet
+  persistence and distributed shards.
+- Use `rf.Deployment` for online JSON or Arrow IPC requests.
 
-## Verify A Completed Job
+## What Custom Callbacks Receive
 
-At minimum:
+Lightning `predict_step` returns an ordinary Arrow table:
 
-1. enumerate every expected node/rank output file;
-2. verify total rows against the input after intentional preprocessing drops or
-   expansion;
-3. inspect required address and content fields;
-4. check null counts and join identifiers; and
-5. load representative outputs in the downstream system before publishing the
-   run as complete.
+```python
+def write_on_batch_end(
+    self,
+    trainer,
+    pl_module,
+    output,
+    batch_indices,
+    batch,
+    batch_idx,
+    dataloader_idx,
+):
+    assert isinstance(output, pa.Table)
+```
 
-RelFlow reports `throughput/predict` directly to an attached Lightning logger
-on the global-zero rank. Prediction hooks cannot use Lightning module metrics,
-so this value is not expected in `trainer.callback_metrics`; the installed
-throughput callback also retains the measurement for programmatic integrations.
+## Failure And Recovery
 
-## Common Failures
+The writer closes its Parquet handle when postprocessing, schema validation, or
+writing fails. Existing completed row groups remain in the rank file. Retry to
+a clean output directory unless your orchestration layer owns shard-level
+recovery.
 
-| Symptom | Likely cause or next check |
-| --- | --- |
-| No predictions are written | Configure a `predict` split and attach `Writer` to the Trainer. |
-| Rows cannot join to inputs | Preserve an identifier in processed observation metadata and keep postprocessor columns aligned. |
-| Only part of a distributed job appears | Read every node/rank file and check for local-rank path collisions. |
-| A later batch fails Arrow schema casting | Keep postprocessor keys and value types stable across all batches. |
-| Production values differ from validation | Reuse the same checkpoint and RelFlow preprocessor code/bindings. |
-| S3 output is missing | `Writer` does not upload; publish its local/mounted files separately. |
+## Operational Checklist
 
-## Where Next
-
-- Choose inputs, preprocessing, and sharding in [Data Modules](data-modules.qmd).
-- Define cross-runtime shapes with [Postprocessors](postprocessors.qmd).
-- Interpret address payloads in [Prediction Output](prediction-output.qmd).
+- Use typed Arrow input and stable schemas.
+- Retain a business identifier when downstream alignment matters.
+- Keep postprocessors eager Polars transforms.
+- Expect one Parquet shard per distributed rank.
+- Verify identical postprocessed schemas across batches and ranks.
+- Merge or repartition shards explicitly downstream.

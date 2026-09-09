@@ -3,7 +3,6 @@ marimo-static-output: true
 pyproject: |
   requires-python = ">=3.12"
   dependencies = [
-    "blake3>=1.0.8",
     "marimo>=0.23.8",
     "relflow[serving] @ git+https://github.com/relflow/relflow.git",
   ]
@@ -66,9 +65,11 @@ structure earns its memory, latency, and operational cost.
 
 Preserving hierarchy also does not invent relationships that are absent from
 the schema. `Hash` gives repeated identifiers matching representations, but
-separate sibling branches pool their tokens before interacting. Cross-context
-correspondence may therefore need restructuring or preprocessing so matching
-roles meet before pooling.
+fixed-width reductions on separate sibling branches can discard their tokens
+before interaction. Cross-context correspondence may therefore need
+pass-through reduction, restructuring, or preprocessing so matching roles meet
+before they are compressed. More reduction outputs add capacity; they do not
+perform a relational join.
 
 ## Schema As Model Blueprint
 
@@ -77,7 +78,7 @@ RelFlow makes the record schema executable:
 - leaf declarations choose datatype-specific validation, tensorization,
   embedding, loss, metrics, and prediction behavior;
 - `Branch` declarations define bounded contexts whose children can interact
-  before a pooled representation flows upward;
+  before a configured reduction routes their representations upward;
 - learning roles choose values to hide and reconstruct;
 - `embed=True` chooses representations to expose;
 - names and queries bind source values to stable model addresses.
@@ -101,7 +102,7 @@ model = rf.Model(
         merchant_category=rf.Category(size=256),
         amount=rf.Number,
     ),
-    is_fraud=rf.Category(target=True, size=2),
+    is_fraud=rf.Category(mask=True, size=2),
 )
 
 model
@@ -154,10 +155,11 @@ Supervised prediction and masked reconstruction use the same basic question:
 
 > Given the visible context, what should this hidden value be?
 
-`target=True` always hides a supervised answer. `p_mask` and `p_prune` sample
-reconstruction tasks. A branch mask limits descendant sampling to candidate
-coordinates or windows; descendants still sample independently, so it is not
-an atomic row mask. Embedding export does not hide a value or create a loss.
+`mask=True` always skips a supervised answer and reconstructs it. Other
+`rf.Mask` policies can select positions for learned masking, structural
+skipping, train-only dropout, or reconstruction. A mask attached to a branch
+is resolved once per branch coordinate and applies atomically to all active
+descendants. Embedding export does not hide a value or create a loss.
 
 A shared mechanism makes it possible to combine supervised and self-supervised
 objectives without creating a separate feature representation. It does not make

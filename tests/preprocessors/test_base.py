@@ -1,5 +1,8 @@
+import pickle
 from enum import StrEnum
 
+import polars as pl
+import pyarrow as pa
 import pytest
 
 import relflow as rf
@@ -7,171 +10,298 @@ from relflow.data import processors
 from relflow.structs.enums import Strata
 
 
-def test_processor_providers_are_string_enums():
+def make_frame(values: list[int]) -> pl.DataFrame:
+    return pl.DataFrame({"value": values})
+
+
+@rf.preprocess(scope="dataset")
+def offset(frame: pl.DataFrame, *, amount: int, strata) -> pl.DataFrame:
+    return frame.with_columns(pl.col("value") + amount)
+
+
+@rf.postprocess
+def scale(frame: pl.DataFrame, *, amount: int) -> pl.DataFrame:
+    return frame.with_columns(pl.col("value") * amount)
+
+
+def identity(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame
+
+
+def test_decorated_processors_pickle_with_bound_configuration():
+    prepared = pickle.loads(pickle.dumps(offset.partial(amount=3)))
+    finished = pickle.loads(pickle.dumps(scale.partial(amount=2)))
+    assert prepared.scope == "dataset"
+    assert prepared.func is offset.func
+    assert prepared(make_frame([1]), strata=Strata.train).equals(make_frame([4]))
+    assert finished(make_frame([1])).equals(make_frame([2]))
+
+
+def test_directly_wrapped_importable_function_remains_picklable():
+    prepared = pickle.loads(pickle.dumps(rf.preprocess(identity)))
+    assert prepared.func is identity
+    assert prepared(make_frame([1])).equals(make_frame([1]))
+
+
+def test_preprocessor_providers_are_string_enums():
     assert issubclass(rf.PreprocessorProvider, StrEnum)
-    assert issubclass(rf.PostprocessorProvider, StrEnum)
     assert rf.PreprocessorProvider.strata == "strata"
-    assert rf.PostprocessorProvider.metadata == "metadata"
+    assert rf.PreprocessorProvider.schema == "schema"
+    assert rf.PreprocessorProvider.encoding_context == "encoding_context"
 
 
 def test_preprocess_returns_callable_processor_object():
     @processors.preprocess
-    def add_marker(observation: dict):
-        return processors.Observation({"id": observation["id"], "marked": True})
+    def increment(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.with_columns(pl.col("value") + 1)
 
-    assert isinstance(add_marker, processors.Preprocessor)
-    assert add_marker({"id": 1}) == processors.Observation({"id": 1, "marked": True})
-    assert list(add_marker.outputs({"id": 1}, strata=Strata.train, schema=None, encoding_context={})) == [
-        [{"id": 1, "marked": True}]
-    ]
-
-
-def test_preprocess_rejects_decorator_configuration_kwargs():
-    with pytest.raises(TypeError, match="unexpected preprocess keyword"):
-        processors.preprocess(yields=True)
+    source = make_frame([1, 2])
+    assert isinstance(increment, processors.Preprocessor)
+    assert increment(source).to_dict(as_series=False) == {"value": [2, 3]}
+    [result] = increment.run(source, strata=Strata.train, schema=None, encoding_context={})
+    assert result.equals(pl.DataFrame({"value": [2, 3]}))
 
 
-def test_preprocessor_outputs_discard_none():
+def test_preprocess_scope_is_the_only_decorator_option():
+    @processors.preprocess(scope="dataset")
+    def prepare(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
+
+    assert prepare.scope == "dataset"
+    assert not hasattr(prepare, "requires")
+    assert not hasattr(prepare, "produces")
+
+    with pytest.raises(ValueError, match="scope must be"):
+        processors.preprocess(scope="global")(lambda frame: frame)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="unexpected keyword argument 'requires'"):
+        processors.preprocess(requires="value")  # type: ignore[call-overload]
+
+
+def test_processor_decorators_accept_direct_calls():
+    prepare = processors.preprocess(lambda frame: frame, scope="dataset")
+    finish = processors.postprocess(lambda frame: frame)
+
+    assert prepare.scope == "dataset"
+    assert isinstance(finish, processors.Postprocessor)
+
+
+def test_processor_pipelines_normalize_to_immutable_tuples():
+    @rf.preprocess
+    def first(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
+
+    @rf.preprocess
+    def second(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
+
+    configured = [first, second, first]
+
+    assert rf.Preprocessor.normalize(None) == ()
+    assert rf.Preprocessor.normalize(first) == (first,)
+    assert rf.Preprocessor.normalize(configured) == (first, second, first)
+    assert rf.Preprocessor.normalize(tuple(configured)) == (first, second, first)
+
+    normalized = rf.Preprocessor.normalize(configured)
+    configured.pop()
+    assert normalized == (first, second, first)
+
+
+def test_processor_pipeline_rejects_wrong_and_nested_members_by_index():
+    @rf.preprocess
+    def prepare(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
+
+    @rf.postprocess
+    def finish(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame
+
+    with pytest.raises(TypeError, match="preprocessor at index 1.*Postprocessor"):
+        rf.Preprocessor.normalize([prepare, finish])
+    with pytest.raises(TypeError, match="preprocessor at index 1.*list"):
+        rf.Preprocessor.normalize([prepare, [prepare]])  # type: ignore[list-item]
+    with pytest.raises(TypeError, match="preprocessor must be a Preprocessor, list, tuple, or None"):
+        rf.Preprocessor.normalize(processor for processor in (prepare,))  # type: ignore[arg-type]
+
+
+def test_preprocessor_discards_none_and_expands_frames():
     @processors.preprocess
-    def drop_low_ids(observation: dict):
-        if observation["id"] < 10:
-            return None
-        return processors.Observation(observation)
+    def discard(frame: pl.DataFrame):
+        return None
 
-    assert list(drop_low_ids.outputs({"id": 1}, strata=Strata.train, schema=None, encoding_context={})) == []
-    assert list(drop_low_ids.outputs({"id": 10}, strata=Strata.train, schema=None, encoding_context={})) == [
-        [{"id": 10}]
-    ]
-
-
-def test_preprocessor_outputs_expand_iterables_and_skip_none_items():
     @processors.preprocess
-    def fan_out(observation: dict):
-        yield processors.Observation({"id": observation["id"]})
-        yield None
-        yield processors.Observation({"id": observation["id"] + 1})
+    def split(frame: pl.DataFrame):
+        yield frame.head(1)
+        yield frame.slice(1)
 
-    assert list(fan_out.outputs({"id": 1}, strata=Strata.train, schema=None, encoding_context={})) == [
-        [{"id": 1}],
-        [{"id": 2}],
-    ]
+    source = make_frame([1, 2, 3])
+    assert list(discard.run(source, strata=Strata.train, schema=None, encoding_context={})) == []
+    assert [
+        item["value"].to_list() for item in split.run(source, strata=Strata.train, schema=None, encoding_context={})
+    ] == [[1], [2, 3]]
 
 
-def test_preprocessor_outputs_reject_plain_dict_return():
+@pytest.mark.parametrize(
+    "value",
+    [pa.table({"value": [1]}), {"value": [1]}, [1], pl.Series("value", [1]), pl.LazyFrame({"value": [1]})],
+)
+def test_preprocessor_rejects_non_dataframe_results(value):
     @processors.preprocess
-    def legacy_dict(observation: dict):
-        return {"id": observation["id"]}
+    def invalid(frame: pl.DataFrame):
+        return value
 
-    with pytest.raises(TypeError, match="must return Observation"):
-        list(legacy_dict.outputs({"id": 1}, strata=Strata.train, schema=None, encoding_context={}))
-
-
-def test_preprocessor_outputs_reject_plain_dict_yield():
-    @processors.preprocess
-    def legacy_generator(observation: dict):
-        yield {"id": observation["id"]}
-
-    with pytest.raises(TypeError, match="expected Observation or None"):
-        list(legacy_generator.outputs({"id": 1}, strata=Strata.train, schema=None, encoding_context={}))
+    with pytest.raises(TypeError, match="DataFrame"):
+        list(invalid.run(make_frame([1]), strata=Strata.train, schema=None, encoding_context={}))
 
 
-def test_preprocessor_receives_named_pipeline_providers():
-    @processors.preprocess
-    def with_runtime(observation: dict, *, strata, encoding_context):
-        return processors.Observation(
-            {
-                "id": observation["id"],
-                "strata": strata,
-                "marker": encoding_context["marker"],
-            }
+def test_preprocessor_accepts_arbitrary_canonical_row_changes():
+    @rf.preprocess
+    def canonicalize(frame: pl.DataFrame) -> pl.DataFrame:
+        return (
+            frame.filter(pl.col("value") > 1)
+            .sort("value", descending=True)
+            .select(pl.col("value").repeat_by(2).explode())
         )
 
+    [result] = canonicalize.run(make_frame([1, 2, 3]), strata=Strata.train, schema=None, encoding_context={})
+    assert result["value"].to_list() == [3, 3, 2, 2]
+
+
+def test_preprocessor_receives_only_named_pipeline_providers():
+    @processors.preprocess
+    def inspect(frame: pl.DataFrame, *, strata, schema, encoding_context):
+        assert strata is Strata.validate
+        assert schema == "schema"
+        assert encoding_context == {"marker": "seen"}
+        return frame
+
+    source = make_frame([1])
     assert list(
-        with_runtime.outputs(
-            {"id": 1},
+        inspect.run(
+            source,
             strata=Strata.validate,
-            schema=None,
+            schema="schema",
             encoding_context={"marker": "seen"},
         )
-    ) == [[{"id": 1, "strata": Strata.validate, "marker": "seen"}]]
+    ) == [source]
 
 
-def test_preprocessor_requires_user_params_to_be_bound():
+def test_required_user_parameters_are_bound_immutably():
     @processors.preprocess
-    def with_user_param(observation: dict, *, marker: str):
-        return processors.Observation({"id": observation["id"], "marker": marker})
+    def offset(frame: pl.DataFrame, *, amount: int) -> pl.DataFrame:
+        return frame.with_columns(pl.col("value") + amount)
 
     with pytest.raises(ValueError, match="requires unbound parameter"):
-        list(with_user_param.outputs({"id": 1}, strata=Strata.train, schema=None, encoding_context={}))
+        list(offset.run(make_frame([1]), strata=Strata.train, schema=None, encoding_context={}))
 
-    bound = with_user_param.partial(marker="ready")
-    assert list(bound.outputs({"id": 1}, strata=Strata.train, schema=None, encoding_context={})) == [
-        [{"id": 1, "marker": "ready"}]
-    ]
+    configured = offset.partial(amount=4)
+    assert configured.bound == {"amount": 4}
+    assert offset.bound == {}
+    [result] = configured.run(make_frame([1]), strata=Strata.train, schema=None, encoding_context={})
+    assert result["value"].to_list() == [5]
+
+    with pytest.raises(ValueError, match="already bound"):
+        configured.partial(amount=5)
 
 
-def test_preprocessor_does_not_infer_provider_from_type_annotation():
+def test_pipeline_parameters_cannot_be_bound():
     @processors.preprocess
-    def typed_name_is_user_param(observation: dict, *, split: Strata):
-        return processors.Observation({"id": observation["id"], "split": split})
-
-    with pytest.raises(ValueError, match="requires unbound parameter"):
-        list(typed_name_is_user_param.outputs({"id": 1}, strata=Strata.train, schema=None, encoding_context={}))
-
-
-def test_preprocessor_rejects_binding_pipeline_provider():
-    @processors.preprocess
-    def with_strata(observation: dict, *, strata):
-        return processors.Observation({"id": observation["id"], "strata": strata})
+    def inspect(frame: pl.DataFrame, *, strata):
+        return frame
 
     with pytest.raises(ValueError, match="provided by the pipeline"):
-        with_strata.partial(strata=Strata.train)
+        inspect.partial(strata=Strata.train)
+
+
+@pytest.mark.parametrize(
+    ("function", "message"),
+    [
+        (lambda value: value, "first parameter must be 'frame'"),
+        (lambda frame, value: frame, "must be keyword-only"),
+    ],
+)
+def test_processor_signatures_are_explicit(function, message):
+    with pytest.raises(TypeError, match=message):
+        processors.preprocess(function)
 
 
 def test_preprocessor_normalize_rejects_raw_callable():
-    def raw(observation: dict):
-        return rf.Observation(observation)
-
-    with pytest.raises(TypeError, match="preprocessor must be a Preprocessor object or None"):
-        processors.Preprocessor.normalize(raw)
+    with pytest.raises(TypeError, match="preprocessor must be a Preprocessor"):
+        processors.Preprocessor.normalize(lambda frame: frame)
 
 
-def test_postprocess_optional_unavailable_provider_receives_none():
+def test_postprocessor_may_change_rows_and_columns():
     @rf.postprocess
-    def add_batch_index(predictions: dict, *, batch_idx: int | None = None):
-        return {"predictions": predictions, "batch_idx": batch_idx}
+    def compact(frame: pl.DataFrame, *, threshold: int) -> pl.DataFrame:
+        return frame.filter(pl.col("value") >= threshold).select(large=pl.lit(True))
 
-    assert add_batch_index.run({}, available={}) == {"predictions": {}, "batch_idx": None}
+    output = compact.partial(threshold=2).run(make_frame([1, 3]))
+    assert output.to_dict(as_series=False) == {"large": [True]}
 
 
-def test_postprocess_required_unavailable_provider_errors():
+def test_postprocessor_pipeline_runs_in_order():
+    calls: list[str] = []
+
     @rf.postprocess
-    def needs_batch_index(predictions: dict, *, batch_idx: int):
-        return {"predictions": predictions, "batch_idx": batch_idx}
+    def double(frame: pl.DataFrame) -> pl.DataFrame:
+        calls.append("double")
+        return frame.select(doubled=pl.col("value") * 2)
 
-    with pytest.raises(ValueError, match="not available in this runtime"):
-        needs_batch_index.run({}, available={})
+    @rf.postprocess
+    def classify(frame: pl.DataFrame) -> pl.DataFrame:
+        calls.append("classify")
+        return frame.select(large=pl.col("doubled") > 3)
+
+    result = processors.apply(pa.table({"value": [1, 2]}), [double, classify])
+
+    assert calls == ["double", "classify"]
+    assert result.to_pydict() == {"large": [False, True]}
+
+
+def test_processor_boundaries_convert_arrow_once(monkeypatch):
+    counts = {"from": 0, "to": 0}
+    from_arrow = pl.from_arrow
+    to_arrow = pl.DataFrame.to_arrow
+
+    def convert_from(*args, **kwargs):
+        counts["from"] += 1
+        return from_arrow(*args, **kwargs)
+
+    def convert_to(self, *args, **kwargs):
+        counts["to"] += 1
+        return to_arrow(self, *args, **kwargs)
+
+    monkeypatch.setattr(pl, "from_arrow", convert_from)
+    monkeypatch.setattr(pl.DataFrame, "to_arrow", convert_to)
+
+    @rf.postprocess
+    def first(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.with_columns(pl.col("value") + 1)
+
+    @rf.postprocess
+    def second(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.with_columns(pl.col("value") * 2)
+
+    result = processors.apply(pa.table({"value": [1]}), [first, second])
+
+    assert result.to_pydict() == {"value": [4]}
+    assert counts == {"from": 1, "to": 1}
+
+
+def test_processors_reject_zero_column_results():
+    @rf.preprocess
+    def empty(frame: pl.DataFrame) -> pl.DataFrame:
+        return pl.DataFrame()
+
+    @rf.postprocess
+    def also_empty(frame: pl.DataFrame) -> pl.DataFrame:
+        return pl.DataFrame()
+
+    with pytest.raises(ValueError, match="at least one Polars column"):
+        list(empty.run(make_frame([1]), strata=Strata.train, schema=None, encoding_context={}))
+    with pytest.raises(ValueError, match="at least one Polars column"):
+        also_empty.run(make_frame([1]))
 
 
 def test_postprocessor_normalize_rejects_raw_callable():
-    def raw(predictions: dict):
-        return predictions
-
-    with pytest.raises(TypeError, match="postprocessor must be a Postprocessor object or None"):
-        rf.Postprocessor.normalize(raw)
-
-
-def test_postprocess_rejects_context_dict_signature():
-    with pytest.raises(TypeError, match="first parameter must be 'predictions'"):
-
-        @rf.postprocess
-        def legacy_context(context: dict, predictions: dict):
-            return predictions
-
-
-def test_processors_reject_var_keyword_parameters():
-    with pytest.raises(TypeError, match="does not support \\*\\*kwargs"):
-
-        @processors.preprocess
-        def legacy_kwargs(observation: dict, **kwargs):
-            return processors.Observation(observation)
+    with pytest.raises(TypeError, match="postprocessor must be a Postprocessor"):
+        rf.Postprocessor.normalize(lambda frame: frame)
