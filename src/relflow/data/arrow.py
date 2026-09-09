@@ -114,5 +114,15 @@ class Encoded:
         ):
             raise ValueError("Encoded retain must be '*', or a tuple of unique non-empty column names")
 
+    def pin_memory(self) -> Encoded:
+        """Pin every tensor payload while leaving Arrow metadata untouched."""
+
+        return Encoded(
+            tensors=self.tensors.pin_memory(),
+            source=self.source,
+            retain=self.retain,
+            observations={address: value.pin_memory() for address, value in self.observations.items()},
+        )
+
 
 __all__: list[str] = []

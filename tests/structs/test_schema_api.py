@@ -1,7 +1,20 @@
+import pickle
+
 import pytest
 
 import relflow as rf
 from relflow.structs.enums import TensorKey
+
+
+def test_schema_pickle_discards_derived_selection_predicates():
+    model = rf.Model(id=rf.Category(size=32), d_model=8, n_layers=1, n_heads=2)
+    selected = model.select(rf.where("type") == "category")
+
+    restored = pickle.loads(pickle.dumps(model.schema))
+
+    assert selected == [model.schema.requests["record/id"]]
+    assert restored._selection_cache == {}
+    assert restored.select(rf.where("type") == "category") == [restored.requests["record/id"]]
 
 
 def test_model_constructor_supports_direct_binding_and_opt_in_queries():

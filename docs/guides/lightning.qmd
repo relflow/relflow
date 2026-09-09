@@ -269,7 +269,7 @@ for `throughput/predict` in the attached logger rather than
 | An explicit loop has no data | Add the matching `validate`, `test`, or `predict` split. |
 | Checkpoint monitor is missing | Inspect exact keys in `trainer.callback_metrics` and ensure validation runs each epoch. |
 | Mutation raises during a callback | Move the mutation between complete Lightning runs. |
-| Notebook settings are slow on a server | Tune Arrow storage/chunks, pinning, devices, precision, and batch size; the current data module requires `num_workers=0`. |
+| Notebook settings are slow on a server | Tune Arrow storage/chunks, workers, pinning, devices, precision, and batch size; keep `num_workers=0` only for interactive debugging. |
 | Metrics are good only on the tutorial frame | Build a non-overlapping, leakage-safe validation split. |
 
 ## Where Next

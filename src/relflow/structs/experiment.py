@@ -375,6 +375,15 @@ class Schema(Node):
     def clear_selection_cache(self) -> None:
         self._selection_cache.clear()
 
+    def __getstate__(self) -> dict[str, Any]:
+        """Serialize canonical schema state without derived predicate closures."""
+
+        state = super().__getstate__()
+        private = state.get("__pydantic_private__")
+        if private is not None:
+            state["__pydantic_private__"] = {**private, "_selection_cache": {}}
+        return state
+
     def refresh_selection_cache(self) -> None:
         self._selection_cache = {
             key: entry.model_copy(

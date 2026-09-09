@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from types import SimpleNamespace
 
 import polars as pl
 import pyarrow as pa
@@ -56,6 +57,9 @@ def test_public_surface_has_four_modules_and_no_source_specific_datasets():
         "PolarsDataModule",
         "SyntheticDataModule",
     ]
+    assert callable(rf.source)
+    assert not hasattr(rf, "parquet")
+    assert not hasattr(rf, "PartitionedSource")
     assert not hasattr(rf, "StreamingDataModule")
     assert not hasattr(datasets, "PolarsBatchDataset")
     assert not hasattr(datasets, "CustomBatchDataset")
@@ -242,6 +246,23 @@ def test_arrow_dataset_uses_distributed_rank_and_world_size(monkeypatch: pytest.
     assert [batch["id"].to_pylist() for batch in batches] == [["b", "d"]]
     context = dataset.encoding_context[next(iter(dataset.encoding_context))]
     assert context.global_rank == 1
+
+
+def test_arrow_workers_combine_parent_rank_and_local_worker_identity(monkeypatch: pytest.MonkeyPatch):
+    module = rf.ArrowDataModule(
+        model=model(),
+        validate=pa.table({"id": list(range(24))}),
+        shuffle=False,
+        num_workers=3,
+    )
+    monkeypatch.setattr(arrow, "rank", lambda: 1)
+    monkeypatch.setattr(arrow, "world_size", lambda: 2)
+    dataset = module.val_dataloader().dataset
+    monkeypatch.setattr(arrow, "get_worker_info", lambda: SimpleNamespace(id=1, num_workers=3))
+
+    batches = collect(dataset, monkeypatch)
+
+    assert [batch["id"].to_pylist() for batch in batches] == [[4, 10], [16, 22]]
 
 
 def test_arrow_dataset_source_scans_through_the_shared_pipeline(monkeypatch: pytest.MonkeyPatch):
@@ -645,10 +666,27 @@ def test_synthetic_generator_is_called_for_every_source_iteration():
     assert list(source())[0]["id"].to_pylist() == [2]
 
 
-def test_deferred_parallel_and_replacement_modes_fail_explicitly():
+def test_parallel_configuration_and_replacement_validation():
     source = pa.table({"id": [1, 2]})
-    with pytest.raises(NotImplementedError, match="workers are deferred"):
-        rf.ArrowDataModule(model=model(), train=source, num_workers=1)
+    module = rf.ArrowDataModule(
+        model=model(),
+        train=source,
+        num_workers=1,
+        persistent_workers=True,
+        prefetch_factor=3,
+    )
+
+    loader = module.train_dataloader()
+
+    assert loader.num_workers == 1
+    assert loader.persistent_workers is True
+    assert loader.prefetch_factor == 3
+    assert loader.multiprocessing_context.get_start_method() == "spawn"
+
+    with pytest.raises(ValueError, match="requires num_workers"):
+        rf.ArrowDataModule(model=model(), train=source, persistent_workers=True)
+    with pytest.raises(ValueError, match="prefetch_factor"):
+        rf.ArrowDataModule(model=model(), train=source, prefetch_factor=0)
     with pytest.raises(NotImplementedError, match="replacement sampling is not implemented"):
         rf.ArrowDataModule(model=model(), train=source, replacement=True)
 

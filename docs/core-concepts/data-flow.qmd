@@ -27,8 +27,8 @@ at an explicit mapping/JSON boundary.
 
 ## 1. Adapt The Source Once
 
-`ArrowDataModule` accepts a `pa.Table`, `pa.RecordBatch`, Arrow Dataset, or a
-restartable callable that yields Arrow units. `PolarsDataModule` converts each
+`ArrowDataModule` accepts paths/globs, `rf.source(...)`, a `pa.Table`,
+`pa.RecordBatch`, Arrow Dataset, or a restartable callable that yields Arrow units. `PolarsDataModule` converts each
 configured eager frame once. Custom and synthetic modules convert bounded
 groups of mappings at ingress.
 

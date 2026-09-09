@@ -75,9 +75,10 @@ data = rf.ArrowDataModule(
     epoch_size={"train": 100_000},
     shuffle_rows=16_384,
     drop_last={"train": True},
-    num_workers=0,
-    persistent_workers=False,
-    pin_memory=False,
+    num_workers=4,
+    persistent_workers=True,
+    pin_memory=True,
+    prefetch_factor=2,
 )
 ```
 
@@ -96,9 +97,11 @@ schema rather than a tuning override.
 | `epoch_size` | Maximum logical observations emitted per pass |
 | `shuffle_rows` | Streaming shuffle output quantum; the mixer may hold up to twice this row count |
 | `drop_last` | Drop an incomplete final model batch |
-| `num_workers` | PyTorch DataLoader workers; currently `0` only |
-| `persistent_workers` | Currently `False` only |
-| `pin_memory` | Accepted for DataLoader compatibility; leave `False` because the current encoded carrier does not expose PyTorch's recursive pinning protocol |
+| `num_workers` | PyTorch DataLoader workers per distributed rank |
+| `persistent_workers` | Reuse workers across epochs; requires a positive worker count |
+| `pin_memory` | Recursively pin encoded tensor payloads before accelerator transfer |
+| `prefetch_factor` | Batches prepared ahead by each worker; defaults to `2` |
+| `multiprocessing_context` | Worker start method; defaults to the Arrow-safe `"spawn"` when workers are enabled |
 
 `replacement` is present as a reserved constructor option but currently
 rejects `True`.
@@ -176,32 +179,89 @@ finite Table when every source row should have a chance to enter that epoch.
 
 ## `ArrowDataModule`
 
-The canonical module accepts a finite Arrow unit, an Arrow Dataset, or a
-restartable factory:
-
-```text
-pa.Table | pa.RecordBatch
-pyarrow.dataset.Dataset
-Callable[[], pa.RecordBatchReader | Iterable[Arrow unit]]
-```
-
-Let `pyarrow.dataset` own file discovery, format, filesystem, and partitioning:
+The canonical module accepts file paths and globs, a lazy `rf.source`
+description, an Arrow table/record batch, a restartable Arrow Dataset, or a
+factory returning fresh Arrow batches. Local and remote files use the same API:
 
 ```python
+import relflow as rf
+
+model = rf.Model(d_model=32, n_layers=1, n_heads=4, amount=rf.Number)
+data = rf.ArrowDataModule(
+    model=model,
+    train="data/train-*.parquet",
+    validate="data/validate-*.jsonl",
+)
+```
+
+File suffixes select Arrow's Parquet, CSV, JSON Lines (`.jsonl`/`.ndjson`),
+IPC/Feather v2 (`.arrow`/`.ipc`/`.feather`), or ORC reader. Each split chooses its
+own format. A directory is searched recursively; `*` matches within one path
+segment and `**` spans directories. Mixed or unknown formats require a narrower
+selection or an explicit format. `.json` and IPC streams are not inferred.
+
+Use `rf.source` for exact basename matching, a list of files, a declared schema,
+Arrow parsing options, or partition discovery:
+
+```python
+import pyarrow as pa
+import pyarrow.csv as csv
 import pyarrow.dataset as ds
 
-train_dataset = ds.dataset("train/", format="parquet")
-data = rf.ArrowDataModule(model=model, train=train_dataset)
+train = rf.source("s3://bucket/events/", match=r"^train-\d{5}\.parquet$")
+codes = rf.source(
+    "data/codes-*.csv",
+    format=ds.CsvFileFormat(
+        parse_options=csv.ParseOptions(delimiter=";"),
+        convert_options=csv.ConvertOptions(column_types={"code": pa.string()}),
+    ),
+)
+partitioned = rf.source("s3://bucket/events/", format="parquet", partitioning="hive")
 ```
 
-A factory must return a fresh reader or iterable every time:
+`match` full-matches the basename; compiled regex flags are preserved. Explicit
+file lists are sorted and deduplicated. Conventional `.` and `_` metadata
+sidecars are ignored during selection. Corrupt data files are errors, not
+silently excluded observations. An explicit `schema=pa.schema(...)` establishes
+intended parsing/conversion types; missing declared columns are rejected.
+
+For a custom filesystem, pass a filesystem URI or an importable zero-argument
+`filesystem` factory that returns a `pyarrow.fs.FileSystem`. Use paths relative
+to that filesystem. Live filesystem objects are rejected so workers cannot
+inherit a connection. Arrow Datasets created by callers remain accepted; callers
+own their restartability and resource initialization.
+
+Construction performs no listing or reads. At the first loader preparation,
+rank zero freezes a sorted manifest and source schema and shares it with every
+rank/worker. Reading resources are created in their consuming process. With
+explicit `fork` workers, discovery runs in a disposable spawned process.
+Subsequent epochs retain the selection; new files require a new data module.
+Changes to selected files are detected using Arrow's available size and
+modification-time metadata. Use immutable inputs when storage cannot reliably
+expose changes; this is not object-version pinning.
+
+Workers do not require an `epoch_size`:
 
 ```python
+data = rf.ArrowDataModule(
+    model=model,
+    train=train,
+    num_workers=4,
+    persistent_workers=True,
+    pin_memory=True,
+)
+```
+
+Other providers can supply a factory returning a fresh Arrow reader or iterable:
+
+```python
+import pyarrow as pa
 import pyarrow.ipc as ipc
 
 def train_source():
-    handle = pa.memory_map("train.arrow", "r")
-    return ipc.open_stream(handle)
+    with pa.input_stream("train.stream") as handle:
+        with ipc.open_stream(handle) as reader:
+            yield from reader
 
 data = rf.ArrowDataModule(model=model, train=train_source)
 ```
@@ -209,37 +269,26 @@ data = rf.ArrowDataModule(model=model, train=train_source)
 Every emitted unit must have the same Arrow schema. An empty factory may return
 a zero-batch `RecordBatchReader` with a declared schema or emit one typed empty
 unit. A bare iterable or reader is rejected because it may be exhausted after
-the first epoch.
-
-Paths, mappings, Polars frames, and configured Arrow scanners are rejected at
-this boundary. Build a Dataset from a path; pass a Dataset instead of its
-configured Scanner so RelFlow owns each scan plan; use the adapter matching any
-non-Arrow source.
+the first epoch. Mappings, Polars frames, and configured Arrow scanners still use
+their corresponding ingress adapter or an unconfigured, restartable Dataset.
 
 ### Current source limits
 
-The Arrow-native release supports in-memory Arrow, Dataset scans, single-reader
-factories, and deterministic distributed rank ownership. These features remain
-deferred until their scheduling contracts are complete:
+All sources replay the same deterministic global stream in each rank/worker,
+then take disjoint rows from global superbatches. This gives equal step counts
+at the cost of repeated source I/O and preprocessing. Source-native sharding,
+RelFlow-planned projection pushdown, coordinated caches, replacement sampling,
+and dataset-scoped preprocessing of a factory remain deferred. File sources
+follow the factory preprocessing contract.
 
-- RelFlow-planned source projection pushdown;
-- multiple DataLoader workers;
-- source-native distributed scans;
-- coordinated caches;
-- replacement sampling;
-- dataset-scoped preprocessing of a factory.
-
-Distributed ranks currently replay the same deterministic global stream, then
-take disjoint rows from each global superbatch. This guarantees equal step
-counts and stable ownership at the cost of repeated source I/O and
-preprocessing. Continue to use `num_workers=0`; the remaining failures are
-deliberate because silent duplication or ordering drift is worse than a clear
-capability error.
-
-Distributed `epoch_size` is the global row limit. With `drop_last=False`, each
-rank receives an equal final partial batch and fewer than `world_size` trailing
-rows may be omitted. With `drop_last=True`, the scheduler emits only complete
-global superbatches of `model.batch_size * world_size` rows.
+`epoch_size` is an optional global cap on processed, sampled rows. A finite
+source can finish below that cap. With `consumers = distributed_world_size *
+max(num_workers, 1)` and `drop_last=False`, each consumer receives an equal final
+partial batch and fewer than `consumers` trailing rows may be omitted. With
+`drop_last=True`, only complete superbatches of `model.batch_size * consumers`
+rows are emitted. Use one rank and `num_workers=0` when exact prediction coverage
+and original source order are required. Worker count is not yet independent of
+this tail policy.
 
 ## `PolarsDataModule`
 
@@ -435,7 +484,8 @@ When ingestion fails, inspect boundaries in this order:
 3. verify the model's direct bindings and `query` roots exist after
    preprocessing;
 4. set `shuffle=False` temporarily when investigating row order;
-5. use `num_workers=0`—the current Arrow scheduler requires it;
+5. reproduce with `num_workers=0`, then check that worker preprocessors are
+   importable and each source returns fresh readers;
 6. provide `arrow_schema` for empty, all-null, or evolving mapping sources;
 7. ensure a factory returns a fresh reader or iterator on every invocation.
 
