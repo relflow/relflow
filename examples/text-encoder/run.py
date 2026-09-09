@@ -16,7 +16,7 @@ def records() -> list[dict[str, str]]:
 
 
 def build_model(*, text_model: str) -> rf.Model:
-    return rf.Model.from_tree(
+    return rf.Model(
         d_model=32,
         n_layers=1,
         n_heads=4,

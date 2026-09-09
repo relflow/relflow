@@ -1,6 +1,6 @@
 [project]
 name = "relflow"
-version = "0.1.4"
+version = "0.2.0"
 description = "Relationship Flow: schema-first PyTorch models for hierarchical, nested, and sequence data"
 readme = "README.md"
 authors = [
@@ -11,17 +11,12 @@ license = "Apache-2.0"
 requires-python = ">=3.12"
 dependencies = [
     "beartype>=0.21.0",
-    "pluggy>=1.6.0",
     "rich>=14.0.0",
     "pydantic>=2.11.7",
-    "jmespath>=1.0.1",
-    "loguru>=0.7.3",
     "anytree>=2.13.0",
     "pyarrow>=21.0.0",
     "polars>=1.35.2",
     "numpy>=2.2.6",
-    "blake3>=1.0.8",
-    "msgspec>=0.21.1",
     "lightning>=2.6.4",
     "tensordict>=0.10.0",
     "torch>=2.7.1",
@@ -47,10 +42,6 @@ dev = [
     "ruff>=0.12.12",
     "pytest>=8.4.1",
     "pytest-xdist>=3.8.0",
-    "ipython>=9.9.0",
-    "ipykernel>=6.29.5",
-    "nbclient>=0.10.2",
-    "nbformat>=5.10.4",
     "fastapi>=0.124.0",
     "orjson>=3.10.0",
     "pydantic-settings>=2.10.1",
@@ -73,14 +64,18 @@ include = ["relflow*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+pythonpath = ["."]
 addopts = ["-n", "auto"]
+markers = [
+    "proof: deterministic synthetic-data checks of learned model behavior",
+]
 
 [tool.ruff]
 line-length = 120
 lint.extend-select = ["I"]
 
 [tool.ty.rules]
-# Keep ty as a green baseline while the dynamic plugin/Torch/Lightning surfaces
+# Keep ty as a green baseline while the dynamic extension/Torch/Lightning surfaces
 # are covered by runtime tests and can be tightened incrementally.
 unresolved-attribute = "ignore"
 invalid-type-form = "ignore"

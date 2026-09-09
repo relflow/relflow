@@ -1,0 +1,246 @@
+---
+title: Dynamic Mask Preprocessors
+---
+
+# Dynamic Mask Preprocessors
+
+**Example status — reference:** examples use the shipped eager Polars
+preprocessor and `Mask(query=...)` contracts.
+
+Dynamic masking separates policy from model structure. A preprocessor derives a
+Boolean selector column; a `Mask` reads that column at its own node-relative
+coordinates.
+
+## The Contract in One Example
+
+```python
+import polars as pl
+import relflow as rf
+
+@rf.preprocess
+def threshold(frame: pl.DataFrame, *, cutoff: float) -> pl.DataFrame:
+    return frame.with_columns(
+        mask_amount=(pl.col("amount") > cutoff).fill_null(False)
+    )
+
+prepare = threshold.partial(cutoff=1_000.0)
+
+model = rf.Model(
+    d_model=32,
+    n_layers=1,
+    n_heads=4,
+    amount=rf.Number(
+        mask=rf.Mask(query="mask_amount", skip=True, dropout=False)
+    ),
+)
+```
+
+The selector must resolve to non-null Boolean values with the same geometry as
+the mask owner. `True` selects the coordinate for the configured mask effects.
+
+## Attach the Processor Everywhere It Is Needed
+
+```python
+data = rf.ArrowDataModule(model=model, train=train, preprocessor=prepare)
+encoded = model.encode(requests, preprocess=prepare)
+predictions = model.predict(requests, preprocess=prepare)
+deployment = rf.Deployment(model=model).preprocess(prepare)
+```
+
+Use the same ordered pipeline wherever the same raw contract must become the
+same canonical observations.
+
+## Inspect Before Training
+
+Call the decorated processor with a small eager frame and inspect its result:
+
+```python
+frame = pl.DataFrame({"amount": [100.0, 2_000.0, None]})
+result = prepare(
+    frame,
+    strata=rf.Strata.predict,
+    schema=model.schema,
+    encoding_context=model.interprocess_encoding_context,
+)
+assert result["mask_amount"].to_list() == [False, True, False]
+```
+
+The pipeline invokes only provider parameters present in the callback
+signature. User parameters such as `cutoff` are bound with `.partial(...)`.
+
+## Recipe: Train-Only Data-Dependent Dropout
+
+```python
+mask=rf.Mask(query="mask_amount", dropout=True, reconstruct=False)
+```
+
+Dropout effects activate only in training. The selector may remain present in
+other strata without changing values there.
+
+## Recipe: Stratum-Aware Routing
+
+```python
+@rf.preprocess
+def prediction_policy(frame: pl.DataFrame, *, strata) -> pl.DataFrame:
+    selected = (
+        pl.col("deny_amount").fill_null(False)
+        if strata == rf.Strata.predict
+        else pl.lit(False)
+    )
+    return frame.with_columns(mask_amount=selected)
+```
+
+## Recipe: Conditional Reconstruction
+
+Use `reconstruct=True` when selected values are supervised targets. Combine
+`skip=True` to keep them out of encoder context:
+
+```python
+mask=rf.Mask(
+    query="mask_amount",
+    skip=True,
+    dropout=False,
+    reconstruct=True,
+)
+```
+
+## Recipe: Eligibility Plus Uniform Sampling
+
+```python
+mask=rf.Mask(
+    query="eligible",
+    rate=0.25,
+    skip=True,
+    dropout=False,
+)
+```
+
+The query establishes eligible coordinates and `rate` samples among them.
+Randomness is positional: the same seed, epoch, and input geometry repeat; a
+separately sliced call need not match a full-table call.
+
+## Nested Data: Use Polars List Expressions
+
+For a selector owned by an `events` branch, append `mask_event` to each child
+struct:
+
+```python
+@rf.preprocess
+def refunds(frame: pl.DataFrame) -> pl.DataFrame:
+    selected = (
+        (pl.element().struct.field("amount") < 0)
+        .fill_null(False)
+        .alias("mask_event")
+    )
+    return frame.with_columns(
+        events=pl.col("events").list.eval(
+            pl.element().struct.with_fields(selected)
+        )
+    )
+```
+
+```python
+events=rf.Branch(
+    length=32,
+    mask=rf.Mask(query="mask_event", skip=True, dropout=False),
+    kind=rf.Category(size=32),
+    amount=rf.Number,
+)
+```
+
+A branch-owned mask is atomic across descendants because every child shares
+the branch geometry.
+
+### Recipe: mask only one leaf
+
+Put the mask on that leaf rather than the common branch:
+
+```python
+events=rf.Branch(
+    length=32,
+    kind=rf.Category(size=32),
+    amount=rf.Number(mask=rf.Mask(query="mask_event", skip=True, dropout=False)),
+)
+```
+
+### Recipe: last-N window
+
+```python
+@rf.preprocess
+def recent(frame: pl.DataFrame, *, count: int = 2) -> pl.DataFrame:
+    selected = (pl.int_range(pl.len()) >= pl.len() - count).alias("mask_event")
+    return frame.with_columns(
+        events=pl.col("events").list.eval(
+            pl.element().struct.with_fields(selected)
+        )
+    )
+```
+
+### Recipe: exact-K by a nested score
+
+```python
+@rf.preprocess
+def top_risk(frame: pl.DataFrame, *, count: int = 2) -> pl.DataFrame:
+    selected = (
+        pl.element()
+        .struct.field("risk")
+        .fill_null(float("-inf"))
+        .rank("ordinal", descending=True)
+        .le(count)
+        .alias("mask_event")
+    )
+    return frame.with_columns(
+        events=pl.col("events").list.eval(
+            pl.element().struct.with_fields(selected)
+        )
+    )
+```
+
+## Correlating Decisions
+
+- Put one mask on a common branch for the same selection and same effect.
+- Let multiple leaves query the same selector for the same selection with
+  different effects.
+- Derive separate selector fields for independent decisions.
+
+## Processor Scope
+
+Partition scope is usually sufficient. Use dataset scope when the policy truly
+requires the complete logical split:
+
+```python
+@rf.preprocess(scope="dataset")
+def top_five_percent(frame: pl.DataFrame) -> pl.DataFrame:
+    cutoff = frame.select(pl.col("amount").quantile(0.95)).item()
+    return frame.with_columns(mask_amount=pl.col("amount").gt(cutoff).fill_null(False))
+```
+
+## Preserve Schema
+
+Every result must be an eager DataFrame with at least one column. Keep selector
+dtypes Boolean, preserve nested nullability deliberately, and return typed empty
+frames when a filter removes every row. RelFlow locks the final processed Arrow
+schema within each split.
+
+## Security and Leakage Checklist
+
+- Derive training selectors only from information available at training time.
+- Do not use labels or future events in inference-time features.
+- Fit global thresholds outside iteration on the intended training population.
+- Test nulls, empty nested lists, all-selected, and none-selected cases.
+
+## Troubleshooting Workflow
+
+1. Run the processor on a tiny `pl.DataFrame`.
+2. Inspect selector dtype, null count, and nested geometry.
+3. Identify the mask owner: root, repeated branch, or leaf.
+4. Confirm `query=` is relative to that owner.
+5. Check which effects activate in the current stratum.
+6. Hold seed, epoch, and input geometry fixed for random comparisons.
+
+## Related Documentation
+
+- [Dynamic Masking](../core-concepts/dynamic-masking.qmd)
+- [Binding Data](../core-concepts/binding-data.qmd)
+- [Working With Arrow](working-with-arrow.qmd)
+- [Serving](serving.qmd)

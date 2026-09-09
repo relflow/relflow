@@ -1,52 +1,50 @@
 ---
-marimo-static-output: true
 eval: false
 ---
 
 # Field Stacking
 
-**Example status — excerpt:** blocks show reusable schema and preprocessor
-patterns; adapt them inside a complete train/evaluate workflow.
+**Example status — reference:** processor examples are eager Polars transforms
+intended to be tested against the application's exact source schema.
 
-Field stacking is a schema and query pattern for repeated semantic roles. It
-maps multiple source fields into one repeated schema field so they share
-datatype parameters, vocabulary, decoder behavior, and embedding behavior.
+Field stacking maps several source roles into one repeated schema field so they
+share datatype parameters, vocabulary, decoder behavior, and embeddings.
+Examples include origin/destination, buyer/seller, payer/payee, and before/after
+values.
 
-Use it when source fields represent the same kind of thing in different roles:
-origin and destination, buyer and seller, payer and payee, source and target, or
-before and after values.
+Stacking changes structure rather than merely selecting a path. RelFlow's query
+language deliberately has no multiselect or flatten operation, so build the
+shared collection in one Polars preprocessor.
 
-## Basic Pattern
+## Stack Two Scalar Columns
 
-Without stacking, two locations become two separate categorical fields:
+Start with two source columns:
 
-```{python .marimo}
-#| echo: true
-#| output: true
-
-import relflow as rf
-
-model = rf.Model(
-    name="itinerary",
-    d_model=64,
-    n_layers=2,
-    n_heads=4,
-    origin=rf.Category(size=4096),
-    destination=rf.Category(size=4096),
-)
-
-model
+```text
+origin: large_string
+destination: large_string
 ```
 
-That is simple, but the model learns separate parameters for
-`itinerary/origin` and `itinerary/destination`.
+This preprocessor creates one fixed-size list containing two location structs
+per observation without walking Python rows:
 
-With stacking, the source fields become repeated values under one schema field:
+```python
+import polars as pl
+import relflow as rf
 
-```{python .marimo}
-#| echo: true
-#| output: true
+@rf.preprocess
+def stack_locations(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(
+        locations=pl.concat_list(
+            pl.struct(location=pl.col("origin").cast(pl.String)),
+            pl.struct(location=pl.col("destination").cast(pl.String)),
+        )
+    )
+```
 
+The model binds the produced field directly:
+
+```python
 model = rf.Model(
     name="itinerary",
     d_model=64,
@@ -54,87 +52,35 @@ model = rf.Model(
     n_heads=4,
     locations=rf.Branch(
         length=2,
-        location=rf.Category(query="[*].[origin, destination]", size=4096),
+        overflow="error",
+        location=rf.Category(size=4096),
     ),
 )
-
-model
 ```
 
-For a raw record like:
+Both positions now use the address `itinerary/locations/location` and one
+vocabulary. `overflow="error"` turns an unexpected width into a data-contract
+failure.
 
-```json
-{
-  "origin": "IAD",
-  "destination": "SFO"
-}
-```
+## Preserve Roles When They Carry Signal
 
-the query `[*].[origin, destination]` produces two location values for the
-`locations` branch. The modeled field is `itinerary/locations/location`, so both
-positions share one categorical vocabulary.
+Stacking removes role-specific field addresses. Add a role field when the model
+should distinguish positions:
 
-```{python .marimo}
-#| echo: true
-#| output: true
-
-import jmespath
-
-observation = [{"origin": "IAD", "destination": "SFO"}]
-assert jmespath.search("[*].[origin, destination]", observation) == [["IAD", "SFO"]]
-```
-
-## Buyer And Seller Accounts
-
-Stacking also works for repeated identity roles.
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-model = rf.Model(
-    name="payment",
-    d_model=64,
-    n_layers=2,
-    n_heads=4,
-    parties=rf.Branch(
-        length=2,
-        account_id=rf.Hash(query="[*].[buyer_account_id, seller_account_id]"),
-    ),
-    amount=rf.Number,
-)
-
-model
-```
-
-Use `Hash` when the useful signal is local equality inside the observation,
-for example whether the same account appears in multiple roles or events. Use
-`Category` for bounded labels or codes that should be learned as a persistent
-global vocabulary.
-
-## Preserve Roles When They Matter
-
-Stacking removes role-specific field names. If the role carries important
-meaning, add it back explicitly. A short RelFlow preprocessor is often clearer
-than a dense query.
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-import relflow as rf
-
-
+```python
 @rf.preprocess
-def stack_parties(record):
-    return rf.Observation(
-        {
-            **record,
-            "parties": [
-                {"party_id": record["buyer_account_id"], "role": "buyer"},
-                {"party_id": record["seller_account_id"], "role": "seller"},
-            ],
-        }
+def stack_parties(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(
+        parties=pl.concat_list(
+            pl.struct(
+                account_id=pl.col("buyer_account_id"),
+                role=pl.lit("buyer"),
+            ),
+            pl.struct(
+                account_id=pl.col("seller_account_id"),
+                role=pl.lit("seller"),
+            ),
+        )
     )
 
 
@@ -145,36 +91,52 @@ model = rf.Model(
     n_heads=4,
     parties=rf.Branch(
         length=2,
-        party_id=rf.Hash,
-        role=rf.Category(size=8),
+        overflow="error",
+        account_id=rf.Hash,
+        role=rf.Category(size=2),
     ),
     amount=rf.Number,
 )
-
-model
 ```
 
-This keeps the shared identity representation while letting the model distinguish
-buyer from seller.
+Use `Hash` when equality matters without a persistent vocabulary. Use
+`Category` for a bounded identity whose global label embedding should be
+learned.
 
-Pass `preprocessor=stack_parties` to a data module or
-`preprocess=stack_parties` to `model.predict(...)`. A plain function returning a
-dictionary can be used as an upstream transformation, but it is not the
-RelFlow preprocessor contract.
+## Stack Roles Inside A Ragged Collection
 
-Stacking shares parameters by design, but it also removes the original
-role-specific field names from the address. Add an explicit role field whenever
-origin vs destination, buyer vs seller, or before vs after is part of the
-signal.
+When every segment has an origin and destination, explode the child records,
+stack both roles, then aggregate them back by source row:
+
+```python
+@rf.preprocess
+def stack_segments(frame: pl.DataFrame) -> pl.DataFrame:
+    rows = frame.with_row_index("_row").explode("segments").unnest("segments")
+    origin = rows.select("_row", location="origin", role=pl.lit(0))
+    destination = rows.select("_row", location="destination", role=pl.lit(1))
+    locations = (
+        pl.concat([origin, destination])
+        .sort("_row", "role")
+        .group_by("_row", maintain_order=True)
+        .agg(pl.struct("location", "role").alias("locations"))
+    )
+    return frame.with_row_index("_row").join(
+        locations, on="_row", how="left", maintain_order="left"
+    ).drop("_row")
+```
+
+Each source segment contributes adjacent origin (`role=0`) and destination
+(`role=1`) entries. The operation moves both fields together and does not use separate leaf queries
+that could compact missing values differently.
+
+If grouping by original segment is part of the architecture, keep the extra
+axis and model nested branches instead of flattening it.
 
 ## Before And After Values
 
-Stacking can represent state changes:
+The same role pattern represents a transition:
 
-```{python .marimo}
-#| echo: true
-#| output: true
-
+```python
 model = rf.Model(
     name="profile_change",
     d_model=32,
@@ -182,64 +144,75 @@ model = rf.Model(
     n_heads=4,
     status_values=rf.Branch(
         length=2,
-        status=rf.Category(query="[*].[previous_status, new_status]", size=64),
+        overflow="error",
+        status=rf.Category(size=64),
+        phase=rf.Category(size=2),
     ),
 )
-
-model
 ```
 
-Add a role marker such as `before` and `after` if direction matters.
+Build `status_values` exactly like `parties`, interleaving
+`previous_status`/`new_status` and adding `before`/`after`. The shared `status`
+vocabulary learns transitions across both roles while `phase` preserves
+direction.
 
-## Check The Shape
+## Use The Same Processor Everywhere
 
-Before training, validate that the query produces the repeated shape expected by
-the schema. For top-level stacking, the request query usually looks like:
+```python
+data = rf.ArrowDataModule(
+    model=model,
+    train=train,
+    validate=validate,
+    preprocessor=stack_locations,
+)
 
-```{python .marimo}
-#| echo: true
-#| output: true
-
-query = "[*].[origin, destination]"
+result = model.predict(
+    requests,
+    preprocess=stack_locations,
+)
 ```
 
-For values inside an array, include the parent path:
+The preprocessor creates a model-facing structural field. It should be the same
+for train, evaluation, and prediction.
 
-```{python .marimo}
-#| echo: true
-#| output: true
+## Verify The Contract
 
-query = "[*].segments[*].[origin, destination]"
+Test values and physical schema before fitting:
+
+```python
+source = pa.table(
+    {
+        "origin": ["IAD", "LHR"],
+        "destination": ["SFO", "JFK"],
+    }
+)
+
+# Exercise through model.encode or an ArrowDataModule so RelFlow performs the
+# Arrow/Polars conversion and calls the processor at its real boundary.
+encoded = model.encode(
+    source,
+    preprocess=stack_locations,
+)
 ```
 
-The resulting values should line up with the `Branch(length=...)` that owns
-the stacked field.
+Also test nulls, batch size one, an empty typed table, and enough rows to cross
+an ingress/scanner batch boundary. Field order must always be origin then
+destination; do not derive semantic order from a hash map or observed values.
 
-## When To Use It
+## When To Stack
 
-Use field stacking when:
+Stack fields when:
 
-- The values have the same datatype and should share parameters.
-- You want one vocabulary for a concept that appears in multiple roles.
-- Role-specific meaning is optional or can be modeled with an explicit role
-  field.
-- You want embeddings at the shared concept level.
+- they represent one semantic type and should share parameters;
+- one vocabulary should cover the concept across roles;
+- role-specific meaning is absent or represented explicitly;
+- one shared branch embedding is useful.
 
-## When Not To Use It
+Do not stack merely because storage types match. Airport locations, merchant
+categories, and fraud labels may all be strings without representing one
+concept. Keep separate fields when shared parameters would erase useful
+meaning.
 
-Do not stack fields just because their storage types match. Airport locations,
-merchant categories, and fraud labels may all be strings, but they are not the
-same semantic field. Do not stack values if sharing a vocabulary would hide
-meaning that the model needs. Do not use a clever query when a preprocessor
-would be easier to test and maintain.
-
-## Where Next
-
-- Use [Binding Data](../core-concepts/binding-data.qmd) to choose between
-  defaults, queries, and preprocessors.
-- Use [Query Paths](../core-concepts/querypaths.qmd) for advanced request query conventions.
-- Use [Branch](../data-types/branch.qmd) for repeated context behavior.
-- Use [preprocessors](data-modules.qmd#preprocessors) when role-aware stacking
-  needs Python logic.
-- See the [Device Tenure case study](../case-studies/device-tenure.qmd) for a
-  repeated-identity pattern in event histories.
+See [Binding Data](../core-concepts/binding-data.qmd) for processor contracts,
+[Working With Arrow](working-with-arrow.qmd) for nested operations, and
+[Branch](../data-types/branch.qmd) for repeated context behavior.

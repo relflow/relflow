@@ -1,20 +1,36 @@
 from __future__ import annotations
 
+import ast
+from logging.handlers import BufferingHandler
+from pathlib import Path
+
 import torch
 from lightning.pytorch.utilities.model_summary.model_summary import summarize
-from loguru import logger
 
 import relflow as rf
 from relflow.architecture.checkpoint import CheckpointState
 from relflow.architecture.graph import ModelGraph
 from relflow.architecture.mutations import SchemaEditor
+from relflow.logging import logger
+from relflow.logging.config import CONTEXT
 from relflow.structs import experiment, selectors
+
+FRAMEWORK_PROTOCOL_METHODS = frozenset(
+    {
+        "_load_from_state_dict",
+        "_mime_",
+        "_missing_",
+        "_repr_html_",
+        "_repr_mimebundle_",
+        "_save_to_state_dict",
+    }
+)
 
 
 def _model() -> rf.Model:
     return rf.Model(
         rf.Number(name="amount"),
-        rf.Category(name="label", target=True, size=4),
+        rf.Category(name="label", mask=True, size=4),
         d_model=8,
         n_layers=1,
         n_heads=2,
@@ -31,26 +47,23 @@ def test_model_uses_mutation_facade() -> None:
 
 def test_model_mutations_emit_structured_logs() -> None:
     model = _model()
-    events: list[dict[str, object]] = []
-    messages: list[str] = []
-    sink_id = logger.add(
-        lambda message: (
-            events.append(dict(message.record["extra"])),
-            messages.append(message.record["message"]),
-        )
-    )
+    records = BufferingHandler(capacity=100)
+    logger.logger.addHandler(records)
 
     try:
         model.update(rf.where("name") == "amount", weight=2.0)
         model.update(rf.where("name") == "amount", benchmark="schema_api", allow_extra=True)
-        model.update(rf.where("name") == "amount", target=True)
+        model.update(rf.where("name") == "amount", mask=True)
         model.extend(rf.where("name") == "record", rf.Category(name="extra", size=4))
         model.reset(rf.where("name") == "amount")
         with model.override(rf.where("name") == "amount", weight=3.0):
             pass
         model.delete(rf.where("name") == "extra")
     finally:
-        logger.remove(sink_id)
+        logger.logger.removeHandler(records)
+
+    events = [getattr(record, CONTEXT) for record in records.buffer]
+    messages = [record.getMessage() for record in records.buffer]
 
     mutation_events = [event for event in events if event.get("component") == "schema_mutation"]
     actions = {event["action"] for event in mutation_events}
@@ -64,7 +77,7 @@ def test_model_mutations_emit_structured_logs() -> None:
         for event in mutation_events
     )
     assert any(
-        event.get("attribute") == "target" and event.get("definition_attribute") is False for event in mutation_events
+        event.get("attribute") == "mask" and event.get("definition_attribute") is True for event in mutation_events
     )
     assert any(
         event.get("address") == "record/amount"
@@ -81,19 +94,16 @@ def test_model_mutations_emit_structured_logs() -> None:
 
 def test_model_mutation_logs_include_previous_and_current_address_for_renames() -> None:
     model = _model()
-    events: list[dict[str, object]] = []
-    messages: list[str] = []
-    sink_id = logger.add(
-        lambda message: (
-            events.append(dict(message.record["extra"])),
-            messages.append(message.record["message"]),
-        )
-    )
+    records = BufferingHandler(capacity=10)
+    logger.logger.addHandler(records)
 
     try:
         model.update(rf.where("name") == "amount", name="total")
     finally:
-        logger.remove(sink_id)
+        logger.logger.removeHandler(records)
+
+    events = [getattr(record, CONTEXT) for record in records.buffer]
+    messages = [record.getMessage() for record in records.buffer]
 
     mutation_events = [event for event in events if event.get("component") == "schema_mutation"]
 
@@ -142,3 +152,21 @@ def test_experiment_reexports_selector_api() -> None:
     assert experiment.where is selectors.where
     assert experiment.NodePredicate is selectors.NodePredicate
     assert experiment.NodeAttribute is selectors.NodeAttribute
+
+
+def test_source_functions_and_classes_do_not_use_private_names() -> None:
+    source = Path(__file__).parents[2] / "src" / "relflow"
+    violations: list[str] = []
+
+    for path in sorted(source.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef)):
+                continue
+            if not node.name.startswith("_") or node.name.startswith("__"):
+                continue
+            if node.name in FRAMEWORK_PROTOCOL_METHODS:
+                continue
+            violations.append(f"{path.relative_to(source)}:{node.lineno}: {node.name}")
+
+    assert not violations, "private function/class names:\n" + "\n".join(violations)
