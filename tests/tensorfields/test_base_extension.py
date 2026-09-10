@@ -170,7 +170,7 @@ def test_extension_requires_reports_all_missing_imports_and_install_targets():
         assert name in message
         assert first in message
         assert second in message
-        assert "python -m pip install 'example[first]' 'example[second]'" in message
+        assert "uv add 'example[first]' 'example[second]'" in message
     finally:
         TENSORFIELDS.pop(name, None)
 

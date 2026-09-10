@@ -173,7 +173,7 @@ def test_model_reports_missing_extension_packages_before_building_runtime_nodes(
         assert raised.value.name == module
         assert "record/value" in message
         assert extension.name in message
-        assert "python -m pip install 'example-extension[fast]'" in message
+        assert "uv add 'example-extension[fast]'" in message
         assert embedders == []
     finally:
         TENSORFIELDS.pop(extension.name, None)
