@@ -7,6 +7,7 @@
 </p>
 
 <p align="center">
+  <a href="https://pypi.org/project/relflow/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/relflow?logo=pypi&amp;logoColor=white" /></a>
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&amp;logoColor=white" />
   <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-2E8B57" /></a>
   <a href="https://relflow.github.io/relflow/"><img alt="Documentation" src="https://img.shields.io/badge/docs-Quarto-39729E?logo=quarto&amp;logoColor=white" /></a>
@@ -309,25 +310,25 @@ parameters.
 
 ## Install
 
-RelFlow requires Python `>=3.12`. Create a virtual environment and install with uv:
+RelFlow requires Python `>=3.12`. Add it to your uv project:
 
 ```bash
-uv venv --python 3.12
-source .venv/bin/activate
-uv pip install relflow
+uv add relflow
 ```
 
-Install optional functionality:
+For a new project, run `uv init --python 3.12` first.
+
+Add optional functionality:
 
 ```bash
-uv pip install "relflow[text]"
-uv pip install "relflow[serving]"
+uv add "relflow[text]"
+uv add "relflow[serving]"
 ```
 
 Verify the environment:
 
 ```bash
-python -c "import importlib.metadata; import relflow; print(importlib.metadata.version('relflow'))"
+uv run python -c "import importlib.metadata; import relflow; print(importlib.metadata.version('relflow'))"
 ```
 
 For a contributor checkout, use the locked development environment instead:

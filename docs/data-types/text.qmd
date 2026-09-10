@@ -48,7 +48,7 @@ the desired signal.
 The text tensorfield requires the optional `transformers` dependency.
 
 ```bash
-uv pip install "relflow[text]"
+uv add "relflow[text]"
 ```
 
 In a contributor checkout, use `uv sync --extra text` instead.
@@ -114,7 +114,7 @@ inside the process. It is not executed by the core docs suite because it
 requires that external download.
 
 ```bash
-uv pip install "relflow[text]"
+uv add "relflow[text]"
 ```
 
 ```python

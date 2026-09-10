@@ -106,7 +106,7 @@ fast_scalar = rf.Extension(
 RelFlow checks each extension once at model graph construction, before it
 constructs any runtime node. If `fast_scalar_codec` is absent, model creation
 raises `ModuleNotFoundError` identifying the field and extension and includes
-the exact command `python -m pip install 'fast-scalar[codec]>=2'`. This also
+the exact command `uv add 'fast-scalar[codec]>=2'`. This also
 applies when loading a model or rebuilding its graph after a schema mutation.
 Creating the extension and working with its request schema remain possible
 without the optional package.

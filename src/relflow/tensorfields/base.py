@@ -519,7 +519,7 @@ class Extension:
     incompatible; types joined in one PEP 604 union may share one Arrow column.
     ``arrow`` supplies a physical-type matcher for custom Python atoms or
     overrides a standard matcher. ``requires`` maps importable module names to
-    their pip installation requirements. Creating an extension with an existing
+    their package requirements. Creating an extension with an existing
     name replaces the registry entry and emits a warning.
     """
 
@@ -651,7 +651,7 @@ class Extension:
         noun = "package" if len(missing) == 1 else "packages"
         raise ModuleNotFoundError(
             f"model field '{address}' uses extension '{self.name}', which requires uninstalled {noun}: "
-            f"{modules}; install with `python -m pip install {command}`",
+            f"{modules}; install with `uv add {command}`",
             name=missing[0],
         )
 

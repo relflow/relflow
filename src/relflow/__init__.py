@@ -103,7 +103,7 @@ def __getattr__(name: str) -> Any:
     except ModuleNotFoundError as error:
         if error.name in {"fastapi", "orjson", "pydantic_settings", "uvicorn"}:
             raise ModuleNotFoundError(
-                f"relflow.{name} requires the serving extra; install with `pip install relflow[serving]`."
+                f"relflow.{name} requires the serving extra; install with `uv add 'relflow[serving]'`."
             ) from error
         raise
 

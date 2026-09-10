@@ -238,7 +238,7 @@ release version and record the distribution version, processor code, and
 dependency environment with every artifact:
 
 ```bash
-uv pip install "relflow==<version>"
+uv add "relflow==<version>"
 ```
 
 Use documentation matching the installed version for an older artifact.

@@ -17,19 +17,19 @@ verify that every part of the workflow is connected correctly.
 
 ## Install
 
-RelFlow requires Python 3.12 or newer. Create a virtual environment with uv and
-install the published package:
+RelFlow requires Python 3.12 or newer. Add the published package to your uv
+project:
 
 ```bash
-uv venv --python 3.12
-source .venv/bin/activate
-uv pip install relflow
+uv add relflow
 ```
+
+For a new project, run `uv init --python 3.12` first.
 
 Verify the installed distribution and import:
 
 ```bash
-python -c 'from importlib.metadata import version; import relflow; print(version("relflow"))'
+uv run python -c 'from importlib.metadata import version; import relflow; print(version("relflow"))'
 ```
 
 The core install includes PyTorch, Lightning, PyArrow, Polars, and `Hash`
@@ -37,8 +37,8 @@ fields. Add `text` for Hugging Face text models or `serving` for the FastAPI
 runtime:
 
 ```bash
-uv pip install "relflow[text]"
-uv pip install "relflow[serving]"
+uv add "relflow[text]"
+uv add "relflow[serving]"
 ```
 
 The walkthrough fixes Lightning to `accelerator="cpu"`; no GPU is required.

@@ -39,6 +39,7 @@ def render():
         for asset, title in (
             ("logo", "RelFlow"),
             ("banner", "relflow"),
+            ("preview", "relflow"),
         ):
             directory = Path(f"{asset}s")
             source = directory / f"{asset}.typ"
