@@ -1,8 +1,10 @@
 <p align="center">
-  <img alt="RelFlow logo" src="https://raw.githubusercontent.com/relflow/relflow/main/docs/branding/logo.drawio.svg" width="144" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/branding/banners/banner.dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/branding/banners/banner.light.svg" />
+    <img alt="relflow" src="docs/branding/banners/banner.light.svg" width="100%" />
+  </picture>
 </p>
-
-<h1 align="center"><code>relflow</code></h1>
 
 <p align="center">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&amp;logoColor=white" />
@@ -59,7 +61,7 @@ model = rf.Model(
         quantity=rf.Number,
         price=rf.Number,
     ),
-    returned=rf.Category(mask=True, size=2),
+    returned=rf.Boolean(mask=True),
 )
 ```
 
@@ -72,7 +74,7 @@ This model reads records shaped like:
         {"sku": "A12", "quantity": 2, "price": 19.99},
         {"sku": "B07", "quantity": 1, "price": 45.50},
     ],
-    "returned": "false",
+    "returned": False,
 }
 ```
 
@@ -83,7 +85,7 @@ prediction to emit embeddings at configured addresses.
 ## Train With Lightning
 
 `rf.Model` is a LightningModule. `rf.ArrowDataModule` is the canonical
-LightningDataModule; focused Polars, custom, and synthetic adapters enter the
+`LightningDataModule`; focused Polars, custom, and synthetic adapters enter the
 same Arrow pipeline. The schema
 defines the model tree, typed losses, prediction outputs, and embeddings;
 Lightning runs `fit`, `validate`, `test`, and `predict`.
@@ -307,22 +309,19 @@ parameters.
 
 ## Install
 
-RelFlow requires Python `>=3.12`. The currently documented user installation
-is directly from the GitHub repository:
+RelFlow requires Python `>=3.12`. Create a virtual environment and install with uv:
 
 ```bash
-python -m pip install "relflow @ git+https://github.com/relflow/relflow.git"
+uv venv --python 3.12
+source .venv/bin/activate
+uv pip install relflow
 ```
 
-This follows the repository's default branch. The documentation Versions menu
-links to the published `main` and staging builds. Those builds move with their
-branches, so pin a tag or commit in the Git URL for reproducible environments.
-
-Install optional functionality from the same source:
+Install optional functionality:
 
 ```bash
-python -m pip install "relflow[text] @ git+https://github.com/relflow/relflow.git"
-python -m pip install "relflow[serving] @ git+https://github.com/relflow/relflow.git"
+uv pip install "relflow[text]"
+uv pip install "relflow[serving]"
 ```
 
 Verify the environment:

@@ -26,11 +26,11 @@ actual model and payloads before production use.
 FastAPI, Uvicorn, and the JSON backends are optional dependencies:
 
 ```bash
-python -m pip install "relflow[serving] @ git+https://github.com/relflow/relflow.git"
+uv pip install "relflow[serving]"
 ```
 
-This matches the current source-distribution installation documented in
-[Getting Started](../getting-started.qmd). Without the extra, accessing
+For virtual environment setup, see [Getting Started](../getting-started.qmd).
+Without the extra, accessing
 `rf.Deployment` raises an installation error.
 
 ## Start A Server

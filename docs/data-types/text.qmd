@@ -4,7 +4,7 @@ pyproject: |
   requires-python = ">=3.12"
   dependencies = [
     "marimo>=0.23.8",
-    "relflow[text] @ git+https://github.com/relflow/relflow.git",
+    "relflow[text]",
   ]
 ---
 
@@ -48,7 +48,7 @@ the desired signal.
 The text tensorfield requires the optional `transformers` dependency.
 
 ```bash
-python -m pip install "relflow[text] @ git+https://github.com/relflow/relflow.git"
+uv pip install "relflow[text]"
 ```
 
 In a contributor checkout, use `uv sync --extra text` instead.
@@ -114,7 +114,7 @@ inside the process. It is not executed by the core docs suite because it
 requires that external download.
 
 ```bash
-python -m pip install "relflow[text] @ git+https://github.com/relflow/relflow.git"
+uv pip install "relflow[text]"
 ```
 
 ```python
