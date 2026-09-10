@@ -233,17 +233,15 @@ The second block is an inspection excerpt using a model built elsewhere.
 
 The published site keeps `main` at its stable root URL and exposes selected
 staging builds through the Versions menu. These builds move with their branches;
-they are not immutable snapshots. The documented Git installation also tracks
-`main` unless a revision is pinned. For reproducible work, install an explicit
-tag or commit and record that source revision, the distribution version,
-processor code, and dependency environment with every artifact:
+they are not immutable snapshots. For reproducible work, install an explicit
+release version and record the distribution version, processor code, and
+dependency environment with every artifact:
 
 ```bash
-python -m pip install \
-  "relflow @ git+https://github.com/relflow/relflow.git@<commit>"
+uv pip install "relflow==<version>"
 ```
 
-Use documentation from the matching source checkout for an older artifact.
+Use documentation matching the installed version for an older artifact.
 Saved artifacts own their validated built-in schema plus field preprocessing
 state and weights; do not reconstruct them from copied constructor snippets
 when exact parity matters.
@@ -252,7 +250,7 @@ Support maturity differs by workflow:
 
 | Surface | Current policy |
 | --- | --- |
-| Built-in schema, training, persistence, and interactive/batch prediction | Covered by the repository test suite; pin a revision because no long-term compatibility window is published. |
+| Built-in schema, training, persistence, and interactive/batch prediction | Covered by the repository test suite; pin a version because no long-term compatibility window is published. |
 | Online serving | Provided and tested, but version-coupled and without an availability or compatibility guarantee. See [Online Serving](../guides/serving.qmd). |
 | Dataset and factory input | Arrow-native with deterministic combined rank/worker ownership; file manifests are frozen across consumers, while source-native sharding and coordinated caching remain deferred. See [Data Modules](../guides/data-modules.qmd). |
 | Custom tensorfields | Experimental extension surface; artifacts require the same extension registration and compatible code before loading. See [Experimental Custom Tensorfields](../guides/custom-tensorfields.qmd). |

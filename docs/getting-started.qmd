@@ -17,19 +17,14 @@ verify that every part of the workflow is connected correctly.
 
 ## Install
 
-RelFlow requires Python 3.12 or newer. The public documentation currently uses
-the GitHub source distribution:
+RelFlow requires Python 3.12 or newer. Create a virtual environment with uv and
+install the published package:
 
 ```bash
-python -m venv .venv
+uv venv --python 3.12
 source .venv/bin/activate
-python -m pip install "relflow @ git+https://github.com/relflow/relflow.git"
+uv pip install relflow
 ```
-
-That command follows the repository's current default branch. The documentation
-navbar links to the published `main` and staging branch builds. Because those
-builds move with their branches, pin a tag or commit after `@` and retain the
-matching source checkout when exact reproducibility matters.
 
 Verify the installed distribution and import:
 
@@ -42,14 +37,13 @@ fields. Add `text` for Hugging Face text models or `serving` for the FastAPI
 runtime:
 
 ```bash
-python -m pip install "relflow[text] @ git+https://github.com/relflow/relflow.git"
-python -m pip install "relflow[serving] @ git+https://github.com/relflow/relflow.git"
+uv pip install "relflow[text]"
+uv pip install "relflow[serving]"
 ```
 
 The walkthrough fixes Lightning to `accelerator="cpu"`; no GPU is required.
 For a contributor checkout, install the locked development environment with
-`uv sync` instead. Do not confuse that repository setup with installation in a
-downstream project.
+`uv sync`.
 
 ## Start With Records
 
