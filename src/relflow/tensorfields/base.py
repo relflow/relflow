@@ -138,7 +138,8 @@ class EmbedderBase(torch.nn.Module):
         count = int(indices.numel())
 
         if count:
-            compact = self(field.take(indices))
+            complete = count == present.numel()
+            compact = self(field.take(None if complete else indices))
             if not isinstance(compact, Parcel):
                 raise TypeError(f"embedder for '{self.address}' must return a Parcel, got {type(compact).__name__}")
             expected = (count, self.d_model)
@@ -159,10 +160,14 @@ class EmbedderBase(torch.nn.Module):
                 )
 
             compact_payload = compact.payload.masked_fill(~compact.present.unsqueeze(-1), 0.0)
-            payload = compact.payload.new_zeros((math.prod(shape), self.d_model))
-            payload = payload.index_copy(0, indices, compact_payload)
-            restored = torch.zeros(math.prod(shape), dtype=torch.bool, device=compact.present.device)
-            restored = restored.index_copy(0, indices, compact.present)
+            if complete:
+                payload = compact_payload
+                restored = compact.present.clone()
+            else:
+                payload = compact.payload.new_zeros((math.prod(shape), self.d_model))
+                payload = payload.index_copy(0, indices, compact_payload)
+                restored = torch.zeros(math.prod(shape), dtype=torch.bool, device=compact.present.device)
+                restored = restored.index_copy(0, indices, compact.present)
         else:
             payload = self.anchor.new_zeros((math.prod(shape), self.d_model))
             for parameter in self.parameters():
@@ -381,19 +386,21 @@ class TensorFieldBase(Renderable):
     ) -> "TensorFieldBase":
         raise NotImplementedError
 
-    def take(self, indices: torch.Tensor) -> TensorInput:
-        """Gather one row-major coordinate prefix for embedding."""
+    def take(self, indices: torch.Tensor | None) -> TensorInput:
+        """Copy selected row-major coordinates, or every coordinate when indices is None."""
 
-        if indices.ndim != 1 or indices.dtype != torch.int64:
-            raise TypeError("tensorfield take indices must be a one-dimensional int64 tensor")
-        if indices.device != self.state.device:
-            raise ValueError(
-                f"tensorfield take indices must use state device {self.state.device}, got {indices.device}"
-            )
+        if indices is not None:
+            if indices.ndim != 1 or indices.dtype != torch.int64:
+                raise TypeError("tensorfield take indices must be a one-dimensional int64 tensor")
+            if indices.device != self.state.device:
+                raise ValueError(
+                    f"tensorfield take indices must use state device {self.state.device}, got {indices.device}"
+                )
 
         size = math.prod(self.state.shape)
-        if indices.numel() and (indices.min() < 0 or indices.max() >= size):
+        if indices is not None and indices.numel() and ((indices < 0) | (indices >= size)).any():
             raise IndexError(f"tensorfield take indices must be between 0 and {size - 1}")
+        count = size if indices is None else indices.numel()
 
         def gather(value: Any) -> Any:
             if torch.is_tensor(value):
@@ -403,19 +410,23 @@ class TensorFieldBase(Renderable):
                         f"got {tuple(value.shape)}"
                     )
                 trailing = tuple(value.shape[self.state.ndim :])
-                return value.reshape(size, *trailing).index_select(0, indices)
+                flat = value.reshape(size, *trailing)
+                if indices is None:
+                    return flat.clone(memory_format=torch.contiguous_format)
+                return flat.index_select(0, indices)
             if isinstance(value, TensorDict):
                 return TensorDict(
                     {key: gather(value[key]) for key in value.keys()},
-                    batch_size=[indices.numel()],
+                    batch_size=[count],
                     device=value.device,
                 )
             raise TypeError(f"tensorfield content must contain only tensors or TensorDicts, got {type(value).__name__}")
 
+        state = self.state.reshape(size)
         return TensorInput(
-            state=self.state.reshape(size).index_select(0, indices),
+            state=state.clone() if indices is None else state.index_select(0, indices),
             content=gather(self.content),
-            batch_size=[indices.numel()],
+            batch_size=[count],
         )
 
     def __rich_console__(self, console, options):

@@ -103,13 +103,13 @@ class LearnedQueryCrossAttention(torch.nn.Module):
             )
 
         active = present.any(dim=1)
+        indices = active.nonzero(as_tuple=False).reshape(-1)
         pooled = memory.new_zeros((N, self.queries.shape[0], self.queries.shape[1]))
-        if not active.any():
+        if not indices.numel():
             for parameter in self.parameters():
                 pooled = pooled + parameter.sum() * 0.0
             return pooled
 
-        indices = active.nonzero(as_tuple=False).reshape(-1)
         memory = memory.index_select(0, indices)
         present = present.index_select(0, indices)
         memory = memory.masked_fill(~present.unsqueeze(-1), 0.0)

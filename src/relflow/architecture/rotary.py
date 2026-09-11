@@ -17,7 +17,7 @@ class RotaryEmbedding(torch.nn.Module):
         self.register_buffer("inv_freq", base ** (-index / self.rotary_dim), persistent=False)
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        _, seq_len, _ = inputs.shape
+        seq_len = inputs.shape[-2]
 
         positions = torch.arange(seq_len, device=inputs.device, dtype=self.inv_freq.dtype)
         freqs = torch.outer(positions, self.inv_freq)
