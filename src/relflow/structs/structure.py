@@ -1,14 +1,17 @@
 """Structured schema nodes that group tensorfield requests."""
 
-from collections.abc import Mapping
-from typing import Annotated, Any, Literal, Self, TypeAlias
+from __future__ import annotations
+
+import builtins
+from collections.abc import Mapping, Sequence
+from typing import Annotated, Any, Literal, Self, TypeAlias, overload
 
 import pydantic
 from rich.text import Text
 
 from relflow.structs.enums import AttentionMode, Overflow
 from relflow.structs.reduction import Attention, ReductionConfig
-from relflow.structs.tree import Leaf, Mask, Node
+from relflow.structs.tree import Leaf, Mask, MaskInput, Node, Rate
 from relflow.tensorfields import extensions as _extensions  # noqa: F401
 from relflow.tensorfields.base import TENSORFIELDS
 
@@ -34,7 +37,48 @@ class Branch(Node):
     mask: tuple[Mask, ...] = pydantic.Field(default=False)
     fields: list[Self | pydantic.SerializeAsAny[pydantic.InstanceOf[Leaf]]] = pydantic.Field(default_factory=list)
 
-    def __init__(self, *children: Self | RequestTypes | Leaf, **data):
+    @overload
+    def __init__(
+        self,
+        *children: Branch | Leaf,
+        name: str | None = None,
+        query: str | None = None,
+        description: str | None = None,
+        embed: bool = False,
+        length: int = 1,
+        overflow: Overflow | Literal["head", "tail", "error"] = Overflow.head,
+        attention: AttentionMode | Literal["mha", "gqa", "mqa", "none"] = AttentionMode.mha,
+        n_layers: int = 1,
+        n_heads: int = 4,
+        reduction: ReductionConfig | None = ...,
+        dropout: Rate | None = None,
+        mask: MaskInput = False,
+        type: Literal["branch"] = "branch",
+        **named_children: Branch | Leaf | builtins.type[Leaf],
+    ) -> None: ...
+
+    @overload
+    def __init__(
+        self,
+        *,
+        fields: Sequence[Branch | Leaf | Mapping[str, Any]],
+        name: str | None = None,
+        query: str | None = None,
+        description: str | None = None,
+        embed: bool = False,
+        length: int = 1,
+        overflow: Overflow | Literal["head", "tail", "error"] = Overflow.head,
+        attention: AttentionMode | Literal["mha", "gqa", "mqa", "none"] = AttentionMode.mha,
+        n_layers: int = 1,
+        n_heads: int = 4,
+        reduction: ReductionConfig | None = ...,
+        dropout: Rate | None = None,
+        mask: MaskInput = False,
+        type: Literal["branch"] = "branch",
+        **named_children: Branch | Leaf | builtins.type[Leaf],
+    ) -> None: ...
+
+    def __init__(self, *children: Branch | Leaf, **data: Any) -> None:
         removed = sorted({"p_mask", "p_prune", "target"} & data.keys())
         if "masks" in data:
             value = data["masks"]
