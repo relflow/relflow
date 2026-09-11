@@ -1,17 +1,44 @@
+from copy import deepcopy
+
 import pyarrow as pa
 import pytest
 import torch
 from tensordict import TensorDict
 
 import relflow as rf
-from relflow.structs.enums import Strata, TensorKey
-from relflow.tensorfields.base import TensorFieldBase, TensorInput
+from relflow.structs.enums import Strata, TensorKey, Tokens
+from relflow.structs.packages import Parcel
+from relflow.tensorfields.base import EmbedderBase, TensorFieldBase, TensorInput
 
 
 class Field(TensorFieldBase):
     @classmethod
     def new(cls, input, target, present, trainable, inferred, address, schema, strata, context):
         raise NotImplementedError
+
+
+class Probe(EmbedderBase):
+    def __init__(self, schema):
+        super().__init__(schema, "record/value")
+        self.linear = torch.nn.Linear(7, schema.d_model)
+        self.dropout = torch.nn.Dropout(0.3)
+
+    def forward(self, inputs):
+        self.inputs = inputs
+        assert inputs.content["nested", "matrix"].is_contiguous()
+        values = torch.cat(
+            (inputs.content["scalar"].unsqueeze(-1), inputs.content["nested", "matrix"].view(inputs.state.numel(), -1)),
+            dim=1,
+        )
+        present = inputs.state.ne(Tokens.other.value)
+        self.parcel = Parcel(
+            payload=self.dropout(self.linear(values)).masked_fill(~present.unsqueeze(-1), torch.nan),
+            present=present,
+            origin=self.address,
+            destination=self.destination,
+            batch_size=inputs.state.numel(),
+        )
+        return self.parcel
 
 
 def test_plain_input_node_allocates_only_an_embedder():
@@ -23,7 +50,8 @@ def test_plain_input_node_allocates_only_an_embedder():
     assert not hasattr(node, "decoder")
 
 
-def test_tensorfield_take_gathers_every_content_prefix():
+@pytest.mark.parametrize("indices", [None, [1, 4], [5, 1, 1], []])
+def test_tensorfield_take_gathers_every_content_prefix(indices):
     field = Field()
     field.state = torch.arange(6).reshape(2, 3)
     field.content = TensorDict(
@@ -34,29 +62,122 @@ def test_tensorfield_take_gathers_every_content_prefix():
         batch_size=[2, 3],
     )
 
-    compact = field.take(torch.tensor([1, 4]))
+    selected = torch.arange(6) if indices is None else torch.tensor(indices, dtype=torch.int64)
+    compact = field.take(None if indices is None else selected)
 
     assert isinstance(compact, TensorInput)
-    assert compact.batch_size == torch.Size([2])
+    assert compact.batch_size == torch.Size([len(selected)])
     assert not hasattr(compact, "targets")
     assert not hasattr(compact, "present")
     assert not hasattr(compact, "trainable")
     assert not hasattr(compact, "inferred")
-    assert torch.equal(compact.state, torch.tensor([1, 4]))
-    assert torch.equal(compact.content["scalar"], torch.tensor([1, 4]))
+    assert torch.equal(compact.state, selected)
+    assert torch.equal(compact.content["scalar"], selected)
     assert torch.equal(
         compact.content["vector"],
-        field.content["vector"].reshape(6, 4).index_select(0, torch.tensor([1, 4])),
+        field.content["vector"].reshape(6, 4).index_select(0, selected),
     )
 
 
-def test_tensorfield_take_rejects_an_invalid_content_prefix():
+@pytest.mark.parametrize("indices", [None, [1, 4]])
+def test_tensorfield_take_rejects_an_invalid_content_prefix(indices):
     field = Field()
     field.state = torch.arange(6).reshape(2, 3)
     field.content = torch.arange(6).reshape(3, 2)
 
     with pytest.raises(ValueError, match="content must start with state shape"):
-        field.take(torch.tensor([1, 4]))
+        field.take(None if indices is None else torch.tensor(indices))
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_tensorfield_take_preserves_empty_geometry_and_index_validation(device):
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+
+    field = Field()
+    field.state = torch.arange(6, device=device).reshape(2, 3)
+    field.content = torch.arange(12.0, device=device).reshape(2, 3, 2)
+    for indices in ([-1], [6], [10]):
+        with pytest.raises(IndexError, match="indices must be between 0 and 5"):
+            field.take(torch.tensor(indices, dtype=torch.int64, device=device))
+    for indices in (torch.tensor([1.0], device=device), torch.tensor([[1]], device=device)):
+        with pytest.raises(TypeError, match="one-dimensional int64"):
+            field.take(indices)
+    if device == "cuda":
+        with pytest.raises(ValueError, match="indices must use state device"):
+            field.take(torch.tensor([1]))
+
+    field.state = field.state[:0]
+    field.content = TensorDict(
+        {"nested": TensorDict({"vector": field.content[:0]}, batch_size=[0, 3], device=device)},
+        batch_size=[0, 3],
+        device=device,
+    )
+    compact = field.take(None)
+    assert compact.state.shape == (0,)
+    assert compact.content["nested", "vector"].shape == (0, 2)
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_all_present_extension_matches_padded_geometry_and_preserves_copy_isolation(device):
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+
+    torch.manual_seed(13)
+    schema = rf.Model(value=rf.Number, d_model=8, n_heads=2, n_layers=1).schema
+    full = Probe(schema).to(device).train()
+    padded = deepcopy(full)
+    fields = []
+    for length in (3, 4):
+        field = Field()
+        field.state = torch.full((2, length), Tokens.padded.value, device=device)
+        field.state[:, :3] = torch.tensor([[0, 4, 1], [0, 0, 0]], device=device)
+        field.present = field.state.ne(Tokens.padded.value)
+        scalar = torch.full((2, length), torch.nan, device=device)
+        scalar[:, :3] = torch.arange(6.0, device=device).reshape(2, 3)
+        matrix = torch.full((2, length, 2, 3), torch.nan, device=device).transpose(-1, -2)
+        matrix[:, :3] = torch.arange(36.0, device=device).reshape(2, 3, 3, 2)
+        assert not matrix.is_contiguous()
+        field.content = TensorDict(
+            {
+                "scalar": scalar.requires_grad_(),
+                "nested": TensorDict({"matrix": matrix.requires_grad_()}, batch_size=[2, length], device=device),
+            },
+            batch_size=[2, length],
+            device=device,
+        )
+        fields.append(field)
+
+    torch.manual_seed(19)
+    actual = full.embed(fields[0])
+    torch.manual_seed(19)
+    expected = padded.embed(fields[1])
+    torch.testing.assert_close(actual.payload, expected.payload[:, :3])
+    torch.testing.assert_close(actual.present, expected.present[:, :3])
+    assert torch.isfinite(actual.payload).all()
+    assert torch.count_nonzero(expected.payload[:, 3]) == 0
+    weights = torch.linspace(0.1, 1, actual.payload.numel(), device=device).reshape_as(actual.payload)
+    (actual.payload * weights).sum().backward()
+    (expected.payload[:, :3] * weights).sum().backward()
+    for left, right in zip(full.parameters(), padded.parameters(), strict=True):
+        assert left.grad is not None and right.grad is not None
+        torch.testing.assert_close(left.grad, right.grad)
+        assert torch.isfinite(left.grad).all()
+    for key in ("scalar", ("nested", "matrix")):
+        torch.testing.assert_close(fields[0].content[key].grad, fields[1].content[key].grad[:, :3])
+
+    state = fields[0].state.clone()
+    content = fields[0].content.clone()
+    presence = actual.present.clone()
+    with torch.no_grad():
+        full.inputs.state.fill_(9)
+        full.inputs.content["scalar"].fill_(999)
+        full.inputs.content["nested", "matrix"].fill_(999)
+        full.parcel.present.logical_not_()
+    torch.testing.assert_close(fields[0].state, state)
+    torch.testing.assert_close(fields[0].content["scalar"], content["scalar"])
+    torch.testing.assert_close(fields[0].content["nested", "matrix"], content["nested", "matrix"])
+    torch.testing.assert_close(actual.present, presence)
 
 
 def test_embedder_compacts_present_coordinates_and_restores_fixed_geometry():

@@ -34,11 +34,12 @@ def adamw(
     weight_decay: float = 0.01,
     betas: tuple[float, float] = (0.9, 0.95),
     eps: float = 1e-8,
+    fused: bool | None = True,
     decay_bias: bool = False,
     decay_1d: bool = False,
     no_decay_name_fragments: tuple[str, ...] = ("norm",),
 ) -> OptimizerFactory:
-    """Build an AdamW optimizer with common no-decay parameter grouping."""
+    """Build fused AdamW with common no-decay parameter grouping."""
 
     fragments = tuple(fragment.lower() for fragment in no_decay_name_fragments if fragment)
 
@@ -72,6 +73,7 @@ def adamw(
             lr=learning_rate,
             betas=betas,
             eps=eps,
+            fused=fused,
             weight_decay=weight_decay,
         )
 

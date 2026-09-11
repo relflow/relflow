@@ -280,10 +280,8 @@ class GlobalOnlineNormalizer(torch.nn.Module):
             self.update(inputs[finite_mask])
 
         std = torch.sqrt(self.var + self.epsilon)
-        out = inputs.clone()
-        out[finite_mask] = (inputs[finite_mask] - self.mean) / std
-
-        return out
+        normalized = (torch.atleast_1d(inputs) - self.mean) / std
+        return torch.where(finite_mask, normalized.reshape_as(inputs), inputs)
 
 
 @number.register

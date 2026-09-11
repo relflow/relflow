@@ -344,6 +344,53 @@ def test_number_normalizer_ignores_nonfinite_values_when_updating():
     assert torch.isnan(output[3])
 
 
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+@pytest.mark.parametrize("layout", ["flat", "transposed", "scalar", "empty"])
+@pytest.mark.parametrize(
+    ("dtype", "buffer_dtype"),
+    [
+        (torch.float32, torch.float32),
+        (torch.float64, torch.float32),
+        (torch.float16, torch.float16),
+        (torch.bfloat16, torch.bfloat16),
+    ],
+)
+def test_number_normalizer_preserves_masked_values_and_input_gradients_without_updates(
+    device: str, layout: str, dtype: torch.dtype, buffer_dtype: torch.dtype
+):
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+
+    normalizer = GlobalOnlineNormalizer(epsilon=0.0).to(device=device, dtype=buffer_dtype).train()
+    normalizer.mean.fill_(2.0)
+    normalizer.var.fill_(9.0)
+    inputs = torch.tensor([8.0, -3.0, float("nan"), float("inf"), float("-inf"), 5.0], device=device, dtype=dtype)
+    mask = torch.tensor([True, False, True, True, False, True], device=device)
+    expected = torch.tensor([2.0, -3.0, float("nan"), float("inf"), float("-inf"), 1.0], device=device, dtype=dtype)
+    slopes = torch.tensor([1 / 3, 1.0, 1.0, 1.0, 1.0, 1 / 3], device=device, dtype=dtype)
+    if layout == "transposed":
+        inputs, mask, expected, slopes = [value.reshape(2, 3).T for value in (inputs, mask, expected, slopes)]
+        assert not inputs.is_contiguous()
+    elif layout == "empty":
+        inputs, mask, expected, slopes = [value[:0] for value in (inputs, mask, expected, slopes)]
+    elif layout == "scalar":
+        inputs, mask, expected, slopes = [value[0] for value in (inputs, mask, expected, slopes)]
+    original = inputs.clone()
+    inputs.requires_grad_()
+
+    output = normalizer(inputs=inputs, mask=mask, update=False)
+    weights = torch.arange(1, inputs.numel() + 1, dtype=inputs.dtype, device=device).reshape(inputs.shape)
+    (gradient,) = torch.autograd.grad(output, inputs, grad_outputs=weights)
+
+    torch.testing.assert_close(output, expected, equal_nan=True)
+    torch.testing.assert_close(inputs, original, equal_nan=True)
+    torch.testing.assert_close(gradient, weights * slopes)
+    assert torch.isfinite(gradient).all()
+    assert normalizer.mean.item() == 2.0
+    assert normalizer.var.item() == 9.0
+    assert normalizer.count.item() == 0
+
+
 def test_number_normalizer_learns_precomputed_finite_moments():
     normalizer = GlobalOnlineNormalizer()
     observation = moments(torch.tensor([1.0, 3.0, float("nan"), float("inf")]))

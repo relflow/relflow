@@ -316,7 +316,7 @@ class Embedder(EmbedderBase):
         content = inputs.content.reshape(-1)
         valued = state.eq(Tokens.valued.value)
 
-        if valued.any() and (content.masked_select(valued) > self.size).any().item():
+        if (valued & (content > self.size)).any():
             raise ValueError(f"Token in address {self.origin} exceeds vocabulary size of {self.size}")
 
         known = valued & content.lt(self.size)

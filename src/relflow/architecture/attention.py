@@ -44,9 +44,7 @@ class RotaryMultiheadAttention(torch.nn.Module):
     def rotate(self, inputs: torch.Tensor) -> torch.Tensor:
         if self.rotary is None:
             return inputs
-        batch, nhead, seq_len, head_dim = inputs.shape
-        rotated = self.rotary(inputs.reshape(batch * nhead, seq_len, head_dim))
-        return rotated.reshape(batch, nhead, seq_len, head_dim)
+        return self.rotary(inputs)
 
     def forward(
         self,
@@ -56,6 +54,7 @@ class RotaryMultiheadAttention(torch.nn.Module):
         key_padding_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         active: torch.Tensor | None = None
+        attn_mask: torch.Tensor | None = None
         if key_padding_mask is not None:
             expected = (key.shape[0], key.shape[1])
             if key_padding_mask.dtype != torch.bool or tuple(key_padding_mask.shape) != expected:
@@ -64,7 +63,8 @@ class RotaryMultiheadAttention(torch.nn.Module):
                     f"got {tuple(key_padding_mask.shape)} with dtype {key_padding_mask.dtype}"
                 )
 
-            active = ~key_padding_mask.all(dim=1)
+            attn_mask = ~key_padding_mask
+            active = attn_mask.any(dim=1)
             if key.shape[1] == 0:
                 output = query.new_zeros(query.shape)
                 for parameter in self.parameters():
@@ -73,20 +73,16 @@ class RotaryMultiheadAttention(torch.nn.Module):
 
             # Give an empty row one safe placeholder key for SDPA, then erase its
             # result below. This stays entirely on-device and avoids a host sync.
-            key = key.masked_fill(key_padding_mask.unsqueeze(-1), 0.0)
-            value = value.masked_fill(key_padding_mask.unsqueeze(-1), 0.0)
-            key_padding_mask = key_padding_mask.clone()
-            key_padding_mask[:, 0] &= active
+            shared = key is value
+            padding = key_padding_mask.unsqueeze(-1)
+            key = key.masked_fill(padding, 0.0)
+            value = key if shared else value.masked_fill(padding, 0.0)
+            attn_mask[:, 0] |= ~active
+            attn_mask = attn_mask[:, None, None, :]
 
         q = self.rotate(self.splitheads(self.q_proj(query), nhead=self.nhead))
         k = self.rotate(self.splitheads(self.k_proj(key), nhead=self.n_kv_heads))
         v = self.splitheads(self.v_proj(value), nhead=self.n_kv_heads)
-
-        attn_mask: torch.Tensor | None = None
-
-        if key_padding_mask is not None:
-            # SDPA boolean masks use True for positions that may participate in attention.
-            attn_mask = ~key_padding_mask[:, None, None, :]
 
         context = F.scaled_dot_product_attention(
             query=q,

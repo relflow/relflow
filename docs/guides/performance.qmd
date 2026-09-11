@@ -223,6 +223,29 @@ Mixed precision can reduce activation memory on supported accelerators. Validate
 numeric behavior for each datatype and loss rather than assuming identical
 quality.
 
+## Compare Optimizer Implementations
+
+The AdamW factory uses PyTorch's fused implementation by default, preserving
+its existing parameter groups and weight-decay rules:
+
+```python
+from relflow.helpers.optimizers import adamw
+
+model.optimizer = adamw(learning_rate=1e-3)
+```
+
+Pass `fused=None` for PyTorch's automatic selection or `fused=False` to disable
+fusion. Fused arithmetic can produce different floating-point training
+trajectories. Compare complete training steps on the intended device: a large
+improvement in optimizer time
+can have a small effect when forward and backward dominate. The available
+settings are described in the [PyTorch AdamW documentation](https://docs.pytorch.org/docs/2.12/generated/torch.optim.AdamW.html).
+
+For checkpoint resume with gradient scaling, construct the helper with the
+saved `fused` setting. Optimizer checkpoints made with the previous helper
+default need `adamw(learning_rate=1e-3, fused=None)`; loading them into an
+optimizer constructed with `fused=True` can fail in PyTorch's `GradScaler`.
+
 ## Distributed Training
 
 ::: {.callout-note title="Arrow scheduler"}
