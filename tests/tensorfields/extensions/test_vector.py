@@ -4,8 +4,10 @@ import torch
 from tensordict import TensorDict
 
 import relflow as rf
+from relflow.architecture.runtime import ModelRuntime
 from relflow.data.ragged import coalesce
 from relflow.helpers import Jitter
+from relflow.helpers.optimizers import adamw
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
@@ -196,7 +198,7 @@ def test_vector_jitter_runs_only_in_training_mode(monkeypatch: pytest.MonkeyPatc
 
 
 def test_vector_jitter_preserves_content_and_reconstruction_targets(monkeypatch: pytest.MonkeyPatch):
-    structure = Schema.model_validate(structure_payload(jitter=Jitter(add=0.5)))
+    structure = Schema.model_validate(structure_payload(jitter=Jitter(add=0.5), mask=Mask(reconstruct=True)))
     field = tensorfield(values=values(), schema=structure, strata=Strata.train)
     embedder = Embedder(schema=structure, address=ADDRESS)
     content = field.content.clone()
@@ -291,3 +293,109 @@ def test_vector_write_returns_content_payload():
         [0.0, 0.0, 0.0],
         [0.0, 0.0, 0.0],
     ]
+
+
+@pytest.mark.parametrize("strata", [Strata.train, Strata.validate, Strata.test, Strata.predict])
+def test_vector_omits_targets_without_reconstruction(strata: Strata):
+    schema = Schema.model_validate(structure_payload())
+
+    field = tensorfield(values=values(), schema=schema, strata=strata)
+
+    assert field.targets.is_empty()
+    assert field.targets.batch_size == field.state.shape
+    assert not field.trainable.any()
+    torch.testing.assert_close(field.content, torch.tensor(values(), dtype=torch.float32), rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("owner", ["leaf", "branch", "root"])
+@pytest.mark.parametrize("strata", [Strata.train, Strata.predict])
+def test_vector_retains_targets_for_reconstruction(owner: str, strata: Strata):
+    payload = structure_payload()
+    root = payload["fields"]
+    branch = root["fields"][0]
+    leaf = branch["fields"][0]
+    {"root": root, "branch": branch, "leaf": leaf}[owner]["mask"] = Mask(reconstruct=True)
+    schema = Schema.model_validate(payload)
+
+    field = tensorfield(values=values(), schema=schema, strata=strata)
+
+    assert ADDRESS in schema.objectives
+    assert set(field.targets.keys()) == {TensorKey.state, TensorKey.content}
+    assert field.targets.batch_size == field.state.shape
+    assert field.targets[TensorKey.content].shape == field.content.shape
+    if strata == Strata.train:
+        torch.testing.assert_close(
+            field.targets[TensorKey.content], torch.tensor(values(), dtype=torch.float32), rtol=0, atol=0
+        )
+    else:
+        assert not field.trainable.any()
+
+
+@pytest.mark.parametrize("reconstruct", [False, True])
+@pytest.mark.parametrize("strata", [Strata.train, Strata.predict])
+def test_vector_target_policy_preserves_empty_nested_rows(reconstruct: bool, strata: Strata):
+    schema = Schema.model_validate(structure_payload(mask=Mask(reconstruct=True) if reconstruct else False))
+    rows = [[[]], values()[1]]
+
+    field = tensorfield(values=rows, schema=schema, strata=strata)
+
+    assert field.state.shape == (2, 1, 2)
+    assert field.targets.batch_size == field.state.shape
+    assert not field.present[0].any()
+    assert not field.content[0].any()
+    assert field.targets.is_empty() == (not reconstruct)
+    expected = torch.zeros_like(field.content[1]) if reconstruct else torch.tensor(values()[1], dtype=torch.float32)
+    torch.testing.assert_close(field.content[1], expected, rtol=0, atol=0)
+
+
+def test_vector_unused_target_omission_preserves_training(monkeypatch: pytest.MonkeyPatch):
+    outcomes = []
+    for padded_targets in (False, True):
+        torch.manual_seed(2718)
+        model = rf.Model(
+            d_model=16,
+            n_layers=1,
+            n_heads=4,
+            dropout=0.0,
+            batch_size=2,
+            embedding=rf.Vector(n_dim=3),
+            label=rf.Number(mask=True),
+        )
+        monkeypatch.setattr(model, "log", lambda *args, **kwargs: None)
+        source = arrow_batch(
+            [
+                {"embedding": [0.1, 0.2, 0.3], "label": 1.0},
+                {"embedding": [0.4, 0.5, 0.6], "label": -1.0},
+            ]
+        )
+        batch = ModelRuntime.prepare(model, source, preprocess=(), strata=Strata.train, seed=2718)
+        field = batch.tensors["record/embedding"]
+        assert field.targets.is_empty()
+        if padded_targets:
+            # Reconstruct the previous unused payload without changing model input.
+            field.targets = TensorDict(
+                {
+                    TensorKey.state: torch.full_like(field.state, Tokens.padded.value),
+                    TensorKey.content: torch.zeros_like(field.content),
+                },
+                batch_size=field.state.shape,
+            )
+        embedding = model.nodes["record/embedding"].embedder.embed(field).payload.detach().clone()
+        optimizer = adamw(1e-3)(model)
+        loss = model.training_step(batch, batch_idx=0)["loss"]
+        loss.backward()
+        gradients = {
+            name: None if value.grad is None else value.grad.clone() for name, value in model.named_parameters()
+        }
+        optimizer.step()
+        outcomes.append(
+            (
+                embedding,
+                loss.detach(),
+                gradients,
+                {name: value.detach().clone() for name, value in model.named_parameters()},
+                {name: value.clone() for name, value in model.named_buffers()},
+            )
+        )
+
+    torch.testing.assert_close(outcomes[0], outcomes[1], rtol=0, atol=0)
