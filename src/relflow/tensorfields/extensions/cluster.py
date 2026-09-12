@@ -796,7 +796,7 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
         cluster_type,
     )
 
-    assign_weight: torch.Tensor = embedder.embeddings[TensorKey.cluster.name].weight
+    assign_weight: torch.Tensor = embedder.embeddings[TensorKey.cluster.name].weight.detach()
     vocabulary_logits = cluster_probabilities @ assign_weight.T
     vocabulary = labels(embedder.vocab)
     size = len(vocabulary)

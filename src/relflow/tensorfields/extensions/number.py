@@ -180,7 +180,9 @@ class TensorField(TensorFieldBase):
                 {
                     TensorKey.state: torch.from_numpy(target.dense),
                     TensorKey.content: encode(target),
-                },
+                }
+                if address in schema.objectives
+                else {},
                 batch_size=input.shape,
             ),
             batch_size=input.batch_size,
@@ -474,14 +476,16 @@ def loss(
         .mean(),
     )
 
+    diff = diff.masked_select(trainable)
+
     module.track(
         (address, strata, Metric.mae, TensorKey.content),
-        value=diff.absolute().masked_select(trainable).float().mean(),
+        value=diff.absolute().float().mean(),
     )
 
     module.track(
         (address, strata, Metric.rmse, TensorKey.content),
-        value=diff.square().masked_select(trainable).float().mean().sqrt(),
+        value=diff.square().float().mean().sqrt(),
     )
 
     return loss

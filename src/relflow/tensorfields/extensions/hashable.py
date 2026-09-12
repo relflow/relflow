@@ -170,7 +170,9 @@ class TensorField(TensorFieldBase):
                 {
                     TensorKey.state: torch.from_numpy(target.dense),
                     TensorKey.content: encode(target),
-                },
+                }
+                if address in schema.objectives
+                else {},
                 batch_size=input.shape,
             ),
             batch_size=input.batch_size,

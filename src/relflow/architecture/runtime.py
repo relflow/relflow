@@ -171,7 +171,8 @@ def plan(module: Model, retain: Retain = (), *, refresh: bool = False) -> Output
     if not refresh and isinstance(cached, OutputPlan):
         return cached
 
-    expected = frozenset(Address(str(address)) for address in (*module.schema.decodes, *module.schema.embed))
+    embeds = set(module.schema.embed)
+    expected = frozenset(Address(str(address)) for address in (*module.schema.decodes, *embeds))
     entries: list[OutputEntry] = []
     visited: set[Address] = set()
     for node in (module.schema.fields, *module.schema.fields.descendants):
@@ -202,7 +203,7 @@ def plan(module: Model, retain: Retain = (), *, refresh: bool = False) -> Output
             coordinate_fields.append(pa.field(TensorKey.state.name, STATE, nullable=False))
             coordinate_fields.extend(decoded)
             coordinate_fields.append(pa.field(TensorKey.inferred.name, pa.bool_(), nullable=False))
-        if address in module.schema.embed:
+        if address in embeds:
             coordinate_fields.append(
                 pa.field(
                     TensorKey.embedding.name,
@@ -223,7 +224,7 @@ def plan(module: Model, retain: Retain = (), *, refresh: bool = False) -> Output
                 axes=model_axes,
                 decoded=decoded,
                 writer=writer,
-                embed=address in module.schema.embed,
+                embed=address in embeds,
                 extension=extension_name,
                 coordinate=coordinate_type,
                 output=output_type,
@@ -380,6 +381,7 @@ class ModelRuntime:
         predictions: list[Prediction] = []
 
         participating = participation(module, inputs, strata) if participating is None else participating
+        embeds = set(module.schema.embed)
 
         for address in module.schema.active_requests:
             tensorfield: TensorFieldBase = inputs[address]
@@ -404,7 +406,7 @@ class ModelRuntime:
                 processed[encoded.destination].append(encoded)
                 outgoing[encoded.origin] = encoded
 
-                if address in module.schema.embed:
+                if address in embeds:
                     predictions.append(
                         Prediction(
                             address=encoded.origin,
@@ -416,8 +418,7 @@ class ModelRuntime:
                         )
                     )
 
-        decodes = set(module.schema.decodes)
-        embeds = set(module.schema.embed)
+        decodes = set(module.schema.decodes) if strata == Strata.predict else set()
         for address in module.schema.active_requests:
             tensorfield = inputs[address]
             selected = (
@@ -493,12 +494,13 @@ class ModelRuntime:
                 return None
             return Output(loss=torch.tensor(0.0, device=inputs.device))
 
+        objectives = set(module.schema.objectives)
         losses: list[torch.Tensor] = []
         anchors: list[torch.Tensor] = []
         for prediction in predictions:
             if prediction.address not in module.schema.requests:
                 continue
-            if prediction.address not in module.schema.objectives:
+            if prediction.address not in objectives:
                 continue
             if strata == Strata.train and prediction.address in participating:
                 anchors.extend(

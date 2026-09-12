@@ -156,7 +156,6 @@ class TensorField(TensorFieldBase):
             return torch.from_numpy(field.place(encoded.to_numpy(zero_copy_only=False), fill=0.0))
 
         state = torch.from_numpy(input.dense)
-        target_state = torch.from_numpy(target.dense)
         return cls(
             content=encode(input),
             state=state,
@@ -165,9 +164,11 @@ class TensorField(TensorFieldBase):
             inferred=inferred,
             targets=TensorDict(
                 {
-                    TensorKey.state: target_state,
+                    TensorKey.state: torch.from_numpy(target.dense),
                     TensorKey.content: encode(target),
-                },
+                }
+                if address in schema.objectives
+                else {},
                 batch_size=input.shape,
             ),
             batch_size=input.batch_size,

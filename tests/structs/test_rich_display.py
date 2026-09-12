@@ -1,6 +1,7 @@
 from pprint import pformat
 
 import pyarrow as pa
+import pytest
 import torch
 from rich.console import Console
 from rich.pretty import Pretty
@@ -319,10 +320,11 @@ def test_model_select_pprint_uses_rich_node_display() -> None:
         assert "Selection(" not in output
 
 
-def test_tensorfield_rich_display_previews_state_tokens() -> None:
+@pytest.mark.parametrize("objective", [False, True])
+def test_tensorfield_rich_display_previews_state_tokens(objective: bool) -> None:
     model = rf.Model(
         rf.Branch(
-            rf.Category("letter", size=4, p_unavailable=0.0),
+            rf.Category("letter", size=4, p_unavailable=0.0, mask=rf.Mask(dropout=False, reconstruct=objective)),
             name="letters",
             length=4,
         ),
@@ -335,8 +337,10 @@ def test_tensorfield_rich_display_previews_state_tokens() -> None:
         strata=rf.Strata.train,
     )["record/letters/letter"]
 
+    field.state[field.present] = rf.Tokens.valued
     selected = torch.tensor([[[False, True, False, False]]])
     field.state[selected] = rf.Tokens.masked
+    field.trainable.zero_()
     field.trainable[selected] = True
     rendered = render_text(field)
 
@@ -344,7 +348,7 @@ def test_tensorfield_rich_display_previews_state_tokens() -> None:
     assert "TensorField [tensorfield] state=(1, 1, 4) device=cpu trainable=1" in rendered
     assert "counts V=1 N=0 P=2 M=1 O=0" in rendered
     assert "state V M P P" in rendered
-    assert "targets=content, state" in rendered
+    assert ("targets=content, state" in rendered) == objective
 
 
 def test_tensorfield_rich_display_separates_nested_array_state_tokens() -> None:
