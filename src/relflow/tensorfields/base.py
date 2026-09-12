@@ -170,8 +170,9 @@ class EmbedderBase(torch.nn.Module):
                 restored = restored.index_copy(0, indices, compact.present)
         else:
             payload = self.anchor.new_zeros((math.prod(shape), self.d_model))
-            for parameter in self.parameters():
-                payload = payload + parameter.sum() * 0.0
+            if torch.is_grad_enabled():
+                for parameter in self.parameters():
+                    payload = payload + parameter.sum() * 0.0
             restored = field.present.reshape(-1)
 
         return Parcel(
@@ -277,8 +278,9 @@ class DecoderBase(torch.nn.Module):
                 device=device,
                 dtype=self.anchor.dtype,
             )
-            for parameter in self.pool.parameters():
-                pooled = pooled + parameter.sum() * 0.0
+            if torch.is_grad_enabled():
+                for parameter in self.pool.parameters():
+                    pooled = pooled + parameter.sum() * 0.0
         else:
             for parcel in parcels:
                 if parcel.payload.shape[0] != batch_size:
@@ -337,9 +339,9 @@ class DecoderBase(torch.nn.Module):
 
         payload = torch.stack(aligned, dim=2)
         present = torch.stack(presence, dim=2)
-        weights = present.unsqueeze(-1).to(dtype=payload.dtype)
+        count = present.sum(dim=2, keepdim=True, dtype=payload.dtype)
         combined = payload.masked_fill(~present.unsqueeze(-1), 0.0).sum(dim=2)
-        combined = combined / weights.sum(dim=2).clamp_min(1.0)
+        combined = combined / count.clamp_min(1.0)
         combined = combined + self.context_projection(combined)
         return combined.masked_fill(~present.any(dim=2).unsqueeze(-1), 0.0)
 

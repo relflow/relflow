@@ -108,7 +108,7 @@ def state(logits: torch.Tensor) -> pa.StructArray:
     """Convert final-axis state logits into the shared probability struct."""
     if logits.ndim == 0 or logits.shape[-1] != len(Tokens):
         raise ValueError(f"state logits must have a final dimension of {len(Tokens)}")
-    probabilities = logits.detach().float().softmax(dim=-1).reshape(-1, len(Tokens))
+    probabilities = logits.detach().float().softmax(dim=-1).reshape(-1, len(Tokens)).cpu()
     return struct(
         {token.name: array(probabilities[:, token.value], pa.float32()) for token in Tokens},
         STATE,

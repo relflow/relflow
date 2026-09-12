@@ -136,3 +136,40 @@ def test_embedding_only_extensions_declare_no_decoded_output(name: str):
     assert Component.write not in extension.components
     assert extension.output(module=object(), address=object()) is None
     assert extension.write(module=object(), prediction=object(), datatype=None) is None
+
+
+DEVICES = [
+    "cpu",
+    pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")),
+]
+
+
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64, torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("layout", ["contiguous", "transposed", "sliced", "empty", "nonfinite"])
+def test_state_preserves_probabilities_and_storage_lifetime(device, dtype, layout):
+    logits = torch.randn(2, 3, len(Tokens), dtype=dtype, device=device)
+    if layout == "transposed":
+        logits = logits.transpose(0, 1)
+    elif layout == "sliced":
+        logits = logits[:, ::2]
+    elif layout == "empty":
+        logits = logits[:0]
+    elif layout == "nonfinite":
+        logits[0, 0, 0] = torch.nan
+        logits[0, 1, 1] = torch.inf
+        logits[1, 0] = -torch.inf
+    original = logits.clone()
+    expected = logits.float().softmax(dim=-1).reshape(-1, len(Tokens)).cpu()
+
+    written = state(logits)
+
+    assert written.type == STATE
+    assert len(written) == expected.shape[0]
+    torch.testing.assert_close(logits, original, rtol=0, atol=0, equal_nan=True)
+    # Later calls and source mutation must not overwrite the returned Arrow data.
+    state(torch.zeros_like(logits))
+    logits.zero_()
+    for token in Tokens:
+        values = written.field(token.name).to_numpy(zero_copy_only=False).copy()
+        torch.testing.assert_close(torch.from_numpy(values), expected[:, token.value], rtol=0, atol=0, equal_nan=True)

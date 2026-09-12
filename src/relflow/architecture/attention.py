@@ -67,8 +67,9 @@ class RotaryMultiheadAttention(torch.nn.Module):
             active = attn_mask.any(dim=1)
             if key.shape[1] == 0:
                 output = query.new_zeros(query.shape)
-                for parameter in self.parameters():
-                    output = output + parameter.sum() * 0.0
+                if torch.is_grad_enabled():
+                    for parameter in self.parameters():
+                        output = output + parameter.sum() * 0.0
                 return output
 
             # Give an empty row one safe placeholder key for SDPA, then erase its
