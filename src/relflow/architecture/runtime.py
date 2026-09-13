@@ -557,6 +557,7 @@ class ModelRuntime:
 
         objectives = set(module.schema.objectives)
         losses: list[torch.Tensor] = []
+        task_losses: dict[Address, torch.Tensor] | None = {} if module.jacobian and strata == Strata.train else None
         anchors: list[torch.Tensor] = []
         for prediction in predictions:
             if prediction.address not in module.schema.requests:
@@ -584,6 +585,8 @@ class ModelRuntime:
             loss_fn = cast(Callable[..., torch.Tensor], extension.loss)
             loss = loss_fn(module=module, prediction=prediction, batch=inputs[address], strata=strata)
             losses.append(loss * torch.tensor(request.weight))
+            if task_losses is not None:
+                task_losses[address] = losses[-1]
 
         if strata == Strata.train:
             if not anchors:
@@ -591,6 +594,18 @@ class ModelRuntime:
             anchor = torch.stack(anchors).sum()
         else:
             anchor = torch.zeros((), device=inputs.device)
+        if task_losses is not None:
+            from relflow.architecture.jacobian import combine
+
+            total = torch.stack(losses).sum() + anchor if losses else anchor
+            module.track((Metric.loss, strata), value=total)
+            # Missing local objectives have zero Jacobians; the final anchor
+            # still connects every participating decoder to Lightning backward.
+            zero = anchor.new_zeros(())
+            ordered = [
+                task_losses.get(address, zero) for address in execution(module).objectives if address in participating
+            ]
+            return Output(loss=combine(module, ordered, anchor))
         if not losses:
             suffix = "anchored zero loss" if strata == Strata.train else "zero loss"
             logger.bind(

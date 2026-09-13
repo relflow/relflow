@@ -57,6 +57,9 @@ Legacy checkpoints without version metadata remain loadable and report
 `model.version == "0+unknown"`.
 :::
 
+It does not contain the `jacobian` training policy; opt in explicitly for each
+loaded model as described in [Jacobian Descent](jacobian-descent.qmd).
+
 It does not contain the Python preprocessor or postprocessor callable, raw
 datasets, logger history, optimizer factory, scheduler factory, or application
 configuration. Version and deploy those alongside the checkpoint.

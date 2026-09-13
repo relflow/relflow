@@ -102,12 +102,16 @@ class Model(lit.LightningModule, Renderable):
         mask: MaskInput = False,
         optimizer: OptimizerConfig | None = None,
         scheduler: SchedulerConfig | None = None,
+        jacobian: bool = False,
         **field_kwargs: Any,
     ):
         """Build a model from tree fields, or from an existing ``schema``.
 
         Passing ``schema=...`` is retained for checkpoint loading and
-        lower-level integrations.
+        lower-level integrations. ``jacobian=True`` opts into TorchJD UPGrad
+        for reconstruction objectives and requires ``relflow[torchjd]`` when
+        fitting. This policy is not saved in checkpoints. Lightning still
+        owns backward, accumulation and optimization.
         """
         if "n_linear" in field_kwargs and not (
             isinstance(field_kwargs["n_linear"], Node)
@@ -166,6 +170,7 @@ class Model(lit.LightningModule, Renderable):
         self.batch_size: int = batch_size
         self.optimizer: OptimizerConfig | None = optimizer
         self.scheduler: SchedulerConfig | None = scheduler
+        self.jacobian: bool = jacobian
         self.locks: Counter[str | Strata] = Counter()
         self.nodes: torch.nn.ModuleDict = torch.nn.ModuleDict()
         self._schema_editor: SchemaEditor = SchemaEditor(self)
@@ -409,6 +414,10 @@ class Model(lit.LightningModule, Renderable):
                 "model has no reconstruction objectives; configure at least one active node "
                 "with mask=True or Mask(reconstruct=True) before fitting"
             )
+        if self.jacobian:
+            from relflow.architecture.jacobian import validate
+
+            validate(self)
 
     def track(self, names: tuple[str, ...], /, value: torch.Tensor | TorchMetric) -> torch.Tensor | TorchMetric:
         def groupname(names: tuple[str, ...]) -> str:
