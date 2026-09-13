@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import torch
 import torch.nn.functional as F
 
+from relflow.architecture.packed import Packed, attend
 from relflow.architecture.rotary import RotaryEmbedding
 
 
@@ -52,7 +55,11 @@ class RotaryMultiheadAttention(torch.nn.Module):
         key: torch.Tensor,
         value: torch.Tensor,
         key_padding_mask: torch.Tensor | None = None,
+        *,
+        packing: Packed | None = None,
     ) -> torch.Tensor:
+        if packing is not None:
+            return attend(self, query, key, value, packing)
         active: torch.Tensor | None = None
         attn_mask: torch.Tensor | None = None
         if key_padding_mask is not None:

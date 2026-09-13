@@ -52,20 +52,75 @@ class Output(TypedDict):
     loss: NotRequired[torch.Tensor]
 
 
+@dataclass(frozen=True, slots=True)
+class DecoderRoute:
+    """Schema-owned inputs and output roles for one leaf decoder."""
+
+    address: Address
+    heritage: tuple[Address, ...]
+    embed: bool
+    decode: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionPlan:
+    """Immutable graph routing retained until the model resets its contracts."""
+
+    requests: tuple[Address, ...]
+    depthwise: tuple[tuple[Address, ...], ...]
+    embeds: frozenset[Address]
+    objectives: tuple[Address, ...]
+    decoders: tuple[DecoderRoute, ...]
+
+
+def execution(module: Model) -> ExecutionPlan:
+    """Resolve schema predicates and decoder routes once per model generation."""
+
+    if module.execution_plan is not None:
+        return module.execution_plan
+
+    requests = tuple(module.schema.active_requests)
+    embeds = frozenset(module.schema.embed)
+    objectives = tuple(module.schema.objectives)
+    decodes = frozenset(module.schema.decodes)
+    selected = set(objectives) | decodes | embeds
+    decoders = tuple(
+        DecoderRoute(
+            address=address,
+            heritage=tuple(module.schema.requests[address].heritage),
+            embed=address in embeds,
+            decode=address in decodes,
+        )
+        for address in requests
+        if address in selected
+    )
+    module.execution_plan = ExecutionPlan(
+        requests=requests,
+        depthwise=tuple(tuple(depth) for depth in reversed(module.schema.depthwise)),
+        embeds=embeds,
+        objectives=objectives,
+        decoders=decoders,
+    )
+    return module.execution_plan
+
+
 def participation(
     module: Model,
     inputs: TensorDict[Address, TensorFieldBase],
     strata: Strata,
-) -> set[Address]:
-    """Resolve objective addresses selected on at least one distributed rank."""
+) -> tuple[set[Address], set[Address]]:
+    """Resolve local objectives and those selected on any distributed rank."""
 
-    objectives = tuple(module.schema.objectives)
+    objectives = execution(module).objectives
     if strata == Strata.predict or not objectives:
-        return set()
+        return set(), set()
 
     local = torch.stack([inputs[address].trainable.any() for address in objectives]).to(dtype=torch.uint8)
-    selected = all_reduce_max(local).tolist()
-    return {address for address, active in zip(objectives, selected, strict=True) if active}
+    selected = torch.stack((local, all_reduce_max(local.clone()))).tolist()
+    return (
+        {address for address, active in zip(objectives, selected[0], strict=True) if active},
+        {address for address, active in zip(objectives, selected[1], strict=True) if active},
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -375,15 +430,32 @@ class ModelRuntime:
     ) -> list[Prediction]:
         strata = Strata.normalize(strata)
         sanitize(module, inputs, strata=strata, dataloader_idx=dataloader_idx)
+        participating = participation(module, inputs, strata)[1] if participating is None else participating
+        plan = execution(module)
+        predict = strata == Strata.predict
+        decoders = tuple(
+            route
+            for route in plan.decoders
+            if route.embed or (route.decode if predict else route.address in participating)
+        )
+        return ModelRuntime.compute(module, inputs, plan=plan, decoders=decoders, predict=predict)
+
+    @staticmethod
+    def compute(
+        module: Model,
+        inputs: TensorDict[Address, TensorFieldBase],
+        *,
+        plan: ExecutionPlan,
+        decoders: tuple[DecoderRoute, ...],
+        predict: bool,
+    ) -> list[Prediction]:
+        """Execute the model graph after host validation and objective selection."""
 
         processed: dict[Address, list[Parcel]] = defaultdict(list)
         outgoing: dict[Address, Parcel] = {}
         predictions: list[Prediction] = []
 
-        participating = participation(module, inputs, strata) if participating is None else participating
-        embeds = set(module.schema.embed)
-
-        for address in module.schema.active_requests:
+        for address in plan.requests:
             tensorfield: TensorFieldBase = inputs[address]
             node_module = cast(NodeModule, module.nodes[address])
             embedder: EmbedderBase = node_module.embedder
@@ -393,7 +465,7 @@ class ModelRuntime:
             processed[embedded.destination].append(embedded)
             outgoing[embedded.origin] = embedded
 
-        for depth in reversed(module.schema.depthwise):
+        for depth in plan.depthwise:
             for address in depth:
                 if not processed[address]:
                     continue
@@ -406,7 +478,7 @@ class ModelRuntime:
                 processed[encoded.destination].append(encoded)
                 outgoing[encoded.origin] = encoded
 
-                if address in embeds:
+                if address in plan.embeds:
                     predictions.append(
                         Prediction(
                             address=encoded.origin,
@@ -418,19 +490,10 @@ class ModelRuntime:
                         )
                     )
 
-        decodes = set(module.schema.decodes) if strata == Strata.predict else set()
-        for address in module.schema.active_requests:
+        for route in decoders:
+            address = route.address
             tensorfield = inputs[address]
-            selected = (
-                (strata == Strata.predict and address in decodes)
-                or (strata != Strata.predict and address in participating)
-                or address in embeds
-            )
-            if not selected:
-                continue
-
-            request = module.schema.requests[address]
-            parcels = [outgoing[item] for item in request.heritage if item in outgoing]
+            parcels = [outgoing[item] for item in route.heritage if item in outgoing]
 
             node_module = cast(NodeModule, module.nodes[address])
             decoder: DecoderBase = node_module.decoder
@@ -440,11 +503,9 @@ class ModelRuntime:
                 contexts=contexts,
                 batch_size=tensorfield.state.shape[0],
                 device=tensorfield.state.device,
-                embed=address in embeds,
+                embed=route.embed,
             )
-            prediction.payload[TensorKey.inferred] = (
-                tensorfield.inferred if strata == Strata.predict else tensorfield.trainable
-            )
+            prediction.payload[TensorKey.inferred] = tensorfield.inferred if predict else tensorfield.trainable
             predictions.append(prediction)
 
         return predictions
@@ -464,7 +525,7 @@ class ModelRuntime:
         if strata == Strata.predict and not isinstance(batch, Encoded):
             raise TypeError("prediction batches must retain their Arrow source")
         compiled = plan(module, batch.retain) if isinstance(batch, Encoded) and strata == Strata.predict else None
-        participating = participation(module, inputs, strata)
+        local, participating = participation(module, inputs, strata)
         predictions = ModelRuntime.forward(
             module,
             inputs,
@@ -512,7 +573,7 @@ class ModelRuntime:
             # Extension losses and scalar metrics remain local to ranks carrying
             # selected targets; the zero-loss path below anchors every module
             # into backward when only a peer has an objective.
-            if not inputs[prediction.address].trainable.any():
+            if prediction.address not in local:
                 continue
             if set(prediction.payload.keys()) <= {TensorKey.embedding, TensorKey.inferred}:
                 continue

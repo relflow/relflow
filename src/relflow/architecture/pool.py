@@ -104,24 +104,43 @@ class LearnedQueryCrossAttention(torch.nn.Module):
 
         active = present.any(dim=1)
         indices = active.nonzero(as_tuple=False).reshape(-1)
-        pooled = memory.new_zeros((N, self.queries.shape[0], self.queries.shape[1]))
+        shape = (N, self.queries.shape[0], self.queries.shape[1])
+        dtype, device = memory.dtype, memory.device
         if not indices.numel():
+            pooled = memory.new_zeros(shape)
             if torch.is_grad_enabled():
                 for parameter in self.parameters():
                     pooled = pooled + parameter.sum() * 0.0
             return pooled
 
-        memory = memory.index_select(0, indices)
+        complete = indices.numel() == N
+        memory = memory.contiguous() if complete else memory.index_select(0, indices)
         present = present.index_select(0, indices)
         memory = memory.masked_fill(~present.unsqueeze(-1), 0.0)
         if evidence is not None:
-            evidence = evidence.index_select(0, indices).masked_fill(~present.unsqueeze(-1), 0.0)
+            evidence = evidence.contiguous() if complete else evidence.index_select(0, indices)
+            evidence = evidence.masked_fill(~present.unsqueeze(-1), 0.0)
         if context is not None and tuple(context.shape) != (N, self.queries.shape[0], self.queries.shape[1]):
             raise ValueError(
                 f"pool query context must have shape {(N, self.queries.shape[0], self.queries.shape[1])}, "
                 f"got {tuple(context.shape)}"
             )
+        if context is not None:
+            context = context.index_select(0, indices)
 
+        queries = self.compute(memory, present, context, evidence)
+        if complete and queries.shape == shape and queries.dtype == dtype and queries.device == device:
+            return queries.clone(memory_format=torch.contiguous_format)
+        return memory.new_zeros(shape, dtype=dtype, device=device).index_copy(0, indices, queries)
+
+    def compute(
+        self,
+        memory: torch.Tensor,
+        present: torch.Tensor,
+        context: torch.Tensor | None,
+        evidence: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Pool compacted nonempty rows with absent memory and evidence already zeroed."""
         queries = self.queries
 
         if not torch.is_grad_enabled():
@@ -132,9 +151,9 @@ class LearnedQueryCrossAttention(torch.nn.Module):
             if context is not None:
                 context = context.detach()
 
-        queries = queries.unsqueeze(0).expand(indices.numel(), -1, -1)
+        queries = queries.unsqueeze(0).expand(memory.shape[0], -1, -1)
         if context is not None:
-            queries = queries + context.index_select(0, indices)
+            queries = queries + context
 
         for block in self.blocks:
             queries = block(queries=queries, memory=memory, present=present)
@@ -148,7 +167,7 @@ class LearnedQueryCrossAttention(torch.nn.Module):
             count = present.sum(dim=1).to(dtype=queries.dtype) / self.mass_capacity
             queries = queries + mass + count[:, None, None] * self.mass_direction.unsqueeze(0)
 
-        return pooled.index_copy(0, indices, queries)
+        return queries
 
 
 class MeanPool(torch.nn.Module):

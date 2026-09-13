@@ -16,10 +16,13 @@ class RotaryEmbedding(torch.nn.Module):
         self.inv_freq: torch.Tensor
         self.register_buffer("inv_freq", base ** (-index / self.rotary_dim), persistent=False)
 
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+    def forward(self, inputs: torch.Tensor, *, positions: torch.Tensor | None = None) -> torch.Tensor:
         seq_len = inputs.shape[-2]
 
-        positions = torch.arange(seq_len, device=inputs.device, dtype=self.inv_freq.dtype)
+        if positions is None:
+            positions = torch.arange(seq_len, device=inputs.device, dtype=self.inv_freq.dtype)
+        else:
+            positions = positions.to(device=inputs.device, dtype=self.inv_freq.dtype)
         freqs = torch.outer(positions, self.inv_freq)
         cos = freqs.cos().to(dtype=inputs.dtype).unsqueeze(0)
         sin = freqs.sin().to(dtype=inputs.dtype).unsqueeze(0)
