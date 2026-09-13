@@ -1,0 +1,288 @@
+---
+eval: false
+---
+
+# Jacobian Descent
+
+**Example status — runnable with the optional extra:** the complete CPU
+training example requires `relflow[torchjd]`. The DDP example requires two GPUs.
+
+Jacobian descent is an optional training policy for models with several
+reconstruction targets. Ordinary training sums their losses. With
+`jacobian=True`, RelFlow uses TorchJD's UPGrad algorithm to resolve conflicts
+between their parameter gradients before Lightning applies the optimizer.
+
+This changes the learning algorithm. It can help competing objectives, but
+does not guarantee better predictions and costs more than a summed backward
+pass. Compare each target's held-out metric and the time needed to reach the
+quality you need.
+
+## Enable It
+
+Install the optional package and quadratic-program solver together:
+
+```bash
+pip install "relflow[torchjd]"
+```
+
+The extra requires PyTorch 2.9 or newer for the compiled-backward precision
+controls. Installing RelFlow without this extra keeps its existing PyTorch
+minimum.
+
+The following complete example trains two different target types. It reuses
+a tiny table for validation to demonstrate the API; use separate held-out
+data when evaluating quality.
+
+```python
+import lightning.pytorch as lit
+import pyarrow as pa
+
+import relflow as rf
+from relflow.helpers.optimizers import adamw
+
+table = pa.table({
+    "amount": [12.0, 8.0, 24.0, 16.0],
+    "future_spend": [18.0, 10.0, 32.0, 20.0],
+    "returned": [False, False, True, True],
+})
+model = rf.Model(
+    d_model=32,
+    n_layers=1,
+    n_heads=4,
+    batch_size=2,
+    jacobian=True,
+    optimizer=adamw(learning_rate=1e-3),
+    amount=rf.Number,
+    future_spend=rf.Number(mask=True, objective="mse"),
+    returned=rf.Boolean(mask=True),
+)
+data = rf.ArrowDataModule(
+    model=model,
+    train=table,
+    validate=table,
+    num_workers=0,
+    persistent_workers=False,
+    pin_memory=False,
+)
+trainer = lit.Trainer(
+    accelerator="cpu",
+    max_epochs=1,
+    limit_train_batches=1,
+    limit_val_batches=1,
+    logger=False,
+    enable_checkpointing=False,
+)
+trainer.fit(model, datamodule=data)
+```
+
+The default is `jacobian=False`. It keeps ordinary summed-loss training and
+does not import TorchJD. Validation and prediction use the ordinary runtime
+regardless of the flag. One globally participating objective uses ordinary
+scalar backward without computing a Jacobian.
+
+## What Counts As An Objective
+
+Each active reconstruction address contributes its extension-owned scalar
+loss, multiplied by its configured `weight`. A `Number` target and a
+`Category` target are two objectives; the state and content terms inside one
+datatype's loss remain one objective. This also works with registered custom
+tensorfields without special cases in the shared runtime.
+
+RelFlow computes each objective's gradients with respect to the trainable
+model parameters owned by the optimizer. It forms their pairwise inner
+products and asks [TorchJD UPGrad](https://torchjd.org/stable/docs/aggregation/upgrad/)
+for weights. Unit preferences preserve the ordinary summed-gradient scale
+when no projection is needed. The final weighted scalar goes through
+Lightning's normal backward, optimizer, clipping, scheduler and precision
+handling. The logged total loss remains the original sum so its meaning does
+not change with UPGrad weights.
+
+UPGrad resolves conflicts in the raw parameter gradients. AdamW's momentum,
+preconditioning and weight decay still affect the eventual update. Neither
+UPGrad nor this integration guarantees that every observed target loss falls
+on every optimizer step.
+
+## Distributed Training And Precision
+
+Single-device training and unsharded Lightning DDP are supported. Configure
+unused-parameter detection whenever trainable parameters may be unused in a
+batch, including changing targets, skipped embedders and conditional context:
+
+```python
+from lightning.pytorch.strategies import DDPStrategy
+
+trainer = lit.Trainer(
+    accelerator="gpu",
+    devices=2,
+    strategy=DDPStrategy(find_unused_parameters=True),
+    accumulate_grad_batches=2,
+    precision="bf16-mixed",
+    max_epochs=10,
+)
+trainer.fit(model, datamodule=data)
+```
+
+Objective ordering is coordinated across ranks. A rank without a local
+target contributes a zero row. RelFlow averages each objective's gradients
+across ranks **before** computing their inner products; averaging independent
+per-rank weights or inner products would give a different algorithm. Rank
+zero solves for the weights and broadcasts them. Lightning then performs its
+normal final gradient reduction. This requires extra communication per
+objective, in addition to ordinary DDP backward.
+
+Every distributed batch must contain at least one selected reconstruction
+target somewhere across the ranks. Lightning currently rejects skipping an
+entirely targetless distributed batch; this restriction also applies with
+`jacobian=False`. FSDP and other sharded parameter strategies are rejected
+when Jacobian descent is enabled.
+
+Gradient accumulation resolves conflicts separately for each microbatch and
+then accumulates the resulting gradients. It does not compute one Jacobian
+for the whole accumulation window. Mixed precision uses Lightning's scaling
+and optimizer handling; the gradient inner products are accumulated in
+float32 (float64 for float64 parameters).
+
+## Checkpoints And Compilation
+
+The `jacobian` training policy is not saved in compact artifacts or Lightning
+checkpoints. `rf.Model.load(...)` starts with `jacobian=False`, regardless of
+the policy used to train the saved model. Loading for prediction does not
+require the optional package.
+
+Opt in explicitly after loading, before compiling or fitting:
+
+```python
+model = rf.Model.load("model.ckpt")
+model.jacobian = True
+```
+
+For a Lightning resume, construct the model with `jacobian=True` or set the
+attribute explicitly before `trainer.fit(..., ckpt_path=...)`. Restoring a
+checkpoint into an existing model leaves that model's current policy intact;
+the checkpoint cannot enable or disable it.
+
+Compilation remains a separate runtime choice. Select the Jacobian policy
+before compiling so compiled regions preserve saved tensors for repeated
+backward passes:
+
+```python
+model.compile()
+trainer.fit(model, datamodule=data)
+```
+
+Only the usual encoder and attention-pool regions are compiled. Objective
+gradient extraction, the UPGrad solver and Lightning orchestration remain
+outside those regions. Set `jacobian=True` before calling `.compile(...)`.
+RelFlow then disables backward buffer donation for those regions so the
+objective probes can reuse the graph. If you enable the flag after compiling,
+call `.compile(...)` again before fitting. The setting is scoped to these
+regions and does not change ordinary models' compiler defaults.
+
+If you compiled with `jacobian=True` and later set `model.jacobian = False`,
+call `.compile(...)` again to restore the ordinary compiler settings. Models
+constructed and compiled with `jacobian=False` use those settings directly.
+
+Compilation is not retained in checkpoints; reapply it after loading, as
+described in the [performance guide](performance.qmd).
+
+## Performance Tradeoffs
+
+For multiple objectives, RelFlow runs a backward probe per locally active
+objective, followed by the final weighted backward. The probes
+reuse the forward graph. They traverse each loss separately so unrelated
+decoder graphs do not add unnecessary backward work.
+
+Parameters used by only one objective contribute only to the corresponding
+Gramian diagonal, avoiding zero-filled gradient matrices. DDP coordinates
+parameter usage across ranks before applying this shortcut. Missing local
+objectives skip their probes while the final backward retains their zero
+gradient connections for DDP. These changes preserve the gradient calculation,
+with ordinary floating-point rounding differences.
+
+Gramian validation and solving share one transfer to the CPU. Larger batches
+can amortize this fixed cost, but they do not eliminate the extra gradient work.
+Target count,
+shared encoder size and decoder size all matter. Retaining objective gradients
+also increases memory use: a larger shared encoder and more targets can
+substantially raise peak memory even with small batches. Start with a few
+objectives and compare equal-update and equal-time validation results before
+enabling it for a long run.
+
+### Initial Measured Cost
+
+On one RTX 3090 (24 GiB), PyTorch 2.12.0, Lightning 2.6.4 and TorchJD 0.17.0,
+the following models used eight numeric inputs and a mixture of numeric,
+Boolean and categorical targets. Both arms used fused AdamW, FP32, no
+compilation, identical seeds and 48 updates. Times include batch preparation,
+transfer, metrics and optimization: the mean of 36 batches after 12 warmup
+batches, averaged over two seeds. `B` is batch size, `D` is model width.
+
+| Targets / model | Summed loss | Jacobian descent | Time multiplier | Peak memory, summed / JD |
+| --- | ---: | ---: | ---: | ---: |
+| 2 / B16, D64, 1 layer | 27.12 ms | 37.65 ms | 1.39× | 23 / 29 MiB |
+| 8 / B16, D64, 1 layer | 55.17 ms | 95.69 ms | 1.73× | 30 / 46 MiB |
+| 8 / B512, D256, 2 layers | 65.67 ms | 152.71 ms | 2.33× | 555 / 744 MiB |
+| 32 / B64, D128, 1 layer | 182.37 ms | 412.64 ms | 2.26× | 188 / 310 MiB |
+
+Default training reproduced the baseline's final model state exactly in
+the four control cases, without importing TorchJD. The implementation avoids
+retaining zero gradient blocks for unrelated decoders; on the 32-target case,
+this reduced an earlier implementation's peak allocation from 2,174 MiB to
+310 MiB while retaining exact gradient geometry.
+
+The subsequent sparsity and CPU-transfer changes were compared against that
+JD implementation on the same GPU, with two fresh seeds, reversed execution
+order on the second seed, and 64 updates per run. The following times average
+48 batches after 16 warmup batches; both arms use JD and the same FP32 models
+and fused AdamW configuration described above.
+
+| Targets / model | Previous JD | Optimized JD | Step time reduction |
+| --- | ---: | ---: | ---: |
+| 2 / B16, D64, 1 layer | 37.70 ms | 36.18 ms | 4.0% |
+| 8 / B512, D256, 2 layers | 151.91 ms | 150.01 ms | 1.2% |
+| 32 / B64, D128, 1 layer | 411.35 ms | 398.64 ms | 3.1% |
+
+The small case's peak allocation fell from 29.0 to 27.2 MiB; the larger cases
+were unchanged. These are modest measurements from two seeds, not guaranteed
+speedups. Independent dense-Jacobian comparisons check gradient correctness;
+validation loss differences alone are not a correctness or learning-efficiency
+test.
+
+Missing targets showed a larger benefit in a separate two-process CPU/Gloo
+check: 16 Boolean objectives, B4 per rank, D16, one layer, and Lightning with
+SGD and momentum. Splitting objectives evenly across ranks reduced step time
+from 186.96 to 92.55 ms; putting all objectives on one rank reduced it from
+224.87 to 113.07 ms. These single-seed runs used four warmup and twelve timed
+steps, synchronized across ranks, with gradient and update parity checks.
+They measure the combined changes on CPU; multi-GPU NCCL throughput remains
+unmeasured.
+
+Two larger rewrites were investigated and left out. Reusing cached objective
+gradients gave small gains in some cases but slowed the 32-target case, and
+can change intermediate gradient-hook or custom-backward behavior. TorchJD's
+layerwise `autogram` was 1.5–2.5 times slower in separate prepared-input GPU
+comparisons, increased memory on the larger models, and requires additional
+work for compilation and exact DDP geometry. Shared QP factorization was also
+left out: the solver accounted for about 2 ms of a 399 ms profiled step, so
+duplicating solver internals offered little benefit in these workloads.
+
+In a separate eight-target, 300-update comparison over three seeds, average
+held-out total loss was **0.5582 with summed loss and 0.5859 with Jacobian
+descent**, at 56.17 versus 98.52 ms per step. Some targets improved and others
+worsened. This equal-update synthetic example does not demonstrate an overall
+quality benefit. Learning efficiency remains unmeasured: it requires learning
+curves and elapsed time to predefined per-target quality thresholds across
+seeds, rather than one endpoint at a fixed update budget.
+
+The existing two-target Mean/cardinality proof passed with either policy using
+its original budget and assertions. That is a capability regression check:
+the model still extracts and infers the intended information and retains the
+expected structural limitations. Proof runtime and differences in its final
+metric do not establish how quickly or efficiently the model learns.
+
+CUDA eager and compiled training completed with finite parameters in FP32,
+BF16 mixed precision and FP16 mixed precision. In the FP16 check, GradScaler
+skipped three initial overflowed updates out of 36 attempted steps; the other
+precision modes completed all 36. Real two-process CPU/Gloo tests covered DDP
+and accumulation. Multi-GPU NCCL throughput was not measured on this single-GPU
+machine.

@@ -3,13 +3,16 @@
 from collections.abc import Callable
 from copy import deepcopy
 from types import FunctionType, MethodType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 
 from relflow.architecture.encoder import BranchEncoder
 from relflow.architecture.packed import customized
 from relflow.architecture.pool import CrossAttentionBlock, LearnedQueryCrossAttention
+
+if TYPE_CHECKING:
+    from relflow.architecture.root import Model
 
 __all__ = ["clear", "compile"]
 
@@ -22,12 +25,14 @@ class Region:
         eager: MethodType,
         local: bool,
         *,
+        retain_graph: bool,
         backend: str | Callable,
         dynamic: bool | None,
         options: dict[str, Any],
     ) -> None:
         self.eager = eager
         self.local = local
+        self.retain_graph = retain_graph
         original = eager.__func__
         # Dynamo caches by code object. Independent regions must not exhaust a
         # shared method's specialization limit as the number of nodes grows.
@@ -62,6 +67,13 @@ class Region:
         # callbacks added after warmup and custom replacements still run eager.
         if customized(layers, additional=(CrossAttentionBlock,)):
             return self.eager(*args, **kwargs)
+        if self.retain_graph:
+            from torch._functorch import config
+
+            # AOTAutograd must preserve saved tensors for objective probes.
+            # Scope this around lazy tracing; ordinary models keep defaults.
+            with config.patch(donated_buffer=False, backward_pass_autocast="off"):
+                return self.compiled(*args, **kwargs)
         return self.compiled(*args, **kwargs)
 
     def __deepcopy__(self, memo: dict[int, Any]) -> MethodType:
@@ -83,7 +95,7 @@ def clear(model: torch.nn.Module) -> None:
 
 
 def compile(
-    model: torch.nn.Module,
+    model: "Model",
     *,
     encoders: bool,
     pools: bool,
@@ -121,7 +133,9 @@ def compile(
         ):
             continue
         local = current.local if isinstance(current, Region) else "compute" in module.__dict__
-        region = Region(eager, local, backend=backend, dynamic=dynamic, options=settings.copy())
+        region = Region(
+            eager, local, retain_graph=model.jacobian, backend=backend, dynamic=dynamic, options=settings.copy()
+        )
         replacements.append((module, region))
     clear(model)
     for module, region in replacements:

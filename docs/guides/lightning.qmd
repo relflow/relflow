@@ -102,6 +102,10 @@ For optional encoder and attention-pool compilation, call `model.compile()`
 before fitting. The [compiler workflow](performance.qmd#compile-encoder-and-pool-regions)
 covers region selection, warmup, prediction and checkpoint behavior.
 
+For competing reconstruction targets, `rf.Model(..., jacobian=True)` enables
+optional TorchJD UPGrad training. See [Jacobian Descent](jacobian-descent.qmd)
+for installation, DDP behavior and the additional training cost.
+
 ## Configure The Matching Loop And Split
 
 Lightning calls the corresponding RelFlow step for each stage:

@@ -98,7 +98,9 @@ class CheckpointState:
         previous_batch_size = module.batch_size
         previous_nodes = module.nodes
         previous_example = module.example_input_array
+        previous_version = module.version
         try:
+            CheckpointState.restore_version(module, checkpoint)
             module.schema = Schema.model_validate(checkpoint["schema"])
             module.batch_size = checkpoint["batch_size"]
             ModelGraph.install(module)
@@ -110,10 +112,10 @@ class CheckpointState:
             module.batch_size = previous_batch_size
             module.nodes = previous_nodes
             module.example_input_array = previous_example
+            object.__setattr__(module, "_version", previous_version)
             module.train(was_training)
             raise
         module.train(was_training)
-        CheckpointState.restore_version(module, checkpoint)
         module.reset_contracts()
 
     @staticmethod
