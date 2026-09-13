@@ -41,6 +41,8 @@ website:
             text: Working With Arrow
           - href: guides/lightning.qmd
             text: Training With Lightning
+          - href: guides/jacobian-descent.qmd
+            text: Jacobian Descent
           - href: guides/evaluation.qmd
             text: Evaluation & Metrics
           - href: guides/model-configuration.qmd
@@ -155,6 +157,8 @@ website:
             text: Working With Arrow
           - href: guides/lightning.qmd
             text: Training With Lightning
+          - href: guides/jacobian-descent.qmd
+            text: Jacobian Descent
           - href: guides/evaluation.qmd
             text: Evaluation & Metrics
           - href: guides/model-configuration.qmd
