@@ -5,8 +5,8 @@ eval: false
 
 # Performance And Scaling
 
-**Example status — excerpt:** settings are tuning patterns, not portable
-benchmarks or complete training jobs.
+**Example status — runnable compiler workflow:** the compilation example trains
+and predicts from Arrow inputs; the other sections describe tuning choices.
 
 RelFlow performance is determined by the schema shape as much as by model
 width. Fixed branch lengths, datatype capacities, data-loader behavior, and
@@ -56,6 +56,31 @@ Before increasing a branch length:
 Nested branches multiply shape. A long child inside a long parent can create a
 large padded tensor even when most observations are sparse. Window, filter, or
 summarize irrelevant events in a preprocessor before expanding model capacity.
+
+### Automatic Token Packing
+
+Sparse branch and coordinate encoders automatically gather present tokens before
+normalization, query/key/value projections, attention, and feed-forward layers.
+Rows with equal live lengths share an attention call. Original token positions
+and row boundaries are retained, and outputs return to their structural slots
+before pooling and routing. Every present token remains available; model
+capacity, parameters, objectives, and checkpoint names stay the same.
+
+Packing needs no configuration. Fully occupied sequences, active training
+dropout, and encoder modules with hooks or custom implementations retain dense
+execution. Evaluation can use packing even when training dropout is configured.
+Data tensors and pooling still have padded shapes, so configured branch lengths
+continue to affect memory. Benefits depend on occupancy, batch size, and the
+number of distinct sequence lengths.
+
+Packing changes floating-point operation order. Compare training and held-out
+behavior when changing occupancy or shape; checkpoint compatibility does not
+guarantee the same floating-point training trajectory.
+
+When every processed row contains at least one present token, branch encoding
+and attention pooling also avoid redundant row copies and zero-filled output
+initialization. Rows may still contain padding. Outputs retain independent
+storage for custom modules and callbacks, and this optimization needs no setting.
 
 ## Size Width And Depth
 
@@ -159,6 +184,11 @@ their full width.
 
 ## Feed The Accelerator
 
+Measure worker count and pinning together. Encoding, interprocess transfer and
+worker startup can exceed the saved device-transfer time, particularly for
+small in-memory batches. Storage-bound datasets may benefit from different
+settings.
+
 For small in-memory work, `ArrowDataModule` with a `pa.Table` removes file
 discovery and remote I/O from the experiment. For file-backed jobs, pass paths
 or use `rf.source(...)`. Selection stays lazy and workers open their own readers;
@@ -176,6 +206,21 @@ Important controls include:
 - `shuffle_rows`: larger streaming buffers improve mixing but consume memory;
 - `sample`: useful for bounded experiments, not a substitute for a valid
   split.
+
+Measure loader iteration, device transfer and the complete training step
+together when tuning these controls. With `num_workers=0`, pinning runs inside
+loader iteration; faster GPU copies may not repay that CPU cost. Workers move
+preparation off the training thread but add interprocess delivery and queueing.
+Increase workers or prefetch depth only when the complete pipeline improves.
+
+GPU transfers already use TensorDict's nonblocking CUDA path. Overlapping a
+future batch's copy with computation additionally requires pinned buffers,
+separate streams and correct buffer lifetimes; a nonblocking flag alone does
+not establish overlap. Input-only Number, Boolean, Hash, Text, Category and
+Vector fields omit unused reconstruction targets. This reduces retained and
+transferred payloads; the benefit depends on datatype and input width.
+Category still performs its regularization draws to preserve the training
+random-number sequence.
 
 Run a data-only or CPU baseline when the accelerator is idle. If increasing
 batch size does not improve device utilization, the bottleneck may be
@@ -223,6 +268,186 @@ Mixed precision can reduce activation memory on supported accelerators. Validate
 numeric behavior for each datatype and loss rather than assuming identical
 quality.
 
+Compare inference precision separately, including output conversion and
+serialization in the measurement. Validate the resulting predictions as well
+as latency.
+
+## Compile Encoder And Pool Regions
+
+Call `model.compile()` before training or prediction to compile branch encoder
+stacks and learned attention pools, including decoder pools. It changes the
+existing model and returns that same instance, so it can follow the constructor.
+Lightning continues to own device placement and the training loop.
+
+This small example checks the complete workflow. Use representative training
+and held-out data when evaluating performance or model quality.
+
+```{python .marimo}
+#| echo: true
+#| output: true
+
+import lightning.pytorch as lit
+import pyarrow as pa
+import torch
+
+import relflow as rf
+from relflow.helpers.optimizers import adamw
+
+torch.manual_seed(7)
+device = "cuda" if torch.cuda.is_available() else "cpu"
+records = pa.table(
+    {"amount": [2.0, 4.0, 6.0, 8.0], "label": [False, False, True, True]}
+)
+model = rf.Model(
+    d_model=16,
+    n_layers=1,
+    n_heads=4,
+    batch_size=4,
+    optimizer=adamw(learning_rate=1e-3),
+    amount=rf.Number,
+    label=rf.Boolean(mask=True),
+).compile()
+datamodule = rf.ArrowDataModule(
+    model=model,
+    train=records,
+    validate=records,
+    num_workers=0,
+    persistent_workers=False,
+    pin_memory=False,
+)
+trainer = lit.Trainer(
+    accelerator=device,
+    devices=1,
+    max_epochs=1,
+    limit_train_batches=1,
+    limit_val_batches=1,
+    num_sanity_val_steps=0,
+    logger=False,
+    enable_checkpointing=False,
+    enable_progress_bar=False,
+    enable_model_summary=False,
+)
+trainer.fit(model=model, datamodule=datamodule)
+
+# Lightning may move the model to CPU when its loop finishes.
+observations = records.drop(["label"])
+predictions = model.to(device).predict(observations)
+print(predictions.column_names)
+```
+
+### Select Regions
+
+The two Boolean switches are independent. Every call replaces the previous
+selection and compiler settings; omitted switches return to their defaults.
+
+```python
+assert model.compile(encoders=True, pools=False) is model  # Only encoder stacks.
+model.compile(encoders=False, pools=True)                  # Only attention pools.
+model.compile()                                           # Both; default settings.
+model.compile(encoders=False, pools=False)                 # Disable compilation.
+```
+
+`encoders` covers branch sequence encoder stacks. `pools` covers learned-query
+attention reduction in branches and decoders; it does not include mean pooling.
+Coordinate encoders, tensorfield operations, routing, packing preparation,
+losses and metrics keep their existing paths. Custom compute overrides and
+customized regions run eagerly. Nested hooks also make the affected region run
+eagerly, including hooks added after compilation.
+
+### Compiler Settings And Warmup
+
+`backend="inductor"`, `dynamic=None`, and `options=None` are the defaults.
+`backend` accepts a PyTorch backend name or callable. `dynamic=None` lets
+PyTorch adapt to changing shapes; `True` requests dynamic shapes from the first
+trace, and `False` specializes shapes. Some operations still require
+specialization. Backend-specific `options` override RelFlow's defaults.
+
+```python
+model.compile(encoders=True, pools=True, dynamic=True, options={})
+```
+
+The Inductor defaults preserve eager random draws and disable CUDA graphs and
+automatic tensor padding. Every selected region uses `fullgraph=True`.
+Unsupported graph operations or backend errors surface during setup or first
+execution; they are not silently replaced by eager execution. Select one region
+family at a time to isolate a failure. `backend="eager"` is useful for checking
+graph capture without Inductor code generation; it is not a speed setting.
+See [PyTorch's compiler API](https://docs.pytorch.org/docs/2.12/generated/torch.compile.html)
+for backend options and dynamic-shape behavior.
+
+Compilation happens lazily on real inputs. Initial training, validation and
+prediction can compile different graphs; new shapes, devices or dtypes can
+trigger more compilation. Warm up the actual mode and representative batch
+shapes before measuring steady throughput, and report startup separately.
+When timing CUDA from Python, synchronize before starting and after completing
+the measured work. Compare complete training steps or public prediction calls,
+including data preparation and output writing when those belong to your use
+case. Keep the data, seed, optimizer, precision and update budget matched, and
+compare held-out behavior: compiled floating-point results can differ.
+
+### Evaluate The Incremental Gain
+
+Inductor is already the backend used by `model.compile()`. RelFlow compiles
+encoder stacks and attention pools as separate regions; `fullgraph=True`
+applies to each region, not the entire training step. Embedding, routing,
+losses, metrics and optimizer execution remain outside those compiled regions.
+Compare the same optimized model with and without compilation to measure its
+contribution. Gains from token packing, reduced transfers and fused AdamW also
+appear in a cumulative comparison against an older release.
+
+In September 2026 validation on an RTX 3090 with PyTorch 2.12.0, FP32 and three
+seeds, the incremental steady-throughput results were:
+
+| Workload | Compilation versus the same model running eagerly |
+|---|---:|
+| Training, equal weight across 12 shared scenarios | +2.3% |
+| Prediction, equal weight across 8 scenarios | -0.4% |
+| Sparse-history training, batch 128 and width 512 | +10.0% |
+| Sparse-history prediction, batch 128 and width 512 | +11.0% |
+
+These are geometric means of paired throughput ratios, using each run's
+arithmetic mean latency after warmup and retaining every measured interval.
+The scenario averages include an empty-history case that executes no compiled
+regions; they do not represent a production workload mix. The comparison used
+the public defaults, with CUDA graphs and automatic compiler padding disabled.
+
+Compilation remains optional and workload-dependent. In the 64-output case,
+compilation increased prediction latency by 12.6% versus eager execution on the
+same optimized model. Long training sessions amortize compilation startup;
+they do not remove a steady-execution regression. Evaluate training and
+prediction separately, and use the region switches to measure encoder and pool
+compilation independently on the actual schema.
+
+Prediction tolerance checks and the selected learning proofs passed, while
+strict training-state and loss-trajectory comparisons showed numerical drift.
+Those checks do not establish identical training quality. Larger compilation
+regions or more aggressive Inductor autotuning require separate measurements;
+the default comparison does not establish their benefit.
+
+### Save, Load And Resume
+
+Compilation is runtime state, not checkpoint configuration. A newly loaded
+model is eager even if its saved model was compiled. Load and place the model,
+then select compilation explicitly:
+
+```python
+model.save("model.ckpt")
+restored = rf.Model.load("model.ckpt").to(device).compile()
+restored_predictions = restored.predict(observations)
+```
+
+`reset_contracts()`, successful schema mutations and checkpoint rebuilds such
+as `restore_checkpoint_state(...)` clear compilation. Deep copies and pickle
+round trips also start eager. Reapply `.compile(...)` afterward, outside active
+Lightning loops.
+
+Native Lightning resume into an existing model behaves differently: select
+compilation before `trainer.fit(model, datamodule=..., ckpt_path=...)`, and
+loading its weights retains that explicit selection. The checkpoint never
+enables compilation by itself. Use a Lightning training checkpoint when you
+need to resume optimizer and loop state; see
+[Training With Lightning](lightning.qmd#select-and-restore-checkpoints).
+
 ## Compare Optimizer Implementations
 
 The AdamW factory uses PyTorch's fused implementation by default, preserving
@@ -266,6 +491,10 @@ never reorders stages. Record processor order, scope, input rows, emitted rows,
 and Arrow schemas with a preprocessing benchmark.
 
 ## Optimize Prediction Output
+
+Keep Arrow output through downstream operations that accept it. Conversion to
+Python values and JSON serialization can dominate after model execution
+becomes faster; measure them separately from Arrow-to-Arrow prediction.
 
 Prediction can spend substantial time moving and serializing data:
 

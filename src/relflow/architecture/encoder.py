@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from relflow.architecture.attention import RotaryMultiheadAttention
+from relflow.architecture.packed import Packed, block, customized, pack, stochastic, unpack
 from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool
 from relflow.structs.enums import AttentionMode
 from relflow.structs.packages import Parcel
@@ -45,13 +46,14 @@ class RotaryTransformerEncoderLayer(torch.nn.Module):
             torch.nn.Dropout(p=dropout),
         )
 
-    def forward(self, inputs: torch.Tensor, present: torch.Tensor) -> torch.Tensor:
+    def forward(self, inputs: torch.Tensor, present: torch.Tensor, *, packing: Packed | None = None) -> torch.Tensor:
+        if packing is not None:
+            return block(self, inputs, packing)
         if present.dtype != torch.bool or tuple(present.shape) != tuple(inputs.shape[:2]):
             raise ValueError(
                 f"encoder presence must have bool shape {tuple(inputs.shape[:2])}, "
                 f"got {tuple(present.shape)} with dtype {present.dtype}"
             )
-
         inputs = inputs.masked_fill(~present.unsqueeze(-1), 0.0)
         normed = self.attention_norm(inputs)
         inputs = inputs + self.attention(normed, normed, normed, key_padding_mask=~present)
@@ -163,20 +165,26 @@ class BranchEncoder(torch.nn.Module):
         indices = active.nonzero(as_tuple=False).reshape(-1)
 
         output_width = L if self.n_outputs is None else self.n_outputs
-        reduced = encoded.new_zeros((encoded.shape[0], output_width, C))
-        reduced_present = torch.zeros(
-            (encoded.shape[0], output_width),
-            dtype=torch.bool,
-            device=present.device,
-        )
-        if indices.numel():
-            selected = encoded.index_select(0, indices)
+        count = indices.numel()
+        complete = count > 0 and count == encoded.shape[0]
+        shape = (encoded.shape[0], output_width, C)
+        if count:
+            selected = encoded if complete else encoded.index_select(0, indices)
             selected_present = present.index_select(0, indices)
             selected = selected.masked_fill(~selected_present.unsqueeze(-1), 0.0)
             evidence = selected
 
-            for layer in self.encoder:
-                selected = layer(selected, present=selected_present)
+            if (
+                self.encoder
+                and not customized(self.encoder)
+                and not stochastic(self.encoder)
+                and not bool(selected_present.all())
+            ):
+                values, packing = pack(selected, selected_present)
+                values = self.compute(values, selected_present, packing=packing)
+                selected = unpack(values, packing, selected, selected_present, self.encoder)
+            else:
+                selected = self.compute(selected, selected_present)
 
             match self.reduction:
                 case None:
@@ -194,11 +202,27 @@ class BranchEncoder(torch.nn.Module):
                         device=present.device,
                     )
 
-            reduced = reduced.index_copy(0, indices, selected_output)
-            reduced_present = reduced_present.index_copy(0, indices, selected_output_present)
-        elif torch.is_grad_enabled():
-            for parameter in self.parameters():
-                reduced = reduced + parameter.sum() * 0.0
+            complete = complete and (
+                selected_output.shape == shape
+                and selected_output.dtype == encoded.dtype
+                and selected_output.device == encoded.device
+                and selected_output_present.shape == shape[:-1]
+                and selected_output_present.dtype == present.dtype
+                and selected_output_present.device == present.device
+            )
+
+        if complete:
+            reduced = selected_output.clone(memory_format=torch.contiguous_format)
+            reduced_present = selected_output_present.clone(memory_format=torch.contiguous_format)
+        else:
+            reduced = encoded.new_zeros(shape)
+            reduced_present = present.new_zeros(shape[:-1])
+            if count:
+                reduced = reduced.index_copy(0, indices, selected_output)
+                reduced_present = reduced_present.index_copy(0, indices, selected_output_present)
+            elif torch.is_grad_enabled():
+                for parameter in self.parameters():
+                    reduced = reduced + parameter.sum() * 0.0
 
         reduced = reduced.reshape(N, *dims, output_width, C)
         reduced_present = reduced_present.reshape(N, *dims, output_width)
@@ -219,6 +243,15 @@ class BranchEncoder(torch.nn.Module):
             destination=self.destination,
             batch_size=N,
         )
+
+    def compute(self, inputs: torch.Tensor, present: torch.Tensor, *, packing: Packed | None = None) -> torch.Tensor:
+        """Encode prepared sequences without routing or data-dependent selection."""
+        for layer in self.encoder:
+            if packing is None:
+                inputs = layer(inputs, present=present)
+            else:
+                inputs = layer(inputs, present=present, packing=packing)
+        return inputs
 
     def contextualize(self, parcels: list[Parcel]) -> list[Parcel]:
         """Mix direct sibling fields only with fields at the same coordinate."""
@@ -241,10 +274,21 @@ class BranchEncoder(torch.nn.Module):
         present = torch.stack([parcel.present for parcel in selected], dim=-1)
         field_count = payload.shape[-2]
         channel_count = payload.shape[-1]
-        mixed = self.coordinate_encoder(
-            payload.reshape(-1, field_count, channel_count),
-            present=present.reshape(-1, field_count),
-        ).reshape(payload.shape)
+        inputs = payload.reshape(-1, field_count, channel_count)
+        presence = present.reshape(-1, field_count)
+        if (
+            field_count
+            and not customized((self.coordinate_encoder,))
+            and not stochastic((self.coordinate_encoder,))
+            and not bool(presence.all())
+        ):
+            values, packing = pack(inputs, presence)
+            if packing.indices.numel():
+                values = self.coordinate_encoder(values, present=presence, packing=packing)
+            mixed = unpack(values, packing, inputs, presence, (self.coordinate_encoder,))
+        else:
+            mixed = self.coordinate_encoder(inputs, present=presence)
+        mixed = mixed.reshape(payload.shape)
 
         contextualized = list(parcels)
         for field_index, parcel_index in enumerate(indices):

@@ -440,11 +440,13 @@ def loss(
     known = valued & content_targets.lt(n_content_tokens)
     unavailable = valued & content_targets.eq(n_content_tokens)
 
+    known_indices = known.nonzero(as_tuple=True)[0]
+
     content_loss_sum = content_inputs.new_zeros(())
-    if known.any():
+    if known_indices.numel():
         known_losses = torch.nn.functional.cross_entropy(
-            input=content_inputs[known],
-            target=content_targets[known],
+            input=content_inputs.index_select(0, known_indices),
+            target=content_targets.index_select(0, known_indices),
             weight=cast(Counter, embedder.counters[TensorKey.content.name]).weight,
             reduction="none",
         )
@@ -460,7 +462,7 @@ def loss(
     )
     loss += content_loss
 
-    if not known.any():
+    if not known_indices.numel():
         return loss
 
     for topk in module.schema.requests[prediction.address].topk:
@@ -470,7 +472,7 @@ def loss(
                 content_inputs.topk(k=topk, dim=1)
                 .indices.eq(content_targets.unsqueeze(1))
                 .any(dim=1)
-                .masked_select(known)
+                .index_select(0, known_indices)
                 .float()
                 .mean()
             ),
@@ -478,7 +480,7 @@ def loss(
 
     module.track(
         (prediction.address, strata, Metric.accuracy, TensorKey.content),
-        value=content_inputs.argmax(dim=1).eq(content_targets).masked_select(known).float().mean(),
+        value=content_inputs.argmax(dim=1).eq(content_targets).index_select(0, known_indices).float().mean(),
     )
 
     return loss

@@ -17,6 +17,7 @@ from tensordict import TensorDict
 from torchmetrics import Metric as TorchMetric
 
 from relflow._version import __version__
+from relflow.architecture import compiler
 from relflow.architecture.checkpoint import CheckpointState, RollbackCheckpoint
 from relflow.architecture.contracts import ContractScheduler
 from relflow.architecture.graph import ModelGraph
@@ -26,7 +27,7 @@ from relflow.architecture.mutations import (
     SchemaEditor,
     immutable,
 )
-from relflow.architecture.runtime import ModelRuntime, PredictionInput, Retain, step
+from relflow.architecture.runtime import ExecutionPlan, ModelRuntime, PredictionInput, Retain, step
 from relflow.data.arrow import Encoded
 from relflow.data.datasets.base import EncodedInput
 from relflow.data.processors import PostprocessorInput, PreprocessorInput
@@ -171,6 +172,7 @@ class Model(lit.LightningModule, Renderable):
         self._contract_generation: int = 0
         self._contract_scheduler: ContractScheduler = ContractScheduler()
         self.output_plans: dict[Any, Any] = {}
+        self.execution_plan: ExecutionPlan | None = None
 
         ModelGraph.install(self)
 
@@ -188,9 +190,45 @@ class Model(lit.LightningModule, Renderable):
         return self._version
 
     def reset_contracts(self) -> None:
+        compiler.clear(self)
         self._contract_generation += 1
         self._contract_scheduler.reset()
         self.output_plans.clear()
+        self.execution_plan = None
+
+    def compile(
+        self,
+        *,
+        encoders: bool = True,
+        pools: bool = True,
+        backend: str | Callable = "inductor",
+        dynamic: bool | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> Self:
+        """Compile selected tensor regions in place and return this model.
+
+        ``encoders`` selects branch encoder stacks; ``pools`` selects learned
+        attention pools in branches and decoders. Routing, coordinate encoders,
+        tensorfield operations, and losses keep their existing execution paths.
+        Each region uses ``torch.compile(fullgraph=True)`` lazily on real inputs.
+
+        Calls replace the previous selection. Set both switches to ``False``
+        to restore eager execution. Schema mutations and checkpoint rebuilds
+        clear compilation; checkpoints and model copies do not retain it.
+        Custom compute overrides remain eager, as do regions with customized
+        internals or nested hooks, including hooks added after compilation.
+
+        ``backend``, ``dynamic``, and ``options`` are PyTorch compiler settings.
+        Inductor defaults preserve eager random draws and disable CUDA graphs
+        and automatic tensor padding. Floating-point results may still differ.
+        """
+        self._schema_editor.assert_mutation_allowed("compile")
+        if not isinstance(encoders, bool) or not isinstance(pools, bool):
+            raise TypeError(
+                f"model.compile requires Boolean region switches, got encoders={encoders!r}, pools={pools!r}"
+            )
+        compiler.compile(self, encoders=encoders, pools=pools, backend=backend, dynamic=dynamic, options=options)
+        return self
 
     def __rich_console__(self, console, options):
         parameters = sum(parameter.numel() for parameter in self.parameters())
