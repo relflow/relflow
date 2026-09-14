@@ -53,8 +53,14 @@ def test_public_surface_has_four_modules_and_no_source_specific_datasets():
     assert rf.ArrowDataModule is arrow.ArrowDataModule
     assert datasets.__all__ == [
         "ArrowDataModule",
+        "ArrowInput",
+        "ArrowSource",
+        "ArrowStream",
+        "ArrowUnit",
         "CustomDataModule",
         "PolarsDataModule",
+        "Retain",
+        "StratumConfig",
         "SyntheticDataModule",
     ]
     assert callable(rf.source)

@@ -14,7 +14,7 @@ import torch
 import torch.nn.functional as F
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable
 
     from relflow.architecture.attention import RotaryMultiheadAttention
     from relflow.architecture.encoder import RotaryTransformerEncoderLayer
@@ -38,7 +38,7 @@ class Packed:
     groups: tuple[Group, ...]
 
 
-def stochastic(layers: Sequence[RotaryTransformerEncoderLayer]) -> bool:
+def stochastic(layers: Iterable[RotaryTransformerEncoderLayer]) -> bool:
     """Whether active dropout requires the original dense RNG schedule."""
     return any(
         (layer.attention.training and layer.attention.dropout_p > 0)
@@ -49,7 +49,7 @@ def stochastic(layers: Sequence[RotaryTransformerEncoderLayer]) -> bool:
     )
 
 
-def customized(layers: Sequence[torch.nn.Module], *, additional: tuple[type[torch.nn.Module], ...] = ()) -> bool:
+def customized(layers: Iterable[torch.nn.Module], *, additional: tuple[type[torch.nn.Module], ...] = ()) -> bool:
     """Retain dense module shapes for callbacks and replaced implementations.
 
     Packing changes nested module inputs from [batch, length, width] to
@@ -159,7 +159,7 @@ def unpack(
     packing: Packed,
     inputs: torch.Tensor,
     present: torch.Tensor,
-    layers: Sequence[RotaryTransformerEncoderLayer],
+    layers: Iterable[RotaryTransformerEncoderLayer],
 ) -> torch.Tensor:
     """Restore structural holes and retain zero gradients for entirely empty blocks."""
     output = inputs.masked_fill(~present.unsqueeze(-1), 0.0) * 0.0

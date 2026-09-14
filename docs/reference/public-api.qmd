@@ -22,6 +22,52 @@ It is a discovery reference, not a replacement for signatures or the workflow
 guides. Objects not exported from `relflow` may still be necessary for advanced
 extension internals and should be treated as more version-coupled.
 
+## Type Hints And Completion
+
+RelFlow includes typing metadata in its installed package. Pyrefly can show
+field-specific constructor options, accepted string choices, and method return
+types. `Model` distinguishes tree construction from loading an existing
+`Schema`. Field inputs describe shorthand such as `mask=True` separately from
+the normalized attributes stored on a request.
+
+Install the optional Arrow stubs for complete Arrow input and result types:
+
+```bash
+uv add 'relflow[typing]'
+```
+
+The extra adds typing information and does not change model execution.
+
+For application helpers, these input aliases are available from `relflow`:
+
+| Alias | Accepted input |
+| --- | --- |
+| `TreeFieldInput` | A leaf instance, leaf class, or child branch. |
+| `MaskInput` | A Boolean, masking rate, `Mask`, or list/tuple of masks. |
+| `AttentionInput`, `OverflowInput`, `StrataInput` | The corresponding enum or canonical string literal. |
+| `NodeSelector` | A predicate or schema attribute selector. |
+| `ArrowInput` | An Arrow data module source, including file paths and restartable streams. |
+| `StratumConfig[T]` | One value of type `T` or a mapping of strata to values. |
+| `PreprocessorInput`, `PostprocessorInput` | A decorated processor, a list/tuple of processors, or `None`. |
+| `PreprocessorResult` | A Polars frame, iterable of frames, or `None`. |
+
+```python
+def supervised_model(field: rf.TreeFieldInput) -> rf.Model:
+    return rf.Model(
+        d_model=32,
+        n_layers=1,
+        n_heads=4,
+        feature=field,
+        label=rf.Category(size=2, mask=True),
+    )
+```
+
+`model.compile(...)` returns the same model type, including subclasses.
+`model.predict(...)` returns `pyarrow.Table`; `model.save(...)` returns the
+supplied `str` or `Path`. Preprocessor decorators retain their callback's
+return type. Runtime validation still enforces value constraints, such as
+positive dimensions and compatible attention head counts.
+
 ## Modeling
 
 | Export | Purpose | Guide |
@@ -169,7 +215,8 @@ installation error with the required command.
 | --- | --- | --- |
 | `__version__` | Report the installed RelFlow distribution version used to initialize new models. | [Model Lifecycle](../guides/model-lifecycle.qmd) |
 | `RollbackCheckpoint` | Save/select Lightning checkpoints and restore the best full model state at fit end. | [Model Lifecycle](../guides/model-lifecycle.qmd) |
-| `OptimizerConfig`, `SchedulerConfig` | Public typing aliases for model optimizer/scheduler inputs. | [Model Configuration](../guides/model-configuration.qmd) |
+| `OptimizerConfig`, `SchedulerConfig`, `SchedulerOptions` | Optimizer/scheduler inputs and Lightning scheduling controls. | [Model Configuration](../guides/model-configuration.qmd) |
+| `Scheduler` | Stateful scheduler protocol. Custom schedulers require an overridden `lr_scheduler_step` hook or manual optimization. | [Model Configuration](../guides/model-configuration.qmd) |
 | `VocabularySyncCallback` | Synchronize supported online vocabularies in distributed training. Normally auto-configured. | [Performance And Scaling](../guides/performance.qmd) |
 | `MutationLockCallback`, `RuntimePlacementCallback` | Keep mutation and device placement safe around Lightning loops. Normally auto-configured. | [Schema Mutation](../guides/schema-mutation.qmd) |
 

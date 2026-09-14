@@ -1,8 +1,8 @@
-# ty: ignore[unknown-argument]
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Annotated, Literal
+from dataclasses import InitVar
+from typing import TYPE_CHECKING, Annotated, Literal, Unpack, cast
 
 import numpy as np
 import polars as pl
@@ -16,7 +16,7 @@ from tensordict import TensorDict, tensorclass
 from relflow.data.ragged import RaggedField
 from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
-from relflow.structs.tree import Address
+from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
     Context,
     DecoderBase,
@@ -30,6 +30,7 @@ from relflow.tensorfields.base import (
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.structs.experiment import Schema
+    from relflow.structs.structure import Branch
 
 
 hashable: Extension = Extension(
@@ -92,16 +93,36 @@ class Request(RequestBase):
     offset: Annotated[int, pydantic.Field(gt=0, default=4)] = 4
     n_buckets: Annotated[int, pydantic.Field(gt=1, default=4)] = 4
 
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            name: str | None = None,
+            *,
+            n_hashes: int = 1,
+            n_bands: int = 8,
+            offset: int = 4,
+            n_buckets: int = 4,
+            type: Literal["hash"] = "hash",
+            **options: Unpack[FieldOptions],
+        ) -> None: ...
+
 
 @hashable.register
 @tensorclass
-class TensorField(TensorFieldBase):
+class TensorField(TensorFieldBase[torch.Tensor]):
     state: torch.Tensor
     content: torch.Tensor
     present: torch.Tensor
     trainable: torch.Tensor
     inferred: torch.Tensor
-    targets: TensorDict[TensorKey, torch.Tensor]
+    targets: TensorDict
+
+    if TYPE_CHECKING:
+        # TensorClass metadata is accepted by its generated initializer.
+        batch_size: InitVar[int | torch.Size | list[int] | tuple[int, ...] | None] = None
+        device: InitVar[torch.device | str | int | None] = None
+        names: InitVar[list[str | None] | None] = None
 
     @classmethod
     def new(
@@ -115,8 +136,8 @@ class TensorField(TensorFieldBase):
         schema: Schema,
         strata: Strata,
         context: Context,
-    ) -> TensorFieldBase:
-        request: Request = schema.requests[address]
+    ) -> TensorField:
+        request: Request = cast(Request, schema.requests[address])
         n_hashes: int = request.n_hashes
 
         def encode(field: RaggedField) -> torch.Tensor:
@@ -130,7 +151,8 @@ class TensorField(TensorFieldBase):
             ):
                 raise ValueError(f"hash field at '{address}' expects scalar Arrow values, got {values.type}")
             if pa.types.is_dictionary(values.type):
-                values = pc.dictionary_decode(values)
+                # Arrow exposes this kernel dynamically; pyarrow-stubs omits it.
+                values = pc.dictionary_decode(values)  # pyrefly: ignore [missing-attribute]
             if not len(values):
                 return torch.zeros((*field.shape, n_hashes), dtype=torch.int64)
 
@@ -184,9 +206,9 @@ class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 
-        request: Request = schema.requests[address]
+        request: Request = cast(Request, schema.requests[address])
         self.origin: Address = address
-        self.destination: Address = request.parent.address
+        self.destination: Address = cast("Branch", request.parent).address
         self.n_hashes: int = request.n_hashes
 
         n_bands = request.n_bands
@@ -206,7 +228,7 @@ class Embedder(EmbedderBase):
 
         N, *dims = inputs.state.shape
         state = inputs.state.reshape(-1)
-        content = inputs.content.reshape(-1, self.n_hashes)
+        content = cast(torch.Tensor, inputs.content).reshape(-1, self.n_hashes)
         valued = state.eq(Tokens.valued.value)
 
         normalized = content.to(dtype=self.weights.dtype).div(_HASH_NORMALIZER)
@@ -231,7 +253,7 @@ class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 
-        request: Request = schema.requests[address]
+        request: Request = cast(Request, schema.requests[address])
         self.n_hashes: int = request.n_hashes
         self.n_buckets: int = request.n_buckets
         self.state_linear = torch.nn.Linear(in_features=schema.d_model, out_features=len(Tokens))
@@ -242,7 +264,7 @@ class Decoder(DecoderBase):
         )
 
     @beartype
-    def decode(self, pooled: torch.Tensor) -> TensorDict[TensorKey, torch.Tensor]:
+    def decode(self, pooled: torch.Tensor) -> TensorDict:
         return TensorDict(
             source={
                 TensorKey.state: self.state_linear(pooled),
@@ -258,10 +280,10 @@ def loss(
     batch: TensorFieldBase,
     strata: Strata,
 ) -> torch.Tensor:
-    N: int = batch.targets[TensorKey.state].numel()
+    N: int = cast(torch.Tensor, batch.targets[TensorKey.state]).numel()
     trainable = batch.trainable.reshape(N)
-    state_inputs = prediction.payload[TensorKey.state].reshape(N, -1)
-    state_targets = batch.targets[TensorKey.state].reshape(N)
+    state_inputs = cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(N, -1)
+    state_targets = cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(N)
 
     loss: torch.Tensor = module.track(
         (prediction.address, strata, Metric.loss, TensorKey.state),
@@ -285,13 +307,13 @@ def loss(
     if not valued.any():
         return loss
 
-    request: Request = module.schema.requests[prediction.address]
+    request: Request = cast(Request, module.schema.requests[prediction.address])
     n_hashes: int = request.n_hashes
     n_buckets: int = request.n_buckets
 
     # Per-hash categorical over deterministic quantile buckets.
-    inputs = prediction.payload[TensorKey.content].reshape(N * n_hashes, n_buckets)
-    raw_targets = batch.targets[TensorKey.content].reshape(N, n_hashes)
+    inputs = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N * n_hashes, n_buckets)
+    raw_targets = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(N, n_hashes)
     bucket_targets = (
         raw_targets.to(dtype=torch.get_default_dtype())
         .div(_HASH_NORMALIZER)

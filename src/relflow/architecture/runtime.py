@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypeAlias, TypedDict, cast
+from typing import TYPE_CHECKING, Literal, TypeAlias, TypedDict, cast, overload
 
 import pyarrow as pa
 import torch
@@ -37,6 +37,7 @@ from relflow.tensorfields.base import (
     Extension,
     RequestBase,
     TensorFieldBase,
+    Write,
 )
 from relflow.tensorfields.output import STATE, embedding, inferred, shape, state, struct
 
@@ -44,12 +45,14 @@ if TYPE_CHECKING:
     from relflow.architecture.root import Model
 
 Retain = tuple[str, ...] | Literal["*"]
-PredictionInput: TypeAlias = pa.Table | pa.RecordBatch | Sequence[Mapping[str, Any]]
+PredictionInput: TypeAlias = pa.Table | pa.RecordBatch | Sequence[Mapping[str, object]]
 RESERVED = frozenset({TensorKey.state.name, TensorKey.inferred.name, TensorKey.embedding.name})
 
 
 class Output(TypedDict):
-    loss: NotRequired[torch.Tensor]
+    """Scalar objective returned by a nonprediction step that was not skipped."""
+
+    loss: torch.Tensor
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,7 +109,7 @@ def execution(module: Model) -> ExecutionPlan:
 
 def participation(
     module: Model,
-    inputs: TensorDict[Address, TensorFieldBase],
+    inputs: EncodedInput,
     strata: Strata,
 ) -> tuple[set[Address], set[Address]]:
     """Resolve local objectives and those selected on any distributed rank."""
@@ -115,7 +118,9 @@ def participation(
     if strata == Strata.predict or not objectives:
         return set(), set()
 
-    local = torch.stack([inputs[address].trainable.any() for address in objectives]).to(dtype=torch.uint8)
+    local = torch.stack([cast(TensorFieldBase, inputs[address]).trainable.any() for address in objectives]).to(
+        dtype=torch.uint8
+    )
     selected = torch.stack((local, all_reduce_max(local.clone()))).tolist()
     return (
         {address for address, active in zip(objectives, selected[0], strict=True) if active},
@@ -130,7 +135,7 @@ class OutputEntry:
     address: Address
     axes: tuple[int, ...]
     decoded: pa.StructType | None
-    writer: Callable[..., pa.StructArray | None] | None
+    writer: Write | None
     embed: bool
     extension: str | None
     coordinate: pa.StructType | None
@@ -237,7 +242,7 @@ def plan(module: Model, retain: Retain = (), *, refresh: bool = False) -> Output
 
         visited.add(address)
         decoded: pa.StructType | None = None
-        writer: Callable[..., pa.StructArray | None] | None = None
+        writer: Write | None = None
         extension_name: str | None = None
         if address in module.schema.requests:
             extension = TENSORFIELDS[module.schema.requests[address].type]
@@ -307,8 +312,8 @@ def coordinate(module: Model, entry: OutputEntry, prediction: Prediction, rows: 
     if address in module.schema.requests:
         if TensorKey.state not in prediction.payload or TensorKey.inferred not in prediction.payload:
             raise ValueError(f"decoded prediction for {address!s} is missing shared state or inferred tensors")
-        state_tensor = prediction.payload[TensorKey.state]
-        inferred_tensor = prediction.payload[TensorKey.inferred]
+        state_tensor = cast(torch.Tensor, prediction.payload[TensorKey.state])
+        inferred_tensor = cast(torch.Tensor, prediction.payload[TensorKey.inferred])
         if state_tensor.ndim == 0 or state_tensor.shape[-1] != len(Tokens):
             raise ValueError(f"prediction state at {address!s} must end with {len(Tokens)} logits")
         if state_tensor.numel() != expected * len(Tokens) or inferred_tensor.numel() != expected:
@@ -342,7 +347,7 @@ def coordinate(module: Model, entry: OutputEntry, prediction: Prediction, rows: 
     if not entry.embed and TensorKey.embedding in prediction.payload:
         raise ValueError(f"prediction for {address!s} returned an unplanned embedding tensor")
     if entry.embed:
-        embedding_tensor = prediction.payload[TensorKey.embedding]
+        embedding_tensor = cast(torch.Tensor, prediction.payload[TensorKey.embedding])
         if embedding_tensor.ndim == 0 or embedding_tensor.shape[-1] != module.schema.d_model:
             raise ValueError(f"prediction embedding at {address!s} must end with model width {module.schema.d_model}")
         embedding_values = embedding(embedding_tensor)
@@ -411,7 +416,7 @@ def vacant(compiled: OutputPlan) -> pa.Array:
     entries = [entry for entry in compiled.entries if entry.output is not None]
     if not entries:
         return pa.nulls(0)
-    fields = [pa.field(str(entry.address), entry.output, nullable=False) for entry in entries]
+    fields = [pa.field(str(entry.address), cast(pa.DataType, entry.output), nullable=False) for entry in entries]
     arrays = [pa.array([], type=entry.output) for entry in entries]
     return pa.StructArray.from_arrays(arrays, fields=fields)
 
@@ -422,12 +427,13 @@ class ModelRuntime:
     @staticmethod
     def forward(
         module: Model,
-        inputs: TensorDict[Address, TensorFieldBase],
+        inputs: EncodedInput,
         *,
         strata: Strata | str,
         dataloader_idx: int = 0,
         participating: set[Address] | None = None,
     ) -> list[Prediction]:
+        """Validate encoded fields and decode the routes active in this loop phase."""
         strata = Strata.normalize(strata)
         sanitize(module, inputs, strata=strata, dataloader_idx=dataloader_idx)
         participating = participation(module, inputs, strata)[1] if participating is None else participating
@@ -443,7 +449,7 @@ class ModelRuntime:
     @staticmethod
     def compute(
         module: Model,
-        inputs: TensorDict[Address, TensorFieldBase],
+        inputs: EncodedInput,
         *,
         plan: ExecutionPlan,
         decoders: tuple[DecoderRoute, ...],
@@ -456,7 +462,7 @@ class ModelRuntime:
         predictions: list[Prediction] = []
 
         for address in plan.requests:
-            tensorfield: TensorFieldBase = inputs[address]
+            tensorfield = cast(TensorFieldBase, inputs[address])
             node_module = cast(NodeModule, module.nodes[address])
             embedder: EmbedderBase = node_module.embedder
             embedded = embedder.embed(tensorfield)
@@ -492,7 +498,7 @@ class ModelRuntime:
 
         for route in decoders:
             address = route.address
-            tensorfield = inputs[address]
+            tensorfield = cast(TensorFieldBase, inputs[address])
             parcels = [outgoing[item] for item in route.heritage if item in outgoing]
 
             node_module = cast(NodeModule, module.nodes[address])
@@ -511,14 +517,59 @@ class ModelRuntime:
         return predictions
 
     @staticmethod
+    @overload
     def step(
         module: Model,
-        batch: Encoded | TensorDict[Address, TensorFieldBase],
+        batch: Encoded,
+        batch_idx: int,
+        dataloader_idx: int = 0,
+        *,
+        strata: Literal[Strata.predict],
+    ) -> pa.Table: ...
+
+    @staticmethod
+    @overload
+    def step(
+        module: Model,
+        batch: Encoded | EncodedInput,
+        batch_idx: int,
+        dataloader_idx: int = 0,
+        *,
+        strata: Literal[Strata.train],
+    ) -> Output | None: ...
+
+    @staticmethod
+    @overload
+    def step(
+        module: Model,
+        batch: Encoded | EncodedInput,
+        batch_idx: int,
+        dataloader_idx: int = 0,
+        *,
+        strata: Literal[Strata.validate, Strata.test],
+    ) -> Output: ...
+
+    @staticmethod
+    @overload
+    def step(
+        module: Model,
+        batch: Encoded | EncodedInput,
+        batch_idx: int,
+        dataloader_idx: int = 0,
+        *,
+        strata: Strata,
+    ) -> Output | pa.Table | None: ...
+
+    @staticmethod
+    def step(
+        module: Model,
+        batch: Encoded | EncodedInput,
         batch_idx: int,
         dataloader_idx: int = 0,
         *,
         strata: Strata,
     ) -> Output | pa.Table | None:
+        """Evaluate a loop batch, retaining Arrow sources for public predictions."""
         inputs = batch.tensors if isinstance(batch, Encoded) else batch
         if isinstance(batch, Encoded):
             ModelRuntime.learn(module, batch.observations, strata=strata)
@@ -581,8 +632,10 @@ class ModelRuntime:
             address = Address(str(prediction.address))
             request: RequestBase = module.schema.requests[address]
             extension: Extension = TENSORFIELDS[request.type]
-            loss_fn = cast(Callable[..., torch.Tensor], extension.loss)
-            loss = loss_fn(module=module, prediction=prediction, batch=inputs[address], strata=strata)
+            loss_fn = extension.loss
+            loss = loss_fn(
+                module=module, prediction=prediction, batch=cast(TensorFieldBase, inputs[address]), strata=strata
+            )
             losses.append(loss * torch.tensor(request.weight))
 
         if strata == Strata.train:
@@ -602,7 +655,7 @@ class ModelRuntime:
             return Output(loss=anchor)
 
         loss = module.track((Metric.loss, strata), value=torch.stack(losses).sum() + anchor)
-        return Output(loss=cast(torch.Tensor, loss))
+        return Output(loss=loss)
 
     @staticmethod
     def write(
@@ -733,7 +786,7 @@ class ModelRuntime:
             epoch=epoch,
         )
         ModelRuntime.learn(module, encoded.observations, strata=normalized)
-        return cast(EncodedInput, encoded.tensors)
+        return encoded.tensors
 
     @staticmethod
     def predict(

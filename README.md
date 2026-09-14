@@ -424,7 +424,7 @@ uv run pytest
 Run type and lint checks:
 
 ```bash
-uv run ty check src/relflow --output-format concise
+uv run pyrefly check
 uv run ruff check
 ```
 

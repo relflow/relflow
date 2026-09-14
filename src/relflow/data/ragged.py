@@ -7,7 +7,7 @@ import json
 import math
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import pyarrow as pa
@@ -35,7 +35,9 @@ def boolean(values: pa.Array | pa.ChunkedArray) -> np.ndarray:
 
     if not values.null_count:
         return values.to_numpy(zero_copy_only=False).astype(bool, copy=False)
-    return pc.fill_null(values, False).to_numpy(zero_copy_only=False).astype(bool, copy=False)
+    # Arrow accepts Python scalars; the stubs require an explicit Scalar.
+    filled = cast(pa.Array | pa.ChunkedArray, pc.fill_null(values, False))  # pyrefly: ignore[bad-specialization]
+    return filled.to_numpy(zero_copy_only=False).astype(bool, copy=False)
 
 
 def dictionary(datatype: pa.DataType) -> bool:
@@ -86,8 +88,11 @@ def valid(values: pa.Array | pa.ChunkedArray) -> np.ndarray:
     if isinstance(values, pa.ExtensionArray):
         return valid(values.storage)
     if pa.types.is_dictionary(values.type):
+        values = cast(pa.DictionaryArray, values)
         present = boolean(pc.is_valid(values.indices))
-        positions = pc.fill_null(values.indices, 0).to_numpy(zero_copy_only=False)
+        # Arrow accepts Python scalars; the stubs require an explicit Scalar.
+        filled = cast(pa.Array, pc.fill_null(values.indices, 0))  # pyrefly: ignore[bad-specialization]
+        positions = filled.to_numpy(zero_copy_only=False)
         result = present.copy()
         result[present] &= valid(values.dictionary)[positions[present]]
         return result
@@ -97,6 +102,7 @@ def valid(values: pa.Array | pa.ChunkedArray) -> np.ndarray:
         return boolean(pc.is_valid(values))
 
     codes, offsets = variants(values)
+    values = cast(pa.UnionArray, values)
     result = np.zeros(len(values), dtype=bool)
     for index, code in enumerate(values.type.type_codes):
         selected = codes == code
@@ -317,7 +323,7 @@ def root(values: pa.Table, branch: Branch, *, size: int | None = None) -> Layout
 def descend(layout: Layout, branch: Branch, address: Address) -> Layout:
     """Lower one repeated branch and retain its dense child positions."""
 
-    expression = branch.query or member(branch.name)
+    expression = branch.query or member(cast(str, branch.name))
     selected = query(layout.records, expression, address=str(branch.address))
     if selected.present.type != pa.bool_():
         raise ValueError(f"branch query {expression!r} must select one list per parent")
@@ -648,6 +654,7 @@ def coalesce(
     def visit(branch: Branch, layout: Layout, inherited: tuple[Decision, ...]) -> None:
         for child in branch.fields:
             if getattr(child, "type", None) == "branch":
+                child = cast("Branch", child)
                 active = descendants.get(child.address, [])
                 if active:
                     child_layout = descend(layout, child, active[0])

@@ -1,9 +1,9 @@
-# ty: ignore[unknown-argument]
 from __future__ import annotations
 
 import enum
 import math
-from typing import TYPE_CHECKING, Annotated, Literal
+from dataclasses import InitVar
+from typing import TYPE_CHECKING, Annotated, Literal, Unpack, cast
 
 import numpy as np
 import pyarrow as pa
@@ -17,7 +17,7 @@ from relflow.data.ragged import RaggedField
 from relflow.helpers import Jitter
 from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
-from relflow.structs.tree import Address
+from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
     Context,
     DecoderBase,
@@ -32,6 +32,7 @@ from relflow.tensorfields.output import array, fixed, struct
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.structs.experiment import Schema
+    from relflow.structs.structure import Branch
 
 
 vector: Extension = Extension(name="vector", types=(int | float,))
@@ -50,23 +51,50 @@ class Objective(enum.StrEnum):
 
 @vector.register
 class Request(RequestBase):
-    """Fixed-width numeric vector tensorfield request."""
+    """Fixed-width numeric vector, such as a precomputed embedding.
+
+    Every valued input must contain exactly ``n_dim`` non-null numeric elements;
+    content is stored as float32 without fitting a normalizer. ``jitter`` adds
+    training-only noise in the supplied coordinate units and preserves targets.
+    ``objective`` selects mean ``"l1"`` or ``"l2"`` reconstruction loss across
+    coordinates. ``mask=True`` makes the vector a supervised target.
+    Predictions contain a reconstructed vector of the same width.
+    """
 
     type: Literal["vector"] = "vector"
     n_dim: Annotated[int, pydantic.Field(gt=0)]
     jitter: Jitter = pydantic.Field(default_factory=Jitter)
     objective: Objective = Objective.l2
 
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            name: str | None = None,
+            *,
+            n_dim: int,
+            jitter: Jitter = ...,
+            objective: Objective | Literal["l1", "l2"] = Objective.l2,
+            type: Literal["vector"] = "vector",
+            **options: Unpack[FieldOptions],
+        ) -> None: ...
+
 
 @vector.register
 @tensorclass
-class TensorField(TensorFieldBase):
+class TensorField(TensorFieldBase[torch.Tensor]):
     content: torch.Tensor
     state: torch.Tensor
     present: torch.Tensor
     trainable: torch.Tensor
     inferred: torch.Tensor
-    targets: TensorDict[TensorKey, torch.Tensor]
+    targets: TensorDict
+
+    if TYPE_CHECKING:
+        # TensorClass metadata is accepted by its generated initializer.
+        batch_size: InitVar[int | torch.Size | list[int] | tuple[int, ...] | None] = None
+        device: InitVar[torch.device | str | int | None] = None
+        names: InitVar[list[str | None] | None] = None
 
     @classmethod
     def new(
@@ -80,8 +108,8 @@ class TensorField(TensorFieldBase):
         schema: Schema,
         strata: Strata,
         context: Context,
-    ) -> TensorFieldBase:
-        request: Request = schema.requests[address]
+    ) -> TensorField:
+        request: Request = cast(Request, schema.requests[address])
 
         def encode(field: RaggedField) -> torch.Tensor:
             values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
@@ -95,7 +123,8 @@ class TensorField(TensorFieldBase):
                 ):
                     raise ValueError(f"vector field at '{address}' expects an Arrow list, got {values.type}")
                 lengths = pc.list_value_length(values)
-                if pc.any(pc.not_equal(lengths, request.n_dim)).as_py():
+                # pyarrow-stubs incorrectly decorates not_equal as an overload.
+                if pc.any(pc.not_equal(lengths, request.n_dim)).as_py():  # pyrefly: ignore [no-matching-overload]
                     raise ValueError(f"vector field at '{address}' expects every value to have length {request.n_dim}")
                 flattened = pc.list_flatten(values)
                 if flattened.null_count:
@@ -133,9 +162,9 @@ class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 
-        request: Request = schema.requests[address]
+        request: Request = cast(Request, schema.requests[address])
         self.origin: Address = address
-        self.destination: Address = request.parent.address
+        self.destination: Address = cast("Branch", request.parent).address
         self.jitter: Jitter = request.jitter
 
         self.embeddings = torch.nn.Embedding(
@@ -153,7 +182,7 @@ class Embedder(EmbedderBase):
         D = math.prod((N, *dims))
 
         state = inputs.state.reshape(D)
-        content = inputs.content.reshape(D, -1)
+        content = cast(torch.Tensor, inputs.content).reshape(D, -1)
 
         if self.training:
             eligible = state.eq(Tokens.valued).unsqueeze(-1) & torch.isfinite(content)
@@ -176,7 +205,7 @@ class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 
-        request: Request = schema.requests[address]
+        request: Request = cast(Request, schema.requests[address])
 
         self.classification = torch.nn.Linear(
             in_features=schema.d_model,
@@ -188,7 +217,7 @@ class Decoder(DecoderBase):
         )
 
     @beartype
-    def decode(self, pooled: torch.Tensor) -> TensorDict[TensorKey, torch.Tensor]:
+    def decode(self, pooled: torch.Tensor) -> TensorDict:
         return TensorDict(
             source={
                 TensorKey.state: self.classification(pooled),
@@ -205,11 +234,11 @@ def loss(
     strata: Strata,
 ) -> torch.Tensor:
     address: Address = prediction.address
-    request: Request = module.schema.requests[address]
+    request: Request = cast(Request, module.schema.requests[address])
 
     trainable = batch.trainable.reshape(-1)
-    state_targets = batch.targets[TensorKey.state].reshape(-1)
-    state_inputs = prediction.payload[TensorKey.state].reshape(-1, len(Tokens))
+    state_targets = cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(-1)
+    state_inputs = cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(-1, len(Tokens))
 
     output: torch.Tensor = module.track(
         (address, strata, Metric.loss, TensorKey.state),
@@ -233,8 +262,8 @@ def loss(
     if not valued.any():
         return output
 
-    inputs = prediction.payload[TensorKey.content].reshape(-1, request.n_dim)
-    targets = batch.targets[TensorKey.content].reshape(-1, request.n_dim)
+    inputs = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(-1, request.n_dim)
+    targets = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(-1, request.n_dim)
     diff = inputs.subtract(targets)
 
     output += module.track(
@@ -257,16 +286,16 @@ def loss(
 
 @vector.register
 def output(module: Model, address: Address) -> pa.StructType:
-    request: Request = module.schema.requests[address]
+    request: Request = cast(Request, module.schema.requests[address])
     content = pa.list_(pa.float32(), request.n_dim)
     return pa.struct([pa.field(TensorKey.content.name, content, nullable=False)])
 
 
 @vector.register
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
-    request: Request = module.schema.requests[prediction.address]
-    content = prediction.payload[TensorKey.content].detach().float().clone()
-    non_valued = prediction.payload[TensorKey.state].argmax(dim=-1).ne(Tokens.valued.value)
+    request: Request = cast(Request, module.schema.requests[prediction.address])
+    content = cast(torch.Tensor, prediction.payload[TensorKey.content]).detach().float().clone()
+    non_valued = cast(torch.Tensor, prediction.payload[TensorKey.state]).argmax(dim=-1).ne(Tokens.valued.value)
     content[non_valued] = 0.0
     values = fixed(array(content, pa.float32()), request.n_dim)
     return struct({TensorKey.content.name: values}, datatype)

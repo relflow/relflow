@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import importlib
 import inspect
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, fields, replace
 from enum import StrEnum
-from typing import Any, Literal, Self, TypeAlias, overload
+from typing import Any, Generic, Literal, Self, TypeAlias, TypeVar, overload
 
 import polars as pl
 import pyarrow as pa
 
+import relflow
+
 EMPTY = inspect.Signature.empty
 Scope = Literal["partition", "dataset"]
+PreprocessorResult: TypeAlias = pl.DataFrame | Iterable[pl.DataFrame] | None
+Result = TypeVar("Result", bound=PreprocessorResult, covariant=True)
 
 
 class PreprocessorProvider(StrEnum):
@@ -72,10 +76,10 @@ def arrow(value: pl.DataFrame, *, context: str) -> pa.Table:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Processor:
+class Processor(Generic[Result]):
     """Callable wrapper with explicit pipeline and user parameter binding."""
 
-    func: Callable[..., Any]
+    func: Callable[..., Result]
     kind: str
     providers: frozenset[str]
     bound: Mapping[str, Any] = field(default_factory=dict)
@@ -196,7 +200,7 @@ class Processor:
 
         return replace(self, bound={**self.bound, **values})
 
-    def call(self, value: pl.DataFrame, runtime: Mapping[str, Any]) -> Any:
+    def call(self, value: pl.DataFrame, runtime: Mapping[str, Any]) -> Result:
         """Invoke the wrapped callable with validated arguments."""
 
         if not isinstance(value, pl.DataFrame):
@@ -209,15 +213,21 @@ class Processor:
         supplied = {name: runtime[name] for name in self.runtime}
         return self.func(value, **dict(self.bound), **supplied)
 
-    def __call__(self, frame: pl.DataFrame, **runtime: Any) -> Any:
+    def __call__(self, frame: pl.DataFrame, **runtime: Any) -> Result:
+        """Invoke the original transform with its configured and pipeline arguments."""
         return self.call(frame, runtime)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Preprocessor(Processor):
-    """Polars frame transform returned by :func:`preprocess`."""
+class Preprocessor(Processor[Result]):
+    """Polars frame transform returned by :func:`preprocess`.
 
-    func: Callable[..., Any]
+    Calling a processor preserves the wrapped function's result type. Use
+    ``run`` for a uniform iterator of validated frames and ``partial`` to bind
+    user configuration without changing the original processor.
+    """
+
+    func: Callable[..., Result]
     scope: Scope = "partition"
     kind: str = field(default="preprocessor", init=False)
     providers: frozenset[str] = field(default=PREPROCESSOR_PROVIDERS, init=False)
@@ -231,10 +241,10 @@ class Preprocessor(Processor):
         self,
         value: pl.DataFrame,
         *,
-        strata: Any,
-        schema: Any,
-        encoding_context: Any,
-    ) -> Iterable[pl.DataFrame]:
+        strata: relflow.Strata,
+        schema: relflow.Schema,
+        encoding_context: dict[relflow.Address, object],
+    ) -> Iterator[pl.DataFrame]:
         """Yield the zero, one, or many Polars frames produced by one call."""
 
         result = self.call(
@@ -264,10 +274,10 @@ class Preprocessor(Processor):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Postprocessor(Processor):
+class Postprocessor(Processor[pl.DataFrame]):
     """Polars output transform returned by :func:`postprocess`."""
 
-    func: Callable[..., Any]
+    func: Callable[..., pl.DataFrame]
     kind: str = field(default="postprocessor", init=False)
     providers: frozenset[str] = field(default_factory=frozenset, init=False)
 
@@ -277,7 +287,7 @@ class Postprocessor(Processor):
         return frame(self.call(value, {}), kind=self.kind, name=self.name)
 
 
-PreprocessorInput: TypeAlias = Preprocessor | list[Preprocessor] | tuple[Preprocessor, ...] | None
+PreprocessorInput: TypeAlias = Preprocessor[Any] | list[Preprocessor[Any]] | tuple[Preprocessor[Any], ...] | None
 PostprocessorInput: TypeAlias = Postprocessor | list[Postprocessor] | tuple[Postprocessor, ...] | None
 
 
@@ -309,11 +319,11 @@ def apply(table: pa.Table, processors: PostprocessorInput = ()) -> pa.Table:
 
 @overload
 def preprocess(
-    func: Callable[..., Any],
+    func: Callable[..., Result],
     /,
     *,
     scope: Scope = "partition",
-) -> Preprocessor: ...
+) -> Preprocessor[Result]: ...
 
 
 @overload
@@ -322,18 +332,25 @@ def preprocess(
     /,
     *,
     scope: Scope = "partition",
-) -> Callable[[Callable[..., Any]], Preprocessor]: ...
+) -> Callable[[Callable[..., Result]], Preprocessor[Result]]: ...
 
 
 def preprocess(
-    func: Callable[..., Any] | None = None,
+    func: Callable[..., Result] | None = None,
     /,
     *,
     scope: Scope = "partition",
-) -> Callable[[Callable[..., Any]], Preprocessor] | Preprocessor:
-    """Wrap a callable as a Polars preprocessor."""
+) -> Callable[[Callable[..., Result]], Preprocessor[Result]] | Preprocessor[Result]:
+    """Decorate a Polars transform, preserving its result type.
 
-    def decorate(inner: Callable[..., Any]) -> Preprocessor:
+    The first parameter is ``frame``; remaining parameters must be keyword-only.
+    ``strata``, ``schema`` and ``encoding_context`` are supplied by the pipeline.
+    Bind other required arguments with ``processor.partial(...)``. A transform
+    may return one frame, an iterable of frames, or ``None`` to discard input.
+    Use ``@preprocess`` or ``@preprocess(scope="dataset")``.
+    """
+
+    def decorate(inner: Callable[..., Result]) -> Preprocessor[Result]:
         if not callable(inner):
             raise TypeError("preprocess can only decorate callables")
         return Preprocessor(func=inner, scope=scope)
@@ -344,20 +361,24 @@ def preprocess(
 
 
 @overload
-def postprocess(func: Callable[..., Any], /) -> Postprocessor: ...
+def postprocess(func: Callable[..., pl.DataFrame], /) -> Postprocessor: ...
 
 
 @overload
-def postprocess(func: None = None, /) -> Callable[[Callable[..., Any]], Postprocessor]: ...
+def postprocess(func: None = None, /) -> Callable[[Callable[..., pl.DataFrame]], Postprocessor]: ...
 
 
 def postprocess(
-    func: Callable[..., Any] | None = None,
+    func: Callable[..., pl.DataFrame] | None = None,
     /,
-) -> Callable[[Callable[..., Any]], Postprocessor] | Postprocessor:
-    """Wrap a callable as a Polars postprocessor."""
+) -> Callable[[Callable[..., pl.DataFrame]], Postprocessor] | Postprocessor:
+    """Decorate a Polars prediction transform returning one eager DataFrame.
 
-    def decorate(inner: Callable[..., Any]) -> Postprocessor:
+    Use ``@postprocess`` or ``@postprocess()``. Additional keyword-only user
+    arguments can be bound with ``processor.partial(...)``.
+    """
+
+    def decorate(inner: Callable[..., pl.DataFrame]) -> Postprocessor:
         if not callable(inner):
             raise TypeError("postprocess can only decorate callables")
         return Postprocessor(func=inner)
@@ -369,8 +390,12 @@ def postprocess(
 
 __all__ = [
     "Postprocessor",
+    "PostprocessorInput",
     "Preprocessor",
+    "PreprocessorInput",
     "PreprocessorProvider",
+    "PreprocessorResult",
+    "Scope",
     "postprocess",
     "preprocess",
 ]

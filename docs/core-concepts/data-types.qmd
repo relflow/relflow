@@ -163,13 +163,21 @@ Every tensorfield inherits shared leaf options. Individual datatype pages own
 their type-specific options. `Branch` has structural settings because it groups
 children instead of reading one leaf value.
 
+Pass declared options directly, such as
+`rf.Number(objective="mse", description="Transaction amount in USD")`.
+Constructors reject a `kwargs={...}` bag and undeclared options, including
+misspellings and arbitrary metadata. Use `description` for human-readable
+notes. Custom tensorfields declare additional options as fields on their
+`RequestBase` subclass. A mapping of declared options can still be unpacked
+with `rf.Number(**options)`.
+
 ### Schema Identity
 
 | Option | Default | Notes |
 | --- | --- | --- |
 | `name` | `None`; inferred when bound | Public schema name and default processed-observation key. The normal `Model(..., amount=rf.Number)` or `Branch(..., amount=rf.Number)` keyword binding supplies `amount`; an unbound leaf must acquire a name before schema compilation. |
 | `query` | `None` | Optional node-relative structural source path. `None` selects the node's own schema name from its parent. Explicit and direct values converge during coalescing before fixed-geometry projection. See [Query Paths](querypaths.qmd). |
-| `description` | `None` | Optional schema metadata. |
+| `description` | `None` | Optional human-readable notes about the field, such as its meaning or units. |
 | `active` | `True` | Inactive fields remain in the schema but are ignored by encoding, loss, and prediction. |
 | `nullable` | `True` | Allows explicit `None` input. `False` raises whenever the encoded leaf contains state `null`. |
 

@@ -17,9 +17,9 @@ repos:
         pass_filenames: false
         always_run: true
 
-      - id: ty-check
-        name: Run Ty
-        entry: uv run ty check src/relflow --output-format concise
+      - id: pyrefly-check
+        name: Run Pyrefly
+        entry: uv run pyrefly check
         language: system
         pass_filenames: false
         always_run: true

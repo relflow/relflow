@@ -82,7 +82,8 @@ model.update(rf.where("name") == "returned", weight=2.0, topk=[])
 Updates are strict by default. If a selector matches mixed node types and one
 does not support the option, RelFlow raises instead of silently applying a
 partial change. Narrow the predicate or use `strict=False` only when partial
-application is intentional.
+application is intentional. An option unsupported by every selected node still
+raises; use `description` for notes.
 
 Every accepted shorthand is normalized to a tuple of `rf.Mask` policies.
 For example, `mask=0.10` becomes a uniform train-only learned mask, while

@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal, TypeAlias, cast
+from typing import Any, Literal, Self, TypeAlias, TypeVar, cast
 
 import fastapi
 import orjson
@@ -27,18 +27,21 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from relflow.architecture.root import Model
 from relflow.data.arrow import mappings
 from relflow.data.processors import Postprocessor, PostprocessorInput, Preprocessor, PreprocessorInput
-from relflow.structs.experiment import NodeAttribute, NodePredicate
+from relflow.structs.experiment import NodeAttribute, NodePredicate, Schema
 from relflow.structs.tree import Node
 
 Input: TypeAlias = dict[str, Any]
 ModelSource: TypeAlias = str | Path | Model
 Retain: TypeAlias = tuple[str, ...] | Literal["*"]
 UpdateOperation: TypeAlias = tuple[tuple[NodePredicate | NodeAttribute | Callable[[Node], bool], ...], dict[str, Any]]
+DeploymentType = TypeVar("DeploymentType", bound="Deployment")
 JSON_MEDIA_TYPE = "application/json"
 ARROW_MEDIA_TYPE = "application/vnd.apache.arrow.stream"
 
 
 class Accelerator(StrEnum):
+    """Select automatic device discovery, CPU, CUDA or Apple MPS for serving."""
+
     auto = "auto"
     cpu = "cpu"
     cuda = "cuda"
@@ -56,6 +59,8 @@ class Accelerator(StrEnum):
 
 
 class JSONBackend(StrEnum):
+    """Choose the optional fast JSON encoder or Python's standard JSON encoder."""
+
     orjson = "orjson"
     stdlib = "stdlib"
 
@@ -149,7 +154,7 @@ class FastAPIRuntime:
             if self.request_signature is None:
                 return cast(Input, payload)
             request = self.request_signature.model_validate(payload)
-            return cast(Input, request.model_dump(mode="python"))
+            return request.model_dump(mode="python")
         except Exception as exception:
             return ErrorItem(status_code=422, message=str(exception))
 
@@ -259,7 +264,7 @@ class FastAPIRuntime:
                 if self.response_signature is not None:
                     response = self.response_signature.model_validate(row)
                     row = response.model_dump(mode="json")
-                outputs[position] = cast(dict[str, Any], row)
+                outputs[position] = row
 
         return [cast(dict[str, Any], output) for output in outputs]
 
@@ -369,6 +374,13 @@ class Deployment(BaseSettings):
     converted into one Arrow table. ``retain`` controls which processed input
     columns are available to a Polars postprocessor. Deployment responses add
     loaded-model provenance after application response validation.
+
+    Set ``checkpoint`` to a path or provide an in-memory ``model``. Configure
+    ``max_batch_size`` and ``batch_timeout`` for microbatching; ``workers`` selects
+    server processes. ``accelerator`` chooses the model device. ``host``, ``port``
+    and ``log_level`` configure Uvicorn. Values can also come from the documented
+    ``RELFLOW_*`` environment variables. Configuration methods mutate this object
+    and return it, preserving subclass methods during chaining.
     """
 
     model_config = SettingsConfigDict(
@@ -434,7 +446,7 @@ class Deployment(BaseSettings):
 
     @field_validator("checkpoint", mode="before")
     @classmethod
-    def strip_checkpoint(cls, value: Any) -> Any:
+    def check_checkpoint(cls, value: Any) -> Any:
         if isinstance(value, str):
             stripped = value.strip()
             if stripped == "":
@@ -448,17 +460,17 @@ class Deployment(BaseSettings):
         return retention(cast(Retain, value))
 
     @model_validator(mode="after")
-    def check_model_source(self) -> Deployment:
+    def check_model_source(self) -> Self:
         if self.model is not None and "checkpoint" in self.model_fields_set:
             raise ValueError("pass either checkpoint or model, not both")
         return self
 
     @beartype
     def forge(
-        self,
+        self: DeploymentType,
         request: type[pydantic.BaseModel] | None = None,
         response: type[pydantic.BaseModel] | None = None,
-    ) -> Deployment:
+    ) -> DeploymentType:
         """Attach optional Pydantic request and response signatures."""
 
         self._request_signature = request
@@ -466,14 +478,14 @@ class Deployment(BaseSettings):
         return self
 
     @beartype
-    def preprocess(self, preprocessor: PreprocessorInput) -> Deployment:
+    def preprocess(self: DeploymentType, preprocessor: PreprocessorInput) -> DeploymentType:
         """Attach an ordered eager Polars preprocessor collection."""
 
         self._preprocessors = Preprocessor.normalize(preprocessor)
         return self
 
     @beartype
-    def postprocess(self, postprocessor: PostprocessorInput) -> Deployment:
+    def postprocess(self: DeploymentType, postprocessor: PostprocessorInput) -> DeploymentType:
         """Attach an ordered eager Polars postprocessor collection."""
 
         self._postprocessors = Postprocessor.normalize(postprocessor)
@@ -481,22 +493,21 @@ class Deployment(BaseSettings):
 
     @beartype
     def update(
-        self,
+        self: DeploymentType,
         *predicates: NodePredicate | NodeAttribute | Callable[[Node], bool],
         strict: bool = True,
-        allow_extra: bool = False,
         include_root: bool = True,
         validate: bool = True,
         **values: Any,
-    ) -> Deployment:
-        """Queue a model schema mutation to apply during server startup."""
+    ) -> DeploymentType:
+        """Queue declared schema changes for startup; use ``description`` for notes."""
 
+        values = Schema.update_values(values)
         self._update_operations.append(
             (
                 tuple(predicates),
                 {
                     "strict": strict,
-                    "allow_extra": allow_extra,
                     "include_root": include_root,
                     "validate": validate,
                     **values,

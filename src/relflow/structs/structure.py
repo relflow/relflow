@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import builtins
-from collections.abc import Mapping, Sequence
-from typing import Annotated, Any, Literal, Self, TypeAlias, overload
+from collections.abc import Generator, Mapping, Sequence
+from typing import Annotated, Any, Literal, Self, TypeAlias, cast, overload
 
 import pydantic
+from rich.console import Console, ConsoleOptions
 from rich.text import Text
 
-from relflow.structs.enums import AttentionMode, Overflow
+from relflow.structs.enums import AttentionInput, AttentionMode, Overflow, OverflowInput
 from relflow.structs.reduction import Attention, ReductionConfig
 from relflow.structs.tree import Leaf, Mask, MaskInput, Node, Rate
 from relflow.tensorfields import extensions as _extensions  # noqa: F401
@@ -21,7 +22,11 @@ RequestTypes: TypeAlias = Leaf
 class Branch(Node):
     """Repeated nested object group in a `relflow` schema.
 
-    Positional children are treated as fields inside the branch.
+    Positional children are named field or branch instances. Keyword children
+    may also be tensorfield classes, such as ``amount=rf.Number``. ``length``
+    limits the repeated collection; ``overflow`` chooses which excess rows to
+    retain. ``reduction`` controls the context passed to the parent branch.
+    ``mask`` accepts the same policies as a leaf and applies to its descendants.
     """
 
     model_config = pydantic.ConfigDict(extra="forbid", validate_default=True)
@@ -34,7 +39,8 @@ class Branch(Node):
     overflow: Overflow = Overflow.head
     n_layers: Annotated[int, pydantic.Field(gt=0, default=1)] = 1
     reduction: ReductionConfig | None = pydantic.Field(default_factory=Attention)
-    mask: tuple[Mask, ...] = pydantic.Field(default=False)
+    # The before-validator normalizes this public Boolean default to a tuple.
+    mask: tuple[Mask, ...] = cast(tuple[Mask, ...], pydantic.Field(default=False))
     fields: list[Self | pydantic.SerializeAsAny[pydantic.InstanceOf[Leaf]]] = pydantic.Field(default_factory=list)
 
     @overload
@@ -46,8 +52,8 @@ class Branch(Node):
         description: str | None = None,
         embed: bool = False,
         length: int = 1,
-        overflow: Overflow | Literal["head", "tail", "error"] = Overflow.head,
-        attention: AttentionMode | Literal["mha", "gqa", "mqa", "none"] = AttentionMode.mha,
+        overflow: OverflowInput = Overflow.head,
+        attention: AttentionInput = AttentionMode.mha,
         n_layers: int = 1,
         n_heads: int = 4,
         reduction: ReductionConfig | None = ...,
@@ -67,8 +73,8 @@ class Branch(Node):
         description: str | None = None,
         embed: bool = False,
         length: int = 1,
-        overflow: Overflow | Literal["head", "tail", "error"] = Overflow.head,
-        attention: AttentionMode | Literal["mha", "gqa", "mqa", "none"] = AttentionMode.mha,
+        overflow: OverflowInput = Overflow.head,
+        attention: AttentionInput = AttentionMode.mha,
         n_layers: int = 1,
         n_heads: int = 4,
         reduction: ReductionConfig | None = ...,
@@ -123,12 +129,12 @@ class Branch(Node):
 
     @pydantic.field_validator("mask", mode="before")
     @classmethod
-    def normalize_mask(cls, value: Any) -> tuple[Mask, ...]:
+    def check_mask(cls, value: Any) -> tuple[Mask, ...]:
         return Mask.normalize(value)
 
     @pydantic.field_validator("fields", mode="before")
     @classmethod
-    def materialize(cls, value: Any) -> Any:
+    def check_fields(cls, value: Any) -> Any:
         """Resolve serialized leaf requests against the live extension registry."""
 
         if not isinstance(value, (list, tuple)):
@@ -153,20 +159,20 @@ class Branch(Node):
         return fields
 
     @pydantic.model_validator(mode="after")
-    def check_query(self):
+    def check_query(self) -> Self:
         if self.query is not None:
             from relflow.data.query import compile
 
             compile(self.query)
         return self
 
-    def model_post_init(self, __context):
+    def model_post_init(self, __context: object) -> None:
         for field in self.fields:
-            field.parent: Self = self
+            field.parent = self
 
     @pydantic.model_validator(mode="after")
-    def check_unique_child_names(self):
-        seen: set[str] = set()
+    def check_unique_child_names(self) -> Self:
+        seen: set[str | None] = set()
         for field in self.fields:
             if field.name in seen:
                 raise ValueError(f"duplicate field name: {field.name}")
@@ -174,7 +180,7 @@ class Branch(Node):
 
         return self
 
-    def post_bind_validate(self):
+    def post_bind_validate(self) -> None:
         if len(self.mask) == 0:
             return None
 
@@ -188,7 +194,7 @@ class Branch(Node):
 
         return None
 
-    def __rich_console__(self, console, options):
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
         is_root = getattr(getattr(self, "parent", None), "type", None) == "schema"
         display_type = "root" if is_root else self.type
         attributes = ("query", "attention", "n_layers", "n_heads", "reduction", "dropout")
@@ -196,7 +202,7 @@ class Branch(Node):
             attributes = ("length", "overflow", *attributes)
 
         heading = Text()
-        heading.append(self.name, style=self.RICH_NAME_STYLE)
+        heading.append(cast(str, self.name), style=self.RICH_NAME_STYLE)
         heading.append(" ")
         heading.append(f"[{display_type}]", style=self.RICH_TYPE_STYLE)
         if self.embed:

@@ -1,13 +1,17 @@
 """Shared tensor types used after Arrow coalescing."""
 
-from typing import Any, TypeAlias
+from collections.abc import Mapping
+from typing import TypeAlias, TypeVar
 
 from tensordict import TensorDict
 
+from relflow.structs.enums import StrataInput
 from relflow.structs.tree import Address
-from relflow.tensorfields.base import TensorFieldBase
 
-EncodedInput: TypeAlias = TensorDict[Address, TensorFieldBase]
-InterprocessEncodingContext: TypeAlias = dict[Address, Any]
+T = TypeVar("T")
 
-__all__ = ["EncodedInput", "InterprocessEncodingContext"]
+EncodedInput: TypeAlias = TensorDict
+InterprocessEncodingContext: TypeAlias = dict[Address, object]
+StratumConfig: TypeAlias = T | Mapping[StrataInput | str, T]
+
+__all__ = ["EncodedInput", "InterprocessEncodingContext", "StratumConfig"]

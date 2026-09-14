@@ -6,13 +6,15 @@ import json
 import re
 from dataclasses import dataclass
 from functools import cache
-from typing import TypeAlias
+from typing import Generic, TypeAlias, TypeGuard, TypeVar, cast
 
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
 Atom: TypeAlias = str | int | bool
+ListType: TypeAlias = pa.ListType | pa.LargeListType | pa.FixedSizeListType
+Array = TypeVar("Array", bound=pa.Array | pa.ChunkedArray, covariant=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,17 +89,17 @@ class Plan:
 
 
 @dataclass(frozen=True, slots=True)
-class Projection:
+class Projection(Generic[Array]):
     """Selected Arrow values and an aligned structural-presence bitmap."""
 
-    values: pa.Array | pa.ChunkedArray
-    present: pa.Array | pa.ChunkedArray
+    values: Array
+    present: Array
 
 
 class Parser:
     """Strict parser for RelFlow's structural path grammar."""
 
-    def __init__(self, text: str):
+    def __init__(self, text: str) -> None:
         self.text = text
         self.position = 0
 
@@ -231,13 +233,13 @@ def compile(expression: str) -> Query:
     return Parser(expression).parse()
 
 
-def listed(datatype: pa.DataType) -> bool:
+def listed(datatype: pa.DataType) -> TypeGuard[ListType]:
     """Return whether an Arrow type owns one traversable list axis."""
 
     return pa.types.is_list(datatype) or pa.types.is_large_list(datatype) or pa.types.is_fixed_size_list(datatype)
 
 
-def nest(container: pa.DataType, child: pa.DataType) -> pa.DataType:
+def nest(container: ListType, child: pa.DataType) -> ListType:
     """Replace a list container's value type while preserving its list kind."""
 
     value = pa.field(
@@ -288,7 +290,7 @@ def bind(query: Query | str, source: pa.Schema | pa.DataType, *, address: str | 
     datatype = pa.struct(list(source)) if isinstance(source, pa.Schema) else source
     input_type = datatype
     steps: list[Bound] = []
-    wrappers: list[pa.DataType] = []
+    wrappers: list[ListType] = []
 
     for step in parsed.steps:
         if isinstance(step, Member):
@@ -380,31 +382,35 @@ def parts(values: pa.Array) -> tuple[np.ndarray, pa.Array, np.ndarray]:
 
     valid = pc.is_valid(values).to_numpy(zero_copy_only=False)
     if pa.types.is_fixed_size_list(values.type):
+        values = cast(pa.FixedSizeListArray, values)
         start = values.offset * values.type.list_size
         stop = start + len(values) * values.type.list_size
         offsets = np.arange(start, stop + 1, values.type.list_size, dtype=np.int64)
         return offsets, values.values, valid
 
-    offsets = values.offsets.to_numpy(zero_copy_only=False)
-    return offsets, values.values, valid
+    variable = cast(pa.ListArray | pa.LargeListArray, values)
+    offsets = variable.offsets.to_numpy(zero_copy_only=False)
+    return offsets, variable.values, valid
 
 
 def wrap(container: pa.Array, child: pa.Array, mask: pa.Array) -> pa.Array:
     """Rebuild one list container around transformed child values."""
 
-    datatype = nest(container.type, child.type)
+    datatype = nest(cast(ListType, container.type), child.type)
     if pa.types.is_fixed_size_list(container.type):
-        return pa.FixedSizeListArray.from_arrays(child, type=datatype, mask=mask)
+        # Arrow supports explicit types; pyarrow-stubs omits this overload.
+        return pa.FixedSizeListArray.from_arrays(child, type=datatype, mask=mask)  # pyrefly: ignore[no-matching-overload]
 
-    offsets = container.offsets
+    offsets = cast(pa.ListArray | pa.LargeListArray, container).offsets
     base = offsets[0].as_py()
-    normalized = pc.subtract(offsets, pa.scalar(base, type=offsets.type))
+    # The offset and scalar dtypes agree; the stub cannot correlate their unions.
+    normalized = pc.subtract(offsets, pa.scalar(base, type=offsets.type))  # pyrefly: ignore[no-matching-overload]
     if pa.types.is_large_list(container.type):
         return pa.LargeListArray.from_arrays(normalized, child, type=datatype, mask=mask)
-    return pa.ListArray.from_arrays(normalized, child, type=datatype, mask=mask)
+    return pa.ListArray.from_arrays(normalized, child, type=cast(pa.ListType, datatype), mask=mask)
 
 
-def index(values: pa.Array, present: pa.Array, position: int) -> Projection:
+def index(values: pa.Array, present: pa.Array, position: int) -> Projection[pa.Array]:
     """Safely select one position from every list without bounds failures."""
 
     offsets, children, valid_parent = parts(values)
@@ -456,20 +462,24 @@ def subslice(values: pa.Array, present: pa.Array, start: int | None, stop: int |
     mask = pc.invert(pc.and_(present, pa.array(valid, type=pa.bool_())))
     datatype = sliced(values.type, start, stop)
     if pa.types.is_fixed_size_list(datatype):
-        return pa.FixedSizeListArray.from_arrays(selected, type=datatype, mask=mask)
+        # Arrow supports explicit types; pyarrow-stubs omits this overload.
+        return pa.FixedSizeListArray.from_arrays(selected, type=datatype, mask=mask)  # pyrefly: ignore[no-matching-overload]
 
     result_offsets = pa.array(np.concatenate(([0], np.cumsum(counts))), type=pa.int64())
     if pa.types.is_large_list(datatype):
         return pa.LargeListArray.from_arrays(result_offsets, selected, type=datatype, mask=mask)
-    return pa.ListArray.from_arrays(pc.cast(result_offsets, pa.int32()), selected, type=datatype, mask=mask)
+    return pa.ListArray.from_arrays(
+        cast(pa.Int32Array, pc.cast(result_offsets, pa.int32())), selected, type=cast(pa.ListType, datatype), mask=mask
+    )
 
 
-def lookup(values: pa.Array, present: pa.Array, step: Lookup, plan: Plan, address: str | None) -> Projection:
+def lookup(values: pa.Array, present: pa.Array, step: Lookup, plan: Plan, address: str | None) -> Projection[pa.Array]:
     """Select one exact map key and reject duplicate matches."""
 
     matches = pc.map_lookup(values, step.value, occurrence="all")
-    counts = pc.fill_null(pc.list_value_length(matches), 0)
-    duplicated = pc.any(pc.greater(counts, 1)).as_py()
+    # Arrow accepts Python scalar arguments; the stubs require explicit Scalars.
+    counts = cast(pa.Int32Array, pc.fill_null(pc.list_value_length(matches), 0))  # pyrefly: ignore[bad-specialization]
+    duplicated = pc.any(pc.greater(counts, 1)).as_py()  # pyrefly: ignore[no-matching-overload]
     if duplicated:
         raise context(plan.query, step.segment, address, f"map contains duplicate key {step.value!r}")
     return index(matches, present, 0)
@@ -481,7 +491,7 @@ def select(
     steps: tuple[Bound, ...],
     plan: Plan,
     address: str | None,
-) -> Projection:
+) -> Projection[pa.Array]:
     """Execute bound steps against one non-chunked Arrow array."""
 
     if not steps:
@@ -522,7 +532,7 @@ def query(
     expression: Query | Plan | str,
     *,
     address: str | None = None,
-) -> Projection:
+) -> Projection[pa.Array | pa.ChunkedArray]:
     """Bind and execute a structural query without Python row materialization."""
 
     if isinstance(source, pa.Table):
@@ -545,9 +555,10 @@ def query(
         selected = [
             select(chunk, pa.repeat(pa.scalar(True), len(chunk)), plan.steps, plan, address) for chunk in values.chunks
         ]
+        # Arrow accepts Array chunks with a runtime DataType; the stub omits this overload.
         return Projection(
-            values=pa.chunked_array([item.values for item in selected], type=plan.output),
-            present=pa.chunked_array([item.present for item in selected], type=plan.presence),
+            values=pa.chunked_array([item.values for item in selected], type=plan.output),  # pyrefly: ignore[no-matching-overload]
+            present=pa.chunked_array([item.present for item in selected], type=plan.presence),  # pyrefly: ignore[no-matching-overload]
         )
 
     selected = select(values, pa.repeat(pa.scalar(True), len(values)), plan.steps, plan, address)

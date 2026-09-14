@@ -1,9 +1,9 @@
-# ty: ignore[unknown-argument]
 from __future__ import annotations
 
 import enum
 import math
-from typing import TYPE_CHECKING, Annotated, Literal
+from dataclasses import InitVar
+from typing import TYPE_CHECKING, Annotated, Literal, Unpack, cast
 
 import numpy as np
 import pyarrow as pa
@@ -19,7 +19,7 @@ from relflow.helpers import Jitter
 from relflow.logging import logger
 from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
-from relflow.structs.tree import Address
+from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
     Context,
     DecoderBase,
@@ -35,6 +35,7 @@ from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.structs.experiment import Schema
+    from relflow.structs.structure import Branch
 
 
 number: Extension = Extension(name="number", types=(int | float,))
@@ -60,7 +61,15 @@ class Objective(enum.StrEnum):
 
 @number.register
 class Request(RequestBase):
-    """Numeric scalar tensorfield request."""
+    """Continuous numeric scalar with online normalization and Fourier features.
+
+    ``objective`` selects ``"mae"``, ``"mse"``, or ``"huber"`` reconstruction
+    loss in normalized units; predictions and error metrics use source units.
+    ``alpha=None`` uses cumulative statistics; a value in ``(0, 1)`` uses
+    exponential updates. ``n_bands`` and ``offset`` bound Fourier exponents.
+    ``jitter=rf.Jitter(...)`` perturbs training inputs while retaining pristine
+    targets. ``mask=True`` makes the scalar a supervised, unembedded target.
+    """
 
     type: Literal["number"] = "number"
     jitter: Jitter = pydantic.Field(default_factory=Jitter)
@@ -68,6 +77,21 @@ class Request(RequestBase):
     offset: Annotated[int, pydantic.Field(gt=0, default=4)] = 4
     alpha: Annotated[float | None, pydantic.Field(gt=0.0, lt=1.0, default=None)] = None
     objective: Objective = Objective.mae
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            name: str | None = None,
+            *,
+            jitter: Jitter = ...,
+            n_bands: int = 8,
+            offset: int = 4,
+            alpha: float | None = None,
+            objective: Objective | Literal["mae", "mse", "huber"] = Objective.mae,
+            type: Literal["number"] = "number",
+            **options: Unpack[FieldOptions],
+        ) -> None: ...
 
     @classmethod
     def normalization(
@@ -132,13 +156,19 @@ def observe(
 
 @number.register
 @tensorclass
-class TensorField(TensorFieldBase):
+class TensorField(TensorFieldBase[torch.Tensor]):
     content: torch.Tensor
     state: torch.Tensor
     present: torch.Tensor
     trainable: torch.Tensor
     inferred: torch.Tensor
-    targets: TensorDict[TensorKey, torch.Tensor]
+    targets: TensorDict
+
+    if TYPE_CHECKING:
+        # TensorClass metadata is accepted by its generated initializer.
+        batch_size: InitVar[int | torch.Size | list[int] | tuple[int, ...] | None] = None
+        device: InitVar[torch.device | str | int | None] = None
+        names: InitVar[list[str | None] | None] = None
 
     @classmethod
     def new(
@@ -152,7 +182,7 @@ class TensorField(TensorFieldBase):
         schema: Schema,
         strata: Strata,
         context: Context,
-    ) -> TensorFieldBase:
+    ) -> TensorField:
         def encode(field: RaggedField) -> torch.Tensor:
             values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
             if (
@@ -291,9 +321,9 @@ class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 
-        request: Request = schema.requests[address]
+        request: Request = cast(Request, schema.requests[address])
         self.origin: Address = address
-        self.destination: Address = request.parent.address
+        self.destination: Address = cast("Branch", request.parent).address
 
         self.embeddings = torch.nn.Embedding(num_embeddings=len(Tokens), embedding_dim=schema.d_model)
         self.counter = Counter(address=address, size=len(Tokens))
@@ -352,7 +382,7 @@ class Embedder(EmbedderBase):
         D = math.prod(tuple([N, *dims]))
 
         state = inputs.state.reshape(D)
-        content = inputs.content.reshape(D)
+        content = cast(torch.Tensor, inputs.content).reshape(D)
         eligible = state.eq(Tokens.valued) & torch.isfinite(content)
 
         if self.training and not self.jitter.normalize:
@@ -406,9 +436,9 @@ def learn(
 
     if strata != Strata.train:
         raise ValueError(f"number learner at '{address}' requires train strata, got {strata}")
-    embedder: Embedder = module.nodes[address].embedder
-    embedder.counter.learn(observation[TensorKey.state])
-    embedder.normalizer.learn(observation[TensorKey.content])
+    embedder: Embedder = cast(Embedder, module.nodes[address].embedder)
+    embedder.counter.learn(cast(torch.Tensor, observation[TensorKey.state]))
+    embedder.normalizer.learn(cast(torch.Tensor, observation[TensorKey.content]))
 
 
 @number.register
@@ -420,7 +450,7 @@ class Decoder(DecoderBase):
         self.regression = torch.nn.Linear(in_features=schema.d_model, out_features=1)
 
     @beartype
-    def decode(self, pooled: torch.Tensor) -> TensorDict[TensorKey, torch.Tensor]:
+    def decode(self, pooled: torch.Tensor) -> TensorDict:
         return TensorDict(
             source={
                 TensorKey.state: self.classification(pooled),
@@ -437,21 +467,21 @@ def loss(
     strata: Strata,
 ) -> torch.Tensor:
     address: Address = prediction.address
-    request: Request = module.schema.requests[prediction.address]
+    request: Request = cast(Request, module.schema.requests[prediction.address])
 
-    embedder: Embedder = module.nodes[address].embedder
+    embedder: Embedder = cast(Embedder, module.nodes[address].embedder)
     normalizer: GlobalOnlineNormalizer = embedder.normalizer
 
-    N: int = batch.targets[TensorKey.state].numel()
+    N: int = cast(torch.Tensor, batch.targets[TensorKey.state]).numel()
 
     trainable: torch.Tensor = batch.trainable.reshape(N)
-    state_targets = batch.targets[TensorKey.state].reshape(N)
+    state_targets = cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(N)
 
     loss: torch.Tensor = module.track(
         (address, strata, Metric.loss, TensorKey.state),
         value=(
             torch.nn.functional.cross_entropy(
-                input=prediction.payload[TensorKey.state].reshape(N, -1),
+                input=cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(N, -1),
                 target=state_targets,
                 weight=embedder.counter.weight,
                 reduction="none",
@@ -461,8 +491,8 @@ def loss(
         ),
     )
 
-    target: torch.Tensor = batch.targets[TensorKey.content].reshape(N)
-    inputs: torch.Tensor = prediction.payload[TensorKey.content].reshape(N)
+    target: torch.Tensor = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(N)
+    inputs: torch.Tensor = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N)
     diff: torch.Tensor = inputs.subtract(target)
 
     loss += module.track(
@@ -498,5 +528,5 @@ def output(module: Model, address: Address) -> pa.StructType:
 
 @number.register
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
-    content = array(prediction.payload[TensorKey.content], pa.float64())
+    content = array(cast(torch.Tensor, prediction.payload[TensorKey.content]), pa.float64())
     return struct({TensorKey.content.name: content}, datatype)

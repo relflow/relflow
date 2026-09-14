@@ -22,12 +22,11 @@ def test_model_constructor_supports_direct_binding_and_opt_in_queries():
         rf.Category(
             "job_code",
             query='source["job code"]',
-            description="job code",
+            description="Job code from OpenML",
             size=128,
-            source="openml",
         ),
         rf.Number("amount"),
-        rf.Category("label", mask=True, embed=False, metric="roc_auc", topk=[2, 3]),
+        rf.Category("label", mask=True, embed=False, topk=[2, 3]),
         d_model=32,
         n_layers=2,
         n_heads=4,
@@ -44,10 +43,9 @@ def test_model_constructor_supports_direct_binding_and_opt_in_queries():
 
     job = params.requests["record/job_code"]
     assert job.name == "job_code"
-    assert job.description == "job code"
+    assert job.description == "Job code from OpenML"
     assert job.query == 'source["job code"]'
     assert job.size == 128
-    assert job.source == "openml"
 
     amount = params.requests["record/amount"]
     assert amount.query is None
@@ -57,7 +55,6 @@ def test_model_constructor_supports_direct_binding_and_opt_in_queries():
     label = params.requests["record/label"]
     assert label.mask == (rf.Mask(skip=True, dropout=False, reconstruct=True),)
     assert label.embed is False
-    assert label.metric == "roc_auc"
     assert label.topk == [2, 3]
     assert params.reconstruct == ["record/label"]
 
@@ -285,8 +282,8 @@ def test_model_select_returns_nodes_and_update_refreshes_cached_role_views():
     model.update(numeric, weight=2.0)
     assert params.requests["record/amount"].weight == 2.0
 
-    model.update(rf.where("name") == "amount", benchmark="schema_api", allow_extra=True)
-    assert model.select(rf.where("benchmark") == "schema_api") == [params.requests["record/amount"]]
+    model.update(rf.where("name") == "amount", description="Transaction amount")
+    assert model.select(rf.where("description") == "Transaction amount") == [params.requests["record/amount"]]
 
     reconstruct = rf.where("reconstruct")
     assert model.select(reconstruct, include_root=False) == [params.requests["record/label"]]

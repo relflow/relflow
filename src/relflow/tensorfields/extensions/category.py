@@ -1,8 +1,8 @@
-# ty: ignore[invalid-method-override,unknown-argument]
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
+from dataclasses import InitVar
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Unpack, cast
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -15,7 +15,7 @@ from relflow.data.ragged import RaggedField
 from relflow.logging import logger
 from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
-from relflow.structs.tree import Address
+from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
     Context,
     DecoderBase,
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.datasets.base import InterprocessEncodingContext
     from relflow.structs.experiment import Schema
+    from relflow.structs.structure import Branch
 
 category: Extension = Extension(name="category", types=(bool, int, float, str, bytes))
 
@@ -41,9 +42,18 @@ category.callback(VocabularySyncCallback, CounterUpdateCallback)
 
 @category.register
 class Request(RequestBase):
-    """Categorical scalar tensorfield request backed by an online vocabulary."""
+    """One scalar label represented by an online vocabulary.
 
-    model_config = pydantic.ConfigDict(extra="allow", populate_by_name=True, serialize_by_alias=True)
+    ``size`` (also accepted as ``capacity``) limits learned labels. Training
+    grows the vocabulary; later stages reuse it. ``p_unavailable`` hides known
+    label content during training, while unknown labels remain valued inputs.
+    ``topk`` adds accuracy metrics and prediction candidates; entries are
+    sorted and deduplicated, and must satisfy ``1 < k < size``.
+    ``mask=True`` declares a supervised classification target. Predictions
+    select populated vocabulary labels and exclude the unavailable sentinel.
+    """
+
+    model_config = pydantic.ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
     type: Literal["category"] = "category"
     capacity: Annotated[
@@ -52,6 +62,20 @@ class Request(RequestBase):
     ] = 1024
     p_unavailable: Annotated[float, pydantic.Field(ge=0.0, le=1.0, default=0.01)] = 0.01
     topk: list[int] | None = None
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            name: str | None = None,
+            *,
+            size: int = 1024,
+            capacity: int = ...,
+            p_unavailable: float = 0.01,
+            topk: list[int] | None = None,
+            type: Literal["category"] = "category",
+            **options: Unpack[FieldOptions],
+        ) -> None: ...
 
     @classmethod
     def vocabulary(
@@ -114,7 +138,7 @@ class Request(RequestBase):
 
         vocabulary = cls.vocabulary(model, address)
         counts = (
-            embedder.counters[TensorKey.content.name]
+            cast(Counter, embedder.counters[TensorKey.content.name])
             .counts[: len(vocabulary)]
             .detach()
             .cpu()
@@ -135,7 +159,7 @@ class Request(RequestBase):
 
     @pydantic.model_validator(mode="before")
     @classmethod
-    def reject_removed_options(cls, data: Any) -> Any:
+    def check_removed_options(cls, data: Any) -> Any:
         if isinstance(data, Mapping) and "max_vocab_size" in data:
             raise ValueError("max_vocab_size was removed; use size")
 
@@ -184,7 +208,7 @@ def observe(
     return TensorDict(
         {
             TensorKey.state: tally(torch.from_numpy(field.dense.copy()), len(Tokens)),
-            TensorKey.content: tally(torch.from_numpy(indices.copy()), schema.requests[address].size),
+            TensorKey.content: tally(torch.from_numpy(indices.copy()), cast(Request, schema.requests[address]).size),
         },
         batch_size=[],
     )
@@ -192,13 +216,19 @@ def observe(
 
 @category.register
 @tensorclass
-class TensorField(TensorFieldBase):
+class TensorField(TensorFieldBase[torch.Tensor]):
     state: torch.Tensor
     content: torch.Tensor
     present: torch.Tensor
     trainable: torch.Tensor
     inferred: torch.Tensor
-    targets: TensorDict[TensorKey, torch.Tensor]
+    targets: TensorDict
+
+    if TYPE_CHECKING:
+        # TensorClass metadata is accepted by its generated initializer.
+        batch_size: InitVar[int | torch.Size | list[int] | tuple[int, ...] | None] = None
+        device: InitVar[torch.device | str | int | None] = None
+        names: InitVar[list[str | None] | None] = None
 
     @classmethod
     def new(
@@ -212,7 +242,7 @@ class TensorField(TensorFieldBase):
         schema: Schema,
         strata: Strata,
         context: Context,
-    ) -> TensorFieldBase:
+    ) -> TensorField:
         state = context.state
         if state is not None and not isinstance(state, VocabularyState):
             raise TypeError(
@@ -230,7 +260,7 @@ class TensorField(TensorFieldBase):
         content = encode(input)
         target_content = encode(target)
 
-        if state is not None and len(state) > (size := schema.requests[address].size):
+        if state is not None and len(state) > (size := cast(Request, schema.requests[address]).size):
             logger.bind(
                 component="tensorfield",
                 field_type="category",
@@ -242,8 +272,8 @@ class TensorField(TensorFieldBase):
         state_tensor = torch.from_numpy(input.dense)
         target_state = torch.from_numpy(target.dense)
         if strata == Strata.train:
-            p_unavailable: float = schema.requests[address].p_unavailable
-            unavailable_index: int = schema.requests[address].size
+            p_unavailable: float = cast(Request, schema.requests[address]).p_unavailable
+            unavailable_index: int = cast(Request, schema.requests[address]).size
 
             if p_unavailable > 0.0:
                 # Unavailable content never appears naturally during training, because the
@@ -282,9 +312,9 @@ class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 
-        request: Request = schema.requests[address]
+        request: Request = cast(Request, schema.requests[address])
         self.origin: Address = address
-        self.destination: Address = request.parent.address
+        self.destination: Address = cast("Branch", request.parent).address
         self.size: int = request.size
 
         self.vocab: OnlineVocabularyModel = OnlineVocabularyModel(size=request.size)
@@ -315,7 +345,7 @@ class Embedder(EmbedderBase):
 
         N, *dims = inputs.state.shape
         state = inputs.state.reshape(-1)
-        content = inputs.content.reshape(-1)
+        content = cast(torch.Tensor, inputs.content).reshape(-1)
         valued = state.eq(Tokens.valued.value)
 
         if (valued & (content > self.size)).any():
@@ -354,9 +384,9 @@ def learn(
 
     if strata != Strata.train:
         raise ValueError(f"category learner at '{address}' requires train strata, got {strata}")
-    embedder: Embedder = module.nodes[address].embedder
-    embedder.counters[TensorKey.state.name].learn(observation[TensorKey.state])
-    embedder.counters[TensorKey.content.name].learn(observation[TensorKey.content])
+    embedder: Embedder = cast(Embedder, module.nodes[address].embedder)
+    cast(Counter, embedder.counters[TensorKey.state.name]).learn(cast(torch.Tensor, observation[TensorKey.state]))
+    cast(Counter, embedder.counters[TensorKey.content.name]).learn(cast(torch.Tensor, observation[TensorKey.content]))
 
 
 @category.register
@@ -364,7 +394,7 @@ class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 
-        request: Request = schema.requests[address]
+        request: Request = cast(Request, schema.requests[address])
 
         self.linears = torch.nn.ModuleDict(
             {
@@ -380,7 +410,7 @@ class Decoder(DecoderBase):
         )
 
     @beartype
-    def decode(self, pooled: torch.Tensor) -> TensorDict[TensorKey, torch.Tensor]:
+    def decode(self, pooled: torch.Tensor) -> TensorDict:
         return TensorDict(
             source={
                 TensorKey.state: self.linears[TensorKey.state.name](pooled),
@@ -396,12 +426,12 @@ def loss(
     batch: TensorFieldBase,
     strata: Strata,
 ) -> torch.Tensor:
-    embedder: Embedder = module.nodes[prediction.address].embedder
-    N: int = batch.targets[TensorKey.state].numel()
+    embedder: Embedder = cast(Embedder, module.nodes[prediction.address].embedder)
+    N: int = cast(torch.Tensor, batch.targets[TensorKey.state]).numel()
     trainable = batch.trainable.reshape(N)
 
-    state_inputs = prediction.payload[TensorKey.state].reshape(N, -1)
-    state_targets = batch.targets[TensorKey.state].reshape(N)
+    state_inputs = cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(N, -1)
+    state_targets = cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(N)
 
     loss: torch.Tensor = module.track(
         (prediction.address, strata, Metric.loss, TensorKey.state),
@@ -430,8 +460,8 @@ def loss(
     if not valued.any():
         return loss
 
-    content_inputs = prediction.payload[TensorKey.content].reshape(N, -1)
-    content_targets = batch.targets[TensorKey.content].reshape(N)
+    content_inputs = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N, -1)
+    content_targets = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(N)
     n_content_tokens = content_inputs.shape[-1]
     invalid = valued & content_targets.gt(n_content_tokens)
     if invalid.any():
@@ -465,7 +495,7 @@ def loss(
     if not known_indices.numel():
         return loss
 
-    for topk in module.schema.requests[prediction.address].topk:
+    for topk in cast(list[int], cast(Request, module.schema.requests[prediction.address]).topk):
         module.track(
             (prediction.address, strata, Metric.accuracy, f"top{topk}"),
             value=(
@@ -508,9 +538,9 @@ def output(module: Model, address: Address) -> pa.StructType:
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
     content_type = datatype.field(TensorKey.content.name).type
     candidate_type = content_type.field(TensorKey.topk.name).type.value_type
-    logits = prediction.payload[TensorKey.content]
+    logits = cast(torch.Tensor, prediction.payload[TensorKey.content])
     coordinates = logits.reshape(-1, logits.shape[-1])
-    vocabulary = labels(module.nodes[prediction.address].embedder.vocab)
+    vocabulary = labels(cast(Embedder, module.nodes[prediction.address].embedder).vocab)
     size = len(vocabulary)
     if size > coordinates.shape[-1]:
         raise ValueError(
@@ -535,8 +565,8 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
         best_probabilities, best_indices = probabilities.max(dim=-1)
         best_labels = pc.take(vocabulary, array(best_indices, pa.int64()))
 
-        request: Request = module.schema.requests[prediction.address]
-        width = min(max(request.topk, default=0), size)
+        request: Request = cast(Request, module.schema.requests[prediction.address])
+        width = min(max(cast(list[int], request.topk), default=0), size)
         if width:
             top_probabilities, top_indices = probabilities.topk(k=width, dim=-1)
             candidates = struct(
