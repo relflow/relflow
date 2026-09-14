@@ -1,8 +1,13 @@
 /*-- scss:defaults --*/
 
+$web-font-path: false;
+$font-family-sans-serif: system-ui, sans-serif;
 $primary: #375275;
 $link-color: #4679bc;
 $navbar-bg: #223144;
 $sidebar-hl: #4679bc;
 $toc-active-border: #4679bc;
 
+/*-- scss:rules --*/
+
+.navbar-logo { max-height: 3rem; }

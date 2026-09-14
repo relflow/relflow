@@ -1,33 +1,33 @@
 ---
-marimo-static-output: true
-pyproject: |
-  requires-python = ">=3.12"
-  dependencies = [
-    "marimo>=0.23.8",
-    "relflow[serving]",
-  ]
+engine: markdown
 ---
 
 # Model Tree
 
-**Example status — excerpt:** schemas isolate tree/address behavior; use
-[Getting Started](../getting-started.qmd) for a tested lifecycle.
+A schema describes what belongs together. Leaves represent typed values;
+branches combine related values into context; the root represents one
+observation. The same tree defines where reconstruction targets and exported
+embeddings live.
 
-The schema passed to `Model(...)` becomes a tree. The singleton root represents
-one processed observation, `Branch(...)` nodes define child contexts, and leaf
-tensorfields represent typed source values.
+## Follow One Observation
 
-Read this page as the public structural model: what the nodes mean, how
-addresses are formed, and where context can interact. Read
-[Data Flow](data-flow.qmd) first if preprocessing, tensorfields, decoding, and
-prediction output are still unfamiliar.
+An order can contain several line items. This is one illustrative record:
 
-## Read A Schema As A Tree
+```yaml
+customer_tier: gold
+line_items:
+  - sku: A12
+    quantity: 2
+    price: 19.99
+  - sku: B07
+    quantity: 1
+    price: 45.50
+returned: false
+```
 
-```{python .marimo}
-#| echo: true
-#| output: true
+The parent supplies each child's name:
 
+```python
 import relflow as rf
 
 model = rf.Model(
@@ -35,281 +35,102 @@ model = rf.Model(
     d_model=64,
     n_layers=2,
     n_heads=4,
-    embed=True,
-    source_channel=rf.Category(active=False, size=16),
+    customer_tier=rf.Category(size=16),
     line_items=rf.Branch(
         length=32,
-        embed=True,
-        sku=rf.Category(size=2048),
+        sku=rf.Category(size=8192),
         quantity=rf.Number,
-        price=rf.Number(mask=rf.Mask(rate=0.15, reconstruct=True)),
+        price=rf.Number,
     ),
-    returned=rf.Category(mask=True, size=2),
+    returned=rf.Boolean(mask=True),
 )
-
-model
 ```
 
-```text
-order                         root branch, exported embedding
-|-- source_channel            inactive category leaf
-|-- line_items                repeated branch, exported embedding
-|   |-- sku                   category leaf
-|   |-- quantity              number leaf
-|   `-- price                 number leaf, masked reconstruction
-`-- returned                  supervised category target
+```{typst}
+//| label: fig-model-tree
+//| fig-alt: An order combines customer tier and repeated line items containing SKU, quantity, and price, and predicts whether it was returned.
+//| fig-cap: Line-item context reaches the order context. The return target supplies no encoder input.
+#tree(node("Order", kind: "root", children: (
+  node("Customer tier", detail: "Category"),
+  node("Line items", kind: "branch", repeated: true, children: (
+    node("SKU", detail: "Category"),
+    node("Quantity", detail: "Number"),
+    node("Price", detail: "Number"),
+  )),
+  node("Returned", kind: "target", detail: "Boolean"),
+)))
 ```
 
-The schema says that one order contains a repeated list of line items and a
-return target. `source_channel` remains in the serializable schema but is
-inactive. The line-item fields share item coordinates, and the branch can emit
-its own representation before the order is represented at the root.
+Fields at the same line-item position belong to the same item. The branch
+contextualizes those inputs and reduces the item collection before routing it
+to the order. The root combines that representation with customer tier.
+`mask=True` keeps the return answer out of the encoder and creates its
+reconstruction objective.
 
-## Node Kinds
+A decoder pools representations along its ancestor path. Learned decoder
+queries can also be conditioned on visible sibling representations when their
+coordinates align. It is therefore misleading to treat every decoder as
+reading only the root, or to treat a tree edge as a database join. Explicit
+joins and derived values belong in [preprocessing](../guides/preprocessors.qmd).
 
-| Node kind | Created by | Public role |
-| --- | --- | --- |
-| Root | `Model(..., name=...)` | Singleton context for one processed observation. |
-| Branch | `Branch(..., length=...)` | Bounded child context whose aligned values can interact before a configured reduction routes them to its parent. |
-| Leaf tensorfield | `Number`, `Category`, `Set`, `Hash`, `DateParts`, `Text`, `Vector`, `Boolean` | Binds and represents a typed source value; optionally decodes a prediction. |
+## Names And Addresses
 
-The generated root is named `record` by default. `Model(name="order", ...)`
-renames it, but it remains a singleton with internal length 1. Repeated root
-data belongs in a child `Branch(length=...)`.
+`Model(name="order")` names the generated root, whose default name is `record`.
+The root is always a singleton; repeated data belongs in a child branch.
+A child branch reads a list even when `length=1`; a bare child mapping is not
+a branch collection. Branch and leaf definitions have no `name` or positional
+arguments.
 
-Branch and leaf definitions contain configuration; their parent supplies each
-child's name. `amount=rf.Number` names a leaf `amount`, and
-`line_items=rf.Branch(...)` names a branch `line_items`. Constructors do not
-accept positional fields or names. A standalone definition remains unnamed
-and reusable: binding creates independent named nodes, leaving the original
-definition unchanged. Reusing a definition shares configuration, not learned
-parameters or parent links.
+`amount=rf.Number` uses the field's defaults. Use `rf.Number(...)` to configure
+it. Reusing a definition creates independent named nodes and learned modules;
+it does not share model weights.
 
-Use `fields` for a generated mapping or a child name that is also a parent
-configuration option:
+Use a `fields` mapping when generating children or when a child name collides
+with a configuration option:
 
 ```python
 measurements = rf.Branch(
     length=8,
-    fields={"length": rf.Number, "description": rf.Category(size=32)},
-    value=rf.Number,
+    fields={"length": rf.Number, "description": rf.Category(size=16)},
 )
 ```
 
-Here `length=8` configures branch capacity, while `fields["length"]` defines a
-numeric child. Mapping entries and keyword children can be combined, but names
-must be unique. `Model(...)` and `model.extend(...)` accept the same mapping
-form. Bound nodes retain `.name` for inspection, selection, and serialization.
+An address identifies a schema location, such as `order/line_items/price`.
+Addresses appear in prediction fields, metric names, and mutation predicates.
+They describe the model's structure even when an explicit `query` reads a
+differently named source path. Names and nesting match input data by default;
+see [Binding Data](binding-data.qmd) for other source layouts.
 
-Only leaves encode typed values. A branch gives descendants shape and context;
-by default, its name selects the same-named child collection from the processed
-observation. Any node can use a node-relative `query` to select a different
-structural path. See [Binding Data](binding-data.qmd) for direct, query, and
-preprocessor input contracts.
+## Configure The Context
 
-## Addresses Are Stable Locations
+`d_model`, `n_layers`, and `n_heads` are required when building a `Model` from
+fields. `d_model` is the shared embedding width. The model's encoder settings
+configure the root; child branches have their own settings.
 
-Every node has a slash-delimited `rf.Address` derived from its schema path:
-
-| Node | Address object | String form |
-| --- | --- | --- |
-| root | `rf.Address("order")` | `order` |
-| line-items branch | `rf.Address("order", "line_items")` | `order/line_items` |
-| price leaf | `rf.Address("order", "line_items", "price")` | `order/line_items/price` |
-| target leaf | `rf.Address("order", "returned")` | `order/returned` |
-
-Addresses identify nodes in displays, metric names, mutation predicates, and
-prediction dictionaries. They describe the model contract. A preprocessor or
-explicit leaf query can select a differently named source value without
-changing its address.
-
-## Branches Define Alignment And Context
-
-A branch is more than an object-key namespace. It defines a coordinate space
-shared by descendant leaves.
-
-For two line items, `sku`, `quantity`, and `price` all have two corresponding
-positions. The first value in each leaf describes the first item. Padding extends
-that dimension to `line_items.length`; overflow controls values beyond the
-configured length.
-
-Child values can interact inside their branch before the branch representation
-flows to its parent. Nested branches repeat the pattern:
-
-```text
-customer
-|-- login_sessions[]
-|   `-- events[]
-`-- transactions[]
-```
-
-Events interact inside a session; session representations interact in the
-login-session context; the reduced result reaches the customer. Transactions
-have a separate local context before their reduced result reaches the same
-root.
-
-This hierarchy does not perform a deterministic database join across sibling
-branches. A decoder can learn from sibling evidence that survives the ordinary
-Branch route, but it receives no automatic pairwise comparison operator. Stack
-roles into one aligned branch or use preprocessing when exact correspondence is
-part of the data contract.
-
-## Schema Roles And Mutations
-
-Node settings change how a schema participates in learning and prediction:
-
-| Setting | Effect |
+| Setting | Controls |
 | --- | --- |
-| `mask=0.15` | Uses a learned mask at sampled positions during training, without a direct reconstruction loss. |
-| `mask=rf.Mask(rate=0.15, reconstruct=True)` | Reconstructs sampled positions. |
-| `mask=rf.Mask(rate=0.15, skip=True)` | Omits sampled inputs from tensorization and routing during training. |
-| `mask=True` | Always skips a node and reconstructs its leaf values as supervised targets. |
-| branch `mask=...` | Applies one decision atomically to the active descendant subtree. |
-| `embed=True` | Emits an embedding at a root, branch, or leaf address during prediction. |
-| `active=False` | Retains a node in the schema while excluding it from execution. |
+| `attention` | The branch encoder: `"mha"`, `"gqa"`, `"mqa"`, or `None`. |
+| `n_layers`, `n_heads`, `dropout` | That branch's encoder. |
+| `reduction` | What the branch passes to its parent. Defaults to `rf.Attention()`. |
+| `length` | Maximum retained records in a child branch. |
+| `overflow` | Keep the first records (`"head"`, default), last records (`"tail"`), or raise (`"error"`). |
+| `mask` | Which inputs to hide or reconstruct. |
+| `embed=True` | Export the representation at that address. |
 
-The complete learning-role contract belongs to
-[Learning Modes & Embeddings](embeddings.qmd). In particular, embedding export
-does not create a reconstruction objective. Structural skipping and a learned
-mask are distinct encoder effects selected through the same policy.
+Encoder and reduction settings are separate. `attention=None` disables
+encoder attention but leaves the selected reduction in place. An attention
+reduction owns its `n_outputs`, `n_layers`, optional `n_heads`/`dropout`, and
+`position`; omitted reduction heads/dropout inherit the branch values.
+`rf.Mean()` averages present inputs. `reduction=None` preserves routed child
+slots instead of summarizing them. See [Branch](../data-types/branch.qmd) for
+the complete reduction contract.
 
-The tree is also the selection surface for explicit schema changes:
+Short collections are padded. Padding and structurally skipped inputs do not
+contribute to attention or mean pooling. An explicit null remains a modeled
+value state and is different from padding.
 
-| Method | Use |
-| --- | --- |
-| `model.update(predicate, **values)` | Change selected node configuration. |
-| `model.extend(predicate, new_field=rf.Number)` | Add named children under one selected branch. |
-| `model.delete(predicate)` | Permanently remove selected nodes and descendants. |
-| `model.reset(predicate)` | Reinitialize selected runtime modules while keeping schema values. |
-| `model.override(predicate, **values)` | Apply temporary changes inside a context manager. |
-
-Use predicates such as `rf.where("name") == "price"`,
-`rf.where("type") == "number"`, or an exact address to select nodes. Mutations
-rebuild the runtime graph and reuse state whose names and shapes remain
-compatible. They are blocked while Lightning owns an active train, validation,
-test, or prediction loop.
-
-Compatibility is mechanical, not semantic: reusing a tensor of the same shape
-does not prove that a changed query, preprocessor contract, or field meaning is
-safe. Validate and save schema mutations as new model artifacts.
-
-## Architecture Internals
-
-The public concepts above are sufficient for ordinary model design. The
-remaining sections explain the tensor shapes and routing that implement them.
-They are most useful for debugging, performance work, and tensorfield extension.
-
-The runtime tree is backed by Pydantic schema models and installed node
-objects. Vector payloads are routed internally in `Parcel` objects. A decoder's
-canonical pooling memory follows its `heritage`; visible siblings travel on a
-separate conditioning route described below.
-
-### Tensor Shapes
-
-Each branch adds a dimension to descendant leaf arrays. For
-`order/line_items/price`, the inherited schema shape is:
-
-```text
-order.length       -> 1
-line_items.length  -> 32
-leaf shape             -> (1, 32)
-```
-
-At runtime, a scalar tensorfield carries arrays such as:
-
-```text
-state      (batch, 1, 32)  - valued, null, padded, masked, or reserved other
-content    (batch, 1, 32)  - datatype-specific content
-trainable  (batch, 1, 32)  - whether a retained answer may contribute to loss
-present    (batch, 1, 32)  - whether the coordinate participates in routing
-inferred   (batch, 1, 32)  - whether prediction requested reconstruction
-```
-
-Some types add content dimensions. `Vector` content includes the configured
-vector width; `Set` content includes its capacity dimension. The authoritative
-state vocabulary and public output contract are documented in
-[Built-In Data Types](data-types.qmd#value-state).
-
-Leaf embedders convert present state and content into compact `d_model`-wide
-payloads, then RelFlow scatters them back into fixed schema geometry:
-
-```text
-leaf embedding payload  (batch, ..., d_model)
-array embedding payload (batch, ..., d_model)
-```
-
-The repeated dimensions before `d_model` come from branch ancestors.
-
-### Forward Pass
-
-A forward pass traverses the tree from leaves upward, then decodes selected
-leaves from the context available along their path.
-
-1. Raw records have already been preprocessed and bound directly or through
-   explicit node-relative queries.
-2. Arrow resolves every mask policy against pristine values, then creates
-   separate input and target `RaggedField` projections.
-3. Datatype codecs tensorize those projections once. Present leaf coordinates
-   embed state and content and send vector parcels to their parent branches.
-4. Branch encoders run from the deepest branches toward the root. Each branch
-   combines child parcels, applies configured local attention, reduces the
-   child context, and sends one, several, or all encoded tokens to its parent.
-5. Nodes configured with `embed=True` make their representations available to
-   prediction output.
-6. Leaves compiled as fitting objectives, deterministic prediction decodes, or
-   embedding outputs gather context and run their decoders.
-7. During train, validation, or test, tensorfield losses and metrics use retained
-   trainable targets. During prediction, writers serialize decoded values and
-   configured embeddings.
-
-### Branch Reduction And Leaf Heritage
-
-Branch `attention` and `reduction` are distinct. After optional local
-self-attention, the default `rf.Attention()` reduction produces one learned
-summary. `rf.Attention(n_outputs=...)` produces a configured fixed number of
-anonymous summaries, `rf.Mean()` produces one presence-normalized mean of
-encoded token vectors, and `reduction=None` preserves every routed encoded
-child slot and its presence state. None of these choices assigns entity or
-target semantics to an output. A wider or pass-through child can still be
-compressed by the next Branch, so capacity must be considered along the
-complete path.
-
-Decoder pooling builds context for a leaf. A leaf's **heritage** contains the
-addresses on its root-to-leaf path. For `order/line_items/price`:
-
-```text
-order
-order/line_items
-order/line_items/price
-```
-
-The decoder gathers available outgoing parcels from that path and pools them
-into the target leaf shape. The default `pooling="query"` uses learned-query
-cross-attention. `pooling="mean"` repeats the mean heritage context for each
-target slot.
-
-Visible same-parent siblings do not become duplicate pooling memory. Instead,
-shape-aligned siblings condition learned queries for repeated or scalar
-targets. With the default `decoder_position=None`, scalar target queries omit
-position and repeated target queries use it; a leaf can explicitly choose
-`True` or `False`. A sibling branch always exposes its routed branch parcel;
-its individual descendant parcels remain visible only with `reduction=None`.
-This is why pass-through is the clearest starting point for item-level
-reasoning, while a tested fixed-width reduction can be used when it retains
-enough evidence.
-
-These routes let a decoded leaf use ancestor contexts and visible information
-in its own branch. A learned mask can communicate masked state without its
-original content. A skipped coordinate has no input parcel at all; its original
-value exists only in the target projection when reconstruction is enabled.
-
-## Where Next
-
-- Follow the complete pipeline in [Data Flow](data-flow.qmd).
-- Use [Branch](../data-types/branch.qmd) for lengths, overflow, attention, and
-  reduction configuration.
-- Use [Built-In Data Types](data-types.qmd) to choose leaf tensorfields.
-- Use [Learning Modes & Embeddings](embeddings.qmd) for reconstruction,
-  regularization, and exported representations.
-- Use [Dynamic Masking](dynamic-masking.qmd) for selectors and atomic subtree
-  decisions inside repeated contexts.
+Only declared options are accepted. Use `description` for notes. A leaf's
+`active=False` excludes it from execution while retaining it in the schema;
+change an existing model through [mutation methods](../guides/schema-mutation.qmd).
+For learning and output roles, continue to [Masking](dynamic-masking.qmd) and
+[Embeddings](embeddings.qmd).

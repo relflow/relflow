@@ -2,185 +2,67 @@
 title: Postprocessors
 ---
 
-# Postprocessors
+A postprocessor turns the [prediction table](prediction-output.qmd) into the
+shape an application needs. It receives and returns an eager Polars DataFrame.
 
-**Example status — reference:** snippets use the shipped eager Polars
-postprocessor contract.
-
-A postprocessor turns RelFlow's canonical prediction envelope into the table an
-application wants. It receives and returns an eager `polars.DataFrame`:
+For a trained order model with a Boolean `order/returned` target:
 
 ```python
 import polars as pl
 import relflow as rf
 
 @rf.postprocess
-def reshape(frame: pl.DataFrame) -> pl.DataFrame:
-    ...
-```
-
-Arrow is converted to Polars once before the pipeline and back to Arrow once
-afterward. Returning Arrow, a `LazyFrame`, a Series, or Python rows is an error.
-
-## Complete Example
-
-```python
-@rf.postprocess
-def warehouse(frame: pl.DataFrame) -> pl.DataFrame:
-    inputs = pl.col("inputs")
-    fraud = pl.col("predictions").struct.field("record/fraud")
-    content = fraud.struct.field("content")
+def decision(frame: pl.DataFrame, *, threshold: float) -> pl.DataFrame:
+    returned = pl.col("predictions").struct.field("order/returned")
+    probability = returned.struct.field("content").struct.field("probability")
     return frame.select(
-        request_id=inputs.struct.field("request_id"),
-        fraud=content.struct.field("value"),
-        fraud_probability=content.struct.field("probability"),
+        request_id=pl.col("inputs").struct.field("request_id"),
+        return_probability=probability,
+        review=probability >= threshold,
     )
 
-@rf.postprocess
-def review(frame: pl.DataFrame, *, threshold: float) -> pl.DataFrame:
-    return frame.with_columns(
-        send_to_review=pl.col("fraud_probability") >= threshold
-    )
-
-pipeline = (warehouse, review.partial(threshold=0.8))
-result = model.predict(requests, postprocess=pipeline, retain=("request_id",))
-```
-
-## Build An Ordered Pipeline
-
-Processor arguments accept one decorated stage, a list, a tuple, or `None`.
-RelFlow snapshots the value as an immutable tuple and executes stages strictly
-left to right. There are no column declaration arguments and RelFlow does not
-inspect expressions or reorder callbacks.
-
-## The Authoritative-Result Contract
-
-A postprocessor result is authoritative. It may select, rename, derive, sort,
-filter, aggregate, explode, or group rows. The only universal constraints are:
-
-- the result is an eager `pl.DataFrame`;
-- it contains at least one column; and
-- the final Arrow schema stays stable across batches written to one output.
-
-Deployment has an additional transport invariant: the final result must have
-one row, in request order, for each valid request. RelFlow verifies cardinality;
-without hidden row identity, ordering is the application's positional contract.
-
-## Read Canonical Fields
-
-The input normally has `inputs` and `predictions` struct columns. Field
-addresses such as `record/fraud` are literal struct-field names:
-
-```python
-fraud = pl.col("predictions").struct.field("record/fraud")
-value = fraud.struct.field("content").struct.field("value")
-state = fraud.struct.field("state")
-```
-
-Inspect the model's output schema before hard-coding extension-specific nested
-fields.
-
-## Retain Every Source Value You Need
-
-Postprocessors see source values only when `retain=` includes them:
-
-```python
+# request_table is supplied by the application.
 result = model.predict(
-    requests,
-    retain=("request_id", "event_time"),
-    postprocess=warehouse,
+    request_table,
+    retain=("request_id",),
+    postprocess=decision.partial(threshold=0.8),
 )
 ```
 
-They appear under the canonical `inputs` struct. `retain="*"` keeps every
-processed input column; `retain=()` produces a typed null input field.
+One output record has this shape; the probability is a placeholder:
 
-## Bind Application Configuration
-
-Additional callback parameters must be keyword-only and are bound immutably:
-
-```python
-@rf.postprocess
-def decide(
-    frame: pl.DataFrame,
-    *,
-    threshold: float,
-    queue: str = "manual-review",
-) -> pl.DataFrame:
-    field = pl.col("predictions").struct.field("record/fraud")
-    score = field.struct.field("content").struct.field("probability")
-    return frame.select(
-        queue=pl.lit(queue),
-        score=score,
-        selected=score >= threshold,
-    )
-
-configured = decide.partial(threshold=0.8)
+```yaml
+request_id: order-42
+return_probability: <probability of true>
+review: <true or false>
 ```
 
-Postprocessors have no pipeline-provided keyword parameters.
+The threshold is an application decision rule. The example uses the content
+probability; incorporate the predicted value state when your application needs
+to treat missingness separately.
 
-## Preserve The Canonical Envelope Selectively
+## Compose and reuse
 
-Selecting only the prediction envelope is ordinary Polars:
+The first callback parameter must be `frame`; additional parameters are
+keyword-only and bound with `.partial(...)`. A tuple of decorated processors
+runs left to right. The pipeline converts Arrow to Polars before its first
+stage and back to Arrow after its last.
 
-```python
-@rf.postprocess
-def predictions_only(frame: pl.DataFrame) -> pl.DataFrame:
-    return frame.select("predictions")
-```
-
-To expose a retained identifier:
-
-```python
-@rf.postprocess
-def with_id(frame: pl.DataFrame) -> pl.DataFrame:
-    return frame.select(
-        request_id=pl.col("inputs").struct.field("request_id"),
-        predictions=pl.col("predictions"),
-    )
-```
-
-## Handle Predicted State Explicitly
-
-Decoded fields include shared state probabilities and an `inferred` flag in
-addition to extension-owned content. Choose explicitly how null, padded,
-masked, or unavailable predictions map into an application schema.
-
-## Install A Postprocessor Pipeline
-
-The same decorated stages work in all output paths:
+Use the same configured processor in each output path:
 
 ```python
-model.predict(requests, postprocess=pipeline)
-rf.Writer("predictions", postprocessor=pipeline)
-rf.Deployment(model=model).postprocess(pipeline)
+processor = decision.partial(threshold=0.8)
+writer = rf.Writer("predictions", postprocessor=processor)
+deployment = rf.Deployment(model=model, retain=("request_id",)).postprocess(processor)
 ```
 
-## Schema Stability
+For `Writer`, configure `retain=("request_id",)` on the prediction data module.
+Serving requires `relflow[serving]`.
 
-`rf.Writer` locks the first postprocessed Arrow schema for its Parquet shard and
-rejects later drift. For conditional logic, cast branches to the intended dtype
-and return typed empty frames.
+Processors may change rows or columns, but must return an eager frame with at
+least one column. Retain every source column they need; source data is not
+otherwise available in the written table. A `Writer` requires the same output
+schema across batches in its shard.
 
-## Testing A Postprocessor Pipeline
-
-Test callbacks as ordinary DataFrame transforms and test the integrated Arrow
-boundary separately:
-
-```python
-frame = pl.DataFrame({"fraud_probability": [0.2, 0.9]})
-assert review.partial(threshold=0.8).run(frame)["send_to_review"].to_list() == [False, True]
-```
-
-## Common Mistakes
-
-- Returning `pa.Table`, `pl.LazyFrame`, a Series, or Python rows.
-- Naming the first callback argument something other than `frame`.
-- Forgetting to retain a source column needed after prediction.
-- Expecting RelFlow to infer or reorder stage dependencies.
-- Returning a zero-column frame.
-- Changing deployment response cardinality or order.
-
-See [Prediction Output](prediction-output.qmd), [Batch Inference](batch-inference.qmd),
-and [Serving](serving.qmd).
+HTTP serving has an additional requirement: preserve one final row per valid
+request in request order. RelFlow checks the count; the processor owns order.

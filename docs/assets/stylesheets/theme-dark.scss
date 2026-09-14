@@ -1,11 +1,17 @@
 /*-- scss:defaults --*/
 
+$web-font-path: false;
+$font-family-sans-serif: system-ui, sans-serif;
 $primary: #151C24;
 $link-color: #587ea9;
 $navbar-bg: #223144;
 $sidebar-hl: #476c96;
 $toc-active-border: #151C24;
 
+/*-- scss:rules --*/
+
+.navbar-logo { max-height: 3rem; }
+
 main.content :not(pre) > code:not(.sourceCode) {
-    background-color: #293f5c !important;
+  background-color: #293f5c !important;
 }

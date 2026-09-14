@@ -28,9 +28,9 @@ private/
 *.ckpt
 
 /specs
-/benchmarks
 
 /.quarto/
 
 **/site_libs/
 docs/**/*.html
+docs/assets/diagrams/

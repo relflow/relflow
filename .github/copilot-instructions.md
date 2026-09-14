@@ -11,5 +11,8 @@ not invent a public `Struct(...)` API.
 
 Keep code direct: use short semantic names, inline one-use forwarding helpers,
 never prefix functions or classes with `_`, preserve Arrow as the canonical CPU
-representation, and keep datatype behavior inside its extension. Keep examples
-runnable and update tests and docs with public behavior.
+representation, and keep datatype behavior inside its extension. Keep docs
+static with illustrative nested schemas and Typst model-tree diagrams. Update
+tests and docs with public behavior; docs builds must not execute model code.
+Show data as one nested YAML record, keep Arrow/Polars module examples minimal,
+and check factual claims against the implementation.

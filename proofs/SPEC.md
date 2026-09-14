@@ -45,7 +45,7 @@ The prospective public contract is deliberately small:
   semantics. The additive lane improves learned sum algebra but is not an exact
   raw-value reducer. ``Attention(position=False)`` disables rotary position in
   this learned-query reduction only; strict unordered controls must also set
-  branch ``attention="none"`` so an earlier branch-attention layer does not
+  branch ``attention=None`` so an earlier branch-attention layer does not
   encode order.
 - ``Mean()`` produces one presence-masked arithmetic mean of encoded tokens,
   not raw Number values. It does not promise a domain reduction merely by name.
@@ -1370,7 +1370,7 @@ only after a stable separation is demonstrated.
 
 | Hypothesis | Experiment |
 | --- | --- |
-| Self-attention adds pairwise capacity | Compare `attention="mha"` with `"none"` on duplicate detection or matched-pair reasoning inside a branch. |
+| Self-attention adds pairwise capacity | Compare `attention="mha"` with `attention=None` on duplicate detection or matched-pair reasoning inside a branch. |
 | GQA and MQA preserve sufficient quality | Run item alignment, order-dependent history, and nested context at matched update and parameter budgets across `mha`, `gqa`, and `mqa`; report quality and throughput together. |
 | Query pooling exceeds mean pooling when target slots need distinct context | Compare decoder pooling on item-aligned reconstruction while keeping the rest of the model fixed. |
 | Jitter improves measurement robustness | Train mixed flat supervision with and without declared Number jitter, then test several unseen noise magnitudes. Require clean-data non-inferiority before claiming robustness. |

@@ -1,134 +1,57 @@
----
-marimo-static-output: true
----
-
 # Boolean
 
-**Example status — excerpt:** schema and payload blocks isolate Boolean behavior;
-use [Getting Started](../getting-started.qmd) for a tested lifecycle.
+Use `Boolean` for a true/false input or target. It needs no vocabulary. Use
+[Category](category.qmd) when the source contains several named outcomes.
 
-Use `Boolean` for a true/false scalar or target. It has no learned vocabulary,
-so it is preferable to `Category(size=2)` when the source contract is genuinely
-Boolean.
+```yaml
+events:
+  - succeeded: true
+  - succeeded: false
+converted: true
+```
 
 ```python
 import relflow as rf
 
 model = rf.Model(
-    d_model=16,
-    n_layers=1,
-    n_heads=4,
-    events=rf.Branch(length=8, succeeded=rf.Boolean),
+    d_model=64, n_layers=2, n_heads=4,
+    events=rf.Branch(length=32, succeeded=rf.Boolean),
     converted=rf.Boolean(mask=True, threshold=[0.5, 0.8]),
 )
 ```
 
-Use `Category` if the source has labels such as `"yes"`, `"no"`, and
-`"unknown"`, or if more than two valued outcomes are meaningful. Do not use a
-Boolean content value to encode missingness; `None` already has a separate
-state.
+## Input and options
 
-## Input Values And Representation
+The Arrow leaf must be Boolean; integer and string labels are rejected. A null
+has its own state. Internally, false and true use fixed content values of
+`-1` and `1`, combined with a learned state embedding. Non-valued content is
+zero.
 
-`Boolean` accepts Python or NumPy Boolean scalars and `None`. Other scalar types,
-including integers and strings, are rejected. A missing repeated branch slot has
-state `padded`.
-
-Visible content uses a fixed scalar representation:
-
-| Source value | State | Content |
-| --- | --- | ---: |
-| `False` | `valued` | `-1` |
-| `True` | `valued` | `1` |
-| `None` | `null` | `0` |
-
-Padded and masked positions also have zero content. State remains separate, so
-zero content is not asked to distinguish null, padding, or masking.
-
-A fixed three-row buffer maps `-1`, `0`, and `1` into `d_model`: every dimension
-of the respective rows is `-1`, `0`, or `1`. The buffer follows the model across
-devices and checkpoints but is not optimized. Its result is added to a learned
-state embedding. This internal input representation is different from a public
-embedding requested with `embed=True`.
-
-## Configuration
-
-| Option | Default | Notes |
+| Option | Default | Meaning |
 | --- | --- | --- |
-| `threshold` | `0.5` | One metric threshold, or a nonempty list of metric thresholds, from `0` through `1`. Duplicate list values are removed while preserving their first-seen order. Every unique threshold receives its own decision metrics; thresholds do not change prediction content. |
+| `threshold` | `0.5` | One threshold or a nonempty list in `[0, 1]` for decision metrics. Duplicates are removed in first-seen order. |
 
-Shared leaf options such as `mask`, `embed`, and `weight`
-are described in [Built-In Data Types](../core-concepts/data-types.qmd).
+See [shared leaf options](../core-concepts/data-types.qmd#shared-leaf-options)
+for masks, decoder pooling, and embeddings.
 
-## Loss And Metrics
+## Learning and output
 
-The decoder predicts five shared state logits and one Boolean content logit.
-Frequency counters observed during training derive weights for state cross
-entropy and Boolean binary cross entropy.
+Reconstruction combines state cross entropy with frequency-weighted binary
+cross entropy for valued targets. RelFlow tracks AUC and decision accuracy,
+precision, recall, and specificity for each configured threshold; names include
+`accuracy@0.5` and `recall@0.8`.
 
-Only valued targets contribute to Boolean content loss and binary metrics.
-Null, padded, masked, and reserved-other targets contribute only to state
-prediction. The page-level metrics are:
+Prediction `content.probability` is the probability of true. Thresholds affect
+metrics only; they never turn the output into a Boolean. Read it with the
+shared `state` and `inferred` members in the
+[prediction envelope](../guides/prediction-output.qmd).
 
-- state accuracy and state loss;
-- Boolean content loss and AUC, each reported once; and
-- Boolean content accuracy, precision, recall, and specificity at
-  every unique configured threshold.
-
-Threshold-qualified metrics use names such as `accuracy@0.5`,
-`precision@0.5`, `recall@0.5`, and `specificity@0.5`. Recall is sensitivity,
-or the binary true-positive rate; specificity is the true-negative rate. For
-example, `threshold=[0.5, 0.8, 0.5]` logs one set at `0.5` and one at `0.8`, in
-that order. It does not log the repeated `0.5` twice.
-
-Thresholds control discrete decision metrics, but AUC and binary cross entropy
-continue to use unthresholded probabilities or logits. Tune thresholds using
-held-out data when false positives and false negatives have different costs.
-
-Read the content counter from a trained or loaded model with:
+For an application-supplied trained `model`:
 
 ```python
 counts = rf.Boolean.counts(model, "record/converted")
-# {False: ..., True: ...}
 ```
 
-The returned dictionary contains valued training presentations only; null and
-padded content do not count. Counts come from the canonical pristine field, so
-a valued coordinate still counts when a mask removes or replaces its encoder
-input. Counts accumulate again when observations are presented in later epochs
-or through repeated sampling, so they are not necessarily source-dataset
-frequencies. The internal smoothing prior is removed. During distributed
-training, mid-epoch snapshots can be rank-local because counters synchronize at
-epoch end.
-
-## Prediction Output
-
-Predictions contain the probability of `True`, without a thresholded Boolean
-value. The configured `threshold` values affect metrics only and do not change
-this payload. Select the address from the Arrow `predictions` struct:
-
-```python
-import pyarrow.compute as pc
-
-converted = pc.struct_field(result["predictions"], "record/converted")
-state = pc.struct_field(converted, "state")
-content = pc.struct_field(converted, "content")
-probability = pc.struct_field(content, "probability")
-inferred = pc.struct_field(converted, "inferred")
-```
-
-The content probability is emitted for every decoded position. Interpret it
-together with the state distribution and `inferred` mask. The
-[Prediction Output guide](../guides/prediction-output.qmd#the-canonical-payload)
-explains those shared members.
-
-`Boolean` requires neither vocabulary synchronization nor top-k search, making
-its content path constant-size regardless of dataset cardinality.
-
-## Where Next
-
-- Use [Category](category.qmd) for discrete values with more than two labels.
-- Use [Built-In Data Types](../core-concepts/data-types.qmd) for shared leaf and
-  prediction behavior.
-- Use [Learning Modes & Embeddings](../core-concepts/embeddings.qmd) to choose
-  targets, masking, and exported representations.
+Counts include pristine valued training presentations, even when masked, and
+exclude the smoothing prior. Repeated epochs count again. DDP counts
+synchronize at epoch end, so mid-epoch snapshots may be rank-local.

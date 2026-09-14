@@ -37,11 +37,12 @@ def schema_api() -> None:
         kind=rf.Category,
         selected=rf.Boolean(mask=rf.Mask(query="selected", reconstruct=True)),
     )
-    assert_type(branch.attention, AttentionMode)
+    assert_type(branch.attention, AttentionMode | None)
     assert_type(branch.overflow, Overflow)
     assert_type(branch.mask, tuple[rf.Mask, ...])
     rf.Branch(fields={"length": number, "description": rf.Category}, reduction=rf.Mean())
     rf.Model(d_model=32, n_heads=4, n_layers=1, items=branch, label=rf.Boolean(mask=True))
+    rf.Model(d_model=32, n_heads=4, n_layers=1, attention=None, items=rf.Branch(attention=None, value=rf.Number))
 
 
 def third_party_schema() -> None:

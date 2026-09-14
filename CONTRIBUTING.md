@@ -268,9 +268,49 @@ new callable contract, Arrow shape, lifecycle hook, or failure mode, document:
 - one realistic nested example; and
 - actionable errors and migration notes for a breaking change.
 
-Prefer runnable inline examples using the current top-level API. Keep Quarto
-pages self-contained and update code, tests, API references, and narrative docs
-in the same change.
+Documentation is static. Use plain `python` fences with the current top-level
+API, realistic nested schemas, and clearly named application-supplied inputs.
+Do not read datasets, train models, or download weights during a docs build.
+Keep runtime examples in tests and proofs; update API references and narrative
+docs alongside a public contract change.
+
+### Build And Illustrate The Docs
+
+```bash
+make render
+make check-docs
+uv run pytest tests/test_docs.py
+```
+
+Quarto renders static HTML and Typst SVGs without importing RelFlow. The docs
+check renders a temporary copy and rejects diagram errors; static tests check
+Python syntax, single-record YAML, links, and public datatype options.
+
+Pages publishes `main` at the site root and every other branch with docs at
+`/relflow/branches/<branch-name>/`. Use the full branch name in the URL, such as
+`/relflow/branches/dev/gpu-optimizations/`; the current navbar has no version
+menu. Older branches retain their own navigation.
+
+The docs workflow discovers branches automatically, renders their pinned
+commits, and assembles one site. It supports Quarto and historical MkDocs
+without executing Python examples. Every included build must succeed before
+publication; branches without either docs configuration are reported and
+skipped. Pushes and manual runs refresh the site, with a daily refresh to pick
+up changes on branches whose workflows predate this setup. Deleted branches
+disappear from the next successful publication.
+
+Show data as one YAML record, including repeated values under their field
+names. Use simple Arrow or Polars module examples with application-supplied
+splits. Give each concept one home and link to it instead of repeating its
+contract. Verify factual claims against the source, not existing prose.
+
+Use the current [branding](docs/assets/branding/README.md) and shared
+[Typst tree functions](docs/assets/typst/README.md). Diagram pages declare
+`engine: markdown`; unique figure labels, captions, and alt text describe
+structure and roles without hyperparameters. The vendored
+[typst-render extension](https://github.com/mcanouil/quarto-typst-render/tree/0.19.0)
+uses the project's bundled Typst compiler. Generated SVGs under
+`docs/assets/diagrams/` are ignored by Git.
 
 ## Tests
 

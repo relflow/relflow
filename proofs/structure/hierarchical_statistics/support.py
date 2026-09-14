@@ -25,7 +25,7 @@ primitives.
 
 What not to do
 --------------
-Do not use the isolated ``attention="none"`` plus Mean route when a parent also
+Do not use the isolated ``attention=None`` plus Mean route when a parent also
 needs count or distribution detail. Do not assume the normalized attention
 path alone retains count: the passing Attention route relies on its separate
 additive mass/count lane.

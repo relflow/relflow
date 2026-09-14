@@ -1,422 +1,149 @@
 ---
-marimo-static-output: true
-pyproject: |
-  requires-python = ">=3.12"
-  dependencies = [
-    "marimo>=0.23.8",
-    "relflow[serving]",
-  ]
+engine: markdown
 ---
 
 # Branch
 
-**Example status — excerpt:** branch schemas isolate structural choices; use
-[Getting Started](../getting-started.qmd) for a tested lifecycle.
+A `Branch` combines repeated objects into a local context. Its child fields
+stay aligned within each object, letting the model compare objects before
+passing their evidence to the parent.
 
-Use `Branch` to define a shared context for child fields. In raw data this is
-often a repeated collection such as transactions, line items, sessions, or
-measurements: the child leaves are the attributes of each item in that
-collection.
-
-A branch gives those leaves one coordinate system. `length`, `overflow`, and
-branch mask decisions are defined over that collection; child values stay aligned
-under the branch address; and branch embeddings represent the grouped context.
-At runtime, child leaf embeddings are gathered into the branch. If
-`attention!="none"`, a transformer encoder lets items in the context interact;
-then `reduction` determines which encoded tokens flow to its parent.
-
-```json
-{
-  "measurements": [
-    {"name": "mean_radius", "value": 17.99},
-    {"name": "mean_texture", "value": 10.38}
-  ]
-}
+```yaml
+orders:
+  - age_days: 3
+    channel: web
+    line_items:
+      - sku: mug
+        quantity: 2
+        unit_price: 12.50
+      - sku: plate
+        quantity: 1
+        unit_price: 18.00
+churned: false
 ```
 
-```{python .marimo}
-#| echo: true
-#| output: true
-
+```python
 import relflow as rf
 
-measurements = rf.Branch(
-    fields={"name": rf.Category(size=32)},
-    length=8,
-    overflow="tail",
-    n_layers=2,
-    reduction=rf.Attention(n_outputs=2, n_layers=1),
-    value=rf.Number,
-)
-
-measurements
-```
-
-This is a reusable, unnamed definition. Bind it to a parent with
-`measurements=measurements`; the parent keyword supplies the collection name.
-The `fields` mapping supplies child names explicitly, including names that
-collide with configuration options. Ordinary children can use keywords, as
-`value` does here.
-
-Use a different type for scalar vectors (`Vector`) or unordered labels (`Set`).
-If repeated rows do not define a real shared context and are only a melted
-representation of a flat table, preprocessing or flattening is usually more
-efficient.
-
-## Input Values
-
-For the common repeated-collection case, `Branch` expects a list of child
-objects at the processed-observation key named by the branch. A
-`Branch(length=1)` also accepts one child mapping directly. Each child
-tensorfield is padded to the configured `length`, and overlong inputs are
-handled by the branch's `overflow` policy.
-
-::: {.callout-note}
-Set `length` deliberately for real repeated data. The default is `1`,
-which is useful for singleton contexts but usually too small for meaningful
-histories.
-:::
-
-With `length=2` and the default `overflow="head"`, the first two items are
-retained, extra items are truncated, and missing slots are padded:
-
-```json
-[
-  {"measurements": [{"name": "a", "value": 1.0}, {"name": "b", "value": 2.0}, {"name": "c", "value": 3.0}]},
-  {"measurements": [{"name": "a", "value": 4.0}]}
-]
-```
-
-The first record keeps `a` and `b`; `c` is truncated. The second record keeps
-`a` and adds one padded slot. Branch order is processed-observation order. Sort,
-window, or filter in a preprocessor when order matters.
-
-Use `overflow="tail"` when the child collection is ordered oldest-to-newest and the
-most recent records should be retained:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-events = rf.Branch(
-    length=128,
-    overflow="tail",
-    event_type=rf.Category(size=128),
-    amount=rf.Number,
-)
-
-events
-```
-
-Use `overflow="error"` when any truncated input would indicate a bad schema or
-upstream data contract failure.
-
-For a top-level schema like:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
 model = rf.Model(
-    d_model=32,
-    n_layers=1,
-    n_heads=4,
-    measurements=rf.Branch(
-        fields={"name": rf.Category(size=32)},
-        length=8,
-        value=rf.Number,
+    name="customer", d_model=128, n_layers=3, n_heads=8,
+    orders=rf.Branch(
+        length=64,
+        overflow="tail",
+        embed=True,
+        age_days=rf.Number,
+        channel=rf.Category(size=16),
+        line_items=rf.Branch(
+            length=16,
+            sku=rf.Category(size=8192),
+            quantity=rf.Number,
+            unit_price=rf.Number,
+        ),
     ),
-)
-
-model
-```
-
-With the default direct path, `relflow` reads each `measurements` child mapping
-and binds its `name` and `value` keys at the same repeated coordinate.
-
-For stable path differences, put the shared collection selection on the branch
-and child paths on their owning leaves:
-
-```python
-items = rf.Branch(
-    query="line_items[-32:]",
-    length=32,
-    sku=rf.Category(
-        query="product_sku",
-        size=2048,
-    ),
-    quantity=rf.Number(query="qty"),
+    churned=rf.Boolean(mask=True),
 )
 ```
 
-Queries are relative to their parent node. The branch selects its collection
-once, so every sibling shares the same repeated coordinates and overflow plan.
-Use a preprocessor for predicates or coordinated data-dependent reshaping:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-import polars as pl
-
-@rf.preprocess
-def prepare_items(frame: pl.DataFrame) -> pl.DataFrame:
-    return frame.with_columns(items=pl.col("line_items"))
-
-
-items = rf.Branch(
-    length=32,
-    sku=rf.Category(size=2048),
-    quantity=rf.Number,
-)
-
-items
+```{typst}
+//| label: fig-branch-context
+//| fig-alt: "Customer contains repeated orders, each with age, channel, and repeated line items with SKU, quantity, and unit price. Churned is a root prediction target."
+//| fig-cap: "Line-item fields combine within each order; order context contributes to the customer prediction."
+#tree(node("Customer", kind: "root", children: (
+  node("Orders", kind: "branch", repeated: true, detail: "Export embedding", children: (
+    node("Age days", detail: "Number"),
+    node("Channel", detail: "Category"),
+    node("Line items", kind: "branch", repeated: true, children: (
+      node("SKU", detail: "Category"),
+      node("Quantity", detail: "Number"),
+      node("Unit price", detail: "Number"),
+    )),
+  )),
+  node("Churned", kind: "target", detail: "Boolean"),
+)))
 ```
 
-Preprocessing can also stack repeated semantic roles, such as origin and
-destination, into one shared field. See [Field Stacking](../guides/field-stacking.qmd).
+## Binding and shape
 
-## Examples
+The parent keyword supplies the collection name. With `query=None`, `orders`
+reads the same-named child collection, and its leaves read keys within each
+order. Use a [query](../core-concepts/querypaths.qmd) for a different structural
+path and a preprocessor for sorting, filtering, or derived values.
 
-Common branch contexts include:
+A child branch requires a list of objects, including when `length=1`. Only
+the generated model root reads one object directly. Each branch adds a shape
+axis. `length` caps retained items,
+shorter collections are padded, and `overflow` chooses which excess items
+survive. Padding does not contribute to attention or reduction.
 
-- Transaction line items, order items, cart contents, or invoice rows.
-- Time-ordered events in a session, visit, trip, or workflow.
-- Repeated measurements, sensor readings, observations, or lab results.
-- Related parties or counterparties attached to one record.
-- Singleton subcontexts that deserve their own address, encoder, or embedding.
+Definitions are reusable: binding clones them without changing the original.
+Use `fields={"length": rf.Number}` for generated schemas or child names that
+collide with configuration. Use [Set](set.qmd) for membership alone and
+[Vector](vector.qmd) for one numeric vector.
 
-## Configuration
+## Options
 
-| Option | Default | Notes |
+| Option | Default | Meaning |
 | --- | --- | --- |
-| `fields` | `None` | Mapping from child names to branch or tensorfield definitions. Combine with keyword children; names must be unique. Use this for generated schemas or child names such as `length` that collide with branch options. |
-| `length` | `1` | Number of repeated slots retained per observation. Must be positive. |
-| `overflow` | `"head"` | How to handle more than `length` child records: `"head"` keeps the first records, `"tail"` keeps the last records, and `"error"` raises. |
-| `attention` | `"mha"` | Encoder attention mode: `"mha"`, `"gqa"`, `"mqa"`, or `"none"`. |
-| `n_layers` | `1` | Number of encoder layers for this branch. |
-| `n_heads` | `4` | Self-attention heads and the fallback head count for `rf.Attention` reduction. Must be positive and even, divide the model's `d_model`, and leave at least two dimensions per head. |
-| `reduction` | `rf.Attention()` | How encoded branch memory is routed upward: `rf.Attention(n_outputs=...)`, `rf.Mean()`, or `None`. Output count belongs to `Attention`. |
-| `dropout` | `None` | Optional encoder dropout and the fallback for a reduction whose own `dropout` is `None`. |
-| `mask` | `False` | One mask shorthand or a list/tuple of `rf.Mask` policies. The stored value is always a canonical tuple. A branch decision applies atomically to every active descendant. |
-| `embed` | `False` | Includes this branch node in `Model.predict(...)` outputs under `embedding`. See [Learning Modes & Embeddings](../core-concepts/embeddings.qmd). |
-| `description` | `None` | Optional schema metadata. |
+| `fields` | `None` | Named child mapping, combinable with keyword children; names must be unique. |
+| `query` | `None` | Optional node-relative structural path. |
+| `length` | `1` | Positive maximum retained items per parent coordinate. |
+| `overflow` | `"head"` | Keep first items (`"head"`), keep last items (`"tail"`), or raise (`"error"`). Order comes from the processed source. |
+| `attention` | `"mha"` | Encoder mode; see below. |
+| `n_layers` | `1` | Positive sequence-encoder depth. |
+| `n_heads` | `4` | Positive, even encoder head count and fallback for Attention reduction. Active attention requires heads to divide `d_model` with at least two dimensions per head. |
+| `reduction` | `rf.Attention()` | What encoded memory reaches the parent. |
+| `dropout` | `None` | Optional encoder dropout in `[0, 1)` and reduction fallback. |
+| `mask` | `False` | [Masking policy](../core-concepts/dynamic-masking.qmd) applied atomically to active descendants. |
+| `embed` | `False` | Export this branch's contextual embedding. |
+| `description` | `None` | Human-readable notes. |
 
-When a branch contains multiple direct leaf fields, RelFlow first applies one
-coordinate-local attention block across the fields belonging to each record.
-This is what lets fields such as `value` and `weight` form a contribution
-before records are pooled. The block follows the branch's `attention` mode,
-heads, and dropout; `attention="none"` disables it. The configured `n_layers`
-then controls the sequence encoder that mixes the resulting child slots across
-the branch.
+Branch settings are local. Model settings configure the generated singleton
+root; they do not replace every child branch's defaults.
 
-### Attention Modes
+## Attention and reduction {#reduce-branch-memory}
 
-All attention modes keep `n_heads` query heads. They differ in how many
-key/value heads the branch encoder allocates:
+An attention-enabled branch first mixes direct sibling leaves at each aligned
+record coordinate, when there is more than one. Its `n_layers` sequence stack
+then mixes child slots across the branch. Finally, reduction chooses the
+representations routed to its parent.
 
-| Mode | Key/value heads | Tradeoff |
-| --- | ---: | --- |
-| `"mha"` | `n_heads` | Full multi-head attention and the largest key/value projections. This is the default. |
-| `"gqa"` | `n_heads / 2` | Groups pairs of query heads around shared key/value heads, reducing key/value parameters and memory. |
-| `"mqa"` | `1` | Shares one key/value head across all query heads for the smallest key/value projections. |
-| `"none"` | `0` | Omits the branch's self-attention encoder layers. The independently configured `reduction` still runs. |
+| Encoder mode | Key/value heads |
+| --- | --- |
+| `"mha"` | One per query head. |
+| `"gqa"` | One per pair of query heads. |
+| `"mqa"` | One shared by every query head. |
+| `None` | No coordinate or sequence attention; reduction still runs. |
 
-`gqa` and `mqa` can reduce key/value projection cost, but sharing key/value
-heads also changes model capacity. Treat them as configuration choices to
-validate on the target workload, not guaranteed quality-preserving speedups.
-The public node contract requires an even positive `n_heads` value. It must
-also satisfy `d_model % n_heads == 0` and `d_model // n_heads >= 2` so every
-attention head can construct its rotary embedding.
+Sharing key/value heads changes model capacity as well as cost.
 
-## Reduce Branch Memory {#reduce-branch-memory}
+| Reduction | Parent receives | Tradeoff |
+| --- | --- | --- |
+| `rf.Attention(n_outputs=1)` | A fixed number of learned summaries. | Bounded memory; outputs do not guarantee item identity. |
+| `rf.Mean()` | One average of present encoded vectors. | Cheap; count, order, and individual values are not directly preserved. |
+| `None` | Every encoded child slot with its presence state. | Keeps token correspondence available; increases parent sequence cost. |
 
-Branch self-attention and Branch reduction solve different problems:
+`Attention` has `n_outputs=1`, `n_layers=1`, `n_heads=None`, `dropout=None`,
+and `position=True`. Counts are positive. Omitted heads and dropout inherit
+from the branch; explicit values override them. `position` controls rotary
+position in the reducer only. `Mean` has no tuning options. These configurations
+are frozen and share settings, not learned weights, when reused.
 
-```text
-encoded child tokens
-  -> coordinate attention       mix fields within each aligned record
-  -> attention + n_layers       mix child slots across the branch
-  -> reduction configuration   choose what is routed to the parent
-```
+`attention=None` and `reduction=None` skip different operations. Use both for
+pure pass-through. Turning off reducer position alone does not remove position
+information from earlier encoder attention.
 
-Setting `attention="none"` skips both branch-encoder attention phases. The
-default `reduction=rf.Attention()` still uses learned-query cross-attention.
-Conversely, `reduction=None` skips the reduction phase but leaves the
-configured self-attention encoder intact. Use both `attention="none"` and
-`reduction=None` only when the parent should receive the child representations
-without either branch-level operation.
+Choose reduction from the evidence the parent needs. A mean is not a raw-field
+sum, and more learned summaries do not perform a join. Capacity must survive
+later reductions too. `model.schema.branch_outputs` reports each branch's
+static routed width.
 
-### Reduction Configurations
+## Masks and output
 
-| Configuration | Parameters | Routed tokens | Choose it when |
-| --- | --- | ---: | --- |
-| `rf.Attention()` | `n_outputs=1`, `n_heads=None`, `n_layers=1`, `dropout=None`, `position=True` | Configured `n_outputs` | Anonymous learned summaries should select information from anywhere in the branch. Outputs do not acquire item, group, or target identity. Omitted heads and dropout inherit the Branch values. `position` controls rotary position in this reducer only. |
-| `rf.Mean()` | — | `1` | One presence-normalized average of the encoded token vectors is sufficient and direct item-level details are irrelevant. This is not necessarily the mean of a raw numeric field. |
-| `None` | — | Every encoded child slot | The parent must retain one routed slot per encoded child-field coordinate, with its corresponding presence state, or the useful downstream reduction is not yet known. |
+A branch mask makes one decision per retained branch coordinate and applies it
+to the whole descendant subtree. A reconstructing policy creates leaf
+objectives; the branch has no typed decoder of its own. Structural skipping
+omits selected inputs from tensorization and attention.
 
-The configuration objects are frozen schema values. Reusing one object on two
-branches reuses configuration, not learned parameters.
-
-Set reduction depth with `reduction=rf.Attention(n_layers=...)`. A leaf's
-`n_linear` controls its decoder-pooling depth independently.
-
-Use several learned summaries when one vector is measurably too narrow:
-
-```python
-items = rf.Branch(
-    length=32,
-    reduction=rf.Attention(
-        n_outputs=4,
-        n_heads=4,
-        n_layers=2,
-        dropout=0.05,
-    ),
-    sku=rf.Category(size=2048),
-    quantity=rf.Number,
-)
-```
-
-`Attention(position=False)` removes rotary position only from the
-learned-query reducer. For a strict unordered ablation, also set the Branch's
-`attention="none"`; otherwise its earlier coordinate or sequence attention can
-still encode order. The reducer's optional `n_heads` override may be odd when
-it divides `d_model` and leaves at least two dimensions per head. The Branch
-`n_heads` value itself remains even.
-
-Preserve every routed child slot when item-level correspondence must remain
-available to the parent:
-
-```python
-entities = rf.Branch(
-    length=16,
-    reduction=None,
-    entity_id=rf.Hash(n_hashes=4),
-    value=rf.Number,
-)
-```
-
-`None` preserves the routed slot ordering and corresponding presence state; it
-does not send raw values, decoder logits, or an explicit semantic provenance
-label. Branch self-attention may already have transformed each token. Padded
-and structurally skipped positions remain absent from attention.
-
-Inspect the schema-derived routed width before training:
-
-```python
-print(model.schema.branch_outputs)
-```
-
-For Attention this reports its configured `n_outputs`; for Mean it reports
-one; and for `None` it recursively reflects the complete static child-memory
-width.
-
-::: {.callout-warning title="Reduction can silently remove the needed signal"}
-- `Mean` directly exposes only one presence-normalized mean of encoded memory. It does
-  not directly preserve count, order, identity, extrema, or individual tokens;
-  optional upstream self-attention must encode any needed statistic into the
-  vectors being averaged. Without such an encoded signal, one value of `3` and
-  four identical values of `3` collide.
-- `reduction=None` increases the sequence sent to the parent. Parent
-  self-attention cost grows quadratically with that longer sequence, and nested
-  pass-through branches can multiply the effect.
-- Increasing Attention `n_outputs` adds capacity; it does not
-  align entity IDs, perform a join, or guarantee that each output owns one
-  input item.
-- Capacity must survive the entire route. A child can emit four or all tokens
-  and still lose them when its parent immediately reduces the combined context
-  to one output.
-:::
-
-Start from the operation the parent or a decoder must perform. Use `Mean` only
-when a mean is a sufficient statistic, `Attention` for learned fixed-width
-summaries, and `None` when preserving evidence is more important than bounding
-the immediate parent sequence. Validate the choice with paired synthetic
-controls rather than treating a larger output count as proof that a
-relationship is learnable.
-
-## Nesting
-
-Branches can contain tensorfields or other branches. Each nested branch names
-another shared context and contributes another dimension to the child fields'
-shape.
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-sessions = rf.Branch(
-    length=4,
-    transactions=rf.Branch(
-        length=32,
-        amount=rf.Number,
-    ),
-)
-
-sessions
-```
-
-Deep nesting is useful when the source shape marks real context boundaries. If
-repeated records are only an artifact of upstream storage, flattening or
-preprocessing the data can be more efficient.
-
-## Mask And Prediction Behavior
-
-`Branch` does not decode its own typed value. A reconstructing branch mask adds
-objectives for its active descendant leaves, and the branch context routes
-information to their decoders.
-
-Every node has the same singular `mask` argument. `False` means no policy, a
-float means uniform train-only learned masking, and `True` means always skip and
-reconstruct. Use an explicit `rf.Mask(...)` to combine a `query`, a `rate`,
-`skip`, `dropout`, and `reconstruct`; pass a list or tuple when a node needs
-multiple policies.
-
-Configure a mask on a branch when one decision should govern an entire repeated
-object. RelFlow resolves the policy once per retained branch coordinate and
-broadcasts that decision to every active descendant, including descendants in
-nested branches. Padding does not become a mask target.
-
-A query-backed mask reads a Boolean field from the same branch object. Use a
-preprocessor to derive rolling windows, counts, business rules, or other
-coordinated selectors, then reference that field with `Mask(query="selected")`.
-Attach a policy to a narrower branch or leaf when only part of a subtree should
-be affected. See [Dynamic Masking](../core-concepts/dynamic-masking.qmd).
-
-With `skip=False`, selected coordinates remain in model routing as a learned
-mask representation. With `skip=True`, their values are omitted from input
-tensorization and embedding, and attention and reduction ignore their fixed
-geometry slots. A reconstructing branch policy requires compatible descendant
-decoders; schema validation reports an unsupported subtree before execution.
-
-Configure `embed=True` on a branch when you want `Model.predict(...)` to return
-a representation for the grouped context under that branch address. See
-[Learning Modes & Embeddings](../core-concepts/embeddings.qmd) for root,
-branch, and leaf embedding patterns.
-
-## Performance And Failure Boundaries
-
-Every child leaf is tensorized to the fixed branch `length`, so overly generous
-lengths increase padding, memory, and encoder work even when most observations
-are short. Attention-enabled branches also make interaction cost grow faster
-than linearly with the retained context. Choose a length from measured data,
-make truncation intentional, and monitor how often `overflow="head"` or
-`"tail"` discards records.
-
-Use `overflow="error"` while validating a strict upstream contract. Prefer a
-preprocessor when retention depends on timestamps, business priority, or a rule
-more complex than keeping the first or last records. See
-[Performance And Distributed Operation](../guides/performance.qmd) for sizing
-and profiling guidance.
-
-## Where Next
-
-- Use [Model Tree](../core-concepts/model-tree.qmd) for branch addresses and
-  hierarchical context flow.
-- Use [Binding Data](../core-concepts/binding-data.qmd) and
-  [Query Paths](../core-concepts/querypaths.qmd) for child source
-  binding and extraction.
-- Use [Dynamic Masking](../core-concepts/dynamic-masking.qmd) for the exact
-  repeated-coordinate mask contract.
-- Use [Model Configuration](../guides/model-configuration.qmd) to size branch
-  depth, heads, attention mode, and dropout.
+`embed=True` exports branch context at its address. See
+[Embeddings](../core-concepts/embeddings.qmd) for output roles and
+[Model tree](../core-concepts/model-tree.qmd) for the route through nested contexts.

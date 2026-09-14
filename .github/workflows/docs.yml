@@ -3,10 +3,12 @@ name: Build and deploy docs
 on:
   push:
     branches:
-      - main
-      - stage/0.2.0-rc.1
+      - '**'
   pull_request:
   workflow_dispatch:
+  # Refresh branches that still contain an older copy of this workflow.
+  schedule:
+    - cron: '17 4 * * *'
 
 permissions:
   contents: read
@@ -25,90 +27,94 @@ jobs:
       - name: Check out proposed docs
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
 
-      - name: Sync docs dependencies
-        run: uv sync --extra docs
-
       - name: Render docs
         run: make render
 
+  discover:
+    name: Discover documentation branches
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.branches.outputs.matrix }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Discover branches at their current commits
+        id: branches
+        run: |
+          matrix="$(python .github/scripts/docs.py discover)"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   render:
     name: Render ${{ matrix.name }} docs
-    if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'workflow_dispatch' &&
-      (github.ref == 'refs/heads/main' ||
-      github.ref == 'refs/heads/stage/0.2.0-rc.1'))
+    needs: discover
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # Keep these entries aligned with the Versions menu in docs/_quarto.yml.
-          - name: main
-            ref: main
-            artifact: docs-main
-          - name: stage/0.2.0-rc.1
-            ref: stage/0.2.0-rc.1
-            artifact: docs-stage-0-2-0-rc-1
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
 
     steps:
+      - name: Check out publication scripts
+        uses: actions/checkout@v4
+        with:
+          path: workflow
+
       - name: Check out ${{ matrix.name }}
         uses: actions/checkout@v4
         with:
           ref: ${{ matrix.ref }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+          path: branch
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
 
-      - name: Sync docs dependencies
-        run: uv sync --extra docs
+      - name: Set up docs Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: Render docs
-        run: make render
+        env:
+          DOCS_SITE_URL: ${{ matrix.url }}
+        run: uv run --no-project --with pyyaml python workflow/.github/scripts/render_docs.py branch
 
       - name: Upload rendered docs
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: docs/site
+          path: branch/docs/site
           if-no-files-found: error
           retention-days: 1
 
   assemble:
     name: Assemble Pages site
-    needs: render
+    needs: [discover, render]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download main docs
-        uses: actions/download-artifact@v4
-        with:
-          name: docs-main
-          path: site
+      - uses: actions/checkout@v4
 
-      - name: Download staging docs
+      - name: Download branch docs
         uses: actions/download-artifact@v4
         with:
-          name: docs-stage-0-2-0-rc-1
-          path: site/branches/stage/0.2.0-rc.1
+          pattern: docs-*
+          path: artifacts
+
+      - name: Assemble main and branch URLs
+        env:
+          DOCS_MATRIX: ${{ needs.discover.outputs.matrix }}
+        run: python .github/scripts/docs.py assemble artifacts site
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4

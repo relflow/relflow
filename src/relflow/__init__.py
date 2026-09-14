@@ -39,6 +39,7 @@ from relflow.data.processors import (
 from relflow.data.ragged import RaggedField
 from relflow.data.sources import source
 from relflow.helpers import Jitter
+from relflow.helpers.optimizers import adamw
 from relflow.inference.callback import Writer
 from relflow.structs.enums import (
     AttentionInput,
@@ -201,6 +202,7 @@ __all__ = [
     "Vector",
     "VocabularySyncCallback",
     "Writer",
+    "adamw",
     "predicate",
     "postprocess",
     "preprocess",

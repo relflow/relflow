@@ -6,7 +6,7 @@ from io import BytesIO
 import pytest
 import torch
 
-from relflow.helpers.optimizers import adamw
+from relflow import adamw
 
 
 def _module() -> torch.nn.Module:

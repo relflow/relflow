@@ -211,7 +211,7 @@ def test_none_reduction_root_embedding_exposes_every_input_token():
         n_layers=1,
         n_heads=2,
         embed=True,
-        attention="none",
+        attention=None,
         reduction=None,
     )
 

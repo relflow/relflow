@@ -16,7 +16,7 @@ from relflow.architecture.pool import LearnedQueryCrossAttention
 def model():
     return rf.Model(
         value=rf.Number,
-        history=rf.Branch(length=2, attention="none", value=rf.Number),
+        history=rf.Branch(length=2, attention=None, value=rf.Number),
         label=rf.Boolean(mask=True),
         d_model=8,
         n_layers=1,

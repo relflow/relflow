@@ -1,3 +1,4 @@
+import json
 import pickle
 
 import pytest
@@ -137,7 +138,7 @@ def test_model_constructor_accepts_root_branch_options():
         name="events",
         description="event records",
         embed=True,
-        attention="none",
+        attention=None,
         reduction=rf.Attention(n_outputs=3, n_layers=2),
         dropout=0.2,
     )
@@ -146,12 +147,48 @@ def test_model_constructor_accepts_root_branch_options():
     assert params.fields.name == "events"
     assert params.fields.description == "event records"
     assert params.fields.embed is True
-    assert params.fields.attention == "none"
+    assert params.fields.attention is None
     assert params.fields.length == 1
     assert params.fields.reduction == rf.Attention(n_outputs=3, n_layers=2)
     assert params.fields.dropout == 0.2
     assert params.embed == ["events"]
     assert params.shapes["events/amount"] == (1,)
+
+
+def test_disabled_attention_round_trips_as_null() -> None:
+    model = rf.Model(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        attention=None,
+        items=rf.Branch(length=2, attention=None, value=rf.Number),
+    )
+    schema = model.schema
+
+    serialized = schema.model_dump_json(round_trip=True)
+    payload = json.loads(serialized)
+
+    assert payload["fields"]["attention"] is None
+    assert payload["fields"]["fields"][0]["attention"] is None
+    restored = rf.Schema.model_validate_json(serialized)
+    assert restored.model_dump(mode="python") == schema.model_dump(mode="python")
+    assert all(branch.attention is None for branch in restored.branches.values())
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_schema_rejects_string_none_attention(nested: bool) -> None:
+    schema = rf.Schema.from_tree(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        items=rf.Branch(length=2, value=rf.Number),
+    )
+    payload = schema.model_dump(mode="python")
+    branch = payload["fields"]["fields"][0] if nested else payload["fields"]
+    branch["attention"] = "none"
+
+    with pytest.raises(ValueError, match="attention"):
+        rf.Schema.model_validate(payload)
 
 
 @pytest.mark.parametrize("constructor", [rf.Model, rf.Schema.from_tree])
@@ -272,6 +309,31 @@ def test_model_update_applies_validated_values_before_rebuilding_modules():
     assert model.nodes[address] is not before
     assert model.nodes[address].embedder.size == 16
     assert model.nodes[address].embedder.embeddings[TensorKey.content.name].num_embeddings == 16
+
+
+def test_model_update_disables_attention_without_removing_reduction() -> None:
+    model = rf.Model(
+        d_model=8,
+        n_layers=2,
+        n_heads=2,
+        items=rf.Branch(length=3, first=rf.Number, second=rf.Number, reduction=rf.Attention(n_outputs=2)),
+    )
+    address = "record/items"
+    before = model.nodes[address].encoder
+    reduction = {name: value.detach().clone() for name, value in before.pool.state_dict().items()}
+    assert before.coordinate_encoder is not None
+    assert len(before.encoder) == 1
+
+    model.update(rf.where("address") == address, attention=None)
+
+    encoder = model.nodes[address].encoder
+    assert model.schema.branches[address].attention is None
+    assert encoder.coordinate_encoder is None
+    assert len(encoder.encoder) == 0
+    assert model.schema.branches[address].reduction == rf.Attention(n_outputs=2)
+    assert encoder.pool.state_dict().keys() == reduction.keys()
+    for name, value in encoder.pool.state_dict().items():
+        assert value.equal(reduction[name])
 
 
 def test_model_update_uses_current_schema_when_selection_cache_is_stale():

@@ -1,560 +1,117 @@
----
-marimo-static-output: true
-eval: false
----
+# Performance
 
-# Performance And Scaling
+Measure the complete workload: source reading and preprocessing, tensorization,
+model computation, and prediction writing. Schema shape and requested outputs
+can matter as much as model width. Compare quality and throughput under the
+same data, hardware, precision, and optimization budget.
 
-**Example status — runnable compiler workflow:** the compilation example trains
-and predicts from Arrow inputs; the other sections describe tuning choices.
+## Control Work First
 
-RelFlow performance is determined by the schema shape as much as by model
-width. Fixed branch lengths, datatype capacities, data-loader behavior, and
-prediction output can dominate before raw parameter count does.
+Repeated branches reserve their configured lengths. Nested lengths multiply
+coordinate counts. Choose lengths and overflow rules that retain the context
+the task needs; reductions determine how much of each branch reaches its
+parent. These choices can change model quality and are not interchangeable
+performance switches.
 
-Treat every throughput number as workload-specific. Record the schema, input
-length distribution, hardware, precision, batch size, software version, and
-output configuration next to the result.
+Padding and structurally skipped coordinates are absent from attention.
+Eligible encoder work packs present coordinates when the layers have no
+customizations or active stochastic dropout. This is automatic; it does not
+require changing the input schema. Null and learned-mask coordinates remain
+present model inputs.
 
-## Measure The Whole Path
+Export only needed outputs. Root or branch embeddings, repeated leaf outputs,
+and Category top-k values enlarge the prediction payload. Selecting a larger
+batch can improve utilization but also changes updates per epoch; account for
+that when comparing training runs.
 
-Separate four measurements:
+## Feed The Device
 
-| Measurement | Includes | Use it to diagnose |
-| --- | --- | --- |
-| Data preparation | Arrow scan, batch preprocessing, structural query, ragged coalescing, vocabulary/normalizer work | Storage layout, source binding, nested transforms, and Arrow kernel cost. |
-| Encode + forward | Tensorization and model execution | Branch lengths, datatype capacity, model width/depth, device utilization. |
-| Write/postprocess | CPU transfer, typed Arrow construction, embeddings, top-k, reshaping | Oversized output contracts and unnecessary retained columns. |
-| End-to-end service | Queue, dynamic batching, all stages above, JSON, network | User-visible latency and saturation. |
+`model.batch_size` controls encoded model batches. Loader settings belong on
+the data module; tune them after measuring whether input preparation leaves the
+device idle:
 
-Lightning runs include RelFlow's `throughput/train`, `throughput/validate`,
-`throughput/test`, or `throughput/predict` epoch metric. It estimates processed
-observations from completed batches and configured model batch size. Use it for
-comparisons under the same setup, then confirm important results with an
-external end-to-end measurement.
+```python
+datamodule = rf.ArrowDataModule(
+    model=model,
+    train=train_table,
+    validate=validation_table,
+    num_workers=4,
+    persistent_workers=True,
+    pin_memory=True,
+    prefetch_factor=2,
+)
+```
 
-Train, validation, and test throughput use Lightning's module-metric path.
-Prediction has no Lightning result collection, so `throughput/predict` is kept
-on the `ThroughputLogger` callback and sent directly to an attached logger; do
-not expect it in `trainer.callback_metrics`.
+Workers and prefetching consume host memory. Arrow sources and retained data
+remain on CPU while encoded tensors move to the model's device. Source readers
+are replayed by consuming ranks/workers before disjoint row selection, so
+adding workers does not guarantee less source I/O. Keep Arrow/Polars
+transformations columnar instead of repeatedly converting observations to
+Python rows.
 
-## Control Repeated Context First
+The throughput callback estimates rate using completed batches multiplied by
+configured batch size. It is useful for comparisons with the same batch
+geometry, not exact row accounting for partial batches. Prediction throughput
+is retained by the callback and sent directly to the attached logger; it is
+not a `trainer.callback_metrics` result.
 
-Every `Branch(length=...)` reserves a fixed number of positions. Short records
-are padded; long records are truncated or rejected according to `overflow`.
-For attention-enabled branches, work also grows with interactions among local
-positions.
+## Use The AdamW Factory
 
-Before increasing a branch length:
+```python
+import relflow as rf
 
-1. measure the observed length distribution by split;
-2. choose a percentile or business rule, not the maximum outlier;
-3. select `overflow="head"` or `"tail"` from event meaning;
-4. log truncation outside RelFlow if losing records matters operationally;
-5. compare quality and throughput at two or three candidate lengths.
+model.optimizer = rf.adamw(learning_rate=1e-3)
+```
 
-Nested branches multiply shape. A long child inside a long parent can create a
-large padded tensor even when most observations are sparse. Window, filter, or
-summarize irrelevant events in a preprocessor before expanding model capacity.
-
-### Automatic Token Packing
-
-Sparse branch and coordinate encoders automatically gather present tokens before
-normalization, query/key/value projections, attention, and feed-forward layers.
-Rows with equal live lengths share an attention call. Original token positions
-and row boundaries are retained, and outputs return to their structural slots
-before pooling and routing. Every present token remains available; model
-capacity, parameters, objectives, and checkpoint names stay the same.
-
-Packing needs no configuration. Fully occupied sequences, active training
-dropout, and encoder modules with hooks or custom implementations retain dense
-execution. Evaluation can use packing even when training dropout is configured.
-Data tensors and pooling still have padded shapes, so configured branch lengths
-continue to affect memory. Benefits depend on occupancy, batch size, and the
-number of distinct sequence lengths.
-
-Packing changes floating-point operation order. Compare training and held-out
-behavior when changing occupancy or shape; checkpoint compatibility does not
-guarantee the same floating-point training trajectory.
-
-When every processed row contains at least one present token, branch encoding
-and attention pooling also avoid redundant row copies and zero-filled output
-initialization. Rows may still contain padding. Outputs retain independent
-storage for custom modules and callbacks, and this optimization needs no setting.
-
-## Size Width And Depth
-
-- `d_model` widens datatype embeddings, projections, attention, pooling, and
-  decoders across the entire tree.
-- Branches with multiple direct leaf fields use one coordinate-local attention
-  block before their sequence encoder. It follows the branch attention mode,
-  head count, and dropout.
-- `n_layers` adds sequential self-attention blocks to the branch sequence
-  encoder after that coordinate-local block.
-- `reduction=rf.Attention(n_layers=...)` adds learned-query reduction blocks;
-  each block also contains a feed-forward network.
-- Attention `n_outputs` increases both the reduction output and the sequence
-  routed into the parent.
-- `reduction=None` routes every encoded child slot with its presence state and
-  can make a parent's sequence much larger than any fixed output count.
-- `dropout` may improve generalization but does not reduce inference cost.
-
-Increase width only after verifying the input contract and observing
-underfitting. Increase depth only after a width comparison. Use
-`sum(p.numel() for p in model.parameters())` for parameter size, but profile
-representative activations because repeated context often controls memory.
-
-## Compare Attention Modes
-
-`mha`, `gqa`, and `mqa` share the same query-head count. GQA uses half as many
-key/value heads (minimum one); MQA uses one. This reduces key/value projection
-width, but local attention still considers the same positions.
-
-`attention="none"` removes the branch's self-attention stack while retaining
-its independently configured reduction. With the default `rf.Attention()`,
-learned-query attention still runs. It is useful for short branches, low-cost
-baselines, or testing whether pre-reduction cross-position interaction adds
-value.
-
-Benchmark each mode on the intended PyTorch version and accelerator. Kernel
-support and shape can matter more than theoretical parameter savings.
-
-## Budget The Reduction Route
-
-Branch reduction changes both information capacity and the shape seen by the
-parent:
-
-| Reduction | Approximate local reduction work | Parent tokens |
-| --- | --- | ---: |
-| `rf.Attention(n_outputs=Q)` | Proportional to `Q × L` per reduction layer | `Q` per branch coordinate |
-| `rf.Mean()` | Linear in `L` | `1` per branch coordinate |
-| `None` | No reduction module | All `L` encoded tokens per branch coordinate |
-
-Here `L` is the branch's assembled child-memory length, not merely
-`Branch.length`. Child fields contribute field-major token segments, and child
-Branch outputs contribute their own segments.
-
-`None` saves local reduction work but is not automatically cheaper. Those
-tokens move to the parent, whose self-attention remains quadratic in its total
-sequence length. Nested pass-through branches can therefore multiply activation
-memory and compute. Measure the complete tree rather than timing the child in
-isolation.
-
-The cheapest reduction can also be the wrong model. Mean directly retains only
-the average encoded vector; the preceding self-attention would have to encode
-cardinality, identity, extrema, order, or item-specific statistics before that
-average. More learned outputs retain additional latent capacity but do not
-perform keyed joins. A downstream one-output reduction can erase the extra
-capacity immediately. Profile paired configurations that differ only in the
-reduction, and retain a synthetic behavior check for any relationship the
-application depends on.
-
-## Budget Datatype Capacity
-
-### Category And Set
-
-Category and Set content storage grows with `size × d_model`, and decoding or
-scoring grows with `size`. A fixed-width projection elsewhere in a decoder does
-not make a large vocabulary free.
-
-- choose capacity from expected distinct training labels plus explicit
-  headroom;
-- monitor Category `vocabulary.size` by address;
-- investigate capacity warnings rather than silently increasing every field;
-- use `Hash` when identifier equality matters without a learned vocabulary;
-- keep high-cardinality join identifiers as metadata when they are not a model
-  feature;
-- avoid large `topk` output unless consumers use it.
-
-### Text And Vector
-
-Text cost depends on tokenizer/model choice and configured token length; it also
-requires the `text` extra. Vector cost grows with source vector width and the
-projection into `d_model`. Measure transfer and parsing as well as forward time
-when vectors arrive from another service.
-
-`Text` groups valued rows by attended length and removes trailing right padding
-inside each frozen-encoder microbatch. `max_length` still controls truncation
-and storage, and unusually long rows can still determine a microbatch's cost.
-Tune `tokenizer_batch_size`, `encoder_batch_size`, and `max_length` from the
-observed row and token-length distributions. `tokenizer_batch_size` bounds
-transient Python strings at the Hugging Face boundary; `encoder_batch_size`
-bounds frozen-model forward passes. Left-padded tokenizers conservatively retain
-their full width.
-
-## Feed The Accelerator
-
-Measure worker count and pinning together. Encoding, interprocess transfer and
-worker startup can exceed the saved device-transfer time, particularly for
-small in-memory batches. Storage-bound datasets may benefit from different
-settings.
-
-For small in-memory work, `ArrowDataModule` with a `pa.Table` removes file
-discovery and remote I/O from the experiment. For file-backed jobs, pass paths
-or use `rf.source(...)`. Selection stays lazy and workers open their own readers;
-consumers currently replay source I/O and preprocessing.
-
-Important controls include:
-
-- `num_workers`: CPU preparation workers per distributed rank;
-- `persistent_workers`: avoids recreating worker-local filesystems and scanners
-  each epoch;
-- `prefetch_factor`: bounds prepared batches waiting per worker;
-- Dataset fragment and Parquet row-group layout: determine decode and remote
-  read granularity;
-- `pin_memory`: recursively pins encoded tensors for accelerator transfer;
-- `shuffle_rows`: larger streaming buffers improve mixing but consume memory;
-- `sample`: useful for bounded experiments, not a substitute for a valid
-  split.
-
-Measure loader iteration, device transfer and the complete training step
-together when tuning these controls. With `num_workers=0`, pinning runs inside
-loader iteration; faster GPU copies may not repay that CPU cost. Workers move
-preparation off the training thread but add interprocess delivery and queueing.
-Increase workers or prefetch depth only when the complete pipeline improves.
-
-GPU transfers already use TensorDict's nonblocking CUDA path. Overlapping a
-future batch's copy with computation additionally requires pinned buffers,
-separate streams and correct buffer lifetimes; a nonblocking flag alone does
-not establish overlap. Input-only Number, Boolean, Hash, Text, Category and
-Vector fields omit unused reconstruction targets. This reduces retained and
-transferred payloads; the benefit depends on datatype and input width.
-Category still performs its regularization draws to preserve the training
-random-number sequence.
-
-Run a data-only or CPU baseline when the accelerator is idle. If increasing
-batch size does not improve device utilization, the bottleneck may be
-preprocessing, explicit queries, tensorization, or I/O.
-
-## Understand Ragged Preparation
-
-RelFlow eagerly coalesces every encoded address for a processed Arrow batch
-before any datatype codec runs. Fields do not each recursively walk Python
-records. The shared path owns missing versus null, branch overflow, padding,
-final `Tokens` state, and dense placement. Each extension
-enforces its declared Arrow terminal compatibility families; the ragged core
-does not name concrete leaf types. Datatype codecs still perform inherently
-field-specific work such as vocabulary updates, date parsing, hashing, or
-tokenization after overflow selects retained values.
-
-Direct selection is the default when a node's `query` is `None`. Explicit
-node-relative structural queries are parsed once, bind against an Arrow schema,
-and execute columnarly. RelFlow walks each active schema branch once per model
-batch. A branch's query, retained records, overflow decision, shape, and dense
-placement are shared by all active descendants; each leaf evaluates only its
-node-relative selector and builds its own null/value state. All `RaggedField`
-objects are ready before the first datatype codec runs. Do not add queries that
-merely restate schema names.
-
-Arrow compute kernels and NumPy offset/placement operations perform this
-shared structural work; there is no RelFlow JIT switch to enable. A
-preprocessor can dominate when it calls Python once per value.
-Prefer column expressions and whole ragged collection transforms, measure them
-separately, and increase the model batch only within the memory budget. Polars
-converts once at ingress; profile that boundary when frames are large.
-
-## Use Precision And Batch Size Deliberately
-
-Configure numerical precision and accumulation on Lightning's `Trainer`. Start
-with a batch that fits comfortably, then increase while watching memory,
-throughput, and validation behavior.
-
-Larger batches can improve device utilization but change the number of optimizer
-updates per epoch. Preserve effective optimization conditions when comparing
-throughput experiments—for example by controlling learning rate, accumulation,
-and total update count.
-
-Mixed precision can reduce activation memory on supported accelerators. Validate
-numeric behavior for each datatype and loss rather than assuming identical
-quality.
-
-Compare inference precision separately, including output conversion and
-serialization in the measurement. Validate the resulting predictions as well
-as latency.
+The factory defaults to fused Torch AdamW. Biases, one-dimensional parameters,
+and names containing `"norm"` receive no weight decay by default. Use
+`fused=False` for an unsupported device or `fused=None` for Torch's selection.
+When resuming, keep optimizer settings consistent with the saved run.
 
 ## Compile Encoder And Pool Regions
 
-Call `model.compile()` before training or prediction to compile branch encoder
-stacks and learned attention pools, including decoder pools. It changes the
-existing model and returns that same instance, so it can follow the constructor.
-Lightning continues to own device placement and the training loop.
-
-This small example checks the complete workflow. Use representative training
-and held-out data when evaluating performance or model quality.
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-import lightning.pytorch as lit
-import pyarrow as pa
-import torch
-
-import relflow as rf
-from relflow.helpers.optimizers import adamw
-
-torch.manual_seed(7)
-device = "cuda" if torch.cuda.is_available() else "cpu"
-records = pa.table(
-    {"amount": [2.0, 4.0, 6.0, 8.0], "label": [False, False, True, True]}
-)
-model = rf.Model(
-    d_model=16,
-    n_layers=1,
-    n_heads=4,
-    batch_size=4,
-    optimizer=adamw(learning_rate=1e-3),
-    amount=rf.Number,
-    label=rf.Boolean(mask=True),
-).compile()
-datamodule = rf.ArrowDataModule(
-    model=model,
-    train=records,
-    validate=records,
-    num_workers=0,
-    persistent_workers=False,
-    pin_memory=False,
-)
-trainer = lit.Trainer(
-    accelerator=device,
-    devices=1,
-    max_epochs=1,
-    limit_train_batches=1,
-    limit_val_batches=1,
-    num_sanity_val_steps=0,
-    logger=False,
-    enable_checkpointing=False,
-    enable_progress_bar=False,
-    enable_model_summary=False,
-)
-trainer.fit(model=model, datamodule=datamodule)
-
-# Lightning may move the model to CPU when its loop finishes.
-observations = records.drop(["label"])
-predictions = model.to(device).predict(observations)
-print(predictions.column_names)
-```
-
-### Select Regions
-
-The two Boolean switches are independent. Every call replaces the previous
-selection and compiler settings; omitted switches return to their defaults.
+`model.compile()` updates the existing model and returns it, so it can follow
+a constructor or be called programmatically before training or inference.
 
 ```python
-assert model.compile(encoders=True, pools=False) is model  # Only encoder stacks.
-model.compile(encoders=False, pools=True)                  # Only attention pools.
-model.compile()                                           # Both; default settings.
-model.compile(encoders=False, pools=False)                 # Disable compilation.
+model.compile()
+model.compile(encoders=True, pools=False)
+model.compile(encoders=False, pools=True)
+model.compile(encoders=False, pools=False)
 ```
 
-`encoders` covers branch sequence encoder stacks. `pools` covers learned-query
-attention reduction in branches and decoders; it does not include mean pooling.
-Coordinate encoders, tensorfield operations, routing, packing preparation,
-losses and metrics keep their existing paths. Custom compute overrides and
-customized regions run eagerly. Nested hooks also make the affected region run
-eagerly, including hooks added after compilation.
+Each call replaces the previous selection. The last call above restores eager
+execution.
 
-### Compiler Settings And Warmup
+| Switch | Selected region |
+| --- | --- |
+| `encoders=True` | Branch sequence encoder stacks. |
+| `pools=True` | Learned attention reductions in branches and decoders. |
+
+Coordinate encoders, routing, tensorfield operations, mean pooling, losses,
+metrics, and optimizer execution keep their ordinary paths. Each selected
+region uses `torch.compile(fullgraph=True)`. Custom compute implementations
+remain eager, as do customized regions and regions with nested hooks,
+including hooks added after compilation.
+
+```python
+model.compile(backend="inductor", dynamic=True, options={})
+```
 
 `backend="inductor"`, `dynamic=None`, and `options=None` are the defaults.
-`backend` accepts a PyTorch backend name or callable. `dynamic=None` lets
-PyTorch adapt to changing shapes; `True` requests dynamic shapes from the first
-trace, and `False` specializes shapes. Some operations still require
-specialization. Backend-specific `options` override RelFlow's defaults.
+`dynamic=None` lets Torch decide when to generalize shapes; `True` requests
+dynamic shapes and `False` specializes them. Inductor defaults preserve eager
+random draws and disable CUDA graphs and automatic tensor padding.
+Backend-specific `options` override those defaults. Floating-point results can
+still differ.
 
-```python
-model.compile(encoders=True, pools=True, dynamic=True, options={})
-```
+Compilation happens lazily on real inputs. Measure initial compilation and
+steady-state execution separately, covering the batch sizes, branch occupancy,
+training mode, and inference mode used by the application. Compilation is not
+a guaranteed speedup: first establish a useful result on representative work.
+Compiler errors in selected regions propagate rather than silently selecting
+an eager fallback.
 
-The Inductor defaults preserve eager random draws and disable CUDA graphs and
-automatic tensor padding. Every selected region uses `fullgraph=True`.
-Unsupported graph operations or backend errors surface during setup or first
-execution; they are not silently replaced by eager execution. Select one region
-family at a time to isolate a failure. `backend="eager"` is useful for checking
-graph capture without Inductor code generation; it is not a speed setting.
-See [PyTorch's compiler API](https://docs.pytorch.org/docs/2.12/generated/torch.compile.html)
-for backend options and dynamic-shape behavior.
-
-Compilation happens lazily on real inputs. Initial training, validation and
-prediction can compile different graphs; new shapes, devices or dtypes can
-trigger more compilation. Warm up the actual mode and representative batch
-shapes before measuring steady throughput, and report startup separately.
-When timing CUDA from Python, synchronize before starting and after completing
-the measured work. Compare complete training steps or public prediction calls,
-including data preparation and output writing when those belong to your use
-case. Keep the data, seed, optimizer, precision and update budget matched, and
-compare held-out behavior: compiled floating-point results can differ.
-
-### Evaluate The Incremental Gain
-
-Inductor is already the backend used by `model.compile()`. RelFlow compiles
-encoder stacks and attention pools as separate regions; `fullgraph=True`
-applies to each region, not the entire training step. Embedding, routing,
-losses, metrics and optimizer execution remain outside those compiled regions.
-Compare the same optimized model with and without compilation to measure its
-contribution. Gains from token packing, reduced transfers and fused AdamW also
-appear in a cumulative comparison against an older release.
-
-In September 2026 validation on an RTX 3090 with PyTorch 2.12.0, FP32 and three
-seeds, the incremental steady-throughput results were:
-
-| Workload | Compilation versus the same model running eagerly |
-|---|---:|
-| Training, equal weight across 12 shared scenarios | +2.3% |
-| Prediction, equal weight across 8 scenarios | -0.4% |
-| Sparse-history training, batch 128 and width 512 | +10.0% |
-| Sparse-history prediction, batch 128 and width 512 | +11.0% |
-
-These are geometric means of paired throughput ratios, using each run's
-arithmetic mean latency after warmup and retaining every measured interval.
-The scenario averages include an empty-history case that executes no compiled
-regions; they do not represent a production workload mix. The comparison used
-the public defaults, with CUDA graphs and automatic compiler padding disabled.
-
-Compilation remains optional and workload-dependent. In the 64-output case,
-compilation increased prediction latency by 12.6% versus eager execution on the
-same optimized model. Long training sessions amortize compilation startup;
-they do not remove a steady-execution regression. Evaluate training and
-prediction separately, and use the region switches to measure encoder and pool
-compilation independently on the actual schema.
-
-Prediction tolerance checks and the selected learning proofs passed, while
-strict training-state and loss-trajectory comparisons showed numerical drift.
-Those checks do not establish identical training quality. Larger compilation
-regions or more aggressive Inductor autotuning require separate measurements;
-the default comparison does not establish their benefit.
-
-### Save, Load And Resume
-
-Compilation is runtime state, not checkpoint configuration. A newly loaded
-model is eager even if its saved model was compiled. Load and place the model,
-then select compilation explicitly:
-
-```python
-model.save("model.ckpt")
-restored = rf.Model.load("model.ckpt").to(device).compile()
-restored_predictions = restored.predict(observations)
-```
-
-`reset_contracts()`, successful schema mutations and checkpoint rebuilds such
-as `restore_checkpoint_state(...)` clear compilation. Deep copies and pickle
-round trips also start eager. Reapply `.compile(...)` afterward, outside active
-Lightning loops.
-
-Native Lightning resume into an existing model behaves differently: select
-compilation before `trainer.fit(model, datamodule=..., ckpt_path=...)`, and
-loading its weights retains that explicit selection. The checkpoint never
-enables compilation by itself. Use a Lightning training checkpoint when you
-need to resume optimizer and loop state; see
-[Training With Lightning](lightning.qmd#select-and-restore-checkpoints).
-
-## Compare Optimizer Implementations
-
-The AdamW factory uses PyTorch's fused implementation by default, preserving
-its existing parameter groups and weight-decay rules:
-
-```python
-from relflow.helpers.optimizers import adamw
-
-model.optimizer = adamw(learning_rate=1e-3)
-```
-
-Pass `fused=None` for PyTorch's automatic selection or `fused=False` to disable
-fusion. Fused arithmetic can produce different floating-point training
-trajectories. Compare complete training steps on the intended device: a large
-improvement in optimizer time
-can have a small effect when forward and backward dominate. The available
-settings are described in the [PyTorch AdamW documentation](https://docs.pytorch.org/docs/2.12/generated/torch.optim.AdamW.html).
-
-For checkpoint resume with gradient scaling, construct the helper with the
-saved `fused` setting. For example, resume a `fused=None` optimizer with
-`adamw(learning_rate=1e-3, fused=None)`. Loading a different setting into an
-optimizer constructed with `fused=True` can fail in PyTorch's `GradScaler`.
-
-## Distributed Training
-
-::: {.callout-note title="Arrow scheduler"}
-The Arrow-native data module combines distributed rank and local worker identity
-into one deterministic consumer index. All sources replay the global stream
-for disjoint ownership. File manifests are frozen before workers start, but
-source-native fragment scheduling remains deferred.
-:::
-
-Measure repeated source reads when tuning worker count, especially on remote
-storage. Increasing workers can increase I/O without increasing throughput.
-
-For an ordered preprocessor pipeline, time each stage separately as well as the
-complete tuple. A partition-scoped stage streams its outputs into the next;
-each dataset-scoped stage is a full materialization barrier at its exact tuple
-position. Moving that barrier changes both memory and semantics, so RelFlow
-never reorders stages. Record processor order, scope, input rows, emitted rows,
-and Arrow schemas with a preprocessing benchmark.
-
-## Optimize Prediction Output
-
-Keep Arrow output through downstream operations that accept it. Conversion to
-Python values and JSON serialization can dominate after model execution
-becomes faster; measure them separately from Arrow-to-Arrow prediction.
-
-Prediction can spend substantial time moving and serializing data:
-
-- enable `embed=True` only at addresses consumers need;
-- request only useful Category top-k values;
-- retain only source fields an output consumer needs;
-- use a Polars postprocessor to flatten or remove unused fields;
-- use `Writer` for partitioned batch output rather than collecting a whole
-  dataset in memory;
-- set service `max_batch_size` and latency against the real request-size
-  distribution;
-- benchmark JSON backend and response schema validation separately.
-
-When several postprocessors are installed, benchmark the ordered tuple and
-each stage. Every stage receives a complete eager DataFrame; splitting one
-vectorized expression into many tiny stages can make fixed dispatch and schema
-validation visible at real-time batch sizes.
-
-An online latency target and an offline throughput target usually need different
-batch sizes.
-
-## Benchmark Record
-
-Store at least this metadata with a result:
-
-```yaml
-relflow_version: 0.4.11
-device: "example: NVIDIA GPU model or CPU model"
-precision: "32-true"
-batch_size: 128
-world_size: 1
-records: 100000
-branch_length_percentiles: {p50: 12, p95: 48, max_configured: 64}
-d_model: 64
-layers_by_branch: {record: 2, events: 1}
-attention_by_branch: {record: mha, events: gqa}
-reduction_by_branch: {record: "attention:4", events: "none"}
-output: {targets: [label], embeddings: [record], topk: 3}
-measurement_boundary: "raw parquet read through parquet prediction write"
-```
-
-The values above are a reporting template, not a benchmark result.
-
-## Failure Signals
-
-| Signal | Diagnostic | Likely fix |
-| --- | --- | --- |
-| Accelerator utilization is low | Time read/each preprocess stage/encode separately from forward | Simplify or combine the measured bottleneck, remove an unnecessary dataset barrier, or fix remote I/O before widening the model. |
-| Memory is high with mostly short histories | Compare observed lengths with configured branch shapes | Shorten/window branches or choose a justified overflow policy. |
-| Parent memory jumps after enabling pass-through | Inspect child `reduction=None` and the assembled parent sequence | Restore a bounded reduction, shorten the branch, or budget the larger parent attention when token-level evidence is required. |
-| Quality collapses as branch length grows | Compare reduction output count, pass-through, and downstream bottlenecks | Preserve more child outputs and ensure a parent does not immediately collapse them; verify with a paired behavior proof. |
-| More ranks do not improve throughput | Check ownership, remote I/O, worker multiplication, and synchronization time | Correct sharding and remove the serial bottleneck before adding ranks. |
-| Prediction is slower than training forward | Measure CPU conversion, top-k, embeddings, postprocessing, and writes | Narrow the output contract and use partitioned `Writer` output. |
-| Callback throughput disagrees with load tests | Compare measurement boundaries and partial final batches | Publish both callback and end-to-end measurements with their exact boundaries. |
-
-## Where Next
-
-- Use [Model Configuration](model-configuration.qmd) for architecture choices.
-- Use [Data Modules](data-modules.qmd) for worker, buffer, and sharding options.
-- Use [Batch Inference](batch-inference.qmd) and [Serving](serving.qmd) for the
-  two operating paths.
-- Use [Troubleshooting](troubleshooting.qmd) when utilization or output shape is
-  unexpected.
+Schema mutations, checkpoint rebuilds, and model copies do not preserve
+compilation. Reapply it after loading or changing the model. Compilation is
+not stored in checkpoints.

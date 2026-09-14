@@ -113,7 +113,7 @@ def prediction_schema() -> Schema:
             "type": "branch",
             "embed": True,
             "length": 1,
-            "attention": "none",
+            "attention": None,
             "fields": [
                 {
                     "name": "color",
@@ -585,7 +585,7 @@ def test_inactive_leaf_nodes_are_ignored_by_encoding_and_forward() -> None:
                 "type": "branch",
                 "embed": True,
                 "length": 1,
-                "attention": "none",
+                "attention": None,
                 "fields": [
                     {
                         "name": "color",

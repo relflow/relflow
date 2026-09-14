@@ -73,14 +73,6 @@ class AttentionMode(enum.StrEnum):
     mha = "mha"
     gqa = "gqa"
     mqa = "mqa"
-    none = "none"
-
-    @classmethod
-    def normalize(cls, value: "AttentionMode | str") -> "AttentionMode":
-        if isinstance(value, cls):
-            return value
-
-        return cls(value.strip().lower())
 
     def kv_heads(self, n_heads: int) -> int:
         match self:
@@ -90,8 +82,6 @@ class AttentionMode(enum.StrEnum):
                 return max(1, n_heads // 2)
             case AttentionMode.mqa:
                 return 1
-            case AttentionMode.none:
-                raise ValueError("attention mode 'none' does not define key/value heads")
 
 
 class Overflow(enum.StrEnum):
@@ -100,7 +90,7 @@ class Overflow(enum.StrEnum):
     error = "error"
 
 
-AttentionInput: TypeAlias = AttentionMode | Literal["mha", "gqa", "mqa", "none"]
+AttentionInput: TypeAlias = AttentionMode | Literal["mha", "gqa", "mqa"] | None
 OverflowInput: TypeAlias = Overflow | Literal["head", "tail", "error"]
 StrataInput: TypeAlias = Strata | Literal["train", "validate", "test", "predict"]
 

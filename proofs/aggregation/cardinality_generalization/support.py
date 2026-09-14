@@ -37,7 +37,7 @@ What not to do
 --------------
 Do not use Mean for a target that changes when a whole bag is duplicated unless
 an earlier encoder is deliberately expected to retain cardinality.  In the
-tested ``attention="none"`` route, duplicating identical encoded tokens leaves
+tested ``attention=None`` route, duplicating identical encoded tokens leaves
 the Mean summary exactly unchanged, so no decoder can recover the removed
 multiplicity.  Do not infer support for arbitrary lengths from a low
 random-split error: ordinary random splits contain the same length range on both
@@ -250,7 +250,7 @@ def model(*, reduction: Reduction, include_count: bool, target: Literal["mean_am
         optimizer=lambda module: torch.optim.Adam(module.parameters(), lr=1e-3),
         items=rf.Branch(
             length=CAPACITY,
-            attention="mha" if reduction == "attention" else "none",
+            attention="mha" if reduction == "attention" else None,
             n_layers=2,
             reduction=configured_reduction,
             amount=rf.Number,

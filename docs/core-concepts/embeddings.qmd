@@ -1,407 +1,98 @@
----
-marimo-static-output: true
-eval: false
----
+# Learning Modes And Embeddings
 
-# Learning Modes & Embeddings
+RelFlow learns by reconstructing selected values. Supervised learning hides an
+answer on every observation; self-supervised learning hides some values from
+otherwise unlabeled records. `embed=True` separately requests a representation
+for downstream use. It does not create a learning objective.
 
-**Example status — excerpt:** schemas illustrate learning roles unless a block
-explicitly says it is a complete run.
+[Pretraining And Fine-Tuning](../guides/pretraining.qmd) shows how to transfer
+learned context from reconstruction to a labeled task.
 
-`relflow` uses one typed prediction mechanism for supervised and
-self-supervised learning. Configure input interventions and reconstruction with
-the node's singular `mask` argument, then request embeddings from the schema
-nodes you want to export with `embed=True`. Those embeddings can support
-unsupervised downstream tasks such as clustering. If root, branch, and leaf
-addresses are unfamiliar, read [Model Tree](model-tree.qmd) first.
+## Learn Without A Label
 
-The model does not maintain separate supervised and self-supervised code paths.
-Supervised learning is the special case where a field is skipped by the encoder
-and decoded from the remaining context:
+This schema reconstructs sampled purchase amounts and product identities. The
+application supplies its own customer observations and training splits.
 
-- `mask=True` means
-  `Mask(skip=True, dropout=False, reconstruct=True)`: the field never enters
-  encoder input and is always a supervised reconstruction.
-- `mask=0.15` selects positions uniformly for train-only learned-mask dropout.
-  It regularizes context but creates no direct decoder loss.
-- `Mask(rate=0.15, reconstruct=True)` uses a learned mask and reconstructs the
-  sampled positions during fitting.
-- `Mask(rate=0.15, skip=True, reconstruct=True)` omits sampled inputs from
-  tensorization and embedding, then reconstructs them from context.
-- `Mask(query="selected", ...)` takes eligibility from an aligned Boolean Arrow
-  field, optionally composed with `rate`.
-- A policy attached to a branch is resolved once per branch coordinate and
-  applies atomically to every active descendant.
-- `embed=True` emits an embedding for that schema node during prediction. It
-  does not create a reconstruction objective.
-
-`dropout` controls when a policy is active, `skip` controls whether selected
-input has a learned representation or no representation, and `reconstruct`
-controls whether selected values contribute targets. Dropout policies run only
-during training. Reconstructing and explicit ablation policies also run in
-validation and test; prediction applies only deterministic policies without a
-remaining random rate. See [Dynamic Masking](dynamic-masking.qmd) for the full
-selection and activation contract.
-
-Self-supervised embedding workflows use reconstruction objectives without an
-external label, then emit representations with `embed=True`. Downstream use of
-those representations may be supervised or unsupervised.
-
-For recency windows, exact counts, or coordinated business rules, derive a
-Boolean selector in a preprocessor and bind it with `Mask.query`. Put the policy
-on a leaf for independent leaf decisions or on a branch for atomic subtree
-decisions.
-
-## Internal And Exported Embeddings
-
-The word *embedding* refers to two different interfaces in these docs:
-
-1. A datatype's internal input representation converts tensorized state and
-   content into `d_model` before the model tree encodes it. For example, a
-   Category adds a state embedding to an available label's content embedding;
-   unavailable and non-valued categorical content contributes a zero content
-   vector while the state embedding remains distinct.
-2. The public `embedding` requested with `embed=True` is a contextual model
-   output at a schema address. The prediction writer L2-normalizes that vector
-   before returning it.
-
-These are not interchangeable. A Category embedding-table row is not the public
-leaf embedding, and neither is a raw `Vector` field. Root and branch outputs
-represent encoded contexts. A leaf output is produced through that leaf's
-contextual decoder pooling; when the leaf was visible solely because
-`embed=True`, its decoded payload can have `inferred=false`.
-
-Compare exported embeddings from the same model and schema address unless a
-separate alignment method has been validated. Equal width alone does not put
-unrelated nodes—or embeddings from different checkpoints—into a shared semantic
-space.
-
-## Root Embeddings
-
-Set `embed=True` on `Model(...)` to emit the generated root's reduced
-representation for the whole record. The default reduction emits one vector;
-Attention can emit several, and `reduction=None` emits every encoded root input
-token.
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-import pyarrow as pa
-import pyarrow.compute as pc
-
+```python
 import relflow as rf
-
-model = rf.Model(
-    name="transaction",
-    d_model=64,
-    n_layers=2,
-    n_heads=4,
-    embed=True,
-    amount=rf.Number(mask=rf.Mask(rate=0.15, reconstruct=True)),
-    merchant=rf.Category(
-        mask=rf.Mask(rate=0.15, reconstruct=True),
-        size=4096,
-    ),
-)
-
-model
-```
-
-After training, `model.predict(...)` includes the root embedding:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-requests = pa.Table.from_pylist(
-    [{"amount": 42.0, "merchant": "grocery"}]
-)
-result = model.predict(requests)
-transaction = pc.struct_field(result["predictions"], "transaction")
-transaction_embedding = pc.struct_field(transaction, "embedding")
-```
-
-Use root embeddings for whole-record retrieval, clustering, anomaly detection,
-deduplication, or downstream models.
-
-## Branch Embeddings
-
-Set `embed=True` on a `Branch` to emit its reduction output for a repeated
-context. Its configured reduction determines whether that output contains one,
-several, or every routed encoded child slot.
-
-```{python .marimo}
-#| echo: true
-#| output: true
 
 model = rf.Model(
     name="customer",
     d_model=128,
-    n_layers=2,
-    n_heads=4,
+    n_layers=3,
+    n_heads=8,
     embed=True,
-    customer_tier=rf.Category(
-        mask=rf.Mask(rate=0.15, reconstruct=True),
-        size=16,
-    ),
-    events=rf.Branch(
+    region=rf.Category(size=64),
+    purchases=rf.Branch(
         length=64,
         embed=True,
-        event_type=rf.Category(
-            mask=rf.Mask(rate=0.15, reconstruct=True),
-            size=128,
-        ),
-        merchant=rf.Category(
-            mask=rf.Mask(rate=0.15, reconstruct=True),
-            size=4096,
-        ),
+        days_ago=rf.Number,
         amount=rf.Number(mask=rf.Mask(rate=0.15, reconstruct=True)),
+        items=rf.Branch(
+            length=24,
+            product=rf.Category(
+                size=8192,
+                mask=rf.Mask(rate=0.10, reconstruct=True),
+            ),
+            quantity=rf.Number,
+        ),
     ),
 )
-
-model
 ```
 
-This produces an embedding tree with at least two useful addresses:
+Training requires an optimizer and at least one reconstruction objective; see
+[Training](../guides/lightning.qmd). A model with only `embed=True` has no
+objective to learn from. To combine supervised and self-supervised learning,
+add an always-hidden target alongside sampled reconstruction fields. Each
+leaf's `weight` scales its loss contribution.
 
-```{python .marimo}
-#| echo: true
-#| output: true
+## Choose Where To Export
 
-requests = pa.Table.from_pylist(
-    [
-        {
-            "customer_tier": "gold",
-            "events": [
-                {"event_type": "purchase", "merchant": "grocery", "amount": 42.0}
-            ],
-        }
-    ]
-)
-result = model.predict(requests)
-predictions = result["predictions"]
+| `embed=True` location | Exported representation |
+| --- | --- |
+| Root | The root's reduced context. |
+| Branch | The branch's reduced context. |
+| Leaf | The decoder's pooled contextual representation before its datatype output head. |
+
+A leaf embedding is not its raw input embedding. It can include ancestor
+context and aligned sibling conditioning. A branch embedding summarizes the
+context controlled by that branch's reduction.
+
+With default one-output reductions, the example exports one customer vector
+and one purchase-history vector per customer. It does **not** export one vector
+per purchase. If `items` also had `embed=True`, it would export one item-list
+summary per purchase because the outer purchase coordinates remain.
+
+`rf.Attention(n_outputs=...)` retains multiple reduction outputs.
+`reduction=None` retains routed child slots, whose width depends on branch
+length and child outputs. Choose reduction for modeling needs; it also changes
+embedding output shape. See [Branch](../data-types/branch.qmd).
+
+## Read The Output
+
+After training, `observations` is an application-supplied Arrow table:
+
+```python
+import pyarrow.compute as pc
+
+predictions = model.predict(observations)["predictions"]
 customer_embedding = pc.struct_field(
     pc.struct_field(predictions, "customer"),
     "embedding",
 )
-events_embedding = pc.struct_field(
-    pc.struct_field(predictions, "customer/events"),
+purchase_history_embedding = pc.struct_field(
+    pc.struct_field(predictions, "customer/purchases"),
     "embedding",
 )
 ```
 
-Use branch embeddings when the repeated behavior matters independently from the
-whole record, such as event streams, transactions, line items, sessions, or
-measurements.
+Exported vectors are float32, L2-normalized along their `d_model` axis; zero
+vectors remain zero. Repeated outer coordinates and multiple reduction outputs
+appear as fixed-size Arrow list axes. Sampled reconstruction fields do not
+produce ordinary decoded prediction output unless a deterministic
+reconstruction policy also applies.
 
-## Leaf Embeddings
-
-Leaf fields can also request embeddings. This is useful when a field has local
-semantic meaning and you want a representation at that address.
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-model = rf.Model(
-    name="customer",
-    d_model=64,
-    n_layers=2,
-    n_heads=4,
-    embed=True,
-    login_sessions=rf.Branch(
-        length=32,
-        embed=True,
-        device_id=rf.Hash(embed=True),
-        event_type=rf.Category(
-            mask=rf.Mask(rate=0.10, reconstruct=True),
-            size=128,
-        ),
-    ),
-)
-
-model
-```
-
-Use `Hash` when equality between large identifiers matters without learning
-a persistent vocabulary. Matching values share their hash representation across
-all Hash leaves in an encoded batch. Use `Category` for bounded labels that
-should have a persistent vocabulary across training and prediction.
-
-## An Unsupervised Schema
-
-This sketch has no label. The model learns by reconstructing masked values,
-which is often called self-supervised learning, and emits both root and branch
-embeddings. The complete inline version below trains one tiny CPU batch from the
-bundled digit records.
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-import lightning.pytorch as lit
-import pyarrow.compute as pc
-import pyarrow.json as pajson
-import torch
-
-import relflow as rf
-
-records = pajson.read_json("docs/data/digits.jsonl").slice(0, 24)
-
-model = rf.Model(
-    name="digit",
-    d_model=24,
-    n_layers=1,
-    n_heads=4,
-    batch_size=8,
-    embed=True,
-    optimizer=lambda module: torch.optim.AdamW(module.parameters(), lr=1e-2),
-    pixels=rf.Branch(
-        length=64,
-        embed=True,
-        row=rf.Category(size=8),
-        column=rf.Category(size=8),
-        intensity=rf.Number(mask=rf.Mask(rate=0.15, reconstruct=True)),
-    ),
-)
-
-datamodule = rf.ArrowDataModule(
-    model=model,
-    train=records,
-    validate=records,
-    num_workers=0,
-    persistent_workers=False,
-    pin_memory=False,
-    seed=42,
-    sample=1.0,
-)
-
-trainer = lit.Trainer(
-    accelerator="cpu",
-    max_epochs=1,
-    logger=False,
-    enable_progress_bar=False,
-    enable_checkpointing=False,
-    enable_model_summary=False,
-    limit_train_batches=1,
-    limit_val_batches=1,
-)
-
-trainer.fit(model=model, datamodule=datamodule)
-model
-result = model.predict(records.slice(0, 2))
-predictions = result["predictions"]
-
-digit = pc.struct_field(
-    pc.struct_field(predictions, "digit"),
-    "embedding",
-)
-pixels = pc.struct_field(
-    pc.struct_field(predictions, "digit/pixels"),
-    "embedding",
-)
-```
-
-By default, root embeddings return one vector per input observation and a
-branch returns one vector per parent coordinate. That shape follows the default
-one-output Attention reduction. `rf.Attention(n_outputs=...)` retains the
-configured output axis, while `reduction=None` preserves every routed encoded
-child slot. Presence remains
-attached to those slots while RelFlow routes them internally, but the exported
-branch embedding contains only the normalized vectors. Nested branch output
-keeps the relevant ancestor coordinates and the outputs selected by its
-reduction. Budget both the prediction payload and downstream consumer for that
-shape.
-
-## Combining Learning Signals
-
-You can combine an always-skipped supervised reconstruction with auxiliary stochastic
-reconstruction tasks because both use the same typed decoder path.
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-model = rf.Model(
-    name="transaction",
-    d_model=64,
-    n_layers=2,
-    n_heads=4,
-    embed=True,
-    amount=rf.Number(mask=rf.Mask(rate=0.10, reconstruct=True)),
-    merchant=rf.Category(
-        mask=rf.Mask(rate=0.05, reconstruct=True),
-        size=4096,
-    ),
-    fraud=rf.Category(mask=True, size=2),
-)
-
-model
-```
-
-The supervised field trains the task you care about directly while staying out
-of encoder input for every example. The other masked fields add reconstruction
-pressure that can improve the representation, especially when labels are
-sparse.
-
-## Exporting Embeddings
-
-For small interactive workflows, call `Model.predict(...)` directly.
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-requests = pa.Table.from_pylist(
-    [{"amount": 42.0, "merchant": "grocery"}]
-)
-result = model.predict(requests)
-root = pc.struct_field(
-    pc.struct_field(result["predictions"], "transaction"),
-    "embedding",
-)
-```
-
-For larger offline jobs, use the [Batch Inference](../guides/batch-inference.qmd)
-guide. `rf.Writer` writes reconstructed predictions, configured embeddings, and input
-metadata from `trainer.predict(...)` to rank-partitioned Parquet files. Add a
-[postprocessor](../guides/postprocessors.qmd) when you need to strip, rename, or
-flatten the output for a downstream index.
-
-## Comparing Embeddings
-
-Embeddings from related schema addresses are the easiest to compare directly:
-root to root, event-branch to event-branch, or the same leaf address across
-records. Be careful comparing unrelated branches. A customer-level embedding and
-a transaction-branch embedding may have the same width but are trained for
-different context roles.
-
-Cosine similarity is a reasonable starting point for retrieval and clustering,
-but validate it against the task. Embeddings are model outputs, not ground-truth
-explanations.
-
-## When Not To Use This Pattern
-
-Do not use embeddings learned only from reconstruction as a substitute for a
-validated supervised objective when the deployment decision requires one. Do not
-add masking to fields that are mostly noise or leakage. Do not expose embeddings
-from public APIs unless downstream consumers need them and privacy review allows
-it.
-
-Use embeddings when the representation itself is useful: retrieval, clustering,
-anomaly detection, weak supervision, transfer learning, or diagnostics.
-
-## Where Next
-
-- Use [Built-In Data Types](data-types.qmd) to choose leaf fields.
-- Use [Binding Data](binding-data.qmd) to choose direct binding, an explicit
-  query, or preprocessing, and [Query Paths](querypaths.qmd) for structural
-  Arrow selection.
-- Use [Dynamic Masking](dynamic-masking.qmd) for derived selectors and atomic
-  masking inside repeated contexts.
-- Use [Batch Inference](../guides/batch-inference.qmd) to write embedding jobs to
-  Parquet.
-- Use [Postprocessors](../guides/postprocessors.qmd) to reshape exported embeddings.
-- See the [Device Tenure case study](../case-studies/device-tenure.qmd) for a
-  nested risk-modeling example.
+Evaluate an embedding against its intended downstream task. Root context,
+branch context, and leaf context answer different questions and need not be
+interchangeable. Preserve the schema and trained state with
+[the model artifact](../guides/lightning.qmd#save-and-load).

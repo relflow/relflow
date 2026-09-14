@@ -60,11 +60,11 @@ With `reduction=None`, branch self-attention may already have contextualized a
 slot before it is routed, and sibling fields contribute separate slots rather
 than one automatically fused item token. With `Mean`, exact duplicate and
 cardinality invariance requires the pre-reduction path not to encode count or
-order—for example, the isolated proof uses `attention="none"`.
+order—for example, the isolated proof uses `attention=None`.
 
 Branch self-attention retains rotary position information by default. Set
 `Attention(position=False)` to disable position in the learned-query reducer;
-also use `Branch(attention="none")` when testing strict unordered invariance,
+also use `Branch(attention=None)` when testing strict unordered invariance,
 because the reducer setting does not change the branch's earlier attention.
 Leaf `decoder_position=None` automatically disables decoder position for a
 scalar target and enables it for a repeated target; `True` and `False`
