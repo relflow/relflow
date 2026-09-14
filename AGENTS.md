@@ -111,7 +111,10 @@ model = rf.Model(
 
 ## Data And Training
 
-Use `ArrowDataModule(...)` for canonical examples. Keep examples tiny:
+Configure `model.optimizer = rf.adamw(learning_rate=1e-3)` before fitting.
+
+Use `ArrowDataModule(...)` for canonical examples. Documentation uses static
+illustrations; use tiny data only in executable tests and proofs:
 
 ```python
 import pyarrow as pa
@@ -127,7 +130,9 @@ datamodule = rf.ArrowDataModule(
 )
 ```
 
-For quick examples, train with `max_epochs=1`, `limit_train_batches=1`, and `limit_val_batches=1`.
+For runtime smoke tests, train with `max_epochs=1`, `limit_train_batches=1`, and
+`limit_val_batches=1`. Documentation may show realistic training configurations
+without executing them.
 
 `model.predict(...)` returns a `pyarrow.Table`. It accepts Arrow inputs directly
 and retains a nonempty sequence of mappings as a small interactive convenience;
@@ -233,12 +238,26 @@ make render
 
 - `docs/index.qmd`
 - `docs/getting-started.qmd`
-- `docs/ai-quickstart.qmd`
+- `docs/core-concepts/model-tree.qmd`
+- `docs/core-concepts/binding-data.qmd`
 - `docs/core-concepts/querypaths.qmd`
 - `docs/core-concepts/data-types.qmd`
 - `docs/core-concepts/dynamic-masking.qmd`
-- `docs/guides/dynamic-mask-preprocessors.qmd`
+- `docs/guides/data-modules.qmd`
+- `docs/guides/preprocessors.qmd`
 
-When adding docs, prefer runnable inline Python snippets and current public
-imports. Keep Quarto pages self-contained; do not depend on external standalone
-scripts.
+Documentation is static. Use plain `python` fences and current public imports;
+do not execute Python, train models, load real data, or download model weights
+while building the site. Prefer realistic nested schemas and explicitly name
+application-supplied inputs. Use the shared Typst `node` and `tree` functions in
+`docs/assets/typst/model-tree.typ` for structural diagrams; see the authoring
+contract in `docs/assets/typst/README.md`. Show field roles and repeated contexts,
+not parameter counts or hyperparameters. Keep learning-behavior checks in tests
+and proofs rather than extracting and executing documentation snippets.
+
+Show observation and prediction examples as one YAML record, with repeated
+values nested beneath their field names. Keep Arrow and Polars data-module
+snippets to `model` and named splits unless the page explains another option.
+Give each concept one home and link to it. Verify claims against source code
+when editing a page; existing prose is not evidence. Use the current branding
+under `docs/assets/branding` and Typst diagrams for visual explanations.

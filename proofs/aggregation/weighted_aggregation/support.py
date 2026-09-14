@@ -317,7 +317,7 @@ def mean_model() -> rf.Model:
         optimizer=lambda module: torch.optim.AdamW(module.parameters(), lr=3e-3),
         items=rf.Branch(
             length=ITEMS,
-            attention="none",
+            attention=None,
             reduction=rf.Mean(),
             contribution=rf.Number,
         ),

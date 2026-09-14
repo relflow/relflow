@@ -8,7 +8,6 @@ import torch
 from relflow.architecture.attention import RotaryMultiheadAttention
 from relflow.architecture.packed import Packed, block, customized, pack, stochastic, unpack
 from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool
-from relflow.structs.enums import AttentionMode
 from relflow.structs.packages import Parcel
 from relflow.structs.reduction import Attention, Mean
 from relflow.structs.tree import Address, Leaf, Node
@@ -81,8 +80,8 @@ class BranchEncoder(torch.nn.Module):
         self.destination: Address = cast(Node, branch.parent).address
 
         layers: list[RotaryTransformerEncoderLayer] = []
-        attention = AttentionMode.normalize(branch.attention)
-        if attention != AttentionMode.none:
+        attention = branch.attention
+        if attention is not None:
             for _ in range(branch.n_layers):
                 layers.append(
                     RotaryTransformerEncoderLayer(
@@ -106,7 +105,7 @@ class BranchEncoder(torch.nn.Module):
             child.address for child in branch.fields if isinstance(child, Leaf) and child.active
         )
         self.coordinate_encoder: RotaryTransformerEncoderLayer | None = None
-        if attention != AttentionMode.none and len(self.coordinate_origins) > 1:
+        if attention is not None and len(self.coordinate_origins) > 1:
             coordinate_heads = branch.n_heads
             while coordinate_heads > 0 and (
                 schema.d_model % coordinate_heads != 0 or schema.d_model // coordinate_heads < 2

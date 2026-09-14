@@ -34,9 +34,6 @@ serving = [
 text = [
     "transformers>=4.55.0",
 ]
-docs = [
-    "marimo>=0.23.8",
-]
 typing = [
     "pyarrow-stubs>=20.0.0.20260819",
 ]
@@ -81,6 +78,7 @@ markers = [
 
 [tool.ruff]
 line-length = 120
+extend-exclude = ["docs/_extensions"]
 lint.extend-select = ["I"]
 
 [tool.pyrefly]

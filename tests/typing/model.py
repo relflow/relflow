@@ -10,7 +10,6 @@ from tensordict import TensorDict
 
 import relflow as rf
 from relflow.architecture.runtime import Output
-from relflow.helpers.optimizers import adamw
 from relflow.structs.packages import Prediction
 
 
@@ -26,7 +25,7 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
         n_heads=4,
         amount=rf.Number,
         label=rf.Category(mask=True, size=2),
-        optimizer=adamw(1e-3),
+        optimizer=rf.adamw(1e-3),
     )
     assert_type(model.compile(encoders=True, pools=False), Classifier)
     assert_type(model.save("model.ckpt"), str)
@@ -40,8 +39,8 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
     assert_type(model.predict(table), pa.Table)
     assert_type(model.predict([{"amount": 1.0}]), pa.Table)
     assert_type(model.write([], source=table), pa.Table)
-    rf.Model(model.schema, optimizer=adamw(1e-3))
-    rf.Model(schema=model.schema, optimizer=adamw(1e-3))
+    rf.Model(model.schema, optimizer=rf.adamw(1e-3))
+    rf.Model(schema=model.schema, optimizer=rf.adamw(1e-3))
     rf.Model(d_model=32, n_heads=4, n_layers=1, fields={"name": rf.Number, "batch_size": rf.Boolean})
     model.extend(rf.where("name") == "record", risk_score=rf.Number)
     model.extend(fields={"fields": rf.Number})

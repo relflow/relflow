@@ -178,14 +178,20 @@ def test_branch_rich_display_renders_reduction_configuration() -> None:
     )
     passthrough = render_text(
         rf.Branch.model_validate(
-            {"name": "items", "reduction": None, "fields": [rf.Number.model_validate({"name": "amount"})]}
+            {
+                "name": "items",
+                "attention": None,
+                "reduction": None,
+                "fields": [rf.Number.model_validate({"name": "amount"})],
+            }
         )
     )
 
     assert "reduction=attention(n_outputs=4, n_heads=2, n_layers=3, dropout=0.2" in " ".join(attention.split())
     assert "reduction=attention(n_outputs=1, n_layers=1, position=False)" in " ".join(position_free.split())
     assert "reduction=mean" in mean
-    assert "reduction=none" in passthrough
+    assert "reduction=None" in passthrough
+    assert "attention=None" in passthrough
 
 
 def test_root_branch_embed_renders_as_flag() -> None:

@@ -1,367 +1,117 @@
 ---
-eval: false
+title: Prediction Output
 ---
 
-# Prediction Output
+`model.predict(...)` returns a `pyarrow.Table`. Without postprocessing, each row
+corresponds to one processed observation. Output has two columns: retained
+`inputs` and model `predictions`.
 
-**Example status — contract reference:** snippets describe the stable Arrow
-table envelope and use typed struct selection without Python row conversion.
+For an order model with `returned=rf.Boolean(mask=True)`, one request can omit
+the target:
 
-`Model.predict(...)` returns a `pyarrow.Table`:
-
-```python
-result = model.predict(
-    requests,
-    preprocess=None,
-    postprocess=None,
-    retain=(),
-)
+```yaml
+request_id: order-42
+amount: 86.50
+items:
+  - sku: coat-17
+    quantity: 1
+  - sku: scarf-03
+    quantity: 2
 ```
 
-For the canonical path, `requests` is a `pa.Table` or `pa.RecordBatch`. A
-nonempty sequence of Python mappings is also accepted as a
-small-request convenience and is converted to one Arrow table at ingress:
-
 ```python
-result = model.predict([{"amount": 12.5, "merchant": "books"}])
+# model is trained; request_table is an application-supplied Arrow table.
+result = model.predict(request_table, retain=("request_id",))
 ```
 
-Use typed Arrow for empty inputs, large inputs, and any schema whose inference
-would be ambiguous. A preprocessor runs before encoding; a postprocessor runs
-after typed output is assembled. Without a postprocessor, the table has one row
-per processed observation and two columns:
+Arrow tables and record batches are accepted directly. A nonempty sequence of
+mappings is also supported for small interactive requests. Use a typed Arrow
+object for empty input: RelFlow preserves the output schema and skips the
+forward pass.
 
-```text
-inputs: struct<retained processed fields> or null
-predictions: struct<address: typed prediction> or null
-```
+## Read a field
 
-The returned object is Arrow even for one row. RelFlow does not recursively
-convert it to Python or squeeze dimensions based on batch size.
-
-## Produce A Prediction
-
-Fields configured with `mask=True` are normally omitted from prediction input:
+Prediction keys are full schema addresses. For `rf.Model(name="order", ...)`,
+the return target is the literal struct field `order/returned`:
 
 ```python
-import pyarrow as pa
 import pyarrow.compute as pc
-import relflow as rf
 
-requests = pa.Table.from_pylist(
-    [
-        {"request_id": "req-10", "amount": 12.5, "merchant": "books"},
-        {"request_id": "req-11", "amount": 8.0, "merchant": "coffee"},
-    ]
-)
-
-result = model.predict(
-    requests,
-    retain=("request_id",),
-)
-```
-
-`retain` does not affect what the model sees. It selects processed source
-columns copied into the output `inputs` struct for joins and postprocessing.
-
-### Typed empty input
-
-Prediction also accepts a zero-row Arrow table when its schema is explicit. It
-skips the Torch forward pass and returns zero rows with the exact planned output
-schema:
-
-```python
-request_schema = pa.schema(
-    [
-        pa.field("request_id", pa.large_string()),
-        pa.field("amount", pa.float64()),
-        pa.field("merchant", pa.large_string()),
-    ]
-)
-empty_requests = pa.Table.from_batches([], schema=request_schema)
-empty_result = model.predict(empty_requests, retain=("request_id",))
-
-assert empty_result.num_rows == 0
-assert empty_result.column_names == ["inputs", "predictions"]
-```
-
-An empty Python list has no Arrow schema and is rejected. This is why typed
-Arrow is the empty-input contract.
-
-## Read A Prediction Field
-
-Schema addresses are Arrow struct field names:
-
-```python
-inputs = result["inputs"]
-predictions = result["predictions"]
-
-request_id = pc.struct_field(inputs, "request_id")
-fraud = pc.struct_field(predictions, "record/fraud")
-state = pc.struct_field(fraud, "state")
-content = pc.struct_field(fraud, "content")
-
-label = pc.struct_field(content, "value")
+returned = pc.struct_field(result["predictions"], "order/returned")
+content = pc.struct_field(returned, "content")
 probability = pc.struct_field(content, "probability")
-inferred = pc.struct_field(fraud, "inferred")
 ```
 
-Use `pc.struct_field` rather than materializing rows. Address order follows the
-model's schema traversal, not the order in which runtime tensors happen to
-arrive.
+One output record has this shape. Angle-bracket values describe the output;
+they are placeholders, not measured predictions.
 
-## The Canonical Payload
-
-A decoded leaf combines shared fields with its extension-owned output:
-
-```text
-record/fraud: struct<
-    state: struct<
-        valued: float32,
-        null: float32,
-        padded: float32,
-        masked: float32,
-        other: float32
-    >,
-    content: struct<...>,
-    inferred: bool,
-    embedding: fixed_size_list<float32>[d_model]  # only with embed=True
->
+```yaml
+inputs:
+  request_id: order-42
+predictions:
+  order/returned:
+    state:
+      valued: <probability>
+      "null": <probability>
+      padded: <probability>
+      masked: <probability>
+      other: <probability>
+    content:
+      probability: <probability of true>
+    inferred: true
 ```
 
-| Field | Meaning |
+`state` gives probabilities for the five value states. `content` holds the
+field's decoded value. Consider both if the application distinguishes a value
+from a missing or unavailable result. `inferred` records whether reconstruction
+was requested at that position; it is not a confidence score.
+
+## What appears in output
+
+Only configured prediction addresses appear: deterministic reconstructions
+with an extension output, requested embeddings, or both. Visible input fields
+are not automatically echoed. `embed=True` adds an L2-normalized `embedding`;
+branch embeddings contain no decoded value.
+
+| Field type | Decoded output |
 | --- | --- |
-| `state` | Softmax probabilities for RelFlow's five value states |
-| extension fields such as `content` or `cluster` | Datatype-specific prediction |
-| `inferred` | `true` where prediction input was masked |
-| `embedding` | L2-normalized representation requested with `embed=True` |
+| `Boolean` | `content.probability`: probability of `True` |
+| `Number` | `content`: floating-point reconstruction |
+| `Vector` | `content`: fixed-width list |
+| `Category` | `content.value`, `content.probability`, `content.topk` candidates |
+| `Set` | `content`: list of value/probability candidates |
+| `Cluster` | `cluster.value`, `cluster.probability`, plus content value/probability |
+| `Text`, `Hash`, `DateParts` | No decoded public value; embeddings are available |
 
-`state` and content answer different questions. A decoder can choose a content
-candidate while its state distribution favors `null` or `other`; a consumer
-that cares about missingness should inspect both.
+Number predicts in the units supplied after preprocessing. Its internal
+normalizer does not change the output units. Vector predicts the supplied
+coordinates and writes zeros where the most likely state is not `valued`. If
+your preprocessor transforms units, reverse that application transform in a
+[postprocessor](postprocessors.qmd). Category and Set labels are Arrow
+`large_string` values.
+Category `topk` is present even when empty; a Set threshold can vary the number
+of returned candidates.
 
-`inferred` is not confidence or correctness. It says whether prediction
-requested reconstruction at that model coordinate. An always-skipped
-supervised reconstruction is normally inferred; a visible embedded field is
-not.
+The Arrow row dimension always means observations. A repeated branch appears
+as fixed-width lists inside each leaf's output, including length-one branches.
+Vectors and embeddings also keep their width axis. A branch embedding's shape
+follows its reduction output. The generated root singleton is omitted; a
+one-row request has the same nested schema as a larger batch.
 
-## Which Addresses Appear?
+## Retain source columns
 
-RelFlow does not echo every visible field. Public prediction output includes:
+`retain` selects **processed top-level columns** copied into `inputs`:
 
-- configured deterministic reconstructions whose extension declares Arrow output;
-- configured node embeddings;
-- both at the same address when a decoded field also has `embed=True`.
-
-A branch embedding contains only `embedding`; its leading shape follows the
-Branch reduction, including several Attention outputs or the full
-pass-through width. `Text`, `Hash`, and `DateParts` currently define no decoded
-public value, but can still appear when `embed=True`. Consumers should depend
-on configured addresses, not assume all schema nodes are present.
-
-When no address is writable, `predictions` is a typed Arrow null column rather
-than an empty struct, which Parquet cannot persist. Likewise, `retain=()` makes
-`inputs` a null column with the correct row count.
-
-## Datatype-Specific Fields
-
-Extensions own their exact Arrow fragment:
-
-| Datatype | Extension-owned fields |
+| Argument | Retained inputs |
 | --- | --- |
-| `Boolean` | `content: struct<probability: float32>` |
-| `Number` | `content: float64` |
-| `Vector(size=n)` | `content: fixed_size_list<float32>[n]` |
-| `Category` | `content.value: large_string`, `probability: float32`, `topk: list<struct<value, probability>>` |
-| `Set` | `content: list<struct<value: large_string, probability: float32>>` |
-| `Cluster` | `cluster: struct<value: int32, probability: float32>` and Category-like content |
-| `Text`, `Hash`, `DateParts` | no decoded fragment yet; embeddings remain available |
+| `retain=()` | None; `inputs` is an Arrow null column |
+| `retain=("request_id",)` | Only that named column |
+| `retain="*"` | All processed source columns |
 
-Category and Set labels use `large_string`, including for an empty vocabulary.
-Category `topk` is always present but can be an empty list when no top-k width
-is configured. Set output is a list of candidates rather than one dynamic
-struct field per label. With no threshold it contains the active vocabulary;
-with a threshold its list length can vary by observation.
+Retention does not change model inputs. A missing retained column is an error.
+When no prediction address has writable output, `predictions` is also a null
+column, with the observation count preserved.
 
-Boolean output is the probability of `True`. Configured metric thresholds do
-not threshold this written score. Number and Vector writers return model-space
-reconstructions; use a postprocessor for application-specific units.
-
-## Stable Nested Shapes
-
-The Arrow row dimension is always the observation batch. Model geometry lives
-inside each row:
-
-- the generated root singleton is omitted;
-- every repeated child `Branch` axis is a `fixed_size_list`, including length
-  one;
-- vector values and embeddings are fixed-size lists, including width one;
-- top-k and thresholded candidate collections are variable lists.
-
-For `items=rf.Branch(length=32, sku=...)`, the leaf field has this shape:
-
-```text
-"record/items/sku": fixed_size_list<
-    struct<state: ..., content: ..., inferred: bool>
->[32]
-```
-
-It is coordinate-first: one struct per item position. RelFlow does not create a
-struct whose members each invent independent list shapes. Null, padded,
-masked, and inferred positions never change the physical schema.
-
-This contract is identical for one request and a thousand. Test schema equality
-instead of handling a special single-row shape.
-
-## Retain Processed Inputs
-
-The default `retain=()` copies no source data:
-
-```python
-minimal = model.predict(requests)
-```
-
-Select named top-level columns in desired field order:
-
-```python
-joined = model.predict(
-    requests,
-    retain=("request_id", "event_time"),
-)
-```
-
-Use `retain="*"` to copy every post-preprocessor column in source schema order:
-
-```python
-auditable = model.predict(requests, retain="*")
-```
-
-Names resolve after preprocessing. A missing name is an error. Retention is
-explicit so a modeled source value is not accidentally echoed to a response,
-and an unmodeled identifier can survive for downstream joins.
-
-For a data module, `retain` may be a scalar or a per-split mapping. A mapping
-must contain every configured split exactly once. Direct prediction accepts
-only the scalar tuple or `"*"` forms.
-
-## Postprocessed Output
-
-Pass an eager Polars postprocessor when a consumer needs flat or renamed
-columns:
-
-```python
-import polars as pl
-
-@rf.postprocess
-def warehouse(frame: pl.DataFrame) -> pl.DataFrame:
-    inputs = pl.col("inputs")
-    fraud = pl.col("predictions").struct.field("record/fraud")
-    content = fraud.struct.field("content")
-    return frame.select(
-        request_id=inputs.struct.field("request_id"),
-        fraud=content.struct.field("value"),
-        fraud_probability=content.struct.field("probability"),
-    )
-
-result = model.predict(
-    requests,
-    retain=("request_id",),
-    postprocess=warehouse,
-)
-```
-
-With a postprocessor, `Model.predict` returns exactly the replacement table;
-the canonical `inputs` / `predictions` envelope need not remain. Version that
-table schema as an application contract. See [Postprocessors](postprocessors.qmd).
-
-`postprocess=` also accepts a list or tuple of decorated postprocessors. RelFlow
-snapshots it as an immutable tuple, then applies stages strictly left to right.
-Each stage returns the authoritative eager DataFrame and may change rows or
-columns. The retained `inputs` struct is available before the first stage; if
-an early stage removes it, later stages cannot read it.
-
-## Lower-Level `Model.write`
-
-Most callers use `predict`. Framework integrations that already own tensor
-predictions and their source table can use:
-
-```python
-written = model.write(
-    raw_predictions,
-    source=source_table,
-    retain=("request_id",),
-)
-
-assert isinstance(written, pa.Table)
-```
-
-`Model.write` is deliberately lower-level: `source` must be a `pa.Table`.
-Lightning's `predict_step` calls it once; `rf.Writer` consumes that already-written table
-instead of converting tensors again.
-
-## Interactive, Parquet, And JSON Boundaries
-
-| Path | Public result | Python conversion |
-| --- | --- | --- |
-| `model.predict(...)` | `pa.Table` | none |
-| Lightning `predict_step` | `pa.Table` | none |
-| `rf.Writer` | rank Parquet file | none |
-| deployment JSON | JSON response rows | one terminal `Table.to_pylist()` |
-
-Without a deployment postprocessor, JSON responses expose predictions and the
-deployment's `model` provenance, but not retained inputs. With a postprocessor,
-its columns define the application fields and deployment adds `model` afterward.
-RelFlow does not add a hidden identity column to any output path.
-
-Call `.to_pylist()` yourself only when an application boundary actually needs
-Python objects:
-
-```python
-response_rows = result.to_pylist()
-```
-
-That conversion is explicit and outside RelFlow's Arrow pipeline.
-
-## Test A Consumer Contract
-
-Prefer schema and shape checks over exact model scores:
-
-```python
-assert result.num_rows == requests.num_rows
-assert result.column_names == ["inputs", "predictions"]
-
-fraud_type = result.schema.field("predictions").type.field("record/fraud").type
-assert [field.name for field in fraud_type] == [
-    "state",
-    "content",
-    "inferred",
-]
-
-state_type = fraud_type.field("state").type
-assert [field.name for field in state_type] == [
-    "valued",
-    "null",
-    "padded",
-    "masked",
-    "other",
-]
-```
-
-Also compare the schema for zero, one, and several source rows; validate the
-specific addresses your consumer requires; and test a postprocessed schema
-separately from the canonical one.
-
-## Common Mistakes
-
-- Calling `.to_pylist()` before columnar selection is finished.
-- Treating `inferred` as a probability or anomaly signal.
-- Reading content without checking the predicted state when missingness
-  matters.
-- Expecting every visible input field to appear in output.
-- Forgetting to retain a request identifier needed by a postprocessor.
-- Special-casing batch size one and thereby breaking stable list geometry.
-- Depending on exact floating-point values across hardware instead of schemas,
-  shapes, and tolerances.
-
-Continue with [Batch Inference](batch-inference.qmd) for Parquet persistence and
-[Postprocessors](postprocessors.qmd) for application output schemas.
+Use [postprocessors](postprocessors.qmd) to reshape this table,
+[batch inference](batch-inference.qmd) to write it to Parquet, or
+[serving](serving.qmd) for an HTTP endpoint.

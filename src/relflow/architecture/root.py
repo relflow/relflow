@@ -171,7 +171,7 @@ class Model(lit.LightningModule, Renderable):
         query: str | None = None,
         description: str | None = None,
         embed: bool = False,
-        attention: AttentionMode | str = AttentionMode.mha,
+        attention: AttentionInput = AttentionMode.mha,
         reduction: ReductionConfig | None = _DEFAULT_REDUCTION,
         dropout: Rate | None = None,
         mask: MaskInput = False,
@@ -188,7 +188,8 @@ class Model(lit.LightningModule, Renderable):
 
         ``mask=True`` makes a field a supervised target. ``embed=True`` emits
         its embedding during prediction. ``attention`` selects the root
-        encoder mode and ``reduction`` selects its output representation.
+        encoder mode; ``None`` disables its coordinate and sequence attention.
+        ``reduction`` independently selects its output representation.
 
         ``optimizer`` accepts a Torch optimizer or a factory receiving this
         model. ``scheduler`` accepts a Torch scheduler, a Lightning scheduler
@@ -222,7 +223,7 @@ class Model(lit.LightningModule, Renderable):
                 query=query,
                 description=description,
                 embed=embed,
-                attention=cast(AttentionInput, attention),
+                attention=attention,
                 reduction=reduction,
                 dropout=dropout,
                 mask=mask,

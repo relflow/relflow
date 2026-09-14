@@ -138,7 +138,7 @@ def test_number_embedding_retains_standardized_value_in_monotone_lane():
 
 def test_number_monotone_lane_retains_autograd_at_model_width_one():
     schema = rf.Schema.from_tree(
-        amount=rf.Number(), d_model=1, n_layers=1, n_heads=2, attention="none", reduction=rf.Mean()
+        amount=rf.Number(), d_model=1, n_layers=1, n_heads=2, attention=None, reduction=rf.Mean()
     )
     embedder = Embedder(schema=schema, address="record/amount")
     inputs = TensorInput(

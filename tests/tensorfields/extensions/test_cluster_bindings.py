@@ -22,7 +22,7 @@ def build() -> rf.Model:
         n_layers=1,
         n_heads=4,
         batch_size=2,
-        attention="none",
+        attention=None,
         merchant_id=rf.Cluster(
             capacity=CAPACITY,
             n_clusters=(2, N_CLUSTERS),

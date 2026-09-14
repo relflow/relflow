@@ -1,296 +1,158 @@
 ---
-marimo-static-output: true
-eval: false
+engine: markdown
 ---
 
 # Getting Started
 
-**Example status — runnable:** this page uses the public Arrow pipeline from
-table construction through prediction.
+Build a model that reads a customer's purchase history and predicts churn and
+next month's spending. Install the package with `uv add relflow` (Python 3.12+).
 
-This runnable walkthrough takes one small model through the complete first-use
-lifecycle: install, define a schema, train, inspect validation metrics, save,
-load, and predict with the reconstructed field omitted.
+## One Customer Record
 
-The example is deliberately too small to establish model quality. Its job is to
-verify that every part of the workflow is connected correctly.
-
-## Install
-
-RelFlow requires Python 3.12 or newer. Add the published package to your uv
-project:
-
-```bash
-uv add relflow
+```yaml
+customer_id: customer-42
+tenure_days: 420
+orders:
+  - age_days: 3
+    line_items:
+      - sku: A12
+        quantity: 2
+      - sku: B07
+        quantity: 1
+churned: false
+next_month_spend: 75.0
 ```
 
-For a new project, run `uv init --python 3.12` first.
+The history belongs to the observation window; the two labels describe the
+following month. This is one illustrative record, not a training dataset.
 
-Verify the installed distribution and import:
+## Describe Its Structure
 
-```bash
-uv run python -c 'from importlib.metadata import version; import relflow; print(version("relflow"))'
-```
-
-The core install includes PyTorch, Lightning, PyArrow, Polars, and `Hash`
-fields. Add `text` for Hugging Face text models or `serving` for the FastAPI
-runtime:
-
-```bash
-uv add "relflow[text]"
-uv add "relflow[serving]"
-```
-
-The walkthrough fixes Lightning to `accelerator="cpu"`; no GPU is required.
-For a contributor checkout, install the locked development environment with
-`uv sync`.
-
-## Start With Records
-
-The model will predict one of three Iris species from two numeric measurements.
-Training and validation records include `species` because it is the answer used
-to compute loss and metrics.
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-import lightning.pytorch as lit
-import pyarrow as pa
-import torch
-
+```python
 import relflow as rf
 
-train_records = pa.Table.from_pylist(
-    [
-        {"sepal_length": 5.1, "petal_length": 1.4, "species": "setosa"},
-        {"sepal_length": 4.9, "petal_length": 1.4, "species": "setosa"},
-        {"sepal_length": 6.4, "petal_length": 4.5, "species": "versicolor"},
-        {"sepal_length": 6.0, "petal_length": 4.5, "species": "versicolor"},
-        {"sepal_length": 6.3, "petal_length": 6.0, "species": "virginica"},
-        {"sepal_length": 5.8, "petal_length": 5.1, "species": "virginica"},
-    ]
-)
-
-validate_records = pa.Table.from_pylist(
-    [
-        {"sepal_length": 5.0, "petal_length": 1.5, "species": "setosa"},
-        {"sepal_length": 5.9, "petal_length": 4.2, "species": "versicolor"},
-        {"sepal_length": 6.5, "petal_length": 5.2, "species": "virginica"},
-    ]
-)
-```
-
-::: {.callout-warning}
-These are distinct records, but nine hand-selected rows are only a pipeline
-smoke test. Real validation needs a representative held-out split, enough
-examples for stable metrics, and an identity- or time-aware split when records
-are related. Do not report the numbers from this tutorial as model quality.
-:::
-
-## Define The Schema
-
-`Model(...)` turns field declarations into a model tree. Field names match the
-source keys here, so RelFlow can infer how to bind the values.
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-torch.manual_seed(7)
-
 model = rf.Model(
-    d_model=16,
-    n_layers=1,
-    n_heads=4,
-    batch_size=3,
+    name="customer",
+    d_model=128,
+    n_layers=3,
+    n_heads=8,
+    batch_size=128,
     embed=True,
-    optimizer=lambda module: torch.optim.AdamW(module.parameters(), lr=1e-2),
-    sepal_length=rf.Number,
-    petal_length=rf.Number,
-    species=rf.Category(mask=True, size=3, topk=[2]),
-)
-
-model
-```
-
-The schema expresses four decisions:
-
-- `sepal_length` and `petal_length` are visible numeric inputs;
-- `species` is a bounded category with capacity for exactly the three labels in
-  this example;
-- `mask=True` skips `species` in the encoder and trains its decoder from the
-  remaining context;
-- root-level `embed=True` asks prediction to return one `d_model` vector for
-  each record.
-
-`topk=[2]` is valid because 2 is less than the Category capacity of 3. Extra
-Category capacity is not required for an unavailable class; use extra capacity
-only when the vocabulary is expected to grow.
-
-The generated root is named `record`, so the reconstruction address is
-`record/species`. See [Model Tree](core-concepts/model-tree.qmd) for how to read
-the displayed schema.
-
-## Train And Validate
-
-`ArrowDataModule(...)` handles these in-memory tables. RelFlow models and data
-modules use the regular Lightning training loop.
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-datamodule = rf.ArrowDataModule(
-    model=model,
-    train=train_records,
-    validate=validate_records,
-    num_workers=0,
-    persistent_workers=False,
-    pin_memory=False,
-    seed=42,
-    sample=1.0,
-)
-
-trainer = lit.Trainer(
-    accelerator="cpu",
-    max_epochs=1,
-    logger=False,
-    enable_progress_bar=False,
-    enable_checkpointing=False,
-    enable_model_summary=False,
-    limit_train_batches=1,
-    limit_val_batches=1,
-)
-
-trainer.fit(model=model, datamodule=datamodule)
-metrics = trainer.validate(model=model, datamodule=datamodule, verbose=False)[0]
-
-print(metrics["loss/validate"])
-print(metrics["record.species/validate.accuracy.content"])
-```
-
-`loss/validate` is the weighted total validation loss. The address-qualified
-metric reports content accuracy for `record/species`. A single batch can verify
-that both exist, but it cannot tell you whether this architecture generalizes.
-Use [Training With Lightning](guides/lightning.qmd) for full training loops and
-[Evaluation And Metrics](guides/evaluation.qmd) for denominators, model
-selection, thresholds, and baseline comparisons.
-
-## Save And Load The Artifact
-
-`Model.save(...)` writes the schema, batch size, learned tensorfield state, and
-model weights. `Model.load(...)` reconstructs that inference artifact without
-requiring you to repeat the constructor.
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-from pathlib import Path
-from tempfile import TemporaryDirectory
-
-requests = pa.Table.from_pylist(
-    [
-        {"sepal_length": 5.0, "petal_length": 1.5},
-        {"sepal_length": 6.2, "petal_length": 4.8},
-    ]
-)
-
-with TemporaryDirectory() as directory:
-    artifact = Path(directory) / "iris-relflow.pt"
-    model.save(artifact)
-    restored = rf.Model.load(artifact)
-    predictions = restored.predict(requests)
-```
-
-Notice that `requests` omit `species`. Omission is the normal prediction
-contract for `mask=True`: the slot is absent from encoder routing, then decoded
-from the visible inputs. A
-Lightning training checkpoint may additionally contain optimizer, scheduler,
-and loop state; `Model.save(...)` is the compact RelFlow artifact for restoring
-the schema and model state. [Model Lifecycle](guides/model-lifecycle.qmd)
-explains resumable Lightning checkpoints, best-model rollback, compatibility,
-and processor versioning.
-
-## Interpret The Prediction
-
-Prediction is an Arrow table. Its `predictions` struct is keyed by schema
-address:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-import pyarrow.compute as pc
-
-output = predictions["predictions"]
-species = pc.struct_field(output, "record/species")
-content = pc.struct_field(species, "content")
-record = pc.struct_field(output, "record")
-
-print(pc.struct_field(content, "value"))
-print(pc.struct_field(content, "probability"))
-print(pc.struct_field(content, "topk"))
-print(pc.struct_field(species, "inferred"))
-print(pc.struct_field(record, "embedding"))
-```
-
-For each request:
-
-- `content.value` is the selected vocabulary label;
-- `content.probability` is that label's model probability;
-- `content.topk` contains the two requested ranked candidates;
-- `inferred` is `true` because `species` was requested for deterministic
-  reconstruction;
-- `record.embedding` is the exported 16-dimensional root representation.
-
-The reconstructed payload also contains a probability distribution over value states.
-Category probabilities rank the learned vocabulary; they are not automatically
-calibrated probabilities and are not an out-of-distribution detector. See
-[Prediction Output](guides/prediction-output.qmd) for the complete shared
-envelope, [Built-In Data Types](core-concepts/data-types.qmd) for state/content
-semantics, and [Postprocessors](guides/postprocessors.qmd) for reshaping the
-canonical Arrow result.
-
-## Add Structure Next
-
-The first lifecycle used flat records so each step stayed visible. A nested
-schema adds a `Branch` without changing the train/save/load/predict path:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-nested_model = rf.Model(
-    d_model=32,
-    n_layers=1,
-    n_heads=4,
-    line_items=rf.Branch(
-        length=32,
-        sku=rf.Category(size=2048),
-        quantity=rf.Number,
-        price=rf.Number,
+    tenure_days=rf.Number,
+    orders=rf.Branch(
+        length=64,
+        overflow="tail",
+        age_days=rf.Number,
+        line_items=rf.Branch(
+            length=16,
+            sku=rf.Category(size=8192),
+            quantity=rf.Number,
+        ),
     ),
-    returned=rf.Category(mask=True, size=2),
+    churned=rf.Boolean(mask=True),
+    next_month_spend=rf.Number(mask=True),
 )
-
-nested_model
 ```
 
-Continue with:
+```{typst}
+//| label: fig-customer-start
+//| fig-alt: "Customer context combines tenure and repeated orders. Each order contains age and repeated line items with SKU and quantity. Churn and spending are prediction targets."
+//| fig-cap: "Input fields build local contexts; the customer context supports both predictions."
+#tree(node("Customer", kind: "root", detail: "Export embedding", children: (
+  node("Tenure", detail: "Number"),
+  node("Orders", kind: "branch", repeated: true, children: (
+    node("Age", detail: "Number"),
+    node("Line items", kind: "branch", repeated: true, children: (
+      node("SKU", detail: "Category"),
+      node("Quantity", detail: "Number"),
+    )),
+  )),
+  node("Churned", kind: "target", detail: "Boolean"),
+  node("Next month spend", kind: "target", detail: "Number"),
+)))
+```
 
-- [Data Flow](core-concepts/data-flow.qmd) for the record-to-output mental model;
-- [Model Tree](core-concepts/model-tree.qmd) for branches and addresses;
-- [Built-In Data Types](core-concepts/data-types.qmd) for field choice;
-- [Binding Data](core-concepts/binding-data.qmd) for defaults, queries, and
-  preprocessors;
-- [Data Modules](guides/data-modules.qmd) for Arrow and adapter inputs;
-- [Working With Arrow](guides/working-with-arrow.qmd) for practical column and
-  nested-array recipes;
-- [Evaluation And Metrics](guides/evaluation.qmd) for meaningful validation;
-- [Model Lifecycle](guides/model-lifecycle.qmd) for production artifacts;
-- [Prediction Output](guides/prediction-output.qmd) for the shared response
-  contract; and then
-- [Batch Inference](guides/batch-inference.qmd) for large offline jobs or
-  [Online Serving](guides/serving.qmd) for request-time prediction.
+Parent keywords name the fields. The root name, `customer`, prefixes output
+addresses; it does not add a wrapper around the input record.
+
+`mask=True` keeps a target out of the encoder while retaining its value for
+supervised learning. `embed=True` exports the root representation; it adds no
+objective. `overflow="tail"` keeps recent orders only if the application has
+already sorted them oldest to newest. See [Model Tree](core-concepts/model-tree.qmd).
+
+## Stream Parquet Datasets
+
+Prepare independent training and validation splits with the same nested
+structure. Each directory below contains the application's Parquet files;
+each row is one customer observation:
+
+```python
+import pyarrow.dataset as ds
+
+data = rf.ArrowDataModule(
+    model=model,
+    train=ds.dataset("warehouse/train", format="parquet"),
+    validate=ds.dataset("warehouse/validation", format="parquet"),
+)
+```
+
+Arrow datasets read batches from disk on demand. RelFlow opens a fresh scan
+each epoch, shuffles training through a bounded buffer, and forms batches of
+`model.batch_size` observations. The dataset can be larger than memory; working
+memory depends on scan batches, shuffle buffering, and the size of nested records.
+
+Choose the splits and label windows before training, and keep a consistent
+nested Arrow schema across files. Use partition-scoped
+[Polars preprocessing](guides/preprocessors.qmd#scope-and-context) for transforms
+on streamed batches; dataset-scoped preprocessing gathers the full split in
+memory. See [Data Modules](guides/data-modules.qmd) for other sources and
+[Performance](guides/performance.qmd#feed-the-device) for loader tuning.
+
+## Train And Save
+
+Configure an optimizer before fitting. Lightning runs the training loop;
+RelFlow supplies the typed losses and metrics.
+
+```python
+import lightning.pytorch as lit
+
+checkpoint = rf.RollbackCheckpoint(monitor="loss/validate", mode="min")
+trainer = lit.Trainer(max_epochs=30, callbacks=[checkpoint])
+trainer.fit(model=model, datamodule=data)
+
+model.save("customer.rf")
+restored = rf.Model.load("customer.rf")
+```
+
+The callback restores the best validation checkpoint at fit end. See
+[Training](guides/lightning.qmd) for checkpoint and resume behavior.
+
+## Stream Predictions To Parquet
+
+Request files keep `customer_id` and the visible history, and omit `churned`
+and `next_month_spend`. Write each prediction batch directly to Parquet:
+
+```python
+prediction_data = rf.ArrowDataModule(
+    model=restored,
+    predict=ds.dataset("warehouse/requests", format="parquet"),
+    retain=("customer_id",),
+)
+predictor = lit.Trainer(devices=1, callbacks=[rf.Writer("predictions")])
+predictor.predict(
+    model=restored,
+    datamodule=prediction_data,
+    return_predictions=False,
+)
+
+predictions = ds.dataset("predictions", format="parquet")
+```
+
+`return_predictions=False` keeps Lightning from accumulating results in memory.
+The output remains a file-backed Arrow dataset. Its `inputs` column retains
+`customer_id` for joining results, and its `predictions` column contains
+`customer/churned`, `customer/next_month_spend`, and the exported `customer`
+embedding. See [Prediction Output](guides/prediction-output.qmd) for their shapes
+and [Batch Inference](guides/batch-inference.qmd) for output shards and distributed
+jobs. For small interactive requests, `restored.predict(request_table)` returns
+an in-memory Arrow table.

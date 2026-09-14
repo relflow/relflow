@@ -26,6 +26,8 @@ class Branch(Node):
     ``fields`` mapping for names that collide with configuration options. ``length``
     limits the repeated collection; ``overflow`` chooses which excess rows to
     retain. ``reduction`` controls the context passed to the parent branch.
+    ``attention=None`` disables coordinate and sequence attention independently
+    of the reduction.
     ``mask`` accepts the same policies as a leaf and applies to its descendants.
     """
 
@@ -33,7 +35,7 @@ class Branch(Node):
 
     type: Annotated[Literal["branch"], pydantic.Field(default="branch")] = "branch"
     query: str | None = None
-    attention: AttentionMode = AttentionMode.mha
+    attention: AttentionMode | None = AttentionMode.mha
     length: Annotated[int, pydantic.Field(gt=0, default=1)] = 1
     overflow: Overflow = Overflow.head
     n_layers: Annotated[int, pydantic.Field(gt=0, default=1)] = 1
@@ -165,11 +167,11 @@ class Branch(Node):
             heading.append("embed", style="bold #065f46")
         for name in attributes:
             value = getattr(self, name, None)
-            if value is None and name != "reduction":
+            if value is None and name not in ("attention", "reduction"):
                 continue
             if name == "reduction":
                 if value is None:
-                    value = "none"
+                    value = "None"
                 elif isinstance(value, Attention):
                     settings = value.model_dump(exclude={"type"}, exclude_none=True)
                     if settings.get("position") is True:

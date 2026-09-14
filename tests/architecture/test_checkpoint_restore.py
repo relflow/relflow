@@ -13,13 +13,13 @@ def model() -> rf.Model:
         d_model=8,
         n_layers=1,
         n_heads=4,
-        attention="none",
+        attention=None,
         reduction=rf.Attention(n_layers=2),
         nested=rf.Branch(
             length=2,
             n_layers=1,
             n_heads=4,
-            attention="none",
+            attention=None,
             reduction=rf.Attention(n_layers=2),
             value=rf.Number,
         ),
@@ -69,6 +69,27 @@ def assert_unchanged(
     assert configured.state_dict().keys() == state.keys()
     for name, value in configured.state_dict().items():
         assert torch.equal(value, state[name])
+
+
+def test_saved_checkpoint_preserves_disabled_attention(tmp_path) -> None:
+    source = model()
+    pathname = tmp_path / "disabled-attention.ckpt"
+
+    source.save(pathname)
+    saved = torch.load(pathname, weights_only=False, map_location="cpu")
+    restored = rf.Model.load(pathname)
+
+    assert saved["schema"]["fields"]["attention"] is None
+    assert saved["schema"]["fields"]["fields"][0]["attention"] is None
+    assert restored.schema.model_dump(mode="python") == source.schema.model_dump(mode="python")
+    for address, branch in restored.schema.branches.items():
+        assert branch.attention is None
+        encoder = restored.nodes[address].encoder
+        assert encoder.coordinate_encoder is None
+        assert len(encoder.encoder) == 0
+        assert len(encoder.pool.blocks) == 2
+    for name, value in restored.state_dict().items():
+        assert torch.equal(value, source.state_dict()[name])
 
 
 def test_failed_in_place_state_restore_is_transactional() -> None:

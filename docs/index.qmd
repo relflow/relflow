@@ -1,142 +1,48 @@
 ---
-marimo-static-output: true
-pyproject: |
-  requires-python = ">=3.12"
-  dependencies = [
-    "marimo>=0.23.8",
-    "relflow[serving]",
-  ]
+title: RelFlow
+toc: false
 ---
 
-# Home
+RelFlow builds PyTorch models from nested records. Fields describe values;
+branches describe relationships. A customer can contain orders, and each order
+can contain line items. Those local contexts feed a shared representation from
+which the model predicts missing or supervised values.
 
-**Example status — excerpt:** the opening schema demonstrates the public model
-surface; continue to [Getting Started](getting-started.qmd) for the tested
-artifact lifecycle.
-
-`relflow` builds PyTorch/Lightning models for Arrow records that are not
-naturally flat. An order can contain line items, a customer can have several
-histories, and a session can contain events. You describe those fields and
-relationships as a schema; `relflow` uses the schema as both the input contract
-and the model blueprint.
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-import relflow as rf
-
-model = rf.Model(
-    name="order",
-    d_model=64,
-    n_layers=2,
-    n_heads=4,
-    embed=True,
-    customer_tier=rf.Category(size=16),
-    line_items=rf.Branch(
-        length=32,
-        sku=rf.Category(size=2048),
-        quantity=rf.Number,
-        price=rf.Number,
-    ),
-    returned=rf.Category(mask=True, size=2),
-)
-
-model
+```yaml
+tenure_days: 420
+orders:
+  - age_days: 3
+    line_items:
+      - sku: A12
+        quantity: 2
+      - sku: B07
+        quantity: 1
+churned: false
+next_month_spend: 75.0
 ```
 
-This model reads an order as a structured object. The line items interact in
-their own repeated context before the default Attention reduction routes one
-summary into the order. The `returned` value is skipped by the encoder and
-learned as a supervised
-reconstruction. The root address is `order`, so its prediction is written at
-`order/returned`.
+Applications supply Arrow tables or Polars frames.
 
-## Why Preserve The Record Shape?
+[Define your first model →](getting-started.qmd){.btn .btn-primary}
 
-Flattening nested records into one feature row can be the right choice. It can
-also discard ordering and local relationships, force every history into the
-same window, and move important modeling decisions into a separate feature
-pipeline.
+## Learn The Shape
 
-`relflow` is useful when those relationships are part of the signal:
+- [Model tree](core-concepts/model-tree.qmd): fields, local contexts, and predictions.
+- [Data types](core-concepts/data-types.qmd): choose a representation for each value.
+- [Online vocabulary](core-concepts/vocabulary.qmd): learn labels and handle new or unknown values.
+- [Binding data](core-concepts/binding-data.qmd): connect record keys to schema names.
+- [Masking](core-concepts/dynamic-masking.qmd): decide what the model sees and learns.
 
-- orders with line items;
-- accounts with transactions and statements;
-- users with sessions and events;
-- devices with repeated measurements;
-- mixed-type records where each history needs its own length and overflow rule.
+## Use The Model
 
-Use a simpler tabular model when flattening loses no meaningful context. Read
-[Motivation](motivation.qmd) for the longer design argument and the boundaries
-of the approach.
+- [Preprocessing](guides/preprocessors.qmd): prepare fields and nested records with Polars.
+- [Training](guides/lightning.qmd): fit, validate, save, and restore with Lightning.
+- [Pretraining and fine-tuning](guides/pretraining.qmd): transfer learned context to a labeled task.
+- [Prediction output](guides/prediction-output.qmd): read typed results and embeddings.
+- [Customer risk](case-studies/customer-risk.qmd): combine nested histories and targets.
 
-## What The Schema Controls
+Use this hierarchy when the relationships carry useful information. When a
+flat feature table already expresses the task, a simpler model may suffice.
 
-- Leaf types such as `Number`, `Category`, `Cluster`, `Set`, `Hash`,
-  `DateParts`, `Text`, and `Vector` own value encoding, loss, metrics, and
-  prediction output.
-- `Branch` nodes preserve repeated contexts, mix them locally, and apply a
-  configurable reduction before routing representations to their parent.
-- One `mask` policy controls learned masking, structural skipping, and
-  reconstruction from context.
-- `embed=True` selects root, branch, or leaf representations to export during
-  prediction.
-- Field names and optional node-relative queries bind Arrow values to stable
-  schema addresses.
-
-Lightning owns the training, validation, test, and prediction loops. RelFlow
-owns the schema-derived model, typed tensors, losses, and output contract.
-
-## Choose Your Route
-
-| If you want to… | Start with… |
-| --- | --- |
-| Install the package and produce a first prediction | [Getting Started](getting-started.qmd) |
-| See how one raw record becomes tensors, losses, and output | [Data Flow](core-concepts/data-flow.qmd) |
-| Understand branches, leaves, contexts, and addresses | [Model Tree](core-concepts/model-tree.qmd) |
-| Bind ordinary or mismatched input records | [Binding Data](core-concepts/binding-data.qmd) |
-| Learn the practical Arrow surface | [Working With Arrow](guides/working-with-arrow.qmd) |
-| Choose the representation for a field | [Built-In Data Types](core-concepts/data-types.qmd) |
-| Train and evaluate a model | [Training With Lightning](guides/lightning.qmd) |
-| Interpret metrics and select a model | [Evaluation And Metrics](guides/evaluation.qmd) |
-| Save, restore, or resume an artifact | [Model Lifecycle](guides/model-lifecycle.qmd) |
-| Run large offline prediction jobs | [Batch Inference](guides/batch-inference.qmd) |
-| Operate an online endpoint | [Online Serving](guides/serving.qmd) |
-| Look up a familiar API quickly | [AI / Expert Quickstart](ai-quickstart.qmd) |
-
-## Supported Workflows
-
-The public workflow covers schema construction, Arrow-native data modules,
-Lightning training, interactive Arrow prediction, direct Parquet batch output,
-postprocessing, and optional FastAPI-backed serving. Polars, custom iterable,
-and synthetic mapping inputs enter through focused adapters. Schema mutation,
-dynamic masking, field importance, and field stacking are available as more
-advanced workflows.
-
-Scale depends on the schema, branch lengths, vocabulary sizes, hardware,
-precision, data pipeline, and batch size. Each page labels its examples as
-runnable, excerpt, or sketch; none is a portable throughput benchmark for a
-production workload.
-
-## First Learning Path
-
-[Getting Started](getting-started.qmd) →
-[Data Flow](core-concepts/data-flow.qmd) →
-[Model Tree](core-concepts/model-tree.qmd) →
-[Data Types](core-concepts/data-types.qmd) →
-[Binding Data](core-concepts/binding-data.qmd) →
-[Learning Modes & Embeddings](core-concepts/embeddings.qmd) →
-[Data Modules](guides/data-modules.qmd) →
-[Working With Arrow](guides/working-with-arrow.qmd) →
-[Training With Lightning](guides/lightning.qmd) →
-[Evaluation And Metrics](guides/evaluation.qmd) →
-[Model Lifecycle](guides/model-lifecycle.qmd) →
-[Prediction Output](guides/prediction-output.qmd) → choose
-[Batch Inference](guides/batch-inference.qmd) or
-[Online Serving](guides/serving.qmd).
-
-## Community
-
-Join the [`relflow` Discord](https://discord.gg/DVyZUkvTFA) for questions,
-design discussion, and release notes.
+[Source](https://github.com/relflow/relflow) ·
+[Community](https://discord.gg/DVyZUkvTFA)

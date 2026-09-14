@@ -234,7 +234,7 @@ def model(*, source: MomentSource | Literal["paired"], target: Target) -> rf.Mod
         **fields,
     }
     if source in ("squared_deviation", "cross_deviation"):
-        branch_options["attention"] = "none"
+        branch_options["attention"] = None
     return rf.Model(
         d_model=32,
         n_layers=2,

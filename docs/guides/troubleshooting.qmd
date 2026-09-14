@@ -1,190 +1,44 @@
----
-marimo-static-output: true
-eval: false
----
-
 # Troubleshooting
 
-**Example status — excerpt:** diagnostic blocks assume the model and data from
-the failing workflow.
+Start with the error's schema address and the smallest affected observation.
+Confirm its processed structure against the schema before changing model
+capacity or optimization settings.
 
-Most RelFlow failures come from one of four contracts: post-preprocessor Arrow
-schema, state/content encoding, schema capacity, or artifact/runtime parity.
-Inspect the smallest Arrow table and its schema before changing the
-architecture.
+| Symptom | Check |
+| --- | --- |
+| Constructor rejects an option | Use declared options; parents supply field names. Put notes in `description`. |
+| An input path cannot bind | Names and nesting must match, or the node needs an explicit structural `query`. |
+| A collection exceeds capacity | Check `length` and choose the intended `overflow` rule. |
+| A mask selector fails | It must return one non-null Boolean per retained owner record. |
+| Fitting reports no objectives | Add `mask=True` or `Mask(reconstruct=True)` to an active supported field. |
+| Fitting reports a missing optimizer | Set `model.optimizer = rf.adamw(learning_rate=1e-3)` before fitting. |
+| Training batches have no selected targets | Check masks, source presence, and target geometry; those batches are skipped. |
+| Expected decoded output is absent | Fractional reconstruction policies are inactive in ordinary prediction; use deterministic reconstruction to request outputs. |
+| Too many or too few embeddings | Check the selected node and its reduction, including retained outer branch axes. |
+| Mutation is rejected during a loop | Move the edit outside forward, predict, or Lightning execution. |
+| Compilation disappears after a change | Mutations and checkpoint rebuilds clear it; call `compile()` again. |
 
-## First Five Checks
+Use [Binding Data](../core-concepts/binding-data.qmd),
+[Masking](../core-concepts/dynamic-masking.qmd), and
+[Embeddings](../core-concepts/embeddings.qmd) for those contracts.
 
-1. Print the model and confirm names, addresses, lengths, reconstruction roles, and active
-   fields.
-2. Run `model.encode(one_row_table)` and inspect state/content shapes.
-3. Print the post-preprocessor `pa.Schema`; read every query relative to its
-   parent model node.
-4. Verify that fitting data contains reconstruction values and prediction
-   requests omit unconditional reconstructed fields.
-5. Reproduce on CPU with one observation and no data-loader workers.
+## Separate Events From Metrics
 
-```{python .marimo}
-#| echo: true
-#| output: true
+Model construction, mutation, checkpoint restoration, and numerical safeguards
+produce operational logs. Set `RELFLOW_LOG_LEVEL` before import or configure the
+logger directly:
 
-import pyarrow as pa
+```python
+from relflow.logging import configure
 
-import relflow as rf
-
-records = pa.Table.from_pylist(
-    [
-        {
-            "events": [
-                {"kind": "login", "amount": 10.0},
-                {"kind": "purchase", "amount": 20.0},
-            ]
-        }
-    ]
-)
-
-print(records.schema)
-print(model.encode(records))
+configure(level="DEBUG")
 ```
 
-The snippet is a diagnostic excerpt; use the model from the page where the
-problem occurred.
+Supported levels are `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `CRITICAL`.
+This controls RelFlow event logging. Lightning experiment loggers, progress
+bars, and [evaluation metrics](evaluation.qmd) have their own configuration.
 
-## Symptom Guide
-
-| Symptom | Likely cause | Check or fix |
-| --- | --- | --- |
-| Directly bound field is all null or padded | The processed field is null or nested under a different parent | Compare the post-preprocessor Arrow schema with model names and nesting. |
-| Query binding fails | A segment is absent or incompatible with its Arrow parent type | Read the reported segment relative to its parent model node; inspect that Arrow field type. |
-| Unexpected extra list dimension | A processed branch or explicit query result contains an extra collection layer | Preserve one list axis per child Branch, including `Branch(length=1)`. |
-| Sibling values shift after preprocessing | A custom nested transform filtered leaf arrays independently | Filter whole Arrow structs together; let one Branch query own the shared collection. |
-| Branch truncates useful events | `length` is too small or `overflow` keeps the wrong side | Measure lengths; choose `head`, `tail`, or `error` from event ordering. |
-| Overflow raises | Branch uses `overflow="error"` and input exceeds `length` | Window upstream, increase length after profiling, or select an intentional truncation policy. |
-| `nullable=False` raises | Direct input or a query result contains an explicit `None` | Repair/coerce in a preprocessor or make null part of the contract. Do not replace it silently with a valued default. |
-| Arrow conversion rejects a value | A modeled value contains an opaque object or an unstable physical type | Normalize it at ingress or in the preprocessor and return one exact Arrow schema. |
-| Extension rejects an Arrow union | The leaf contains terminals from more than one incompatible `Extension(types=...)` family; built-in examples include Category, Cluster, Hash, and Set labels | Normalize the column to one deliberate Arrow type in a preprocessor; custom extensions should declare separate entries for incompatible types and a union for types that may promote. |
-| Set rejects an iterable container | A Set leaf received a `set`, `range`, generator, mapping, or another unsupported iterable | Emit a list, tuple, or NumPy array; scalar `str`, `bytes`, and non-iterable values are already treated as singleton labels. |
-| Loss is zero / “no trainable fields” | No reconstructing mask selection is active for the batch | Add `mask=True` or an explicit policy with `reconstruct=True`; inspect `trainable` and target state in encoded input. |
-| Prediction has no decoded value | Visible inputs and stochastic-only objectives are not decoded by default | Configure a deterministic reconstructing mask. `embed=True` requests an embedding and may also invoke decoding, but it does not create an objective. |
-| Prediction address is missing | Root/branch name differs, field is inactive, or its extension declares no public decoded content | Print the model and inspect fields inside the Arrow `predictions` struct. |
-| `topk` validation fails | `1` is redundant or requested `k >= size` | Remove `1`; choose `1 < k < size`. Runtime candidates are capped by the populated vocabulary. |
-| Category vocabulary warning | Training observed more distinct labels than `size` | Confirm cardinality and split roles; increase deliberate capacity or choose another representation. |
-| New Category value is not predicted as “unavailable” | Unavailable is not a prediction class | It remains valued with zero input content. Predictions rank populated known labels; do not treat low confidence as calibrated OOD detection. |
-| Set loses unknown labels | Unknown Set members are not in the fixed multi-hot vocabulary | Increase deliberate capacity or define an upstream unknown policy. There is no extra unavailable slot. |
-| Matching Hash IDs do not transfer information across branches | A fixed-width Branch reduction discarded token-level evidence, or a downstream Branch compressed it later | Put matching roles in one shared repeated Branch, preserve evidence with `reduction=None` where affordable, or align it in preprocessing. More Attention outputs add capacity but are not a keyed join; verify transfer with a paired synthetic proof. |
-| Mutation fails during fit/predict | The active Lightning/runtime loop locks the schema | Mutate between complete loops and identically on every distributed rank. |
-| Mutation changed learned behavior | A tensor shape/address changed and its state could not be restored | Inspect the mutated tree, reset/retrain deliberately, and compare state dictionaries/artifacts. |
-| Loaded built-in model has different vocabulary or normalizer behavior | Wrong artifact or unsupported manual reconstruction | Load the saved RelFlow/Lightning checkpoint that owns schema state; do not reconstruct it from copied constructor code. Dynamically registered custom request types do not currently support artifact round-trips. |
-| Serving symbol import fails | Optional serving dependencies are absent | Install the `serving` extra in the service environment. |
-| Text construction/import fails | Optional tokenizer/model dependencies are absent | Install the `text` extra and pin the tokenizer/model artifact used in training. |
-| Arrow DataLoader workers raise | A preprocessor/schema or filesystem factory is not spawn-picklable, or source files changed | Reproduce with `num_workers=0`; use importable processors/factories and a stable source snapshot. |
-| Accelerator is idle | Input/preprocessor/query/tensorization or output serialization is the bottleneck | Benchmark preparation, forward, and writing separately; tune workers and output before scaling ranks. |
-| NaN/unstable loss | Invalid numeric input, aggressive optimizer, precision issue, or empty metric selection | Inspect raw/encoded values, lower learning rate, reproduce at full precision, and identify the exact address/content loss. |
-
-## Understand State Before Content
-
-Each leaf keeps value state separate from content. The shared states are:
-
-- `valued`: a value was present; datatype content may still be unavailable;
-- `null`: an explicit null;
-- `padded`: an unused fixed-shape position;
-- `masked`: a selected input represented by the learned mask token;
-- `other`: reserved for datatype-specific extensions.
-
-A structurally skipped input is omitted from model routing through `present`;
-it does not acquire another state token. See
-[Data Types And Value State](../core-concepts/data-types.qmd) before debugging a
-content value in isolation.
-
-## Debug A Preprocessor
-
-A RelFlow preprocessor is an object produced by `@rf.preprocess` and must return
-an eager `polars.DataFrame`, `None`, or an iterable of eager frames. A processor
-argument may contain one such object, a list, a tuple, or `None`; RelFlow
-snapshots it as an immutable tuple and runs it left to right.
-
-Exercise it through `model.encode` to include conversion and any runtime-provided
-values:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-import polars as pl
-
-@rf.preprocess
-def rename_amount(frame: pl.DataFrame) -> pl.DataFrame:
-    return frame.rename({"raw_amount": "amount"})
-
-@rf.preprocess
-def derive_features(frame: pl.DataFrame) -> pl.DataFrame:
-    return frame.with_columns(amount_copy=pl.col("amount"))
-
-records = pa.table({"raw_amount": [12.5]})
-encoded = model.encode(
-    records,
-    preprocess=(rename_amount, derive_features),
-)
-```
-
-If the preprocessor requests `strata`, `schema`, or `encoding_context`, test it
-through a data module or `model.encode(..., strata=...)` so those providers are
-present. Bind required user parameters with `.partial(...)`.
-
-When a pipeline fails, inspect the named stage's actual input schema. RelFlow
-does not move a producer ahead of its consumer. A missing column usually means
-the tuple is reversed or an earlier stage dropped it. For mixed scopes, each
-dataset-scoped stage materializes all upstream outputs exactly where it appears.
-
-## Debug Prediction Output
-
-The result is an Arrow table. Check its top-level schema and address fields:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-predictions = model.predict(records)
-print(predictions.schema)
-print(predictions.schema.field("predictions").type)
-```
-
-Decoded address structs can contain `state`, datatype-specific `content`,
-`inferred`, and optional `embedding`. `inferred` is positional: it marks values
-that were masked in prediction input. Read [Prediction Output](prediction-output.qmd)
-for the full envelope before flattening it in a postprocessor.
-
-Postprocessor arguments use the same singleton/list/tuple/`None` forms and run
-strictly left to right. Every stage must return an eager DataFrame with at least
-one column. If a later stage cannot see `inputs`, confirm both that prediction
-retained the needed source columns and that no earlier postprocessor removed the
-canonical envelope.
-
-## Reduce A Distributed Failure
-
-Reduce to `devices=1`, `num_workers=0`, and a fixed local table. Then restore
-workers before ranks. For file sources, verify that every selected file has a
-compatible schema and has not changed since loader preparation. Use a new data
-module to discover a new snapshot.
-
-## Report A Reproducible Issue
-
-Include:
-
-- RelFlow, Python, PyTorch, Lightning, and accelerator versions;
-- operating system and device;
-- the smallest model schema and one redacted raw observation;
-- split/strata and preprocessor or explicit query involved;
-- full exception and the first failing address;
-- whether it reproduces with CPU, one process, and no workers;
-- model save/checkpoint origin for load or serving failures.
-
-## Where Next
-
-- Use [Binding Data](../core-concepts/binding-data.qmd) and
-  [Query Paths](../core-concepts/querypaths.qmd) for binding and shape
-  problems.
-- Use [Evaluation and Metrics](evaluation.qmd) for unexpected metric names or
-  model-selection behavior.
-- Use [Model Lifecycle](model-lifecycle.qmd) for artifact parity.
-- Use [Performance and Scaling](performance.qmd) for bottleneck isolation.
+When isolating a failure, retain the original field types, relevant nested
+structure, and mask selectors. Dropping a containing branch can change target
+geometry, while replacing a null with a missing key can change value state.
+Use the reported invariant to make the smallest meaningful correction.

@@ -64,7 +64,7 @@ def test_mean_learns_average_but_erases_cardinality() -> None:
         optimizer=lambda module: torch.optim.AdamW(module.parameters(), lr=3e-3),
         transactions=rf.Branch(
             length=TRANSACTIONS,
-            attention="none",
+            attention=None,
             reduction=rf.Mean(),
             amount=rf.Number,
         ),
