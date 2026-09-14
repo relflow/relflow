@@ -51,7 +51,7 @@ from relflow.structs.experiment import (
 )
 from relflow.structs.packages import Prediction
 from relflow.structs.reduction import Attention, ReductionConfig
-from relflow.structs.tree import Address, Leaf, MaskInput, Node, Rate, Renderable
+from relflow.structs.tree import Address, MaskInput, Node, Rate, Renderable
 from relflow.tensorfields.base import TENSORFIELDS, Extension
 
 OptimizerConfig = torch.optim.Optimizer | Callable[["Model"], torch.optim.Optimizer]
@@ -199,17 +199,6 @@ class Model(lit.LightningModule, Renderable):
         A positional ``Schema`` or ``schema=...`` restores an existing
         architecture and cannot be combined with tree fields or dimensions.
         """
-        if "n_linear" in field_kwargs and not (
-            isinstance(field_kwargs["n_linear"], Node)
-            or (isinstance(field_kwargs["n_linear"], type) and issubclass(field_kwargs["n_linear"], Leaf))
-        ):
-            raise ValueError("n_linear was removed from Model; use reduction=Attention(n_layers=...)")
-        if "n_outputs" in field_kwargs and not (
-            isinstance(field_kwargs["n_outputs"], Node)
-            or (isinstance(field_kwargs["n_outputs"], type) and issubclass(field_kwargs["n_outputs"], Leaf))
-        ):
-            raise ValueError("n_outputs belongs to a reduction; use reduction=Attention(n_outputs=...)")
-
         if schema is not None:
             if fields is not None or field_kwargs or mask is not False:
                 raise TypeError("schema cannot be combined with tree fields")
@@ -585,8 +574,6 @@ class Model(lit.LightningModule, Renderable):
     def load(cls, checkpoint: str | Path) -> Self:
         """Load a `Model` checkpoint written by `Model.save(...)`."""
         return CheckpointState.load(cls, checkpoint)
-
-    from_checkpoint = load
 
     def write(
         self,

@@ -150,27 +150,14 @@ def test_model_constructor_accepts_root_branch_options():
     assert params.fields.length == 1
     assert params.fields.reduction == rf.Attention(n_outputs=3, n_layers=2)
     assert params.fields.dropout == 0.2
-    assert not hasattr(params.fields, "n_linear")
-    assert not hasattr(params.fields, "p_mask")
     assert params.embed == ["events"]
     assert params.shapes["events/amount"] == (1,)
 
 
-def test_model_constructor_rejects_removed_root_n_linear() -> None:
-    with pytest.raises(ValueError, match="n_linear was removed from Model"):
-        rf.Model(amount=rf.Number(), d_model=16, n_layers=1, n_heads=4, n_linear=2)
-
-
-def test_removed_root_options_remain_available_as_data_field_names() -> None:
-    model = rf.Model(
-        n_linear=rf.Number,
-        n_outputs=rf.Number,
-        d_model=16,
-        n_layers=1,
-        n_heads=4,
-    )
-
-    assert list(model.schema.requests) == ["record/n_linear", "record/n_outputs"]
+@pytest.mark.parametrize("constructor", [rf.Model, rf.Schema.from_tree])
+def test_tree_constructors_reject_children_that_are_not_definitions(constructor) -> None:
+    with pytest.raises(TypeError, match="tree field 'unexpected'.*must be a Branch, Leaf, or Leaf class"):
+        constructor(amount=rf.Number(), d_model=16, n_layers=1, n_heads=4, unexpected=2)
 
 
 def test_schema_rejects_embedding_a_branch_without_active_output() -> None:
@@ -182,9 +169,6 @@ def test_schema_rejects_embedding_a_branch_without_active_output() -> None:
             n_layers=1,
             n_heads=2,
         )
-
-    with pytest.raises(ValueError, match="n_outputs belongs to a reduction"):
-        rf.Model(amount=rf.Number(), d_model=16, n_layers=1, n_heads=4, n_outputs=2)
 
 
 def test_model_constructor_rejects_root_length_argument():

@@ -387,7 +387,6 @@ Tutorials and guides:
 - [Troubleshooting](https://relflow.github.io/relflow/guides/troubleshooting.html)
 - [Experimental Custom Tensorfields](https://relflow.github.io/relflow/guides/custom-tensorfields.html)
 - [Public API Map](https://relflow.github.io/relflow/reference/public-api.html)
-- [Arrow Migration](https://relflow.github.io/relflow/guides/arrow-migration.html)
 - [Branch](https://relflow.github.io/relflow/data-types/branch.html)
 - [Number](https://relflow.github.io/relflow/data-types/number.html)
 - [Boolean](https://relflow.github.io/relflow/data-types/boolean.html)

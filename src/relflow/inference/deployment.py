@@ -27,7 +27,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from relflow.architecture.root import Model
 from relflow.data.arrow import mappings
 from relflow.data.processors import Postprocessor, PostprocessorInput, Preprocessor, PreprocessorInput
-from relflow.structs.experiment import NodeAttribute, NodePredicate, Schema
+from relflow.structs.experiment import NodeAttribute, NodePredicate
 from relflow.structs.tree import Node
 
 Input: TypeAlias = dict[str, Any]
@@ -502,7 +502,6 @@ class Deployment(BaseSettings):
     ) -> DeploymentType:
         """Queue declared schema changes for startup; use ``description`` for notes."""
 
-        values = Schema.update_values(values)
         self._update_operations.append(
             (
                 tuple(predicates),

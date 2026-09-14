@@ -119,14 +119,12 @@ least two dimensions per head; the root and Branch `n_heads` values remain
 even. `rf.Mean()` has no parameters. The configuration objects are frozen
 schema values; they do not share learned parameters when reused.
 
-The former root/Branch `n_linear` option is removed. Put that depth on the
-Attention reduction with `reduction=rf.Attention(n_layers=...)`. The
-same-named option on a leaf remains a decoder-pooling setting and is a separate
-API.
+Set Attention reduction depth with `reduction=rf.Attention(n_layers=...)`.
+A leaf's `n_linear` controls its decoder-pooling depth independently.
 
 `model.version` is immutable checkpoint provenance. New models initialize it
-from `rf.__version__`; loaded models retain the checkpoint's top-level `version`
-when available.
+from `rf.__version__`; loaded models retain the checkpoint's required top-level
+`version`.
 
 ## Built-In Datatypes
 

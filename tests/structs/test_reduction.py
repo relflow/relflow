@@ -73,19 +73,7 @@ def test_output_count_belongs_only_to_sized_reduction_configs() -> None:
     with pytest.raises(pydantic.ValidationError):
         rf.Mean(n_outputs=2)
 
-    with pytest.raises(TypeError, match="tree field 'n_outputs'.*must be a Branch, Leaf, or Leaf class"):
-        rf.Branch(n_outputs=2, value=rf.Number)
-
     assert rf.Branch(reduction=None, value=rf.Number).reduction is None
-
-    with pytest.raises(TypeError, match="tree field 'n_linear'.*must be a Branch, Leaf, or Leaf class"):
-        rf.Branch(n_linear=2, value=rf.Number)
-
-
-def test_removed_branch_options_remain_available_as_data_field_names() -> None:
-    branch = rf.Branch(n_outputs=rf.Number, n_linear=rf.Number)
-
-    assert [field.name for field in branch.fields] == ["n_outputs", "n_linear"]
 
 
 def test_schema_computes_effective_structural_branch_outputs() -> None:

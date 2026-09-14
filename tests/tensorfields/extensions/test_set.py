@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pyarrow as pa
 import torch
 from tensordict import TensorDict
 
@@ -187,8 +188,8 @@ def test_set_tensorfield_simulated_unavailable_zeros_content():
 
 
 class _DummyVocab:
-    def snapshot(self) -> list[str]:
-        return ["ALPHA", "BETA"]
+    def labels(self) -> pa.Array:
+        return pa.array(["ALPHA", "BETA"], type=pa.large_string())
 
 
 class _DummyEmbedder:

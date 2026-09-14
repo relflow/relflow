@@ -165,7 +165,7 @@ children instead of reading one leaf value.
 
 Pass declared options directly, such as
 `rf.Number(objective="mse", description="Transaction amount in USD")`.
-Constructors reject a `kwargs={...}` bag and undeclared options, including
+Constructors reject undeclared options, including
 misspellings and arbitrary metadata. Use `description` for human-readable
 notes. Custom tensorfields declare additional options as fields on their
 `RequestBase` subclass. A mapping of declared options can still be unpacked

@@ -75,8 +75,6 @@ website:
             text: Troubleshooting
           - href: reference/public-api.qmd
             text: Public API Map
-          - href: guides/arrow-migration.qmd
-            text: Arrow Migration
       - text: Case Studies
         menu:
           - href: case-studies/iris-reproducible.qmd
@@ -191,8 +189,6 @@ website:
         contents:
           - href: reference/public-api.qmd
             text: Public API Map
-          - href: guides/arrow-migration.qmd
-            text: Arrow Migration
       - section: Case Studies
         contents:
           - href: case-studies/iris-reproducible.qmd

@@ -179,7 +179,6 @@ class SchemaEditor:
         **values: Any,
     ) -> None:
         self.assert_mutation_allowed("update")
-        values = self.module.schema.update_values(values)
         changes = self.attribute_changes(
             values=values,
             predicates=predicates,
@@ -282,7 +281,6 @@ class SchemaEditor:
         **values: Any,
     ) -> Generator[None, None, None]:
         self.assert_mutation_allowed("override")
-        values = self.module.schema.update_values(values)
         changes = self.attribute_changes(
             values=values,
             predicates=predicates,

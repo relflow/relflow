@@ -9,7 +9,6 @@ import lightning.pytorch as lit
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
 
-from relflow._version import UNKNOWN_VERSION
 from relflow.architecture.graph import ModelGraph
 from relflow.logging import logger
 from relflow.structs.experiment import Schema
@@ -61,7 +60,7 @@ class RollbackCheckpoint(ModelCheckpoint):
 class CheckpointState:
     """Save, load, and restore model state without owning the public facade."""
 
-    required_fields = {"state_dict", "schema", "batch_size"}
+    required_fields = {"state_dict", "schema", "batch_size", "version"}
 
     @staticmethod
     def dump(module: "Model", checkpoint: dict[str, Any]) -> None:
@@ -73,7 +72,7 @@ class CheckpointState:
     @staticmethod
     def restore_version(module: "Model", checkpoint: dict[str, Any]) -> None:
         """Restore checkpoint provenance after validating its version field."""
-        saved = checkpoint.get("version", UNKNOWN_VERSION)
+        saved = checkpoint["version"]
         if not isinstance(saved, str):
             raise ValueError("checkpoint version must be a string")
         object.__setattr__(module, "_version", saved)

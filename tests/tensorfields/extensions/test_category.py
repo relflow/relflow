@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from typing import Any
 
+import pyarrow as pa
 import torch
 from tensordict import TensorDict
 
@@ -266,8 +267,8 @@ def test_category_embedder_zeroes_unavailable_and_non_valued_content_contributio
 
 
 class _DummyVocab:
-    def snapshot(self) -> list[str]:
-        return ["ALPHA", "BETA", "GAMMA", "DELTA", "EPS"]
+    def labels(self) -> pa.Array:
+        return pa.array(["ALPHA", "BETA", "GAMMA", "DELTA", "EPS"], type=pa.large_string())
 
 
 class _DummyEmbedder:

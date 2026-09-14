@@ -467,8 +467,8 @@ can have a small effect when forward and backward dominate. The available
 settings are described in the [PyTorch AdamW documentation](https://docs.pytorch.org/docs/2.12/generated/torch.optim.AdamW.html).
 
 For checkpoint resume with gradient scaling, construct the helper with the
-saved `fused` setting. Optimizer checkpoints made with the previous helper
-default need `adamw(learning_rate=1e-3, fused=None)`; loading them into an
+saved `fused` setting. For example, resume a `fused=None` optimizer with
+`adamw(learning_rate=1e-3, fused=None)`. Loading a different setting into an
 optimizer constructed with `fused=True` can fail in PyTorch's `GradScaler`.
 
 ## Distributed Training

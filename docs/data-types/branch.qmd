@@ -258,9 +258,8 @@ without either branch-level operation.
 The configuration objects are frozen schema values. Reusing one object on two
 branches reuses configuration, not learned parameters.
 
-Branch `n_linear` has been removed. Use
-`reduction=rf.Attention(n_layers=...)`; leaf `n_linear` remains a separate
-decoder-pooling option.
+Set reduction depth with `reduction=rf.Attention(n_layers=...)`. A leaf's
+`n_linear` controls its decoder-pooling depth independently.
 
 Use several learned summaries when one vector is measurably too narrow:
 

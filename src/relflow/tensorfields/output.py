@@ -9,13 +9,16 @@ objects.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pyarrow as pa
 import torch
 
 from relflow.structs.enums import Tokens
+
+if TYPE_CHECKING:
+    from relflow.tensorfields.shared.vocabulary import OnlineVocabularyModel
 
 STATE = pa.struct([pa.field(token.name, pa.float32(), nullable=False) for token in Tokens])
 
@@ -92,13 +95,9 @@ def variable(values: pa.Array, counts: torch.Tensor) -> pa.ListArray:
     return pa.ListArray.from_arrays(boundaries, values)
 
 
-def labels(vocabulary: Any) -> pa.Array:
-    """Return one cached canonical large-string vocabulary array when available."""
-    cached = getattr(vocabulary, "labels", None)
-    if callable(cached):
-        values = cached()
-    else:
-        values = pa.array([str(value) for value in vocabulary.snapshot()], type=pa.large_string())
+def labels(vocabulary: OnlineVocabularyModel) -> pa.Array:
+    """Return one cached canonical large-string vocabulary array."""
+    values = vocabulary.labels()
 
     if not isinstance(values, pa.Array) or values.type != pa.large_string():
         raise TypeError("vocabulary labels must be a large_string Arrow array")
