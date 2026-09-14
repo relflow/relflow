@@ -69,7 +69,7 @@ def test_model_rejects_schema_combined_with_tree_configuration() -> None:
 
 def test_model_tree_constructor_requires_architecture_options() -> None:
     with pytest.raises(TypeError, match="requires n_layers, n_heads"):
-        Model(rf.Number("amount"), d_model=8)
+        Model(amount=rf.Number(), d_model=8)
 
 
 def test_on_save_checkpoint_serializes_schema() -> None:
@@ -667,17 +667,7 @@ def test_encode_returns_tensorfield_inputs_for_raw_batch() -> None:
 
 
 def test_encode_branch_tail_overflow_keeps_last_values() -> None:
-    model = rf.Model(
-        rf.Branch(
-            rf.Number("amount"),
-            name="events",
-            length=2,
-            overflow="tail",
-        ),
-        d_model=8,
-        n_layers=1,
-        n_heads=4,
-    )
+    model = rf.Model(events=rf.Branch(amount=rf.Number(), length=2, overflow="tail"), d_model=8, n_layers=1, n_heads=4)
 
     inputs = model.encode(
         table(
@@ -698,17 +688,7 @@ def test_encode_branch_tail_overflow_keeps_last_values() -> None:
 
 
 def test_encode_branch_error_overflow_raises() -> None:
-    model = rf.Model(
-        rf.Branch(
-            rf.Number("amount"),
-            name="events",
-            length=2,
-            overflow="error",
-        ),
-        d_model=8,
-        n_layers=1,
-        n_heads=4,
-    )
+    model = rf.Model(events=rf.Branch(amount=rf.Number(), length=2, overflow="error"), d_model=8, n_layers=1, n_heads=4)
 
     with pytest.raises(ValueError, match="branch overflow at dimension 2 for record/events/amount"):
         model.encode(

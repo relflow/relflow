@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import builtins
-from collections.abc import Generator, Mapping, Sequence
-from typing import Annotated, Any, Literal, Self, TypeAlias, cast, overload
+from collections.abc import Generator, Mapping
+from typing import Annotated, Any, Literal, Self, TypeAlias, cast
 
 import pydantic
 from rich.console import Console, ConsoleOptions
@@ -22,8 +22,8 @@ RequestTypes: TypeAlias = Leaf
 class Branch(Node):
     """Repeated nested object group in a `relflow` schema.
 
-    Positional children are named field or branch instances. Keyword children
-    may also be tensorfield classes, such as ``amount=rf.Number``. ``length``
+    Parent keywords supply child names, such as ``amount=rf.Number``. Use a
+    ``fields`` mapping for names that collide with configuration options. ``length``
     limits the repeated collection; ``overflow`` chooses which excess rows to
     retain. ``reduction`` controls the context passed to the parent branch.
     ``mask`` accepts the same policies as a leaf and applies to its descendants.
@@ -31,7 +31,6 @@ class Branch(Node):
 
     model_config = pydantic.ConfigDict(extra="forbid", validate_default=True)
 
-    name: str | None = None
     type: Annotated[Literal["branch"], pydantic.Field(default="branch")] = "branch"
     query: str | None = None
     attention: AttentionMode = AttentionMode.mha
@@ -43,32 +42,10 @@ class Branch(Node):
     mask: tuple[Mask, ...] = cast(tuple[Mask, ...], pydantic.Field(default=False))
     fields: list[Self | pydantic.SerializeAsAny[pydantic.InstanceOf[Leaf]]] = pydantic.Field(default_factory=list)
 
-    @overload
-    def __init__(
-        self,
-        *children: Branch | Leaf,
-        name: str | None = None,
-        query: str | None = None,
-        description: str | None = None,
-        embed: bool = False,
-        length: int = 1,
-        overflow: OverflowInput = Overflow.head,
-        attention: AttentionInput = AttentionMode.mha,
-        n_layers: int = 1,
-        n_heads: int = 4,
-        reduction: ReductionConfig | None = ...,
-        dropout: Rate | None = None,
-        mask: MaskInput = False,
-        type: Literal["branch"] = "branch",
-        **named_children: Branch | Leaf | builtins.type[Leaf],
-    ) -> None: ...
-
-    @overload
     def __init__(
         self,
         *,
-        fields: Sequence[Branch | Leaf | Mapping[str, Any]],
-        name: str | None = None,
+        fields: Mapping[str, Branch | Leaf | builtins.type[Leaf]] | None = None,
         query: str | None = None,
         description: str | None = None,
         embed: bool = False,
@@ -77,54 +54,29 @@ class Branch(Node):
         attention: AttentionInput = AttentionMode.mha,
         n_layers: int = 1,
         n_heads: int = 4,
-        reduction: ReductionConfig | None = ...,
+        reduction: ReductionConfig | None = Attention(),
         dropout: Rate | None = None,
         mask: MaskInput = False,
         type: Literal["branch"] = "branch",
-        **named_children: Branch | Leaf | builtins.type[Leaf],
-    ) -> None: ...
+        **children: Branch | Leaf | builtins.type[Leaf],
+    ) -> None:
+        from relflow.structs.experiment import bind_fields
 
-    def __init__(self, *children: Branch | Leaf, **data: Any) -> None:
-        removed = sorted({"p_mask", "p_prune", "target"} & data.keys())
-        if "masks" in data:
-            value = data["masks"]
-            modeled = isinstance(value, (type(self), Leaf)) or (isinstance(value, type) and issubclass(value, Leaf))
-            if not modeled:
-                removed.append("masks")
-        if removed:
-            raise ValueError(f"removed node field(s): {removed}; use mask")
-
-        if "max_length" in data:
-            raise ValueError("max_length was removed; use length")
-        if "n_linear" in data and not (
-            isinstance(data["n_linear"], (type(self), Leaf))
-            or (isinstance(data["n_linear"], type) and issubclass(data["n_linear"], Leaf))
-        ):
-            raise ValueError("n_linear was removed from Branch; use reduction=Attention(n_layers=...)")
-        if "n_outputs" in data and not (
-            isinstance(data["n_outputs"], (type(self), Leaf))
-            or (isinstance(data["n_outputs"], type) and issubclass(data["n_outputs"], Leaf))
-        ):
-            raise ValueError("n_outputs belongs to a reduction; use reduction=Attention(n_outputs=...)")
-
-        if data.get("type") not in (None, "branch"):
-            super().__init__(**data)
-            return
-
-        config_names = set(type(self).model_fields)
-        keyword_children = {key: data.pop(key) for key in tuple(data) if key not in config_names}
-
-        if children:
-            if "fields" in data:
-                raise TypeError("branch children were provided both positionally and by keyword")
-            data["fields"] = list(children)
-
-        if keyword_children:
-            from relflow.structs.experiment import bind_tree_field
-
-            data.setdefault("fields", [])
-            data["fields"].extend(bind_tree_field(key, value) for key, value in keyword_children.items())
-
+        data: dict[str, Any] = dict(
+            fields=bind_fields(fields, children),
+            query=query,
+            description=description,
+            embed=embed,
+            length=length,
+            overflow=overflow,
+            attention=attention,
+            n_layers=n_layers,
+            n_heads=n_heads,
+            reduction=reduction,
+            dropout=dropout,
+            mask=mask,
+            type=type,
+        )
         super().__init__(**data)
 
     @pydantic.field_validator("mask", mode="before")
@@ -174,6 +126,8 @@ class Branch(Node):
     def check_unique_child_names(self) -> Self:
         seen: set[str | None] = set()
         for field in self.fields:
+            if field.name is None:
+                raise ValueError("branch children require names; supply child keywords or a fields mapping")
             if field.name in seen:
                 raise ValueError(f"duplicate field name: {field.name}")
             seen.add(field.name)
@@ -202,8 +156,9 @@ class Branch(Node):
             attributes = ("length", "overflow", *attributes)
 
         heading = Text()
-        heading.append(cast(str, self.name), style=self.RICH_NAME_STYLE)
-        heading.append(" ")
+        if self.name is not None:
+            heading.append(self.name, style=self.RICH_NAME_STYLE)
+            heading.append(" ")
         heading.append(f"[{display_type}]", style=self.RICH_TYPE_STYLE)
         if self.embed:
             heading.append(" ")

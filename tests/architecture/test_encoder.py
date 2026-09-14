@@ -64,13 +64,7 @@ def test_branch_encoder_none_skips_transformer_layers():
 
 def test_branch_encoder_skips_coordinate_head_resolution_when_attention_is_disabled():
     schema = rf.Schema.from_tree(
-        rf.Number("first"),
-        rf.Number("second"),
-        d_model=1,
-        n_layers=1,
-        n_heads=2,
-        attention="none",
-        reduction=rf.Mean(),
+        first=rf.Number(), second=rf.Number(), d_model=1, n_layers=1, n_heads=2, attention="none", reduction=rf.Mean()
     )
 
     encoder = BranchEncoder(schema=schema, address="record")
@@ -81,8 +75,8 @@ def test_branch_encoder_skips_coordinate_head_resolution_when_attention_is_disab
 def test_coordinate_encoder_uses_configured_attention_mode():
     for attention, expected_kv_heads in (("gqa", 2), ("mqa", 1)):
         schema = rf.Schema.from_tree(
-            rf.Number("first"),
-            rf.Number("second"),
+            first=rf.Number(),
+            second=rf.Number(),
             d_model=16,
             n_layers=1,
             n_heads=4,
@@ -236,14 +230,7 @@ def test_branch_encoder_routes_multiple_attention_outputs_to_its_parent():
 
 def test_branch_encoder_none_reduction_routes_every_encoded_token_and_presence():
     schema = rf.Schema.from_tree(
-        rf.Branch(
-            rf.Number("first"),
-            rf.Number("second"),
-            name="items",
-            length=2,
-            attention="none",
-            reduction=None,
-        ),
+        items=rf.Branch(first=rf.Number(), second=rf.Number(), length=2, attention="none", reduction=None),
         d_model=4,
         n_layers=1,
         n_heads=2,
@@ -279,8 +266,8 @@ def test_branch_encoder_none_reduction_routes_every_encoded_token_and_presence()
 
 def test_branch_encoder_orders_nested_and_leaf_parcels_by_schema() -> None:
     schema = rf.Schema.from_tree(
-        rf.Branch(name="nested", length=2, attention="none", reduction=None, value=rf.Number),
-        rf.Number("direct"),
+        nested=rf.Branch(length=2, attention="none", reduction=None, value=rf.Number),
+        direct=rf.Number(),
         d_model=4,
         n_layers=1,
         n_heads=2,
@@ -310,13 +297,7 @@ def test_branch_encoder_orders_nested_and_leaf_parcels_by_schema() -> None:
 
 def test_branch_encoder_contextualizes_only_jointly_aligned_field_coordinates():
     schema = rf.Schema.from_tree(
-        rf.Branch(
-            rf.Number("first"),
-            rf.Number("second"),
-            name="items",
-            length=3,
-            reduction=None,
-        ),
+        items=rf.Branch(first=rf.Number(), second=rf.Number(), length=3, reduction=None),
         d_model=8,
         n_layers=1,
         n_heads=2,
@@ -364,13 +345,7 @@ def test_branch_encoder_contextualizes_only_jointly_aligned_field_coordinates():
 
 def test_branch_encoder_mean_reduction_uses_one_output_and_ignores_padding():
     schema = rf.Schema.from_tree(
-        rf.Branch(
-            rf.Number("value"),
-            name="items",
-            length=3,
-            attention="none",
-            reduction=rf.Mean(),
-        ),
+        items=rf.Branch(value=rf.Number(), length=3, attention="none", reduction=rf.Mean()),
         d_model=4,
         n_layers=1,
         n_heads=2,
@@ -394,13 +369,7 @@ def test_branch_encoder_mean_reduction_uses_one_output_and_ignores_padding():
 
 def test_attention_reduction_can_disable_only_its_rotary_position() -> None:
     schema = rf.Schema.from_tree(
-        rf.Branch(
-            name="items",
-            length=3,
-            attention="none",
-            reduction=rf.Attention(position=False),
-            value=rf.Number,
-        ),
+        items=rf.Branch(length=3, attention="none", reduction=rf.Attention(position=False), value=rf.Number),
         d_model=8,
         n_layers=1,
         n_heads=2,

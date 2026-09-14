@@ -67,7 +67,6 @@ class Request(RequestBase):
 
         def __init__(
             self,
-            name: str | None = None,
             *,
             size: int = 1024,
             capacity: int = ...,

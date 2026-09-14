@@ -66,12 +66,7 @@ def test_pool_owns_outputs_from_reusable_custom_buffers(monkeypatch, mode, activ
 def test_branch_owns_outputs_from_reusable_custom_buffers(monkeypatch, mode, active_rows, boundary):
     pooled = boundary in {"pool", "pool_hook"}
     schema = rf.Schema.from_tree(
-        rf.Number(name="x"),
-        d_model=8,
-        n_heads=2,
-        n_layers=1,
-        dropout=0.0,
-        reduction=rf.Attention() if pooled else None,
+        x=rf.Number(), d_model=8, n_heads=2, n_layers=1, dropout=0.0, reduction=rf.Attention() if pooled else None
     )
     encoder = BranchEncoder(schema, "record").eval()
     producer = ReusableOutput((active_rows, 1 if pooled else 3, 8))
@@ -101,14 +96,7 @@ def test_branch_owns_outputs_from_reusable_custom_buffers(monkeypatch, mode, act
 
 @pytest.mark.parametrize("active_rows", [2, 1, 0], ids=["complete", "partial", "empty"])
 def test_branch_presence_does_not_alias_compute_inputs(monkeypatch, active_rows):
-    schema = rf.Schema.from_tree(
-        rf.Number(name="x"),
-        d_model=8,
-        n_heads=2,
-        n_layers=1,
-        dropout=0.0,
-        reduction=None,
-    )
+    schema = rf.Schema.from_tree(x=rf.Number(), d_model=8, n_heads=2, n_layers=1, dropout=0.0, reduction=None)
     encoder = BranchEncoder(schema, "record")
     captured = []
 
@@ -144,14 +132,7 @@ def test_parameter_outputs_are_owned_without_detaching_gradients(monkeypatch, br
     memory = torch.randn(2, 3, 8)
     present = torch.arange(2).unsqueeze(1).expand(2, 3) < active_rows
     if branch:
-        schema = rf.Schema.from_tree(
-            rf.Number(name="x"),
-            d_model=8,
-            n_heads=2,
-            n_layers=1,
-            dropout=0.0,
-            reduction=None,
-        )
+        schema = rf.Schema.from_tree(x=rf.Number(), d_model=8, n_heads=2, n_layers=1, dropout=0.0, reduction=None)
         module = BranchEncoder(schema, "record")
         module.register_parameter("result", torch.nn.Parameter(torch.randn(3, 8)))
         parameter = module.result
@@ -194,14 +175,7 @@ def test_custom_outputs_preserve_shape_and_dtype_contract(monkeypatch, branch, a
     memory = torch.randn(2, 3, 8)
     present = torch.arange(2).unsqueeze(1).expand(2, 3) < active_rows
     if branch:
-        schema = rf.Schema.from_tree(
-            rf.Number(name="x"),
-            d_model=8,
-            n_heads=2,
-            n_layers=1,
-            dropout=0.0,
-            reduction=None,
-        )
+        schema = rf.Schema.from_tree(x=rf.Number(), d_model=8, n_heads=2, n_layers=1, dropout=0.0, reduction=None)
         module = BranchEncoder(schema, "record")
         parcel = Parcel(
             payload=memory,
@@ -232,14 +206,7 @@ def test_custom_outputs_preserve_shape_and_dtype_contract(monkeypatch, branch, a
 @pytest.mark.parametrize("active_rows", [2, 1], ids=["complete", "partial"])
 @pytest.mark.parametrize("invalid", ["shape", "dtype"])
 def test_branch_rejects_custom_mutation_of_prepared_presence(monkeypatch, active_rows, invalid):
-    schema = rf.Schema.from_tree(
-        rf.Number(name="x"),
-        d_model=8,
-        n_heads=2,
-        n_layers=1,
-        dropout=0.0,
-        reduction=None,
-    )
+    schema = rf.Schema.from_tree(x=rf.Number(), d_model=8, n_heads=2, n_layers=1, dropout=0.0, reduction=None)
     encoder = BranchEncoder(schema, "record")
 
     def compute(inputs, present):

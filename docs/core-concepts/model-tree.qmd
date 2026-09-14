@@ -77,6 +77,30 @@ The generated root is named `record` by default. `Model(name="order", ...)`
 renames it, but it remains a singleton with internal length 1. Repeated root
 data belongs in a child `Branch(length=...)`.
 
+Branch and leaf definitions contain configuration; their parent supplies each
+child's name. `amount=rf.Number` names a leaf `amount`, and
+`line_items=rf.Branch(...)` names a branch `line_items`. Constructors do not
+accept positional fields or names. A standalone definition remains unnamed
+and reusable: binding creates independent named nodes, leaving the original
+definition unchanged. Reusing a definition shares configuration, not learned
+parameters or parent links.
+
+Use `fields` for a generated mapping or a child name that is also a parent
+configuration option:
+
+```python
+measurements = rf.Branch(
+    length=8,
+    fields={"length": rf.Number, "description": rf.Category(size=32)},
+    value=rf.Number,
+)
+```
+
+Here `length=8` configures branch capacity, while `fields["length"]` defines a
+numeric child. Mapping entries and keyword children can be combined, but names
+must be unique. `Model(...)` and `model.extend(...)` accept the same mapping
+form. Bound nodes retain `.name` for inspection, selection, and serialization.
+
 Only leaves encode typed values. A branch gives descendants shape and context;
 by default, its name selects the same-named child collection from the processed
 observation. Any node can use a node-relative `query` to select a different
@@ -154,7 +178,7 @@ The tree is also the selection surface for explicit schema changes:
 | Method | Use |
 | --- | --- |
 | `model.update(predicate, **values)` | Change selected node configuration. |
-| `model.extend(predicate, new_field, ...)` | Add children under one selected branch. |
+| `model.extend(predicate, new_field=rf.Number)` | Add named children under one selected branch. |
 | `model.delete(predicate)` | Permanently remove selected nodes and descendants. |
 | `model.reset(predicate)` | Reinitialize selected runtime modules while keeping schema values. |
 | `model.override(predicate, **values)` | Apply temporary changes inside a context manager. |

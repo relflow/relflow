@@ -83,6 +83,12 @@ The `line_items` branch has its own repeated context, `returned` is skipped by
 the encoder and decoded as a supervised reconstruction, and `embed=True` asks
 prediction to emit embeddings at configured addresses.
 
+Parents name their children through keywords such as `line_items` and `sku`;
+Branch and tensorfield constructors accept configuration only. Use a `fields`
+mapping for generated schemas or names that collide with parent options:
+`rf.Branch(length=32, fields={"length": rf.Number})`. `Model(name="order")`
+names the generated root.
+
 ## Train With Lightning
 
 `rf.Model` is a LightningModule. `rf.ArrowDataModule` is the canonical

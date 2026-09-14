@@ -202,7 +202,10 @@ postprocessor stage. See
 ## Contract Checklist
 
 - Name the root with `Model(name=...)`; use child `Branch(length=...)` for
-  repeated data.
+  repeated data. Name children through their parent keywords, such as
+  `events=rf.Branch(...)`; use `fields={"length": rf.Number}` when a child
+  name collides with a parent option. Branch and leaf constructors take no
+  name or positional arguments.
 - Keep `n_heads` positive and even. For the root, every Branch, and each leaf
   using `pooling="query"`, require `d_model % n_heads == 0` and
   `d_model // n_heads >= 2`.

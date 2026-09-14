@@ -67,7 +67,6 @@ class Request(RequestBase):
 
         def __init__(
             self,
-            name: str | None = None,
             *,
             threshold: float | list[float] = 0.5,
             type: Literal["boolean"] = "boolean",

@@ -5,18 +5,13 @@ from relflow.structs.enums import Strata, Tokens
 from tests.arrow import table
 
 
-def build(*fields):
-    return rf.Model(*fields, d_model=8, n_layers=1, n_heads=2)
+def build(**fields):
+    return rf.Model(**fields, d_model=8, n_layers=1, n_heads=2)
 
 
 def test_direct_schema_binding_and_explicit_nested_query_can_share_a_batch():
     model = build(
-        rf.Branch(
-            rf.Number("value"),
-            name="items",
-            length=2,
-        ),
-        rf.Number("gross_amount", query='payload.metrics["gross amount"]'),
+        items=rf.Branch(value=rf.Number(), length=2), gross_amount=rf.Number(query='payload.metrics["gross amount"]')
     )
 
     encoded = model.encode(
@@ -52,23 +47,11 @@ def test_direct_schema_binding_and_explicit_nested_query_can_share_a_batch():
 
 def test_filters_are_rejected_with_a_preprocessor_remedy():
     with pytest.raises(ValueError, match="filters are not supported; use a preprocessor"):
-        rf.Branch(
-            rf.Number("device_id"),
-            name="login_events",
-            query="events[?kind]",
-            length=2,
-        )
+        rf.Branch(device_id=rf.Number(), query="events[?kind]", length=2)
 
 
 def test_query_backed_leaf_ignores_same_named_direct_source_values():
-    model = build(
-        rf.Category(
-            "label",
-            query="payload.label",
-            size=8,
-            p_unavailable=0.0,
-        )
-    )
+    model = build(label=rf.Category(query="payload.label", size=8, p_unavailable=0.0))
 
     encoded = model.encode(
         table(
@@ -88,13 +71,7 @@ def test_query_backed_leaf_ignores_same_named_direct_source_values():
 
 
 def test_scalar_extension_rejects_list_valued_query_with_field_context():
-    model = build(
-        rf.Branch(
-            rf.Number("value", query="values[*]"),
-            name="items",
-            length=2,
-        )
-    )
+    model = build(items=rf.Branch(value=rf.Number(query="values[*]"), length=2))
 
     with pytest.raises(
         ValueError,
@@ -107,14 +84,7 @@ def test_scalar_extension_rejects_list_valued_query_with_field_context():
 
 
 def test_set_owns_the_list_produced_by_a_traversal_query():
-    model = build(
-        rf.Set(
-            "aliases",
-            query="contacts[*].alias",
-            size=8,
-            p_unavailable=0.0,
-        )
-    )
+    model = build(aliases=rf.Set(query="contacts[*].alias", size=8, p_unavailable=0.0))
 
     encoded = model.encode(
         table(
@@ -138,13 +108,7 @@ def test_set_owns_the_list_produced_by_a_traversal_query():
 
 
 def test_vector_owns_the_list_produced_by_a_traversal_query():
-    model = build(
-        rf.Vector(
-            "coordinates",
-            query="measurements[*].value",
-            n_dim=2,
-        )
-    )
+    model = build(coordinates=rf.Vector(query="measurements[*].value", n_dim=2))
 
     encoded = model.encode(
         table(

@@ -29,7 +29,6 @@ code, product family, customer tier, or similarly discrete value.
 import relflow as rf
 
 merchant_category = rf.Category(
-    "merchant_category",
     size=128,
     topk=[3, 10],
     p_unavailable=0.02,
@@ -81,7 +80,7 @@ described in [Built-In Data Types](../core-concepts/data-types.qmd) and
 #| echo: true
 #| output: true
 
-fraud = rf.Category("fraud", mask=True, size=2)
+fraud = rf.Category(mask=True, size=2)
 
 fraud
 ```

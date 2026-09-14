@@ -1,7 +1,7 @@
 """Public Lightning model facade for `relflow` schemas."""
 
 from collections import Counter
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from functools import partialmethod
 from pathlib import Path
@@ -45,7 +45,6 @@ from relflow.logging import logger
 from relflow.logging.throughput import ThroughputLogger
 from relflow.structs.enums import AttentionInput, AttentionMode, Strata, StrataInput
 from relflow.structs.experiment import (
-    ExtendArg,
     NodeSelector,
     Schema,
     TreeFieldInput,
@@ -115,8 +114,8 @@ class Model(lit.LightningModule, Renderable):
         import relflow as rf
 
         model = rf.Model(
-            rf.Category("segment", size=32),
-            rf.Category("label", mask=True, size=4),
+            segment=rf.Category(size=32),
+            label=rf.Category(mask=True, size=4),
             d_model=16,
             n_layers=1,
             n_heads=4,
@@ -129,12 +128,12 @@ class Model(lit.LightningModule, Renderable):
     @overload
     def __init__(
         self,
-        *field_args: TreeFieldInput,
+        *,
         d_model: int,
         n_layers: int,
         n_heads: int,
         batch_size: int = 1,
-        fields: Sequence[TreeFieldInput] | None = None,
+        fields: Mapping[str, TreeFieldInput] | None = None,
         name: str = "record",
         query: str | None = None,
         description: str | None = None,
@@ -152,18 +151,7 @@ class Model(lit.LightningModule, Renderable):
     def __init__(
         self,
         schema: Schema,
-        /,
         *,
-        batch_size: int = 1,
-        optimizer: OptimizerConfig | None = None,
-        scheduler: SchedulerConfig | None = None,
-    ) -> None: ...
-
-    @overload
-    def __init__(
-        self,
-        *,
-        schema: Schema,
         batch_size: int = 1,
         optimizer: OptimizerConfig | None = None,
         scheduler: SchedulerConfig | None = None,
@@ -172,13 +160,13 @@ class Model(lit.LightningModule, Renderable):
     @beartype
     def __init__(
         self,
-        *field_args: TreeFieldInput | Schema,
         schema: Schema | None = None,
+        *,
         d_model: int | None = None,
         n_layers: int | None = None,
         n_heads: int | None = None,
         batch_size: int = 1,
-        fields: Sequence[TreeFieldInput] | None = None,
+        fields: Mapping[str, TreeFieldInput] | None = None,
         name: str = "record",
         query: str | None = None,
         description: str | None = None,
@@ -222,14 +210,8 @@ class Model(lit.LightningModule, Renderable):
         ):
             raise ValueError("n_outputs belongs to a reduction; use reduction=Attention(n_outputs=...)")
 
-        if field_args and isinstance(field_args[0], Schema):
-            if len(field_args) != 1 or schema is not None:
-                raise TypeError("a positional Schema cannot be combined with other fields or schema=")
-            schema = field_args[0]
-            field_args = ()
-
         if schema is not None:
-            if field_args or fields is not None or field_kwargs or mask is not False:
+            if fields is not None or field_kwargs or mask is not False:
                 raise TypeError("schema cannot be combined with tree fields")
             if d_model is not None or n_layers is not None or n_heads is not None:
                 raise TypeError("schema cannot be combined with d_model, n_layers, or n_heads")
@@ -243,7 +225,6 @@ class Model(lit.LightningModule, Renderable):
                 raise TypeError(f"Model requires {names} when constructed from tree fields")
 
             schema = Schema.from_tree(
-                *cast(tuple[TreeFieldInput, ...], field_args),
                 d_model=cast(int, d_model),
                 n_layers=cast(int, n_layers),
                 n_heads=cast(int, n_heads),
@@ -414,12 +395,16 @@ class Model(lit.LightningModule, Renderable):
 
     def extend(
         self,
-        *args: ExtendArg,
+        *predicates: NodeSelector,
+        fields: Mapping[str, TreeFieldInput] | None = None,
         include_root: bool = True,
         use_cache: bool = True,
+        **children: TreeFieldInput,
     ) -> None:
-        """Append new schema fields under one selected branch node and rebuild modules."""
-        self._schema_editor.extend(*args, include_root=include_root, use_cache=use_cache)
+        """Append keyword or mapping-named children under one selected branch."""
+        self._schema_editor.extend(
+            *predicates, fields=fields, include_root=include_root, use_cache=use_cache, **children
+        )
 
     def delete(
         self,

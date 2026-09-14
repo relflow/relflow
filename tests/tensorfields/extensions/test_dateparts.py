@@ -17,12 +17,7 @@ ADDRESS = rf.Address("record", "created")
 
 def build(jitter: Jitter | dict[str, object] | None = None) -> rf.Model:
     options = {} if jitter is None else {"jitter": jitter}
-    return rf.Model(
-        rf.DateParts("created", dateparts=["day_of_week"], **options),
-        d_model=8,
-        n_layers=1,
-        n_heads=2,
-    )
+    return rf.Model(created=rf.DateParts(dateparts=["day_of_week"], **options), d_model=8, n_layers=1, n_heads=2)
 
 
 def test_dateparts_request_hydrates_jitter_from_a_mapping():
@@ -34,7 +29,7 @@ def test_dateparts_request_hydrates_jitter_from_a_mapping():
 @pytest.mark.parametrize("value", [None, 0.0, 0.2, 1, True])
 def test_dateparts_rejects_non_jitter_configuration(value: object):
     with pytest.raises(pydantic.ValidationError):
-        rf.DateParts("created", dateparts=["day_of_week"], jitter=value)
+        rf.DateParts(dateparts=["day_of_week"], jitter=value)
 
 
 @pytest.mark.parametrize("normalize", [True, False])

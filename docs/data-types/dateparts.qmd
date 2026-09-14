@@ -29,7 +29,6 @@ hour of day, day of week, month of year, or related cyclical coordinates.
 import relflow as rf
 
 created_at = rf.DateParts(
-    "created_at",
     dateparts=["day of week", "HourOfDay", "second_of_minute"],
     pattern="%Y-%m-%dT%H:%M:%S",
     jitter=rf.Jitter(add=0.02, multiply=0.05),
@@ -113,7 +112,6 @@ part's trainable projection:
 #| echo: true
 
 noisy_calendar = rf.DateParts(
-    "created_at",
     dateparts=["day_of_week", "hour_of_day"],
     jitter=rf.Jitter(add=0.02, multiply=0.05),
 )

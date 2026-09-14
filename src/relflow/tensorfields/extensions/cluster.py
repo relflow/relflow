@@ -94,7 +94,6 @@ class Request(RequestBase):
         @overload
         def __init__(
             self,
-            name: str | None = None,
             *,
             bounds: int | tuple[int, int],
             n_clusters: int | tuple[int, int] = ...,
@@ -109,7 +108,6 @@ class Request(RequestBase):
         @overload
         def __init__(
             self,
-            name: str | None = None,
             *,
             n_clusters: int | tuple[int, int],
             bounds: int | tuple[int, int] = ...,

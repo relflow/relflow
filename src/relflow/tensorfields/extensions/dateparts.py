@@ -242,7 +242,6 @@ class Request(RequestBase):
 
         def __init__(
             self,
-            name: str | None = None,
             *,
             dateparts: list[DatePart | str] | tuple[DatePart | str, ...],
             pattern: str | None = None,

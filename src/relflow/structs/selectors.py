@@ -224,7 +224,6 @@ def where(name: str) -> NodeAttribute:
 
 
 NodeSelector: TypeAlias = NodePredicate | NodeAttribute | Callable[[Node], bool]
-ExtendArg: TypeAlias = NodeSelector | SchemaField
 
 
 def has_model_attribute(node: Node, name: str) -> bool:

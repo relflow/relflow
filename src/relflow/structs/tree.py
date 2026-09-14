@@ -2,13 +2,13 @@
 
 import functools
 import io
-import re
 from abc import ABC
 from collections.abc import Generator, Mapping
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self, TypeAlias, TypedDict, cast
 
 import pydantic
 from anytree import NodeMixin
+from pydantic_core import CoreSchema
 from rich.console import Console, ConsoleOptions
 from rich.text import Text
 
@@ -217,14 +217,22 @@ class Node(NodeMixin, Renderable, pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(extra="forbid")
 
-    name: str | None = None
     if TYPE_CHECKING:
+
+        @property
+        def name(self) -> str | None:
+            """The name assigned when a parent binds this node."""
+            ...
+
+        @name.setter
+        def name(self, value: str | None) -> None: ...
 
         @property
         def type(self) -> str:
             """The concrete node's fixed schema discriminator."""
             ...
     else:
+        name: str | None = None
         type: str
     description: str | None = None
     embed: bool = False
@@ -232,9 +240,23 @@ class Node(NodeMixin, Renderable, pydantic.BaseModel):
     dropout: Rate | None = None
 
     @classmethod
-    def sanitize_name(cls, value: str) -> str:
-        sanitized = re.sub(r"[^0-9A-Za-z_-]+", "_", value).strip("_")
-        return sanitized or "field"
+    def __get_pydantic_core_schema__(cls, source: Any, handler: pydantic.GetCoreSchemaHandler) -> CoreSchema:
+        """Restore serialized nodes through validators without replaying public constructors."""
+        schema = handler(source)
+        model = schema
+        while model["type"] in ("function-before", "function-after", "function-wrap"):
+            model = model["schema"]
+        if model["type"] == "model":
+            model["custom_init"] = False
+        return schema
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        """Keep parent-assigned names out of Pydantic's generated constructor signature."""
+        super().__pydantic_init_subclass__(**kwargs)
+        cls.__signature__ = cls.__signature__.replace(
+            parameters=[parameter for parameter in cls.__signature__.parameters.values() if parameter.name != "name"]
+        )
 
     @functools.cached_property
     def address(self) -> Address:
@@ -295,7 +317,6 @@ class Leaf(Node):
 
     active: bool = True
     embed: bool = False
-    name: str | None = None
     if TYPE_CHECKING:
 
         @property
@@ -311,11 +332,9 @@ class Leaf(Node):
     mask: tuple[Mask, ...] = cast(tuple[Mask, ...], pydantic.Field(default=False))
     n_linear: Annotated[int, pydantic.Field(gt=0, default=1)] = 1
 
-    def __init__(self, name: str | None = None, **data: Any) -> None:
-        if name is not None:
-            if "name" in data:
-                raise TypeError("name was provided both positionally and by keyword")
-            data["name"] = name
+    def __init__(self, **data: Any) -> None:
+        if "name" in data:
+            raise TypeError("tensorfield names come from the parent; use field_name=Tensorfield(...)")
         super().__init__(**data)
 
     @pydantic.model_validator(mode="before")
@@ -367,8 +386,9 @@ class Leaf(Node):
             flags.append("reconstruct")
 
         heading = Text()
-        heading.append(cast(str, self.name), style=self.RICH_NAME_STYLE)
-        heading.append(" ")
+        if self.name is not None:
+            heading.append(self.name, style=self.RICH_NAME_STYLE)
+            heading.append(" ")
         heading.append(f"[{self.type}]", style=self.RICH_TYPE_STYLE)
         for flag in flags:
             heading.append(" ")

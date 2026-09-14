@@ -211,10 +211,16 @@ class Request(rf.RequestBase):
     clip: Annotated[float, pydantic.Field(gt=0.0)] = 10.0
 ```
 
-`RequestBase` provides common options such as `name`, `query`, `nullable`,
+Put validation and normalization in Pydantic validators named `check_...`.
+Binding and checkpoint loading validate serialized request data without
+calling the public constructor.
+
+`RequestBase` provides common options such as `query`, `nullable`,
 `active`, `embed`, `weight`, `mask`, pooling, heads, linear depth, and neural
-dropout. With `query=None`, a request reads its own name from its parent
-selection. An explicit node-relative structural query is evaluated inside the
+dropout. The parent keyword or `fields` mapping supplies the request's name;
+the constructor accepts only configuration. With `query=None`, a request reads
+its bound name from its parent selection. An explicit node-relative structural
+query is evaluated inside the
 same coalescing call; direct and queried values converge before fixed-geometry
 projection.
 Custom tensorfields therefore receive the same `field` contract in either case

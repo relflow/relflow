@@ -22,7 +22,7 @@ def test_renderable_owns_shared_rich_styles() -> None:
 
 
 def test_leaf_rich_display_uses_schema_summary() -> None:
-    rendered = render_text(rf.Number("amount"))
+    rendered = render_text(rf.Number.model_validate({"name": "amount"}))
 
     assert "amount [number] active" in rendered
     assert "query=" not in rendered
@@ -37,23 +37,25 @@ def test_leaf_rich_display_uses_schema_summary() -> None:
 
 
 def test_leaf_rich_display_shows_only_explicit_query() -> None:
-    direct = render_text(rf.Number("amount"))
-    queried = render_text(rf.Number("amount", query="payload.amount"))
+    direct = render_text(rf.Number.model_validate({"name": "amount"}))
+    queried = render_text(rf.Number.model_validate({"name": "amount", "query": "payload.amount"}))
 
     assert "query=" not in direct
     assert "amount [number] active query=payload.amount" in queried
 
 
 def test_leaf_rich_display_shows_nondefault_decoder_position() -> None:
-    rendered = render_text(rf.Number("answer", decoder_position=True))
+    rendered = render_text(rf.Number.model_validate({"name": "answer", "decoder_position": True}))
 
     assert "decoder_position=True" in rendered
 
 
 def test_leaf_display_flags() -> None:
-    reconstruct = render_text(rf.Category("returned", mask=True, size=2)).splitlines()[0].split()
-    embedded = render_text(rf.Number("amount", embed=True)).splitlines()[0].split()
-    inactive = render_text(rf.Category("customer_id", active=False)).splitlines()[0].split()
+    reconstruct = (
+        render_text(rf.Category.model_validate({"name": "returned", "mask": True, "size": 2})).splitlines()[0].split()
+    )
+    embedded = render_text(rf.Number.model_validate({"name": "amount", "embed": True})).splitlines()[0].split()
+    inactive = render_text(rf.Category.model_validate({"name": "customer_id", "active": False})).splitlines()[0].split()
 
     assert "reconstruct" in reconstruct
     assert "embed" in embedded
@@ -62,24 +64,16 @@ def test_leaf_display_flags() -> None:
 
 
 def test_names_and_type_labels_have_background_styles() -> None:
-    number_html = rf.Number("amount")._repr_html_()
-    category_html = rf.Category("sku")._repr_html_()
-    branch_html = rf.Branch(rf.Number("amount"), name="items")._repr_html_()
+    number_html = rf.Number.model_validate({"name": "amount"})._repr_html_()
+    category_html = rf.Category.model_validate({"name": "sku"})._repr_html_()
+    branch_html = rf.Branch.model_validate(
+        {"name": "items", "fields": [rf.Number.model_validate({"name": "amount"})]}
+    )._repr_html_()
     schema_html = rf.Schema.from_tree(
-        rf.Number("amount"),
-        rf.Number("label", mask=True),
-        name="record",
-        d_model=8,
-        n_layers=1,
-        n_heads=4,
+        amount=rf.Number(), label=rf.Number(mask=True), name="record", d_model=8, n_layers=1, n_heads=4
     )._repr_html_()
     model_html = rf.Model(
-        rf.Number("amount"),
-        rf.Number("label", mask=True),
-        name="record",
-        d_model=8,
-        n_layers=1,
-        n_heads=4,
+        amount=rf.Number(), label=rf.Number(mask=True), name="record", d_model=8, n_layers=1, n_heads=4
     )._repr_html_()
 
     for html in (number_html, category_html, branch_html, schema_html, model_html):
@@ -89,8 +83,10 @@ def test_names_and_type_labels_have_background_styles() -> None:
 
 
 def test_leaf_display_separates_common_and_specific_attributes() -> None:
-    number_lines = render_text(rf.Number("amount", mask=0.15, objective="huber")).splitlines()
-    category_lines = render_text(rf.Category("sku", size=2048)).splitlines()
+    number_lines = render_text(
+        rf.Number.model_validate({"name": "amount", "mask": 0.15, "objective": "huber"})
+    ).splitlines()
+    category_lines = render_text(rf.Category.model_validate({"name": "sku", "size": 2048})).splitlines()
 
     assert number_lines[1].startswith(" ")
     assert "objective=huber" not in number_lines[1]
@@ -106,11 +102,15 @@ def test_leaf_display_separates_common_and_specific_attributes() -> None:
 
 def test_branch_rich_display_renders_child_subtree() -> None:
     rendered = render_text(
-        rf.Branch(
-            rf.Category("sku", size=2048),
-            rf.Number("quantity"),
-            name="line_items",
-            length=32,
+        rf.Branch.model_validate(
+            {
+                "name": "line_items",
+                "length": 32,
+                "fields": [
+                    rf.Category.model_validate({"name": "sku", "size": 2048}),
+                    rf.Number.model_validate({"name": "quantity"}),
+                ],
+            }
         )
     )
 
@@ -125,10 +125,11 @@ def test_branch_rich_display_renders_child_subtree() -> None:
 
 
 def test_tree_prefixes_have_bold_html_style() -> None:
-    html = rf.Branch(
-        rf.Number("amount"),
-        rf.Number("quantity"),
-        name="line_items",
+    html = rf.Branch.model_validate(
+        {
+            "name": "line_items",
+            "fields": [rf.Number.model_validate({"name": "amount"}), rf.Number.model_validate({"name": "quantity"})],
+        }
     )._repr_html_()
 
     assert 'font-weight: bold">|-- </span>' in html
@@ -137,11 +138,13 @@ def test_tree_prefixes_have_bold_html_style() -> None:
 
 def test_branch_embed_renders_as_flag() -> None:
     rendered = render_text(
-        rf.Branch(
-            rf.Number("amount"),
-            name="line_items",
-            length=32,
-            embed=True,
+        rf.Branch.model_validate(
+            {
+                "name": "line_items",
+                "length": 32,
+                "embed": True,
+                "fields": [rf.Number.model_validate({"name": "amount"})],
+            }
         )
     )
 
@@ -151,31 +154,31 @@ def test_branch_embed_renders_as_flag() -> None:
 
 def test_branch_rich_display_renders_reduction_configuration() -> None:
     attention = render_text(
-        rf.Branch(
-            rf.Number("amount"),
-            name="items",
-            reduction=rf.Attention(n_outputs=4, n_heads=2, n_layers=3, dropout=0.2),
+        rf.Branch.model_validate(
+            {
+                "name": "items",
+                "reduction": rf.Attention(n_outputs=4, n_heads=2, n_layers=3, dropout=0.2),
+                "fields": [rf.Number.model_validate({"name": "amount"})],
+            }
         )
     )
     position_free = render_text(
-        rf.Branch(
-            rf.Number("amount"),
-            name="items",
-            reduction=rf.Attention(position=False),
+        rf.Branch.model_validate(
+            {
+                "name": "items",
+                "reduction": rf.Attention(position=False),
+                "fields": [rf.Number.model_validate({"name": "amount"})],
+            }
         )
     )
     mean = render_text(
-        rf.Branch(
-            rf.Number("amount"),
-            name="items",
-            reduction=rf.Mean(),
+        rf.Branch.model_validate(
+            {"name": "items", "reduction": rf.Mean(), "fields": [rf.Number.model_validate({"name": "amount"})]}
         )
     )
     passthrough = render_text(
-        rf.Branch(
-            rf.Number("amount"),
-            name="items",
-            reduction=None,
+        rf.Branch.model_validate(
+            {"name": "items", "reduction": None, "fields": [rf.Number.model_validate({"name": "amount"})]}
         )
     )
 
@@ -187,14 +190,7 @@ def test_branch_rich_display_renders_reduction_configuration() -> None:
 
 def test_root_branch_embed_renders_as_flag() -> None:
     rendered = render_text(
-        rf.Schema.from_tree(
-            rf.Number("amount"),
-            name="record",
-            d_model=8,
-            n_layers=1,
-            n_heads=4,
-            embed=True,
-        )
+        rf.Schema.from_tree(amount=rf.Number(), name="record", d_model=8, n_layers=1, n_heads=4, embed=True)
     )
 
     assert "`-- record [root] embed attention=mha" in rendered
@@ -203,16 +199,24 @@ def test_root_branch_embed_renders_as_flag() -> None:
 
 def test_nested_branch_rich_display_renders_nested_tree_prefixes() -> None:
     rendered = render_text(
-        rf.Branch(
-            rf.Branch(
-                rf.Number("amount"),
-                rf.Category("merchant", size=4096),
-                name="transactions",
-                length=360,
-                overflow="tail",
-            ),
-            rf.Category("churned", mask=True, size=2),
-            name="customer",
+        rf.Branch.model_validate(
+            {
+                "name": "customer",
+                "fields": [
+                    rf.Branch.model_validate(
+                        {
+                            "name": "transactions",
+                            "length": 360,
+                            "overflow": "tail",
+                            "fields": [
+                                rf.Number.model_validate({"name": "amount"}),
+                                rf.Category.model_validate({"name": "merchant", "size": 4096}),
+                            ],
+                        }
+                    ),
+                    rf.Category.model_validate({"name": "churned", "mask": True, "size": 2}),
+                ],
+            }
         )
     )
 
@@ -224,7 +228,7 @@ def test_nested_branch_rich_display_renders_nested_tree_prefixes() -> None:
 
 
 def test_common_display_surfaces_are_backed_by_rich() -> None:
-    node = rf.Number("amount")
+    node = rf.Number.model_validate({"name": "amount"})
 
     assert str(node) == render_text(node)
 
@@ -246,12 +250,7 @@ def test_common_display_surfaces_are_backed_by_rich() -> None:
 
 def test_schema_rich_display_uses_root_schema_tree() -> None:
     schema = rf.Schema.from_tree(
-        rf.Number("amount"),
-        rf.Category("label", mask=True, size=2),
-        name="record",
-        d_model=8,
-        n_layers=1,
-        n_heads=4,
+        amount=rf.Number(), label=rf.Category(mask=True, size=2), name="record", d_model=8, n_layers=1, n_heads=4
     )
 
     assert isinstance(schema, Renderable)
@@ -270,8 +269,8 @@ def test_schema_rich_display_uses_root_schema_tree() -> None:
 
 def test_model_rich_display_uses_runtime_summary_and_schema_tree() -> None:
     model = rf.Model(
-        rf.Number("amount"),
-        rf.Category("label", mask=True, size=2),
+        amount=rf.Number(),
+        label=rf.Category(mask=True, size=2),
         name="record",
         d_model=8,
         n_layers=1,
@@ -296,12 +295,7 @@ def test_model_rich_display_uses_runtime_summary_and_schema_tree() -> None:
 
 def test_model_select_pprint_uses_rich_node_display() -> None:
     model = rf.Model(
-        rf.Number("amount"),
-        rf.Category("species", mask=True, size=4),
-        name="record",
-        d_model=8,
-        n_layers=1,
-        n_heads=4,
+        amount=rf.Number(), species=rf.Category(mask=True, size=4), name="record", d_model=8, n_layers=1, n_heads=4
     )
 
     selection = model.select(rf.where("address") == "record/species")
@@ -323,10 +317,8 @@ def test_model_select_pprint_uses_rich_node_display() -> None:
 @pytest.mark.parametrize("objective", [False, True])
 def test_tensorfield_rich_display_previews_state_tokens(objective: bool) -> None:
     model = rf.Model(
-        rf.Branch(
-            rf.Category("letter", size=4, p_unavailable=0.0, mask=rf.Mask(dropout=False, reconstruct=objective)),
-            name="letters",
-            length=4,
+        letters=rf.Branch(
+            letter=rf.Category(size=4, p_unavailable=0.0, mask=rf.Mask(dropout=False, reconstruct=objective)), length=4
         ),
         d_model=8,
         n_layers=1,
@@ -353,15 +345,7 @@ def test_tensorfield_rich_display_previews_state_tokens(objective: bool) -> None
 
 def test_tensorfield_rich_display_separates_nested_array_state_tokens() -> None:
     model = rf.Model(
-        rf.Branch(
-            rf.Branch(
-                rf.Category("letter", size=8, p_unavailable=0.0),
-                name="letters",
-                length=3,
-            ),
-            name="words",
-            length=2,
-        ),
+        words=rf.Branch(letters=rf.Branch(letter=rf.Category(size=8, p_unavailable=0.0), length=3), length=2),
         d_model=8,
         n_layers=1,
         n_heads=4,
@@ -387,7 +371,7 @@ def test_tensorfield_rich_display_separates_nested_array_state_tokens() -> None:
 
 
 def test_rich_display_does_not_replace_repr_or_mutate_serialization() -> None:
-    node = rf.Number("amount", mask=0.15)
+    node = rf.Number.model_validate({"name": "amount", "mask": 0.15})
     dumped = node.model_dump(mode="python")
 
     assert "query=<inferred>" not in repr(node)

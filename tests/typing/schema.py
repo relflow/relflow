@@ -14,7 +14,7 @@ from relflow.tensorfields.extensions.number import Objective
 
 
 def schema_api() -> None:
-    number = rf.Number("amount", mask=[rf.Mask(rate=0.2)], objective="mse", pooling="mean")
+    number = rf.Number(mask=[rf.Mask(rate=0.2)], objective="mse", pooling="mean")
     assert_type(number.mask, tuple[rf.Mask, ...])
     assert_type(number.objective, Objective)
     assert_type(number.n_bands, int)
@@ -29,8 +29,7 @@ def schema_api() -> None:
     rf.Hash(n_hashes=2, n_buckets=8)
     rf.Boolean(threshold=[0.3, 0.7], mask=True)
     branch = rf.Branch(
-        number,
-        name="items",
+        amount=number,
         length=32,
         overflow="tail",
         attention="gqa",
@@ -41,7 +40,7 @@ def schema_api() -> None:
     assert_type(branch.attention, AttentionMode)
     assert_type(branch.overflow, Overflow)
     assert_type(branch.mask, tuple[rf.Mask, ...])
-    rf.Branch(name="items", fields=[number], reduction=rf.Mean())
+    rf.Branch(fields={"length": number, "description": rf.Category}, reduction=rf.Mean())
     rf.Model(d_model=32, n_heads=4, n_layers=1, items=branch, label=rf.Boolean(mask=True))
 
 
@@ -55,11 +54,11 @@ def third_party_schema() -> None:
         type: Literal["typing_custom"] = "typing_custom"
         width: int = 4
 
-    request = Request(name="custom", width=8, mask=True)
+    request = Request(width=8, mask=True)
     assert_type(request, Request)
     assert_type(request.width, int)
     assert_type(request.mask, tuple[rf.Mask, ...])
-    rf.Branch(name="context", custom=request)
+    rf.Branch(custom=request)
     assert_type(extension.loss, Loss)
     assert_type(extension.observe, Observe)
     assert_type(extension.output, OutputSchema)

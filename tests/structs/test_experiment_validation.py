@@ -89,7 +89,7 @@ def test_schema_rejects_removed_branch_mask_rate():
     payload = _schema_payload()
     payload["fields"]["p_mask"] = 1.0
 
-    with pytest.raises(ValueError, match="removed node field"):
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
         Schema.model_validate(payload)
 
 

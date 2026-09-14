@@ -86,8 +86,8 @@ positive dimensions and compatible attention head counts.
 
 | Parameter | Required/default | Meaning |
 | --- | --- | --- |
-| positional/keyword fields | At least one request | Tensorfields and child branches that become the generated root's children. |
-| `fields` | `None` | Sequence form of the same root children; cannot duplicate names supplied positionally or by keyword. |
+| keyword fields | Optional with `fields` | Named tensorfields and child branches that become the generated root's children, such as `amount=rf.Number`. The combined children must contain at least one tensorfield. |
+| `fields` | `None` | Mapping from child names to definitions; use for generated schemas or names that collide with Model configuration. Cannot duplicate names supplied by keyword. |
 | `d_model` | Required | Shared representation width. |
 | `n_layers` | Required | Generated root self-attention depth. |
 | `n_heads` | Required | Generated root self-attention heads and the fallback head count for an `Attention` reduction; positive, even, a divisor of `d_model`, and small enough that `d_model // n_heads >= 2`. |
@@ -104,6 +104,10 @@ positive dimensions and compatible attention head counts.
 
 Passing `schema=...` is a lower-level/load integration and cannot be combined
 with tree fields or root architecture arguments.
+
+Branch and leaf constructors do not take a name or positional arguments.
+Their names come from the parent keyword or mapping key. `Model(name=...)`
+names the generated root, which has no parent.
 
 `attention` and `reduction` control separate phases. `attention` mixes the
 root's input tokens; `reduction` determines how many of those encoded tokens

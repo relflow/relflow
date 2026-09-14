@@ -1,5 +1,7 @@
 """Each marked line must produce a public API type error."""
 
+from typing import Literal
+
 import relflow as rf
 
 rf.Number(n_bands="wide")  # rejected
@@ -18,3 +20,20 @@ rf.Model(d_model=32, n_heads=4, n_layers=1, value=rf.Number, scheduler="cosine")
 model = rf.Model(d_model=32, n_heads=4, n_layers=1, value=rf.Number)
 model.compile(encoders="yes")  # rejected
 model.predict(123)  # rejected
+
+rf.Number("amount")  # rejected
+rf.Number(name="amount")  # rejected
+rf.Branch(rf.Number())  # rejected
+rf.Branch(name="items", value=rf.Number)  # rejected
+rf.Branch(fields=[rf.Number()])  # rejected
+rf.Model(rf.Number(), d_model=32, n_heads=4, n_layers=1)  # rejected
+rf.Model(d_model=32, n_heads=4, n_layers=1, fields=[rf.Number()])  # rejected
+model.extend(rf.Number())  # rejected
+
+
+class CustomRequest(rf.RequestBase):
+    type: Literal["typing_custom"] = "typing_custom"
+    width: int = 4
+
+
+CustomRequest(width=8, name="custom")  # rejected

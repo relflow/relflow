@@ -355,7 +355,7 @@ def test_runtime_setup_applies_updates_before_device_placement(monkeypatch):
 
 
 def test_runtime_setup_uses_an_in_memory_model(monkeypatch):
-    model = Model(Number(name="amount"), d_model=8, n_layers=1, n_heads=2)
+    model = Model(amount=Number(), d_model=8, n_layers=1, n_heads=2)
     monkeypatch.setattr(
         deployment_module.Model,
         "load",
@@ -621,7 +621,7 @@ def test_multiworker_deployment_rejects_in_process_builder_configuration():
 
 
 def test_deployment_rejects_explicit_checkpoint_and_model():
-    model = Model(Number(name="amount"), d_model=8, n_layers=1, n_heads=2)
+    model = Model(amount=Number(), d_model=8, n_layers=1, n_heads=2)
 
     with pytest.raises(ValueError, match="pass either checkpoint or model"):
         Deployment(checkpoint="model.ckpt", model=model)
