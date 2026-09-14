@@ -30,7 +30,6 @@ dimension.
 import relflow as rf
 
 body = rf.Text(
-    "body",
     max_length=128,
     encoder_pooling="mean",
     jitter=rf.Jitter(add=0.05),
@@ -95,7 +94,6 @@ Text can be nested like any other leaf:
 #| output: true
 
 ticket_events = rf.Branch(
-    name="ticket_events",
     length=32,
     message=rf.Text(max_length=128),
     event_type=rf.Category(size=64),

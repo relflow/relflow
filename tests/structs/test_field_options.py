@@ -25,7 +25,7 @@ REQUESTS = [
 def test_tensorfields_reject_kwargs_bags_in_constructors_and_payloads(constructor, required, kwargs):
     payload = {"name": "value", **required, "kwargs": kwargs}
     with pytest.raises(ValueError, match="kwargs.*description"):
-        constructor(**payload)
+        constructor(**required, kwargs=kwargs)
     with pytest.raises(ValueError, match="kwargs.*description"):
         constructor.model_validate(payload)
 
@@ -34,7 +34,7 @@ def test_tensorfields_reject_kwargs_bags_in_constructors_and_payloads(constructo
 @pytest.mark.parametrize("option", ["notes", "n_heeds"])
 def test_tensorfields_reject_undeclared_options(constructor, required, option):
     with pytest.raises(pydantic.ValidationError, match=option) as error:
-        constructor(name="value", **required, **{option: "unexpected"})
+        constructor(**required, **{option: "unexpected"})
     assert error.value.errors()[0]["type"] == "extra_forbidden"
 
 
@@ -58,11 +58,11 @@ def test_declared_extension_options_remain_supported():
             type: Literal["declared_options"] = "declared_options"
             scale: float = 1.0
 
-        field = Request(name="value", scale=2.0, description="Custom units")
+        field = Request(scale=2.0, description="Custom units")
         assert field.scale == 2.0
         assert Request.model_validate(field.model_dump()).description == "Custom units"
         with pytest.raises(pydantic.ValidationError, match="note"):
-            Request(name="value", scale=2.0, note="Custom units")
+            Request(scale=2.0, note="Custom units")
     finally:
         rf.TENSORFIELDS.pop("declared_options", None)
 

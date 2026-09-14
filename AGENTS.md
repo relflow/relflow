@@ -64,6 +64,12 @@ model = rf.Model(
 
 - Do not use a public `Struct(...)` constructor. Public examples should use `Model(...)` and `Branch(...)`.
 - `Model(..., name="customer")` names the generated root branch. Older examples may say `root=...`; update them.
+- Branch and leaf definitions have no `name` argument or positional arguments.
+  Their parent supplies names through keywords, such as
+  `amount=rf.Number` or `events=rf.Branch(...)`. Use a `fields` mapping for
+  generated schemas or child names that collide with parent configuration:
+  `rf.Branch(length=8, fields={"length": rf.Number})`.
+  `model.extend(predicate, risk_score=rf.Number)` follows the same rule.
 - Tensorfield options must be declared fields; pass them directly or unpack a
   mapping with `**options`. A `kwargs={...}` bag and undeclared metadata are
   rejected. Use `description` for notes, and declare extension options on
@@ -74,7 +80,7 @@ model = rf.Model(
   as `query="source.path"` or `query="items[-32:][*].sku"`; RelFlow never
   infers queries. Filters, joins, sorting, and derived values belong in an
   `rf.Preprocessor`.
-- `Branch(name="transactions")` reads the same-named child collection, and its
+- `transactions=rf.Branch(...)` reads the same-named child collection, and its
   leaves read keys such as `amount` from each child mapping.
 - `Branch(overflow="head")` is the default. Use `overflow="tail"` for recency-ordered histories and `overflow="error"` for strict schemas. The generated root branch uses internal `Overflow.error`.
 - `mask=True` is shorthand for

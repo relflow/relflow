@@ -123,7 +123,7 @@ its label” from `null`, padding, or an intentionally hidden input.
 ]
 ```
 
-For `Set("tags")`, `["vip"]` and `[]` are both valued. `null` is a null field
+For `tags=rf.Set(size=2048)`, `["vip"]` and `[]` are both valued. `null` is a null field
 state. A missing repeated slot inside a `Branch` is padded. If a leaf has
 `nullable=False`, encoding raises when its projected input contains an explicit
 null.
@@ -173,9 +173,14 @@ with `rf.Number(**options)`.
 
 ### Schema Identity
 
+The parent supplies a leaf's name through a keyword, such as
+`Model(..., amount=rf.Number)`, or a `fields` mapping. Leaf constructors accept
+configuration only; a standalone `rf.Number(...)` definition remains unnamed
+until it is bound to a parent. See [Model Tree](model-tree.qmd) for mapping
+examples and names that collide with parent configuration.
+
 | Option | Default | Notes |
 | --- | --- | --- |
-| `name` | `None`; inferred when bound | Public schema name and default processed-observation key. The normal `Model(..., amount=rf.Number)` or `Branch(..., amount=rf.Number)` keyword binding supplies `amount`; an unbound leaf must acquire a name before schema compilation. |
 | `query` | `None` | Optional node-relative structural source path. `None` selects the node's own schema name from its parent. Explicit and direct values converge during coalescing before fixed-geometry projection. See [Query Paths](querypaths.qmd). |
 | `description` | `None` | Optional human-readable notes about the field, such as its meaning or units. |
 | `active` | `True` | Inactive fields remain in the schema but are ignored by encoding, loss, and prediction. |

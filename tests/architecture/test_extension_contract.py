@@ -199,9 +199,9 @@ def test_third_party_extension_receives_one_explicit_context_contract():
 def test_reconstruction_validates_custom_leaf_and_branch_capabilities(branch):
     extension, Request = build_extension(decoder=False, loss=False)
     try:
-        field = Request(name="value")
+        field = Request()
         fields = (
-            {"items": rf.Branch(field, length=2, mask=True)}
+            {"items": rf.Branch(value=field, length=2, mask=True)}
             if branch
             else {"value": field.model_copy(update={"mask": True})}
         )
@@ -269,10 +269,7 @@ def test_late_extension_schema_round_trip_uses_the_live_registry():
     extension, Request = build_extension(decoder=False, loss=False)
     try:
         schema = rf.Schema.from_tree(
-            rf.Branch(Request(name="value", family="bytes"), name="items", length=2),
-            d_model=8,
-            n_layers=1,
-            n_heads=2,
+            items=rf.Branch(value=Request(family="bytes"), length=2), d_model=8, n_layers=1, n_heads=2
         )
 
         restored = rf.Schema.model_validate(schema.model_dump(mode="python", round_trip=True))

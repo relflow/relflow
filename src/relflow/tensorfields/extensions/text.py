@@ -150,7 +150,6 @@ class Request(RequestBase):
 
         def __init__(
             self,
-            name: str | None = None,
             *,
             model: str = DEFAULT_TEXT_MODEL,
             max_length: int = 128,

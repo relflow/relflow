@@ -43,6 +43,9 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
     assert_type(model.write([], source=table), pa.Table)
     rf.Model(model.schema, optimizer=adamw(1e-3))
     rf.Model(schema=model.schema, optimizer=adamw(1e-3))
+    rf.Model(d_model=32, n_heads=4, n_layers=1, fields={"name": rf.Number, "batch_size": rf.Boolean})
+    model.extend(rf.where("name") == "record", risk_score=rf.Number)
+    model.extend(fields={"fields": rf.Number})
 
 
 def schedule(model: rf.Model, optimizer: torch.optim.Optimizer) -> torch.optim.lr_scheduler.StepLR:

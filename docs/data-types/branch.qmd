@@ -13,7 +13,7 @@ pyproject: |
 **Example status — excerpt:** branch schemas isolate structural choices; use
 [Getting Started](../getting-started.qmd) for a tested lifecycle.
 
-Use `Branch` to name a shared context for child fields. In raw data this is
+Use `Branch` to define a shared context for child fields. In raw data this is
 often a repeated collection such as transactions, line items, sessions, or
 measurements: the child leaves are the attributes of each item in that
 collection.
@@ -41,8 +41,7 @@ then `reduction` determines which encoded tokens flow to its parent.
 import relflow as rf
 
 measurements = rf.Branch(
-    rf.Category("name", size=32),
-    name="measurements",
+    fields={"name": rf.Category(size=32)},
     length=8,
     overflow="tail",
     n_layers=2,
@@ -52,6 +51,12 @@ measurements = rf.Branch(
 
 measurements
 ```
+
+This is a reusable, unnamed definition. Bind it to a parent with
+`measurements=measurements`; the parent keyword supplies the collection name.
+The `fields` mapping supplies child names explicitly, including names that
+collide with configuration options. Ordinary children can use keywords, as
+`value` does here.
 
 Use a different type for scalar vectors (`Vector`) or unordered labels (`Set`).
 If repeated rows do not define a real shared context and are only a melted
@@ -94,7 +99,6 @@ most recent records should be retained:
 #| output: true
 
 events = rf.Branch(
-    name="events",
     length=128,
     overflow="tail",
     event_type=rf.Category(size=128),
@@ -118,7 +122,7 @@ model = rf.Model(
     n_layers=1,
     n_heads=4,
     measurements=rf.Branch(
-        rf.Category("name", size=32),
+        fields={"name": rf.Category(size=32)},
         length=8,
         value=rf.Number,
     ),
@@ -135,7 +139,6 @@ and child paths on their owning leaves:
 
 ```python
 items = rf.Branch(
-    name="items",
     query="line_items[-32:]",
     length=32,
     sku=rf.Category(
@@ -162,7 +165,6 @@ def prepare_items(frame: pl.DataFrame) -> pl.DataFrame:
 
 
 items = rf.Branch(
-    name="items",
     length=32,
     sku=rf.Category(size=2048),
     quantity=rf.Number,
@@ -188,8 +190,7 @@ Common branch contexts include:
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| `name` | `None`; inferred when bound | Public schema name and default processed-observation key. A parent keyword normally supplies it; an unbound branch must acquire a name before schema compilation. |
-| `fields` | `[]` | Child branches or tensorfields. Positional constructor arguments become `fields`. |
+| `fields` | `None` | Mapping from child names to branch or tensorfield definitions. Combine with keyword children; names must be unique. Use this for generated schemas or child names such as `length` that collide with branch options. |
 | `length` | `1` | Number of repeated slots retained per observation. Must be positive. |
 | `overflow` | `"head"` | How to handle more than `length` child records: `"head"` keeps the first records, `"tail"` keeps the last records, and `"error"` raises. |
 | `attention` | `"mha"` | Encoder attention mode: `"mha"`, `"gqa"`, `"mqa"`, or `"none"`. |
@@ -345,8 +346,7 @@ shape.
 #| echo: true
 #| output: true
 
-session = rf.Branch(
-    name="sessions",
+sessions = rf.Branch(
     length=4,
     transactions=rf.Branch(
         length=32,
@@ -354,7 +354,7 @@ session = rf.Branch(
     ),
 )
 
-session
+sessions
 ```
 
 Deep nesting is useful when the source shape marks real context boundaries. If

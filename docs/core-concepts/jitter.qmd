@@ -22,14 +22,13 @@ import relflow as rf
 
 noise = rf.Jitter(add=0.05, multiply=0.10)
 
-amount = rf.Number("amount", jitter=noise)
-embedding = rf.Vector("embedding", n_dim=128, jitter=noise)
+amount = rf.Number(jitter=noise)
+embedding = rf.Vector(n_dim=128, jitter=noise)
 created_at = rf.DateParts(
-    "created_at",
     dateparts=["day_of_week", "hour_of_day"],
     jitter=noise,
 )
-message = rf.Text("message", jitter=noise)
+message = rf.Text(jitter=noise)
 
 noise
 ```

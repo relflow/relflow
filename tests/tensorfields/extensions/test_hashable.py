@@ -374,7 +374,7 @@ def test_hashable_bucketize_range_is_valid():
 
 def test_hashable_embedder_only_learns_state_embeddings():
     model = rf.Model(
-        rf.Branch(rf.Hash("id", n_hashes=4, n_bands=4, offset=2), name="items", length=2),
+        items=rf.Branch(id=rf.Hash(n_hashes=4, n_bands=4, offset=2), length=2),
         d_model=8,
         n_layers=1,
         n_heads=2,
@@ -389,13 +389,7 @@ def test_hashable_embedder_only_learns_state_embeddings():
 
 
 def test_hashable_embedder_forward_produces_finite_projections():
-    model = rf.Model(
-        rf.Branch(rf.Hash("id", n_hashes=4), name="items", length=3),
-        d_model=8,
-        n_layers=1,
-        n_heads=2,
-        batch_size=2,
-    )
+    model = rf.Model(items=rf.Branch(id=rf.Hash(n_hashes=4), length=3), d_model=8, n_layers=1, n_heads=2, batch_size=2)
     inputs = model.encode(
         table(
             [
@@ -417,16 +411,7 @@ def test_hashable_training_loss_covers_state_and_content_heads():
     n_hashes = 4
     n_buckets = 4
     model = rf.Model(
-        rf.Branch(
-            rf.Hash(
-                "id",
-                n_hashes=n_hashes,
-                n_buckets=n_buckets,
-                mask=rf.Mask(reconstruct=True),
-            ),
-            name="items",
-            length=3,
-        ),
+        items=rf.Branch(id=rf.Hash(n_hashes=n_hashes, n_buckets=n_buckets, mask=rf.Mask(reconstruct=True)), length=3),
         d_model=8,
         n_layers=1,
         n_heads=2,
@@ -507,12 +492,8 @@ def test_hashable_embedder_uses_raw_sinusoidal_content_and_state_embeddings():
 
 def _hashable_model(**kwargs) -> "rf.Model":
     return rf.Model(
-        rf.Branch(
-            rf.Hash("id", n_hashes=4, n_buckets=4, **kwargs),
-            name="items",
-            length=2,
-        ),
-        rf.Hash("owner", n_hashes=4, n_buckets=4, **kwargs),
+        items=rf.Branch(id=rf.Hash(n_hashes=4, n_buckets=4, **kwargs), length=2),
+        owner=rf.Hash(n_hashes=4, n_buckets=4, **kwargs),
         d_model=16,
         n_layers=1,
         n_heads=2,

@@ -29,7 +29,6 @@ precomputed embeddings, dense descriptors, sensor windows, or model features.
 import relflow as rf
 
 embedding = rf.Vector(
-    "embedding",
     n_dim=4,
     objective="l2",
     jitter=rf.Jitter(add=0.02),

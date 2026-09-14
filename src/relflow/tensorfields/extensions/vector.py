@@ -70,7 +70,6 @@ class Request(RequestBase):
 
         def __init__(
             self,
-            name: str | None = None,
             *,
             n_dim: int,
             jitter: Jitter = ...,

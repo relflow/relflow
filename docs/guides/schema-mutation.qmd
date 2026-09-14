@@ -92,8 +92,8 @@ to remove all policies from the selected node.
 
 ## Extend One Branch
 
-`extend(...)` requires exactly one selected branch, followed by one or more new
-fields:
+`extend(...)` requires predicates that select exactly one branch and one or more
+named children:
 
 ```{python .marimo}
 #| echo: true
@@ -101,8 +101,8 @@ fields:
 
 model.extend(
     rf.where("name") == "order",
-    rf.Boolean("expedited"),
-    rf.Category("region", size=32),
+    expedited=rf.Boolean,
+    region=rf.Category(size=32),
 )
 
 model
@@ -111,6 +111,19 @@ model
 New fields receive new runtime modules. Existing compatible modules keep their
 state. Duplicate sibling names and extensions that match zero or multiple
 branches fail validation.
+
+Use a `fields` mapping for generated children or names that collide with method
+options:
+
+```python
+model.extend(
+    rf.where("name") == "order",
+    fields={"include_root": rf.Boolean, "description": rf.Category(size=16)},
+)
+```
+
+Definitions are configured without names; the keyword or mapping key supplies
+each new child's name.
 
 ## Delete Permanently
 

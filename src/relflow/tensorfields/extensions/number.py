@@ -82,7 +82,6 @@ class Request(RequestBase):
 
         def __init__(
             self,
-            name: str | None = None,
             *,
             jitter: Jitter = ...,
             n_bands: int = 8,

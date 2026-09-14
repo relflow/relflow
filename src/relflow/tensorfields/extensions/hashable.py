@@ -97,7 +97,6 @@ class Request(RequestBase):
 
         def __init__(
             self,
-            name: str | None = None,
             *,
             n_hashes: int = 1,
             n_bands: int = 8,

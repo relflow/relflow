@@ -29,7 +29,6 @@ permissions, flags, detected concepts, or multi-label targets.
 import relflow as rf
 
 tags = rf.Set(
-    "tags",
     size=2048,
     p_unavailable=0.02,
     threshold=0.75,
@@ -39,7 +38,7 @@ tags
 ```
 
 A `Set` and a `Branch` of `Category` values can receive similar source data,
-but they express different structures. Use `Set("tags")` when membership is
+but they express different structures. Use `tags=rf.Set(size=2048)` when membership is
 unordered and labels have no attributes. Use a `Branch` when position, order,
 or item-level fields matter.
 

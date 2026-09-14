@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from copy import deepcopy
 from functools import partialmethod, wraps
@@ -16,9 +16,9 @@ from lightning.pytorch import Callback
 from relflow.architecture.graph import ModelGraph
 from relflow.logging import logger
 from relflow.structs.enums import Strata
-from relflow.structs.experiment import NodeAttribute, NodePredicate, SchemaField
+from relflow.structs.experiment import NodeAttribute, NodePredicate, TreeFieldInput
 from relflow.structs.structure import Branch
-from relflow.structs.tree import Leaf, Node
+from relflow.structs.tree import Node
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
@@ -201,17 +201,22 @@ class SchemaEditor:
 
     def extend(
         self,
-        *args: NodePredicate | NodeAttribute | Callable[[Node], bool] | SchemaField,
+        *predicates: NodePredicate | NodeAttribute | Callable[[Node], bool],
+        fields: Mapping[str, TreeFieldInput] | None = None,
         include_root: bool = True,
         use_cache: bool = True,
+        **children: TreeFieldInput,
     ) -> None:
         self.assert_mutation_allowed("extend")
-        parent, field_count = self.extend_target(*args, include_root=include_root, use_cache=use_cache)
+        parent = self.extend_target(*predicates, include_root=include_root, use_cache=use_cache)
+        field_count = len(parent.fields)
         with self.transaction():
-            self.module.schema.extend(*args, include_root=include_root, use_cache=use_cache)
+            self.module.schema.extend(
+                *predicates, fields=fields, include_root=include_root, use_cache=use_cache, **children
+            )
             ModelGraph.rebuild(self.module)
         self.module.reset_contracts()
-        for field in parent.fields[-field_count:]:
+        for field in parent.fields[field_count:]:
             self.log_node_mutation(
                 action="extend",
                 message="extended schema node",
@@ -336,28 +341,10 @@ class SchemaEditor:
 
     def extend_target(
         self,
-        *args: NodePredicate | NodeAttribute | Callable[[Node], bool] | SchemaField,
+        *predicates: NodePredicate | NodeAttribute | Callable[[Node], bool],
         include_root: bool,
         use_cache: bool,
-    ) -> tuple[Branch, int]:
-        predicates: list[NodePredicate | NodeAttribute | Callable[[Node], bool]] = []
-        field_count = 0
-        reading_fields = False
-
-        for item in args:
-            if isinstance(item, (Branch, Leaf)):
-                reading_fields = True
-                field_count += 1
-                continue
-
-            if reading_fields:
-                raise TypeError("extend predicates must come before new tree fields")
-
-            predicates.append(item)
-
-        if field_count == 0:
-            raise ValueError("extend requires at least one tree field")
-
+    ) -> Branch:
         candidates = [
             node
             for node in self.module.schema.select(*predicates, include_root=include_root, use_cache=use_cache)
@@ -366,7 +353,7 @@ class SchemaEditor:
         if len(candidates) != 1:
             raise ValueError(f"extend requires exactly one matching branch node, found {len(candidates)}")
 
-        return candidates[0], field_count
+        return candidates[0]
 
     def delete_roots(
         self,

@@ -73,10 +73,10 @@ that makes the code valid.
 
 Pyrefly can initially select a schema-only overload while a `Model(...)` call
 is incomplete; supplying all three required dimensions selects the tree
-signature. For third-party Pydantic request subclasses with inherited
-constructors, use `name=...` in checked code or declare an explicit constructor
-signature to expose positional names. Their runtime positional-name support
-is unchanged. Literal value suggestions appear after opening quotes.
+signature. Branch and tensorfield constructors accept configuration by keyword;
+their parent supplies the node name through a keyword or a `fields` mapping.
+This also applies to third-party `RequestBase` subclasses. Literal value
+suggestions appear after opening quotes.
 
 ## Implementation Style
 
