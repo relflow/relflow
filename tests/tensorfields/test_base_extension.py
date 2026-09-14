@@ -494,7 +494,7 @@ def test_extension_write_accepts_a_return_annotation():
 
 
 def test_extension_write_requires_declared_datatype_parameter():
-    extension = Extension(name=extension_name("legacywrite"), types=(object,))
+    extension = Extension(name=extension_name("missingdatatype"), types=(object,))
 
     def write(module: object, prediction: object) -> None:
         return None
@@ -550,13 +550,13 @@ def test_extension_request_must_implement_leaf_contract():
         TENSORFIELDS.pop(extension.name, None)
 
 
-def test_extension_rejects_legacy_tensorfield_new_signature():
+def test_extension_tensorfield_requires_all_batch_inputs():
     class TensorField(TensorFieldBase):
         @classmethod
         def new(cls, values, address, schema, strata):
             return object()
 
-    extension = Extension(name=extension_name("legacynew"), types=(object,))
+    extension = Extension(name=extension_name("missinginputs"), types=(object,))
     try:
         with pytest.raises(TypeError, match="TensorField.new must accept these parameters"):
             extension.register(TensorField)

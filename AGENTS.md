@@ -71,10 +71,8 @@ model = rf.Model(
   `rf.Branch(length=8, fields={"length": rf.Number})`.
   `model.extend(predicate, risk_score=rf.Number)` follows the same rule.
 - Tensorfield options must be declared fields; pass them directly or unpack a
-  mapping with `**options`. A `kwargs={...}` bag and undeclared metadata are
-  rejected. Use `description` for notes, and declare extension options on
-  `RequestBase` subclasses. Schema children may still be named `kwargs` or
-  `allow_extra`; those names do not enable arbitrary options.
+  mapping with `**options`. Use `description` for notes, and declare extension
+  options on `RequestBase` subclasses. Undeclared options are rejected.
 - Processed observation names and nesting match the schema by default. A node
   may opt into RelFlow's node-relative structural query syntax with paths such
   as `query="source.path"` or `query="items[-32:][*].sku"`; RelFlow never

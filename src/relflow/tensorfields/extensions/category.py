@@ -156,14 +156,6 @@ class Request(RequestBase):
         self.capacity = value
         self.model_fields_set.add("capacity")
 
-    @pydantic.model_validator(mode="before")
-    @classmethod
-    def check_removed_options(cls, data: Any) -> Any:
-        if isinstance(data, Mapping) and "max_vocab_size" in data:
-            raise ValueError("max_vocab_size was removed; use size")
-
-        return data
-
     @pydantic.model_validator(mode="after")
     def check_topk(self):
         if self.topk is None:

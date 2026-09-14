@@ -3,7 +3,7 @@
 import functools
 import io
 from abc import ABC
-from collections.abc import Generator, Mapping
+from collections.abc import Generator
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self, TypeAlias, TypedDict, cast
 
 import pydantic
@@ -336,21 +336,6 @@ class Leaf(Node):
         if "name" in data:
             raise TypeError("tensorfield names come from the parent; use field_name=Tensorfield(...)")
         super().__init__(**data)
-
-    @pydantic.model_validator(mode="before")
-    @classmethod
-    def check_fields(cls, data: Any) -> Any:
-        if not isinstance(data, Mapping):
-            return data
-
-        if "kwargs" in data:
-            raise ValueError("tensorfield kwargs is not supported; pass options directly and use description for notes")
-
-        removed = sorted({"masks", "p_mask", "p_prune", "target"} & data.keys())
-        if removed:
-            raise ValueError(f"removed node field(s): {removed}; use mask")
-
-        return data
 
     @pydantic.field_validator("mask", mode="before")
     @classmethod

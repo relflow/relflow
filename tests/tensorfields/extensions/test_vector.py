@@ -95,7 +95,7 @@ def test_vector_request_hydrates_jitter_from_a_mapping(normalize: bool):
 
 
 @pytest.mark.parametrize("value", [None, 0.0, 0.2, 1, True])
-def test_vector_rejects_legacy_scalar_jitter(value: object):
+def test_vector_requires_a_jitter_configuration(value: object):
     with pytest.raises(pydantic.ValidationError):
         rf.Vector(n_dim=3, jitter=value)
 

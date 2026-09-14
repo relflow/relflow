@@ -54,7 +54,6 @@ def test_quarto_docs_snapshot_contains_expected_pages() -> None:
         "docs/data-types/set.qmd",
         "docs/data-types/text.qmd",
         "docs/data-types/vector.qmd",
-        "docs/guides/arrow-migration.qmd",
         "docs/guides/batch-inference.qmd",
         "docs/guides/custom-tensorfields.qmd",
         "docs/guides/data-modules.qmd",

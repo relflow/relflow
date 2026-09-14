@@ -51,7 +51,6 @@ def test_checkpoint_dump_records_version() -> None:
     model.on_save_checkpoint(checkpoint)
 
     assert checkpoint["version"] == model.version
-    assert "relflow_version" not in checkpoint
 
 
 def test_model_save_persists_version(tmp_path: Path) -> None:
@@ -62,19 +61,15 @@ def test_model_save_persists_version(tmp_path: Path) -> None:
 
     checkpoint = torch.load(pathname, weights_only=False, map_location="cpu")
     assert checkpoint["version"] == model.version
-    assert "relflow_version" not in checkpoint
 
 
-def test_model_load_accepts_legacy_checkpoint_without_version(tmp_path: Path) -> None:
-    pathname = tmp_path / "legacy.ckpt"
+def test_model_load_requires_version_metadata(tmp_path: Path) -> None:
+    pathname = tmp_path / "incomplete.ckpt"
     model = _model()
     torch.save(_checkpoint(model), pathname)
 
-    restored = rf.Model.load(pathname)
-
-    assert restored.schema.model_dump(mode="python") == model.schema.model_dump(mode="python")
-    assert restored.batch_size == model.batch_size
-    assert restored.version == "0+unknown"
+    with pytest.raises(ValueError, match="version"):
+        rf.Model.load(pathname)
 
 
 def test_model_load_and_resave_preserve_version_without_gating(tmp_path: Path) -> None:

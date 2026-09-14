@@ -5,14 +5,12 @@ import pytest
 import torch
 from tensordict import TensorDict
 
-import relflow as rf
 from relflow.data import arrow
 from relflow.data.arrow import Encoded, mappings, variants
 from relflow.structs.tree import Address
 
 
-def test_batch_is_removed_from_the_public_api():
-    assert not hasattr(rf, "Batch")
+def test_encoded_stays_internal_to_the_arrow_module():
     assert "Encoded" not in arrow.__all__
 
 

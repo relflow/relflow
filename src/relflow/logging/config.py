@@ -70,10 +70,9 @@ class Logger(logging.LoggerAdapter):
         """Return an adapter combining the configured mapping with new context."""
         return type(self)(self.logger, {**cast(Mapping[str, object], self.extra), **context})
 
-    # Keep the existing public keyword; LoggerAdapter calls this hook positionally.
-    def process(  # pyrefly: ignore[bad-override-param-name]
+    def process(
         self,
-        message: object,
+        msg: object,
         kwargs: MutableMapping[str, Any],
     ) -> tuple[object, MutableMapping[str, Any]]:
         extra = dict(kwargs.get("extra") or {})
@@ -82,7 +81,7 @@ class Logger(logging.LoggerAdapter):
             raise TypeError(f"logging {CONTEXT} must be a mapping, got {type(supplied).__name__}")
         extra[CONTEXT] = {**cast(Mapping[str, object], self.extra), **supplied}
         kwargs["extra"] = extra
-        return message, kwargs
+        return msg, kwargs
 
 
 def configure(*, level: str | int | None = None, output: Console | None = None) -> Logger:

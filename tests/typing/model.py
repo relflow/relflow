@@ -32,7 +32,6 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
     assert_type(model.save("model.ckpt"), str)
     assert_type(model.save(Path("model.ckpt")), Path)
     assert_type(Classifier.load("model.ckpt"), Classifier)
-    assert_type(Classifier.from_checkpoint("model.ckpt"), Classifier)
     assert_type(model.track(("train", "loss"), loss), torch.Tensor)
     assert_type(model.encode(table), TensorDict)
     assert_type(model(batch, strata="train"), list[Prediction])

@@ -1,4 +1,3 @@
-import relflow.structs.experiment as experiment_module
 from relflow.structs.experiment import Schema
 
 
@@ -26,7 +25,3 @@ def test_schema_supports_programmatic_instantiation():
 
     assert schema.d_model == 16
     assert "root/identifier" in schema.requests
-
-
-def test_experiment_model_is_removed():
-    assert not hasattr(experiment_module, "Experiment")

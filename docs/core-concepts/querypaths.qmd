@@ -279,18 +279,5 @@ Use this debugging order:
    accepted by its extension;
 5. move data-dependent logic into a preprocessor.
 
-## Migration Examples
-
-Old batch-root expressions are not interpreted:
-
-| Old form | New form |
-| --- | --- |
-| `[*].payload.amount` | `amount=rf.Number(query="payload.amount")` |
-| `[*].payload.items[*].product.sku` | root `query="payload"`, branch `query="items"`, leaf `query="product.sku"` |
-| `[*].legs[0].origin` | `legs[0].origin` |
-| `[*].events[-10:].amount` | branch `query="events[-10:]"`, child `amount=rf.Number` |
-| `[*]."job code"` | `["job code"]` |
-
-See [Arrow Migration](../guides/arrow-migration.qmd) for the rest of the
-breaking API changes and [Binding Data](binding-data.qmd) for choosing between
-direct binding, queries, and preprocessors.
+See [Binding Data](binding-data.qmd) for choosing between direct binding,
+queries, and preprocessors.

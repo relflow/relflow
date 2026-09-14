@@ -97,18 +97,6 @@ class Schema(Node):
 
     _selection_cache: dict[SelectionKey, SelectionCacheEntry] = pydantic.PrivateAttr(default_factory=dict)
 
-    @classmethod
-    def update_values(cls, values: Mapping[str, Any]) -> dict[str, Any]:
-        if "kwargs" in values:
-            raise ValueError("schema kwargs is not supported; pass options directly and use description for notes")
-        if "allow_extra" in values:
-            raise ValueError("allow_extra was removed; declare schema options explicitly and use description for notes")
-        normalized = dict(values)
-        removed = sorted({"masks", "p_mask", "p_prune", "target"} & normalized.keys())
-        if removed:
-            raise ValueError(f"removed node field(s): {removed}; use mask")
-        return normalized
-
     @pydantic.model_validator(mode="before")
     @classmethod
     def check_masks(cls, data: Any) -> Any:
@@ -159,17 +147,6 @@ class Schema(Node):
         **field_kwargs: TreeFieldInput,
     ) -> Self:
         """Build schema from tree fields."""
-        if "n_linear" in field_kwargs and not (
-            isinstance(field_kwargs["n_linear"], (Branch, Leaf))
-            or (isinstance(field_kwargs["n_linear"], type) and issubclass(field_kwargs["n_linear"], Leaf))
-        ):
-            raise ValueError("n_linear was removed from Model; use reduction=Attention(n_layers=...)")
-        if "n_outputs" in field_kwargs and not (
-            isinstance(field_kwargs["n_outputs"], (Branch, Leaf))
-            or (isinstance(field_kwargs["n_outputs"], type) and issubclass(field_kwargs["n_outputs"], Leaf))
-        ):
-            raise ValueError("n_outputs belongs to a reduction; use reduction=Attention(n_outputs=...)")
-
         root_fields = bind_fields(fields, field_kwargs)
         if not root_fields:
             raise ValueError("from_tree requires at least one field")
@@ -459,7 +436,6 @@ class Schema(Node):
         **values: Any,
     ) -> None:
         """Mutate matching schema nodes."""
-        values = self.update_values(values)
         if not values:
             raise ValueError("update requires at least one field value")
 
@@ -626,7 +602,6 @@ class Schema(Node):
         **values: Any,
     ) -> Generator[None, None, None]:
         nodes = self.select(*predicates, include_root=include_root, use_cache=use_cache)
-        normalized_values = self.update_values(values)
         snapshot = [
             (
                 node,
@@ -635,7 +610,7 @@ class Schema(Node):
                 name in getattr(node, "model_fields_set", set()),
             )
             for node in nodes
-            for name in normalized_values
+            for name in values
             if has_model_attribute(node, name)
         ]
 
@@ -645,7 +620,7 @@ class Schema(Node):
             include_root=include_root,
             validate=validate,
             use_cache=use_cache,
-            **normalized_values,
+            **values,
         )
 
         try:

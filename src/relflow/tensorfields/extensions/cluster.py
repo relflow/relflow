@@ -130,14 +130,6 @@ class Request(RequestBase):
     def size(self) -> int:
         return self.n_clusters[-1]
 
-    @pydantic.model_validator(mode="before")
-    @classmethod
-    def check_removed_options(cls, data: Any) -> Any:
-        if isinstance(data, Mapping) and "max_vocab_size" in data:
-            raise ValueError("max_vocab_size was removed; use size")
-
-        return data
-
     @pydantic.model_validator(mode="after")
     def check_n_clusters(self):
         if len(self.n_clusters) != 2:
@@ -544,11 +536,10 @@ class Embedder(EmbedderBase):
             finally:
                 self._override_depth -= 1
 
-    # Preserve the existing keyword accepted by checkpoint callers.
-    def _save_to_state_dict(self, state_dict, prefix, keep_vars):  # pyrefly: ignore [bad-override]
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
         if self._override_depth:
             raise RuntimeError("cannot save or rebuild a model while Cluster assignment overrides are active")
-        super()._save_to_state_dict(state_dict, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
 
 
 @cluster.register

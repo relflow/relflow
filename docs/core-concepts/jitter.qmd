@@ -97,8 +97,9 @@ units for `Vector`, a `DateParts` circle pair, or a Text encoder embedding.
 | `normalize` | `True` | Prefer a consumer's normalized boundary when it has one. Must be a Boolean. |
 
 `Jitter` is a frozen Pydantic model: create a new value instead of mutating an
-existing one. Unknown fields, Boolean or non-finite magnitudes, negative
-magnitudes, and legacy scalar forms such as `jitter=0.05` are rejected.
+existing one. Unknown fields, Boolean or non-finite magnitudes, and negative
+magnitudes are rejected. Tensorfields accept a `Jitter` configuration or a
+mapping of its fields.
 
 ## Configuration Recipes
 

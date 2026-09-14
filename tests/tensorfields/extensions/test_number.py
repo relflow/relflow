@@ -106,7 +106,7 @@ def test_number_jitter_round_trips_through_model_checkpoint(tmp_path: Path):
 
 
 @pytest.mark.parametrize("value", [None, 0.0, 0.2, 1, True])
-def test_number_rejects_legacy_scalar_jitter(value: object):
+def test_number_requires_a_jitter_configuration(value: object):
     with pytest.raises(pydantic.ValidationError):
         rf.Number(jitter=value)
 

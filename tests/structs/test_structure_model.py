@@ -40,21 +40,15 @@ def test_branch_accepts_keyword_children():
     assert branch.fields[0].name == "category_leaf"
 
 
-def test_branch_accepts_masks_as_an_ordinary_keyword_child():
-    branch = Branch(masks=Category)
-
-    assert branch.fields[0].name == "masks"
-
-
 def test_branch_accepts_mapping_and_keyword_children():
     branch = Branch(category_leaf=Category(), fields={"length": Category})
 
     assert [field.name for field in branch.fields] == ["length", "category_leaf"]
 
 
-def test_branch_rejects_leaf_mask_and_target_options():
-    with pytest.raises(TypeError, match="tree field 'p_mask'.*must be a Branch, Leaf, or Leaf class"):
-        Branch(category_leaf=Category(), p_mask=0.1)
+def test_branch_rejects_children_that_are_not_definitions():
+    with pytest.raises(TypeError, match="tree field 'unexpected'.*must be a Branch, Leaf, or Leaf class"):
+        Branch(category_leaf=Category(), unexpected=0.1)
 
 
 def test_schema_derives_branches_requests_and_shapes():
@@ -144,23 +138,11 @@ def test_schema_preserves_direct_field_dropout():
     assert structure.requests["root/branch/category_leaf"].dropout == 0.4
 
 
-def test_schema_rejects_branch_mask_and_target_rates():
+def test_schema_rejects_undeclared_branch_options():
     payload = _payload()
-    payload["fields"]["p_mask"] = 0.2
-    payload["fields"]["p_prune"] = 0.1
+    payload["fields"]["notes"] = "Undeclared option"
 
     with pytest.raises(ValueError, match="Extra inputs are not permitted"):
-        Schema.model_validate(payload)
-
-
-def test_schema_rejects_removed_mask_fields_on_branches_and_leaves():
-    payload = _payload()
-    payload["fields"]["fields"][0]["p_mask"] = 0.3
-    payload["fields"]["fields"][0]["p_prune"] = 0.4
-    payload["fields"]["fields"][0]["fields"][0]["p_mask"] = 0.5
-    payload["fields"]["fields"][0]["fields"][0]["p_prune"] = 0.6
-
-    with pytest.raises(ValueError, match="removed node field"):
         Schema.model_validate(payload)
 
 

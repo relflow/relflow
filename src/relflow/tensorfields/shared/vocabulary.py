@@ -308,10 +308,9 @@ class OnlineVocabularyModel(torch.nn.Module):
         self.share()
         return self.storage
 
-    # Preserve the existing keyword accepted by checkpoint callers.
-    def _save_to_state_dict(self, state_dict, prefix, keep_vars):  # pyrefly: ignore [bad-override]
-        super()._save_to_state_dict(state_dict, prefix, keep_vars)
-        state_dict[prefix + "vocabulary"] = list(self.master)
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + "vocabulary"] = list(self.master)
 
     def _load_from_state_dict(
         self,

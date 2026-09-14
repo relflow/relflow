@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from typing import Any
 
+import pyarrow as pa
 import pytest
 import torch
 from tensordict import TensorDict
@@ -300,8 +301,8 @@ class _DummyVocab:
     def __init__(self, tokens: list[str]):
         self._tokens = list(tokens)
 
-    def snapshot(self) -> list[str]:
-        return list(self._tokens)
+    def labels(self) -> pa.Array:
+        return pa.array(self._tokens, type=pa.large_string())
 
 
 class _DummyEmbedder:
