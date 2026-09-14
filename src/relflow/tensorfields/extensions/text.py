@@ -1,10 +1,9 @@
-# ty: ignore[unknown-argument]
 from __future__ import annotations
 
 import enum
 import math
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
+from dataclasses import InitVar, dataclass
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, Unpack, cast
 
 import numpy as np
 import pydantic
@@ -16,7 +15,7 @@ from relflow.data.ragged import RaggedField
 from relflow.helpers import Jitter
 from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
-from relflow.structs.tree import Address
+from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
     Context,
     DecoderBase,
@@ -29,8 +28,11 @@ from relflow.tensorfields.base import (
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
 
 if TYPE_CHECKING:
+    from transformers import PreTrainedModel, PreTrainedTokenizerBase
+
     from relflow.architecture.root import Model
     from relflow.structs.experiment import Schema
+    from relflow.structs.structure import Branch
 
 
 text: Extension = Extension(
@@ -67,10 +69,10 @@ class Objective(enum.StrEnum):
 @dataclass
 class CachedModel:
     _models: ClassVar[dict[str, "CachedModel"]] = {}
-    _tokenizers: ClassVar[dict[str, Any]] = {}
+    _tokenizers: ClassVar[dict[str, PreTrainedTokenizerBase]] = {}
 
     key: str
-    model: Any
+    model: PreTrainedModel
     hidden_size: int
     device: torch.device | None = None
 
@@ -80,9 +82,9 @@ class CachedModel:
         key: str,
     ) -> "CachedModel":
         if key not in cls._models:
-            from transformers import AutoModel  # ty:ignore[unresolved-import]
+            from transformers import AutoModel
 
-            model = AutoModel.from_pretrained(key)
+            model = cast("PreTrainedModel", AutoModel.from_pretrained(key))
             model.eval()
             model.requires_grad_(False)
             hidden_size = getattr(model.config, "hidden_size", None)
@@ -93,11 +95,11 @@ class CachedModel:
         return cls._models[key]
 
     @classmethod
-    def get_tokenizer(cls, key: str):
+    def get_tokenizer(cls, key: str) -> PreTrainedTokenizerBase:
         if key not in cls._tokenizers:
-            from transformers import AutoTokenizer  # ty:ignore[unresolved-import]
+            from transformers import AutoTokenizer
 
-            tokenizer = AutoTokenizer.from_pretrained(key)
+            tokenizer = cast("PreTrainedTokenizerBase", AutoTokenizer.from_pretrained(key))
 
             if tokenizer.pad_token_id is None:
                 if tokenizer.eos_token is not None:
@@ -110,7 +112,7 @@ class CachedModel:
 
         return cls._tokenizers[key]
 
-    def module_for(self, device: torch.device) -> Any:
+    def module_for(self, device: torch.device) -> PreTrainedModel:
         target = torch.device(device)
         if self.device != target:
             self.model.to(target)
@@ -122,9 +124,18 @@ class CachedModel:
 
 @text.register
 class Request(RequestBase):
-    """Text tensorfield request encoded by a frozen Hugging Face model."""
+    """String input represented by a frozen Hugging Face encoder.
 
-    model_config = pydantic.ConfigDict(extra="allow", str_strip_whitespace=True)
+    ``model`` names a pretrained model or local path. ``max_length`` limits
+    tokens; ``tokenizer_batch_size`` and ``encoder_batch_size`` bound each
+    tokenizer and encoder call. ``encoder_pooling`` selects ``"cls"``,
+    ``"mean"``, or ``"pooler"``. ``jitter`` perturbs pooled training inputs.
+    Reconstructing masks use ``"l1"`` or ``"l2"`` ``objective`` loss against
+    pristine frozen embeddings. Prediction can export an embedding with
+    ``embed=True``; this field does not generate text.
+    """
+
+    model_config = pydantic.ConfigDict(str_strip_whitespace=True)
 
     type: Literal["text"] = "text"
     model: Annotated[str, pydantic.Field(min_length=1)] = DEFAULT_TEXT_MODEL
@@ -134,6 +145,23 @@ class Request(RequestBase):
     encoder_pooling: Pooling = Pooling.cls
     objective: Objective = Objective.l2
     jitter: Jitter = pydantic.Field(default_factory=Jitter)
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            name: str | None = None,
+            *,
+            model: str = DEFAULT_TEXT_MODEL,
+            max_length: int = 128,
+            tokenizer_batch_size: int = 4096,
+            encoder_batch_size: int = 32,
+            encoder_pooling: Pooling | Literal["cls", "mean", "pooler"] = Pooling.cls,
+            objective: Objective | Literal["l1", "l2"] = Objective.l2,
+            jitter: Jitter = ...,
+            type: Literal["text"] = "text",
+            **options: Unpack[FieldOptions],
+        ) -> None: ...
 
 
 @text.register
@@ -157,13 +185,19 @@ def observe(
 
 @text.register
 @tensorclass
-class TensorField(TensorFieldBase):
-    content: TensorDict[str, torch.Tensor]
+class TensorField(TensorFieldBase[TensorDict]):
+    content: TensorDict
     state: torch.Tensor
     present: torch.Tensor
     trainable: torch.Tensor
     inferred: torch.Tensor
-    targets: TensorDict[TensorKey, torch.Tensor]
+    targets: TensorDict
+
+    if TYPE_CHECKING:
+        # TensorClass metadata is accepted by its generated initializer.
+        batch_size: InitVar[int | torch.Size | list[int] | tuple[int, ...] | None] = None
+        device: InitVar[torch.device | str | int | None] = None
+        names: InitVar[list[str | None] | None] = None
 
     @classmethod
     def new(
@@ -177,10 +211,10 @@ class TensorField(TensorFieldBase):
         schema: Schema,
         strata: Strata,
         context: Context,
-    ) -> TensorFieldBase:
-        request: Request = schema.requests[address]
+    ) -> TensorField:
+        request: Request = cast(Request, schema.requests[address])
 
-        def encode(field: RaggedField) -> TensorDict[str, torch.Tensor]:
+        def encode(field: RaggedField) -> TensorDict:
             length = request.max_length
             size = math.prod(field.shape)
             encoded_ids = np.zeros((size, length), dtype=np.int64)
@@ -247,10 +281,10 @@ class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 
-        request: Request = schema.requests[address]
+        request: Request = cast(Request, schema.requests[address])
 
         self.origin: Address = address
-        self.destination: Address = request.parent.address
+        self.destination: Address = cast("Branch", request.parent).address
         cached_model = CachedModel.get_model(request.model)
         self.__dict__["_cached_model"] = cached_model
         self.hidden_size: int = cached_model.hidden_size
@@ -271,15 +305,15 @@ class Embedder(EmbedderBase):
     @beartype
     def encode(
         self,
-        content: TensorDict[str, torch.Tensor],
+        content: TensorDict,
         state: torch.Tensor,
     ) -> torch.Tensor:
         N, *dims = state.shape
         D = math.prod((N, *dims))
 
         flat_state = state.reshape(D)
-        flat_ids = content[INPUT_IDS].reshape(D, -1)
-        flat_mask = content[ATTENTION_MASK].reshape(D, -1)
+        flat_ids = cast(torch.Tensor, content[INPUT_IDS]).reshape(D, -1)
+        flat_mask = cast(torch.Tensor, content[ATTENTION_MASK]).reshape(D, -1)
 
         embeddings = torch.zeros((D, self.hidden_size), device=flat_ids.device, dtype=torch.float32)
         valued = flat_state.eq(Tokens.valued.value)
@@ -368,7 +402,7 @@ class Embedder(EmbedderBase):
 
         state = inputs.state.reshape(D)
         valued = state.eq(Tokens.valued.value).unsqueeze(-1)
-        encoded = self.encode(content=inputs.content, state=inputs.state)
+        encoded = self.encode(content=cast(TensorDict, inputs.content), state=inputs.state)
         encoded = encoded.reshape(D, self.hidden_size)
         if self.training:
             eligible = valued & torch.isfinite(encoded)
@@ -397,8 +431,8 @@ def learn(
 
     if strata != Strata.train:
         raise ValueError(f"text learner at '{address}' requires train strata, got {strata}")
-    embedder: Embedder = module.nodes[address].embedder
-    embedder.counter.learn(observation[TensorKey.state])
+    embedder: Embedder = cast(Embedder, module.nodes[address].embedder)
+    embedder.counter.learn(cast(torch.Tensor, observation[TensorKey.state]))
 
 
 @text.register
@@ -406,7 +440,7 @@ class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 
-        request: Request = schema.requests[address]
+        request: Request = cast(Request, schema.requests[address])
         hidden_size = CachedModel.get_model(request.model).hidden_size
         self.classification = torch.nn.Linear(
             in_features=schema.d_model,
@@ -418,7 +452,7 @@ class Decoder(DecoderBase):
         )
 
     @beartype
-    def decode(self, pooled: torch.Tensor) -> TensorDict[TensorKey, torch.Tensor]:
+    def decode(self, pooled: torch.Tensor) -> TensorDict:
         return TensorDict(
             source={
                 TensorKey.state: self.classification(pooled),
@@ -435,12 +469,12 @@ def loss(
     strata: Strata,
 ) -> torch.Tensor:
     address: Address = prediction.address
-    request: Request = module.schema.requests[address]
-    embedder: Embedder = module.nodes[address].embedder
+    request: Request = cast(Request, module.schema.requests[address])
+    embedder: Embedder = cast(Embedder, module.nodes[address].embedder)
 
     trainable = batch.trainable.reshape(-1)
-    state_targets = batch.targets[TensorKey.state].reshape(-1)
-    state_inputs = prediction.payload[TensorKey.state].reshape(-1, len(Tokens))
+    state_targets = cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(-1)
+    state_inputs = cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(-1, len(Tokens))
 
     loss: torch.Tensor = module.track(
         (address, strata, Metric.loss, TensorKey.state),
@@ -465,13 +499,13 @@ def loss(
     if not valued.any():
         return loss
 
-    inputs = prediction.payload[TensorKey.content].reshape(-1, embedder.hidden_size)
+    inputs = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(-1, embedder.hidden_size)
     if TensorKey.embedding not in batch.targets.keys():
         batch.targets[TensorKey.embedding] = embedder.encode(
-            content=batch.targets[TensorKey.content],
-            state=batch.targets[TensorKey.state],
+            content=cast(TensorDict, batch.targets[TensorKey.content]),
+            state=cast(torch.Tensor, batch.targets[TensorKey.state]),
         )
-    targets = batch.targets[TensorKey.embedding].reshape(-1, embedder.hidden_size)
+    targets = cast(torch.Tensor, batch.targets[TensorKey.embedding]).reshape(-1, embedder.hidden_size)
     diff = inputs.subtract(targets)
 
     loss += module.track(

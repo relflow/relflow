@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 import pydantic
 import torch
@@ -30,7 +30,7 @@ INTEGER_DTYPES = {
 }
 
 
-ContractSignature = tuple[Any, ...]
+ContractSignature = tuple[object, ...]
 ContractScope = tuple[str, int, int, ContractSignature]
 
 
@@ -48,7 +48,7 @@ class ContractScheduler(pydantic.BaseModel):
     def should_check(
         self,
         module: "Model",
-        inputs: Any,
+        inputs: object,
         *,
         strata: Strata,
         dataloader_idx: int,
@@ -67,7 +67,7 @@ class ContractScheduler(pydantic.BaseModel):
 
 def sanitize(
     module: "Model",
-    inputs: TensorDict[Address, TensorFieldBase],
+    inputs: TensorDict,
     *,
     strata: Strata | str,
     dataloader_idx: int = 0,
@@ -91,6 +91,7 @@ def sanitize(
     for address in module.schema.active_requests:
         tensorfield = inputs[address]
         require_registered_tensorfield(module, address, tensorfield)
+        tensorfield = cast(TensorFieldBase, tensorfield)
         require_core_tensors(module, address, tensorfield)
         require_tensor_devices(module, address, tensorfield)
         require_objective_contract(module, address, tensorfield)
@@ -107,12 +108,12 @@ def is_backoff_index(index: int, *, periodic_interval: int) -> bool:
     return periodic_interval > 0 and index % periodic_interval == 0
 
 
-def batch_signature(module: "Model", inputs: Any) -> ContractSignature:
+def batch_signature(module: "Model", inputs: object) -> ContractSignature:
     if not isinstance(inputs, TensorDict):
         return ("inputs", qualified_name(type(inputs)))
 
     input_keys = tuple(sorted(str(key) for key in inputs.keys()))
-    fields: list[tuple[Any, ...]] = []
+    fields: list[tuple[object, ...]] = []
     for address in sorted(module.schema.active_requests, key=str):
         if address not in inputs.keys():
             fields.append((str(address), "missing"))
@@ -135,7 +136,7 @@ def batch_signature(module: "Model", inputs: Any) -> ContractSignature:
     return (input_keys, tuple(fields))
 
 
-def tensor_signature(value: Any) -> tuple[Any, ...]:
+def tensor_signature(value: object) -> tuple[object, ...]:
     if not torch.is_tensor(value):
         return ("object", qualified_name(type(value)))
 
@@ -147,7 +148,7 @@ def tensor_signature(value: Any) -> tuple[Any, ...]:
     )
 
 
-def tensor_tree_signature(value: Any) -> tuple[Any, ...]:
+def tensor_tree_signature(value: object) -> tuple[object, ...]:
     if torch.is_tensor(value):
         return tensor_signature(value)
 
@@ -170,7 +171,7 @@ def tensor_tree_signature(value: Any) -> tuple[Any, ...]:
 
 def require_forward_addresses(
     module: "Model",
-    inputs: TensorDict[Address, TensorFieldBase],
+    inputs: TensorDict,
     *,
     strata: Strata,
 ) -> None:
@@ -202,7 +203,7 @@ def require_forward_addresses(
     raise ForwardContractError(f"forward input contains unknown address(es): {format_addresses(extra)}")
 
 
-def require_registered_tensorfield(module: "Model", address: Address, value: Any) -> None:
+def require_registered_tensorfield(module: "Model", address: Address, value: object) -> None:
     if not isinstance(value, TensorFieldBase):
         raise TypeError(f"forward input '{address}' must be a TensorFieldBase, got {type(value).__name__}")
 
@@ -268,7 +269,7 @@ def require_core_tensors(module: "Model", address: Address, tensorfield: TensorF
             expected={(): state},
         )
         require_integer_tensors(address, target_state_name, target_state)
-        require_token_values(address, target_state_name, targets[TensorKey.state])
+        require_token_values(address, target_state_name, cast(torch.Tensor, targets[TensorKey.state]))
 
     if TensorKey.content in targets.keys():
         target_content_name = f"{TensorKey.targets}[{TensorKey.content}]"
@@ -345,7 +346,7 @@ def require_routing_contract(
         if key not in targets.keys():
             raise ForwardContractError(f"forward input '{address}' has trainable positions but lacks targets[{key}]")
 
-    target_state = targets[TensorKey.state]
+    target_state = cast(torch.Tensor, targets[TensorKey.state])
     unavailable = target_state.masked_select(trainable)
     if unavailable.eq(Tokens.masked.value).any() or unavailable.eq(Tokens.padded.value).any():
         raise ForwardContractError(
@@ -387,7 +388,7 @@ def require_targets(address: Address, tensorfield: TensorFieldBase) -> TensorDic
 def require_tensor_tree(
     address: Address,
     name: str,
-    value: Any,
+    value: object,
     *,
     allow_empty: bool = False,
 ) -> dict[tuple[str, ...], torch.Tensor]:
@@ -458,7 +459,7 @@ def require_token_values(address: Address, name: str, values: torch.Tensor) -> N
         raise ForwardContractError(f"forward input '{address}' {name} contains invalid token id {value}")
 
 
-def iter_tensor_leaves(value: Any, path: tuple[str, ...] = ()) -> Iterator[tuple[tuple[str, ...], torch.Tensor]]:
+def iter_tensor_leaves(value: object, path: tuple[str, ...] = ()) -> Iterator[tuple[tuple[str, ...], torch.Tensor]]:
     if torch.is_tensor(value):
         yield path, value
         return
@@ -492,7 +493,7 @@ def format_addresses(addresses: set[Address]) -> str:
     return ", ".join(sorted(str(address) for address in addresses))
 
 
-def format_paths(values: Mapping[tuple[str, ...], Any]) -> str:
+def format_paths(values: Mapping[tuple[str, ...], object]) -> str:
     return ", ".join(format_path(path) or "<tensor>" for path in sorted(values))
 
 
@@ -500,5 +501,5 @@ def format_path(path: tuple[str, ...]) -> str:
     return "".join(f"[{part}]" for part in path)
 
 
-def qualified_name(cls: type[Any]) -> str:
+def qualified_name(cls: type[object]) -> str:
     return f"{cls.__module__}.{cls.__qualname__}"

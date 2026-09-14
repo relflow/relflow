@@ -9,7 +9,7 @@ objects.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pyarrow as pa
@@ -41,7 +41,8 @@ def fixed(values: pa.Array, size: int) -> pa.FixedSizeListArray:
         raise ValueError("fixed list size must be positive")
     if len(values) % size:
         raise ValueError(f"cannot wrap {len(values)} values in fixed lists of size {size}")
-    return pa.FixedSizeListArray.from_arrays(values, list_size=size)
+    # pyarrow-stubs spells list_size as limit_size and omits this valid keyword.
+    return pa.FixedSizeListArray.from_arrays(values, list_size=size)  # pyrefly: ignore [no-matching-overload]
 
 
 def shape(values: pa.Array, axes: tuple[int, ...]) -> pa.Array:
@@ -80,7 +81,7 @@ def offsets(counts: torch.Tensor) -> pa.Int32Array:
     cumulative[1:] = flat.cumsum(dim=0)
     if cumulative[-1].item() > np.iinfo(np.int32).max:
         raise OverflowError("Arrow list output exceeds the int32 offset limit")
-    return array(cumulative, pa.int32())
+    return cast(pa.Int32Array, array(cumulative, pa.int32()))
 
 
 def variable(values: pa.Array, counts: torch.Tensor) -> pa.ListArray:
@@ -117,7 +118,7 @@ def state(logits: torch.Tensor) -> pa.StructArray:
 
 def inferred(values: torch.Tensor) -> pa.BooleanArray:
     """Convert a tensor mask into one flat Arrow boolean array."""
-    return array(values.bool(), pa.bool_())
+    return cast(pa.BooleanArray, array(values.bool(), pa.bool_()))
 
 
 def embedding(values: torch.Tensor) -> pa.FixedSizeListArray:

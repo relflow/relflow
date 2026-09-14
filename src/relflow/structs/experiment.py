@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import functools
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
-from typing import Annotated, Any, ClassVar, Literal, Self, TypeAlias
+from typing import Annotated, Any, ClassVar, Literal, Self, TypeAlias, cast
 
 import pydantic
 from anytree import LevelOrderGroupIter, PreOrderIter
+from rich.console import Console, ConsoleOptions
 from rich.text import Text
 
-from relflow.structs.enums import AttentionMode, Component, Overflow, Strata
+from relflow.structs.enums import AttentionInput, AttentionMode, Component, Overflow, Strata
 from relflow.structs.reduction import Attention, ReductionConfig
 from relflow.structs.selectors import (
     ExtendArg,
@@ -64,7 +65,7 @@ def bind_tree_field(source: str | None, value: TreeFieldInput) -> SchemaField:
     if value.name is None:
         value.name = source
         value.model_fields_set.add("name")
-        value.check_node_name()
+        cast(Callable[[], Leaf], value.check_node_name)()
         return value
 
     if value.name != source:
@@ -78,19 +79,24 @@ class Schema(Node):
 
     model_config = pydantic.ConfigDict(extra="forbid")
 
-    name: Literal["schema"] = pydantic.Field(default="schema", exclude=True)
+    # The metadata root has fixed values excluded from serialized field data.
+    name: Literal["schema"] = pydantic.Field(default="schema", exclude=True)  # pyrefly: ignore [bad-override-mutable-attribute]
     type: Literal["schema"] = pydantic.Field(default="schema", exclude=True)
-    description: Literal[None] = pydantic.Field(default=None, exclude=True)
+    description: Literal[None] = pydantic.Field(default=None, exclude=True)  # pyrefly: ignore [bad-override-mutable-attribute]
     d_model: Annotated[int, pydantic.Field(gt=0, default=128)]
     fields: Branch
 
-    embed: ClassVar[None] = None
-    dropout: ClassVar[None] = None  # ty:ignore[invalid-attribute-override]
+    embed: ClassVar[None] = None  # pyrefly: ignore [bad-override]
+    dropout: ClassVar[None] = None  # pyrefly: ignore [bad-override]
 
     _selection_cache: dict[SelectionKey, SelectionCacheEntry] = pydantic.PrivateAttr(default_factory=dict)
 
     @classmethod
     def update_values(cls, values: Mapping[str, Any]) -> dict[str, Any]:
+        if "kwargs" in values:
+            raise ValueError("schema kwargs is not supported; pass options directly and use description for notes")
+        if "allow_extra" in values:
+            raise ValueError("allow_extra was removed; declare schema options explicitly and use description for notes")
         normalized = dict(values)
         removed = sorted({"masks", "p_mask", "p_prune", "target"} & normalized.keys())
         if removed:
@@ -99,7 +105,7 @@ class Schema(Node):
 
     @pydantic.model_validator(mode="before")
     @classmethod
-    def restore_masks(cls, data: Any) -> Any:
+    def check_masks(cls, data: Any) -> Any:
         if not isinstance(data, Mapping):
             return data
 
@@ -173,7 +179,7 @@ class Schema(Node):
         query: str | None = None,
         description: str | None = None,
         embed: bool = False,
-        attention: AttentionMode | str = AttentionMode.mha,
+        attention: AttentionInput = AttentionMode.mha,
         reduction: ReductionConfig | None = Attention(),
         dropout: Rate | None = None,
         mask: MaskInput = False,
@@ -254,7 +260,7 @@ class Schema(Node):
         self.fields = materialize(self.fields)
         self.fields.length = 1
         self.fields.overflow = Overflow.error
-        self.fields.parent: Self = self
+        self.fields.parent = self
         self.post_bind_validate()
 
     @property
@@ -493,7 +499,6 @@ class Schema(Node):
         self,
         *predicates: NodeSelector,
         strict: bool = True,
-        allow_extra: bool = False,
         include_root: bool = True,
         validate: bool = True,
         use_cache: bool = False,
@@ -505,22 +510,26 @@ class Schema(Node):
             raise ValueError("update requires at least one field value")
 
         nodes = self.select(*predicates, include_root=include_root, use_cache=use_cache)
+        if not strict and nodes:
+            missing = [name for name in values if not any(has_model_attribute(node, name) for node in nodes)]
+            if missing:
+                raise AttributeError(
+                    f"selected schema nodes have no attribute(s): {missing}; "
+                    "declare options explicitly and use description for notes"
+                )
         snapshots: list[tuple[Node, str, Any, bool]] = []
         try:
             for node in nodes:
-                can_apply_extra = allow_extra and getattr(type(node), "model_config", {}).get("extra") == "allow"
-                missing = [name for name in values if not has_model_attribute(node, name) and not can_apply_extra]
+                missing = [name for name in values if not has_model_attribute(node, name)]
                 if missing and strict:
                     label = str(node.address) or node.name
                     raise AttributeError(f"{label} has no attribute(s): {missing}")
 
-                applicable_values = {
-                    name: value for name, value in values.items() if has_model_attribute(node, name) or can_apply_extra
-                }
+                applicable_values = {name: value for name, value in values.items() if has_model_attribute(node, name)}
 
                 if validate and applicable_values:
-                    payload = node.model_dump(mode="python", round_trip=True, exclude={"mask"})
-                    payload["mask"] = node.mask
+                    payload = node.model_dump(mode="python", round_trip=True, exclude={"mask", *applicable_values})
+                    payload["mask"] = cast(SchemaField, node).mask
                     payload.update(applicable_values)
                     validated = type(node).model_validate(payload)
                     applicable_values = {name: getattr(validated, name) for name in applicable_values}
@@ -595,11 +604,11 @@ class Schema(Node):
         parent = candidates[0]
         new_fields = [self.from_tree_node(field) for field in fields]
         existing_names = {field.name for field in parent.fields}
-        duplicate_names = sorted({field.name for field in new_fields if field.name in existing_names})
+        duplicate_names = sorted({cast(str, field.name) for field in new_fields if field.name in existing_names})
         duplicate_names.extend(
             sorted(
                 {
-                    field.name
+                    cast(str, field.name)
                     for index, field in enumerate(new_fields)
                     if any(other.name == field.name for other in new_fields[index + 1 :])
                 }
@@ -682,12 +691,11 @@ class Schema(Node):
         self,
         *predicates: NodeSelector,
         strict: bool = True,
-        allow_extra: bool = False,
         include_root: bool = True,
         validate: bool = True,
         use_cache: bool = False,
         **values: Any,
-    ) -> Iterator[None]:
+    ) -> Generator[None, None, None]:
         nodes = self.select(*predicates, include_root=include_root, use_cache=use_cache)
         normalized_values = self.update_values(values)
         snapshot = [
@@ -700,13 +708,11 @@ class Schema(Node):
             for node in nodes
             for name in normalized_values
             if has_model_attribute(node, name)
-            or (allow_extra and getattr(type(node), "model_config", {}).get("extra") == "allow")
         ]
 
         self.update(
             *predicates,
             strict=strict,
-            allow_extra=allow_extra,
             include_root=include_root,
             validate=validate,
             use_cache=use_cache,
@@ -733,7 +739,7 @@ class Schema(Node):
             self.post_bind_validate()
             self.refresh_selection_cache()
 
-    def __rich_console__(self, console, options):
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
         heading = Text()
         heading.append(self.name, style=self.RICH_NAME_STYLE)
         heading.append(" ")

@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
-
 import polars as pl
+import pyarrow as pa
 
 import relflow
 from relflow.data.datasets.arrow import ArrowDataModule, Retain
+from relflow.data.datasets.base import StratumConfig
 from relflow.data.processors import PreprocessorInput
-from relflow.structs.enums import Strata
 
 
 class PolarsDataModule(ArrowDataModule):
@@ -28,28 +26,28 @@ class PolarsDataModule(ArrowDataModule):
         validate: pl.DataFrame | None = None,
         test: pl.DataFrame | None = None,
         predict: pl.DataFrame | None = None,
-        preprocessor: PreprocessorInput | Mapping[Strata | str, PreprocessorInput] = (),
+        preprocessor: StratumConfig[PreprocessorInput] = (),
         seed: int = 0,
-        shuffle: bool | None | Mapping[Strata | str, bool | None] = None,
-        sample: float | Mapping[Strata | str, float] = 1.0,
-        replacement: bool | Mapping[Strata | str, bool] = False,
-        epoch_size: int | None | Mapping[Strata | str, int | None] = None,
-        shuffle_rows: int | None | Mapping[Strata | str, int | None] = None,
-        drop_last: bool | Mapping[Strata | str, bool] = False,
-        num_workers: int | Mapping[Strata | str, int] = 0,
-        persistent_workers: bool | Mapping[Strata | str, bool] = False,
-        pin_memory: bool | Mapping[Strata | str, bool] = False,
-        prefetch_factor: int | Mapping[Strata | str, int] = 2,
+        shuffle: StratumConfig[bool | None] = None,
+        sample: StratumConfig[float] = 1.0,
+        replacement: StratumConfig[bool] = False,
+        epoch_size: StratumConfig[int | None] = None,
+        shuffle_rows: StratumConfig[int | None] = None,
+        drop_last: StratumConfig[bool] = False,
+        num_workers: StratumConfig[int] = 0,
+        persistent_workers: StratumConfig[bool] = False,
+        pin_memory: StratumConfig[bool] = False,
+        prefetch_factor: StratumConfig[int] = 2,
         multiprocessing_context: str | None = None,
-        retain: Retain | Mapping[Strata | str, Retain] = (),
-    ):
+        retain: StratumConfig[Retain] = (),
+    ) -> None:
         frames = {
             "train": train,
             "validate": validate,
             "test": test,
             "predict": predict,
         }
-        converted: dict[str, Any] = {}
+        converted: dict[str, pa.Table | None] = {}
         for name, frame in frames.items():
             if frame is None:
                 converted[name] = None

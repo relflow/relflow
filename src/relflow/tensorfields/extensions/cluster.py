@@ -1,10 +1,10 @@
-# ty: ignore[invalid-method-override,unknown-argument]
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager
-from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
+from dataclasses import InitVar
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Unpack, cast, overload
 from weakref import ReferenceType, ref
 
 import pyarrow as pa
@@ -12,7 +12,7 @@ import pyarrow.compute as pc
 import pydantic
 import torch
 from beartype import beartype
-from lightning.pytorch import Callback, Trainer
+from lightning.pytorch import Callback, LightningModule, Trainer
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
@@ -20,7 +20,7 @@ from relflow.distributed import broadcast_object
 from relflow.logging import logger
 from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
-from relflow.structs.tree import Address
+from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
     Context,
     DecoderBase,
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.datasets.base import InterprocessEncodingContext
     from relflow.structs.experiment import Schema
+    from relflow.structs.structure import Branch
 
 cluster: Extension = Extension(name="cluster", types=(bool, int, float, str, bytes))
 
@@ -56,9 +57,18 @@ Assignment = int | torch.Tensor | list[float] | tuple[float, ...]
 
 @cluster.register
 class Request(RequestBase):
-    """Clustering scalar tensorfield request."""
+    """Scalar labels represented through shared, learned latent clusters.
 
-    model_config = pydantic.ConfigDict(extra="allow", populate_by_name=True, serialize_by_alias=True)
+    ``capacity`` limits source labels. ``bounds=K`` normalizes to ``(K, K)``;
+    ``bounds=(lower, upper)`` allows an adaptive cluster count within that
+    range. The normalized tuple is stored as ``n_clusters``. ``p_unavailable``
+    routes known training labels through shared unavailable content.
+    ``ema_decay`` smooths usage statistics; ``revive_temperature=0`` disables
+    inactive-cluster revival. A reconstructing mask trains the cluster head.
+    Predictions expose the best cluster and the best known vocabulary label.
+    """
+
+    model_config = pydantic.ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
     type: Literal["cluster"] = "cluster"
     capacity: Annotated[
@@ -79,9 +89,41 @@ class Request(RequestBase):
         ),
     ]
 
+    if TYPE_CHECKING:
+
+        @overload
+        def __init__(
+            self,
+            name: str | None = None,
+            *,
+            bounds: int | tuple[int, int],
+            n_clusters: int | tuple[int, int] = ...,
+            capacity: int = 1024,
+            p_unavailable: float = 0.01,
+            ema_decay: float = 0.99,
+            revive_temperature: float = 10.0,
+            type: Literal["cluster"] = "cluster",
+            **options: Unpack[FieldOptions],
+        ) -> None: ...
+
+        @overload
+        def __init__(
+            self,
+            name: str | None = None,
+            *,
+            n_clusters: int | tuple[int, int],
+            bounds: int | tuple[int, int] = ...,
+            capacity: int = 1024,
+            p_unavailable: float = 0.01,
+            ema_decay: float = 0.99,
+            revive_temperature: float = 10.0,
+            type: Literal["cluster"] = "cluster",
+            **options: Unpack[FieldOptions],
+        ) -> None: ...
+
     @pydantic.field_validator("n_clusters", mode="before")
     @classmethod
-    def broadcast_n_clusters(cls, value: Any) -> Any:
+    def check_n_clusters_input(cls, value: Any) -> Any:
         if isinstance(value, int) and not isinstance(value, bool):
             return (value, value)
         return value
@@ -92,7 +134,7 @@ class Request(RequestBase):
 
     @pydantic.model_validator(mode="before")
     @classmethod
-    def reject_removed_options(cls, data: Any) -> Any:
+    def check_removed_options(cls, data: Any) -> Any:
         if isinstance(data, Mapping) and "max_vocab_size" in data:
             raise ValueError("max_vocab_size was removed; use size")
 
@@ -164,7 +206,11 @@ class Request(RequestBase):
         embedder = resolve_cluster_embedder(model, address)
         with embedder.vocab.lock:
             vocabulary = tuple(embedder.vocab.master)
-            logits = embedder.embeddings[TensorKey.cluster.name].weight[: len(vocabulary)].detach().clone()
+            logits = (
+                cast(torch.Tensor, embedder.embeddings[TensorKey.cluster.name].weight)[: len(vocabulary)]
+                .detach()
+                .clone()
+            )
 
         if not vocabulary:
             return {}
@@ -174,7 +220,7 @@ class Request(RequestBase):
         rows: list[list[float]] = probabilities.cpu().tolist()
         return {
             token: {
-                "cluster": int(cluster_id),
+                "cluster": cluster_id,
                 "probabilities": tuple(float(probability) for probability in row),
             }
             for token, cluster_id, row in zip(vocabulary, clusters, rows, strict=True)
@@ -226,7 +272,7 @@ def observe(
         raise RuntimeError(f"cluster field at '{address}' requires a vocabulary encoding context")
 
     indices = state.indices(field.values, learn=True)
-    request: Request = schema.requests[address]
+    request: Request = cast(Request, schema.requests[address])
     return TensorDict(
         {
             TensorKey.state: tally(torch.from_numpy(field.dense.copy()), len(Tokens)),
@@ -238,13 +284,19 @@ def observe(
 
 @cluster.register
 @tensorclass
-class TensorField(TensorFieldBase):
+class TensorField(TensorFieldBase[torch.Tensor]):
     state: torch.Tensor
     content: torch.Tensor
     present: torch.Tensor
     trainable: torch.Tensor
     inferred: torch.Tensor
-    targets: TensorDict[TensorKey, torch.Tensor]
+    targets: TensorDict
+
+    if TYPE_CHECKING:
+        # TensorClass metadata is accepted by its generated initializer.
+        batch_size: InitVar[int | torch.Size | list[int] | tuple[int, ...] | None] = None
+        device: InitVar[torch.device | str | int | None] = None
+        names: InitVar[list[str | None] | None] = None
 
     @classmethod
     def new(
@@ -258,7 +310,7 @@ class TensorField(TensorFieldBase):
         schema: Schema,
         strata: Strata,
         context: Context,
-    ) -> TensorFieldBase:
+    ) -> TensorField:
         state = context.state
         if state is not None and not isinstance(state, VocabularyState):
             raise TypeError(
@@ -276,7 +328,7 @@ class TensorField(TensorFieldBase):
         content = encode(input)
         target_content = encode(target)
 
-        if state is not None and len(state) > (capacity := schema.requests[address].capacity):
+        if state is not None and len(state) > (capacity := cast(Request, schema.requests[address]).capacity):
             logger.bind(
                 component="tensorfield",
                 field_type="cluster",
@@ -288,8 +340,8 @@ class TensorField(TensorFieldBase):
         state_tensor = torch.from_numpy(input.dense)
         target_state = torch.from_numpy(target.dense)
         if strata == Strata.train:
-            p_unavailable: float = schema.requests[address].p_unavailable
-            unavailable_index: int = schema.requests[address].capacity
+            p_unavailable: float = cast(Request, schema.requests[address]).p_unavailable
+            unavailable_index: int = cast(Request, schema.requests[address]).capacity
 
             if p_unavailable > 0.0:
                 # Unavailable content never appears naturally during training, because the
@@ -330,9 +382,9 @@ class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 
-        request: Request = schema.requests[address]
+        request: Request = cast(Request, schema.requests[address])
         self.origin: Address = address
-        self.destination: Address = request.parent.address
+        self.destination: Address = cast("Branch", request.parent).address
         self.capacity: int = request.capacity
         self.size: int = request.size
 
@@ -387,7 +439,7 @@ class Embedder(EmbedderBase):
 
         N, *dims = inputs.state.shape
         state = inputs.state.reshape(-1)
-        content = inputs.content.reshape(-1)
+        content = cast(torch.Tensor, inputs.content).reshape(-1)
         valued = state.eq(Tokens.valued.value)
 
         if valued.any():
@@ -423,7 +475,7 @@ class Embedder(EmbedderBase):
         return self.vocab.state
 
     def assignment_logits(self, assignment: Assignment) -> torch.Tensor:
-        weight = self.embeddings[TensorKey.cluster.name].weight
+        weight = cast(torch.Tensor, self.embeddings[TensorKey.cluster.name].weight)
         if isinstance(assignment, bool):
             raise TypeError("assignment must be a cluster index or probability vector")
         if isinstance(assignment, int):
@@ -446,7 +498,7 @@ class Embedder(EmbedderBase):
 
     def assign_token(self, token: Any, assignment: Assignment) -> int:
         logits = self.assignment_logits(assignment)
-        weight = self.embeddings[TensorKey.cluster.name].weight
+        weight = cast(torch.Tensor, self.embeddings[TensorKey.cluster.name].weight)
         index = self.vocab.state.index.get(token)
         if index is None:
             if len(self.vocab.master) >= self.capacity:
@@ -458,12 +510,12 @@ class Embedder(EmbedderBase):
         return index
 
     @contextmanager
-    def override_assignments(self, assignments: Mapping[Any, Assignment]) -> Iterator[None]:
+    def override_assignments(self, assignments: Mapping[Any, Assignment]) -> Generator[None, None, None]:
         if self._override_depth:
             raise RuntimeError("Cluster assignment overrides cannot be nested")
 
         self._override_depth += 1
-        weight = self.embeddings[TensorKey.cluster.name].weight
+        weight = cast(torch.Tensor, self.embeddings[TensorKey.cluster.name].weight)
         saved: list[tuple[int, torch.Tensor, bool]] = []
         try:
             for token, assignment in assignments.items():
@@ -494,7 +546,8 @@ class Embedder(EmbedderBase):
             finally:
                 self._override_depth -= 1
 
-    def _save_to_state_dict(self, state_dict, prefix, keep_vars):  # ty:ignore[invalid-method-override]
+    # Preserve the existing keyword accepted by checkpoint callers.
+    def _save_to_state_dict(self, state_dict, prefix, keep_vars):  # pyrefly: ignore [bad-override]
         if self._override_depth:
             raise RuntimeError("cannot save or rebuild a model while Cluster assignment overrides are active")
         super()._save_to_state_dict(state_dict, prefix, keep_vars)
@@ -512,9 +565,9 @@ def learn(
 
     if strata != Strata.train:
         raise ValueError(f"cluster learner at '{address}' requires train strata, got {strata}")
-    embedder: Embedder = module.nodes[address].embedder
-    embedder.counters[TensorKey.state.name].learn(observation[TensorKey.state])
-    embedder.counters[TensorKey.content.name].learn(observation[TensorKey.content])
+    embedder: Embedder = cast(Embedder, module.nodes[address].embedder)
+    cast(Counter, embedder.counters[TensorKey.state.name]).learn(cast(torch.Tensor, observation[TensorKey.state]))
+    cast(Counter, embedder.counters[TensorKey.content.name]).learn(cast(torch.Tensor, observation[TensorKey.content]))
 
 
 def resolve_cluster_embedder(model: "Model", address: Address | str) -> Embedder:
@@ -569,7 +622,7 @@ class ClusterRuntime:
             return embedder.assign_token(token, assignment)
 
     @contextmanager
-    def override(self, assignments: Mapping[Any, Assignment]) -> Iterator[None]:
+    def override(self, assignments: Mapping[Any, Assignment]) -> Generator[None, None, None]:
         model, embedder = self.resolve()
         with embedder.vocab.lock:
             self.assert_writable(model, embedder)
@@ -592,7 +645,7 @@ class Decoder(DecoderBase):
         # alter the query used to reconstruct the identity itself.
         super().__init__(schema=schema, address=address, conditioned=False)
 
-        request: Request = schema.requests[address]
+        request: Request = cast(Request, schema.requests[address])
         n_clusters: int = request.size
 
         self.linears = torch.nn.ModuleDict(
@@ -608,7 +661,7 @@ class Decoder(DecoderBase):
         )
 
     @beartype
-    def decode(self, pooled: torch.Tensor) -> TensorDict[TensorKey, torch.Tensor]:
+    def decode(self, pooled: torch.Tensor) -> TensorDict:
         return TensorDict(
             source={
                 TensorKey.state: self.linears[TensorKey.state.name](pooled),
@@ -624,13 +677,13 @@ def loss(
     batch: TensorFieldBase,
     strata: Strata,
 ) -> torch.Tensor:
-    embedder: Embedder = module.nodes[prediction.address].embedder
+    embedder: Embedder = cast(Embedder, module.nodes[prediction.address].embedder)
     request: Request = cast(Request, module.schema.requests[prediction.address])
-    N: int = batch.targets[TensorKey.state].numel()
+    N: int = cast(torch.Tensor, batch.targets[TensorKey.state]).numel()
     trainable = batch.trainable.reshape(N)
 
-    state_inputs = prediction.payload[TensorKey.state].reshape(N, -1)
-    state_targets = batch.targets[TensorKey.state].reshape(N)
+    state_inputs = cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(N, -1)
+    state_targets = cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(N)
 
     loss: torch.Tensor = module.track(
         (prediction.address, strata, Metric.loss, TensorKey.state),
@@ -659,10 +712,10 @@ def loss(
     if not valued.any():
         return loss
 
-    cluster_logits: torch.Tensor = prediction.payload[TensorKey.cluster].reshape(N, -1)
-    content_targets = batch.targets[TensorKey.content].reshape(N)
+    cluster_logits: torch.Tensor = cast(torch.Tensor, prediction.payload[TensorKey.cluster]).reshape(N, -1)
+    content_targets = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(N)
 
-    assign_weight: torch.Tensor = embedder.embeddings[TensorKey.cluster.name].weight
+    assign_weight: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.cluster.name].weight)
     cluster_probs = torch.log_softmax(cluster_logits, dim=-1).exp()
     vocab_logits = cluster_probs @ assign_weight.T
 
@@ -707,7 +760,7 @@ def loss(
         usage_safe = usage_normalized.clamp_min(1e-12)
         usage_entropy = -(usage_safe * usage_safe.log()).sum()
         perplexity = torch.exp(usage_entropy)
-        n_committed: int = max(lower, min(upper, int(round(perplexity.item()))))
+        n_committed: int = max(lower, min(upper, round(perplexity.item())))
 
         _, committed_idx = embedder.usage_ema.topk(n_committed)
         embedder.committed.zero_()
@@ -784,8 +837,8 @@ def output(module: Model, address: Address) -> pa.StructType:
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
     cluster_type = datatype.field(TensorKey.cluster.name).type
     content_type = datatype.field(TensorKey.content.name).type
-    embedder: Embedder = module.nodes[prediction.address].embedder
-    logits = prediction.payload[TensorKey.cluster]
+    embedder: Embedder = cast(Embedder, module.nodes[prediction.address].embedder)
+    logits = cast(torch.Tensor, prediction.payload[TensorKey.cluster])
     cluster_probabilities = logits.reshape(-1, logits.shape[-1]).softmax(dim=-1)
     cluster_probability, cluster_ids = cluster_probabilities.max(dim=-1)
     cluster_values = struct(
@@ -796,7 +849,7 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
         cluster_type,
     )
 
-    assign_weight: torch.Tensor = embedder.embeddings[TensorKey.cluster.name].weight.detach()
+    assign_weight: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.cluster.name].weight).detach()
     vocabulary_logits = cluster_probabilities @ assign_weight.T
     vocabulary = labels(embedder.vocab)
     size = len(vocabulary)
@@ -832,8 +885,9 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
 
 class ClusterReviveCallback(Callback):
     @torch.no_grad()
-    def on_train_epoch_end(self, trainer: Trainer, pl_module: "Model") -> None:  # ty:ignore[invalid-method-override]
-        epoch = int(trainer.current_epoch)
+    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        pl_module = cast("Model", pl_module)
+        epoch = trainer.current_epoch
         targets: dict[Address, tuple[Embedder, Decoder, Request]] = {}
         for address, node in pl_module.nodes.items():
             request = pl_module.schema.requests.get(cast(Address, address))
@@ -861,12 +915,12 @@ class ClusterReviveCallback(Callback):
     @staticmethod
     def plan(embedder: "Embedder", request: "Request", *, epoch: int) -> dict[str, Any] | None:
         dead = (~embedder.committed).nonzero(as_tuple=True)[0]
-        n_dead = int(dead.numel())
+        n_dead = dead.numel()
         if n_dead == 0:
             return None
 
         committed_idx = embedder.committed.nonzero(as_tuple=True)[0]
-        n_committed = int(committed_idx.numel())
+        n_committed = committed_idx.numel()
         adherence = float(embedder.adherence_ema.item())
         warmup = epoch < _REVIVE_WARMUP
 
@@ -894,10 +948,10 @@ class ClusterReviveCallback(Callback):
             donor = int(embedder.usage_ema.argmax().item())
             donors = [donor] * len(chosen)
 
-        assign_w: torch.Tensor = embedder.embeddings[TensorKey.cluster.name].weight
-        content_w: torch.Tensor = embedder.embeddings[TensorKey.content.name].weight
-        v_plus_1 = int(assign_w.shape[0])
-        d_model = int(content_w.shape[0])
+        assign_w: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.cluster.name].weight)
+        content_w: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.content.name].weight)
+        v_plus_1 = assign_w.shape[0]
+        d_model = content_w.shape[0]
         noise = _REVIVE_NOISE
         n_chosen = len(chosen)
         return {
@@ -913,9 +967,9 @@ class ClusterReviveCallback(Callback):
         if plan is None:
             return
 
-        assign_w: torch.Tensor = embedder.embeddings[TensorKey.cluster.name].weight
-        content_w: torch.Tensor = embedder.embeddings[TensorKey.content.name].weight
-        cluster_w: torch.Tensor = decoder.linears[TensorKey.cluster.name].weight
+        assign_w: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.cluster.name].weight)
+        content_w: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.content.name].weight)
+        cluster_w: torch.Tensor = cast(torch.Tensor, decoder.linears[TensorKey.cluster.name].weight)
         donors = plan["donors"]
         device = assign_w.device
         dtype = assign_w.dtype
@@ -938,7 +992,8 @@ _MERGE_THRESHOLD: float = 0.95
 
 class ClusterMergeCallback(Callback):
     @torch.no_grad()
-    def on_train_epoch_end(self, trainer: Trainer, pl_module: "Model") -> None:  # ty:ignore[invalid-method-override]
+    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        pl_module = cast("Model", pl_module)
         targets: dict[Address, tuple[Embedder, Decoder, Request]] = {}
         for address, node in pl_module.nodes.items():
             request = pl_module.schema.requests.get(cast(Address, address))
@@ -966,13 +1021,13 @@ class ClusterMergeCallback(Callback):
     @staticmethod
     def plan(embedder: "Embedder", decoder: "Decoder", request: "Request") -> dict[str, int] | None:
         committed_idx = embedder.committed.nonzero(as_tuple=True)[0]
-        n_committed = int(committed_idx.numel())
+        n_committed = committed_idx.numel()
         lower = request.n_clusters[0]
         if n_committed <= lower or n_committed < 2:
             return None
 
-        content_w = embedder.embeddings[TensorKey.content.name].weight  # (d_model, K)
-        cluster_w = decoder.linears[TensorKey.cluster.name].weight  # (K, d_model)
+        content_w = cast(torch.Tensor, embedder.embeddings[TensorKey.content.name].weight)  # (d_model, K)
+        cluster_w = cast(torch.Tensor, decoder.linears[TensorKey.cluster.name].weight)  # (K, d_model)
 
         content_cols = content_w[:, committed_idx]
         cluster_rows = cluster_w[committed_idx, :]
@@ -1010,7 +1065,7 @@ class ClusterMergeCallback(Callback):
         embedder.usage_ema[winner] = embedder.usage_ema[winner] + embedder.usage_ema[loser]
         embedder.usage_ema[loser] = 0.0
         embedder.committed[loser] = False
-        decoder.linears[TensorKey.cluster.name].weight.data[loser, :].zero_()
+        cast(torch.Tensor, decoder.linears[TensorKey.cluster.name].weight).data[loser, :].zero_()
 
 
 cluster.callback(ClusterReviveCallback, ClusterMergeCallback)

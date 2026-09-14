@@ -1,7 +1,6 @@
 import torch
 from tensordict import TensorClass, TensorDict
 
-from relflow.structs.enums import TensorKey
 from relflow.structs.tree import Address
 
 
@@ -15,4 +14,4 @@ class Parcel(TensorClass):
 # @jaxtyped(typechecker=beartype)
 class Prediction(TensorClass):
     address: Address
-    payload: TensorDict[TensorKey, torch.Tensor]
+    payload: TensorDict

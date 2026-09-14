@@ -9,7 +9,7 @@ import re
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field, fields
 from pathlib import Path, PurePosixPath
-from typing import Any, TypeAlias
+from typing import Any, TypeAlias, cast
 from urllib.parse import unquote
 
 import pyarrow as pa
@@ -18,6 +18,7 @@ import pyarrow.fs as fs
 
 Location: TypeAlias = str | os.PathLike[str]
 Filesystem: TypeAlias = str | Callable[[], fs.FileSystem] | None
+Partitioning: TypeAlias = ds.Partitioning | ds.PartitioningFactory | str | list[str] | None
 
 FORMATS = {
     ".parquet": "parquet",
@@ -94,11 +95,11 @@ class Source:
     match: re.Pattern[str] | None
     schema: pa.Schema | None
     filesystem: Filesystem
-    partitioning: Any
+    partitioning: Partitioning
     partition_base_dir: str | None
     context: str = "file"
     manifest: Manifest | None = field(default=None, init=False, repr=False)
-    dataset: ds.Dataset | None = field(default=None, init=False, repr=False)
+    dataset: ds.FileSystemDataset | None = field(default=None, init=False, repr=False)
     process: int | None = field(default=None, init=False, repr=False)
 
     @property
@@ -192,7 +193,8 @@ class Source:
                         f"{self.label}: mixed or unknown file formats; narrow the selection or pass format explicitly"
                     )
                 format = formats.pop()
-            dataset = ds.dataset(
+            # Arrow supports JSON/ORC and format names absent from the stub's literal union.
+            dataset = ds.dataset(  # pyrefly: ignore[no-matching-overload]
                 [item.path for item in files],
                 filesystem=filesystem,
                 format=format,
@@ -268,7 +270,7 @@ def source(
     match: str | re.Pattern[str] | None = None,
     schema: pa.Schema | None = None,
     filesystem: Filesystem = None,
-    partitioning: Any = None,
+    partitioning: Partitioning = None,
     partition_base_dir: Location | None = None,
 ) -> Source:
     """Describe files, a directory, or a glob without opening or listing data.
@@ -282,7 +284,7 @@ def source(
     explicit = not isinstance(location, (str, os.PathLike))
     if explicit and (not isinstance(location, Sequence) or not location):
         raise TypeError("source location must be a path or a nonempty sequence of file paths")
-    locations = tuple(location) if explicit else (location,)
+    locations = tuple(cast(Sequence[Location], location)) if explicit else (cast(Location, location),)
     normalized = []
     for item in locations:
         if not isinstance(item, (str, os.PathLike)) or not os.fspath(item):
@@ -310,4 +312,4 @@ def source(
     return Source(tuple(normalized), explicit, format, pattern, schema, filesystem, partitioning, base)
 
 
-__all__ = ["source"]
+__all__ = ["Filesystem", "Location", "Partitioning", "Source", "source"]

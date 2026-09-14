@@ -94,7 +94,7 @@ def encode(
             ),
         )
 
-    inputs = cast(EncodedInput, TensorDict(source=cast(Any, out)))
+    inputs = TensorDict(source=cast(Any, out))
     return Encoded(tensors=inputs, source=batch, retain=retain, observations=observations)
 
 
@@ -124,4 +124,4 @@ def mock(schema: Schema, batch_size: int) -> EncodedInput:
             context=Context(),
         )
 
-    return cast(EncodedInput, TensorDict(source=cast(Any, out), batch_size=batch_size))
+    return TensorDict(source=cast(Any, out), batch_size=batch_size)

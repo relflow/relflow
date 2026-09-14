@@ -18,7 +18,9 @@ if TYPE_CHECKING:
 
 
 class NodeModule(torch.nn.Module):
-    def __init__(self, schema: Schema, address: Address):
+    """Install the extension modules or encoder owned by one bound schema node."""
+
+    def __init__(self, schema: Schema, address: Address) -> None:
         super().__init__()
 
         if address in schema.requests:

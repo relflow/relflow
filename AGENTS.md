@@ -64,6 +64,11 @@ model = rf.Model(
 
 - Do not use a public `Struct(...)` constructor. Public examples should use `Model(...)` and `Branch(...)`.
 - `Model(..., name="customer")` names the generated root branch. Older examples may say `root=...`; update them.
+- Tensorfield options must be declared fields; pass them directly or unpack a
+  mapping with `**options`. A `kwargs={...}` bag and undeclared metadata are
+  rejected. Use `description` for notes, and declare extension options on
+  `RequestBase` subclasses. Schema children may still be named `kwargs` or
+  `allow_extra`; those names do not enable arbitrary options.
 - Processed observation names and nesting match the schema by default. A node
   may opt into RelFlow's node-relative structural query syntax with paths such
   as `query="source.path"` or `query="items[-32:][*].sku"`; RelFlow never
@@ -144,6 +149,8 @@ RelFlow code should read as a short sequence of domain operations.
 - Never prefix a function or class name with `_`; control exposure with
   explicit `__all__` and root exports. Python protocol methods such as
   `__post_init__` are the exception.
+- Name every Pydantic validator with a `check_` prefix, including validators
+  that normalize or coerce inputs.
 - Inline a one-use function when it only forwards a call, renames arguments,
   or hides a few incidental expressions. A named function should own a
   semantic phase, recursion, a reusable algorithm, callback identity, or an
@@ -212,7 +219,7 @@ Before considering a change complete, ask:
 ```bash
 uv run ruff format --check
 uv run ruff check
-uv run ty check src/relflow --output-format concise
+uv run pyrefly check
 uv run pytest
 uv run pytest tests/test_public_api.py
 make render

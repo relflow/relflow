@@ -1,8 +1,12 @@
+from typing import TYPE_CHECKING
+
 import torch
 
 
 class RotaryEmbedding(torch.nn.Module):
-    def __init__(self, d_model: int, base: float = 10_000.0):
+    """Rotate paired channels while preserving an optional final odd channel."""
+
+    def __init__(self, d_model: int, base: float = 10_000.0) -> None:
         super().__init__()
 
         if d_model < 2:
@@ -41,3 +45,6 @@ class RotaryEmbedding(torch.nn.Module):
             return rotated
 
         return torch.cat((rotated, passthrough), dim=-1)
+
+    if TYPE_CHECKING:
+        __call__ = forward

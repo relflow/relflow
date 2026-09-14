@@ -1,8 +1,8 @@
-# ty: ignore[unknown-argument]
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Annotated, Literal, cast
+from dataclasses import InitVar
+from typing import TYPE_CHECKING, Annotated, Literal, Unpack, cast
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -22,7 +22,7 @@ from torchmetrics.classification import (
 from relflow.data.ragged import RaggedField
 from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
-from relflow.structs.tree import Address
+from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
     Context,
     DecoderBase,
@@ -38,6 +38,7 @@ from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.structs.experiment import Schema
+    from relflow.structs.structure import Branch
 
 
 boolean: Extension = Extension(name="boolean", types=(bool,))
@@ -49,10 +50,29 @@ Thresholds = Annotated[list[Threshold], pydantic.Field(min_length=1)]
 
 @boolean.register
 class Request(RequestBase):
-    """Boolean scalar tensorfield request without a vocabulary."""
+    """True/false scalar with a fixed representation and no vocabulary.
+
+    Inputs are Boolean values or nulls; nulls retain their separate state.
+    ``threshold`` accepts one value or a nonempty list in ``[0, 1]``; repeated
+    list entries are removed in their original order. Thresholds affect
+    decision metrics only: predicted content remains the probability of True.
+    ``mask=True`` declares a supervised target, trained with binary content
+    loss for valued targets and separate state classification.
+    """
 
     type: Literal["boolean"] = "boolean"
     threshold: Threshold | Thresholds = 0.5
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            name: str | None = None,
+            *,
+            threshold: float | list[float] = 0.5,
+            type: Literal["boolean"] = "boolean",
+            **options: Unpack[FieldOptions],
+        ) -> None: ...
 
     @classmethod
     def counts(
@@ -75,12 +95,14 @@ class Request(RequestBase):
         if not isinstance(embedder, Embedder):
             raise TypeError(f"address {str(address)!r} is not a Boolean field (got {type(embedder).__name__})")
 
-        counts = embedder.counters[TensorKey.content.name].counts.detach().cpu().sub(1).clamp_min(0).tolist()
+        counts = (
+            cast(Counter, embedder.counters[TensorKey.content.name]).counts.detach().cpu().sub(1).clamp_min(0).tolist()
+        )
         return {False: int(counts[0]), True: int(counts[1])}
 
     @pydantic.field_validator("threshold", mode="after")
     @classmethod
-    def deduplicate_thresholds(cls, value: float | list[float]) -> float | list[float]:
+    def check_thresholds(cls, value: float | list[float]) -> float | list[float]:
         if isinstance(value, list):
             return list(dict.fromkeys(value))
         return value
@@ -128,13 +150,19 @@ def observe(
 
 @boolean.register
 @tensorclass
-class TensorField(TensorFieldBase):
+class TensorField(TensorFieldBase[torch.Tensor]):
     content: torch.Tensor
     state: torch.Tensor
     present: torch.Tensor
     trainable: torch.Tensor
     inferred: torch.Tensor
-    targets: TensorDict[TensorKey, torch.Tensor]
+    targets: TensorDict
+
+    if TYPE_CHECKING:
+        # TensorClass metadata is accepted by its generated initializer.
+        batch_size: InitVar[int | torch.Size | list[int] | tuple[int, ...] | None] = None
+        device: InitVar[torch.device | str | int | None] = None
+        names: InitVar[list[str | None] | None] = None
 
     @classmethod
     def new(
@@ -148,7 +176,7 @@ class TensorField(TensorFieldBase):
         schema: Schema,
         strata: Strata,
         context: Context,
-    ) -> TensorFieldBase:
+    ) -> TensorField:
         def encode(field: RaggedField) -> torch.Tensor:
             encoded = pc.if_else(field.values, pa.scalar(1.0, pa.float32()), pa.scalar(-1.0, pa.float32()))
             if isinstance(encoded, pa.ChunkedArray):
@@ -179,9 +207,9 @@ class TensorField(TensorFieldBase):
 class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
-        request: Request = schema.requests[address]
+        request: Request = cast(Request, schema.requests[address])
         self.origin = address
-        self.destination = request.parent.address
+        self.destination = cast("Branch", request.parent).address
         self.state = torch.nn.Embedding(len(Tokens), schema.d_model)
         values = torch.tensor(BOOLEAN_VALUES, dtype=torch.float32).unsqueeze(-1)
         self.register_buffer("content", values.expand(len(BOOLEAN_VALUES), schema.d_model).clone())
@@ -196,7 +224,7 @@ class Embedder(EmbedderBase):
 
     @beartype
     def forward(self, inputs: TensorInput) -> Parcel:
-        content = self.content[inputs.content.to(dtype=torch.int64).add(1)]
+        content = self.content[cast(torch.Tensor, inputs.content).to(dtype=torch.int64).add(1)]
         embeddings = self.state(inputs.state) + content
 
         return Parcel(
@@ -220,16 +248,16 @@ def learn(
 
     if strata != Strata.train:
         raise ValueError(f"boolean learner at '{address}' requires train strata, got {strata}")
-    embedder: Embedder = module.nodes[address].embedder
-    embedder.counters[TensorKey.state.name].learn(observation[TensorKey.state])
-    embedder.counters[TensorKey.content.name].learn(observation[TensorKey.content])
+    embedder: Embedder = cast(Embedder, module.nodes[address].embedder)
+    cast(Counter, embedder.counters[TensorKey.state.name]).learn(cast(torch.Tensor, observation[TensorKey.state]))
+    cast(Counter, embedder.counters[TensorKey.content.name]).learn(cast(torch.Tensor, observation[TensorKey.content]))
 
 
 @boolean.register
 class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
-        request: Request = schema.requests[address]
+        request: Request = cast(Request, schema.requests[address])
         self.state = torch.nn.Linear(schema.d_model, len(Tokens))
         self.content = torch.nn.Linear(schema.d_model, 1)
         self.thresholds = request.thresholds
@@ -264,7 +292,7 @@ class Decoder(DecoderBase):
                 yield f"{name}@{threshold}", cast(TorchMetric, metric)
 
     @beartype
-    def decode(self, pooled: torch.Tensor) -> TensorDict[TensorKey, torch.Tensor]:
+    def decode(self, pooled: torch.Tensor) -> TensorDict:
         return TensorDict(
             {
                 TensorKey.state: self.state(pooled),
@@ -276,10 +304,10 @@ class Decoder(DecoderBase):
 @boolean.register
 def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: Strata) -> torch.Tensor:
     address = prediction.address
-    embedder: Embedder = module.nodes[address].embedder
+    embedder: Embedder = cast(Embedder, module.nodes[address].embedder)
     trainable = batch.trainable.reshape(-1)
-    state_targets = batch.targets[TensorKey.state].reshape(-1)
-    state_logits = prediction.payload[TensorKey.state].reshape(state_targets.numel(), -1)
+    state_targets = cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(-1)
+    state_logits = cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(state_targets.numel(), -1)
 
     total = module.track(
         (address, strata, Metric.loss, TensorKey.state),
@@ -294,7 +322,7 @@ def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: 
         value=state_logits[trainable].argmax(dim=-1).eq(state_targets[trainable]).float().mean(),
     )
 
-    decoder: Decoder = module.nodes[address].decoder
+    decoder: Decoder = cast(Decoder, module.nodes[address].decoder)
     metrics = tuple(decoder.content_metrics(strata))
     valued = trainable & state_targets.eq(Tokens.valued.value)
     if not valued.any():
@@ -304,13 +332,13 @@ def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: 
             module.track((address, strata, metric_name, TensorKey.content), value=metric)
         return total
 
-    logits = prediction.payload[TensorKey.content].reshape(-1)[valued]
-    targets = batch.targets[TensorKey.content].reshape(-1)[valued].gt(0).long()
+    logits = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(-1)[valued]
+    targets = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(-1)[valued].gt(0).long()
     total += module.track(
         (address, strata, Metric.loss, TensorKey.content),
         value=(
             torch.nn.functional.binary_cross_entropy_with_logits(logits, targets.float(), reduction="none")
-            * cast(BooleanCounter, embedder.counters[TensorKey.content.name]).weight[targets]
+            * cast(BooleanCounter, cast(Counter, embedder.counters[TensorKey.content.name])).weight[targets]
         ).mean(),
     )
 
@@ -330,6 +358,6 @@ def output(module: Model, address: Address) -> pa.StructType:
 @boolean.register
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
     content_type = datatype.field(TensorKey.content.name).type
-    probabilities = array(prediction.payload[TensorKey.content].sigmoid(), pa.float32())
+    probabilities = array(cast(torch.Tensor, prediction.payload[TensorKey.content]).sigmoid(), pa.float32())
     content = struct({TensorKey.probability.name: probabilities}, content_type)
     return struct({TensorKey.content.name: content}, datatype)

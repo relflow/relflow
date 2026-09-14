@@ -13,13 +13,70 @@ Use Python 3.12 or newer.
 uv sync
 uv run ruff format --check
 uv run ruff check
-uv run ty check src/relflow --output-format concise
+uv run pyrefly check
 uv run pytest
 ```
 
 Run the smallest relevant test subset while developing. Before publishing a
 branch, run the complete checks above and `make render` when documentation or a
 public contract changed.
+
+## Editor And Type Checking
+
+Pyrefly checks `src/relflow` and the static examples in `tests/typing` using
+the configuration in `pyproject.toml`. The pre-commit hook runs the same
+`uv run pyrefly check` command. Development dependencies include Arrow stubs
+and the optional Text and serving dependencies so those public APIs are checked
+too; they remain optional for applications installing RelFlow.
+
+Install the Pyrefly editor extension and select `.venv/bin/python` as the
+workspace interpreter. For VS Code, these local workspace settings use the
+same checker version as pre-commit:
+
+```json
+{
+  "python.defaultInterpreterPath": ".venv/bin/python",
+  "pyrefly.lspPath": ".venv/bin/pyrefly",
+  "python.pyrefly.diagnosticMode": "workspace"
+}
+```
+
+On Windows, use `.venv/Scripts/python.exe` and `.venv/Scripts/pyrefly.exe`.
+Other editors can launch `uv run pyrefly lsp` through their language-server
+client. See the [Pyrefly editor guide](https://pyrefly.org/en/docs/IDE/).
+
+Type constructor inputs separately from normalized attributes: a field accepts
+`mask=True`, but stores a tuple of `Mask` objects. Use small union aliases,
+`Literal` choices, and overloads where they clarify real call patterns. Preserve
+the caller's return type for decorators and chainable methods. Type-only
+signatures describe framework-generated constructors and hooks without
+replacing runtime dispatch. Add `assert_type` examples for public contracts;
+`tests/test_typing.py` also checks that invalid inputs produce diagnostics.
+
+The package ships `py.typed`, so installed users can discover its annotations.
+Applications can install `relflow[typing]` for Arrow's separate stubs and full
+Arrow input/result completion; development installs already include them.
+Keep annotations compatible with the minimum Python version in
+`requires-python`. Use `typing_extensions` when a typing feature needs a
+backport, such as defaulted type parameters on Python 3.12. Check newer Python
+targets explicitly when changing typing syntax:
+
+```bash
+uv run pyrefly check --python-version 3.14
+uv run pyrefly check --python-version 3.15
+```
+
+These are static checks; runtime compatibility still requires tests on the
+target interpreter. Avoid project-wide suppressions and error baselines. A
+local suppression should name the upstream stub gap or framework contract
+that makes the code valid.
+
+Pyrefly can initially select a schema-only overload while a `Model(...)` call
+is incomplete; supplying all three required dimensions selects the tree
+signature. For third-party Pydantic request subclasses with inherited
+constructors, use `name=...` in checked code or declare an explicit constructor
+signature to expose positional names. Their runtime positional-name support
+is unchanged. Literal value suggestions appear after opening quotes.
 
 ## Implementation Style
 

@@ -1,0 +1,20 @@
+"""Each marked line must produce a public API type error."""
+
+import relflow as rf
+
+rf.Number(n_bands="wide")  # rejected
+rf.Number(objective="l2")  # rejected
+rf.Number(mask=None)  # rejected
+rf.Number(kwargs={"n_bands": 4})  # rejected
+rf.Number(n_bnads=4)  # rejected
+rf.Number(note="Transaction amount")  # rejected
+rf.Category(size=16, notes="Merchant label")  # rejected
+rf.Vector()  # rejected
+rf.Cluster(bounds=(1, 2, 3))  # rejected
+rf.Category(size="large")  # rejected
+rf.Branch(overflow="middle", value=rf.Number)  # rejected
+rf.Model(d_model=32, value=rf.Number)  # rejected
+rf.Model(d_model=32, n_heads=4, n_layers=1, value=rf.Number, scheduler="cosine")  # rejected
+model = rf.Model(d_model=32, n_heads=4, n_layers=1, value=rf.Number)
+model.compile(encoders="yes")  # rejected
+model.predict(123)  # rejected

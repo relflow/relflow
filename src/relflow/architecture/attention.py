@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import torch
 import torch.nn.functional as F
 
@@ -8,6 +10,8 @@ from relflow.architecture.rotary import RotaryEmbedding
 
 
 class RotaryMultiheadAttention(torch.nn.Module):
+    """Project and attend dense sequences or preselected live tokens."""
+
     def __init__(
         self,
         d_model: int,
@@ -15,7 +19,7 @@ class RotaryMultiheadAttention(torch.nn.Module):
         dropout: float,
         n_kv_heads: int | None = None,
         position: bool = True,
-    ):
+    ) -> None:
         super().__init__()
 
         if d_model % nhead != 0:
@@ -106,3 +110,6 @@ class RotaryMultiheadAttention(torch.nn.Module):
         if active is not None:
             output = output.masked_fill(~active[:, None, None], 0.0)
         return output
+
+    if TYPE_CHECKING:
+        __call__ = forward

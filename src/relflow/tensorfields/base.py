@@ -10,19 +10,21 @@ import shlex
 import sys
 import warnings
 from abc import abstractmethod
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from types import MappingProxyType, UnionType
-from typing import TYPE_CHECKING, Any, Callable, TypeAlias, TypeVar, cast, get_args, overload
+from typing import TYPE_CHECKING, Any, Callable, Generic, Protocol, Self, TypeAlias, TypeVar, cast, get_args, overload
 
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import torch
 from lightning.pytorch import Callback
+from rich.console import Console, ConsoleOptions
 from rich.text import Text
 from tensordict import TensorClass, TensorDict
+from typing_extensions import TypeVar as DefaultTypeVar
 
 from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool
 from relflow.data.arrow import variants
@@ -42,6 +44,47 @@ ComponentValue: TypeAlias = Callable[..., Any] | type[Any]
 RegisterT = TypeVar("RegisterT", bound=ComponentValue)
 ValueTypeFamily: TypeAlias = type[Any] | UnionType
 ArrowMatcher: TypeAlias = Callable[[pa.DataType], bool]
+ContentT = DefaultTypeVar(
+    "ContentT", bound=torch.Tensor | TensorDict, default=torch.Tensor | TensorDict, covariant=True
+)
+
+
+class Observe(Protocol):
+    """Summarize pristine Arrow values before masking or augmentation."""
+
+    def __call__(
+        self, field: RaggedField, *, address: Address, schema: Schema, state: object | None, learn: bool
+    ) -> TensorDict | None: ...
+
+
+class Learn(Protocol):
+    """Apply one field-owned observation to the model's training state."""
+
+    def __call__(self, module: Model, observation: TensorDict, *, address: Address, strata: Strata) -> None: ...
+
+
+class Loss(Protocol):
+    """Return the scalar objective for selected targets of one field."""
+
+    def __call__(
+        self, module: Model, prediction: Prediction, batch: TensorFieldBase, strata: Strata
+    ) -> torch.Tensor: ...
+
+
+class OutputSchema(Protocol):
+    """Declare the extension-owned Arrow fields written at one address."""
+
+    def __call__(self, module: Model, address: Address) -> pa.StructType | None: ...
+
+
+class Write(Protocol):
+    """Materialize prediction coordinates with the declared Arrow schema."""
+
+    def __call__(
+        self, module: Model, prediction: Prediction, datatype: pa.StructType | None
+    ) -> pa.StructArray | None: ...
+
+
 MATCHERS: Mapping[type[Any], ArrowMatcher] = MappingProxyType(
     {
         object: lambda datatype: True,
@@ -114,12 +157,12 @@ class TensorInput(TensorClass):
 class EmbedderBase(torch.nn.Module):
     """Base class for tensorfield embedders."""
 
-    def __init__(self, schema: Schema, address: Address):
+    def __init__(self, schema: Schema, address: Address) -> None:
         super().__init__()
 
         request = schema.requests[address]
         self.address = address
-        self.destination = request.parent.address
+        self.destination = cast("Branch", request.parent).address
         self.d_model = schema.d_model
         self.register_buffer("anchor", torch.zeros(()), persistent=False)
 
@@ -135,7 +178,7 @@ class EmbedderBase(torch.nn.Module):
         shape = tuple(field.state.shape)
         present = field.present.reshape(-1)
         indices = present.nonzero(as_tuple=False).reshape(-1)
-        count = int(indices.numel())
+        count = indices.numel()
 
         if count:
             complete = count == present.numel()
@@ -187,7 +230,7 @@ class EmbedderBase(torch.nn.Module):
 class DecoderBase(torch.nn.Module):
     """Base class for tensorfield decoders."""
 
-    def __init__(self, schema: Schema, address: Address, *, conditioned: bool = True):
+    def __init__(self, schema: Schema, address: Address, *, conditioned: bool = True) -> None:
         super().__init__()
 
         self.address: Address = address
@@ -214,7 +257,7 @@ class DecoderBase(torch.nn.Module):
 
         context_addresses: list[Address] = []
         if conditioned:
-            for child in request.parent.fields:
+            for child in cast("Branch", request.parent).fields:
                 if child.address == address:
                     continue
                 context_addresses.extend(visible(child))
@@ -257,7 +300,7 @@ class DecoderBase(torch.nn.Module):
             case _:
                 raise ValueError(f"unsupported decoder pooling: {request.pooling}")
 
-    def decode(self, pooled: torch.Tensor) -> TensorDict[TensorKey, torch.Tensor]:
+    def decode(self, pooled: torch.Tensor) -> TensorDict:
         raise NotImplementedError("decoder must implement decode(pooled)")
 
     def forward(
@@ -346,8 +389,12 @@ class DecoderBase(torch.nn.Module):
         return combined.masked_fill(~present.any(dim=2).unsqueeze(-1), 0.0)
 
 
-class TensorFieldBase(Renderable):
-    """Tensorized field values plus trainable target state."""
+class TensorFieldBase(Renderable, Generic[ContentT]):
+    """Tensorized values and targets with an extension-owned content type.
+
+    Consumers read content through this base interface. Concrete tensorclasses
+    declare its storage as either a Tensor or a TensorDict and own replacement.
+    """
 
     STATE_PREVIEW_LIMIT: int = 80
     STATE_LABELS: dict[int, str] = {
@@ -365,12 +412,17 @@ class TensorFieldBase(Renderable):
         Tokens.other.value: "bold cyan",
     }
 
-    content: torch.Tensor | TensorDict
+    if TYPE_CHECKING:
+
+        @property
+        def content(self) -> ContentT: ...
+    else:
+        content: torch.Tensor | TensorDict
     state: torch.Tensor
     present: torch.Tensor
     trainable: torch.Tensor
     inferred: torch.Tensor
-    targets: TensorDict[TensorKey, torch.Tensor]
+    targets: TensorDict
 
     @classmethod
     @abstractmethod
@@ -385,7 +437,7 @@ class TensorFieldBase(Renderable):
         schema: Schema,
         strata: Strata,
         context: Context,
-    ) -> "TensorFieldBase":
+    ) -> Self:
         raise NotImplementedError
 
     def take(self, indices: torch.Tensor | None) -> TensorInput:
@@ -431,7 +483,7 @@ class TensorFieldBase(Renderable):
             batch_size=[count],
         )
 
-    def __rich_console__(self, console, options):
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
         state = getattr(self, TensorKey.state, None)
         trainable = getattr(self, TensorKey.trainable, None)
         targets = getattr(self, TensorKey.targets, None)
@@ -486,7 +538,7 @@ class TensorFieldBase(Renderable):
             rows = preview.reshape(-1, preview.shape[-1])
             row_prefix = "\n       "
 
-        limit = min(int(preview.numel()), self.STATE_PREVIEW_LIMIT)
+        limit = min(preview.numel(), self.STATE_PREVIEW_LIMIT)
         count = 0
 
         for row_index, row in enumerate(rows):
@@ -505,7 +557,7 @@ class TensorFieldBase(Renderable):
                 text.append(self.STATE_LABELS.get(token, str(token)), style=self.STATE_STYLES.get(token, "bold red"))
                 count += 1
 
-        if int(preview.numel()) > limit:
+        if preview.numel() > limit:
             text.append(" ...", style="dim")
 
         return text
@@ -746,6 +798,12 @@ class Extension:
             return datatype if direct else self.canonical(datatype.storage_type)
         return datatype
 
+    @overload
+    def normalize(self, values: pa.Array, datatype: pa.DataType) -> pa.Array: ...
+
+    @overload
+    def normalize(self, values: pa.ChunkedArray, datatype: pa.DataType) -> pa.ChunkedArray: ...
+
     def normalize(
         self,
         values: pa.Array | pa.ChunkedArray,
@@ -756,18 +814,22 @@ class Extension:
         if values.type == datatype:
             return values
         if isinstance(values, pa.ChunkedArray):
-            return pa.chunked_array(
+            # Registered Arrow datatypes exceed the stubs' enumerated overloads.
+            return pa.chunked_array(  # pyrefly: ignore [no-matching-overload]
                 [self.normalize(chunk, datatype) for chunk in values.chunks],
                 type=datatype,
             )
         if pa.types.is_dictionary(values.type):
+            values = cast(pa.DictionaryArray, values)
             decoded = pc.take(values.dictionary, values.indices)
             return self.normalize(decoded, datatype)
         if isinstance(values, pa.ExtensionArray) and not isinstance(datatype, pa.ExtensionType):
             return self.normalize(values.storage, datatype)
         if pa.types.is_union(values.type) and not pa.types.is_union(datatype):
+            values = cast(pa.UnionArray, values)
             codes, offsets = variants(values)
-            result = pa.nulls(len(values), type=datatype)
+            # nulls accepts any Arrow datatype, including registered extensions.
+            result = pa.nulls(len(values), type=cast(pa.DataType, datatype))  # pyrefly: ignore [no-matching-overload]
             for index, code in enumerate(values.type.type_codes):
                 selected = codes == code
                 positions = np.flatnonzero(selected).astype(np.int64, copy=False)
@@ -776,7 +838,8 @@ class Extension:
                 indices = offsets[selected] if offsets is not None else positions
                 child = pc.take(values.field(index), pa.array(indices, type=pa.int64()))
                 normalized = self.normalize(child, datatype)
-                placed = pc.scatter(normalized, pa.array(positions, type=pa.int64()), max_index=len(values) - 1)
+                # Arrow exposes scatter dynamically; pyarrow-stubs omits it.
+                placed = pc.scatter(normalized, pa.array(positions, type=pa.int64()), max_index=len(values) - 1)  # pyrefly: ignore [missing-attribute]
                 result = pc.coalesce(result, placed)
             return result
         if (
@@ -786,16 +849,20 @@ class Extension:
         ) and (pa.types.is_list(datatype) or pa.types.is_large_list(datatype) or pa.types.is_fixed_size_list(datatype)):
             mask = pc.is_null(values)
             if pa.types.is_fixed_size_list(values.type):
+                values = cast(pa.FixedSizeListArray, values)
                 start = values.offset * values.type.list_size
                 length = len(values) * values.type.list_size
                 child = values.values.slice(start, length)
             else:
+                values = cast(pa.ListArray | pa.LargeListArray, values)
                 start = values.offsets[0].as_py()
                 stop = values.offsets[-1].as_py()
                 child = values.values.slice(start, stop - start)
             child = self.normalize(child, datatype.value_type)
             if pa.types.is_fixed_size_list(datatype):
-                return pa.FixedSizeListArray.from_arrays(child, type=datatype, mask=mask)
+                # The stubs omit Arrow's explicit-type constructor overload.
+                return pa.FixedSizeListArray.from_arrays(child, type=datatype, mask=mask)  # pyrefly: ignore [no-matching-overload]
+            values = cast(pa.ListArray | pa.LargeListArray, values)
             offsets = pc.subtract(values.offsets, values.offsets[0])
             if pa.types.is_large_list(datatype):
                 return pa.LargeListArray.from_arrays(offsets, child, type=datatype, mask=mask)
@@ -858,7 +925,8 @@ class Extension:
         if not hasattr(obj, "__name__"):
             raise NameError(f"Object {obj} does not have a name")
 
-        name: str = str(obj.__name__)
+        # Extension registration also accepts unchecked callable objects.
+        name = str(obj.__name__)  # pyrefly: ignore [unnecessary-type-conversion]
         try:
             key = Component(name)
         except ValueError:
@@ -882,7 +950,7 @@ class Extension:
                 if not issubclass(obj, TensorFieldBase):
                     raise TypeError("TensorField must be a subclass of TensorFieldBase")
 
-                new_params = inspect.signature(obj.new).parameters
+                new_params = inspect.signature(cast(type[TensorFieldBase], obj).new).parameters
                 required = {
                     "input",
                     "target",
@@ -909,7 +977,7 @@ class Extension:
                 if "schema" not in init_params or "address" not in init_params:
                     raise TypeError("Embedder __init__ method must accept 'schema' and 'address' parameters")
 
-                forward_params = inspect.signature(obj.forward).parameters
+                forward_params = inspect.signature(cast(type[EmbedderBase], obj).forward).parameters
                 if "inputs" not in forward_params:
                     raise TypeError("Embedder.forward must accept a compact 'inputs' parameter")
 
@@ -986,7 +1054,9 @@ class Extension:
     @overload
     def callback(self, factory: CallbackFactory, *factories: CallbackFactory) -> tuple[CallbackFactory, ...]: ...
 
-    def callback(self, factory: CallbackFactory, *factories: CallbackFactory):
+    def callback(
+        self, factory: CallbackFactory, *factories: CallbackFactory
+    ) -> CallbackFactory | tuple[CallbackFactory, ...]:
         """Register one or more Lightning callback factories for this tensorfield."""
         registered = (factory, *factories)
         for callback_factory in registered:
@@ -1040,24 +1110,24 @@ class Extension:
         return cast(type[DecoderBase], self.component(Component.Decoder))
 
     @property
-    def observe(self) -> Callable[..., TensorDict | None]:
-        return cast(Callable[..., TensorDict | None], self.component(Component.observe))
+    def observe(self) -> Observe:
+        return cast(Observe, self.component(Component.observe))
 
     @property
-    def learn(self) -> Callable[..., None]:
-        return cast(Callable[..., None], self.component(Component.learn))
+    def learn(self) -> Learn:
+        return cast(Learn, self.component(Component.learn))
 
     @property
-    def loss(self) -> Callable[..., Any]:
-        return cast(Callable[..., Any], self.component(Component.loss))
+    def loss(self) -> Loss:
+        return cast(Loss, self.component(Component.loss))
 
     @property
-    def output(self) -> Callable[..., Any]:
-        return cast(Callable[..., Any], self.component(Component.output))
+    def output(self) -> OutputSchema:
+        return cast(OutputSchema, self.component(Component.output))
 
     @property
-    def write(self) -> Callable[..., Any]:
-        return cast(Callable[..., Any], self.component(Component.write))
+    def write(self) -> Write:
+        return cast(Write, self.component(Component.write))
 
     def __getattr__(self, key: str) -> ComponentValue:
         try:

@@ -8,7 +8,7 @@ import os
 from collections.abc import Callable, Generator, Iterable, Iterator, Mapping
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, replace
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal, TypeAlias, TypeVar, overload
 
 import lightning.pytorch as lit
 import numpy as np
@@ -19,20 +19,25 @@ import torch
 from torch.utils.data import DataLoader, IterableDataset, get_worker_info
 
 import relflow
-from relflow.data.datasets.base import InterprocessEncodingContext
+from relflow.data.arrow import Encoded
+from relflow.data.datasets.base import InterprocessEncodingContext, StratumConfig
 from relflow.data.iterables import encode
 from relflow.data.processors import Preprocessor, PreprocessorInput, arrow, polars
 from relflow.data.sources import Source
 from relflow.data.sources import source as file_source
 from relflow.distributed import broadcast_object, rank, world_size
 from relflow.structs.enums import Strata
+from relflow.structs.experiment import Schema
+
+Value = TypeVar("Value")
+Default = TypeVar("Default")
 
 ArrowUnit: TypeAlias = pa.Table | pa.RecordBatch
 ArrowStream: TypeAlias = pa.RecordBatchReader | Iterable[ArrowUnit]
 Retain: TypeAlias = tuple[str, ...] | Literal["*"]
 
 
-ArrowSource: TypeAlias = ArrowUnit | ds.Dataset | Callable[[], ArrowStream]
+ArrowSource: TypeAlias = ArrowUnit | ds.Dataset | Source | Callable[[], ArrowStream]
 ArrowInput: TypeAlias = ArrowSource | str | os.PathLike[str]
 
 
@@ -55,7 +60,7 @@ def lock(schemas: Schemas, stage: Literal["source", "processed"], actual: pa.Sch
         raise TypeError(f"{context}: expected {expected}, got {actual}")
 
 
-def passthrough(value: Any) -> Any:
+def passthrough(value: Value) -> Value:
     """Keep values intact when Lightning's DataLoader has batching disabled."""
 
     return value
@@ -63,11 +68,11 @@ def passthrough(value: Any) -> Any:
 
 def splits(
     *,
-    train: Any = None,
-    validate: Any = None,
-    test: Any = None,
-    predict: Any = None,
-) -> dict[Strata, Any]:
+    train: Value | None = None,
+    validate: Value | None = None,
+    test: Value | None = None,
+    predict: Value | None = None,
+) -> dict[Strata, Value]:
     """Collect explicitly named, non-null data splits."""
 
     values = {
@@ -82,13 +87,13 @@ def splits(
     return configured
 
 
-def expand(value: Any, *, default: Any) -> dict[Strata, Any]:
+def expand(value: StratumConfig[Value], *, default: Default) -> dict[Strata, Value | Default]:
     """Expand a scalar or named stratum overrides to all strata."""
 
     return Strata.expand(value, default=default)
 
 
-def accept(source: Any, *, strata: Strata) -> ArrowSource:
+def accept(source: ArrowInput, *, strata: Strata) -> ArrowSource:
     """Validate the restartable Arrow source boundary."""
 
     if isinstance(source, (str, os.PathLike)):
@@ -373,14 +378,14 @@ def distribute(
         yield item.take(indices)
 
 
-class ArrowDataset(IterableDataset):
+class ArrowDataset(IterableDataset[Encoded]):
     """Feed one Arrow source through the shared model-input pipeline."""
 
     def __init__(
         self,
         *,
         source: ArrowSource,
-        schema: Any,
+        schema: Schema,
         preprocessors: tuple[Preprocessor, ...],
         encoding_context: InterprocessEncodingContext,
         batch_size: int,
@@ -400,7 +405,7 @@ class ArrowDataset(IterableDataset):
         epoch: Any = None,
         epoch_snapshot: Any = None,
         epoch_barrier: Any = None,
-    ):
+    ) -> None:
         super().__init__()
         self.source = source
         self.schema = schema
@@ -454,7 +459,7 @@ class ArrowDataset(IterableDataset):
         consumers = self.distributed_world_size * worker.num_workers
         return epoch, consumer, consumers
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Encoded]:
         epoch, consumer, consumers = self.iteration()
         for field_context in self.encoding_context.values():
             configure = getattr(field_context, "configure_distributed", None)
@@ -506,7 +511,7 @@ class ArrowDataset(IterableDataset):
         )
         yield from self.encode(distributed, epoch=epoch)
 
-    def encode(self, batches: Iterable[pa.Table], *, epoch: int) -> Iterator[Any]:
+    def encode(self, batches: Iterable[pa.Table], *, epoch: int) -> Iterator[Encoded]:
         """Encode one consumer's final model batches."""
 
         for item in batches:
@@ -524,7 +529,7 @@ class ArrowDataset(IterableDataset):
 def loader(
     *,
     source: ArrowSource,
-    schema: Any,
+    schema: Schema,
     preprocessors: tuple[Preprocessor, ...],
     encoding_context: InterprocessEncodingContext,
     batch_size: int,
@@ -544,7 +549,7 @@ def loader(
     prefetch_factor: int,
     multiprocessing_context: Any,
     epoch: Any = None,
-) -> DataLoader:
+) -> DataLoader[Encoded]:
     """Build the sole Lightning DataLoader used by all four data modules."""
 
     distributed_rank = rank()
@@ -616,6 +621,15 @@ class ArrowDataModule(lit.LightningDataModule):
     data workers replay the same global stream and receive disjoint rows from
     equal global superbatches. File sources freeze their manifest before workers
     start, then open independent Arrow readers in each consuming process.
+
+    Pass at least one of ``train``, ``validate``, ``test`` or ``predict``.
+    Configuration accepts one value for every split or a mapping keyed by
+    ``"train"``, ``"validate"``, ``"test"`` and ``"predict"``. Shuffling defaults
+    to training only; ``sample`` is a probability, ``epoch_size`` caps rows, and
+    ``shuffle_rows`` bounds the streaming shuffle buffer. ``retain`` preserves
+    processed columns for prediction output and requires exact split keys when
+    given as a mapping. Data loaders yield :class:`~relflow.data.arrow.Encoded`
+    batches with Arrow source metadata and a TensorDict payload.
     """
 
     def __init__(
@@ -626,21 +640,21 @@ class ArrowDataModule(lit.LightningDataModule):
         validate: ArrowInput | None = None,
         test: ArrowInput | None = None,
         predict: ArrowInput | None = None,
-        preprocessor: PreprocessorInput | Mapping[Strata | str, PreprocessorInput] = (),
+        preprocessor: StratumConfig[PreprocessorInput] = (),
         seed: int = 0,
-        shuffle: bool | None | Mapping[Strata | str, bool | None] = None,
-        sample: float | Mapping[Strata | str, float] = 1.0,
-        replacement: bool | Mapping[Strata | str, bool] = False,
-        epoch_size: int | None | Mapping[Strata | str, int | None] = None,
-        shuffle_rows: int | None | Mapping[Strata | str, int | None] = None,
-        drop_last: bool | Mapping[Strata | str, bool] = False,
-        num_workers: int | Mapping[Strata | str, int] = 0,
-        persistent_workers: bool | Mapping[Strata | str, bool] = False,
-        pin_memory: bool | Mapping[Strata | str, bool] = False,
-        prefetch_factor: int | Mapping[Strata | str, int] = 2,
+        shuffle: StratumConfig[bool | None] = None,
+        sample: StratumConfig[float] = 1.0,
+        replacement: StratumConfig[bool] = False,
+        epoch_size: StratumConfig[int | None] = None,
+        shuffle_rows: StratumConfig[int | None] = None,
+        drop_last: StratumConfig[bool] = False,
+        num_workers: StratumConfig[int] = 0,
+        persistent_workers: StratumConfig[bool] = False,
+        pin_memory: StratumConfig[bool] = False,
+        prefetch_factor: StratumConfig[int] = 2,
         multiprocessing_context: str | None = None,
-        retain: Retain | Mapping[Strata | str, Retain] = (),
-    ):
+        retain: StratumConfig[Retain] = (),
+    ) -> None:
         super().__init__()
         if not isinstance(seed, int) or isinstance(seed, bool):
             raise TypeError("seed must be an integer")
@@ -766,7 +780,8 @@ class ArrowDataModule(lit.LightningDataModule):
         self.seed = seed
 
     @property
-    def schema(self):
+    def schema(self) -> Schema:
+        """The schema of the model whose batches this module prepares."""
         return self.model.schema
 
     @property
@@ -777,8 +792,17 @@ class ArrowDataModule(lit.LightningDataModule):
     def encoding_context(self) -> InterprocessEncodingContext:
         return self.model.interprocess_encoding_context
 
-    def dataloader(self, strata: Strata | str, required: bool = True) -> DataLoader | None:
-        """Create the shared loader for one configured split."""
+    @overload
+    def dataloader(self, strata: Strata | str, required: Literal[True] = True) -> DataLoader[Encoded]: ...
+
+    @overload
+    def dataloader(self, strata: Strata | str, required: Literal[False]) -> DataLoader[Encoded] | None: ...
+
+    @overload
+    def dataloader(self, strata: Strata | str, required: bool) -> DataLoader[Encoded] | None: ...
+
+    def dataloader(self, strata: Strata | str, required: bool = True) -> DataLoader[Encoded] | None:
+        """Create one split's loader; missing splits raise unless ``required=False``."""
 
         normalized = Strata.normalize(strata)
         if normalized not in self.sources:
@@ -817,17 +841,17 @@ class ArrowDataModule(lit.LightningDataModule):
             epoch=self.worker_epochs.get(normalized),
         )
 
-    def train_dataloader(self) -> DataLoader | None:
+    def train_dataloader(self) -> DataLoader[Encoded] | None:
         return self.dataloader(Strata.train, required=False)
 
-    def val_dataloader(self) -> DataLoader | None:
+    def val_dataloader(self) -> DataLoader[Encoded] | None:
         return self.dataloader(Strata.validate, required=False)
 
-    def test_dataloader(self) -> DataLoader | None:
+    def test_dataloader(self) -> DataLoader[Encoded] | None:
         return self.dataloader(Strata.test, required=False)
 
-    def predict_dataloader(self) -> DataLoader | None:
+    def predict_dataloader(self) -> DataLoader[Encoded] | None:
         return self.dataloader(Strata.predict, required=False)
 
 
-__all__ = ["ArrowDataModule"]
+__all__ = ["ArrowDataModule", "ArrowInput", "ArrowSource", "ArrowStream", "ArrowUnit", "Retain"]

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Any
 
 import pyarrow as pa
@@ -11,6 +11,7 @@ from torch.utils.data import IterableDataset
 import relflow
 from relflow.data.arrow import mappings
 from relflow.data.datasets.arrow import ArrowDataModule, ArrowStream, Retain
+from relflow.data.datasets.base import StratumConfig
 from relflow.data.processors import PreprocessorInput
 from relflow.structs.enums import Strata
 
@@ -27,7 +28,7 @@ def schemas(
     if not isinstance(value, Mapping):
         raise TypeError("arrow_schema must be a pyarrow.Schema, named schema mapping, or None")
 
-    normalized = {Strata.normalize(key): schema for key, schema in value.items()}
+    normalized: dict[Strata, pa.Schema | None] = {Strata.normalize(key): schema for key, schema in value.items()}
     if set(normalized) != configured:
         missing = sorted(str(item) for item in configured - set(normalized))
         extra = sorted(str(item) for item in set(normalized) - configured)
@@ -38,7 +39,7 @@ def schemas(
 
 
 def adapt(
-    source: Callable[[], Iterator[Mapping[str, Any]]],
+    source: Callable[[], Iterable[Mapping[str, Any]]],
     *,
     schema: pa.Schema | None,
     rows: int,
@@ -109,27 +110,27 @@ class CustomDataModule(ArrowDataModule):
         self,
         model: relflow.Model,
         *,
-        train: IterableDataset | None = None,
-        validate: IterableDataset | None = None,
-        test: IterableDataset | None = None,
-        predict: IterableDataset | None = None,
+        train: IterableDataset[Mapping[str, Any]] | None = None,
+        validate: IterableDataset[Mapping[str, Any]] | None = None,
+        test: IterableDataset[Mapping[str, Any]] | None = None,
+        predict: IterableDataset[Mapping[str, Any]] | None = None,
         arrow_schema: pa.Schema | Mapping[Strata | str, pa.Schema] | None = None,
         ingress_rows: int = 4096,
-        preprocessor: PreprocessorInput | Mapping[Strata | str, PreprocessorInput] = (),
+        preprocessor: StratumConfig[PreprocessorInput] = (),
         seed: int = 0,
-        shuffle: bool | None | Mapping[Strata | str, bool | None] = None,
-        sample: float | Mapping[Strata | str, float] = 1.0,
-        replacement: bool | Mapping[Strata | str, bool] = False,
-        epoch_size: int | None | Mapping[Strata | str, int | None] = None,
-        shuffle_rows: int | None | Mapping[Strata | str, int | None] = None,
-        drop_last: bool | Mapping[Strata | str, bool] = False,
-        num_workers: int | Mapping[Strata | str, int] = 0,
-        persistent_workers: bool | Mapping[Strata | str, bool] = False,
-        pin_memory: bool | Mapping[Strata | str, bool] = False,
-        prefetch_factor: int | Mapping[Strata | str, int] = 2,
+        shuffle: StratumConfig[bool | None] = None,
+        sample: StratumConfig[float] = 1.0,
+        replacement: StratumConfig[bool] = False,
+        epoch_size: StratumConfig[int | None] = None,
+        shuffle_rows: StratumConfig[int | None] = None,
+        drop_last: StratumConfig[bool] = False,
+        num_workers: StratumConfig[int] = 0,
+        persistent_workers: StratumConfig[bool] = False,
+        pin_memory: StratumConfig[bool] = False,
+        prefetch_factor: StratumConfig[int] = 2,
         multiprocessing_context: str | None = None,
-        retain: Retain | Mapping[Strata | str, Retain] = (),
-    ):
+        retain: StratumConfig[Retain] = (),
+    ) -> None:
         if not isinstance(ingress_rows, int) or isinstance(ingress_rows, bool) or ingress_rows < 1:
             raise ValueError("ingress_rows must be a positive integer")
 

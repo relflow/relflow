@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from copy import deepcopy
 from functools import partialmethod, wraps
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import lightning.pytorch as lit
 import pydantic
@@ -26,10 +26,12 @@ if TYPE_CHECKING:
 _MISSING = object()
 
 
-def immutable(name: str | Strata) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    def decorator(method: Callable[..., Any]) -> Callable[..., Any]:
+def immutable[F: Callable[..., object]](name: str | Strata) -> Callable[[F], F]:
+    """Hold a model mutation lock without changing the decorated call signature."""
+
+    def decorator(method: F) -> F:
         @wraps(method)
-        def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
+        def wrapped(self: Model, *args: object, **kwargs: object) -> object:
             locks = self.locks
             locks[name] += 1
             try:
@@ -40,7 +42,7 @@ def immutable(name: str | Strata) -> Callable[[Callable[..., Any]], Callable[...
                 else:
                     locks[name] -= 1
 
-        return wrapped
+        return cast(F, wrapped)
 
     return decorator
 
@@ -50,13 +52,14 @@ class MutationLockCallback(Callback):
 
     locks: tuple[Strata, ...] = (Strata.train, Strata.validate, Strata.test, Strata.predict)
 
-    def on_loop_start(self, trainer: lit.Trainer, pl_module: "Model", strata: Strata) -> None:
+    def on_loop_start(self, trainer: lit.Trainer, pl_module: lit.LightningModule, strata: Strata) -> None:
+        module = cast("Model", pl_module)
         if strata == Strata.predict:
-            pl_module.output_plans.clear()
-        pl_module.locks[strata] += 1
+            module.output_plans.clear()
+        module.locks[strata] += 1
 
-    def on_loop_end(self, trainer: lit.Trainer, pl_module: "Model", strata: Strata) -> None:
-        locks = pl_module.locks
+    def on_loop_end(self, trainer: lit.Trainer, pl_module: lit.LightningModule, strata: Strata) -> None:
+        locks = cast("Model", pl_module).locks
         if locks[strata] <= 1:
             locks.pop(strata, None)
         else:
@@ -65,20 +68,31 @@ class MutationLockCallback(Callback):
     def on_exception(
         self,
         trainer: lit.Trainer,
-        pl_module: "Model",
+        pl_module: lit.LightningModule,
         exception: BaseException,
-    ) -> None:  # ty:ignore[invalid-method-override]
+    ) -> None:
         for lock in self.locks:
-            pl_module.locks.pop(lock, None)
+            cast("Model", pl_module).locks.pop(lock, None)
 
-    on_train_start = partialmethod(on_loop_start, strata=Strata.train)
-    on_train_end = partialmethod(on_loop_end, strata=Strata.train)
-    on_validation_start = partialmethod(on_loop_start, strata=Strata.validate)
-    on_validation_end = partialmethod(on_loop_end, strata=Strata.validate)
-    on_test_start = partialmethod(on_loop_start, strata=Strata.test)
-    on_test_end = partialmethod(on_loop_end, strata=Strata.test)
-    on_predict_start = partialmethod(on_loop_start, strata=Strata.predict)
-    on_predict_end = partialmethod(on_loop_end, strata=Strata.predict)
+    # Preserve Lightning hook signatures for the runtime partialmethod descriptors.
+    if TYPE_CHECKING:
+        on_train_start = Callback.on_train_start
+        on_train_end = Callback.on_train_end
+        on_validation_start = Callback.on_validation_start
+        on_validation_end = Callback.on_validation_end
+        on_test_start = Callback.on_test_start
+        on_test_end = Callback.on_test_end
+        on_predict_start = Callback.on_predict_start
+        on_predict_end = Callback.on_predict_end
+    else:
+        on_train_start = partialmethod(on_loop_start, strata=Strata.train)
+        on_train_end = partialmethod(on_loop_end, strata=Strata.train)
+        on_validation_start = partialmethod(on_loop_start, strata=Strata.validate)
+        on_validation_end = partialmethod(on_loop_end, strata=Strata.validate)
+        on_test_start = partialmethod(on_loop_start, strata=Strata.test)
+        on_test_end = partialmethod(on_loop_end, strata=Strata.test)
+        on_predict_start = partialmethod(on_loop_start, strata=Strata.predict)
+        on_predict_end = partialmethod(on_loop_end, strata=Strata.predict)
 
 
 class RuntimePlacementCallback(Callback):
@@ -89,10 +103,17 @@ class RuntimePlacementCallback(Callback):
         if isinstance(device, torch.device):
             pl_module.to(device=device)
 
-    on_train_start = partialmethod(on_loop_start, strata=Strata.train)
-    on_validation_start = partialmethod(on_loop_start, strata=Strata.validate)
-    on_test_start = partialmethod(on_loop_start, strata=Strata.test)
-    on_predict_start = partialmethod(on_loop_start, strata=Strata.predict)
+    # Preserve Lightning hook signatures for the runtime partialmethod descriptors.
+    if TYPE_CHECKING:
+        on_train_start = Callback.on_train_start
+        on_validation_start = Callback.on_validation_start
+        on_test_start = Callback.on_test_start
+        on_predict_start = Callback.on_predict_start
+    else:
+        on_train_start = partialmethod(on_loop_start, strata=Strata.train)
+        on_validation_start = partialmethod(on_loop_start, strata=Strata.validate)
+        on_test_start = partialmethod(on_loop_start, strata=Strata.test)
+        on_predict_start = partialmethod(on_loop_start, strata=Strata.predict)
 
 
 class AttributeChange(pydantic.BaseModel):
@@ -116,7 +137,7 @@ class SchemaEditor:
         self.module = module
 
     @contextmanager
-    def transaction(self) -> Iterator[None]:
+    def transaction(self) -> Generator[None, None, None]:
         """Restore the schema and runtime graph when a mutation cannot rebuild."""
 
         schema = deepcopy(self.module.schema)
@@ -152,7 +173,6 @@ class SchemaEditor:
         self,
         *predicates: NodePredicate | NodeAttribute | Callable[[Node], bool],
         strict: bool = True,
-        allow_extra: bool = False,
         include_root: bool = True,
         validate: bool = True,
         use_cache: bool = False,
@@ -163,7 +183,6 @@ class SchemaEditor:
         changes = self.attribute_changes(
             values=values,
             predicates=predicates,
-            allow_extra=allow_extra,
             include_root=include_root,
             use_cache=use_cache,
         )
@@ -171,7 +190,6 @@ class SchemaEditor:
             self.module.schema.update(
                 *predicates,
                 strict=strict,
-                allow_extra=allow_extra,
                 include_root=include_root,
                 validate=validate,
                 use_cache=use_cache,
@@ -253,18 +271,16 @@ class SchemaEditor:
         self,
         *predicates: NodePredicate | NodeAttribute | Callable[[Node], bool],
         strict: bool = True,
-        allow_extra: bool = False,
         include_root: bool = True,
         validate: bool = True,
         use_cache: bool = False,
         **values: Any,
-    ) -> Iterator[None]:
+    ) -> Generator[None, None, None]:
         self.assert_mutation_allowed("override")
         values = self.module.schema.update_values(values)
         changes = self.attribute_changes(
             values=values,
             predicates=predicates,
-            allow_extra=allow_extra,
             include_root=include_root,
             use_cache=use_cache,
         )
@@ -273,7 +289,6 @@ class SchemaEditor:
             with self.module.schema.override(
                 *predicates,
                 strict=strict,
-                allow_extra=allow_extra,
                 include_root=include_root,
                 validate=validate,
                 use_cache=use_cache,
@@ -295,16 +310,14 @@ class SchemaEditor:
         *,
         values: dict[str, Any],
         predicates: tuple[NodePredicate | NodeAttribute | Callable[[Node], bool], ...],
-        allow_extra: bool,
         include_root: bool,
         use_cache: bool,
     ) -> list[AttributeChange]:
         nodes = self.module.schema.select(*predicates, include_root=include_root, use_cache=use_cache)
         changes: list[AttributeChange] = []
         for node in nodes:
-            can_apply_extra = allow_extra and getattr(type(node), "model_config", {}).get("extra") == "allow"
             for name in values:
-                if not (has_node_attribute(node, name) or can_apply_extra):
+                if not has_node_attribute(node, name):
                     continue
 
                 changes.append(
@@ -314,7 +327,7 @@ class SchemaEditor:
                         original=getattr(node, name, _MISSING),
                         definition_attribute=is_definition_attribute(node, name),
                         address=str(node.address),
-                        node_name=node.name,
+                        node_name=cast(str, node.name),
                         node_type=node.type,
                     )
                 )
@@ -437,8 +450,7 @@ class SchemaEditor:
 
 def has_node_attribute(node: Node, name: str) -> bool:
     fields = getattr(type(node), "model_fields", {})
-    extra = getattr(node, "model_extra", None) or {}
-    return name in fields or name in extra or hasattr(node, name)
+    return name in fields or hasattr(type(node), name)
 
 
 def is_definition_attribute(node: Node, name: str) -> bool:

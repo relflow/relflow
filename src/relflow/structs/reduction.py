@@ -11,7 +11,12 @@ ReductionDropout: TypeAlias = Annotated[float, pydantic.Field(strict=True, ge=0.
 
 
 class Mean(pydantic.BaseModel):
-    """Arithmetic-mean branch reduction."""
+    """Reduce a branch to one vector by averaging its present coordinates.
+
+    Padding and other absent coordinates do not contribute to the mean; an
+    empty selection yields zero. This frozen configuration adds no learned
+    reduction parameters and is passed as ``Branch(reduction=rf.Mean())``.
+    """
 
     model_config = pydantic.ConfigDict(extra="forbid", frozen=True)
 
@@ -19,7 +24,15 @@ class Mean(pydantic.BaseModel):
 
 
 class Attention(pydantic.BaseModel):
-    """Learned-query attention branch reduction."""
+    """Reduce a branch to a fixed number of learned context vectors.
+
+    ``n_outputs`` sets the number of vectors passed to the parent, and
+    ``n_layers`` sets reduction depth. ``n_heads`` and ``dropout`` inherit the
+    branch configuration when omitted; explicit values override it here.
+    ``position`` enables rotary position information in reduction attention.
+    Absent coordinates are excluded from attention. This frozen configuration
+    is passed as ``Branch(reduction=rf.Attention(...))``.
+    """
 
     model_config = pydantic.ConfigDict(extra="forbid", frozen=True)
 

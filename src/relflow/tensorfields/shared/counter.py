@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import torch
-from lightning.pytorch import Callback
+from lightning.pytorch import Callback, LightningModule
 
 from relflow.distributed import all_reduce_sum, is_distributed, synchronize_epoch_metrics
 from relflow.structs.tree import Address
@@ -109,8 +109,9 @@ class CounterUpdateCallback(Callback):
     def on_train_epoch_end(
         self,
         trainer: Trainer,
-        pl_module: Model,
-    ) -> None:  # ty:ignore[invalid-method-override]
+        pl_module: LightningModule,
+    ) -> None:
+        pl_module = cast("Model", pl_module)
         resources: dict[tuple[Address, str], Counter] = {}
 
         for address, node in pl_module.nodes.items():
@@ -120,7 +121,7 @@ class CounterUpdateCallback(Callback):
 
             counter = getattr(embedder, "counter", None)
             if isinstance(counter, Counter):
-                resources[(address, "counter")] = counter
+                resources[(cast(Address, address), "counter")] = counter
 
             counter_map = getattr(embedder, "counters", None)
             if counter_map is None:
@@ -128,7 +129,7 @@ class CounterUpdateCallback(Callback):
 
             for name, item in counter_map.items():
                 if isinstance(item, Counter):
-                    resources[(address, str(name))] = item
+                    resources[(cast(Address, address), str(name))] = item
 
         if resources and is_distributed():
             synchronize_epoch_metrics(trainer)

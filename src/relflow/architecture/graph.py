@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, cast
 
 import torch
 
@@ -18,11 +18,18 @@ if TYPE_CHECKING:
     from relflow.architecture.root import Model
 
 
+class ForwardInputs(TypedDict):
+    """Keyword arguments used by Lightning to trace an example model forward."""
+
+    inputs: EncodedInput
+    strata: Strata
+
+
 class ModelGraph:
     """Build and rebuild runtime modules from a schema tree."""
 
     @staticmethod
-    def example_forward_kwargs(schema: Schema, batch_size: int) -> dict[str, EncodedInput | Strata]:
+    def example_forward_kwargs(schema: Schema, batch_size: int) -> ForwardInputs:
         from relflow.data.iterables import mock
 
         return {
@@ -34,7 +41,7 @@ class ModelGraph:
     def build(
         schema: Schema,
         batch_size: int,
-    ) -> tuple[torch.nn.ModuleDict, dict[str, EncodedInput | Strata]]:
+    ) -> tuple[torch.nn.ModuleDict, ForwardInputs]:
         checked: set[str] = set()
         for address, request in schema.requests.items():
             if request.type in checked:
@@ -42,7 +49,7 @@ class ModelGraph:
             TENSORFIELDS[request.type].require(address=address)
             checked.add(request.type)
 
-        nodes: torch.nn.ModuleDict[str, NodeModule] = torch.nn.ModuleDict()
+        nodes = torch.nn.ModuleDict()
 
         for address in schema.requests | schema.branches:
             nodes[address] = NodeModule(
@@ -54,10 +61,12 @@ class ModelGraph:
 
     @staticmethod
     def install(module: "Model") -> None:
-        module.nodes, module.example_input_array = ModelGraph.build(
+        module.nodes, example = ModelGraph.build(
             schema=module.schema,
             batch_size=module.batch_size,
         )
+        # Lightning accepts a concrete dict but does not type its keyword fields.
+        module.example_input_array = cast(dict[str, EncodedInput | Strata], example)
 
     @staticmethod
     def rebuild(module: "Model") -> None:
@@ -110,9 +119,9 @@ class ModelGraph:
                 address=address,
             )
 
-        module.example_input_array = ModelGraph.example_forward_kwargs(
-            schema=module.schema,
-            batch_size=module.batch_size,
+        module.example_input_array = cast(
+            dict[str, EncodedInput | Strata],
+            ModelGraph.example_forward_kwargs(schema=module.schema, batch_size=module.batch_size),
         )
         device = module.device
         if isinstance(device, torch.device):
