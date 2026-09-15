@@ -1,9 +1,15 @@
 project:
   type: website
   output-dir: site
+  pre-render:
+    - uv run --no-project --with pyyaml python ../proofs/render.py
+  resources:
+    - proofs/_generated/results.yaml
+    - proofs/_generated/*.py
   render:
     - index.qmd
     - "**/*.qmd"
+    - "proofs/*/*.py"
 
 website:
   title: RelFlow
@@ -100,6 +106,8 @@ website:
             text: Troubleshooting
           - href: reference/public-api.qmd
             text: API Map
+      - href: proofs.qmd
+        text: Modeling Proofs
       - href: case-studies/customer-risk.qmd
         text: Customer Risk Example
   search: true
@@ -120,6 +128,7 @@ format:
 
 engine: markdown
 execute:
+  enabled: false
   eval: false
 
 filters:

@@ -11,3 +11,5 @@ $toc-active-border: #4679bc;
 /*-- scss:rules --*/
 
 .navbar-logo { max-height: 3rem; }
+
+.callout { background-color: mix($body-color, $body-bg, 6%); }

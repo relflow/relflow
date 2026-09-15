@@ -58,17 +58,17 @@ model = rf.Model(
 //| label: fig-customer-start
 //| fig-alt: "Customer context combines tenure and repeated orders. Each order contains age and repeated line items with SKU and quantity. Churn and spending are prediction targets."
 //| fig-cap: "Input fields build local contexts; the customer context supports both predictions."
-#tree(node("Customer", kind: "root", detail: "Export embedding", children: (
-  node("Tenure", detail: "Number"),
-  node("Orders", kind: "branch", repeated: true, children: (
-    node("Age", detail: "Number"),
-    node("Line items", kind: "branch", repeated: true, children: (
-      node("SKU", detail: "Category"),
-      node("Quantity", detail: "Number"),
+#tree(node("customer", kind: "root", detail: "Export embedding", children: (
+  node("tenure_days", type: "Number"),
+  node("orders", kind: "branch", repeated: true, children: (
+    node("age_days", type: "Number"),
+    node("line_items", kind: "branch", repeated: true, children: (
+      node("sku", type: "Category"),
+      node("quantity", type: "Number"),
     )),
   )),
-  node("Churned", kind: "target", detail: "Boolean"),
-  node("Next month spend", kind: "target", detail: "Number"),
+  node("churned", kind: "target", type: "Boolean"),
+  node("next_month_spend", width: 150pt, kind: "target", type: "Number"),
 )))
 ```
 

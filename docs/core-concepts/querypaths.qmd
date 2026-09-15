@@ -47,12 +47,12 @@ child reads relative to an item. Children do not repeat the parent's path.
 //| label: fig-query-order
 //| fig-cap: "Queries select source values while the model keeps its own readable field names."
 //| fig-alt: "Order selects payload. Its repeated items branch selects items[-32:], with SKU from product.sku and quantity from qty; returned target selects outcome."
-#tree(node("Order", kind: "root", detail: "payload", children: (
-  node("Items", kind: "branch", repeated: true, detail: "items[-32:]", children: (
-    node("SKU", detail: "product.sku"),
-    node("Quantity", detail: "qty"),
+#tree(node("order", kind: "root", detail: "payload", children: (
+  node("items", kind: "branch", repeated: true, detail: "items[-32:]", children: (
+    node("sku", type: "Category", detail: "product.sku"),
+    node("quantity", type: "Number", detail: "qty"),
   )),
-  node("Returned", kind: "target", detail: "outcome"),
+  node("returned", kind: "target", type: "Boolean", detail: "outcome"),
 )))
 ```
 

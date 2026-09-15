@@ -43,6 +43,7 @@ dev = [
     "ruff>=0.12.12",
     "pytest>=8.4.1",
     "pytest-xdist>=3.8.0",
+    "pyyaml>=6.0.2",
     "fastapi>=0.124.0",
     "orjson>=3.10.0",
     "pydantic-settings>=2.10.1",
@@ -72,9 +73,6 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 pythonpath = ["."]
 addopts = ["-n", "auto"]
-markers = [
-    "proof: deterministic synthetic-data checks of learned model behavior",
-]
 
 [tool.ruff]
 line-length = 120

@@ -57,3 +57,8 @@ The per-part `mae` metric is angular error in radians, not elapsed time.
 DateParts has no decoded public content and does not generate timestamps.
 Use `embed=True` for a contextual embedding; see
 [shared leaf options](../core-concepts/data-types.qmd#shared-leaf-options).
+
+The [month-inference proof](../proofs/temporal/month-from-day-of-year.html)
+tests a recurring relationship on withheld dates and years. The
+[leap-boundary proof](../proofs/temporal/leap-boundary-requires-context.html)
+shows how selecting too few calendar coordinates can make the answer ambiguous.

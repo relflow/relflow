@@ -48,17 +48,17 @@ model = rf.Model(
 //| label: fig-branch-context
 //| fig-alt: "Customer contains repeated orders, each with age, channel, and repeated line items with SKU, quantity, and unit price. Churned is a root prediction target."
 //| fig-cap: "Line-item fields combine within each order; order context contributes to the customer prediction."
-#tree(node("Customer", kind: "root", children: (
-  node("Orders", kind: "branch", repeated: true, detail: "Export embedding", children: (
-    node("Age days", detail: "Number"),
-    node("Channel", detail: "Category"),
-    node("Line items", kind: "branch", repeated: true, children: (
-      node("SKU", detail: "Category"),
-      node("Quantity", detail: "Number"),
-      node("Unit price", detail: "Number"),
+#tree(node("customer", kind: "root", children: (
+  node("orders", kind: "branch", repeated: true, detail: "Export embedding", children: (
+    node("age_days", type: "Number"),
+    node("channel", type: "Category"),
+    node("line_items", kind: "branch", repeated: true, children: (
+      node("sku", type: "Category"),
+      node("quantity", type: "Number"),
+      node("unit_price", type: "Number"),
     )),
   )),
-  node("Churned", kind: "target", detail: "Boolean"),
+  node("churned", kind: "target", type: "Boolean"),
 )))
 ```
 
@@ -136,6 +136,11 @@ Choose reduction from the evidence the parent needs. A mean is not a raw-field
 sum, and more learned summaries do not perform a join. Capacity must survive
 later reductions too. `model.schema.branch_outputs` reports each branch's
 static routed width.
+
+The [nested cardinality proof](../proofs/structure/attention-preserves-nested-cardinality.html)
+tests whether session summaries preserve enough information for their parent.
+The [Mean control](../proofs/structure/mean-erases-cardinality.html) isolates what
+is lost when identical repeated values become one normalized summary.
 
 ## Masks and output
 

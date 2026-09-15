@@ -66,3 +66,8 @@ Reconstruction loss scales errors by the learned standard deviation. MAE and
 RMSE metrics use source units. Prediction `content` is a `float64` scalar, even
 when the most likely predicted state is not `valued`; read it alongside
 `state` and `inferred` in the [prediction envelope](../guides/prediction-output.qmd).
+
+The [null-versus-zero proof](../proofs/state/null-versus-zero.html) isolates the
+information in validity state. The [weighted-sum proof](../proofs/aggregation/raw-value-weight-sum.html)
+tests learned interaction between visible numeric fields, with controls for
+their pairing and order.

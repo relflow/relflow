@@ -17,7 +17,7 @@ def prepare_quarto(root: Path, site_url: str | None) -> None:
     config_path = root / "docs/_quarto.yml"
     config = yaml.safe_load(config_path.read_text())
     config["engine"] = "markdown"
-    config["execute"] = {"eval": False}
+    config["execute"] = {"enabled": False, "eval": False}
     config.pop("jupyter", None)
     config["project"]["output-dir"] = "site"
     website = config.setdefault("website", {})
@@ -31,7 +31,7 @@ def prepare_quarto(root: Path, site_url: str | None) -> None:
         metadata = (yaml.safe_load(header[1]) or {}) if header else {}
         body = text[header.end() :] if header else text
         metadata["engine"] = "markdown"
-        metadata["execute"] = {"eval": False}
+        metadata["execute"] = {"enabled": False, "eval": False}
         metadata.pop("jupyter", None)
         for key in tuple(metadata):
             if key.startswith("marimo-"):

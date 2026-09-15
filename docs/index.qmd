@@ -41,6 +41,12 @@ Applications supply Arrow tables or Polars frames.
 - [Prediction output](guides/prediction-output.qmd): read typed results and embeddings.
 - [Customer risk](case-studies/customer-risk.qmd): combine nested histories and targets.
 
+## Explore The Evidence
+
+[Modeling proofs](proofs.qmd) show the schemas, controls, and recorded
+results behind individual learning claims, including known limitations. Start
+with a task close to yours and inspect what its model can observe.
+
 Use this hierarchy when the relationships carry useful information. When a
 flat feature table already expresses the task, a simpler model may suffice.
 

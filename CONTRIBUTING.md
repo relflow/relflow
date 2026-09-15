@@ -307,10 +307,35 @@ contract. Verify factual claims against the source, not existing prose.
 Use the current [branding](docs/assets/branding/README.md) and shared
 [Typst tree functions](docs/assets/typst/README.md). Diagram pages declare
 `engine: markdown`; unique figure labels, captions, and alt text describe
-structure and roles without hyperparameters. The vendored
+structure, roles, and settings essential to the explanation. Use formatted node
+bodies for masking rules, reduction choices, and other relevant configuration;
+put those distinctions in the figure's text alternative too. The vendored
 [typst-render extension](https://github.com/mcanouil/quarto-typst-render/tree/0.19.0)
 uses the project's bundled Typst compiler. Generated SVGs under
 `docs/assets/diagrams/` are ignored by Git.
+
+Author each modeling proof in one `proofs/<category>/*.py` file. Interleave Markdown
+comment cells (`# %% [markdown]`) with Python cells (`# %%`): the explanation,
+Typst tree, YAML examples, generator, model, training, and controls live together.
+Its commented YAML header includes `proof-id`, `code-fold: true`, and
+`execute: {enabled: false, eval: false}`. Both execution flags are also disabled
+globally. Quarto renders scripts natively without Jupyter or running a proof.
+The build stages ignored copies under `docs/proofs/<family>/<slug>.py` to keep
+published URLs stable; edit only the canonical script.
+
+Explicit proof runs append measurements and checks to `proofs/results.yaml`.
+The docs insert this evidence, status, and reproduction commands at render time.
+Keep historical interpretations archived in YAML and current insights in the
+script. An AST fingerprint distinguishes code changes from Markdown and
+formatting edits; full file hashes retain provenance. Separate measured values
+from thresholds and identify single-seed or mechanistic limits.
+
+Use contrasting YAML records to explain why an answer changes or stays the
+same. Label corruption controls that retain the original target explicitly.
+Lead `Insights` with one clear conclusion, explain why it matters, and state
+its essential limit. Distinguish an interpretation of learned behavior from a
+demonstrated mechanism. See [proof authoring](proofs/README.md#author-the-page)
+for the layout and execution commands.
 
 ## Tests
 
