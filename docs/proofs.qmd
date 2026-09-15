@@ -1,0 +1,86 @@
+---
+title: Modeling Proofs
+description: What RelFlow has learned in controlled experiments, and where information is lost.
+listing:
+  id: proofs
+  contents: "proofs/catalog.yaml"
+  type: table
+  fields: [id, title, categories, proof-status]
+  field-display-names:
+    id: ID
+    title: Proof
+    categories: Family
+    proof-status: Status
+  sort: [categories, title]
+  filter-ui: [id, title, categories, proof-status]
+  sort-ui: [id, title, categories, proof-status]
+  categories: false
+  page-size: 50
+---
+
+Can a model find a matching identity, recover a hidden subtotal, or preserve
+enough information through a nested summary? These experiments isolate one
+relationship at a time. Controls remove the signal, change the pairing, or
+deliberately discard information so that a useful prediction has a clear
+explanation.
+
+Each scenario opens with a short **Insights** summary: what the proof shows,
+why it matters, and where the conclusion stops. A model tree, contrasting
+records, and expandable code sections explain the experiment together. Each
+page comes from the same Python file you can download and run. The collection
+covers 45 scenarios in 19 families.
+
+## Read The Status
+
+Statuses summarize recorded evidence in `proofs/results.yaml`. Each experiment
+has a stable ID, such as `P014`, independent of its title or script name. Some experiments
+are designed to confirm a limitation, such as losing count when averaging
+identical values. Their expected outcome is useful evidence about model design.
+Each page provides commands to reproduce the experiment.
+Acceptance thresholds are labeled as gates. Each page shows the latest full
+run's measurements, with behavioral checks collapsed by default. Expand them
+to inspect the individual criteria. Short smoke runs never replace full
+experiment results.
+
+| Status | What the evidence establishes |
+| --- | --- |
+| **Provisional pass** | The reported experiment clears its gates, usually for one deterministic seed. Broader stability or generalization remains to be established. |
+| **Expected limitation** | The experiment reproduces a specific loss of information or unsuccessful modeling route. Its checks are met when that limitation appears. |
+| **Partial evidence** | Internal behavior passes a mechanistic check, while a claim such as held-out prediction or partition recovery remains untested. |
+| **Gates not met** | The latest full run completed but did not meet every stated behavioral criterion. |
+| **Execution error** | The latest full run could not complete. Its error is recorded separately from model quality. |
+| **Not run** | No full experiment run has been recorded. |
+
+These are empirical checks of learned behavior. Training speed and memory use
+require separate measurements. Learned arithmetic is approximate; use exact
+[preprocessing](guides/preprocessors.qmd) for fixed business rules that must
+be exact.
+
+## Explore The Proofs
+
+Sort by **ID**, **Proof**, **Family**, or **Status**, using the column headings or the
+order menu. Filter by an ID, task, family, or status, then select a proof to explore
+its insights, examples, and evidence.
+
+::: {#proofs}
+:::
+
+## What Strengthens A Result
+
+The shared protocol calls for three paired data/model seeds before promoting
+a core claim, plus at least ten seeds to calibrate a new threshold. Held-out
+splits, matched baselines, and controls must continue to support the claimed
+relationship. Each page identifies the additional work for that scenario.
+
+Regression errors are generally reported as **nRMSE**: model RMSE divided by
+the RMSE of a baseline that predicts the training mean. Lower is better;
+`1` matches that baseline. Other baselines, such as an oracle with information
+removed, are identified on the relevant page. Classification pages report
+accuracy or ROC AUC, together with the appropriate chance or corruption control.
+
+Run `uv run python proofs/run.py --list` to list proof IDs, or
+`uv run python proofs/run.py P014 --accelerator gpu` to run one on a GPU.
+Each script uses seeded synthetic records and records its metrics, controls,
+seed, environment, and source fingerprint. `make proofs` runs all scripts serially.
+
+[Complete results](proofs/_generated/results.yaml)

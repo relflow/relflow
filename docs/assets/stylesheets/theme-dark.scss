@@ -12,6 +12,8 @@ $toc-active-border: #151C24;
 
 .navbar-logo { max-height: 3rem; }
 
+.callout { background-color: mix($body-color, $body-bg, 6%); }
+
 main.content :not(pre) > code:not(.sourceCode) {
   background-color: #293f5c !important;
 }

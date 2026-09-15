@@ -1,12 +1,15 @@
 // Diagram descriptions are independent of Python models and training data.
-#let node(label, kind: "field", detail: none, repeated: false, children: ()) = {
+#let node(label, kind: "field", type: none, detail: none, body: none, width: 120pt, repeated: false, children: ()) = {
   assert(kind in ("root", "branch", "field", "target"),
-    message: "Node '" + label + "': kind must be root, branch, field, or target.")
+    message: "Node " + repr(label) + ": kind must be root, branch, field, or target.")
   assert(children.len() == 0 or kind in ("root", "branch"),
-    message: "Node '" + label + "': only roots and branches can contain children.")
+    message: "Node " + repr(label) + ": only roots and branches can contain children.")
   assert(not repeated or kind == "branch",
-    message: "Node '" + label + "': only a branch can be repeated.")
-  (label: label, kind: kind, detail: detail, repeated: repeated, children: children)
+    message: "Node " + repr(label) + ": only a branch can be repeated.")
+  if kind in ("root", "branch") { type = "Branch" }
+  assert(type != none,
+    message: "Node " + repr(label) + ": specify its datatype with type, such as type: \"Number\".")
+  (label: label, kind: kind, type: type, detail: detail, body: body, width: width, repeated: repeated, children: children)
 }
 
 // Typst Render supplies this background for the Quarto dark-mode variant.
@@ -29,23 +32,29 @@
 
 #let card(item) = {
   let colors = palette.at(item.kind)
-  let role = (root: "ROOT CONTEXT", branch: "BRANCH CONTEXT", field: "INPUT", target: "PREDICTION").at(item.kind)
-  if item.repeated { role = "REPEATED BRANCH" }
   block(
-    width: 120pt,
+    width: item.width,
     inset: 9pt,
     radius: 5pt,
     fill: colors.fill,
     stroke: 0.7pt + colors.border,
     stack(dir: ttb, spacing: 4pt,
-      text(size: 6.5pt, weight: "semibold", fill: colors.ink, tracking: 0.4pt, role),
-      text(size: 11pt, weight: "semibold", fill: colors.ink, item.label),
+      text(size: 6.5pt, weight: "semibold", fill: colors.ink, tracking: 0.4pt, upper(item.type)),
+      text(font: "DejaVu Sans Mono", size: 11pt, weight: "semibold", fill: colors.ink, item.label),
       if item.detail != none { text(size: 8pt, fill: colors.ink, item.detail) },
+      if item.body != none {
+        block(width: 100%)[
+          #set text(size: 8pt, fill: colors.ink)
+          #set par(leading: 0.6em, spacing: 5pt)
+          #set list(indent: 6pt, body-indent: 4pt, spacing: 3pt)
+          #item.body
+        ]
+      },
     ),
   )
 }
 
-// Measure each subtree once; parents sit midway between their outer children.
+// Measure complete cards, including formatted bodies, before placing subtrees.
 #let arrange(item) = {
   let body = card(item)
   let size = measure(body)

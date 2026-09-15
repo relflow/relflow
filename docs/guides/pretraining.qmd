@@ -116,15 +116,15 @@ instead of adding it again.
 //| label: fig-pretraining-transfer
 //| fig-alt: "Customer context combines tenure, region, and repeated purchases containing age, amount, and merchant. Fine-tuning adds a churn prediction at the customer root."
 //| fig-cap: "Pretraining reconstructs selected amounts and merchants. Fine-tuning reuses the customer hierarchy and adds a churn target."
-#tree(node("Customer", kind: "root", children: (
-  node("Tenure", detail: "Number"),
-  node("Region", detail: "Category"),
-  node("Purchases", kind: "branch", repeated: true, children: (
-    node("Days ago", detail: "Number"),
-    node("Amount", detail: "Pretraining objective"),
-    node("Merchant", detail: "Pretraining objective"),
+#tree(node("customer", kind: "root", children: (
+  node("tenure_days", type: "Number"),
+  node("region", type: "Category"),
+  node("purchases", kind: "branch", repeated: true, children: (
+    node("days_ago", type: "Number"),
+    node("amount", type: "Number", detail: "Pretraining objective"),
+    node("merchant", type: "Category", detail: "Pretraining objective"),
   )),
-  node("Churned", kind: "target", detail: "Added for fine-tuning"),
+  node("churned", kind: "target", type: "Boolean", detail: "Added for fine-tuning"),
 )))
 ```
 

@@ -67,11 +67,11 @@ Inline: `{python} model.schema`.
     assert prepared["website"]["navbar"] == config["website"]["navbar"]
     assert prepared["filters"] == ["typst-render"]
     assert prepared["engine"] == "markdown"
-    assert prepared["execute"] == {"eval": False}
+    assert prepared["execute"] == {"enabled": False, "eval": False}
     assert "jupyter" not in prepared
     page = (docs / "index.qmd").read_text()
     metadata = yaml.safe_load(page.split("---", 2)[1])
-    assert metadata == {"title": "Example", "engine": "markdown", "execute": {"eval": False}}
+    assert metadata == {"title": "Example", "engine": "markdown", "execute": {"enabled": False, "eval": False}}
     assert "```python\nmodel = rf.Model(amount=rf.Number)\n```" in page
     assert '```python\nraise RuntimeError("Never execute this example")\n```' in page
     assert "~~~python\nmodel.fit()\n~~~" in page

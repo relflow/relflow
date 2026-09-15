@@ -34,3 +34,5 @@ private/
 **/site_libs/
 docs/**/*.html
 docs/assets/diagrams/
+docs/proofs/
+proofs/*.yaml.lock

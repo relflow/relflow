@@ -4,6 +4,10 @@ Evaluate the task you need the model to solve, alongside its aggregate
 reconstruction loss. A model can improve its combined objectives while
 regressing on the output that matters to an application.
 
+The [modeling proofs](../proofs.qmd) give worked examples of held-out
+metrics, corrupted-input controls, and deliberately lossy representations.
+Each scenario includes its model tree and the current evidence for its claim.
+
 ## Read The Metrics
 
 With a trained model and a configured validation split:

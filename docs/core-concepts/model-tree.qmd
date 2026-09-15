@@ -50,14 +50,14 @@ model = rf.Model(
 //| label: fig-model-tree
 //| fig-alt: An order combines customer tier and repeated line items containing SKU, quantity, and price, and predicts whether it was returned.
 //| fig-cap: Line-item context reaches the order context. The return target supplies no encoder input.
-#tree(node("Order", kind: "root", children: (
-  node("Customer tier", detail: "Category"),
-  node("Line items", kind: "branch", repeated: true, children: (
-    node("SKU", detail: "Category"),
-    node("Quantity", detail: "Number"),
-    node("Price", detail: "Number"),
+#tree(node("order", kind: "root", children: (
+  node("customer_tier", type: "Category"),
+  node("line_items", kind: "branch", repeated: true, children: (
+    node("sku", type: "Category"),
+    node("quantity", type: "Number"),
+    node("price", type: "Number"),
   )),
-  node("Returned", kind: "target", detail: "Boolean"),
+  node("returned", kind: "target", type: "Boolean"),
 )))
 ```
 

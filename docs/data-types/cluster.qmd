@@ -91,3 +91,9 @@ vocabulary yields a null label and zero probability.
 
 See the [prediction envelope](../guides/prediction-output.qmd) for shared
 state probabilities, `inferred`, and repeated shapes.
+
+The [reconstructing Cluster proof](../proofs/cluster/reconstructing-category-labels.html)
+reports internal convergence for repeated identities. Its page distinguishes
+that evidence from partition recovery and held-out prediction. The
+[plain-input control](../proofs/cluster/plain-input-is-dormant.html) shows why
+downstream supervision alone leaves adaptive Cluster state dormant.

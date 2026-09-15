@@ -79,25 +79,25 @@ model = rf.Model(
 //| label: fig-customer-risk
 //| fig-alt: "Customer context contains tenure, repeated orders with line items and a per-order refund target, and repeated sessions with events. Root targets predict churn and spending."
 //| fig-cap: "The refund target keeps order coordinates; churn and spending belong to the customer."
-#tree(node("Customer", kind: "root", detail: "Export embedding", children: (
-  node("Tenure", detail: "Number"),
-  node("Orders", kind: "branch", repeated: true, children: (
-    node("Age", detail: "Number"),
-    node("Line items", kind: "branch", repeated: true, children: (
-      node("SKU", detail: "Category"),
-      node("Quantity", detail: "Number"),
+#tree(node("customer", kind: "root", detail: "Export embedding", children: (
+  node("tenure_days", type: "Number"),
+  node("orders", kind: "branch", repeated: true, children: (
+    node("age_days", type: "Number"),
+    node("line_items", kind: "branch", repeated: true, children: (
+      node("sku", type: "Category"),
+      node("quantity", type: "Number"),
     )),
-    node("Refunded next month", kind: "target", detail: "Boolean · per order"),
+    node("refunded_next_month", width: 150pt, kind: "target", type: "Boolean", detail: "per order"),
   )),
-  node("Sessions", kind: "branch", repeated: true, children: (
-    node("Device", detail: "Category"),
-    node("Events", kind: "branch", repeated: true, children: (
-      node("Kind", detail: "Category"),
-      node("Elapsed time", detail: "Number"),
+  node("sessions", kind: "branch", repeated: true, children: (
+    node("device", type: "Category"),
+    node("events", kind: "branch", repeated: true, children: (
+      node("kind", type: "Category"),
+      node("elapsed_seconds", type: "Number"),
     )),
   )),
-  node("Churned", kind: "target", detail: "Boolean"),
-  node("Next month spend", kind: "target", detail: "Number"),
+  node("churned", kind: "target", type: "Boolean"),
+  node("next_month_spend", width: 150pt, kind: "target", type: "Number"),
 )))
 ```
 

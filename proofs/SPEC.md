@@ -58,7 +58,7 @@ The prospective public contract is deliberately small:
 
 These behaviors are implemented architectural contracts exercised by the
 current proof suite. Their numerical thresholds remain provisional until each
-directory's multi-seed promotion matrix passes.
+family's multi-seed promotion matrix passes.
 
 ## Objective
 
@@ -147,8 +147,8 @@ these boundaries.
 
 ## What Counts As A Proof
 
-Every proof must make the following reviewable in its directory docstrings and
-implementation:
+Every proof must make the following reviewable in its annotated Python script,
+which is also the source of its documentation page:
 
 1. **Claim** — one sentence describing the behavior protected.
 2. **Synthetic process** — the latent variables and equations used to produce
@@ -163,20 +163,20 @@ implementation:
    maximum optimizer steps or a fixed number of complete data passes.
 7. **Primary metric and gate** — measured on held-out predictions in the target's
    natural unit.
-8. **Diagnostics** — enough state in a failing assertion to distinguish no
+8. **Diagnostics** — enough recorded state to distinguish no
    learning, overfitting, boundary saturation, and seed instability.
-9. **Example** — a small fenced YAML tree with concrete `input` and
-   `expected_output` values; add a matched `control` when it clarifies the
-   footgun or causal gate.
+9. **Example** — one nested YAML record per example in a Markdown cell;
+   explain its target and add a matched control when it clarifies the
+   information boundary or causal gate.
 
-The directory's Python docstrings are the concise guide. A one-file proof keeps
-the whole guide in its test module. A multi-version proof may keep shared
-material in `support.py`, while each test module documents its own version and
-links readers back to the shared guide. The generator, controls, and assertions
-may carry experimental detail when repeating it in prose would obscure the
-guide.
+Each standalone script contains its complete generator, schema, training, and
+evaluation, interleaved with Markdown explanations, a Typst tree, and YAML
+examples. `proofs/results.yaml` owns historical reports and new measurements,
+indexed by stable proof IDs. Quarto renders the script and recorded evidence
+without executing the experiment. Only reporting and command-line handling
+are shared between experiments.
 
-A falling training loss is not proof of inference. The primary assertion must
+A falling training loss is not proof of inference. The primary measurement must
 use held-out data or, for a deliberately mechanistic proof, explicitly say that
 it tests optimization state rather than generalization.
 
@@ -184,8 +184,8 @@ it tests optimization state rather than generalization.
 
 ### Data
 
-- Generate Arrow tables locally with `numpy.random.Generator`; do not download
-  or persist a dataset.
+- Yield nested Python records from a locally seeded `numpy.random.Generator`;
+  do not download or persist a dataset.
 - Give train, validation, and test generation independent random streams.
 - Prefer at least 4,096 training observations and 2,048 test observations for
   scalar tasks. Use fewer only when one observation contains a large repeated
@@ -202,7 +202,7 @@ it tests optimization state rather than generalization.
 ### Training
 
 - Exercise `rf.Model`, built-in public tensorfield constructors, and
-  `rf.ArrowDataModule` through a normal Lightning training loop.
+  `rf.SyntheticDataModule` through a normal Lightning training loop.
 - Use `lit.seed_everything(seed, workers=True)` and
   `Trainer(deterministic=True)`.
 - Prefer fixed optimizer steps. Fixed epochs are acceptable when complete data
@@ -210,7 +210,7 @@ it tests optimization state rather than generalization.
   effective update budget cannot change silently.
 - Disable loggers, progress bars, summaries, and checkpointing unless they are
   part of the claim.
-- Run on CPU by default. An accelerator-specific proof must have its own marker
+- Run on CPU by default. An accelerator-specific proof must record its device and environment
   and must not replace the CPU behavioral gate.
 - Compare alternative schemas or configurations with the same observations,
   optimizer family, parameter budget where practical, and number of updates.
@@ -229,7 +229,7 @@ claim passes when:
 
 An extended stability run should use at least ten seeds before a new threshold
 is frozen. A single-seed proof may be introduced while a hypothesis is being
-calibrated, but its docstring must label it as a mechanistic or provisional
+calibrated, but its interpretation must label it as a mechanistic or provisional
 check.
 
 ### Metrics
@@ -258,7 +258,7 @@ The numeric gates below are provisional starting points. For each new proof:
 1. run at least ten seeds for the intended model and its negative control;
 2. inspect the result distributions without changing the generator;
 3. place the gate in the gap between them with room for numerical variation;
-4. commit the raw summary and rationale in the proof docstring or this spec; and
+4. record the raw summary and rationale in `proofs/results.yaml`; and
 5. treat a later threshold change as a modeling-contract change requiring an
    explanation, not routine test maintenance.
 
@@ -1385,80 +1385,87 @@ the quality/resource tradeoff.
 
 ## Suite Layout And Execution
 
-Use capability-oriented semantic names. Never encode a sequence number in a
-directory, module, test, or claim name:
+Each experiment is one annotated Python script under `proofs/<category>/`, with
+a permanent ID such as `P014`. `results.yaml` maps that ID to its script and staged docs
+path; do not reuse IDs when filenames or titles change. Keep descriptive
+filenames for readers and use IDs in automation and result references.
 
 ```text
 proofs/
 ├── README.md
 ├── SPEC.md
+├── results.yaml
+├── reporting.py
+├── render.py
+├── source.py
+├── run.py
 ├── aggregation/
-│   └── weighted_aggregation/
-│       ├── support.py
-│       ├── test_supplied_contribution_sum.py
-│       ├── test_raw_value_weight_sum.py
-│       ├── test_variable_cardinality_weighted_mean.py
-│       └── test_mean_erases_contribution_count.py
+│   └── raw_value_weight_sum.py
+├── calibration/
+├── cluster/
+├── identity/
 ├── relational/
-│   └── sibling_entity_transfer/
-│       ├── support.py
-│       ├── test_category_identity.py
-│       └── test_hash_identity.py
+│   └── hash_recall.py
+├── state/
+├── structure/
 └── temporal/
-    └── datepart_periodicity/
-        ├── support.py
-        ├── test_month_from_day_of_year.py
-        ├── test_weekday_requires_year_context.py
-        ├── test_leap_boundary_requires_context.py
-        └── test_business_window_requires_composition.py
 ```
 
-Give each behavioral claim one directory under a broad capability category.
-Put exactly one collected test in each `test_*.py` file. Recommended,
-discouraged, and negative-control variants remain siblings inside the same
-proof directory, but each gets a descriptive module name so a user can run and
-read it independently. Keep test-module basenames globally unique unless the
-whole proof tree becomes an explicit Python package; pytest's default import
-mode otherwise aliases equal basenames during full-suite collection.
+Choose the directory for the broad behavior being examined; the script's page
+metadata names its more specific catalog family. Keep shared tooling and the
+results registry at the root. Moving a script updates its registry path without
+changing its ID, published URL, or recorded run history.
 
-Python docstrings are the only proof-specific documentation; do not add a
-`WORK.md` sidecar. For a single-file proof, the test module docstring owns the
-full guide. For a multi-file proof, `support.py` or the package `__init__.py`
-owns proof-wide status and follow-up while every test module explains its
-particular version. Across the
-directory, the docstrings must state the claim, what to use, what to avoid, why
-the distinction matters, protocol and gate, current status and evidence,
-remaining work, promotion criteria, and commands to run the variants.
+Each script owns its seeded record generator, model, training, metrics, and
+controls. Use `rf.SyntheticDataModule` with restartable generator factories.
+Keep Arrow conversion inside RelFlow. Materialize held-out records only when
+it makes paired evaluation clearer. Do not share dataset or model helpers
+between experiments: the reader should be able to understand one file on its
+own. `reporting.py` owns CLI handling and result recording; `source.py` reads
+page metadata and fingerprints Python syntax without importing the experiment.
 
-Name directories and tests for behavioral claims, not implementation methods
-or historical ordering. Keep public
-schema and reduction choices visible in the proof script. A reduction's output
-count belongs to its configuration, such as
-`reduction=rf.Attention(n_outputs=4)`; `rf.Mean` has one output and
-`reduction=None` performs no pooling, routing one slot per encoded child
-field-coordinate slot plus its presence mask to the parent. The payload may
-already have been contextualized with other fields at the same coordinate and
-by branch attention; these representations are not raw values or decoder
-logits. `Branch` does not own `n_outputs`.
+Each script exposes `run(seed, steps, accelerator)`, returning measured metrics
+and named Boolean checks. Run it through an ordinary `__main__` guard. Report
+all checks, even when some are not met; a learning outcome is data, not a pytest
+assertion. Preserve dataset, corruption, and shape invariants with ordinary
+validation errors. Defaults keep the full experiment budget; a `--steps`
+override is explicitly recorded as a smoke run.
 
-Keep a data generator local to its proof until at least three modules share the
-exact same contract; then extract one plain helper into `proofs/support.py`.
+Author prose in `# %% [markdown]` comment cells and Python in `# %%` code cells.
+The first Markdown cell contains the page metadata, including `proof-id`,
+`code-fold: true`, and `execute: {enabled: false, eval: false}`. Quarto's native
+script rendering needs no Jupyter environment. Both execution flags are also
+disabled globally. Four foldable code sections keep setup, data and controls,
+training and evaluation, and the reporting entrypoint beside their explanations.
 
-The default unit suite remains `pytest`, which collects only `tests/`. The core
-modeling suite is:
+Include a schema-faithful Typst tree, contrasting YAML records, controls,
+current insights, and remaining work in that same script. The docs build stages
+ignored copies under `docs/proofs/<category>/<slug>.py`, preserving published
+URLs. Do not maintain a separate authored page. Shortcodes insert status,
+evidence, and reproduction commands with a script download.
+
+Measurements remain in `results.yaml`; gates are criteria, not measured
+results. Historical interpretations stay archived there while current insights
+are authored in the script. Full file hashes retain provenance, and a Python
+AST fingerprint detects code changes without invalidating results for Markdown
+or formatting edits. Retain the original recorded hashes when reorganizing
+scripts; those hashes identify the source used for each measured run.
+
+The normal unit suite remains `pytest` under `tests/`. Run experiments with:
 
 ```bash
+uv run python proofs/run.py --list
+uv run python proofs/run.py P014 --accelerator gpu
+PYTHONPATH=proofs uv run python proofs/aggregation/raw_value_weight_sum.py
 make proofs
 ```
 
-Proofs run serially by default so concurrent training jobs do not compete for
-CPU threads or accelerator memory. Add these markers when the corresponding
-tier first exists:
+Prefer the ID command. Direct script execution uses `PYTHONPATH=proofs` from the
+repository root to import shared reporting; the runner sets this path itself.
 
-- `proof` — deterministic offline core suite;
-- `proof_extended` — multi-seed or scaling run outside the ordinary core gate;
-- `proof_text` — requires pinned local text-model assets; and
-- `proof_accelerator` — validates an accelerator-specific behavioral path.
+Run serially by default. Record seeds, budgets, environment, source fingerprints,
+metrics, and every check in YAML. Failed execution is separate from unmet
+behavioral gates. Shortened smoke runs never update the capability status.
 
 ## Failure Reports
 

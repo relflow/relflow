@@ -47,13 +47,13 @@ the encoded context.
 //| label: fig-binding-order
 //| fig-cap: "The items branch builds context from product and quantity fields; the order uses this context and its amount to predict a return."
 //| fig-alt: "Order root with amount input, a repeated items branch containing SKU and quantity inputs, and returned prediction target."
-#tree(node("Order", kind: "root", children: (
-  node("Amount", detail: "Number"),
-  node("Items", kind: "branch", repeated: true, children: (
-    node("SKU", detail: "Category"),
-    node("Quantity", detail: "Number"),
+#tree(node("order", kind: "root", children: (
+  node("amount", type: "Number"),
+  node("items", kind: "branch", repeated: true, children: (
+    node("sku", type: "Category"),
+    node("quantity", type: "Number"),
   )),
-  node("Returned", kind: "target", detail: "Boolean"),
+  node("returned", kind: "target", type: "Boolean"),
 )))
 ```
 
