@@ -1,4 +1,4 @@
-# RelFlow Modeling Proof Specification
+# relflow Modeling Proof Specification
 
 Status: active. Recorded results live in `results.yaml`, with implemented
 coverage tracked in [`README.md`](README.md). Sections marked planned describe
@@ -11,7 +11,7 @@ Scope: empirical regression proofs for learned model behavior
 The record-reasoning experiments in this suite are intended to improve model
 behavior without requiring users to wire relational Q/K/V, joins, or reference
 paths into the model. The schema already identifies structural coordinates and
-reconstruction targets; RelFlow should use that information internally. This
+reconstruction targets; relflow should use that information internally. This
 does not replace structural ``query=`` paths or preprocessors: those still own
 source selection, renaming, filtering, joining, sorting, windows, and derived
 source values when observations do not already match the schema.
@@ -63,14 +63,14 @@ family's multi-seed promotion matrix passes.
 
 ## Objective
 
-Protect the modeling claims that distinguish RelFlow from a schema parser or a
+Protect the modeling claims that distinguish relflow from a schema parser or a
 collection of datatype codecs. A proof trains a model on a controlled synthetic
 process and verifies that held-out predictions recover a relationship the public
 schema makes learnable.
 
 The suite should answer four questions:
 
-1. Can RelFlow recover typed relationships from flat and nested records?
+1. Can relflow recover typed relationships from flat and nested records?
 2. Does the schema's structure create the intended inductive behavior?
 3. Does the model fail in predictable ways when information or training signal
    is absent?
@@ -82,7 +82,7 @@ that one architecture or optimizer solves every dataset.
 
 ## The Inference Boundary
 
-RelFlow should infer a relationship when all of the following are true:
+relflow should infer a relationship when all of the following are true:
 
 - the relevant values survive preprocessing, query selection, and branch
   overflow;
@@ -111,12 +111,12 @@ Within that boundary, the public package should support these claims:
 | DateParts | Recurring calendar phase can generalize across dates without treating absolute timestamp magnitude as the signal. |
 | DatePart composition | Multiple visible calendar coordinates can jointly identify periodic behavior that no one coordinate determines. |
 | Vector | Geometry supplied by a fixed-width continuous representation can drive prediction and reconstruction. |
-| Text | A frozen text encoder can provide semantic features; RelFlow learns around those features but does not generate text. |
+| Text | A frozen text encoder can provide semantic features; relflow learns around those features but does not generate text. |
 | Masked reconstruction | Correlated visible context can reconstruct selected state and content without a separate learning path. |
 | Contextual embeddings | A reconstruction-trained root or branch can expose a useful normalized representation of the synthetic latent process. |
 | Cluster | Repeated high-cardinality labels can organize into latent groups when the cluster head receives an engaged objective. |
 
-The suite must also protect the limits of those claims. RelFlow should not be
+The suite must also protect the limits of those claims. relflow should not be
 expected to:
 
 - infer causality from predictive association;
@@ -832,7 +832,7 @@ branch representation that retains several group summaries at once.
 An extended compositional split may hold out selected `(group, operation)` pairs
 while exposing each group and operation elsewhere. Record the result as
 characterization until repeated runs establish that this kind of compositional
-generalization is a RelFlow contract.
+generalization is a relflow contract.
 
 Implementation snapshot: selected-group mean passes for three interleaved
 groups and fails after matched group-label permutation. The full 12-cell
@@ -1024,7 +1024,7 @@ Vary one axis at a time before sampling full programs:
 The generator may randomly select programs only after each selected primitive
 has an independent positive proof. Every operation token and argument needed to
 identify the answer must be visible to the model. The evaluator executes the
-same program outside RelFlow to produce ground truth. Keep all requests derived
+same program outside relflow to produce ground truth. Keep all requests derived
 from one base context in the same split.
 
 ### Learned quantifiers and conditional counts
@@ -1278,7 +1278,7 @@ answer(q, 2) = attribute(destination(destination(q)))
 Use unseen Hash IDs and fresh graphs in every observation. Start with one unique
 path and no cycles, then add distractor edges, two hops, branching, and cycles.
 One-hop and two-hop results must be reported separately. A shared-context graph
-encoding is the positive control. This is the clearest proof for whether RelFlow
+encoding is the positive control. This is the clearest proof for whether relflow
 needs iterative message passing or an explicit relation node.
 
 ### Conservation and reconciliation
@@ -1776,7 +1776,7 @@ changing its ID, published URL, or recorded run history.
 
 Each script owns its seeded record generator, model, training, metrics, and
 controls. Use `rf.SyntheticDataModule` with restartable generator factories.
-Keep Arrow conversion inside RelFlow. Materialize held-out records only when
+Keep Arrow conversion inside relflow. Materialize held-out records only when
 it makes paired evaluation clearer. Do not share dataset or model helpers
 between experiments: the reader should be able to understand one file on its
 own. `reporting.py` owns CLI handling and result recording; `source.py` reads

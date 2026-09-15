@@ -4,6 +4,7 @@ project:
   pre-render:
     - uv run --no-project --with pyyaml python ../proofs/render.py
   resources:
+    - assets/fonts/OFL.txt
     - proofs/_generated/results.yaml
     - proofs/_generated/*.py
   render:
@@ -12,26 +13,24 @@ project:
     - "proofs/*/*.py"
 
 website:
-  title: RelFlow
+  title: relflow
   favicon: assets/branding/logos/logo.svg
   image: assets/branding/logos/logo.light.png
   navbar:
-    title: RelFlow
-    logo: assets/branding/logos/logo.dark.svg
-    logo-alt: RelFlow
-    right:
-      - icon: github
-        href: https://github.com/relflow/relflow
-        aria-label: GitHub
+    title: relflow
+    logo: assets/branding/logos/logo.navbar.svg
+    logo-alt: relflow
   sidebar:
     style: floating
     search: true
-    collapse-level: 1
+    collapse-level: 99
     contents:
       - href: index.qmd
         text: Home
       - href: getting-started.qmd
         text: Getting Started
+      - href: proofs.qmd
+        text: Proofs
       - section: Model
         contents:
           - href: core-concepts/model-tree.qmd
@@ -106,14 +105,28 @@ website:
             text: Troubleshooting
           - href: reference/public-api.qmd
             text: API Map
-      - href: proofs.qmd
-        text: Modeling Proofs
-      - href: case-studies/customer-risk.qmd
-        text: Customer Risk Example
+      - section: Case Studies
+        contents:
+          - href: case-studies/customer-risk.qmd
+            text: Customer Risk Example
+  page-footer:
+    left: Grantham Taylor
+    right:
+      - text: GitHub
+        icon: github
+        href: https://github.com/relflow/relflow
+      - text: Discord
+        icon: discord
+        href: https://discord.gg/DVyZUkvTFA
+      - text: LinkedIn
+        icon: linkedin
+        href: https://www.linkedin.com/in/granthamtaylor
   search: true
 
 format:
   html:
+    css: assets/stylesheets/branding.css
+    include-after-body: assets/sidebar.html
     theme:
       light:
         - flatly

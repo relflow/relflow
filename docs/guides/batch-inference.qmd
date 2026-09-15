@@ -24,7 +24,7 @@ trainer.predict(model=model, datamodule=data, return_predictions=False)
 Each rank writes `predictions/rank-{global_rank}.parquet`. The files contain
 the canonical `inputs` and `predictions` columns described in
 [Prediction Output](prediction-output.qmd). Retain a business key to join or
-sort distributed results downstream; RelFlow does not add row identity.
+sort distributed results downstream; relflow does not add row identity.
 
 With multiple ranks or data workers, the loader trims the final group to divide
 evenly among consumers, so trailing rows can be omitted even with

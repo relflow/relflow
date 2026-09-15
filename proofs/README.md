@@ -1,4 +1,4 @@
-# Modeling proofs
+# Proofs
 
 Each proof is one Python file: a standalone, seeded synthetic experiment and
 the source of its illustrated documentation page. Read from the explanation

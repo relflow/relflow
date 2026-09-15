@@ -21,7 +21,7 @@ purchases:
 churned: false
 ```
 
-The tables and frames below are supplied by your application. RelFlow does not
+The tables and frames below are supplied by your application. relflow does not
 load example data or choose train/validation splits for you.
 
 ## Arrow
@@ -81,7 +81,7 @@ least one. Training shuffles by default. The other splits do not. The model's
 
 Choose splits before constructing the module. For time-based evaluation, define
 an observation cutoff, build features only from information available then, and
-keep later outcomes out of inputs. RelFlow does not enforce these application
+keep later outcomes out of inputs. relflow does not enforce these application
 rules. Fit application preprocessing state on training data and reuse it for
 validation and prediction.
 

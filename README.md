@@ -1,6 +1,6 @@
-# RelFlow
+# relflow
 
-RelFlow builds PyTorch/Lightning models from nested records. Typed fields
+relflow builds PyTorch/Lightning models from nested records. Typed fields
 represent values; branches combine them into local contexts; decoders learn to
 predict selected fields from the available context.
 

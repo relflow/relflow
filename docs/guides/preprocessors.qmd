@@ -2,7 +2,7 @@
 title: Preprocessing
 ---
 
-A preprocessor prepares records before RelFlow resolves schema fields or queries.
+A preprocessor prepares records before relflow resolves schema fields or queries.
 Write it as an eager Polars transform and attach it to a data module or prediction
 call. Use it for derived values, renaming, filters, joins, and nested reshaping.
 
@@ -141,7 +141,7 @@ Retention reads the processed columns. Before any
 [postprocessing](postprocessors.qmd), predictions contain one row per processed
 observation. Filtering removes observations; exploding or a one-to-many join can
 add them. Keep a business key when outputs must be joined back to source records;
-RelFlow does not restore the original rows or order.
+relflow does not restore the original rows or order.
 
 ## Scope and context
 

@@ -1,7 +1,7 @@
 # Model trees
 
 `model-tree.typ` exports `node` and `tree`. These describe a model's structure
-without importing RelFlow, instantiating models, or accessing data. The Quarto
+without importing relflow, instantiating models, or accessing data. The Quarto
 project imports both functions through its `typst-render` preamble.
 
 Use a Typst block with a unique figure label, caption, and text alternative:

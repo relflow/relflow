@@ -47,7 +47,7 @@ and `multiply > 1` can reverse a sign.
 | [Number](../data-types/number.qmd) | Standardized values by default; raw values before normalization when `normalize=False`. |
 | [Vector](../data-types/vector.qmd) | Supplied coordinates before projection; no learned normalizer. |
 | [DateParts](../data-types/dateparts.qmd) | Sine/cosine pairs, without moving the source timestamp or renormalizing the pair. |
-| [Text](../data-types/text.qmd) | Pooled frozen-encoder embedding before RelFlow projection. |
+| [Text](../data-types/text.qmd) | Pooled frozen-encoder embedding before relflow projection. |
 
 Only Number has separate raw and standardized boundaries. For the other types,
 both settings of `normalize` use the same coordinate space. Choose `add` in that

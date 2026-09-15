@@ -44,7 +44,7 @@ calendar timezone upstream; the field does not choose a local-time policy.
 ## Representation and output
 
 Each part becomes a sine/cosine pair: the end of a cycle is near its beginning.
-RelFlow projects each pair and combines the results with a state embedding.
+relflow projects each pair and combines the results with a state embedding.
 Null, padded, and masked content is zero; state remains separate.
 
 [Jitter](../core-concepts/jitter.qmd) changes the circle coordinates, not the

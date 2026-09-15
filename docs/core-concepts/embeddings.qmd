@@ -1,6 +1,6 @@
 # Learning Modes And Embeddings
 
-RelFlow learns by reconstructing selected values. Supervised learning hides an
+relflow learns by reconstructing selected values. Supervised learning hides an
 answer on every observation; self-supervised learning hides some values from
 otherwise unlabeled records. `embed=True` separately requests a representation
 for downstream use. It does not create a learning objective.

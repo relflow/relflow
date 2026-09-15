@@ -1,6 +1,6 @@
-# RelFlow branding
+# relflow branding
 
-The **official RelFlow logo** has fine `rf` branches in front of staggered green
+The **official relflow logo** has fine `rf` branches in front of staggered green
 columns, with a blurred duplicate of the columns beneath them at **35% opacity**.
 The glow expands the columns by 1.8 pt and blurs them by 3 pt in
 the 195 pt logo. The solid columns and branches remain fully opaque and sharp.
@@ -21,8 +21,11 @@ uses live SVG filters and shares the column paths; it changes color with the
 theme. The banner lettering is outlined, so viewers do not need the original
 font installed.
 
-The `.light.svg` and `.dark.svg` files have fixed colors. Documentation uses the
-standalone logo and text title; banners and preview artwork are unused assets.
+The `.light.svg` and `.dark.svg` files have fixed colors. Documentation uses
+`logos/logo.navbar.svg`, which retains the dark palette's columns and branches
+with a transparent background. The navbar and home-page wordmark use a locally
+served copy of Libertinus Serif Semibold, matching the banner's weight,
+tracking, and disabled ligatures. Banners and preview artwork are unused assets.
 
 PNGs use fixed light or dark colors and are rendered at 144 ppi:
 
@@ -33,7 +36,7 @@ PNGs use fixed light or dark colors and are rendered at 144 ppi:
 The previews center the banner artwork with extra space on a solid background
 for sharing.
 
-To regenerate all nine SVGs and six PNGs, install Typst and `rsvg-convert`, then run from the
+To regenerate all ten SVGs and six PNGs, install Typst and `rsvg-convert`, then run from the
 repository root:
 
 ```sh
@@ -52,5 +55,6 @@ the same glow. Direct Typst compilation produces the geometry before the glow.
 
 The wordmark uses Libertinus Serif Semibold (weight 600), which is
 [embedded in the standard Typst CLI](https://typst.app/docs/reference/text/text/#parameters-font).
-The renderer disables system font discovery, so no font files or extra font
-installation are needed.
+The renderer disables system font discovery, so no extra font installation is
+needed for branding exports. The docs font and its license are stored in
+[`docs/assets/fonts`](../fonts/README.md).
