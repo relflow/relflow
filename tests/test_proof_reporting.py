@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
@@ -270,6 +271,27 @@ def test_docs_refresh_from_yaml_and_embed_scripts_without_executing(
     assert "proofs/run.py P001" in listing
     assert "{python}" not in listing
     assert not (root / "executed").exists()
+
+
+def test_render_preserves_unchanged_input_timestamps(evidence: tuple[ModuleType, ModuleType, Path]) -> None:
+    _, renderer, root = evidence
+    renderer.render(root)
+    generated = root / "docs/proofs"
+    files = {path for path in generated.rglob("*") if path.is_file()}
+    timestamp = 1_700_000_000_000_000_000
+    for path in files:
+        os.utime(path, ns=(timestamp, timestamp))
+
+    renderer.render(root)
+    assert all(path.stat().st_mtime_ns == timestamp for path in files)
+
+    script = root / "proofs/signal.py"
+    script.write_text(script.read_text().replace("# title: Signal", "# title: Updated signal"))
+    renderer.render(root)
+    changed = {path.relative_to(generated).as_posix() for path in files if path.stat().st_mtime_ns != timestamp}
+    assert changed == {"family/signal.py", "_generated/P001.py", "catalog.yaml"}
+    assert (generated / "family/signal.py").read_text() == script.read_text()
+    assert (generated / "_generated/P001.py").read_text() == script.read_text()
 
 
 def test_docs_reject_enabled_experiments_before_staging(evidence: tuple[ModuleType, ModuleType, Path]) -> None:

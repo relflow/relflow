@@ -19,6 +19,7 @@ Scripts are grouped by the behavior they examine:
 | `calibration/` | Separating learnable signal from noise |
 | `cluster/` | Cluster objectives and capacity |
 | `identity/` | Equality for unseen identifiers |
+| `mutations/` | Retention, extension, reset, deactivation, and deletion |
 | `relational/` | Retrieval, grouped context, and field relationships |
 | `state/` | Missing values and real zeroes |
 | `structure/` | Reduction and nested cardinality |
@@ -27,6 +28,29 @@ Scripts are grouped by the behavior they examine:
 The shared runner, reporting, rendering, source readers, and `results.yaml` stay
 at the root of `proofs/`. Directory categories are broader than the families
 shown in the catalog; each script's page metadata defines its family.
+
+## Mutation proofs
+
+Five mutation experiments are registered in the 50-script catalog:
+
+- **P046**: repeated neutral edits preserve a learned numerical and categorical task.
+- **P047**: add a hidden output, measure immediate retention, and learn the new task.
+- **P048**: reset one hidden output, measure localized loss, and relearn it.
+- **P049**: deactivate an informative input and restore it through updates, overrides, and save/load.
+- **P050**: delete an informative input and adapt toward the remaining-information limit.
+
+Each starts from a trained model and includes state comparisons, prediction
+checks, controls, and checkpoint round trips. Adaptation uses a fresh optimizer
+and rehearses the original labels. Read the recorded outcomes before treating
+a proposed preservation property as established.
+
+```bash
+uv run python proofs/run.py P046 P047 P048 P049 P050
+```
+
+The broader [mutation designs](SPEC.md#mutation-proofs) also cover informative
+inputs, repeated context, masking-role changes, capacity growth, and
+composed edits. Those additional scenarios remain planned.
 
 ## Run an experiment
 
