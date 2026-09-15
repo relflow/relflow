@@ -1,229 +1,66 @@
 ---
 title: Binding Data
+engine: markdown
 ---
 
-# Binding Data
+A model reads one observation at a time. Field names follow the record's
+nesting; branches describe repeated objects. Extra source columns are available
+to preprocessors and retention without becoming model inputs.
 
-**Example status — reference:** examples show the eager Polars processor
-contract used by the shipped runtime.
+One order:
 
-RelFlow binds a schema to canonical observations in three steps: direct field
-selection, optional structural queries, and an ordered preprocessing pipeline.
-The preprocessor result is the source of truth consumed by query/coalescing.
-
-## Direct Binding
-
-By default, a node reads its own name relative to its parent. A root field named
-`amount` reads the top-level `amount` column; a field named `sku` under an
-`items` branch reads `sku` from each item struct.
-
-```python
-model = rf.Model(
-    d_model=32,
-    n_layers=1,
-    n_heads=4,
-    amount=rf.Number,
-    items=rf.Branch(length=16, sku=rf.Category(size=2048)),
-)
+```yaml
+request_id: order-42
+amount: 86.50
+items:
+  - sku: coat-17
+    quantity: 1
+  - sku: scarf-03
+    quantity: 2
+returned: false
 ```
 
-Missing modeled columns are errors. Null values are data and follow the field's
-`nullable` contract.
-
-## Structural Queries
-
-Set `query=` only when a node needs a different structural path:
-
 ```python
-model = rf.Model(
-    d_model=32,
-    n_layers=1,
-    n_heads=4,
-    recent_skus=rf.Category(query="orders[-8:][*].sku", size=2048),
-)
-```
-
-Queries navigate members, list traversal, indices, and slices. They do not
-filter, join, sort, aggregate, or derive values. Put those operations in a
-preprocessor so users can express them directly with Polars.
-
-## Polars Preprocessors
-
-A preprocessor receives and returns an eager `polars.DataFrame`:
-
-```python
-import polars as pl
 import relflow as rf
 
-@rf.preprocess
-def total(frame: pl.DataFrame) -> pl.DataFrame:
-    return frame.with_columns(
-        amount=pl.col("subtotal").cast(pl.Float64) + pl.col("tax").fill_null(0.0)
-    )
-```
-
-RelFlow converts Arrow to Polars before the ordered processor pipeline and back
-to Arrow afterward. A callback must not return a `LazyFrame`, Arrow object,
-mapping, Series, or scalar. A preprocessor may return one frame, an iterable of
-frames, or `None`.
-
-The returned rows are canonical observations. Users may filter, reorder, join,
-explode, duplicate, aggregate, or replace columns without preserving an input
-identity. A nonempty observation set must have at least one column.
-
-### Compose processors in order
-
-```python
-@rf.preprocess
-def logarithm(frame: pl.DataFrame) -> pl.DataFrame:
-    return frame.with_columns(amount_log=pl.col("amount").log1p())
-
-pipeline = (total, logarithm)
-```
-
-Processor arguments accept one decorated processor, a list, a tuple, or
-`None`. RelFlow snapshots them as an immutable tuple and executes them strictly
-left to right. There are no column declaration arguments; a missing column
-fails in the Polars expression that uses it, and the final Arrow schema is
-locked for each configured split.
-
-### Partition and dataset scope
-
-Partition scope is the default and processes each incoming Arrow partition:
-
-```python
-@rf.preprocess(scope="partition")
-def prepare(frame: pl.DataFrame) -> pl.DataFrame:
-    return frame.with_columns(amount=pl.col("amount").cast(pl.Float64))
-```
-
-Dataset scope materializes the logical split at that exact pipeline position:
-
-```python
-@rf.preprocess(scope="dataset")
-def chronological(frame: pl.DataFrame) -> pl.DataFrame:
-    return frame.sort("event_time")
-```
-
-Dataset scope is available for in-memory Arrow and Arrow Dataset sources.
-Restartable callable sources do not yet support it because coordinated
-materialization is not implemented.
-
-## Bind User Configuration
-
-Additional parameters are keyword-only and configured immutably with
-`.partial(...)`:
-
-```python
-@rf.preprocess
-def standardize(
-    frame: pl.DataFrame,
-    *,
-    center: float,
-    spread: float,
-) -> pl.DataFrame:
-    return frame.with_columns(amount=(pl.col("amount") - center) / spread)
-
-prepare = standardize.partial(center=12.5, spread=3.0)
-```
-
-The pipeline owns three optional parameter names: `strata`, `schema`, and
-`encoding_context`. They are injected only when explicitly present in the
-signature:
-
-```python
-@rf.preprocess
-def route(frame: pl.DataFrame, *, strata) -> pl.DataFrame:
-    return frame if str(strata) == "train" else frame.filter(pl.col("active"))
-```
-
-## Fit State Outside Iteration
-
-Fit lookup tables, normalization statistics, encoders, or policy state before
-data iteration and bind the immutable result with `.partial(...)`. Do not fit
-inside a callback: it would make behavior depend on partition order and worker
-timing.
-
-## Filter Rows
-
-Filtering is an ordinary Polars operation:
-
-```python
-@rf.preprocess
-def valid(frame: pl.DataFrame) -> pl.DataFrame:
-    return frame.filter(
-        (pl.col("status") == "complete") & pl.col("amount").is_not_null()
-    )
-```
-
-Returning an empty frame is valid when its columns and dtypes remain known.
-
-## Join A Small Lookup Without Reordering
-
-```python
-lookup = pl.DataFrame(
-    {"merchant_id": [10, 20], "merchant_risk": [0.1, 0.8]}
+model = rf.Model(
+    name="order",
+    d_model=64,
+    n_layers=2,
+    n_heads=4,
+    amount=rf.Number,
+    items=rf.Branch(
+        length=32,
+        sku=rf.Category(size=4096),
+        quantity=rf.Number,
+    ),
+    returned=rf.Boolean(mask=True),
 )
-
-@rf.preprocess
-def enrich(frame: pl.DataFrame, *, lookup: pl.DataFrame) -> pl.DataFrame:
-    return frame.join(lookup, on="merchant_id", how="left", maintain_order="left")
-
-enrich_merchants = enrich.partial(lookup=lookup)
 ```
 
-A one-to-many join may expand rows; that output is authoritative. Preserve a
-domain key as an ordinary column when downstream consumers need one.
+`amount` reads the top-level field. `items` selects the collection, and its
+children read each item's `sku` and `quantity`. The parent keywords supply the
+names. `returned` supplies a training target; `mask=True` keeps its value out of
+the encoded context.
 
-## Transform A Nested Collection
-
-Use list expressions to transform nested records without Python row loops:
-
-```python
-@rf.preprocess
-def recent_logins(frame: pl.DataFrame) -> pl.DataFrame:
-    return frame.with_columns(
-        events=pl.col("events").list.eval(
-            pl.element().filter(pl.element().struct.field("kind") == "login")
-        )
-    )
+```{typst}
+//| label: fig-binding-order
+//| fig-cap: "The items branch builds context from product and quantity fields; the order uses this context and its amount to predict a return."
+//| fig-alt: "Order root with amount input, a repeated items branch containing SKU and quantity inputs, and returned prediction target."
+#tree(node("order", kind: "root", children: (
+  node("amount", type: "Number"),
+  node("items", kind: "branch", repeated: true, children: (
+    node("sku", type: "Category"),
+    node("quantity", type: "Number"),
+  )),
+  node("returned", kind: "target", type: "Boolean"),
+)))
 ```
 
-## Install The Same Pipeline Everywhere
+Missing required fields are binding errors. Explicit nulls follow the field's
+`nullable` contract. See [Query Paths](querypaths.qmd) when names or nesting differ.
 
-Attach the same ordered preprocessor tuple to every path that must share the
-same canonical observation contract:
-
-```python
-pipeline = (total, logarithm)
-
-data = rf.ArrowDataModule(model=model, train=train, preprocessor=pipeline)
-predictions = model.predict(requests, preprocess=pipeline)
-deployment = rf.Deployment(model=model).preprocess(pipeline)
-```
-
-## Retention Is Output, Not Binding
-
-`retain=` controls which processed input columns appear under the prediction
-table's `inputs` struct. It does not change model binding or preprocessing.
-
-```python
-result = model.predict(requests, preprocess=pipeline, retain=("request_id",))
-```
-
-## What Belongs In An Extension?
-
-An extension owns datatype meaning: accepted Arrow families, semantic
-validation, tensorization, embedding, decoding, loss, and output writing.
-Application-specific renaming, joins, filters, normalization, and policy
-selectors belong in preprocessors.
-
-## Binding Checklist
-
-- Use direct names when source nesting matches the schema.
-- Use `query=` only for structural navigation.
-- Use eager Polars preprocessors for data-dependent transformations.
-- Treat preprocessor output as the canonical observation set.
-- Order stages explicitly and keep one final schema per split.
-- Fit external state before iteration and bind it with `.partial(...)`.
-- Keep required business identifiers as ordinary data columns.
+Use a [preprocessor](../guides/preprocessors.qmd) when the source needs renaming,
+derived values, filtering, joins, or reshaping before binding. Its output defines
+the records the model reads. The guide shows how to reshape nested account data
+into a shared repeated branch and reuse that preparation for training and prediction.

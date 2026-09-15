@@ -1,4 +1,5 @@
 import math
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -6,7 +7,9 @@ from relflow.architecture.attention import RotaryMultiheadAttention
 
 
 class CrossAttentionBlock(torch.nn.Module):
-    def __init__(self, d_model: int, nhead: int, dropout: float, ffn_multiplier: int, position: bool = True):
+    """Update query embeddings against present memory coordinates."""
+
+    def __init__(self, d_model: int, nhead: int, dropout: float, ffn_multiplier: int, position: bool = True) -> None:
         super().__init__()
 
         self.attention_norm = torch.nn.LayerNorm(normalized_shape=d_model)
@@ -43,8 +46,13 @@ class CrossAttentionBlock(torch.nn.Module):
         queries = queries + attended
         return queries + self.ffn(self.ffn_norm(queries))
 
+    if TYPE_CHECKING:
+        __call__ = forward
+
 
 class LearnedQueryCrossAttention(torch.nn.Module):
+    """Pool nonempty memory rows into learned queries and optional additive evidence."""
+
     def __init__(
         self,
         n_context: int,
@@ -55,7 +63,7 @@ class LearnedQueryCrossAttention(torch.nn.Module):
         ffn_multiplier: int = 4,
         position: bool = True,
         mass_capacity: int | None = None,
-    ):
+    ) -> None:
         super().__init__()
 
         if mass_capacity is not None and mass_capacity < 1:
@@ -169,9 +177,14 @@ class LearnedQueryCrossAttention(torch.nn.Module):
 
         return queries
 
+    if TYPE_CHECKING:
+        __call__ = forward
+
 
 class MeanPool(torch.nn.Module):
-    def __init__(self, n_context: int):
+    """Average present memory coordinates and repeat the result across queries."""
+
+    def __init__(self, n_context: int) -> None:
         super().__init__()
         self.n_context = n_context
 
@@ -188,3 +201,6 @@ class MeanPool(torch.nn.Module):
         pooled = memory.masked_fill(~present.unsqueeze(-1), 0.0).sum(dim=1, keepdim=True)
         pooled = pooled / weights.sum(dim=1, keepdim=True).clamp_min(1.0)
         return pooled.expand(-1, self.n_context, -1)
+
+    if TYPE_CHECKING:
+        __call__ = forward

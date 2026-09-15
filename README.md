@@ -1,49 +1,35 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/branding/banners/banner.dark.svg" />
-    <source media="(prefers-color-scheme: light)" srcset="docs/branding/banners/banner.light.svg" />
-    <img alt="relflow" src="docs/branding/banners/banner.light.svg" width="100%" />
-  </picture>
-</p>
+# relflow
 
-<p align="center">
-  <a href="https://pypi.org/project/relflow/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/relflow?logo=pypi&amp;logoColor=white" /></a>
-  <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&amp;logoColor=white" />
-  <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-2E8B57" /></a>
-  <a href="https://relflow.github.io/relflow/"><img alt="Documentation" src="https://img.shields.io/badge/docs-Quarto-39729E?logo=quarto&amp;logoColor=white" /></a>
-  <!-- discord-invite:start -->
-  <a href="https://discord.gg/DVyZUkvTFA"><img alt="Discord channel invite" src="https://img.shields.io/badge/discord-join%20the%20channel-5865F2?logo=discord&amp;logoColor=white" /></a>
-  <!-- discord-invite:end -->
-</p>
+relflow builds PyTorch/Lightning models from nested records. Typed fields
+represent values; branches combine them into local contexts; decoders learn to
+predict selected fields from the available context.
 
-RelFlow builds PyTorch/Lightning models directly from nested, Arrow-backed
-schemas.
-It is meant for predictive modeling on records that are not naturally flat:
-customers with transactions, orders with line items, sessions with clickstream
-events, devices recurring across histories, and mixed datatypes at every level.
+## Install
 
-Most ML pipelines flatten that shape first, then train on one fixed feature
-row. `relflow` takes the opposite path: describe the structured record, and
-the schema becomes the model.
+Python 3.12 or newer:
 
-## Core Idea
+```bash
+uv add relflow
+```
 
-A `relflow` schema is both a data contract and an architecture blueprint.
+Add `relflow[text]` for Hugging Face text encoders or `relflow[serving]` for the
+HTTP runtime.
 
-- Leaf fields such as `Number`, `Category`, `Cluster`, `Set`, `Hash`, `Text`,
-  and `Vector` become datatype-specific tensorfields.
-- `Branch` nodes define shared contexts for child fields, with optional local
-  attention and pooling before the representation flows upward.
-- Mask policies and embeddings are configured on the same schema tree.
-- Prediction output uses schema addresses as fields inside a typed Arrow
-  struct, so decoded values and embeddings remain attached to the part of the
-  record that produced them.
+## Describe One Record
 
-That gives one model surface for supervised prediction, masked reconstruction,
-unsupervised embedding workflows, schema mutation, field importance, batch
-inference, and serving.
+```yaml
+line_items:
+  - sku: A12
+    quantity: 2
+    price: 19.99
+  - sku: B07
+    quantity: 1
+    price: 45.50
+returned: false
+```
 
-## A Model From A Nested Record
+YAML makes the shape visible. Applications supply Arrow tables or eager Polars
+DataFrames with this structure.
 
 ```python
 import relflow as rf
@@ -53,12 +39,10 @@ model = rf.Model(
     d_model=64,
     n_layers=2,
     n_heads=4,
-    embed=True,
-    customer_tier=rf.Category(size=16),
+    batch_size=128,
     line_items=rf.Branch(
         length=32,
-        embed=True,
-        sku=rf.Category(size=2048),
+        sku=rf.Category(size=4096),
         quantity=rf.Number,
         price=rf.Number,
     ),
@@ -66,378 +50,44 @@ model = rf.Model(
 )
 ```
 
-This model reads records shaped like:
+Parent keywords name each field. `mask=True` makes `returned` a supervised
+target whose value never enters the encoder. The branch builds line-item
+context before its reduced representation reaches the order root.
 
-```python
-{
-    "customer_tier": "gold",
-    "line_items": [
-        {"sku": "A12", "quantity": 2, "price": 19.99},
-        {"sku": "B07", "quantity": 1, "price": 45.50},
-    ],
-    "returned": False,
-}
-```
+## Train And Predict
 
-The `line_items` branch has its own repeated context, `returned` is skipped by
-the encoder and decoded as a supervised reconstruction, and `embed=True` asks
-prediction to emit embeddings at configured addresses.
-
-## Train With Lightning
-
-`rf.Model` is a LightningModule. `rf.ArrowDataModule` is the canonical
-`LightningDataModule`; focused Polars, custom, and synthetic adapters enter the
-same Arrow pipeline. The schema
-defines the model tree, typed losses, prediction outputs, and embeddings;
-Lightning runs `fit`, `validate`, `test`, and `predict`.
-
-For local or remote files, pass paths or globs directly to `ArrowDataModule`;
-use `rf.source(...)` for schema, parsing, and file-selection options. Parquet,
-CSV, JSON Lines, IPC/Feather, and ORC share the Arrow reader pipeline. The module
-supports persistent workers, prefetching, and pinned encoded tensors. Consumers
-currently replay source reads before selecting their disjoint rows.
+`train_table`, `validation_table`, and `request_table` below are
+application-supplied Arrow tables. Prediction requests omit `returned`.
 
 ```python
 import lightning.pytorch as lit
-import pyarrow as pa
-import pyarrow.json as pajson
-import torch
 
-import relflow as rf
-
-records = pajson.read_json("docs/data/iris.jsonl").slice(0, 36)
-train_records = records.take(pa.array([index for index in range(36) if index % 3 != 2]))
-validate_records = records.take(pa.array([index for index in range(36) if index % 3 == 2]))
-
-model = rf.Model(
-    d_model=16,
-    n_layers=1,
-    n_heads=4,
-    batch_size=8,
-    embed=True,
-    optimizer=lambda module: torch.optim.AdamW(module.parameters(), lr=1e-2),
-    sepal_length=rf.Number,
-    petal_length=rf.Number,
-    species=rf.Category(mask=True, size=3, topk=[2]),
+model.optimizer = rf.adamw(learning_rate=1e-3)
+data = rf.ArrowDataModule(
+    model=model, train=train_table, validate=validation_table
 )
-
-datamodule = rf.ArrowDataModule(
-    model=model,
-    train=train_records,
-    validate=validate_records,
-    num_workers=0,
-    persistent_workers=False,
-    pin_memory=False,
-    seed=42,
-    sample=1.0,
-)
-
-trainer = lit.Trainer(
-    accelerator="cpu",
-    max_epochs=1,
-    logger=False,
-    enable_progress_bar=False,
-    enable_model_summary=False,
-    enable_checkpointing=False,
-    limit_train_batches=1,
-    limit_val_batches=1,
-)
-
-trainer.fit(model=model, datamodule=datamodule)
+trainer = lit.Trainer(max_epochs=30)
+trainer.fit(model=model, datamodule=data)
+predictions = model.predict(request_table)
 ```
 
-This tiny deterministic split is only a wiring example. Use a representative,
-leakage-safe validation design before interpreting the metrics as model quality.
-
-For larger jobs, the same model can run through normal Lightning callbacks,
-checkpointing, precision settings, device placement, and distributed
-strategies. See
-[Training With Lightning](https://relflow.github.io/relflow/guides/lightning.html).
-
-## Predict And Embed
-
-For interactive work, call `model.predict(...)` with an Arrow table or record
-batch. A nonempty sequence of mappings is a small-request convenience; use
-typed Arrow for empty or large inputs. The result is always a `pyarrow.Table`.
-
-```python
-import pyarrow.compute as pc
-
-requests = validate_records.drop(["species"]).slice(0, 3)
-result = model.predict(requests)
-
-predictions = result["predictions"]
-species = pc.struct_field(predictions, "record/species")
-content = pc.struct_field(species, "content")
-record = pc.struct_field(predictions, "record")
-
-print(pc.struct_field(content, "value"))
-print(pc.struct_field(content, "probability"))
-print(pc.struct_field(record, "embedding"))
-```
-
-For larger offline jobs, configure a `predict` split on a data module and attach
-`rf.Writer` to Lightning's prediction loop.
-
-```python
-writer = rf.Writer("predictions")
-
-trainer = lit.Trainer(
-    accelerator="cpu",
-    callbacks=[writer],
-    logger=False,
-)
-
-predict_datamodule = rf.ArrowDataModule(
-    model=model,
-    predict=validate_records.drop(["species"]),
-    num_workers=0,
-    persistent_workers=False,
-    pin_memory=False,
-)
-
-trainer.predict(
-    model=model,
-    datamodule=predict_datamodule,
-    return_predictions=False,
-)
-```
-
-`Writer` creates rank-partitioned Parquet files such as
-`predictions/rank-0.parquet`. Use a postprocessor when downstream systems need
-flat columns, renamed addresses, redacted payloads, or fewer fields. See
-[Batch Inference](https://relflow.github.io/relflow/guides/batch-inference.html)
-and [Postprocessors](https://relflow.github.io/relflow/guides/postprocessors.html).
-
-## Learning Modes
-
-`relflow` does not maintain separate supervised and self-supervised code
-paths. Supervised learning is the special case where a field is skipped by the
-encoder 100% of the time and decoded from the remaining context.
-
-| Setting | What the model sees | What prediction can emit |
-| --- | --- | --- |
-| plain input | value is visible | no decoded output unless otherwise configured |
-| `mask=True` | value is skipped by the encoder | decoded supervised reconstruction |
-| `mask=x` | sampled positions use a learned mask during training | context regularization only |
-| `mask=rf.Mask(rate=x, reconstruct=True)` | sampled positions use a learned mask | reconstruction loss in train/validation/test; a remaining rate is inactive in ordinary prediction |
-| `mask=rf.Mask(rate=x, skip=True, reconstruct=True)` | sampled positions are omitted from encoder work | the same reconstruction objective without input embedding; a remaining rate is inactive in ordinary prediction |
-| `embed=True` | does not hide the value | embedding at that address |
-
-`mask=True` is shorthand for
-`rf.Mask(skip=True, dropout=False, reconstruct=True)`. A mask can select
-positions uniformly with `rate`, from a Boolean Arrow field with `query`, or
-with both. See
-[Dynamic Masking](https://relflow.github.io/relflow/core-concepts/dynamic-masking.html)
-for selection, branch atomicity, and the distinction between learned masking
-and structural skipping. The
-[preprocessor recipes](https://relflow.github.io/relflow/guides/dynamic-mask-preprocessors.html)
-show data-dependent Arrow selectors from source through deployment.
-Use `embed=True` when you want a representation returned from prediction.
-
-## Data Modules
-
-Data modules load Arrow records, apply optional batch preprocessing, sample and
-shuffle logical observations, resolve mask policies against Arrow values,
-tensorize the selected input and target projections, and hand encoded batches
-to Lightning.
-One preparation phase produces all selected ragged fields before datatype
-codecs run. Same-named fields use direct projection; any node may opt into a small,
-Arrow-native structural `query=...` path.
-
-Choose the data module by where the records live:
-
-| Use case | Module |
-| --- | --- |
-| In-memory Arrow or restartable Arrow factories | `ArrowDataModule` |
-| Local or remote files and globs | `ArrowDataModule`, with `rf.source` for options |
-| Other local or remote Arrow datasets | `ArrowDataModule` |
-| Collected in-memory Polars frames | `PolarsDataModule` |
-| PyTorch `IterableDataset` mappings | `CustomDataModule` |
-| Restartable mapping generators | `SyntheticDataModule` |
-
-Polars is an in-memory ingress adapter and converts each frame once. Custom and
-synthetic adapters convert bounded mapping groups once per chunk. Thereafter,
-all four use the same Arrow preprocessing, shuffling, coalescing, and encoding
-path. The first Arrow release deliberately limits Dataset and factory sources
-to one reader while distributed ownership is completed.
-
-See [Data Modules](https://relflow.github.io/relflow/guides/data-modules.html)
-for split configuration, sampling, shuffling, buffering, and preprocessors.
-
-## What Makes This Different
-
-- **Hierarchical context encoding:** child records interact locally before
-  their representation flows upward.
-- **Typed datatype architecture:** each built-in field owns validation,
-  tensorization, missing-state handling, decoding, loss, metrics, and
-  output writing. The external registration surface is experimental and
-  same-process only in the current release.
-- **Unified mask policies:** one `mask` argument controls selection, encoder
-  omission, train-only dropout, and reconstruction.
-- **Embedding trees:** embeddings can come from the root, branches, or selected
-  leaves.
-- **Schema evolution:** fields can be added, removed, updated, reset, or
-  temporarily overridden after construction.
-- **Production missingness semantics:** `valued`, `null`, `padded`, `masked`,
-  and reserved `other` are distinct tensorfield states.
-- **Training-serving parity:** queries, preprocessors, tensorization, model
-  execution, prediction writing, and postprocessors stay on the same configured
-  path.
-
-## Where It Fits
-
-Use `relflow` when relationships inside the record matter: account histories,
-fraud or risk snapshots, order and fulfillment events, flight itineraries,
-operations telemetry, user sessions, repeated measurements, or mixed datatype
-objects where flattening would discard useful structure.
-
-Use a simpler tabular model when flattening loses no meaningful context. The
-point is not to replace every table. The point is to model nested business data
-without making a feature table the only representation the model can see.
-
-## What It Does Not Do
-
-`relflow` stops at the representation and typed prediction layer. It is not a
-feature store, governance system, rule engine, authorization layer,
-decision-capture system, or audit platform. Those systems can consume
-`relflow` embeddings and predictions, but their policies and operational
-controls remain separate concerns.
-
-The open-source layer is the reusable encoder and runtime infrastructure. It
-does not require users to publish data, schemas, checkpoints, or model
-parameters.
-
-## Install
-
-RelFlow requires Python `>=3.12`. Add it to your uv project:
-
-```bash
-uv add relflow
-```
-
-For a new project, run `uv init --python 3.12` first.
-
-Add optional functionality:
-
-```bash
-uv add "relflow[text]"
-uv add "relflow[serving]"
-```
-
-Verify the environment:
-
-```bash
-uv run python -c "import importlib.metadata; import relflow; print(importlib.metadata.version('relflow'))"
-```
-
-For a contributor checkout, use the locked development environment instead:
-
-```bash
-uv sync
-```
-
-Contributor extras:
-
-```bash
-uv sync --extra text
-uv sync --extra serving
-uv sync --extra docs
-```
-
-The `text` extra installs Hugging Face `transformers`. The `serving` extra
-installs FastAPI-backed deployment dependencies. The `docs` extra installs the
-Python packages used by the Quarto docs.
-
-## Documentation Map
-
-Start with:
-
-- [Getting Started](https://relflow.github.io/relflow/getting-started.html)
-- [AI / Expert Quickstart](https://relflow.github.io/relflow/ai-quickstart.html)
-- [Model Tree](https://relflow.github.io/relflow/core-concepts/model-tree.html)
-- [Data Flow](https://relflow.github.io/relflow/core-concepts/data-flow.html)
-- [Binding Data](https://relflow.github.io/relflow/core-concepts/binding-data.html)
-- [Query Paths](https://relflow.github.io/relflow/core-concepts/querypaths.html)
-- [Built-In Data Types](https://relflow.github.io/relflow/core-concepts/data-types.html)
-- [Learning Modes & Embeddings](https://relflow.github.io/relflow/core-concepts/embeddings.html)
-- [Training With Lightning](https://relflow.github.io/relflow/guides/lightning.html)
-- [Data Modules](https://relflow.github.io/relflow/guides/data-modules.html)
-- [Working With Arrow](https://relflow.github.io/relflow/guides/working-with-arrow.html)
-- [Evaluation And Metrics](https://relflow.github.io/relflow/guides/evaluation.html)
-- [Model Lifecycle](https://relflow.github.io/relflow/guides/model-lifecycle.html)
-- [Batch Inference](https://relflow.github.io/relflow/guides/batch-inference.html)
-- [Serving](https://relflow.github.io/relflow/guides/serving.html)
-
-Tutorials and guides:
-
-- [Postprocessors](https://relflow.github.io/relflow/guides/postprocessors.html)
-- [Field Importance](https://relflow.github.io/relflow/guides/field-importance.html)
-- [Field Stacking](https://relflow.github.io/relflow/guides/field-stacking.html)
-- [Model Configuration](https://relflow.github.io/relflow/guides/model-configuration.html)
-- [Performance And Scaling](https://relflow.github.io/relflow/guides/performance.html)
-- [Temporal Validation](https://relflow.github.io/relflow/guides/temporal-validation.html)
-- [Schema Mutation](https://relflow.github.io/relflow/guides/schema-mutation.html)
-- [Troubleshooting](https://relflow.github.io/relflow/guides/troubleshooting.html)
-- [Experimental Custom Tensorfields](https://relflow.github.io/relflow/guides/custom-tensorfields.html)
-- [Public API Map](https://relflow.github.io/relflow/reference/public-api.html)
-- [Arrow Migration](https://relflow.github.io/relflow/guides/arrow-migration.html)
-- [Branch](https://relflow.github.io/relflow/data-types/branch.html)
-- [Number](https://relflow.github.io/relflow/data-types/number.html)
-- [Boolean](https://relflow.github.io/relflow/data-types/boolean.html)
-- [Category](https://relflow.github.io/relflow/data-types/category.html)
-- [Cluster](https://relflow.github.io/relflow/data-types/cluster.html)
-- [Set](https://relflow.github.io/relflow/data-types/set.html)
-- [Hash](https://relflow.github.io/relflow/data-types/hash.html)
-- [DateParts](https://relflow.github.io/relflow/data-types/dateparts.html)
-- [Vector](https://relflow.github.io/relflow/data-types/vector.html)
-- [Text](https://relflow.github.io/relflow/data-types/text.html)
-- [Reproducible Iris Case Study](https://relflow.github.io/relflow/case-studies/iris-reproducible.html)
-- [Device Tenure Case Study](https://relflow.github.io/relflow/case-studies/device-tenure.html)
-
-Build the docs locally with:
-
-```bash
-make render
-uv run pytest tests/examples/test_e2e_examples.py
-```
-
-## Repository Layout
-
-- `src/relflow/architecture`: model assembly, attention, pooling, and routing
-- `src/relflow/data`: dataset fetch/read/process/batch/encode pipeline and preprocessor exports
-- `src/relflow/inference`: serving and prediction callbacks
-- `src/relflow/logging`: runtime logging callbacks
-- `src/relflow/structs`: pydantic config models, enums, and tree nodes
-- `src/relflow/tensorfields`: tensorfield extension system and built-in fields
-- `tests/`: package test suite
-- `docs/`: Quarto project, pages, guides, stylesheets, and sample data
-
-## Development
-
-Run tests:
-
-```bash
-uv run pytest
-```
-
-Run type and lint checks:
-
-```bash
-uv run ty check src/relflow --output-format concise
-uv run ruff check
-```
-
-## Community
-
-Join the [`relflow` Discord](https://discord.gg/DVyZUkvTFA) for questions,
-design discussion, and release notes.
-
-## License
-
-Licensed under the Apache License, Version 2.0. See `LICENSE` and `NOTICE`.
-
-## References
-
-- `BIBLIOGRAPHY.md`
-- `CITATION.bib`
+For eager Polars DataFrames, use `rf.PolarsDataModule` with the same split
+arguments. `predict` returns an Arrow table; decoded results live under its
+`predictions` column at addresses such as `order/returned`.
+
+## Documentation
+
+- [Getting started](https://relflow.github.io/relflow/getting-started.html)
+- [Model structure](https://relflow.github.io/relflow/core-concepts/model-tree.html)
+- [Data types](https://relflow.github.io/relflow/core-concepts/data-types.html)
+- [Arrow and Polars](https://relflow.github.io/relflow/guides/data-modules.html)
+- [Preprocessing](https://relflow.github.io/relflow/guides/preprocessors.html)
+- [Training and checkpoints](https://relflow.github.io/relflow/guides/lightning.html)
+- [Prediction output](https://relflow.github.io/relflow/guides/prediction-output.html)
+
+Docs use static examples and Typst model diagrams. Build them with `make render`;
+run `make check-docs` to validate the render in a temporary directory. Package
+checks use `uv run pytest`; synthetic learning checks use `make proofs`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development conventions.
+
+[Community](https://discord.gg/DVyZUkvTFA) · [Apache 2.0 license](LICENSE)

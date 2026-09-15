@@ -28,9 +28,12 @@ private/
 *.ckpt
 
 /specs
-/benchmarks
 
 /.quarto/
 
 **/site_libs/
 docs/**/*.html
+!docs/assets/sidebar.html
+docs/assets/diagrams/
+docs/proofs/
+proofs/*.yaml.lock

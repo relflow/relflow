@@ -42,7 +42,7 @@ def test_category_topk_rejects_values_at_or_above_vocab():
         Schema.model_validate(payload)
 
 
-def test_category_allows_extra_n_bands_option():
+def test_category_rejects_number_only_n_bands_option():
     payload = _structure_with_field(
         {
             "name": "cat",
@@ -51,9 +51,8 @@ def test_category_allows_extra_n_bands_option():
             "n_bands": 8,
         }
     )
-    schema = Schema.model_validate(payload)
-
-    assert schema.requests["root/cat"].n_bands == 8
+    with pytest.raises(ValueError, match="n_bands"):
+        Schema.model_validate(payload)
 
 
 def test_set_threshold_rejects_values_above_one():

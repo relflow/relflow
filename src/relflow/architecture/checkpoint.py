@@ -9,7 +9,6 @@ import lightning.pytorch as lit
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
 
-from relflow._version import UNKNOWN_VERSION
 from relflow.architecture.graph import ModelGraph
 from relflow.logging import logger
 from relflow.structs.experiment import Schema
@@ -61,23 +60,26 @@ class RollbackCheckpoint(ModelCheckpoint):
 class CheckpointState:
     """Save, load, and restore model state without owning the public facade."""
 
-    required_fields = {"state_dict", "schema", "batch_size"}
+    required_fields = {"state_dict", "schema", "batch_size", "version"}
 
     @staticmethod
     def dump(module: "Model", checkpoint: dict[str, Any]) -> None:
+        """Add RelFlow metadata to an otherwise framework-owned checkpoint mapping."""
         checkpoint["version"] = module.version
         checkpoint["schema"] = module.schema.model_dump(mode="python")
         checkpoint["batch_size"] = module.batch_size
 
     @staticmethod
     def restore_version(module: "Model", checkpoint: dict[str, Any]) -> None:
-        saved = checkpoint.get("version", UNKNOWN_VERSION)
+        """Restore checkpoint provenance after validating its version field."""
+        saved = checkpoint["version"]
         if not isinstance(saved, str):
             raise ValueError("checkpoint version must be a string")
         object.__setattr__(module, "_version", saved)
 
     @staticmethod
     def save(module: "Model", pathname: str | Path) -> None:
+        """Persist model tensors and the schema needed to reconstruct their graph."""
         path = Path(pathname)
         path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -87,6 +89,7 @@ class CheckpointState:
 
     @staticmethod
     def restore(module: "Model", checkpoint: dict[str, Any]) -> None:
+        """Restore a checkpoint, rolling back the graph if schema or tensor loading fails."""
         missing = CheckpointState.required_fields - set(checkpoint)
         if missing:
             fields = ", ".join(sorted(missing))
@@ -117,7 +120,8 @@ class CheckpointState:
         module.reset_contracts()
 
     @staticmethod
-    def load(model_cls: type["Model"], checkpoint: str | Path) -> "Model":
+    def load[M: Model](model_cls: type[M], checkpoint: str | Path) -> M:
+        """Construct the requested Model subclass from saved schema and tensor state."""
         path = Path(checkpoint)
         logger.bind(component="model_factory", checkpoint=str(path)).info("loading Model from checkpoint")
         state = torch.load(path, weights_only=False, map_location="cpu")

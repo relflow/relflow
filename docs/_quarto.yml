@@ -1,208 +1,132 @@
 project:
   type: website
   output-dir: site
+  pre-render:
+    - uv run --no-project --with pyyaml python ../proofs/render.py
+  resources:
+    - assets/fonts/OFL.txt
+    - proofs/_generated/results.yaml
+    - proofs/_generated/*.py
   render:
     - index.qmd
     - "**/*.qmd"
+    - "proofs/*/*.py"
 
 website:
-  title: "RelFlow"
+  title: relflow
+  favicon: assets/branding/logos/logo.svg
+  image: assets/branding/logos/logo.light.png
   navbar:
-    left:
-      - href: index.qmd
-        text: Home
-      - href: getting-started.qmd
-        text: Getting Started
-      - text: Modeling
-        menu:
-          - href: core-concepts/data-flow.qmd
-            text: Data Flow
-          - href: core-concepts/model-tree.qmd
-            text: Model Tree
-          - href: core-concepts/data-types.qmd
-            text: Data Types & Value State
-          - href: core-concepts/binding-data.qmd
-            text: Binding Data
-          - href: core-concepts/querypaths.qmd
-            text: Query Paths
-          - href: core-concepts/embeddings.qmd
-            text: Learning Modes & Embeddings
-          - href: core-concepts/dynamic-masking.qmd
-            text: Dynamic Masking
-          - href: core-concepts/jitter.qmd
-            text: Jitter & Input Noise
-          - href: guides/dynamic-mask-preprocessors.qmd
-            text: Mask Preprocessor Recipes
-      - text: Train & Evaluate
-        menu:
-          - href: guides/data-modules.qmd
-            text: Data Modules
-          - href: guides/working-with-arrow.qmd
-            text: Working With Arrow
-          - href: guides/lightning.qmd
-            text: Training With Lightning
-          - href: guides/evaluation.qmd
-            text: Evaluation & Metrics
-          - href: guides/model-configuration.qmd
-            text: Model Configuration
-          - href: guides/temporal-validation.qmd
-            text: Temporal Validation
-          - href: guides/model-lifecycle.qmd
-            text: Model Lifecycle
-      - text: Predict & Operate
-        menu:
-          - href: guides/prediction-output.qmd
-            text: Prediction Output
-          - href: guides/batch-inference.qmd
-            text: Batch Inference
-          - href: guides/serving.qmd
-            text: Online Serving
-          - href: guides/postprocessors.qmd
-            text: Postprocessors
-          - href: guides/performance.qmd
-            text: Performance & Scaling
-      - text: Advanced
-        menu:
-          - href: guides/field-stacking.qmd
-            text: Field Stacking
-          - href: guides/field-importance.qmd
-            text: Field Importance
-          - href: guides/schema-mutation.qmd
-            text: Schema Mutation
-          - href: guides/custom-tensorfields.qmd
-            text: Experimental Tensorfields
-          - href: guides/troubleshooting.qmd
-            text: Troubleshooting
-          - href: reference/public-api.qmd
-            text: Public API Map
-          - href: guides/arrow-migration.qmd
-            text: Arrow Migration
-      - text: Case Studies
-        menu:
-          - href: case-studies/iris-reproducible.qmd
-            text: Reproducible Iris
-          - href: case-studies/device-tenure.qmd
-            text: Device Tenure
-    right:
-      - text: Versions
-        menu:
-          - text: main
-            href: https://relflow.github.io/relflow/
-          - text: stage/0.2.0-rc.1
-            href: https://relflow.github.io/relflow/branches/stage/0.2.0-rc.1/
-      - icon: github
-        href: https://github.com/relflow/relflow
-        aria-label: GitHub
+    title: relflow
+    logo: assets/branding/logos/logo.navbar.svg
+    logo-alt: relflow
   sidebar:
-    style: docked
+    style: floating
     search: true
+    collapse-level: 99
     contents:
       - href: index.qmd
         text: Home
       - href: getting-started.qmd
         text: Getting Started
-      - href: motivation.qmd
-        text: Motivation
-      - href: ai-quickstart.qmd
-        text: AI / Expert Quickstart
-      - section: Modeling Concepts
+      - href: proofs.qmd
+        text: Proofs
+      - section: Model
         contents:
-          - href: core-concepts/data-flow.qmd
-            text: Data Flow & Mental Model
           - href: core-concepts/model-tree.qmd
-            text: Model Tree
-          - href: core-concepts/data-types.qmd
-            text: Data Types & Value State
+            text: Structure And Context
           - href: core-concepts/binding-data.qmd
             text: Binding Data
           - href: core-concepts/querypaths.qmd
             text: Query Paths
-          - href: core-concepts/embeddings.qmd
-            text: Learning Modes & Embeddings
           - href: core-concepts/dynamic-masking.qmd
-            text: Dynamic Masking
+            text: Masking And Objectives
+          - href: core-concepts/vocabulary.qmd
+            text: Online Vocabulary
+          - href: core-concepts/embeddings.qmd
+            text: Embeddings
           - href: core-concepts/jitter.qmd
-            text: Jitter & Input Noise
-          - href: guides/dynamic-mask-preprocessors.qmd
-            text: Mask Preprocessor Recipes
+            text: Jitter
       - section: Data Types
         contents:
+          - href: core-concepts/data-types.qmd
+            text: Data Types
           - href: data-types/branch.qmd
             text: Branch
-          - href: data-types/number.qmd
-            text: Number
           - href: data-types/boolean.qmd
             text: Boolean
           - href: data-types/category.qmd
             text: Category
           - href: data-types/cluster.qmd
             text: Cluster
-          - href: data-types/set.qmd
-            text: Set
-          - href: data-types/hash.qmd
-            text: Hash
           - href: data-types/dateparts.qmd
             text: DateParts
-          - href: data-types/vector.qmd
-            text: Vector
+          - href: data-types/hash.qmd
+            text: Hash
+          - href: data-types/number.qmd
+            text: Number
+          - href: data-types/set.qmd
+            text: Set
           - href: data-types/text.qmd
             text: Text
-      - section: Train & Evaluate
+          - href: data-types/vector.qmd
+            text: Vector
+      - section: Train
         contents:
           - href: guides/data-modules.qmd
-            text: Data Modules
-          - href: guides/working-with-arrow.qmd
-            text: Working With Arrow
+            text: Arrow And Polars
+          - href: guides/preprocessors.qmd
+            text: Preprocessing
           - href: guides/lightning.qmd
-            text: Training With Lightning
+            text: Training And Checkpoints
+          - href: guides/pretraining.qmd
+            text: Pretraining And Fine-Tuning
           - href: guides/evaluation.qmd
-            text: Evaluation & Metrics
-          - href: guides/model-configuration.qmd
-            text: Model Configuration
-          - href: guides/temporal-validation.qmd
-            text: Temporal Validation & Leakage
-          - href: guides/model-lifecycle.qmd
-            text: Model Lifecycle
-      - section: Predict & Operate
+            text: Evaluation
+          - href: guides/performance.qmd
+            text: Performance
+      - section: Predict
         contents:
           - href: guides/prediction-output.qmd
-            text: Prediction Output
+            text: Output
+          - href: guides/postprocessors.qmd
+            text: Postprocessing
           - href: guides/batch-inference.qmd
             text: Batch Inference
           - href: guides/serving.qmd
-            text: Online Serving
-          - href: guides/postprocessors.qmd
-            text: Postprocessors
-          - href: guides/performance.qmd
-            text: Performance & Scaling
-      - section: Advanced Workflows
+            text: Serving
+      - section: Extend
         contents:
-          - href: guides/field-stacking.qmd
-            text: Field Stacking
-          - href: guides/field-importance.qmd
-            text: Field Importance
           - href: guides/schema-mutation.qmd
             text: Schema Mutation
           - href: guides/custom-tensorfields.qmd
-            text: Experimental Tensorfields
+            text: Custom Tensorfields
           - href: guides/troubleshooting.qmd
             text: Troubleshooting
-      - section: Reference
-        contents:
           - href: reference/public-api.qmd
-            text: Public API Map
-          - href: guides/arrow-migration.qmd
-            text: Arrow Migration
+            text: API Map
       - section: Case Studies
         contents:
-          - href: case-studies/iris-reproducible.qmd
-            text: Reproducible Iris Classification
-          - href: case-studies/device-tenure.qmd
-            text: Device Tenure
+          - href: case-studies/customer-risk.qmd
+            text: Customer Risk Example
+  page-footer:
+    left: Grantham Taylor
+    right:
+      - text: GitHub
+        icon: github
+        href: https://github.com/relflow/relflow
+      - text: Discord
+        icon: discord
+        href: https://discord.gg/DVyZUkvTFA
+      - text: LinkedIn
+        icon: linkedin
+        href: https://www.linkedin.com/in/granthamtaylor
   search: true
 
 format:
   html:
+    css: assets/stylesheets/branding.css
+    include-after-body: assets/sidebar.html
     theme:
       light:
         - flatly
@@ -210,9 +134,25 @@ format:
       dark:
         - darkly
         - assets/stylesheets/theme-dark.scss
-    toc: true
+    toc: false
     code-copy: true
     code-overflow: scroll
     respect-user-color-scheme: true
-    css:
-      - assets/stylesheets/quarto-marimo.css
+
+engine: markdown
+execute:
+  enabled: false
+  eval: false
+
+filters:
+  - typst-render
+
+extensions:
+  typst-render:
+    root: /
+    format: svg
+    background:
+      light: none
+      dark: "#181c1b"
+    output-directory: /assets/diagrams
+    preamble: /assets/typst/preamble.typ

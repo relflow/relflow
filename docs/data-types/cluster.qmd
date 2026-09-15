@@ -1,235 +1,99 @@
----
-eval: false
----
-
 # Cluster
 
-**Example status — reference:** examples use the shipped `Cluster` schema,
-runtime-inspection, and Arrow prediction contracts. Training is omitted so the
-page stays focused on the datatype.
+Use `Cluster` for scalar labels represented through shared latent groups. It
+factorizes label representation into a label-to-cluster assignment and a
+cluster-to-model projection. It still keeps a bounded vocabulary; it does not
+eliminate per-label state.
 
-Use `Cluster` for a high-cardinality scalar label when a learned bounded
-vocabulary is useful, but one independent embedding per label would be too
-expensive. Each known label learns an assignment over a smaller set of latent
-clusters. Labels assigned to the same cluster share the cluster representation.
+```yaml
+merchant_id: merchant-8042
+amount: 42.75
+fraud: false
+```
 
 ```python
 import relflow as rf
 
 model = rf.Model(
-    d_model=32,
-    n_layers=1,
-    n_heads=4,
+    d_model=64, n_layers=2, n_heads=4,
     merchant_id=rf.Cluster(
         capacity=100_000,
         bounds=64,
         mask=rf.Mask(rate=0.15, reconstruct=True),
-        embed=True,
     ),
-    fraud=rf.Category(mask=True, size=2),
+    amount=rf.Number,
+    fraud=rf.Boolean(mask=True),
 )
 ```
 
-Here `capacity` bounds the learned label vocabulary and `bounds=64` fixes the
-latent cluster width at 64. The reconstructing mask creates sampled objectives
-from which the cluster head can learn.
+Use [Category](category.qmd) for independent label embeddings, or
+[Hash](hash.qmd) for equality without a persistent vocabulary.
 
-Choose a different datatype when the intended signal differs:
+## Input and options
 
-- use [`Category`](category.qmd) when the bounded label deserves its own learned
-  representation;
-- use [`Hash`](hash.qmd) when equality matters but a persistent vocabulary does
-  not;
-- use [`Set`](set.qmd) when several unordered labels may be present;
-- use [`Text`](text.qmd) when meaning comes from words or subwords.
+Accepts scalar Boolean, integer, floating-point, string, or binary labels, with
+one compatible Arrow family per field. Training grows the vocabulary;
+validation, test, and prediction reuse it. Unknown labels remain `valued` and
+use a shared unavailable assignment. Nulls have a separate state.
 
-## Input Contract
-
-`Cluster` accepts one scalar Boolean, integer, floating-point, string, or binary
-label per modeled position. One field must use one compatible Arrow terminal
-type family throughout a split; normalize mixed source types in a preprocessor.
-`None` is the shared `null` state, not a label.
-
-Training observations add first-seen labels until `capacity` is full.
-Validation, test, and prediction reuse the learned vocabulary without extending
-it. A supplied label that is not in that vocabulary remains in the `valued`
-state but uses an internal unavailable-content row:
-
-| Source value | State | Content route |
-| --- | --- | --- |
-| known label | `valued` | learned label-to-cluster assignment |
-| unknown label | `valued` | shared unavailable assignment |
-| `None` | `null` | no label content |
-| absent repeated position | `padded` | no label content |
-
-The unavailable row is not a public class or a vocabulary label. This preserves
-the distinction between “a value was supplied but is unknown” and “no value was
-supplied.”
-
-## Configuration
+See [Online Vocabulary](../core-concepts/vocabulary.qmd) for capacity limits,
+admission timing with workers/DDP, and changes during fine-tuning.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `capacity` | `1024` | Maximum number of learned source labels. Must be positive. |
-| `bounds` | required | An integer `K` fixes exactly `K` latent clusters; `(lower, upper)` enables an adaptive committed count within that inclusive range. |
-| `p_unavailable` | `0.01` | Training probability of routing a known valued label through the unavailable row. |
-| `ema_decay` | `0.99` | Smoothing factor for cluster-usage and range-adherence statistics. |
-| `revive_temperature` | `10.0` | Epoch-scale revival schedule for inactive columns with ranged bounds; `0.0` disables revival. |
+| `capacity` | `1024` | Positive maximum number of learned labels. |
+| `bounds` | required | Integer `K` fixes the cluster count; `(lower, upper)` enables adaptive committed clusters with `0 < lower <= upper`. Stored as `n_clusters`. |
+| `p_unavailable` | `0.01` | Training probability of replacing known labels with unavailable content, independently in input and targets. |
+| `ema_decay` | `0.99` | Smoothing for usage and range-adherence statistics, in `[0, 1]`. |
+| `revive_temperature` | `10.0` | Nonnegative revival schedule control; zero disables inactive-cluster revival. |
 
-`0 < lower <= upper` is required. The upper bound determines the physical
-cluster width and therefore the length of assignment probability vectors.
-With ranged bounds, the training loss tracks usage and balances the currently
-committed columns; epoch callbacks may revive inactive columns or merge highly
-similar active columns. Treat the range as a learned-capacity mechanism, not a
-guarantee that every column will receive equal semantic use.
+The upper bound fixes physical cluster width. Ranged bounds allow callbacks to
+revive inactive columns or merge similar active columns. They do not guarantee
+equal use or human-interpretable groups.
 
-Shared options such as `mask`, `embed`, and `weight` are
-documented in [Built-In Data Types](../core-concepts/data-types.qmd).
+## Learning and inspection
 
-::: {.callout-important}
-A `Cluster` used only as a visible input does not create a reconstruction loss
-for its cluster head, so adaptive cluster selection cannot learn. Configure a
-mask with `reconstruct=True`, or use `mask=True` for an always-skipped target,
-when that head should train.
-:::
+A reconstructing mask is required to train the cluster head and adaptive
+selection. A plain visible Cluster can influence other targets, but creates no
+cluster reconstruction loss of its own. See
+[shared leaf options](../core-concepts/data-types.qmd#shared-leaf-options).
 
-Cluster reconstruction opts out of the direct sibling query shortcut.
-Row-varying siblings can still participate through normal branch memory and
-affect downstream targets. This separation keeps a sibling value from directly
-redefining the identity-reconstruction query on every row.
+Reconstruction combines state classification with label recovery through
+clusters. Content accuracy excludes unknown labels. The decoder uses ancestor
+memory but opts out of direct sibling query conditioning.
 
-`p_unavailable` uses Torch randomness during training. The data-module seed
-reproduces row sampling and ordering; it does not make unavailable simulation
-identity- or chunk-invariant. Seed the Torch/Lightning runtime as well when
-run-level reproducibility matters.
-
-## Vocabulary And Cluster State
-
-After training data has populated the field, inspect immutable snapshots by
-model address:
+For an application-supplied trained `model`:
 
 ```python
-vocabulary = rf.Cluster.vocabulary(model, "record/merchant_id")
+labels = rf.Cluster.vocabulary(model, "record/merchant_id")
 assignments = rf.Cluster.assignments(model, "record/merchant_id")
 status = rf.Cluster.status(model, "record/merchant_id")
 ```
 
-- `vocabulary` is a tuple in categorical-index order.
-- `assignments[label]` contains the evaluation-time `cluster` argmax and the
-  probability tuple across all configured columns.
-- `status["committed"]` lists committed column IDs and `status["usage"]`
-  contains the usage EMA aligned to every configured column.
+`labels` is an index-ordered tuple. Each assignment contains a cluster ID and
+probabilities across all configured columns. Status exposes committed column
+IDs and usage EMA; these inspection calls read local model state under DDP.
 
-The usage EMA is model activity, not a count of vocabulary labels. During
-distributed model training these inspection methods expose local model state;
-they do not aggregate buffers across ranks.
+An idle model also supports `rf.Cluster.assign(model, address, label, assignment)`
+for persistent changes and `rf.Cluster.override(model, address, assignments)`
+as a temporary context manager. An assignment is a cluster ID or a nonnegative
+probability vector of upper-bound width summing to one. Adding a label consumes
+capacity. Overrides restore state on exit; saving or rebuilding during an open
+override is rejected.
 
-Monitor the address-qualified `vocabulary.size` metric alongside upstream
-unknown-label rates. A full vocabulary is not inherently an error, but a high
-unavailable rate can indicate drift, inconsistent normalization, or insufficient
-capacity.
+## Prediction
 
-### Explicit assignments
+`cluster` contains the best cluster's integer `value` and `probability`;
+`content` contains the best populated vocabulary label and its probability.
+Label probabilities are normalized over populated labels, excluding unused
+capacity and the unavailable row. Labels use `large_string`; an empty
+vocabulary yields a null label and zero probability.
 
-An idle model can persistently assign a label to a cluster:
+See the [prediction envelope](../guides/prediction-output.qmd) for shared
+state probabilities, `inferred`, and repeated shapes.
 
-```python
-rf.Cluster.assign(model, "record/merchant_id", "new-merchant", 3)
-```
-
-The assignment may instead be a probability vector whose length equals the
-configured upper bound and whose non-negative values sum to one:
-
-```python
-probabilities = [0.0] * 64
-probabilities[2] = 0.7
-probabilities[3] = 0.3
-
-rf.Cluster.assign(
-    model,
-    "record/merchant_id",
-    "uncertain-merchant",
-    probabilities,
-)
-```
-
-Assigning a new label consumes a vocabulary slot. Use a scoped override when a
-mapping should exist for one operation only:
-
-```python
-import pyarrow as pa
-
-requests = pa.Table.from_pylist([{"merchant_id": "new-merchant"}])
-
-with rf.Cluster.override(
-    model,
-    "record/merchant_id",
-    {"new-merchant": 3},
-):
-    result = model.predict(requests)
-```
-
-The original vocabulary and assignment rows are restored even if prediction
-raises. Assignment changes require an idle model and available local vocabulary
-state; saving or rebuilding while an override is open is rejected.
-
-## Loss And Metrics
-
-For positions selected for reconstruction, `Cluster` learns the shared state
-classification objective and label reconstruction through latent cluster
-probabilities. Content accuracy includes only valued targets whose labels are
-known. Training also records cluster balance and activity diagnostics,
-including committed count, usage entropy, and unavailable sentinel share.
-
-Metric names are address- and stage-qualified. For example, the vocabulary
-size for this field is logged under a name ending in
-`record.merchant_id/train.vocabulary.size`.
-
-## Prediction Output
-
-`Cluster` emits both the most likely latent cluster and the most likely known
-vocabulary label:
-
-```text
-struct<
-  state: struct<valued: float32, null: float32, padded: float32,
-                masked: float32, other: float32>,
-  cluster: struct<value: int32, probability: float32>,
-  content: struct<value: large_string, probability: float32>,
-  inferred: bool,
-  embedding: fixed_size_list<float32>[d_model]  # only with embed=True
->
-```
-
-The shared runtime owns `state` and `inferred`; the extension owns `content` and
-`cluster`. Label probabilities are normalized over the vocabulary populated at
-write time, excluding unused capacity. If the vocabulary is empty, the content
-label is null and its probability is zero. Non-string source labels are exposed
-through the canonical `large_string` output label.
-
-Read the typed Arrow fields without converting rows to Python:
-
-```python
-import pyarrow.compute as pc
-
-merchant = pc.struct_field(result["predictions"], "record/merchant_id")
-cluster = pc.struct_field(merchant, "cluster")
-content = pc.struct_field(merchant, "content")
-
-cluster_id = pc.struct_field(cluster, "value")
-cluster_probability = pc.struct_field(cluster, "probability")
-label = pc.struct_field(content, "value")
-label_probability = pc.struct_field(content, "probability")
-```
-
-See [Prediction Output](../guides/prediction-output.qmd#the-canonical-payload)
-for the complete `pyarrow.Table` envelope and repeated-axis rules.
-
-## Where Next
-
-- Read [Dynamic Masking](../core-concepts/dynamic-masking.qmd) to choose the
-  reconstruction policy that trains the cluster head.
-- Use [Working With Arrow](../guides/working-with-arrow.qmd) to normalize label
-  columns without Python row loops.
-- Use [Model Configuration](../guides/model-configuration.qmd) to tune bounded
-  vocabularies and track drift.
+The [reconstructing Cluster proof](../proofs/cluster/reconstructing-category-labels.html)
+reports internal convergence for repeated identities. Its page distinguishes
+that evidence from partition recovery and held-out prediction. The
+[plain-input control](../proofs/cluster/plain-input-is-dormant.html) shows why
+downstream supervision alone leaves adaptive Cluster state dormant.

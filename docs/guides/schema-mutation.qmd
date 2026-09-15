@@ -1,238 +1,108 @@
----
-marimo-static-output: true
-eval: false
----
-
 # Schema Mutation
 
-**Example status — excerpt:** the initial mutation sequence is self-contained,
-while trainer-dependent blocks are explicitly linked to the complete Lightning
-workflow.
+Use model methods to change a live schema. They validate the edit, rebuild the
+runtime graph, and retain state-dictionary entries whose names, types, and
+tensor shapes still match. An edit can therefore retain some learned state
+while initializing incompatible parts anew.
 
-A RelFlow schema is live model state. Mutation methods update the schema and
-keep compatible runtime modules, parameters, vocabularies, and normalizers
-attached where their address and tensor shape still match.
+## Select And Update
 
-Use mutation for controlled experiments, staged targets, inference views, and
-schema evolution. Treat it as a model change: inspect the result, evaluate it,
-and save the artifact you intend to operate.
+Predicates combine with logical AND. Inspect selected addresses before making
+a broad change:
 
-## Example Model
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
+```python
 import relflow as rf
 
-model = rf.Model(
-    name="order",
-    d_model=32,
-    n_layers=1,
-    n_heads=4,
-    amount=rf.Number,
-    channel=rf.Category(size=8),
-    returned=rf.Category(mask=True, size=2),
-)
-
-model
+prices = rf.where("address") == "order/line_items/price"
+selected = model.select(prices)
+model.update(prices, mask=0.10)
 ```
 
-## Select Before You Change
+Selection is read-only. Updates are strict by default: every matched node must
+support each supplied option. Narrow the predicate rather than mixing unrelated
+node types. `strict=False` permits partial application to supporting nodes;
+an option supported by none of the selected nodes still raises.
 
-`model.select(...)` is read-only. Predicates are combined with logical AND:
+`mask=False` removes the selected node's policies; `mask=True` makes it an
+always-hidden reconstruction target. Use `description` for notes and declared
+field options for configuration.
 
-```{python .marimo}
-#| echo: true
-#| output: true
+## Make A Temporary Change
 
-numbers = model.select(rf.where("type") == "number")
-reconstructed = model.select(rf.where("reconstruct"))
+```python
+with model.override(prices, active=False):
+    ablated = model.predict(observations)
 
-print([str(node.address) for node in numbers])
-print([str(node.address) for node in reconstructed])
+ordinary = model.predict(observations)
 ```
 
-Prefer stable attributes such as `address`, `name`, and `type`. A callable is
-available for conditions that cannot be expressed with `rf.where(...)`:
+`observations` is the application's Arrow input. The context manager restores
+the previous schema attributes, even on exit through an exception. It does
+not snapshot all weights, vocabularies, or normalizers: compatible learned-state
+changes inside the context remain. See [Evaluation](evaluation.qmd) for an
+ablation example.
 
-```{python .marimo}
-#| echo: true
-#| output: true
+## Change The Tree Or Reinitialize State
 
-embedded = model.select(lambda node: getattr(node, "embed", False))
+| Method | Effect |
+| --- | --- |
+| `extend(...)` | Add named children to exactly one selected branch. |
+| `delete(...)` | Remove selected nodes and their descendant subtrees. |
+| `reset(...)` | Keep the schema and reinitialize selected runtime modules. |
+
+```python
+root = rf.where("address") == "order"
+model.extend(root, expedited=rf.Boolean, region=rf.Category(size=32))
+model.reset(rf.where("address") == "order/region")
+model.delete(rf.where("address") == "order/expedited")
 ```
 
-Check the selected addresses before a broad update or delete. `include_root`
-defaults to `True` for selection and update, and to `False` for delete.
+An extension accepts keyword children or a `fields` mapping, following the same
+parent-owned naming rules as construction. Names must remain unique.
+Deletion cannot remove the generated root or leave an invalid empty tree.
+`reset(..., descendants=True)` includes a selected branch's subtree; resetting
+a field discards its learned runtime state, including any owned vocabulary.
 
-## Update Attributes
+## Edit Between Loops
 
-`update(...)` changes every selected node that accepts the requested values and
-then rebuilds the runtime graph:
+Mutation is prohibited during active forward, inference, and Lightning loops.
+Change the model between complete operations. Avoid direct attribute edits that
+bypass graph rebuilding.
 
-```{python .marimo}
-#| echo: true
-#| output: true
+Rebuilds replace runtime modules, so recreate optimization through a factory
+and a new fitting loop after editing a trained model. An existing optimizer
+instance can refer to replaced parameters. Existing data modules keep the
+model reference and use its current schema; application caches and exported
+artifacts remain your responsibility.
 
-model.update(rf.where("type") == "number", mask=0.10)
-model.update(rf.where("name") == "returned", weight=2.0, topk=[])
-```
+A failed update that cannot rebuild restores its previous schema and graph.
+Successful changes clear compilation and cached output contracts. Call
+`model.compile()` again if wanted, reevaluate the changed model, and save the
+artifact you intend to use.
 
-Updates are strict by default. If a selector matches mixed node types and one
-does not support the option, RelFlow raises instead of silently applying a
-partial change. Narrow the predicate or use `strict=False` only when partial
-application is intentional.
+## Evidence For Learned Behavior
 
-Every accepted shorthand is normalized to a tuple of `rf.Mask` policies.
-For example, `mask=0.10` becomes a uniform train-only learned mask, while
-`mask=True` becomes an always-skipped reconstruction target. Set `mask=False`
-to remove all policies from the selected node.
+The mutation proofs start with trained models, evaluate immediately after an
+edit, and measure adaptation separately:
 
-## Extend One Branch
+- [Neutral edits](../proofs/mutations/neutral-edits-preserve-learning.py)
+  check prediction, normalization, and vocabulary retention.
+- [Adding a hidden target](../proofs/mutations/extend-prediction-target.py)
+  checks immediate retention and learning with continuation and scratch controls.
+- [Selective reset](../proofs/mutations/reset-prediction-target.py)
+  checks localized loss and relearning of one hidden output.
+- [Deactivation and restoration](../proofs/mutations/deactivate-and-restore-input.py)
+  removes an informative input, then checks updates, override exits, and
+  reactivation from an inactive checkpoint.
+- [Deletion and adaptation](../proofs/mutations/delete-input-and-adapt.py)
+  compares retraining with inactive, scratch, and continuation controls against
+  the best prediction possible from the remaining information.
 
-`extend(...)` requires exactly one selected branch, followed by one or more new
-fields:
+These experiments cover specific edits and synthetic tasks. Consult their
+recorded outcomes: retaining state entries does not establish identical
+predictions when a schema-derived computation changes.
 
-```{python .marimo}
-#| echo: true
-#| output: true
-
-model.extend(
-    rf.where("name") == "order",
-    rf.Boolean("expedited"),
-    rf.Category("region", size=32),
-)
-
-model
-```
-
-New fields receive new runtime modules. Existing compatible modules keep their
-state. Duplicate sibling names and extensions that match zero or multiple
-branches fail validation.
-
-## Delete Permanently
-
-`delete(...)` removes selected roots and all their descendants:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-model.delete(rf.where("name") == "expedited")
-```
-
-Deletion cannot remove the generated root, every request, or leave a branch
-without any request descendants. There is no automatic undo; use
-`override(...)` for a temporary ablation.
-
-## Reset Learned Runtime State
-
-`reset(...)` keeps schema values but reinitializes selected runtime modules:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-model.reset(rf.where("name") == "channel")
-```
-
-For a stateful field, this discards learned weights and field-owned state such
-as its vocabulary. Pass `descendants=True` when selecting a branch and intending
-to reset its full subtree. Re-train or deliberately refit preprocessing state
-after a reset.
-
-Use reset when you want reinitialization. Ordinary updates rebuild the graph but
-reload state-dictionary entries whose keys, types, and tensor shapes remain
-compatible. A shape-changing option such as vocabulary capacity may therefore
-reinitialize the incompatible tensors while preserving unrelated modules.
-
-## Override Temporarily
-
-`override(...)` changes the schema for the duration of a context manager, then
-restores the prior schema and rebuilds it with whatever compatible runtime
-state exists when the context exits:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-import pyarrow as pa
-
-with model.override(rf.where("name") == "amount", active=False):
-    ablated_predictions = model.predict(
-        pa.Table.from_pylist([{"channel": "web"}])
-    )
-
-restored_predictions = model.predict(
-    pa.Table.from_pylist([{"amount": 42.0, "channel": "web"}])
-)
-```
-
-This is the appropriate primitive for field-ablation evaluation or a temporary
-inference view. Do not retain references to node modules created only inside the
-context. It is a schema override, not a transaction over weights or field-owned
-state: compatible parameter or vocabulary changes made inside the context are
-not rolled back automatically.
-
-## Mutation Boundaries
-
-Schema mutation cannot run while RelFlow is inside an active `forward`,
-interactive inference call, or Lightning train/validate/test/predict loop.
-Mutate between complete loops:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-trainer.fit(model=model, datamodule=datamodule)
-
-model.update(rf.where("name") == "amount", mask=False)
-
-trainer.test(model=model, datamodule=datamodule)
-```
-
-The snippet above is an excerpt: `trainer` and `datamodule` come from the
-complete [Lightning guide](lightning.qmd).
-
-In distributed work, every rank must make the same mutation in the same order.
-Do not mutate from one rank or from a callback in the middle of a collective
-loop.
-
-## Save The Result You Intend To Use
-
-After a permanent mutation and its evaluation, save a new artifact:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-model.save("artifacts/order-v2.rf")
-loaded = rf.Model.load("artifacts/order-v2.rf")
-```
-
-Record the old and new schema, the predicate and values used, validation
-results, and the data/preprocessor version. An artifact name alone is not a
-schema migration record.
-
-## Mutation Checklist
-
-Before shipping a changed schema:
-
-1. print the selected addresses and the mutated Rich tree;
-2. encode representative train and inference observations;
-3. confirm which parameters and preprocessing states were preserved;
-4. re-evaluate every supervised target and important slice;
-5. test save/load parity;
-6. test batch and online request compatibility;
-7. save under a new version and retain rollback metadata.
-
-## Where Next
-
-- Use [Field Importance](field-importance.qmd) for a complete temporary-ablation
-  workflow.
-- Use [Model Lifecycle](model-lifecycle.qmd) for persistence and checkpoint
-  boundaries.
-- Use [Model Tree](../core-concepts/model-tree.qmd) for nodes and addresses.
-- Use [Troubleshooting](troubleshooting.qmd) for selection, shape, and active-loop
-  errors.
+The added-target experiment currently fails exact prediction retention with
+the default attention reduction. Adding the hidden field changes the root
+pool's capacity and shifts old predictions despite preserving existing state.
+The new output still learns successfully during adaptation.

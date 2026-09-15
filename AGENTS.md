@@ -64,12 +64,21 @@ model = rf.Model(
 
 - Do not use a public `Struct(...)` constructor. Public examples should use `Model(...)` and `Branch(...)`.
 - `Model(..., name="customer")` names the generated root branch. Older examples may say `root=...`; update them.
+- Branch and leaf definitions have no `name` argument or positional arguments.
+  Their parent supplies names through keywords, such as
+  `amount=rf.Number` or `events=rf.Branch(...)`. Use a `fields` mapping for
+  generated schemas or child names that collide with parent configuration:
+  `rf.Branch(length=8, fields={"length": rf.Number})`.
+  `model.extend(predicate, risk_score=rf.Number)` follows the same rule.
+- Tensorfield options must be declared fields; pass them directly or unpack a
+  mapping with `**options`. Use `description` for notes, and declare extension
+  options on `RequestBase` subclasses. Undeclared options are rejected.
 - Processed observation names and nesting match the schema by default. A node
   may opt into RelFlow's node-relative structural query syntax with paths such
   as `query="source.path"` or `query="items[-32:][*].sku"`; RelFlow never
   infers queries. Filters, joins, sorting, and derived values belong in an
   `rf.Preprocessor`.
-- `Branch(name="transactions")` reads the same-named child collection, and its
+- `transactions=rf.Branch(...)` reads the same-named child collection, and its
   leaves read keys such as `amount` from each child mapping.
 - `Branch(overflow="head")` is the default. Use `overflow="tail"` for recency-ordered histories and `overflow="error"` for strict schemas. The generated root branch uses internal `Overflow.error`.
 - `mask=True` is shorthand for
@@ -102,7 +111,10 @@ model = rf.Model(
 
 ## Data And Training
 
-Use `ArrowDataModule(...)` for canonical examples. Keep examples tiny:
+Configure `model.optimizer = rf.adamw(learning_rate=1e-3)` before fitting.
+
+Use `ArrowDataModule(...)` for canonical examples. Documentation uses static
+illustrations; use tiny data only in executable tests and proofs:
 
 ```python
 import pyarrow as pa
@@ -118,7 +130,9 @@ datamodule = rf.ArrowDataModule(
 )
 ```
 
-For quick examples, train with `max_epochs=1`, `limit_train_batches=1`, and `limit_val_batches=1`.
+For runtime smoke tests, train with `max_epochs=1`, `limit_train_batches=1`, and
+`limit_val_batches=1`. Documentation may show realistic training configurations
+without executing them.
 
 `model.predict(...)` returns a `pyarrow.Table`. It accepts Arrow inputs directly
 and retains a nonempty sequence of mappings as a small interactive convenience;
@@ -144,6 +158,8 @@ RelFlow code should read as a short sequence of domain operations.
 - Never prefix a function or class name with `_`; control exposure with
   explicit `__all__` and root exports. Python protocol methods such as
   `__post_init__` are the exception.
+- Name every Pydantic validator with a `check_` prefix, including validators
+  that normalize or coerce inputs.
 - Inline a one-use function when it only forwards a call, renames arguments,
   or hides a few incidental expressions. A named function should own a
   semantic phase, recursion, a reusable algorithm, callback identity, or an
@@ -212,7 +228,7 @@ Before considering a change complete, ask:
 ```bash
 uv run ruff format --check
 uv run ruff check
-uv run ty check src/relflow --output-format concise
+uv run pyrefly check
 uv run pytest
 uv run pytest tests/test_public_api.py
 make render
@@ -222,12 +238,26 @@ make render
 
 - `docs/index.qmd`
 - `docs/getting-started.qmd`
-- `docs/ai-quickstart.qmd`
+- `docs/core-concepts/model-tree.qmd`
+- `docs/core-concepts/binding-data.qmd`
 - `docs/core-concepts/querypaths.qmd`
 - `docs/core-concepts/data-types.qmd`
 - `docs/core-concepts/dynamic-masking.qmd`
-- `docs/guides/dynamic-mask-preprocessors.qmd`
+- `docs/guides/data-modules.qmd`
+- `docs/guides/preprocessors.qmd`
 
-When adding docs, prefer runnable inline Python snippets and current public
-imports. Keep Quarto pages self-contained; do not depend on external standalone
-scripts.
+Documentation is static. Use plain `python` fences and current public imports;
+do not execute Python, train models, load real data, or download model weights
+while building the site. Prefer realistic nested schemas and explicitly name
+application-supplied inputs. Use the shared Typst `node` and `tree` functions in
+`docs/assets/typst/model-tree.typ` for structural diagrams; see the authoring
+contract in `docs/assets/typst/README.md`. Show field roles and repeated contexts,
+not parameter counts or hyperparameters. Keep learning-behavior checks in tests
+and proofs rather than extracting and executing documentation snippets.
+
+Show observation and prediction examples as one YAML record, with repeated
+values nested beneath their field names. Keep Arrow and Polars data-module
+snippets to `model` and named splits unless the page explains another option.
+Give each concept one home and link to it. Verify claims against source code
+when editing a page; existing prose is not evidence. Use the current branding
+under `docs/assets/branding` and Typst diagrams for visual explanations.

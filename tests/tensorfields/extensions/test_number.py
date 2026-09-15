@@ -93,12 +93,7 @@ def test_number_jitter_round_trips_through_schema_serialization():
 
 def test_number_jitter_round_trips_through_model_checkpoint(tmp_path: Path):
     configured = Jitter(add=1.5, multiply=0.25, normalize=False)
-    model = rf.Model(
-        rf.Number("amount", jitter=configured),
-        d_model=8,
-        n_layers=1,
-        n_heads=2,
-    )
+    model = rf.Model(amount=rf.Number(jitter=configured), d_model=8, n_layers=1, n_heads=2)
     pathname = tmp_path / "jitter.ckpt"
 
     model.save(pathname)
@@ -111,9 +106,9 @@ def test_number_jitter_round_trips_through_model_checkpoint(tmp_path: Path):
 
 
 @pytest.mark.parametrize("value", [None, 0.0, 0.2, 1, True])
-def test_number_rejects_legacy_scalar_jitter(value: object):
+def test_number_requires_a_jitter_configuration(value: object):
     with pytest.raises(pydantic.ValidationError):
-        rf.Number("amount", jitter=value)
+        rf.Number(jitter=value)
 
 
 def test_default_jitter_does_not_advance_rng_during_training():
@@ -143,12 +138,7 @@ def test_number_embedding_retains_standardized_value_in_monotone_lane():
 
 def test_number_monotone_lane_retains_autograd_at_model_width_one():
     schema = rf.Schema.from_tree(
-        rf.Number("amount"),
-        d_model=1,
-        n_layers=1,
-        n_heads=2,
-        attention="none",
-        reduction=rf.Mean(),
+        amount=rf.Number(), d_model=1, n_layers=1, n_heads=2, attention=None, reduction=rf.Mean()
     )
     embedder = Embedder(schema=schema, address="record/amount")
     inputs = TensorInput(
@@ -269,12 +259,7 @@ def test_number_jitter_is_configuration_not_checkpoint_state():
 
 
 def test_number_jitter_mutation_rebuilds_runtime_configuration():
-    model = rf.Model(
-        rf.Number("amount", jitter=rf.Jitter(add=0.1)),
-        d_model=8,
-        n_layers=1,
-        n_heads=2,
-    )
+    model = rf.Model(amount=rf.Number(jitter=rf.Jitter(add=0.1)), d_model=8, n_layers=1, n_heads=2)
     address = rf.Address("record", "amount")
 
     model.update(

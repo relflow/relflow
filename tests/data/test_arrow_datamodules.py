@@ -53,8 +53,14 @@ def test_public_surface_has_four_modules_and_no_source_specific_datasets():
     assert rf.ArrowDataModule is arrow.ArrowDataModule
     assert datasets.__all__ == [
         "ArrowDataModule",
+        "ArrowInput",
+        "ArrowSource",
+        "ArrowStream",
+        "ArrowUnit",
         "CustomDataModule",
         "PolarsDataModule",
+        "Retain",
+        "StratumConfig",
         "SyntheticDataModule",
     ]
     assert callable(rf.source)
@@ -589,11 +595,9 @@ def test_polars_is_a_one_time_conversion_adapter(monkeypatch: pytest.MonkeyPatch
     assert calls == 2
 
 
-def test_polars_rejects_lazy_frames_and_removed_dataframe_alias():
+def test_polars_requires_eager_frames():
     with pytest.raises(TypeError, match="collected"):
         rf.PolarsDataModule(model=model(), train=pl.DataFrame({"id": [1]}).lazy())
-    with pytest.raises(TypeError, match="unexpected keyword argument 'dataframe'"):
-        rf.PolarsDataModule(model=model(), dataframe=pl.DataFrame({"id": [1]}))
 
 
 def test_custom_adapter_bounds_mapping_conversion_and_restarts():

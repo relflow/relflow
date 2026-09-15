@@ -31,7 +31,7 @@ class Jitter(pydantic.BaseModel):
 
     @pydantic.field_validator("add", "multiply", mode="before")
     @classmethod
-    def validate_amount(cls, value: object) -> object:
+    def check_amount(cls, value: object) -> object:
         if isinstance(value, bool):
             raise ValueError("Jitter.add and Jitter.multiply must be numbers, not booleans")
         return value

@@ -1,79 +1,35 @@
----
-marimo-static-output: true
-pyproject: |
-  requires-python = ">=3.12"
-  dependencies = [
-    "marimo>=0.23.8",
-    "relflow[serving]",
-  ]
----
-
 # DateParts
 
-**Example status — excerpt:** schema blocks isolate calendar encoding; use
-[Getting Started](../getting-started.qmd) for a tested lifecycle.
+Use `DateParts` for recurring calendar position, such as hour of day or day of
+week. Derive a [Number](number.qmd) when elapsed time, age, or recency matters.
 
-Use `DateParts` when calendar position or recurrence matters: second of minute,
-hour of day, day of week, month of year, or related cyclical coordinates.
-
-```json
-{
-  "created_at": "2026-05-28T14:30:45"
-}
+```yaml
+created_at: "2026-05-28T14:30:45"
 ```
 
-```{python .marimo}
-#| echo: true
-#| output: true
-
+```python
 import relflow as rf
 
 created_at = rf.DateParts(
-    "created_at",
-    dateparts=["day of week", "HourOfDay", "second_of_minute"],
+    dateparts=["day_of_week", "hour_of_day"],
     pattern="%Y-%m-%dT%H:%M:%S",
-    jitter=rf.Jitter(add=0.02, multiply=0.05),
 )
-
-created_at
 ```
 
-Use `DateParts` for recurring calendar position. Derive a `Number` when elapsed
-time, age, recency, duration, ordering, or distance between two timestamps is the
-signal. For example, compute `days_since_transaction` in preprocessing using an
-explicit request-time reference.
+## Input and options
 
-| Need | Prefer |
-| --- | --- |
-| Second, minute, hour, weekday, month, or seasonal recurrence | `DateParts` |
-| Age, duration, recency, or ordering | Derived `Number` |
-| Request-time-dependent windows | Preprocessor plus `Number` |
+Accepts Arrow date, timestamp, or string values. Strings are parsed by Arrow
+using `pattern` when supplied; otherwise Arrow casts them to timestamps.
+Calendar extraction uses second-resolution timestamps. Normalize to the intended
+calendar timezone upstream; the field does not choose a local-time policy.
 
-Avoid raw timestamps as features by default. They can encourage a model to
-memorize collection windows, rollout dates, policy changes, or train/test split
-boundaries instead of learning a recurring pattern.
-
-## Input Values
-
-`DateParts` accepts datetime-like values that NumPy can coerce to
-second-resolution `datetime64[s]`. When `pattern` is configured, source values
-are parsed with `datetime.strptime` first. `None` has state `null`, and a missing
-repeated branch slot has state `padded`.
-
-Preprocess timestamps into one consistent timezone before encoding. `DateParts`
-does not impose an application timezone policy or convert local times for you.
-
-## Configuration
-
-| Option | Default | Notes |
+| Option | Default | Meaning |
 | --- | --- | --- |
-| `dateparts` | required | Non-empty list of unique date parts to extract. Friendly casing and separators are normalized. |
-| `pattern` | `None` | Optional valid `datetime.strptime` pattern for source strings. |
-| `jitter` | `rf.Jitter()` | Training-only affine noise applied to each cyclical coordinate before projection. |
+| `dateparts` | required | Nonempty, unique list of parts; casing and separators are normalized. |
+| `pattern` | `None` | Optional strptime-style format for Arrow string parsing. |
+| `jitter` | `rf.Jitter()` | Training noise on the generated sine/cosine coordinates. |
 
-Available date parts are:
-
-| Date part | Period |
+| Part | Period |
 | --- | ---: |
 | `day_of_year` | 366 |
 | `week_of_year` | 53 |
@@ -85,89 +41,24 @@ Available date parts are:
 | `minute_of_hour` | 60 |
 | `second_of_minute` | 60 |
 
-Inputs such as `"day_of_week"`, `"day of week"`, `"Day-Of-Week"`,
-`"DAY_OF_WEEK"`, and `"DayOfWeek"` all resolve to the same part. Serialized
-schemas use the canonical lower-case underscore values.
+## Representation and output
 
-## Representation
+Each part becomes a sine/cosine pair: the end of a cycle is near its beginning.
+relflow projects each pair and combines the results with a state embedding.
+Null, padded, and masked content is zero; state remains separate.
 
-Each requested part becomes a `(sin, cos)` pair on its unit circle. This keeps
-the boundary close: minute `59` is near minute `0`, for example. The tensorfield
-stores these pairs at second-level timestamp precision, and non-valued states
-receive zero part content. State remains separate from the part vectors.
+[Jitter](../core-concepts/jitter.qmd) changes the circle coordinates, not the
+timestamp, and does not renormalize noisy pairs. Its magnitude is measured in
+coordinate units. Both settings of `jitter.normalize` use this same boundary.
 
-Each part has its own projection into `d_model`; the projected parts and state
-embedding are added to create the internal field representation. Requesting
-more parts therefore adds both computation and parameters, and it can expose
-redundant calendar signals. Select parts justified by the task rather than
-including every period automatically.
+Reconstruction learns state cross entropy and mean per-part cosine distance.
+The per-part `mae` metric is angular error in radians, not elapsed time.
 
-## Jitter
+DateParts has no decoded public content and does not generate timestamps.
+Use `embed=True` for a contextual embedding; see
+[shared leaf options](../core-concepts/data-types.qmd#shared-leaf-options).
 
-`DateParts` can regularize its continuous calendar representation with the
-shared `rf.Jitter` helper. Jitter is applied independently to the sine and
-cosine coordinates after calendar extraction and immediately before each
-part's trainable projection:
-
-```{python .marimo}
-#| echo: true
-
-noisy_calendar = rf.DateParts(
-    "created_at",
-    dateparts=["day_of_week", "hour_of_day"],
-    jitter=rf.Jitter(add=0.02, multiply=0.05),
-)
-```
-
-The magnitudes therefore describe unit-circle coordinate units, not seconds,
-days, or timestamp units. Jitter does not shift the source datetime, and it does
-not renormalize a perturbed pair back onto the unit circle. Start with small
-values and validate the effect on the task.
-
-Noise is active only in training mode and only on finite coordinates whose
-field state is `valued`. State embeddings, null or masked coordinates, and
-reconstruction targets remain pristine. Validation, testing, and prediction
-are deterministic with respect to jitter.
-
-`DateParts` has one continuous model-input boundary: its inherently normalized
-cyclical pairs. Consequently, both `normalize=True` and `normalize=False` are
-accepted but place jitter at that same boundary. The option changes placement
-only for a consumer such as `Number` that has distinct raw and normalized
-continuous representations. Derive a `Number` during preprocessing when noise
-must instead be expressed in elapsed-time source units.
-
-## Loss And Metrics
-
-For every trainable selected position, the decoder emits five state logits and
-one two-dimensional vector per configured part. Each predicted part vector is
-normalized before scoring.
-
-- State uses cross entropy and reports state accuracy.
-- Each part uses cosine distance, `1 - cosine(prediction, target)`.
-- Each part's metric named `mae` is mean absolute angular error in radians,
-  computed with `arccos(cosine)`.
-- The content contribution is the mean of the configured per-part losses and is
-  added to state loss.
-
-The angular metric is not bucket accuracy and is not measured in seconds,
-minutes, or hours. Convert radians to a domain unit only with that part's period,
-and remember that every part is cyclical.
-
-## Prediction Output
-
-`DateParts` has no public decoded state/content writer, so
-`Model.predict(...)` does not reconstruct a timestamp or emit part buckets.
-It can still act as a visible input and train state, cosine-loss, and angular
-error metrics when masked or targeted.
-
-Configure `embed=True` when a normalized representation at this field address
-is useful. The public embedding is not a decoded datetime; see
-[Internal And Exported Embeddings](../core-concepts/embeddings.qmd#internal-and-exported-embeddings).
-
-## Where Next
-
-- Use [Number](number.qmd) for monotonic time, age, intervals, or duration.
-- Use [Built-In Data Types](../core-concepts/data-types.qmd) for shared state and
-  masking semantics.
-- Use [Data Modules](../guides/data-modules.qmd) to keep timezone conversion and
-  request-time feature derivation consistent across splits and prediction.
+The [month-inference proof](../proofs/temporal/month-from-day-of-year.html)
+tests a recurring relationship on withheld dates and years. The
+[leap-boundary proof](../proofs/temporal/leap-boundary-requires-context.html)
+shows how selecting too few calendar coordinates can make the answer ambiguous.

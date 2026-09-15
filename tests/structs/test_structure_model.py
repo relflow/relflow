@@ -34,37 +34,21 @@ def _payload() -> dict:
     }
 
 
-def test_branch_accepts_positional_children():
-    branch = Branch(
-        Category(name="category_leaf"),
-        name="branch",
-    )
+def test_branch_accepts_keyword_children():
+    branch = Branch(category_leaf=Category())
 
     assert branch.fields[0].name == "category_leaf"
 
 
-def test_branch_accepts_masks_as_an_ordinary_keyword_child():
-    branch = Branch(name="branch", masks=Category)
+def test_branch_accepts_mapping_and_keyword_children():
+    branch = Branch(category_leaf=Category(), fields={"length": Category})
 
-    assert branch.fields[0].name == "masks"
-
-
-def test_branch_rejects_positional_and_keyword_children():
-    with pytest.raises(TypeError, match="both positionally and by keyword"):
-        Branch(
-            Category(name="category_leaf"),
-            name="branch",
-            fields=[],
-        )
+    assert [field.name for field in branch.fields] == ["length", "category_leaf"]
 
 
-def test_branch_rejects_leaf_mask_and_target_options():
-    with pytest.raises(ValueError, match="removed node field"):
-        Branch(
-            Category(name="category_leaf"),
-            name="branch",
-            p_mask=0.1,
-        )
+def test_branch_rejects_children_that_are_not_definitions():
+    with pytest.raises(TypeError, match="tree field 'unexpected'.*must be a Branch, Leaf, or Leaf class"):
+        Branch(category_leaf=Category(), unexpected=0.1)
 
 
 def test_schema_derives_branches_requests_and_shapes():
@@ -80,22 +64,14 @@ def test_schema_derives_branches_requests_and_shapes():
 
 
 def test_branch_accepts_overflow_policy():
-    branch = Branch(
-        Category(name="category_leaf"),
-        name="branch",
-        overflow="tail",
-    )
+    branch = Branch(category_leaf=Category(), overflow="tail")
 
     assert branch.overflow == Overflow.tail
 
 
 def test_branch_rejects_invalid_overflow_policy():
     with pytest.raises(ValueError):
-        Branch(
-            Category(name="category_leaf"),
-            name="branch",
-            overflow="middle",
-        )
+        Branch(category_leaf=Category(), overflow="middle")
 
 
 def test_schema_converts_leaf_instances_nested_in_branches():
@@ -105,13 +81,7 @@ def test_schema_converts_leaf_instances_nested_in_branches():
             "name": "root",
             "type": "branch",
             "fields": [
-                {
-                    "name": "branch",
-                    "type": "branch",
-                    "fields": [
-                        Category(name="category_leaf"),
-                    ],
-                }
+                {"name": "branch", "type": "branch", "fields": [Category.model_validate({"name": "category_leaf"})]}
             ],
         },
     )
@@ -168,23 +138,11 @@ def test_schema_preserves_direct_field_dropout():
     assert structure.requests["root/branch/category_leaf"].dropout == 0.4
 
 
-def test_schema_rejects_branch_mask_and_target_rates():
+def test_schema_rejects_undeclared_branch_options():
     payload = _payload()
-    payload["fields"]["p_mask"] = 0.2
-    payload["fields"]["p_prune"] = 0.1
+    payload["fields"]["notes"] = "Undeclared option"
 
-    with pytest.raises(ValueError, match="removed node field"):
-        Schema.model_validate(payload)
-
-
-def test_schema_rejects_removed_mask_fields_on_branches_and_leaves():
-    payload = _payload()
-    payload["fields"]["fields"][0]["p_mask"] = 0.3
-    payload["fields"]["fields"][0]["p_prune"] = 0.4
-    payload["fields"]["fields"][0]["fields"][0]["p_mask"] = 0.5
-    payload["fields"]["fields"][0]["fields"][0]["p_prune"] = 0.6
-
-    with pytest.raises(ValueError, match="removed node field"):
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
         Schema.model_validate(payload)
 
 

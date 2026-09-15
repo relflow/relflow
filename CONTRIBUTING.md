@@ -13,13 +13,70 @@ Use Python 3.12 or newer.
 uv sync
 uv run ruff format --check
 uv run ruff check
-uv run ty check src/relflow --output-format concise
+uv run pyrefly check
 uv run pytest
 ```
 
 Run the smallest relevant test subset while developing. Before publishing a
 branch, run the complete checks above and `make render` when documentation or a
 public contract changed.
+
+## Editor And Type Checking
+
+Pyrefly checks `src/relflow` and the static examples in `tests/typing` using
+the configuration in `pyproject.toml`. The pre-commit hook runs the same
+`uv run pyrefly check` command. Development dependencies include Arrow stubs
+and the optional Text and serving dependencies so those public APIs are checked
+too; they remain optional for applications installing RelFlow.
+
+Install the Pyrefly editor extension and select `.venv/bin/python` as the
+workspace interpreter. For VS Code, these local workspace settings use the
+same checker version as pre-commit:
+
+```json
+{
+  "python.defaultInterpreterPath": ".venv/bin/python",
+  "pyrefly.lspPath": ".venv/bin/pyrefly",
+  "python.pyrefly.diagnosticMode": "workspace"
+}
+```
+
+On Windows, use `.venv/Scripts/python.exe` and `.venv/Scripts/pyrefly.exe`.
+Other editors can launch `uv run pyrefly lsp` through their language-server
+client. See the [Pyrefly editor guide](https://pyrefly.org/en/docs/IDE/).
+
+Type constructor inputs separately from normalized attributes: a field accepts
+`mask=True`, but stores a tuple of `Mask` objects. Use small union aliases,
+`Literal` choices, and overloads where they clarify real call patterns. Preserve
+the caller's return type for decorators and chainable methods. Type-only
+signatures describe framework-generated constructors and hooks without
+replacing runtime dispatch. Add `assert_type` examples for public contracts;
+`tests/test_typing.py` also checks that invalid inputs produce diagnostics.
+
+The package ships `py.typed`, so installed users can discover its annotations.
+Applications can install `relflow[typing]` for Arrow's separate stubs and full
+Arrow input/result completion; development installs already include them.
+Keep annotations compatible with the minimum Python version in
+`requires-python`. Use `typing_extensions` when a typing feature needs a
+backport, such as defaulted type parameters on Python 3.12. Check newer Python
+targets explicitly when changing typing syntax:
+
+```bash
+uv run pyrefly check --python-version 3.14
+uv run pyrefly check --python-version 3.15
+```
+
+These are static checks; runtime compatibility still requires tests on the
+target interpreter. Avoid project-wide suppressions and error baselines. A
+local suppression should name the upstream stub gap or framework contract
+that makes the code valid.
+
+Pyrefly can initially select a schema-only overload while a `Model(...)` call
+is incomplete; supplying all three required dimensions selects the tree
+signature. Branch and tensorfield constructors accept configuration by keyword;
+their parent supplies the node name through a keyword or a `fields` mapping.
+This also applies to third-party `RequestBase` subclasses. Literal value
+suggestions appear after opening quotes.
 
 ## Implementation Style
 
@@ -211,9 +268,74 @@ new callable contract, Arrow shape, lifecycle hook, or failure mode, document:
 - one realistic nested example; and
 - actionable errors and migration notes for a breaking change.
 
-Prefer runnable inline examples using the current top-level API. Keep Quarto
-pages self-contained and update code, tests, API references, and narrative docs
-in the same change.
+Documentation is static. Use plain `python` fences with the current top-level
+API, realistic nested schemas, and clearly named application-supplied inputs.
+Do not read datasets, train models, or download weights during a docs build.
+Keep runtime examples in tests and proofs; update API references and narrative
+docs alongside a public contract change.
+
+### Build And Illustrate The Docs
+
+```bash
+make render
+make check-docs
+uv run pytest tests/test_docs.py
+```
+
+Quarto renders static HTML and Typst SVGs without importing RelFlow. The docs
+check renders a temporary copy and rejects diagram errors; static tests check
+Python syntax, single-record YAML, links, and public datatype options.
+
+Pages publishes `main` at the site root and every other branch with docs at
+`/relflow/branches/<branch-name>/`. Use the full branch name in the URL, such as
+`/relflow/branches/dev/gpu-optimizations/`; the current navbar has no version
+menu. Older branches retain their own navigation.
+
+The docs workflow discovers branches automatically, renders their pinned
+commits, and assembles one site. It supports Quarto and historical MkDocs
+without executing Python examples. Every included build must succeed before
+publication; branches without either docs configuration are reported and
+skipped. Pushes and manual runs refresh the site, with a daily refresh to pick
+up changes on branches whose workflows predate this setup. Deleted branches
+disappear from the next successful publication.
+
+Show data as one YAML record, including repeated values under their field
+names. Use simple Arrow or Polars module examples with application-supplied
+splits. Give each concept one home and link to it instead of repeating its
+contract. Verify factual claims against the source, not existing prose.
+
+Use the current [branding](docs/assets/branding/README.md) and shared
+[Typst tree functions](docs/assets/typst/README.md). Diagram pages declare
+`engine: markdown`; unique figure labels, captions, and alt text describe
+structure, roles, and settings essential to the explanation. Use formatted node
+bodies for masking rules, reduction choices, and other relevant configuration;
+put those distinctions in the figure's text alternative too. The vendored
+[typst-render extension](https://github.com/mcanouil/quarto-typst-render/tree/0.19.0)
+uses the project's bundled Typst compiler. Generated SVGs under
+`docs/assets/diagrams/` are ignored by Git.
+
+Author each modeling proof in one `proofs/<category>/*.py` file. Interleave Markdown
+comment cells (`# %% [markdown]`) with Python cells (`# %%`): the explanation,
+Typst tree, YAML examples, generator, model, training, and controls live together.
+Its commented YAML header includes `proof-id`, `code-fold: true`, and
+`execute: {enabled: false, eval: false}`. Both execution flags are also disabled
+globally. Quarto renders scripts natively without Jupyter or running a proof.
+The build stages ignored copies under `docs/proofs/<family>/<slug>.py` to keep
+published URLs stable; edit only the canonical script.
+
+Explicit proof runs append measurements and checks to `proofs/results.yaml`.
+The docs insert this evidence, status, and reproduction commands at render time.
+Keep historical interpretations archived in YAML and current insights in the
+script. An AST fingerprint distinguishes code changes from Markdown and
+formatting edits; full file hashes retain provenance. Separate measured values
+from thresholds and identify single-seed or mechanistic limits.
+
+Use contrasting YAML records to explain why an answer changes or stays the
+same. Label corruption controls that retain the original target explicitly.
+Lead `Insights` with one clear conclusion, explain why it matters, and state
+its essential limit. Distinguish an interpretation of learned behavior from a
+demonstrated mechanism. See [proof authoring](proofs/README.md#author-the-page)
+for the layout and execution commands.
 
 ## Tests
 

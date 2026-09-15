@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -33,16 +34,17 @@ class Writer(callbacks.BasePredictionWriter):
         self.schema: pa.Schema | None = None
         self.writer: pq.ParquetWriter | None = None
 
-    def write_on_batch_end(
+    # Keep the public ``output`` keyword; Lightning calls this hook positionally.
+    def write_on_batch_end(  # pyrefly: ignore[bad-override-param-name]
         self,
         trainer: lit.Trainer,
         pl_module: lit.LightningModule,
         output: pa.Table,
-        batch_indices: list[int] | None,
+        batch_indices: Sequence[int] | None,
         batch: Any,
         batch_idx: int,
         dataloader_idx: int,
-    ) -> None:  # ty:ignore[invalid-method-override]
+    ) -> None:
         """Write the Arrow table returned by one prediction step."""
 
         try:

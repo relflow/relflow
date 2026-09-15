@@ -18,7 +18,7 @@ def _model(*, alpha: float | None = None) -> rf.Model:
         d_model=8,
         n_layers=1,
         n_heads=4,
-        attention="none",
+        attention=None,
         amount=rf.Number(alpha=alpha),
     )
 

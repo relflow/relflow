@@ -1,0 +1,175 @@
+# Online Vocabulary
+
+`Category`, `Set`, and `Cluster` learn a mapping from observed labels to model
+slots during training. Users supply the labels directly; a separate integer
+encoding step is unnecessary. Each field has its own bounded vocabulary,
+preserved with the model's learned state.
+
+## A Vocabulary Belongs To A Field
+
+One customer observation might contain:
+
+```yaml
+orders:
+  - merchant: grocery
+    tags:
+      - food
+      - in_store
+  - merchant: bookstore
+    tags:
+      - gift
+      - online
+preferred_channel: email
+```
+
+```python
+import relflow as rf
+
+model = rf.Model(
+    name="customer",
+    d_model=128,
+    n_layers=3,
+    n_heads=8,
+    orders=rf.Branch(
+        length=64,
+        merchant=rf.Category(size=4096),
+        tags=rf.Set(size=512),
+    ),
+    preferred_channel=rf.Category(size=16, mask=True),
+)
+```
+
+All orders share `customer/orders/merchant`, so that field learns one merchant
+vocabulary across customers and order positions. Tags and preferred channels
+have separate mappings. Matching labels in different fields do not imply
+shared slots or embeddings. Use one repeated field when roles should share a
+vocabulary; [Preprocessing](../guides/preprocessors.qmd) shows that reshaping.
+
+Keep labels in one compatible Arrow type family and normalize spelling, case,
+and label types upstream. A null is a separate value state and consumes no
+vocabulary slot. Set members are labels; the entire set is not one vocabulary entry.
+
+## When Labels Are Learned
+
+| Stage | Vocabulary behavior |
+| --- | --- |
+| Training | Admit new labels while capacity remains. |
+| Validation and test | Reuse the existing mapping; unseen labels remain unknown. |
+| Prediction and serving | Reuse the loaded mapping; requests do not teach new labels. |
+| Fine-tuning or resumed training | Continue from the saved mapping, with further admission while capacity remains. |
+
+Learning observes the pristine values retained by the schema, after
+preprocessing and query/overflow selection but before input masking and
+`p_unavailable` perturbations. An always-hidden target such as
+`preferred_channel` therefore learns its label vocabulary too. Masking does
+not prevent vocabulary learning.
+
+Training-stage encoding, including `model.encode(..., strata="train")`, can
+update this state even without an optimizer step. Validation or prediction on
+a newly constructed model starts with empty vocabularies; load a trained
+artifact to reuse its mappings.
+
+## Capacity And Admission Order
+
+`size` on Category/Set, or `capacity` on Cluster, sets the maximum number of
+learned labels. Category and Set also accept `capacity`. Relevant tensor widths
+are allocated for that capacity when the model is built; admission fills slots
+rather than growing the tensor shapes for each new label.
+
+Labels are admitted in encounter order, subject to worker/rank synchronization.
+Ordinary training appends entries without evicting or renumbering existing
+ones. Capacity does not select the most frequent labels: early rare labels
+can fill it before later common labels arrive. Record order, shuffle settings,
+and worker layout can therefore affect the learned vocabulary.
+
+Once full, additional labels follow the unknown-value behavior below. Monitor
+occupancy explicitly; reaching capacity does not reliably produce a warning
+in every loader configuration. Reserve headroom for expected growth, while
+accounting for memory and decoder cost. In particular, Set content and decoder
+outputs have capacity-wide representations.
+
+Use [Hash](../data-types/hash.qmd) for identifier equality without a persistent
+vocabulary. [Cluster](../data-types/cluster.qmd) shares latent representations
+between labels but still keeps bounded per-label state.
+
+## Unknown Values And Prediction
+
+An unseen or over-capacity label remains `valued`; it does not become null.
+Its content representation depends on the datatype:
+
+| Type | Unknown content |
+| --- | --- |
+| Category | Zero categorical input content plus its value-state embedding. Unavailable reconstruction targets use a uniform content objective and are excluded from content accuracy. |
+| Set | Unknown members supply no positive bits. An all-unknown set shares zero content with a valued empty set; unknown target members cannot supply positive-label supervision. |
+| Cluster | A shared unavailable assignment. Unknown targets are excluded from content accuracy. |
+
+These types default to `p_unavailable=0.01`, which simulates unavailable content
+during training. Input and target perturbations are independent. This changes
+content, not membership in the learned vocabulary or pristine exposure counts.
+See the datatype pages for their respective loss definitions.
+
+Predictions name only populated vocabulary entries. Category and Cluster label
+probabilities are normalized over those entries; Set emits their independent
+membership probabilities. None can name an unseen label. A high probability
+does not establish that a request belongs to the known vocabulary. Evaluate
+unknown-label coverage alongside content accuracy, which excludes unknown
+targets for Category and Cluster.
+
+## Workers And Distributed Training
+
+relflow shares vocabulary state with local data workers and synchronizes it
+across DDP ranks. The first consumer admits labels directly; other workers and
+ranks submit new labels for synchronization. Those labels can remain unknown
+until the synchronization boundary, even when capacity is available.
+
+Synchronization runs at fit start and training epoch end. This delay also
+matters on one device with multiple workers. With one device and
+`num_workers=0`, training admission is immediate before the batch is encoded.
+Do not treat integer slots as portable class IDs across independently trained
+models; preserve the model artifact and inspect its mapping.
+
+Checkpoints include accepted labels, not pending proposals. A checkpoint saved
+mid-epoch therefore does not preserve labels still awaiting synchronization.
+Admission itself also does not establish that a label's representation has
+been trained.
+
+## Inspect And Reuse The Mapping
+
+After training the example model:
+
+```python
+merchant_labels = rf.Category.vocabulary(model, "customer/orders/merchant")
+merchant_counts = rf.Category.counts(model, "customer/orders/merchant")
+tag_labels = rf.Set.vocabulary(model, "customer/orders/tags")
+occupancy = len(merchant_labels) / 4096
+```
+
+Vocabulary accessors return immutable tuples in slot order. Category counts
+are pristine training exposures for populated labels, excluding the smoothing
+prior and unavailable values. Repeated epochs count again; these are not
+unique-record counts. DDP exposure counts synchronize at epoch end.
+Encounters while a label was unavailable are not counted retroactively after
+its admission.
+`rf.Cluster.vocabulary(model, address)` provides the same mapping inspection
+for Cluster fields.
+
+Preprocessors can inspect established mappings through `encoding_context`.
+Training preprocessing runs before vocabulary admission: filtering new labels
+against that snapshot would prevent them from being learned. Normalize labels
+there, and reserve vocabulary-based filtering for an explicit application
+policy. See [Preprocessing](../guides/preprocessors.qmd#scope-and-context).
+
+[Save/load](../guides/lightning.qmd#save-and-load) preserves the mapping and
+associated model state. [Fine-tuning](../guides/pretraining.qmd) continues
+learning from it; freezing parameter gradients alone does not freeze vocabulary
+admission. Use prediction stages for a fixed vocabulary.
+
+Cluster also has an explicit [assignment API](../data-types/cluster.qmd#learning-and-inspection)
+that can add labels to an idle model outside training.
+
+Changing capacity with a schema update rebuilds the affected modules. Resized
+embedding, decoder, and counter tensors are newly initialized; it is not a
+weight-preserving expansion. The ordered vocabulary can survive an expansion,
+while shrinking truncates it. Resetting a field discards its learned vocabulary
+and runtime state. Review [Schema Mutation](../guides/schema-mutation.qmd)
+before changing a trained model's capacity.

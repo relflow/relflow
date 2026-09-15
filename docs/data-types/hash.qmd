@@ -1,98 +1,72 @@
----
-marimo-static-output: true
-pyproject: |
-  requires-python = ">=3.12"
-  dependencies = [
-    "marimo>=0.23.8",
-    "relflow[serving]",
-  ]
----
-
 # Hash
 
-Use `Hash` for large or unbounded identifiers when equality is useful but
-the values should not become a learned vocabulary. Typical examples include
-device, account, counterparty, product, and hostname identifiers.
-In serialized schemas, select it with `"type": "hash"`. Its Polars-backed
-hashing implementation is included in the base RelFlow installation.
+Use `Hash` when equality between identifiers matters, but their identities
+should not become a learned vocabulary. Use [Category](category.qmd) for
+bounded labels whose individual meaning should persist across observations.
 
-```{python .marimo}
-#| echo: true
-#| output: true
-
-import relflow as rf
-
-transactions = rf.Branch(
-    name="transactions",
-    length=16,
-    account_id=rf.Hash(mask=rf.Mask(rate=0.15, reconstruct=True), n_hashes=4),
-    amount=rf.Number,
-)
-
-transactions
+```yaml
+account_id: account-17
+transfers:
+  - counterparty_id: account-17
+    amount: 42.75
+  - counterparty_id: account-92
+    amount: 16.00
+fraud: false
 ```
 
-Use `Category` instead for a small, stable vocabulary whose individual labels
-should be learned. Keep an identifier as metadata when equality itself carries
-no useful signal.
+```python
+import relflow as rf
 
-## Input Values
+model = rf.Model(
+    d_model=64, n_layers=2, n_heads=4,
+    account_id=rf.Hash(n_hashes=4),
+    transfers=rf.Branch(
+        length=32,
+        reduction=None,
+        counterparty_id=rf.Hash(n_hashes=4),
+        amount=rf.Number,
+    ),
+    fraud=rf.Boolean(mask=True),
+)
+```
 
-`Hash` accepts Arrow integer, string, and binary values. `None` has state
-`null`, and a missing branch slot has state `padded`. Normalize floats,
-booleans, and application-specific identifiers in a preprocessor. Lists,
-mappings, and unsupported Python objects are rejected.
+## Input and options
 
-The same value receives the same representation everywhere in one encoded
-batch, including across different `Hash` leaves. Training and validation
-use a fresh random salt for each batch, preventing persistent value
-memorization while preserving batch-local equality. Test and prediction use a
-fixed zero salt, making inference deterministic.
+Accepts scalar Arrow integers, strings, and binary values. Normalize other
+identifier types upstream. A null has its own state.
 
-## Configuration
-
-| Option | Default | Notes |
+| Option | Default | Meaning |
 | --- | --- | --- |
-| `n_hashes` | `1` | Number of independent signed 64-bit hash lanes. More lanes reduce fingerprint collisions and increase the reconstruction target capacity. |
-| `n_bands` | `8` | Number of octaves spanned below the base sinusoidal frequency. |
-| `offset` | `4` | Upper octave of the sinusoidal frequency range. |
-| `n_buckets` | `4` | Number of reconstruction classes per hash lane. Must be greater than one. Effective target capacity is `n_buckets ** n_hashes`. |
+| `n_hashes` | `1` | Positive number of independent signed 64-bit fingerprint lanes. |
+| `n_bands` | `8` | Positive lower exponent bound for Fourier features. |
+| `offset` | `4` | Positive upper exponent bound for Fourier features. |
+| `n_buckets` | `4` | Reconstruction classes per lane; must exceed one. |
 
-Shared leaf options are documented in
-[Built-In Data Types](../core-concepts/data-types.qmd).
+## Equality and learning
 
-## Representation And Learning
+Every Hash field shares a salt within one local-rank batch. Matching values of
+the same Arrow family and matching Hash configuration therefore have the same
+representation across fields. Training and validation draw a new salt per
+batch; test and prediction use zero. Hashes are not durable identifiers across
+library versions.
 
-Tensorization passes the retained Arrow column directly to Polars' native
-seeded hash operation. The Arrow atom family contributes to the seeds, keeping
-integer, string, and binary identities distinct. Each of the `n_hashes` lanes
-becomes one signed 64-bit integer. On the model device, each integer is
-normalized and expanded into a sinusoidal representation. The lane
-representations are summed directly in model space. Non-valued states use a
-field-local learned state embedding.
+Hash lanes become Fourier features directly in model space; there is no learned
+content vocabulary or projection. Non-valued positions use state embeddings.
+Reconstruction predicts quantized hash lanes, with `n_buckets ** n_hashes`
+possible fingerprints, rather than recovering the original identifier.
 
-These hashes need stability only within one local-rank batch. Training and
-validation share seeds across every `Hash` leaf in that batch, then rotate them
-for the next batch. They are not a durable serialization or cross-version
-identifier format.
+Equal fingerprints provide an equality signal while the tokens remain together.
+They do not guarantee a join or item correspondence after branch reduction.
+The example uses `reduction=None` to keep transfer tokens available to the root;
+see [Branch reduction](branch.qmd#reduce-branch-memory).
 
-For reconstruction, each hash lane is uniformly quantized into `n_buckets` and
-trained with cross entropy. These metrics measure recovery of the fingerprint;
-the original raw value cannot be decoded from model output.
+Compare the [unseen-identity equality proof](../proofs/identity/unseen-identity-equality.html)
+with the [sibling-collection overlap boundary](../proofs/relational/direct-sibling-hash-overlap.html).
+Their trees show why a working equality representation alone does not establish
+successful comparison across collections.
 
-Matching hashes allow attention to recognize equal values while their tokens
-remain together. They do not guarantee correspondence after a branch has been
-compressed by a fixed-width reduction.
+## Output
 
-## Prediction Output
-
-`Hash` has no decoded writer payload. Configure `embed=True` only when a
-normalized representation at the field address is useful; it is not a durable
-identifier across separately tensorized training batches.
-
-## Where Next
-
-- Use [Category](category.qmd) for persistent bounded labels.
-- Use [Branch](branch.qmd) to configure repeated observations.
-- Read [Field Stacking](../guides/field-stacking.qmd) when several semantic
-  roles need token-level interaction before reduction.
+Hash has no decoded public content. `embed=True` can export a contextual
+embedding, as described in [shared leaf options](../core-concepts/data-types.qmd#shared-leaf-options).
+Keep IDs outside the model schema when equality itself is not useful.

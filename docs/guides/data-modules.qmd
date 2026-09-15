@@ -1,494 +1,94 @@
 ---
-eval: false
+title: Data Modules
 ---
 
-# Data Modules
+A data module connects named datasets to a model and prepares Lightning batches.
+Each row is one observation; nested lists and structs stay inside that row.
+For example, one customer record might contain several purchases:
 
-**Example status — reference:** snippets use the four shipped data modules and
-their current Arrow contracts.
-
-RelFlow has one Arrow data engine and four ways to enter it:
-
-| Your source | Use |
-| --- | --- |
-| `pyarrow.Table`, `RecordBatch`, `Dataset`, or restartable Arrow factory | `rf.ArrowDataModule` |
-| collected `polars.DataFrame` | `rf.PolarsDataModule` |
-| restartable PyTorch `IterableDataset` yielding mappings | `rf.CustomDataModule` |
-| restartable zero-argument generator yielding mappings | `rf.SyntheticDataModule` |
-
-After ingress, every module uses the same preprocessing, sampling, shuffling,
-model batching, query, and encoding path. The adapters do not maintain separate
-Polars or Python-row implementations.
-
-## Start Here: An In-Memory Arrow Table
-
-```python
-import pyarrow as pa
-import relflow as rf
-
-train = pa.Table.from_pylist(
-    [
-        {"amount": 10.0, "merchant": "market", "fraud": "false"},
-        {"amount": 800.0, "merchant": "unknown", "fraud": "true"},
-    ]
-)
-
-model = rf.Model(
-    d_model=16,
-    n_layers=1,
-    n_heads=4,
-    batch_size=32,
-    amount=rf.Number,
-    merchant=rf.Category(size=1024),
-    fraud=rf.Category(mask=True, size=2),
-)
-
-data = rf.ArrowDataModule(
-    model=model,
-    train=train,
-    validate=train,
-    seed=42,
-)
+```yaml
+customer_id: customer-42
+country: CA
+purchases:
+  - amount: 86.50
+    items:
+      - sku: coat-17
+        quantity: 1
+  - amount: 24.00
+    items:
+      - sku: scarf-03
+        quantity: 2
+churned: false
 ```
 
-Pass only the splits you have. The names are `train`, `validate`, `test`, and
-`predict`; at least one is required. `model.batch_size` is the model-batch
-authority.
+The tables and frames below are supplied by your application. relflow does not
+load example data or choose train/validation splits for you.
 
-## Common Configuration
+## Arrow
 
-```python
-data = rf.ArrowDataModule(
-    model=model,
-    train=train,
-    validate=validate,
-    predict=requests,
-    preprocessor=prepare,
-    retain={
-        "train": (),
-        "validate": (),
-        "predict": ("request_id",),
-    },
-    seed=42,
-    shuffle={"train": True, "validate": False, "predict": False},
-    sample={"train": 0.75, "validate": 1.0},
-    epoch_size={"train": 100_000},
-    shuffle_rows=16_384,
-    drop_last={"train": True},
-    num_workers=4,
-    persistent_workers=True,
-    pin_memory=True,
-    prefetch_factor=2,
-)
-```
-
-Most options can be a scalar for every split or a mapping keyed by split;
-omitted keys retain that option's default. A `retain` mapping is stricter and
-must name every configured split exactly once, because it defines an output
-schema rather than a tuning override.
-
-| Option | Meaning |
-| --- | --- |
-| `preprocessor` | One eager Polars transform, an ordered collection, or one such value per split |
-| `retain` | Processed top-level columns copied into prediction `inputs` |
-| `seed` | Root seed for sampling, shuffling, and uniform mask selection |
-| `shuffle` | Train defaults to `True`; other splits default to `False` |
-| `sample` | Independent inclusion probability in `(0, 1]` |
-| `epoch_size` | Maximum logical observations emitted per pass |
-| `shuffle_rows` | Streaming shuffle output quantum; the mixer may hold up to twice this row count |
-| `drop_last` | Drop an incomplete final model batch |
-| `num_workers` | PyTorch DataLoader workers per distributed rank |
-| `persistent_workers` | Reuse workers across epochs; requires a positive worker count |
-| `pin_memory` | Recursively pin encoded tensor payloads before accelerator transfer |
-| `prefetch_factor` | Batches prepared ahead by each worker; defaults to `2` |
-| `multiprocessing_context` | Worker start method; defaults to the Arrow-safe `"spawn"` when workers are enabled |
-
-`replacement` is present as a reserved constructor option but currently
-rejects `True`.
-
-## What Is An Observation?
-
-One post-preprocessor Arrow row is one RelFlow observation. A repeated child is
-a list-of-struct column inside that row:
-
-```text
-orders: table
-└── line_items: large_list<struct<sku: large_string, quantity: int64>>
-```
-
-`Branch(length=32)` is model capacity. It does not require source lists to be
-padded to 32. RelFlow coalesces the ragged Arrow values and applies the branch
-overflow rule when it encodes a model batch.
-
-Preprocessing happens before sampling and shuffling, so a filter or expansion
-changes the logical observation population. A schema `query` only projects
-values; it never changes membership.
-
-## Shuffling And Sampling
-
-The safe default is automatic:
-
-- training shuffles;
-- validation, test, and prediction preserve processed source order;
-- sampling is without replacement;
-- `sample=1.0` keeps every observation.
-
-An in-memory Arrow table receives a complete permutation each training epoch.
-A restartable Arrow factory is mixed through a bounded buffer. `shuffle_rows`
-controls how many logical rows are emitted on each full-buffer drain; the mixer
-may hold up to twice that count. Choose several model batches when contiguous
-records are correlated.
-
-```python
-data = rf.ArrowDataModule(
-    model=model,
-    train=train_source,
-    seed=7331,
-    shuffle=True,
-    shuffle_rows=max(4096, model.batch_size * 64),
-)
-```
-
-Sampling and shuffling use separate deterministic random streams. With the
-same source, seed, and epoch, they reproduce the same sequence. Training uses
-a new epoch in the key, so its order changes across epochs. Evaluation and
-prediction remain stable.
-
-The same seed also drives uniform mask selection. Selection is keyed by schema
-address, policy, stratum, training epoch, and coordinate position in the
-current batch. Training selections change by epoch; repeated evaluation calls
-with identical input geometry remain stable. Datatype-specific transforms such
-as `p_unavailable` retain their own random contract.
-
-::: {.callout-warning}
-Set `shuffle=False` for training only when order is part of the learning
-design—for example a curriculum or strictly temporal pass. Long contiguous
-runs of one target or entity can produce misleading optimization behavior.
-:::
-
-`sample=0.2` means each logical observation has a 20% inclusion probability;
-it is not an exact row count. Apply validation sampling intentionally because
-it changes metric denominators.
-
-`epoch_size=N` caps the eligible post-preprocessor, post-sampling population at
-`N` observations. For a callable stream, RelFlow admits the first `N` eligible
-rows in canonical source order *before* the bounded shuffle, then mixes only
-that finite set. It is a stream cutoff, not reservoir sampling over rows that
-occur later. Use `sample`, rotate the source deterministically, or provide a
-finite Table when every source row should have a chance to enter that epoch.
-
-## `ArrowDataModule`
-
-The canonical module accepts file paths and globs, a lazy `rf.source`
-description, an Arrow table/record batch, a restartable Arrow Dataset, or a
-factory returning fresh Arrow batches. Local and remote files use the same API:
+Use `ArrowDataModule` with existing Arrow tables:
 
 ```python
 import relflow as rf
 
-model = rf.Model(d_model=32, n_layers=1, n_heads=4, amount=rf.Number)
+# model matches the record structure; these are application-supplied Arrow tables.
 data = rf.ArrowDataModule(
     model=model,
-    train="data/train-*.parquet",
-    validate="data/validate-*.jsonl",
+    train=train_table,
+    validate=validation_table,
 )
 ```
 
-File suffixes select Arrow's Parquet, CSV, JSON Lines (`.jsonl`/`.ndjson`),
-IPC/Feather v2 (`.arrow`/`.ipc`/`.feather`), or ORC reader. Each split chooses its
-own format. A directory is searched recursively; `*` matches within one path
-segment and `**` spans directories. Mixed or unknown formats require a narrower
-selection or an explicit format. `.json` and IPC streams are not inferred.
+Each split also accepts a `pa.RecordBatch`, Arrow Dataset, file path or glob,
+`rf.source(...)`, or a callable returning a fresh reader or iterable of Arrow
+batches. A reader itself is one-shot; wrap its creation in a callable when
+repeated epochs need it.
 
-Use `rf.source` for exact basename matching, a list of files, a declared schema,
-Arrow parsing options, or partition discovery:
-
-```python
-import pyarrow as pa
-import pyarrow.csv as csv
-import pyarrow.dataset as ds
-
-train = rf.source("s3://bucket/events/", match=r"^train-\d{5}\.parquet$")
-codes = rf.source(
-    "data/codes-*.csv",
-    format=ds.CsvFileFormat(
-        parse_options=csv.ParseOptions(delimiter=";"),
-        convert_options=csv.ConvertOptions(column_types={"code": pa.string()}),
-    ),
-)
-partitioned = rf.source("s3://bucket/events/", format="parquet", partitioning="hive")
-```
-
-`match` full-matches the basename; compiled regex flags are preserved. Explicit
-file lists are sorted and deduplicated. Conventional `.` and `_` metadata
-sidecars are ignored during selection. Corrupt data files are errors, not
-silently excluded observations. An explicit `schema=pa.schema(...)` establishes
-intended parsing/conversion types; missing declared columns are rejected.
-
-For a custom filesystem, pass a filesystem URI or an importable zero-argument
-`filesystem` factory that returns a `pyarrow.fs.FileSystem`. Use paths relative
-to that filesystem. Live filesystem objects are rejected so workers cannot
-inherit a connection. Arrow Datasets created by callers remain accepted; callers
-own their restartability and resource initialization.
-
-Construction performs no listing or reads. At the first loader preparation,
-rank zero freezes a sorted manifest and source schema and shares it with every
-rank/worker. Reading resources are created in their consuming process. With
-explicit `fork` workers, discovery runs in a disposable spawned process.
-Subsequent epochs retain the selection; new files require a new data module.
-Changes to selected files are detected using Arrow's available size and
-modification-time metadata. Use immutable inputs when storage cannot reliably
-expose changes; this is not object-version pinning.
-
-Workers do not require an `epoch_size`:
+A file-backed setup can be just as small:
 
 ```python
 data = rf.ArrowDataModule(
     model=model,
-    train=train,
-    num_workers=4,
-    persistent_workers=True,
-    pin_memory=True,
+    train="warehouse/train/*.parquet",
+    validate="warehouse/validation/*.parquet",
 )
 ```
 
-Other providers can supply a factory returning a fresh Arrow reader or iterable:
+`rf.source(...)` adds explicit format, schema, filesystem, and partitioning
+configuration when needed. Keep nested structs and lists in their Arrow form.
+Use an explicit schema when values are empty, entirely null, or ambiguous.
+
+## Polars
+
+Use `PolarsDataModule` for in-memory eager frames:
 
 ```python
-import pyarrow as pa
-import pyarrow.ipc as ipc
-
-def train_source():
-    with pa.input_stream("train.stream") as handle:
-        with ipc.open_stream(handle) as reader:
-            yield from reader
-
-data = rf.ArrowDataModule(model=model, train=train_source)
-```
-
-Every emitted unit must have the same Arrow schema. An empty factory may return
-a zero-batch `RecordBatchReader` with a declared schema or emit one typed empty
-unit. A bare iterable or reader is rejected because it may be exhausted after
-the first epoch. Mappings, Polars frames, and configured Arrow scanners still use
-their corresponding ingress adapter or an unconfigured, restartable Dataset.
-
-### Current source limits
-
-All sources replay the same deterministic global stream in each rank/worker,
-then take disjoint rows from global superbatches. This gives equal step counts
-at the cost of repeated source I/O and preprocessing. Source-native sharding,
-RelFlow-planned projection pushdown, coordinated caches, replacement sampling,
-and dataset-scoped preprocessing of a factory remain deferred. File sources
-follow the factory preprocessing contract.
-
-`epoch_size` is an optional global cap on processed, sampled rows. A finite
-source can finish below that cap. With `consumers = distributed_world_size *
-max(num_workers, 1)` and `drop_last=False`, each consumer receives an equal final
-partial batch and fewer than `consumers` trailing rows may be omitted. With
-`drop_last=True`, only complete superbatches of `model.batch_size * consumers`
-rows are emitted. Use one rank and `num_workers=0` when exact prediction coverage
-and original source order are required. Worker count is not yet independent of
-this tail policy.
-
-## `PolarsDataModule`
-
-Polars and `PolarsDataModule` are included in the base RelFlow installation:
-
-```python
-import polars as pl
-import relflow as rf
-
-train_frame = pl.read_parquet("train.parquet")
-validate_frame = pl.read_parquet("validate.parquet")
-
 data = rf.PolarsDataModule(
     model=model,
     train=train_frame,
-    validate=validate_frame,
-    seed=42,
+    validate=validation_frame,
 )
 ```
 
-Each frame calls `to_arrow()` once during construction. Iteration is then
-identical to `ArrowDataModule`. A `LazyFrame` must be collected explicitly:
+It converts each frame to Arrow once and uses the same pipeline. Collect a
+`LazyFrame` explicitly before passing it in.
 
-```python
-train_frame = pl.scan_parquet("train/*.parquet").collect()
-```
+## Splits and preparation
 
-That prevents a hidden query execution in a data module constructor.
+The available splits are `train`, `validate`, `test`, and `predict`; supply at
+least one. Training shuffles by default. The other splits do not. The model's
+`batch_size` sets the batches the data module produces.
 
-## `CustomDataModule`
+Choose splits before constructing the module. For time-based evaluation, define
+an observation cutoff, build features only from information available then, and
+keep later outcomes out of inputs. relflow does not enforce these application
+rules. Fit application preprocessing state on training data and reuse it for
+validation and prediction.
 
-Use this adapter for a restartable PyTorch `IterableDataset` that yields one
-mapping per observation:
+Attach an ordered [preprocessor](preprocessors.qmd) with
+`preprocessor=prepare` or `preprocessor=(clean, enrich)`. Processing happens
+before sampling, shuffling, and model batching. The source and processed Arrow
+schemas must remain stable within each split across partitions and epochs.
 
-```python
-from torch.utils.data import IterableDataset
-
-class Events(IterableDataset):
-    def __iter__(self):
-        yield {"amount": 10.0, "merchant": "market", "fraud": "false"}
-        yield {"amount": 800.0, "merchant": "unknown", "fraud": "true"}
-
-schema = pa.schema(
-    {
-        "amount": pa.float64(),
-        "merchant": pa.large_string(),
-        "fraud": pa.large_string(),
-    }
-)
-
-data = rf.CustomDataModule(
-    model=model,
-    train=Events(),
-    arrow_schema=schema,
-    ingress_rows=4096,
-)
-```
-
-The adapter collects at most `ingress_rows` mappings, calls
-`pa.RecordBatch.from_pylist(...)`, and immediately enters the shared Arrow
-pipeline. The temporary Python collection is bounded; it is not the internal
-data representation.
-
-Without `arrow_schema`, RelFlow infers once from the first non-empty group.
-Provide the schema when:
-
-- the source may be empty;
-- the first group has an all-null field;
-- a field may appear only in a later group;
-- integer width, list kind, nullability, or another physical type matters.
-
-The dataset must return a fresh iterator with a stable schema on each pass.
-Every yielded item must be a mapping with string keys.
-
-## `SyntheticDataModule`
-
-Use a zero-argument generator factory for synthetic mappings:
-
-```python
-def generate():
-    for index in range(10_000):
-        yield {
-            "amount": float(index % 100),
-            "merchant": f"merchant-{index % 20}",
-            "fraud": "true" if index % 97 == 0 else "false",
-        }
-
-data = rf.SyntheticDataModule(
-    model=model,
-    train=generate,
-    arrow_schema=schema,
-    ingress_rows=4096,
-    seed=42,
-)
-```
-
-The function is called for every new source pass. The module's `seed` controls
-RelFlow sampling and shuffling; it does not seed your generator. Seed a
-stochastic generator internally if you need identical values across restarts.
-
-## Add A Preprocessor Pipeline
-
-Every module accepts one decorated `Preprocessor`, a list, a tuple, or `None`.
-The module snapshots each configured value as an immutable ordered tuple:
-
-```python
-import polars as pl
-
-@rf.preprocess
-def logarithm(frame: pl.DataFrame) -> pl.DataFrame:
-    return frame.with_columns(amount_log=pl.col("amount").cast(pl.Float64).log1p())
-
-@rf.preprocess
-def cap(frame: pl.DataFrame, *, maximum: float) -> pl.DataFrame:
-    return frame.with_columns(pl.col("amount_log").clip(upper_bound=maximum))
-
-prepare = (logarithm, cap.partial(maximum=12.0))
-
-data = rf.ArrowDataModule(
-    model=model,
-    train=train,
-    validate=validate,
-    preprocessor=prepare,
-)
-```
-
-Stages receive eager Polars DataFrames and run strictly left to right. A
-partition-scoped stage flat-maps its outputs into the next stage. A
-dataset-scoped stage materializes all upstream outputs at its exact pipeline
-position before downstream stages resume.
-
-Use a per-split mapping only when the pipeline genuinely differs. Each mapping
-value independently accepts a singleton, list, tuple, or `None`:
-
-```python
-preprocessor={
-    "train": (*prepare, augment),
-    "validate": prepare,
-    "predict": prepare,
-}
-```
-
-Ordinary feature preparation should be identical across train, validation, and
-prediction. Bound fitted state with `.partial(...)`; RelFlow does not fit
-processor statistics during iteration. [Binding Data](../core-concepts/binding-data.qmd)
-and [Working With Arrow](working-with-arrow.qmd) provide complete recipes.
-
-## Retain Inputs For Output
-
-Modeled input columns are not copied into predictions by default. Ask for only
-what an output consumer needs:
-
-```python
-data = rf.ArrowDataModule(
-    model=model,
-    predict=requests,
-    retain=("request_id", "event_time"),
-)
-```
-
-Tuple order becomes field order under the prediction `inputs` struct. Use
-`retain="*"` only when copying every processed column is intentional. A
-per-split mapping must describe configured splits; direct `Model.predict(...)`
-accepts only a tuple or `"*"` because it runs in the predict stratum.
-
-Retained columns are for joining, auditing, and postprocessing. They are not
-automatically model inputs. A postprocessor cannot request a column after the
-data module has discarded it.
-
-## Lightning Lifecycle
-
-```python
-import lightning.pytorch as lit
-
-trainer = lit.Trainer(max_epochs=10)
-trainer.fit(model=model, datamodule=data)
-trainer.validate(model=model, datamodule=data)
-trainer.test(model=model, datamodule=data)
-trainer.predict(model=model, datamodule=data)
-```
-
-Each method asks the matching named split. Missing optional splits return no
-loader; explicitly requesting an unconfigured split through
-`data.dataloader(...)` is an error.
-
-## Debugging Checklist
-
-When ingestion fails, inspect boundaries in this order:
-
-1. print `table.schema` and confirm nested field names and physical types;
-2. run each preprocessor stage in order and confirm one exact final pipeline
-   schema across chunks;
-3. verify the model's direct bindings and `query` roots exist after
-   preprocessing;
-4. set `shuffle=False` temporarily when investigating row order;
-5. reproduce with `num_workers=0`, then check that worker preprocessors are
-   importable and each source returns fresh readers;
-6. provide `arrow_schema` for empty, all-null, or evolving mapping sources;
-7. ensure a factory returns a fresh reader or iterator on every invocation.
-
-Continue with [Query Paths](../core-concepts/querypaths.qmd) for nested
-selection, [Working With Arrow](working-with-arrow.qmd) for column operations,
-and [Batch Inference](batch-inference.qmd) for writing predictions.
+For prediction, `retain=("customer_id",)` keeps a processed identifier in the
+output for downstream joins. See [Batch Inference](batch-inference.qmd).

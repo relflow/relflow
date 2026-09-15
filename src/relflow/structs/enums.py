@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Mapping
-from typing import TypeVar, cast
+from typing import Literal, TypeAlias, TypeVar
 
 T = TypeVar("T")
 DefaultT = TypeVar("DefaultT")
@@ -27,13 +27,14 @@ class Strata(enum.StrEnum):
         if isinstance(value, cls):
             return value
 
-        return cls(str(value).strip().lower())
+        # Preserve coercion for callers outside the checked Python API.
+        return cls(str(value).strip().lower())  # pyrefly: ignore [unnecessary-type-conversion]
 
     @classmethod
     def expand(cls, value: T | Mapping[Strata | str, T], *, default: DefaultT) -> dict[Strata, T | DefaultT]:
         if isinstance(value, Mapping):
             normalized: dict[Strata, T | DefaultT] = {strata: default for strata in cls}
-            for key, item in cast(Mapping[Strata | str, T], value).items():
+            for key, item in value.items():
                 normalized[cls.normalize(key)] = item
             return normalized
 
@@ -72,14 +73,6 @@ class AttentionMode(enum.StrEnum):
     mha = "mha"
     gqa = "gqa"
     mqa = "mqa"
-    none = "none"
-
-    @classmethod
-    def normalize(cls, value: "AttentionMode | str") -> "AttentionMode":
-        if isinstance(value, cls):
-            return value
-
-        return cls(value.strip().lower())
 
     def kv_heads(self, n_heads: int) -> int:
         match self:
@@ -89,14 +82,17 @@ class AttentionMode(enum.StrEnum):
                 return max(1, n_heads // 2)
             case AttentionMode.mqa:
                 return 1
-            case AttentionMode.none:
-                raise ValueError("attention mode 'none' does not define key/value heads")
 
 
 class Overflow(enum.StrEnum):
     head = "head"
     tail = "tail"
     error = "error"
+
+
+AttentionInput: TypeAlias = AttentionMode | Literal["mha", "gqa", "mqa"] | None
+OverflowInput: TypeAlias = Overflow | Literal["head", "tail", "error"]
+StrataInput: TypeAlias = Strata | Literal["train", "validate", "test", "predict"]
 
 
 class Component(enum.StrEnum):

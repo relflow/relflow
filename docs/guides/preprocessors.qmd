@@ -1,0 +1,171 @@
+---
+title: Preprocessing
+---
+
+A preprocessor prepares records before relflow resolves schema fields or queries.
+Write it as an eager Polars transform and attach it to a data module or prediction
+call. Use it for derived values, renaming, filters, joins, and nested reshaping.
+
+## Reshape nested input
+
+Suppose a transfer arrives with named accounts and an amount in minor units:
+
+```yaml
+transfer_id: transfer-42
+accounts:
+  payer: account-17
+  payee: account-83
+amount_minor: 12000
+flagged: false
+```
+
+Build a repeated `parties` collection so both roles can share one account field:
+
+```python
+import polars as pl
+import relflow as rf
+
+@rf.preprocess
+def prepare(frame: pl.DataFrame, *, scale: float = 100.0) -> pl.DataFrame:
+    accounts = pl.col("accounts")
+    return frame.with_columns(
+        amount=pl.col("amount_minor") / scale,
+        parties=pl.concat_list(
+            pl.struct(account=accounts.struct.field("payer"), role=pl.lit("payer")),
+            pl.struct(account=accounts.struct.field("payee"), role=pl.lit("payee")),
+        ),
+    ).drop("accounts", "amount_minor")
+```
+
+The processed record becomes:
+
+```yaml
+transfer_id: transfer-42
+flagged: false
+amount: 120.00
+parties:
+  - account: account-17
+    role: payer
+  - account: account-83
+    role: payee
+```
+
+Define the model against this processed shape:
+
+```python
+model = rf.Model(
+    name="transfer",
+    d_model=64,
+    n_layers=2,
+    n_heads=4,
+    parties=rf.Branch(
+        length=2,
+        overflow="error",
+        account=rf.Hash,
+        role=rf.Category(size=2),
+    ),
+    amount=rf.Number,
+    flagged=rf.Boolean(mask=True),
+)
+```
+
+Both account positions share the `Hash` field; `role` distinguishes payer from
+payee. Use `Category` instead if persistent identity embeddings are needed.
+`transfer_id` stays available for retention without becoming a model input.
+The processor preserves `flagged` when present and does not require it on
+prediction requests.
+
+## Configure and compose
+
+The first parameter must be named `frame`; all others are keyword-only.
+`.partial(...)` returns a configured processor without changing the original:
+
+```python
+processor = prepare.partial(scale=100.0)
+```
+
+A list or tuple runs left to right. Each stage receives the frames emitted by
+the previous stage. For an application that excludes nonpositive transfers:
+
+```python
+@rf.preprocess
+def positive(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.filter(pl.col("amount") > 0)
+
+pipeline = (processor, positive)
+```
+
+Bind required application arguments before attaching the processor. Fit lookups
+or statistics on training data outside the pipeline, then bind and reuse that
+state for validation and prediction. Preprocessors run again during iteration;
+they are not automatically fitted or saved in the model checkpoint.
+
+## Attach to training and prediction
+
+Use `preprocessor=` on either [data module](data-modules.qmd):
+
+```python
+# Tables and frames below come from the application.
+arrow_data = rf.ArrowDataModule(
+    model=model,
+    train=train_table,
+    validate=validation_table,
+    preprocessor=pipeline,
+)
+
+polars_data = rf.PolarsDataModule(
+    model=model,
+    train=train_frame,
+    validate=validation_frame,
+    preprocessor=pipeline,
+)
+```
+
+One value applies to every split. A mapping such as
+`preprocessor={"train": pipeline, "validate": processor}` configures splits
+separately; omitted splits receive no processors. Polars modules use the same
+Arrow pipeline, so callbacks receive eager Polars frames with either module.
+
+Direct prediction uses `preprocess=`. Pass it explicitly even when the model was
+trained with a data module:
+
+```python
+predictions = model.predict(
+    request_table,
+    preprocess=pipeline,
+    retain=("transfer_id",),
+)
+```
+
+Retention reads the processed columns. Before any
+[postprocessing](postprocessors.qmd), predictions contain one row per processed
+observation. Filtering removes observations; exploding or a one-to-many join can
+add them. Keep a business key when outputs must be joined back to source records;
+relflow does not restore the original rows or order.
+
+## Scope and context
+
+The default `scope="partition"` processes each frame from the preceding stage.
+These are source partitions, not necessarily model-sized batches. Processing
+runs before sampling, shuffling, and model batching.
+
+`@rf.preprocess(scope="dataset")` gathers the entire split at that stage into
+one eager frame. Use it for transforms that require a global sort or grouping;
+the split must fit in memory. Callable Arrow sources do not support this scope.
+For direct prediction, the available dataset is only that call's input.
+
+The pipeline supplies these keyword-only arguments when the signature requests
+them; they cannot be bound with `.partial(...)`:
+
+| Parameter | Value |
+|---|---|
+| `strata: rf.Strata` | Current `train`, `validate`, `test`, or `predict` stage. |
+| `schema: rf.Schema` | The model's schema. |
+| `encoding_context: dict[rf.Address, object]` | Field-owned encoding state indexed by schema address. |
+
+A processor may return one eager `pl.DataFrame`, an iterable of frames, or `None`
+to discard its input. Every returned frame needs at least one column; collect
+`LazyFrame` results explicitly. Keep source and final processed Arrow schemas
+stable within each split across partitions and epochs, including empty and
+all-null columns. For an empty direct prediction result, return a typed empty
+frame: a pipeline that emits no frames raises an error.

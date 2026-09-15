@@ -211,7 +211,7 @@ def test_none_reduction_root_embedding_exposes_every_input_token():
         n_layers=1,
         n_heads=2,
         embed=True,
-        attention="none",
+        attention=None,
         reduction=None,
     )
 
@@ -225,15 +225,7 @@ def test_none_reduction_root_embedding_exposes_every_input_token():
 def test_nested_branch_embedding_preserves_parent_and_reduction_axes():
     configured = rf.Model(
         parents=rf.Branch(
-            name="parents",
-            length=3,
-            children=rf.Branch(
-                name="children",
-                length=2,
-                embed=True,
-                reduction=rf.Attention(n_outputs=2),
-                value=rf.Number,
-            ),
+            length=3, children=rf.Branch(length=2, embed=True, reduction=rf.Attention(n_outputs=2), value=rf.Number)
         ),
         d_model=8,
         n_layers=1,

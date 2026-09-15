@@ -1,159 +1,46 @@
----
-marimo-static-output: true
-pyproject: |
-  requires-python = ">=3.12"
-  dependencies = [
-    "marimo>=0.23.8",
-    "relflow[serving]",
-  ]
----
-
 # Vector
 
-**Example status — excerpt:** schema and payload blocks isolate Vector behavior;
-use [Getting Started](../getting-started.qmd) for a tested lifecycle.
+Use `Vector` for a fixed-width numeric representation supplied by another
+system, such as an embedding or sensor window. Use [Text](text.qmd) when
+relflow should encode strings, or [Branch](branch.qmd) for repeated objects.
 
-Use `Vector` for fixed-width numeric vectors supplied by another system:
-precomputed embeddings, dense descriptors, sensor windows, or model features.
-
-```json
-{
-  "embedding": [0.12, -0.03, 0.44, 0.08]
-}
+```yaml
+embedding: [0.12, -0.03, 0.44, 0.08]
 ```
 
-```{python .marimo}
-#| echo: true
-#| output: true
-
+```python
 import relflow as rf
 
-embedding = rf.Vector(
-    "embedding",
-    n_dim=4,
-    objective="l2",
-    jitter=rf.Jitter(add=0.02),
-)
-
-embedding
+embedding = rf.Vector(n_dim=4, objective="l2", jitter=rf.Jitter(add=0.02))
 ```
 
-Use `Vector` when embeddings or dense features are already present in the input
-record. Use `Text` when `relflow` should compute embeddings from strings. Use a
-`Branch` when repeated measurements have item structure.
+## Input and options
 
-## Input Values
+Each valued input must be an Arrow list or fixed-size list with exactly
+`n_dim` numeric, non-null elements. Values convert to `float32`. A null vector
+is a separate field state; null elements inside a valued vector are invalid.
+relflow does not fit a vector normalizer: prepare coordinate scales upstream.
 
-`Vector` accepts:
-
-- Python lists or tuples.
-- 1D NumPy arrays.
-
-Every valued input must have exactly `n_dim` numeric elements. `None` is encoded
-as a null state, and missing branch positions are encoded as padded state.
-Prepare vector scale and normalization upstream unless a custom tensorfield owns
-that behavior.
-
-Invalid containers, non-1D NumPy values, the wrong vector length, and
-non-numeric elements raise `ValueError`. Accepted valued vectors are stored as
-`float32`; the built-in does not fit or apply a normalizer.
-
-## Examples
-
-Common vector fields include:
-
-- Precomputed text, image, audio, or product embeddings.
-- Dense features emitted by a fraud, ranking, search, or recommendation model.
-- Sensor windows or compact numerical descriptors.
-- External representation vectors that should be joined with structured fields.
-
-## Jitter
-
-`Vector` can apply `rf.Jitter` to its supplied coordinates during training:
-
-```python
-embedding = rf.Vector(
-    n_dim=384,
-    jitter=rf.Jitter(
-        add=0.02,
-        multiply=0.05,
-    ),
-)
-```
-
-The affine noise is applied immediately before the input projection. Only
-finite coordinates in valued vectors are eligible. Null, padded, and masked
-states are unchanged. Evaluation and prediction are deterministic, and both
-the stored tensorfield content and reconstruction targets retain the pristine
-input vector.
-
-The built-in `Vector` intentionally has one continuous boundary and no
-normalizer: input coordinates may be embeddings, sensor samples, or unrelated
-dense features, and RelFlow cannot infer the correct scaling rule. Jitter is
-therefore applied at that same boundary for either `normalize` value, and `add`
-is measured in the supplied coordinate units. The flag changes placement only
-for tensorfields with distinct raw and normalized representations, currently
-`Number`. Normalize in an `rf.Preprocessor` or upstream system first when
-scale-independent noise is desired.
-
-## Configuration
-
-| Option | Default | Notes |
+| Option | Default | Meaning |
 | --- | --- | --- |
-| `n_dim` | required | Vector width. Must be positive. |
-| `jitter` | `rf.Jitter()` | Training-only affine triangular noise in supplied coordinate units. |
-| `objective` | `"l2"` | Content reconstruction objective: `"l1"` or `"l2"`. |
+| `n_dim` | required | Positive vector width. |
+| `jitter` | `rf.Jitter()` | Training noise in supplied coordinate units. |
+| `objective` | `"l2"` | Reconstruction loss: `"l1"` or `"l2"`. |
 
-Increasing `n_dim` grows the input projection, decoder output, activation
-memory, and prediction payload linearly. Prefer the smallest upstream
-representation that preserves the signal you need.
+Jitter changes finite coordinates of valued training inputs before projection.
+Targets remain pristine. Both settings of `jitter.normalize` use the same
+coordinate space; see [Jitter](../core-concepts/jitter.qmd).
 
-## Reconstruction Behavior
+## Learning and output
 
-When a `Vector` is selected for reconstruction, the decoder predicts:
+Reconstruction combines state cross entropy with content loss on valued
+targets. MAE and RMSE metrics use the supplied coordinate scale.
 
-- `state`: probabilities for `valued`, `null`, `padded`, `masked`, and
-  reserved `other`.
-- `content`: the reconstructed vector.
+Prediction `content` is `fixed_size_list<float32>[n_dim]`. When the most likely
+predicted state is non-valued, the writer emits a zero vector. Zeros therefore
+do not establish whether a vector was observed; read the shared `state` and
+`inferred` members in the [prediction envelope](../guides/prediction-output.qmd).
 
-For non-valued predicted states, public output uses a zero vector for `content`
-so API consumers get a stable shape without treating zeros as observed values.
-
-State uses cross entropy and reports state accuracy. Only valued targets
-contribute to vector content loss. The configured `l1` or `l2` objective is
-reported alongside mean absolute error and root mean squared error in the
-source vector's scale.
-
-## Prediction Output
-
-`Model.predict(...)` returns an Arrow table. Vector `content` is a
-`fixed_size_list<float32>[size]`, so its width is stable for zero, one, or many
-observations:
-
-```python
-import pyarrow.compute as pc
-
-embedding = pc.struct_field(result["predictions"], "record/embedding")
-state = pc.struct_field(embedding, "state")
-content = pc.struct_field(embedding, "content")
-inferred = pc.struct_field(embedding, "inferred")
-```
-
-See [Prediction Output](../guides/prediction-output.qmd) for array shapes and
-the meaning of `inferred`.
-
-## Notes
-
-Use `Text` when `relflow` should compute text embeddings from strings. Use
-`Vector` when embeddings or dense features are already present in the input
-record. The built-in package does not include image, video, or audio
-tensorfields; the custom tensorfield surface for specialized modalities is
-currently experimental and same-process only.
-
-## Where Next
-
-- Use [Text](text.qmd) when RelFlow should compute a frozen text embedding.
-- Use [Number](number.qmd) when each coordinate is an independently meaningful
-  scalar rather than one jointly interpreted vector.
-- Review [Experimental Custom Tensorfields](../guides/custom-tensorfields.qmd)
-  only for same-process research on a modality-specific encoder or objective.
+Use [shared leaf options](../core-concepts/data-types.qmd#shared-leaf-options)
+to make the vector a target or export a contextual embedding. That exported
+embedding has the model width and is distinct from the supplied vector.

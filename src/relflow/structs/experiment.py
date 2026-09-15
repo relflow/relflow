@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import functools
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
-from typing import Annotated, Any, ClassVar, Literal, Self, TypeAlias
+from typing import Annotated, Any, ClassVar, Literal, Self, TypeAlias, cast
 
 import pydantic
 from anytree import LevelOrderGroupIter, PreOrderIter
+from rich.console import Console, ConsoleOptions
 from rich.text import Text
 
-from relflow.structs.enums import AttentionMode, Component, Overflow, Strata
+from relflow.structs.enums import AttentionInput, AttentionMode, Component, Overflow, Strata
 from relflow.structs.reduction import Attention, ReductionConfig
 from relflow.structs.selectors import (
-    ExtendArg,
     NodeAttribute,
     NodePredicate,
     NodeSelector,
@@ -27,9 +27,9 @@ from relflow.structs.selectors import (
 )
 from relflow.structs.structure import Branch, Mask, RequestTypes
 from relflow.structs.tree import Address, Leaf, MaskInput, Node, Rate, Selection
+from relflow.tensorfields.base import TENSORFIELDS
 
 __all__ = [
-    "ExtendArg",
     "Schema",
     "NodeAttribute",
     "NodePredicate",
@@ -47,30 +47,37 @@ TreeFieldInput: TypeAlias = SchemaField | type[Leaf]
 _MISSING = object()
 
 
-def bind_tree_field(source: str | None, value: TreeFieldInput) -> SchemaField:
-    """Materialize and bind a tree field from a keyword source name."""
+def bind_tree_field(name: str, value: TreeFieldInput) -> SchemaField:
+    """Bind a fresh subtree without changing the reusable definition or its parent links."""
     if isinstance(value, type) and issubclass(value, Leaf):
         value = value()
-
     if not isinstance(value, (Branch, Leaf)):
-        label = f" '{source}'" if source is not None else ""
-        raise TypeError(f"tree field{label} must be a Branch, Leaf, or Leaf class")
+        raise TypeError(f"tree field {name!r} must be a Branch, Leaf, or Leaf class; got {type(value).__name__}")
 
-    if source is None:
-        if value.name is None:
-            raise ValueError("tree field is unnamed; pass it as a keyword or provide a name")
-        return value
+    excluded = {"name", "mask"}
+    if isinstance(value, Branch):
+        excluded.add("fields")
+    payload = value.model_dump(mode="python", round_trip=True, exclude=excluded)
+    payload.update(name=name, mask=value.mask)
+    if isinstance(value, Branch):
+        payload["fields"] = [bind_tree_field(cast(str, child.name), child) for child in value.fields]
+    constructor = TENSORFIELDS[value.type].Request if type(value) is Leaf else type(value)
+    return constructor.model_validate(payload)
 
-    if value.name is None:
-        value.name = source
-        value.model_fields_set.add("name")
-        value.check_node_name()
-        return value
 
-    if value.name != source:
-        raise ValueError(f"tree keyword '{source}' cannot bind field named '{value.name}'")
-
-    return value
+def bind_fields(
+    fields: Mapping[str, TreeFieldInput] | None,
+    children: Mapping[str, TreeFieldInput],
+) -> list[SchemaField]:
+    """Merge parent-owned names and reject duplicates before binding any children."""
+    if fields is None:
+        fields = {}
+    if not isinstance(fields, Mapping):
+        raise TypeError("fields must be a mapping from child names to definitions")
+    duplicates = fields.keys() & children.keys()
+    if duplicates:
+        raise ValueError(f"duplicate field name(s): {sorted(duplicates)}")
+    return [bind_tree_field(name, value) for name, value in (*fields.items(), *children.items())]
 
 
 class Schema(Node):
@@ -78,28 +85,21 @@ class Schema(Node):
 
     model_config = pydantic.ConfigDict(extra="forbid")
 
-    name: Literal["schema"] = pydantic.Field(default="schema", exclude=True)
+    # The metadata root has fixed values excluded from serialized field data.
+    name: Literal["schema"] = pydantic.Field(default="schema", exclude=True)  # pyrefly: ignore [bad-override-mutable-attribute]
     type: Literal["schema"] = pydantic.Field(default="schema", exclude=True)
-    description: Literal[None] = pydantic.Field(default=None, exclude=True)
+    description: Literal[None] = pydantic.Field(default=None, exclude=True)  # pyrefly: ignore [bad-override-mutable-attribute]
     d_model: Annotated[int, pydantic.Field(gt=0, default=128)]
     fields: Branch
 
-    embed: ClassVar[None] = None
-    dropout: ClassVar[None] = None  # ty:ignore[invalid-attribute-override]
+    embed: ClassVar[None] = None  # pyrefly: ignore [bad-override]
+    dropout: ClassVar[None] = None  # pyrefly: ignore [bad-override]
 
     _selection_cache: dict[SelectionKey, SelectionCacheEntry] = pydantic.PrivateAttr(default_factory=dict)
 
-    @classmethod
-    def update_values(cls, values: Mapping[str, Any]) -> dict[str, Any]:
-        normalized = dict(values)
-        removed = sorted({"masks", "p_mask", "p_prune", "target"} & normalized.keys())
-        if removed:
-            raise ValueError(f"removed node field(s): {removed}; use mask")
-        return normalized
-
     @pydantic.model_validator(mode="before")
     @classmethod
-    def restore_masks(cls, data: Any) -> Any:
+    def check_masks(cls, data: Any) -> Any:
         if not isinstance(data, Mapping):
             return data
 
@@ -129,106 +129,43 @@ class Schema(Node):
         return values
 
     @classmethod
-    def request_from_leaf(cls, leaf: Leaf) -> RequestTypes:
-        from relflow.tensorfields.base import TENSORFIELDS
-
-        request_cls = getattr(TENSORFIELDS[leaf.type], "Request")
-        payload = leaf.model_dump(mode="python", round_trip=True, exclude={"mask"})
-        return request_cls.model_validate({**payload, "mask": leaf.mask})
-
-    @classmethod
-    def from_tree_node(cls, node: SchemaField) -> Branch | RequestTypes:
-        if isinstance(node, Leaf):
-            if node.name is None:
-                raise ValueError("tree field is unnamed; pass it as a keyword or provide a name")
-            source = node.name
-            node_name = Node.sanitize_name(source)
-            updates: dict[str, Any] = {}
-
-            if node_name != source:
-                updates["name"] = node_name
-                if node.description is None:
-                    updates["description"] = source
-
-            return cls.request_from_leaf(node.model_copy(update=updates))
-
-        if isinstance(node, Branch):
-            if node.name is None:
-                raise ValueError("tree field is unnamed; pass it as a keyword or provide a name")
-            fields = [cls.from_tree_node(field) for field in node.fields]
-            payload = node.model_dump(mode="python", round_trip=True, exclude={"fields", "mask"})
-            return Branch(*fields, mask=node.mask, **payload)
-
-        raise TypeError("tree fields must be Branch, Leaf, or concrete request instances")
-
-    @classmethod
     def from_tree(
         cls,
-        *field_args: TreeFieldInput,
+        *,
         d_model: int,
         n_layers: int,
         n_heads: int,
-        fields: Sequence[TreeFieldInput] | None = None,
+        fields: Mapping[str, TreeFieldInput] | None = None,
         name: str = "record",
         query: str | None = None,
         description: str | None = None,
         embed: bool = False,
-        attention: AttentionMode | str = AttentionMode.mha,
+        attention: AttentionInput = AttentionMode.mha,
         reduction: ReductionConfig | None = Attention(),
         dropout: Rate | None = None,
         mask: MaskInput = False,
         **field_kwargs: TreeFieldInput,
     ) -> Self:
         """Build schema from tree fields."""
-        if "n_linear" in field_kwargs and not (
-            isinstance(field_kwargs["n_linear"], (Branch, Leaf))
-            or (isinstance(field_kwargs["n_linear"], type) and issubclass(field_kwargs["n_linear"], Leaf))
-        ):
-            raise ValueError("n_linear was removed from Model; use reduction=Attention(n_layers=...)")
-        if "n_outputs" in field_kwargs and not (
-            isinstance(field_kwargs["n_outputs"], (Branch, Leaf))
-            or (isinstance(field_kwargs["n_outputs"], type) and issubclass(field_kwargs["n_outputs"], Leaf))
-        ):
-            raise ValueError("n_outputs belongs to a reduction; use reduction=Attention(n_outputs=...)")
-
-        normalized = [
-            *(bind_tree_field(None, field) for field in (fields or ())),
-            *(bind_tree_field(None, field) for field in field_args),
-            *(bind_tree_field(source, field) for source, field in field_kwargs.items()),
-        ]
-        if not normalized:
+        root_fields = bind_fields(fields, field_kwargs)
+        if not root_fields:
             raise ValueError("from_tree requires at least one field")
-
-        seen_sources: set[str] = set()
-        root_fields: list[Branch | RequestTypes] = []
-
-        for field in normalized:
-            if not isinstance(field, (Branch, Leaf)):
-                raise TypeError("tree fields must be Branch, Leaf, or concrete request instances")
-            if field.name is None:
-                raise ValueError("tree field is unnamed; pass it as a keyword or provide a name")
-
-            source = field.name
-            if source in seen_sources:
-                raise ValueError(f"duplicate schema source field: {source}")
-            seen_sources.add(source)
-
-            root_fields.append(cls.from_tree_node(field))
-
-        branch = Branch(
-            name=name,
-            query=query,
-            description=description,
-            embed=embed,
-            attention=attention,
-            n_layers=n_layers,
-            n_heads=n_heads,
-            reduction=reduction,
-            length=1,
-            overflow=Overflow.error,
-            dropout=dropout,
-            mask=mask,
-            fields=root_fields,
+        branch = Branch.model_validate(
+            dict(
+                name=name,
+                query=query,
+                description=description,
+                embed=embed,
+                attention=attention,
+                n_layers=n_layers,
+                n_heads=n_heads,
+                reduction=reduction,
+                length=1,
+                overflow=Overflow.error,
+                dropout=dropout,
+                mask=mask,
+                fields=root_fields,
+            )
         )
         return cls(d_model=d_model, fields=branch)
 
@@ -241,7 +178,7 @@ class Schema(Node):
                 if isinstance(field, Branch):
                     fields.append(materialize(field))
                 elif type(field) is Leaf:
-                    fields.append(self.request_from_leaf(field))
+                    fields.append(bind_tree_field(cast(str, field.name), field))
                 else:
                     fields.append(field)
 
@@ -254,7 +191,7 @@ class Schema(Node):
         self.fields = materialize(self.fields)
         self.fields.length = 1
         self.fields.overflow = Overflow.error
-        self.fields.parent: Self = self
+        self.fields.parent = self
         self.post_bind_validate()
 
     @property
@@ -493,34 +430,36 @@ class Schema(Node):
         self,
         *predicates: NodeSelector,
         strict: bool = True,
-        allow_extra: bool = False,
         include_root: bool = True,
         validate: bool = True,
         use_cache: bool = False,
         **values: Any,
     ) -> None:
         """Mutate matching schema nodes."""
-        values = self.update_values(values)
         if not values:
             raise ValueError("update requires at least one field value")
 
         nodes = self.select(*predicates, include_root=include_root, use_cache=use_cache)
+        if not strict and nodes:
+            missing = [name for name in values if not any(has_model_attribute(node, name) for node in nodes)]
+            if missing:
+                raise AttributeError(
+                    f"selected schema nodes have no attribute(s): {missing}; "
+                    "declare options explicitly and use description for notes"
+                )
         snapshots: list[tuple[Node, str, Any, bool]] = []
         try:
             for node in nodes:
-                can_apply_extra = allow_extra and getattr(type(node), "model_config", {}).get("extra") == "allow"
-                missing = [name for name in values if not has_model_attribute(node, name) and not can_apply_extra]
+                missing = [name for name in values if not has_model_attribute(node, name)]
                 if missing and strict:
                     label = str(node.address) or node.name
                     raise AttributeError(f"{label} has no attribute(s): {missing}")
 
-                applicable_values = {
-                    name: value for name, value in values.items() if has_model_attribute(node, name) or can_apply_extra
-                }
+                applicable_values = {name: value for name, value in values.items() if has_model_attribute(node, name)}
 
                 if validate and applicable_values:
-                    payload = node.model_dump(mode="python", round_trip=True, exclude={"mask"})
-                    payload["mask"] = node.mask
+                    payload = node.model_dump(mode="python", round_trip=True, exclude={"mask", *applicable_values})
+                    payload["mask"] = cast(SchemaField, node).mask
                     payload.update(applicable_values)
                     validated = type(node).model_validate(payload)
                     applicable_values = {name: getattr(validated, name) for name in applicable_values}
@@ -560,53 +499,28 @@ class Schema(Node):
 
     def extend(
         self,
-        *args: ExtendArg,
+        *predicates: NodeSelector,
+        fields: Mapping[str, TreeFieldInput] | None = None,
         include_root: bool = True,
         use_cache: bool = True,
+        **children: TreeFieldInput,
     ) -> None:
-        """Append new schema fields under the single branch selected by predicates."""
-        predicates: list[NodeSelector] = []
-        fields: list[SchemaField] = []
-        reading_fields = False
-
-        for item in args:
-            if isinstance(item, (Branch, Leaf)):
-                reading_fields = True
-                fields.append(item)
-                continue
-
-            if reading_fields:
-                raise TypeError("extend predicates must come before new tree fields")
-
-            predicates.append(item)
-
-        if not fields:
+        """Append parent-named fields under the single branch selected by predicates."""
+        new_fields = bind_fields(fields, children)
+        if not new_fields:
             raise ValueError("extend requires at least one schema field")
-
         candidates = [
             node
             for node in self.select(*predicates, include_root=include_root, use_cache=use_cache)
             if isinstance(node, Branch)
         ]
-
         if len(candidates) != 1:
             raise ValueError(f"extend requires exactly one matching branch node, found {len(candidates)}")
-
         parent = candidates[0]
-        new_fields = [self.from_tree_node(field) for field in fields]
         existing_names = {field.name for field in parent.fields}
-        duplicate_names = sorted({field.name for field in new_fields if field.name in existing_names})
-        duplicate_names.extend(
-            sorted(
-                {
-                    field.name
-                    for index, field in enumerate(new_fields)
-                    if any(other.name == field.name for other in new_fields[index + 1 :])
-                }
-            )
-        )
+        duplicate_names = sorted({cast(str, field.name) for field in new_fields if field.name in existing_names})
         if duplicate_names:
-            raise ValueError(f"duplicate field name(s): {sorted(set(duplicate_names))}")
+            raise ValueError(f"duplicate field name(s): {duplicate_names}")
 
         original_fields = list(parent.fields)
         try:
@@ -682,14 +596,12 @@ class Schema(Node):
         self,
         *predicates: NodeSelector,
         strict: bool = True,
-        allow_extra: bool = False,
         include_root: bool = True,
         validate: bool = True,
         use_cache: bool = False,
         **values: Any,
-    ) -> Iterator[None]:
+    ) -> Generator[None, None, None]:
         nodes = self.select(*predicates, include_root=include_root, use_cache=use_cache)
-        normalized_values = self.update_values(values)
         snapshot = [
             (
                 node,
@@ -698,19 +610,17 @@ class Schema(Node):
                 name in getattr(node, "model_fields_set", set()),
             )
             for node in nodes
-            for name in normalized_values
+            for name in values
             if has_model_attribute(node, name)
-            or (allow_extra and getattr(type(node), "model_config", {}).get("extra") == "allow")
         ]
 
         self.update(
             *predicates,
             strict=strict,
-            allow_extra=allow_extra,
             include_root=include_root,
             validate=validate,
             use_cache=use_cache,
-            **normalized_values,
+            **values,
         )
 
         try:
@@ -733,7 +643,7 @@ class Schema(Node):
             self.post_bind_validate()
             self.refresh_selection_cache()
 
-    def __rich_console__(self, console, options):
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
         heading = Text()
         heading.append(self.name, style=self.RICH_NAME_STYLE)
         heading.append(" ")

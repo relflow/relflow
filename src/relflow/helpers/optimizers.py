@@ -39,7 +39,13 @@ def adamw(
     decay_1d: bool = False,
     no_decay_name_fragments: tuple[str, ...] = ("norm",),
 ) -> OptimizerFactory:
-    """Build fused AdamW with common no-decay parameter grouping."""
+    """Return an optimizer factory for ``Model(optimizer=adamw(...))``.
+
+    The factory collects trainable parameters when the model configures its
+    optimizer. Biases, one-dimensional parameters, and names containing
+    ``no_decay_name_fragments`` receive no weight decay by default. Set
+    ``fused=False`` for devices that do not support Torch's fused AdamW.
+    """
 
     fragments = tuple(fragment.lower() for fragment in no_decay_name_fragments if fragment)
 

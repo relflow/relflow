@@ -14,31 +14,31 @@ from tests.arrow import batch as arrow_batch
 from tests.arrow import table
 
 
-def build(*fields):
-    return rf.Model(*fields, d_model=8, n_layers=1, n_heads=2)
+def build(**fields):
+    return rf.Model(**fields, d_model=8, n_layers=1, n_heads=2)
 
 
 def request(field_type: str, *, query: str | None = None):
     if field_type == "hash":
-        return rf.Hash("identity", query=query, n_hashes=2)
+        return rf.Hash(query=query, n_hashes=2)
     if field_type == "category":
-        return rf.Category("identity", query=query, size=8, p_unavailable=0.0)
+        return rf.Category(query=query, size=8, p_unavailable=0.0)
     if field_type == "cluster":
-        return rf.Cluster("identity", query=query, capacity=8, n_clusters=2, p_unavailable=0.0)
+        return rf.Cluster(query=query, capacity=8, n_clusters=2, p_unavailable=0.0)
     if field_type == "set":
-        return rf.Set("identity", query=query, size=8, p_unavailable=0.0)
+        return rf.Set(query=query, size=8, p_unavailable=0.0)
     raise AssertionError(f"unsupported test field type: {field_type}")
 
 
 def test_coalesce_requires_arrow_table():
-    model = build(rf.Number("value"))
+    model = build(value=rf.Number())
 
     with pytest.raises(TypeError, match="must be a pyarrow.Table"):
         coalesce({"value": [1.0]}, schema=model.schema, strata=Strata.predict)  # type: ignore[arg-type]
 
 
 def test_ragged_field_distinguishes_value_null_and_missing():
-    model = build(rf.Number("value"))
+    model = build(value=rf.Number())
     source = arrow_batch(
         [{"value": 1.5}, {"value": None}, {}],
         schema=pa.schema([pa.field("value", pa.float64())]),
@@ -60,14 +60,7 @@ def test_ragged_field_distinguishes_value_null_and_missing():
 
 
 def test_sibling_fields_share_branch_geometry_without_sharing_leaf_state():
-    model = build(
-        rf.Branch(
-            rf.Number("left"),
-            rf.Number("right"),
-            name="items",
-            length=3,
-        )
-    )
+    model = build(items=rf.Branch(left=rf.Number(), right=rf.Number(), length=3))
     fields = coalesce(
         arrow_batch(
             [
@@ -136,7 +129,7 @@ def test_sibling_fields_share_branch_geometry_without_sharing_leaf_state():
     ],
 )
 def test_union_leaf_uses_selected_child_validity(values):
-    model = build(rf.Number("value"))
+    model = build(value=rf.Number())
     source = convert(pa.table({"value": values}))
 
     field = coalesce(source, schema=model.schema, strata=Strata.train)["record/value"].pristine
@@ -155,7 +148,7 @@ def test_union_leaf_uses_selected_child_validity(values):
 
 
 def test_coalesce_rejects_modeled_field_missing_from_arrow_schema():
-    model = build(rf.Number("value"))
+    model = build(value=rf.Number())
 
     with pytest.raises(ValueError, match="field 'value' is absent"):
         coalesce(
@@ -166,7 +159,7 @@ def test_coalesce_rejects_modeled_field_missing_from_arrow_schema():
 
 
 def test_mask_spelling_is_ordinary_string_content():
-    model = build(rf.Category("label", size=8, p_unavailable=0.0))
+    model = build(label=rf.Category(size=8, p_unavailable=0.0))
     field = model.encode(table([{"label": "<MASK>"}]), strata=Strata.train)["record/label"]
 
     assert field.state.tolist() == [[Tokens.valued.value]]
@@ -174,7 +167,7 @@ def test_mask_spelling_is_ordinary_string_content():
 
 
 def test_structured_leaf_mask_spelling_is_ordinary_codec_input():
-    model = build(rf.Set("labels", size=8, p_unavailable=0.0))
+    model = build(labels=rf.Set(size=8, p_unavailable=0.0))
     field = coalesce(
         arrow_batch([{"labels": ["<MASK>", "A"]}]),
         schema=model.schema,
@@ -186,14 +179,7 @@ def test_structured_leaf_mask_spelling_is_ordinary_codec_input():
 
 
 def test_tail_overflow_finishes_before_leaf_codec_observes_values():
-    model = build(
-        rf.Branch(
-            rf.Vector("value", n_dim=2),
-            name="items",
-            length=2,
-            overflow="tail",
-        )
-    )
+    model = build(items=rf.Branch(value=rf.Vector(n_dim=2), length=2, overflow="tail"))
     field = coalesce(
         arrow_batch([{"items": [{"value": [0, 1, 2]}, {"value": [2, 3]}, {"value": [4, 5]}]}]),
         schema=model.schema,
@@ -206,14 +192,7 @@ def test_tail_overflow_finishes_before_leaf_codec_observes_values():
 
 
 def test_branch_overflow_precedes_queries_on_discarded_children():
-    model = build(
-        rf.Branch(
-            rf.Number("value", query='attributes["x"]'),
-            name="items",
-            length=1,
-            overflow="head",
-        )
-    )
+    model = build(items=rf.Branch(value=rf.Number(query='attributes["x"]'), length=1, overflow="head"))
     item = pa.struct([pa.field("attributes", pa.map_(pa.string(), pa.float64()))])
     source = pa.table(
         {
@@ -239,14 +218,7 @@ def test_branch_overflow_precedes_queries_on_discarded_children():
 
 
 def test_error_overflow_names_address_and_axis():
-    model = build(
-        rf.Branch(
-            rf.Number("value"),
-            name="items",
-            length=1,
-            overflow="error",
-        )
-    )
+    model = build(items=rf.Branch(value=rf.Number(), length=1, overflow="error"))
     with pytest.raises(ValueError, match="branch overflow at dimension 2 for record/items/value"):
         coalesce(
             arrow_batch([{"items": [{"value": 1}, {"value": 2}]}]),
@@ -256,17 +228,7 @@ def test_error_overflow_names_address_and_axis():
 
 
 def test_all_empty_deep_branches_materialize_declared_geometry():
-    model = build(
-        rf.Branch(
-            rf.Branch(
-                rf.Branch(rf.Number("value"), name="deep", length=2),
-                name="inner",
-                length=2,
-            ),
-            name="outer",
-            length=2,
-        )
-    )
+    model = build(outer=rf.Branch(inner=rf.Branch(deep=rf.Branch(value=rf.Number(), length=2), length=2), length=2))
     deep = pa.struct([pa.field("value", pa.float64())])
     inner = pa.struct([pa.field("deep", pa.list_(deep))])
     outer = pa.struct([pa.field("inner", pa.list_(inner))])
@@ -286,7 +248,7 @@ def test_all_empty_deep_branches_materialize_declared_geometry():
 
 
 def test_typed_empty_nested_batch_preserves_declared_geometry():
-    model = build(rf.Branch(rf.Number("value"), name="items", length=3))
+    model = build(items=rf.Branch(value=rf.Number(), length=3))
     item = pa.struct([pa.field("value", pa.float64())])
     field = coalesce(
         arrow_batch([], schema=pa.schema([pa.field("items", pa.list_(item))])),
@@ -301,7 +263,7 @@ def test_typed_empty_nested_batch_preserves_declared_geometry():
 
 
 def test_singleton_branch_accepts_one_item_list():
-    model = build(rf.Branch(rf.Number("value"), name="details", length=1))
+    model = build(details=rf.Branch(value=rf.Number(), length=1))
     field = coalesce(
         arrow_batch([{"details": [{"value": 4}]}]),
         schema=model.schema,
@@ -313,13 +275,7 @@ def test_singleton_branch_accepts_one_item_list():
 
 
 def test_singleton_branch_lists_nest_inside_repeated_branch():
-    model = build(
-        rf.Branch(
-            rf.Branch(rf.Number("value"), name="details", length=1),
-            name="items",
-            length=3,
-        )
-    )
+    model = build(items=rf.Branch(details=rf.Branch(value=rf.Number(), length=1), length=3))
     source = arrow_batch(
         [
             {
@@ -346,7 +302,7 @@ def test_singleton_branch_lists_nest_inside_repeated_branch():
 
 
 def test_branch_rejects_struct_where_list_axis_is_required():
-    model = build(rf.Branch(rf.Number("value"), name="items", length=2))
+    model = build(items=rf.Branch(value=rf.Number(), length=2))
 
     with pytest.raises(ValueError, match="expected a list"):
         coalesce(
@@ -357,7 +313,7 @@ def test_branch_rejects_struct_where_list_axis_is_required():
 
 
 def test_coalesce_ignores_unmodeled_arrow_columns():
-    model = build(rf.Hash("identifier"))
+    model = build(identifier=rf.Hash())
     source = arrow_batch([{"identifier": "A", "metadata": {"tags": [1, 2]}}])
 
     field = coalesce(source, schema=model.schema, strata=Strata.train)["record/identifier"].pristine
@@ -367,7 +323,7 @@ def test_coalesce_ignores_unmodeled_arrow_columns():
 
 
 def test_coalesce_does_not_ingest_inactive_field_values():
-    model = build(rf.Number("value"), rf.Hash("unused", active=False))
+    model = build(value=rf.Number(), unused=rf.Hash(active=False))
     source = arrow_batch([{"value": 1.0, "unused": {"opaque": True}}])
 
     field = coalesce(source, schema=model.schema, strata=Strata.train)["record/value"].pristine
@@ -377,7 +333,7 @@ def test_coalesce_does_not_ingest_inactive_field_values():
 
 
 def test_predict_reconstruction_values_are_prepared_when_present():
-    model = build(rf.Number("value"), rf.Hash("label", mask=True))
+    model = build(value=rf.Number(), label=rf.Hash(mask=True))
     source = table([{"value": 1.0, "label": {"not": "hashable"}}])
 
     with pytest.raises(TypeError, match="extension 'hash'.*does not accept Arrow type struct"):
@@ -385,14 +341,7 @@ def test_predict_reconstruction_values_are_prepared_when_present():
 
 
 def test_query_only_branch_ignores_same_named_direct_source_value():
-    model = build(
-        rf.Branch(
-            rf.Number("value"),
-            name="synthetic",
-            query="payload.values",
-            length=2,
-        )
-    )
+    model = build(synthetic=rf.Branch(value=rf.Number(), query="payload.values", length=2))
 
     encoded = model.encode(
         table(
@@ -412,10 +361,7 @@ def test_query_only_branch_ignores_same_named_direct_source_value():
 
 
 def test_inactive_only_branch_does_not_ingest_same_named_source_value():
-    model = build(
-        rf.Number("value"),
-        rf.Branch(rf.Hash("unused", active=False), name="synthetic", length=2),
-    )
+    model = build(value=rf.Number(), synthetic=rf.Branch(unused=rf.Hash(active=False), length=2))
     source = arrow_batch([{"value": 1.0, "synthetic": {"opaque": True}}])
 
     field = coalesce(source, schema=model.schema, strata=Strata.train)["record/value"].pristine
@@ -425,7 +371,7 @@ def test_inactive_only_branch_does_not_ingest_same_named_source_value():
 
 
 def test_datetime_leaf_remains_arrow_backed():
-    model = build(rf.DateParts("created", dateparts=["day_of_year"]))
+    model = build(created=rf.DateParts(dateparts=["day_of_year"]))
     value = datetime.datetime(2025, 2, 3, 4, 5, 6)
     field = coalesce(
         arrow_batch([{"created": value}]),
@@ -437,7 +383,7 @@ def test_datetime_leaf_remains_arrow_backed():
 
 
 def test_dateparts_tensorfield_encodes_arrow_timestamp_end_to_end():
-    model = build(rf.DateParts("created", dateparts=["day_of_year", "hour_of_day"]))
+    model = build(created=rf.DateParts(dateparts=["day_of_year", "hour_of_day"]))
     encoded = model.encode(
         table([{"created": datetime.datetime(2025, 2, 3, 4, 5, 6)}]),
         strata=Strata.train,
@@ -458,7 +404,7 @@ def test_dateparts_tensorfield_encodes_arrow_timestamp_end_to_end():
     ],
 )
 def test_set_accepts_arrow_lists_and_scalar_labels(value, expected_vocabulary):
-    model = build(rf.Set("labels", size=8, p_unavailable=0.0))
+    model = build(labels=rf.Set(size=8, p_unavailable=0.0))
     field = model.encode(
         table([{"labels": value}]),
         strata=Strata.train,
@@ -471,7 +417,7 @@ def test_set_accepts_arrow_lists_and_scalar_labels(value, expected_vocabulary):
 
 @pytest.mark.parametrize("query", [None, "source"], ids=["direct", "query"])
 def test_set_treats_scalar_bytes_as_one_label(query):
-    model = build(request("set", query=query))
+    model = build(identity=request("set", query=query))
     key = "source" if query is not None else "identity"
     field = model.encode(
         table([{key: b"AB"}, {key: b"AB"}]),
@@ -484,7 +430,7 @@ def test_set_treats_scalar_bytes_as_one_label(query):
 
 
 def test_place_validates_encoded_count_and_value_shape():
-    model = build(rf.Number("value"))
+    model = build(value=rf.Number())
     field = coalesce(
         arrow_batch([{"value": 1}, {"value": 2}]),
         schema=model.schema,

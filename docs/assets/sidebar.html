@@ -1,0 +1,16 @@
+<script>
+  for (const toggle of document.querySelectorAll("#quarto-sidebar .sidebar-item-toggle")) {
+    toggle.remove();
+  }
+
+  for (const toggle of document.querySelectorAll('#quarto-sidebar .sidebar-item-text[data-bs-toggle="collapse"]')) {
+    const label = document.createElement("span");
+    label.className = "sidebar-item-text";
+    label.append(...toggle.childNodes);
+    toggle.replaceWith(label);
+  }
+
+  for (const section of document.querySelectorAll("#quarto-sidebar .sidebar-section")) {
+    section.classList.remove("collapse", "show");
+  }
+</script>

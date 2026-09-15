@@ -1,7 +1,8 @@
-# RelFlow Modeling Proof Specification
+# relflow Modeling Proof Specification
 
-Status: active; all current core scenarios pass their one-seed gates, with
-implemented coverage and promotion work tracked in [`README.md`](README.md)
+Status: active. Recorded results live in `results.yaml`, with implemented
+coverage tracked in [`README.md`](README.md). Sections marked planned describe
+hypotheses awaiting implementation and measurement.
 
 Scope: empirical regression proofs for learned model behavior
 
@@ -10,7 +11,7 @@ Scope: empirical regression proofs for learned model behavior
 The record-reasoning experiments in this suite are intended to improve model
 behavior without requiring users to wire relational Q/K/V, joins, or reference
 paths into the model. The schema already identifies structural coordinates and
-reconstruction targets; RelFlow should use that information internally. This
+reconstruction targets; relflow should use that information internally. This
 does not replace structural ``query=`` paths or preprocessors: those still own
 source selection, renaming, filtering, joining, sorting, windows, and derived
 source values when observations do not already match the schema.
@@ -45,7 +46,7 @@ The prospective public contract is deliberately small:
   semantics. The additive lane improves learned sum algebra but is not an exact
   raw-value reducer. ``Attention(position=False)`` disables rotary position in
   this learned-query reduction only; strict unordered controls must also set
-  branch ``attention="none"`` so an earlier branch-attention layer does not
+  branch ``attention=None`` so an earlier branch-attention layer does not
   encode order.
 - ``Mean()`` produces one presence-masked arithmetic mean of encoded tokens,
   not raw Number values. It does not promise a domain reduction merely by name.
@@ -58,18 +59,18 @@ The prospective public contract is deliberately small:
 
 These behaviors are implemented architectural contracts exercised by the
 current proof suite. Their numerical thresholds remain provisional until each
-directory's multi-seed promotion matrix passes.
+family's multi-seed promotion matrix passes.
 
 ## Objective
 
-Protect the modeling claims that distinguish RelFlow from a schema parser or a
+Protect the modeling claims that distinguish relflow from a schema parser or a
 collection of datatype codecs. A proof trains a model on a controlled synthetic
 process and verifies that held-out predictions recover a relationship the public
 schema makes learnable.
 
 The suite should answer four questions:
 
-1. Can RelFlow recover typed relationships from flat and nested records?
+1. Can relflow recover typed relationships from flat and nested records?
 2. Does the schema's structure create the intended inductive behavior?
 3. Does the model fail in predictable ways when information or training signal
    is absent?
@@ -81,7 +82,7 @@ that one architecture or optimizer solves every dataset.
 
 ## The Inference Boundary
 
-RelFlow should infer a relationship when all of the following are true:
+relflow should infer a relationship when all of the following are true:
 
 - the relevant values survive preprocessing, query selection, and branch
   overflow;
@@ -110,12 +111,12 @@ Within that boundary, the public package should support these claims:
 | DateParts | Recurring calendar phase can generalize across dates without treating absolute timestamp magnitude as the signal. |
 | DatePart composition | Multiple visible calendar coordinates can jointly identify periodic behavior that no one coordinate determines. |
 | Vector | Geometry supplied by a fixed-width continuous representation can drive prediction and reconstruction. |
-| Text | A frozen text encoder can provide semantic features; RelFlow learns around those features but does not generate text. |
+| Text | A frozen text encoder can provide semantic features; relflow learns around those features but does not generate text. |
 | Masked reconstruction | Correlated visible context can reconstruct selected state and content without a separate learning path. |
 | Contextual embeddings | A reconstruction-trained root or branch can expose a useful normalized representation of the synthetic latent process. |
 | Cluster | Repeated high-cardinality labels can organize into latent groups when the cluster head receives an engaged objective. |
 
-The suite must also protect the limits of those claims. RelFlow should not be
+The suite must also protect the limits of those claims. relflow should not be
 expected to:
 
 - infer causality from predictive association;
@@ -147,8 +148,8 @@ these boundaries.
 
 ## What Counts As A Proof
 
-Every proof must make the following reviewable in its directory docstrings and
-implementation:
+Every proof must make the following reviewable in its annotated Python script,
+which is also the source of its documentation page:
 
 1. **Claim** — one sentence describing the behavior protected.
 2. **Synthetic process** — the latent variables and equations used to produce
@@ -163,20 +164,20 @@ implementation:
    maximum optimizer steps or a fixed number of complete data passes.
 7. **Primary metric and gate** — measured on held-out predictions in the target's
    natural unit.
-8. **Diagnostics** — enough state in a failing assertion to distinguish no
+8. **Diagnostics** — enough recorded state to distinguish no
    learning, overfitting, boundary saturation, and seed instability.
-9. **Example** — a small fenced YAML tree with concrete `input` and
-   `expected_output` values; add a matched `control` when it clarifies the
-   footgun or causal gate.
+9. **Example** — one nested YAML record per example in a Markdown cell;
+   explain its target and add a matched control when it clarifies the
+   information boundary or causal gate.
 
-The directory's Python docstrings are the concise guide. A one-file proof keeps
-the whole guide in its test module. A multi-version proof may keep shared
-material in `support.py`, while each test module documents its own version and
-links readers back to the shared guide. The generator, controls, and assertions
-may carry experimental detail when repeating it in prose would obscure the
-guide.
+Each standalone script contains its complete generator, schema, training, and
+evaluation, interleaved with Markdown explanations, a Typst tree, and YAML
+examples. `proofs/results.yaml` owns historical reports and new measurements,
+indexed by stable proof IDs. Quarto renders the script and recorded evidence
+without executing the experiment. Only reporting and command-line handling
+are shared between experiments.
 
-A falling training loss is not proof of inference. The primary assertion must
+A falling training loss is not proof of inference. The primary measurement must
 use held-out data or, for a deliberately mechanistic proof, explicitly say that
 it tests optimization state rather than generalization.
 
@@ -184,8 +185,8 @@ it tests optimization state rather than generalization.
 
 ### Data
 
-- Generate Arrow tables locally with `numpy.random.Generator`; do not download
-  or persist a dataset.
+- Yield nested Python records from a locally seeded `numpy.random.Generator`;
+  do not download or persist a dataset.
 - Give train, validation, and test generation independent random streams.
 - Prefer at least 4,096 training observations and 2,048 test observations for
   scalar tasks. Use fewer only when one observation contains a large repeated
@@ -202,7 +203,7 @@ it tests optimization state rather than generalization.
 ### Training
 
 - Exercise `rf.Model`, built-in public tensorfield constructors, and
-  `rf.ArrowDataModule` through a normal Lightning training loop.
+  `rf.SyntheticDataModule` through a normal Lightning training loop.
 - Use `lit.seed_everything(seed, workers=True)` and
   `Trainer(deterministic=True)`.
 - Prefer fixed optimizer steps. Fixed epochs are acceptable when complete data
@@ -210,7 +211,7 @@ it tests optimization state rather than generalization.
   effective update budget cannot change silently.
 - Disable loggers, progress bars, summaries, and checkpointing unless they are
   part of the claim.
-- Run on CPU by default. An accelerator-specific proof must have its own marker
+- Run on CPU by default. An accelerator-specific proof must record its device and environment
   and must not replace the CPU behavioral gate.
 - Compare alternative schemas or configurations with the same observations,
   optimizer family, parameter budget where practical, and number of updates.
@@ -229,7 +230,7 @@ claim passes when:
 
 An extended stability run should use at least ten seeds before a new threshold
 is frozen. A single-seed proof may be introduced while a hypothesis is being
-calibrated, but its docstring must label it as a mechanistic or provisional
+calibrated, but its interpretation must label it as a mechanistic or provisional
 check.
 
 ### Metrics
@@ -258,7 +259,7 @@ The numeric gates below are provisional starting points. For each new proof:
 1. run at least ten seeds for the intended model and its negative control;
 2. inspect the result distributions without changing the generator;
 3. place the gate in the gap between them with room for numerical variation;
-4. commit the raw summary and rationale in the proof docstring or this spec; and
+4. record the raw summary and rationale in `proofs/results.yaml`; and
 5. treat a later threshold change as a modeling-contract change requiring an
    explanation, not routine test maintenance.
 
@@ -831,7 +832,7 @@ branch representation that retains several group summaries at once.
 An extended compositional split may hold out selected `(group, operation)` pairs
 while exposing each group and operation elsewhere. Record the result as
 characterization until repeated runs establish that this kind of compositional
-generalization is a RelFlow contract.
+generalization is a relflow contract.
 
 Implementation snapshot: selected-group mean passes for three interleaved
 groups and fails after matched group-label permutation. The full 12-cell
@@ -1023,7 +1024,7 @@ Vary one axis at a time before sampling full programs:
 The generator may randomly select programs only after each selected primitive
 has an independent positive proof. Every operation token and argument needed to
 identify the answer must be visible to the model. The evaluator executes the
-same program outside RelFlow to produce ground truth. Keep all requests derived
+same program outside relflow to produce ground truth. Keep all requests derived
 from one base context in the same split.
 
 ### Learned quantifiers and conditional counts
@@ -1277,7 +1278,7 @@ answer(q, 2) = attribute(destination(destination(q)))
 Use unseen Hash IDs and fresh graphs in every observation. Start with one unique
 path and no cycles, then add distractor edges, two hops, branching, and cycles.
 One-hop and two-hop results must be reported separately. A shared-context graph
-encoding is the positive control. This is the clearest proof for whether RelFlow
+encoding is the positive control. This is the clearest proof for whether relflow
 needs iterative message passing or an explicit relation node.
 
 ### Conservation and reconciliation
@@ -1315,6 +1316,363 @@ view remains.
 
 This tests graceful degradation, multi-policy masking, and whether the model is
 using complementary context rather than one accidentally dominant field.
+
+## Mutation Proofs
+
+**Status: P046–P050 implement five experiments; the remaining
+scenarios below are planned.** Recorded outcomes live in `results.yaml`.
+
+The original 45 scenarios measure models with fixed schemas. Mutation has unit
+coverage for selection, validation, graph rebuilding, compatible state,
+vocabulary retention, rollback, and loop locks. The missing evidence is what
+happens to an already learned function after a schema edit, and whether the
+changed model can learn its new task. Executable coverage is:
+
+| ID | Script | Scope |
+| --- | --- | --- |
+| P046 | [Neutral edits](mutations/neutral_edits_preserve_learning.py) | Metadata, inactive extension/deletion, equivalent source rebinding, rejected edit, and save/load |
+| P047 | [Added target](mutations/extend_prediction_target.py) | Hidden output extension, adaptation with rehearsal, continuation/scratch controls, and save/load |
+| P048 | [Selective reset](mutations/reset_prediction_target.py) | One hidden head, unchanged/complete-reset controls, relearning, and save/load |
+| P049 | [Deactivate and restore](mutations/deactivate_and_restore_input.py) | Trained pure input, repeated active toggles, normal/exceptional override exits, and inactive checkpoint reactivation |
+| P050 | [Delete and adapt](mutations/delete_input_and_adapt.py) | Trained input deletion, inactive/scratch/continuation controls, conditional-mean adaptation, re-addition, and save/load |
+
+These are empirical hypotheses with provisional gates. A failed preservation
+gate remains visible even when adaptation succeeds. P047 additionally isolates
+the branch pool's schema-derived capacity as a diagnostic control; this internal
+intervention is restored before fitting and is not a public mutation recipe.
+
+The first three GPU seed repeats pass every P046 and P048 gate. P047 learns
+the added target and retains useful old-task accuracy after adaptation, but
+fails immediate prediction preservation in all three seeds. Its pooling-scale
+control restores the original predictions. Keep that failure visible; it is
+evidence of a mutation boundary to resolve, not a reason to relax the gate.
+
+The public operations are `update`, `extend`, `delete`, `reset`, and `override`.
+`select` identifies their scope. The contracts come from the
+[mutation guide](../docs/guides/schema-mutation.qmd),
+[schema editor](../src/relflow/architecture/mutations.py), and
+[graph rebuild](../src/relflow/architecture/graph.py). Rebuilding copies state
+entries with matching names and tensor shapes, or matching Python types for
+non-tensor state. It is not a general migration of semantic identities:
+renaming a node or resizing its tensors can initialize learned state anew.
+
+Separate three claims in every experiment:
+
+1. **Preservation:** an edit that leaves the computation equivalent should
+   retain an already learned prediction.
+2. **Immediate effect:** removing information or resetting learned components
+   should change behavior in a specified way before any more training.
+3. **Adaptation:** the edited model should learn the new relationship within a
+   declared budget. A transfer advantage over a fresh model is an additional
+   hypothesis, not a condition for the mutation API to be correct.
+
+### Shared protocol
+
+Use this sequence for each paired seed:
+
+```text
+train source -> save source checkpoint -> fork experiment and controls
+             -> mutate -> evaluate before further training
+             -> adapt with a new optimizer -> evaluate -> save/load and evaluate
+```
+
+- Use independent, restartable synthetic generators for source training,
+  adaptation, validation, and test. Keep a fixed held-out source panel to
+  measure forgetting. Counterfactual pairs share the same latent draw and
+  belong to the same split.
+- Start arms from separate loads of the same trained checkpoint. Reset the
+  initialization RNG before each edit or fresh-model construction. Record the
+  actual mutation order and selected addresses; module object identities are
+  expected to change during rebuilding.
+- Require the source model to clear its learning gate first. If it does not,
+  record that failure and mark downstream evidence uninterpretable. A mutation
+  cannot demonstrate forgetting when the source never learned the task.
+- Measure predictions immediately after the edit and after adaptation.
+  Preserved state values alone do not demonstrate preserved behavior. Equally,
+  retaining weights does not require identical predictions when the edit
+  changes visible context, target meaning, or reduction.
+- Mutate between completed loops. Set `model.optimizer = rf.adamw(...)` and use
+  a new Trainer for each fitting phase. Check that the optimizer covers the
+  current trainable parameters, including newly added nodes. Never continue
+  through an optimizer instance attached to replaced parameters.
+- At evaluation, omit supervised target values from input and disable dropout.
+  For leakage controls, also supply incorrect target placeholders and require
+  the same predictions. Do not train inside an `override` used to measure
+  restoration: that context restores schema attributes, not a full checkpoint.
+- Observe learned Number normalization and Category vocabulary state as well
+  as weights. Use prediction mode for comparisons so evaluation does not fit
+  statistics or grow vocabularies from the test set.
+- Hold adaptation examples, batches, updates, and evaluation checkpoints fixed
+  across arms. Compare the edited model with a fresh model of the final schema
+  at the same adaptation budget. Report a second fresh-model control at the
+  full source-plus-adaptation budget when claiming a pretraining advantage.
+  Restart the optimizer in the unchanged continuation control too.
+
+Start with small models and explicit budgets, such as 512 source updates and
+256 adaptation updates, evaluating at adaptation steps 0, 32, 128, and 256.
+These are pilot settings; choose final budgets and thresholds using validation
+and separate calibration seeds, never the reported test panel. A `--steps`
+override caps each phase and remains a smoke run.
+
+Report source error, immediate post-edit error, final error, old-task retention,
+new-task quality, control scores, and updates to a validation threshold.
+Normalize regression errors against a constant fitted on the corresponding
+training split. Keep that denominator fixed across comparison arms.
+
+For prediction-preserving edits, start with `rtol=1e-5` and
+`atol=1e-6 * max(training_target_sd, 1e-8)` in deterministic float32 evaluation;
+also report the actual maximum and RMS drift. Require compatible state values
+to remain exactly equal when no training has occurred. For simple regression
+tasks, an initial learning gate is nRMSE below 0.25. Gate values are provisional
+and follow the calibration protocol above. Promote claims with three paired
+seeds; use the ten-seed protocol before freezing new thresholds.
+
+### Proposed experiments
+
+Each row becomes its own annotated script under `proofs/mutations/`. Assign
+permanent IDs when the scripts and registry entries are added. Design labels
+below describe hypotheses, not existing catalog entries.
+
+| Experiment | Edit | Main observation | Essential control |
+| --- | --- | --- | --- |
+| Neutral rebuild | Update metadata; append and remove an inactive input | Learned predictions and retained state survive repeated rebuilding | Unchanged checkpoint and a reset model |
+| Add a target | Extend a trained model with a hidden output | New head learns while old tasks retain skill | Fresh final schema and unchanged continuation |
+| Add an informative input | Extend with a formerly unavailable feature | Prediction beats the best estimate from the old inputs | New feature independently shuffled |
+| Add a repeated branch | Extend with a nested collection | New subtree contributes to a target after adaptation | Identical old inputs with different collection contents |
+| Change a masking role | Update a reconstructing field to `mask=True` | Hidden-target learning continues without target leakage | Missing, correct, and corrupted target placeholders |
+| Ablate and restore | Override an input's activity, then delete it in a separate arm | Signal loss is visible; a non-training override restores behavior | Corrupt the signal while preserving the original answer |
+| Reset and relearn | Reset one output; separately reset a branch and its descendants | Selected knowledge is lost and can be relearned | No reset and complete model reset |
+| Increase branch capacity | Update `length` | Old-size behavior survives and new tail items become usable | Same retained prefix, different tails |
+| Resize a vocabulary | Update Category capacity | Existing identity knowledge and new-category learning are measured separately | Fresh larger vocabulary and unchanged-capacity model |
+| Compose edits and reload | Extend, adapt, reject an invalid edit, save/load, continue | Mutation sequence and learned behavior survive serialization | In-memory continuation of the same edited checkpoint |
+
+### Neutral rebuild
+
+Train `y = x + offset(code)`, with continuous `x` and a small Category vocabulary
+whose offsets are fixed per seed. Held-out rows use new values of `x` with the
+same known category identities. This forces both numerical and categorical
+state to matter.
+
+Update a field description, append `unused=rf.Number(active=False)` to the
+root, and delete that inactive field. Evaluate after each operation and repeat
+the cycle to detect cumulative drift. Require output alignment, learned
+quality, compatible tensors, normalization state, and vocabulary token-to-index
+mapping to survive. A completely reset model must lose the source skill, so
+an invariant constant predictor cannot pass this experiment.
+
+Also rebind `x` to an equivalent source key using `update(..., query="renamed_x")`
+while keeping its schema address fixed and supplying the same values. Treat
+changing the schema node's name as a separate boundary: name-based state
+transfer does not promise automatic retention across a new address.
+
+### Add a target
+
+Draw independent `a, b ~ Uniform(-1, 1)`. Train two hidden targets,
+`u = a + 2b` and `v = 2a - b`, so the source tasks require both input degrees
+of freedom. Extend the root with `w=rf.Number(mask=True)`, where `w = 3a + b`.
+
+Before adaptation, record old-target drift and verify that the new output is
+present and correctly aligned. After adaptation, require useful held-out
+accuracy for all three targets. Include old targets during adaptation to make
+retention with rehearsal explicit. A later no-rehearsal experiment measures
+forgetting; it must not silently inherit the same retention claim.
+
+Compare learning curves with the final schema trained fresh, and with the
+original model receiving the same continuation data. An optional shuffled-`w`
+training arm must not acquire held-out skill. Record whether transfer improves
+the adaptation curve; do not describe faster learning unless that comparison
+supports it.
+
+### Add an informative input
+
+Draw independent `a, b ~ Uniform(-1, 1)` and set `y = a + b`. The source schema
+contains only `a` and hidden `y`. Its best prediction using the available
+information is `a`; the missing `b` contributes irreducible variance `1/3`.
+Relative to the zero-mean constant baseline, the population nRMSE floor is
+`1 / sqrt(2)`. Report empirical oracle error on the actual held-out rows too.
+
+Extend the trained model with `b=rf.Number` and adapt. Require nRMSE below the
+provisional learning gate and below the old-information oracle. Pair rows with
+the same `a` and opposite `b` to show that predictions respond to the new
+feature. Shuffling `b` across held-out rows while keeping their original targets
+must destroy much of the improvement. There is no immediate prediction-equality
+requirement here: the edit intentionally changes the evidence available.
+
+### Add a repeated branch
+
+Begin with a scalar input `base`, an old hidden target `old = 2 * base`, and
+hidden `total = base + sum(event.amount)`. Initially the schema cannot see
+events. Extend it with `events=rf.Branch(length=4, amount=rf.Number)`.
+
+Use signed amounts, lengths one through four, and counterfactual rows with the
+same `base` but different event totals. Adapt on both targets. Require the new
+task to beat its old-information oracle and retain old-task skill relative to
+the unchanged continuation control. Alter amounts while holding event count
+fixed to rule out a count-only shortcut. Compare with a model that had the
+same branch from initialization to separate a mutation failure from difficulty
+learning aggregation at all.
+
+### Change a masking role
+
+Train a small reconstruction task with visible `a, b` and a field `z = a - b`
+using a nonzero train-time masking rate on `z`. Then use the public update API
+to make `z` an always-hidden reconstruction target with `mask=True`.
+
+Continue training and evaluate `z` using only `a, b`. Compare with a model that
+used `mask=True` throughout. Supplying true `z`, omitting `z`, or replacing it
+with arbitrary incorrect values at prediction time must produce the same
+post-mutation predictions. Shuffling visible `b` must worsen prediction against
+the original labels. Record state and content quality separately so predicting
+that the target is present cannot substitute for learning its value.
+
+Score source-stage conditional reconstruction only with `z` withheld. Accuracy
+obtained while its true value is visible is not evidence of predictive skill.
+
+### Ablate, restore, and delete
+
+Implemented separately as **P049** (deactivate and restore) and **P050**
+(delete and adapt). Their measured outcomes are recorded in `results.yaml`.
+
+Train `y = a + b` with two independent visible inputs. In a read-only prediction
+phase, override `b` with `active=False`; compare against the full model and
+against independently shuffled `b`. Require a measurable error increase and
+report the best possible error without `b` as the information boundary.
+
+After normal context exit and after an intentional exception inside the
+context, require restoration of the source predictions within tolerance.
+Choose a pure input whose compatible learned components survive inactivity;
+do not generalize this to edits that remove a trained decoder or resize state.
+
+In a separate checkpoint arm, delete `b` permanently and retrain with only
+`a`. The model should approach the restricted-information oracle, not recover
+the missing independent signal. Deleting and re-extending the same name creates
+new node state; checkpoint restoration is the control for actual restoration.
+
+P049 repeats `update(..., active=False/True)` three times, checks normal and
+exceptional `override` exits, and saves an inactive checkpoint before loading
+and reactivating it. It does not train during inactivity. A shuffled-input
+control must destroy learned skill; supplied, omitted, and changed inactive
+values must give equivalent predictions. All original state entries and the
+restored schema must survive. Output-head and branch deactivation remain outside
+this pure-input experiment.
+
+P050 uses 512 source updates on 2,048 rows and 256 adaptation updates on a
+separate 4,096-row split. It forks deleted, inactive, unchanged-continuation,
+and fresh restricted-schema arms. Each uses the same adaptation rows and batch
+seed; fresh optimizers must cover the current parameters. Validation curves
+are recorded at steps 0, 32, 128, and 256. The deleted and scratch schemas must
+match, including field order. Immediate deletion and deactivation predictions
+are compared before either arm adapts.
+
+Both proofs use independent 2,048-row test panels and provisional source
+nRMSE below 0.25. Immediate removal must raise error by more than 0.35 nRMSE
+and reach at least 90% of the measured `a`-only oracle error. In P050, the
+adapted restricted models must finish within oracle nRMSE − 0.05 to + 0.10,
+and their prediction distance from `a` must stay below 0.20 baseline RMSE.
+Those finite-sample tolerances do not assert that a population information
+bound is an absolute lower bound on every test sample. Constant prediction
+cannot satisfy the conditional-mean gate.
+
+The re-addition control starts from its own source checkpoint, deletes `b`,
+and extends the same name again. It checks that the new node's state and
+normalization are fresh. Re-addition also appends the field after the target;
+record that order change and do not attribute its prediction difference solely
+to fresh state. This control does not claim recovery without retraining.
+
+The first three GPU seeds pass all P049 and P050 checks. Reactivation restores
+source predictions exactly. Deleted and inactive models adapt close to the
+measured conditional-mean error, with comparable scratch controls; the
+unchanged model retains accuracy using both inputs. Gates remain provisional
+until the separate calibration runs are complete.
+
+### Reset and relearn
+
+Train two hidden outputs from the same visible inputs. Reset one output node
+and require an immediate loss of its learned skill. Its normalizer and other
+owned state are included in the reset. The other hidden output should retain
+its prediction because neither visible context nor its own state changed.
+Require relearning after adaptation and compare its curve with no reset and
+complete model reset.
+
+Run a separate branch case for `descendants=False` versus `descendants=True`.
+The first resets the branch encoder; the second also resets its descendant
+fields, including owned vocabularies. Check the actual reset scope and measure
+both local and parent-target quality. State outside the selected scope should
+remain intact, but parent predictions can change when their context depends on
+the reset subtree. Do not require independence that the schema does not supply.
+
+### Increase branch capacity
+
+Train a sum task on signed item amounts with `length=4` and `overflow="error"`.
+Update the branch to `length=8`. First compare predictions on the old lengths
+without further training. Then evaluate lengths five through eight both before
+and after adaptation, reporting zero-shot generalization separately.
+
+Use pairs with identical first four items and different remaining items. The
+adapted model must distinguish their totals and beat a predictor using only the
+first four values. An unchanged-capacity model must reject oversized rows;
+silent truncation must not be mistaken for a model-quality result. A static
+capacity-eight control and the existing cardinality proofs distinguish schema
+growth from ordinary length extrapolation. Increasing capacity is not itself
+evidence that the added range has been learned.
+
+### Resize a vocabulary
+
+Train a Category input to predict randomly assigned, balanced labels for its
+known identities. Use an initial capacity comfortably above the observed
+vocabulary, then increase capacity and introduce additional identities during
+adaptation. Keep old and new identities balanced in the held-out report.
+
+Inspect the vocabulary mapping and embedding tensors immediately after the
+resize, then report old-identity accuracy, new-identity accuracy, and unavailable
+rates. The current rebuild skips tensors with changed shapes; it does not copy
+the old rows into a larger embedding table. Consequently, preservation of old
+accuracy is an open hypothesis, not an existing API guarantee. Record a rebuild
+rejection as an execution result, and never silently shrink or remap the data
+to make it succeed. Establishing lossless vocabulary growth may require a
+separate implementation change if this experiment exposes the gap.
+
+### Compose edits and reload
+
+Start from the trained add-target experiment. Add the hidden target, adapt,
+apply an equivalent query rebind, and attempt an invalid duplicate-name
+extension. Require the rejected edit to leave schema, learned state, output
+alignment, and predictions intact; follow it with a valid edit to test recovery.
+
+Save the edited model and load it through `rf.Model.load`. Require the edited
+schema, vocabulary mappings, normalization state, and held-out predictions to
+survive. Continue both the loaded and in-memory arms with fresh optimizers,
+paired RNG state, and identical data. Compare final quality rather than
+requiring serialization to restore an optimizer trajectory it never promised.
+
+Repeat several neutral edit cycles before saving to expose accumulated damage.
+Include reuse of an existing data module in one continuation arm and a freshly
+constructed data module in its matched control. Both must read the current
+schema and include new objectives. Loop locks and rejection mechanics remain
+unit-test responsibilities; this experiment measures their consequences for
+an actually trained artifact.
+
+### Implementation priority and evidence
+
+**Neutral rebuild, added target, reset/relearn, deactivation/restoration, and
+deletion/adaptation** now have executable experiments. They test retention,
+extension of capability, and loss of learned information using simple tasks
+with matched controls. Next add input and branch growth and masking-role
+changes. Finish with capacity, vocabulary, and composed checkpoint lifecycles.
+
+Each script must contain before/after schema illustrations, at least three
+contrasting YAML records, the actual mutation calls, all training phases,
+matched controls, and named behavioral checks. Reuse the current reporting
+format with nested metrics for `source`, `immediate`, `adapted`, and `controls`.
+Record the mutation sequence, phase budgets, source checkpoint origin, and
+optimizer policy with the result. Register a new script with an empty run
+history and explicit unmeasured status; never copy a fixed-schema proof's
+passing measurements into a mutation entry.
+
+The original 45 experiments and their results remain fixed-schema evidence.
+Success in these new experiments would establish only the tested edits and
+data distributions, not arbitrary architecture surgery, address migration,
+lossless tensor resizing, or training through an active mutation.
 
 ## Metamorphic Modeling Checks
 
@@ -1370,7 +1728,7 @@ only after a stable separation is demonstrated.
 
 | Hypothesis | Experiment |
 | --- | --- |
-| Self-attention adds pairwise capacity | Compare `attention="mha"` with `"none"` on duplicate detection or matched-pair reasoning inside a branch. |
+| Self-attention adds pairwise capacity | Compare `attention="mha"` with `attention=None` on duplicate detection or matched-pair reasoning inside a branch. |
 | GQA and MQA preserve sufficient quality | Run item alignment, order-dependent history, and nested context at matched update and parameter budgets across `mha`, `gqa`, and `mqa`; report quality and throughput together. |
 | Query pooling exceeds mean pooling when target slots need distinct context | Compare decoder pooling on item-aligned reconstruction while keeping the rest of the model fixed. |
 | Jitter improves measurement robustness | Train mixed flat supervision with and without declared Number jitter, then test several unseen noise magnitudes. Require clean-data non-inferiority before claiming robustness. |
@@ -1385,80 +1743,87 @@ the quality/resource tradeoff.
 
 ## Suite Layout And Execution
 
-Use capability-oriented semantic names. Never encode a sequence number in a
-directory, module, test, or claim name:
+Each experiment is one annotated Python script under `proofs/<category>/`, with
+a permanent ID such as `P014`. `results.yaml` maps that ID to its script and staged docs
+path; do not reuse IDs when filenames or titles change. Keep descriptive
+filenames for readers and use IDs in automation and result references.
 
 ```text
 proofs/
 ├── README.md
 ├── SPEC.md
+├── results.yaml
+├── reporting.py
+├── render.py
+├── source.py
+├── run.py
 ├── aggregation/
-│   └── weighted_aggregation/
-│       ├── support.py
-│       ├── test_supplied_contribution_sum.py
-│       ├── test_raw_value_weight_sum.py
-│       ├── test_variable_cardinality_weighted_mean.py
-│       └── test_mean_erases_contribution_count.py
+│   └── raw_value_weight_sum.py
+├── calibration/
+├── cluster/
+├── identity/
 ├── relational/
-│   └── sibling_entity_transfer/
-│       ├── support.py
-│       ├── test_category_identity.py
-│       └── test_hash_identity.py
+│   └── hash_recall.py
+├── state/
+├── structure/
 └── temporal/
-    └── datepart_periodicity/
-        ├── support.py
-        ├── test_month_from_day_of_year.py
-        ├── test_weekday_requires_year_context.py
-        ├── test_leap_boundary_requires_context.py
-        └── test_business_window_requires_composition.py
 ```
 
-Give each behavioral claim one directory under a broad capability category.
-Put exactly one collected test in each `test_*.py` file. Recommended,
-discouraged, and negative-control variants remain siblings inside the same
-proof directory, but each gets a descriptive module name so a user can run and
-read it independently. Keep test-module basenames globally unique unless the
-whole proof tree becomes an explicit Python package; pytest's default import
-mode otherwise aliases equal basenames during full-suite collection.
+Choose the directory for the broad behavior being examined; the script's page
+metadata names its more specific catalog family. Keep shared tooling and the
+results registry at the root. Moving a script updates its registry path without
+changing its ID, published URL, or recorded run history.
 
-Python docstrings are the only proof-specific documentation; do not add a
-`WORK.md` sidecar. For a single-file proof, the test module docstring owns the
-full guide. For a multi-file proof, `support.py` or the package `__init__.py`
-owns proof-wide status and follow-up while every test module explains its
-particular version. Across the
-directory, the docstrings must state the claim, what to use, what to avoid, why
-the distinction matters, protocol and gate, current status and evidence,
-remaining work, promotion criteria, and commands to run the variants.
+Each script owns its seeded record generator, model, training, metrics, and
+controls. Use `rf.SyntheticDataModule` with restartable generator factories.
+Keep Arrow conversion inside relflow. Materialize held-out records only when
+it makes paired evaluation clearer. Do not share dataset or model helpers
+between experiments: the reader should be able to understand one file on its
+own. `reporting.py` owns CLI handling and result recording; `source.py` reads
+page metadata and fingerprints Python syntax without importing the experiment.
 
-Name directories and tests for behavioral claims, not implementation methods
-or historical ordering. Keep public
-schema and reduction choices visible in the proof script. A reduction's output
-count belongs to its configuration, such as
-`reduction=rf.Attention(n_outputs=4)`; `rf.Mean` has one output and
-`reduction=None` performs no pooling, routing one slot per encoded child
-field-coordinate slot plus its presence mask to the parent. The payload may
-already have been contextualized with other fields at the same coordinate and
-by branch attention; these representations are not raw values or decoder
-logits. `Branch` does not own `n_outputs`.
+Each script exposes `run(seed, steps, accelerator)`, returning measured metrics
+and named Boolean checks. Run it through an ordinary `__main__` guard. Report
+all checks, even when some are not met; a learning outcome is data, not a pytest
+assertion. Preserve dataset, corruption, and shape invariants with ordinary
+validation errors. Defaults keep the full experiment budget; a `--steps`
+override is explicitly recorded as a smoke run.
 
-Keep a data generator local to its proof until at least three modules share the
-exact same contract; then extract one plain helper into `proofs/support.py`.
+Author prose in `# %% [markdown]` comment cells and Python in `# %%` code cells.
+The first Markdown cell contains the page metadata, including `proof-id`,
+`code-fold: true`, and `execute: {enabled: false, eval: false}`. Quarto's native
+script rendering needs no Jupyter environment. Both execution flags are also
+disabled globally. Four foldable code sections keep setup, data and controls,
+training and evaluation, and the reporting entrypoint beside their explanations.
 
-The default unit suite remains `pytest`, which collects only `tests/`. The core
-modeling suite is:
+Include a schema-faithful Typst tree, contrasting YAML records, controls,
+current insights, and remaining work in that same script. The docs build stages
+ignored copies under `docs/proofs/<category>/<slug>.py`, preserving published
+URLs. Do not maintain a separate authored page. Shortcodes insert status,
+evidence, and reproduction commands with a script download.
+
+Measurements remain in `results.yaml`; gates are criteria, not measured
+results. Historical interpretations stay archived there while current insights
+are authored in the script. Full file hashes retain provenance, and a Python
+AST fingerprint detects code changes without invalidating results for Markdown
+or formatting edits. Retain the original recorded hashes when reorganizing
+scripts; those hashes identify the source used for each measured run.
+
+The normal unit suite remains `pytest` under `tests/`. Run experiments with:
 
 ```bash
+uv run python proofs/run.py --list
+uv run python proofs/run.py P014 --accelerator gpu
+PYTHONPATH=proofs uv run python proofs/aggregation/raw_value_weight_sum.py
 make proofs
 ```
 
-Proofs run serially by default so concurrent training jobs do not compete for
-CPU threads or accelerator memory. Add these markers when the corresponding
-tier first exists:
+Prefer the ID command. Direct script execution uses `PYTHONPATH=proofs` from the
+repository root to import shared reporting; the runner sets this path itself.
 
-- `proof` — deterministic offline core suite;
-- `proof_extended` — multi-seed or scaling run outside the ordinary core gate;
-- `proof_text` — requires pinned local text-model assets; and
-- `proof_accelerator` — validates an accelerator-specific behavioral path.
+Run serially by default. Record seeds, budgets, environment, source fingerprints,
+metrics, and every check in YAML. Failed execution is separate from unmet
+behavioral gates. Shortened smoke runs never update the capability status.
 
 ## Failure Reports
 

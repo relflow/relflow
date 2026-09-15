@@ -10,8 +10,8 @@ from relflow.tensorfields.base import TENSORFIELDS
 from tests.arrow import batch as arrow_batch
 
 
-def model(*fields):
-    return rf.Model(*fields, d_model=8, n_layers=1, n_heads=2)
+def model(**fields):
+    return rf.Model(**fields, d_model=8, n_layers=1, n_heads=2)
 
 
 def bits(values: pa.Array) -> list[bool]:
@@ -20,10 +20,9 @@ def bits(values: pa.Array) -> list[bool]:
 
 def test_branch_query_skip_is_atomic_across_descendants():
     schema = model(
-        rf.Branch(
-            rf.Number("amount"),
-            rf.Category("code", size=8),
-            name="items",
+        items=rf.Branch(
+            amount=rf.Number(),
+            code=rf.Category(size=8),
             length=3,
             mask=rf.Mask(query="selected", skip=True, dropout=False, reconstruct=True),
         )
@@ -55,12 +54,7 @@ def test_branch_query_skip_is_atomic_across_descendants():
 
 
 def test_rate_skip_is_stable_for_one_batch_and_changes_by_epoch():
-    schema = model(
-        rf.Number(
-            "value",
-            mask=rf.Mask(rate=0.5, skip=True, dropout=False),
-        )
-    ).schema
+    schema = model(value=rf.Number(mask=rf.Mask(rate=0.5, skip=True, dropout=False))).schema
     source = arrow_batch([{"value": float(index)} for index in range(512)])
 
     whole = coalesce(source, schema, Strata.train, seed=17, epoch=3)["record/value"]
@@ -72,12 +66,7 @@ def test_rate_skip_is_stable_for_one_batch_and_changes_by_epoch():
 
 
 def test_query_and_rate_sample_only_eligible_owner_coordinates():
-    schema = model(
-        rf.Number(
-            "value",
-            mask=rf.Mask(query="eligible", rate=0.5, skip=True, dropout=False),
-        )
-    ).schema
+    schema = model(value=rf.Number(mask=rf.Mask(query="eligible", rate=0.5, skip=True, dropout=False))).schema
     source = arrow_batch([{"value": float(index), "eligible": index % 2 == 0} for index in range(256)])
 
     projection = coalesce(source, schema, Strata.train, seed=5, epoch=0)["record/value"]
@@ -96,7 +85,7 @@ def test_query_and_rate_sample_only_eligible_owner_coordinates():
     ],
 )
 def test_category_observes_pristine_values_before_mask_projection(mask):
-    configured = model(rf.Category("value", size=8, mask=mask))
+    configured = model(value=rf.Category(size=8, mask=mask))
     source = arrow_batch(
         [
             {"value": "hidden", "selected": True},
@@ -116,13 +105,7 @@ def test_category_observes_pristine_values_before_mask_projection(mask):
 
 
 def test_fully_skipped_source_is_prepared_and_observed(monkeypatch):
-    configured = model(
-        rf.Category(
-            "value",
-            size=8,
-            mask=rf.Mask(skip=True, dropout=False),
-        )
-    )
+    configured = model(value=rf.Category(size=8, mask=rf.Mask(skip=True, dropout=False)))
     source = arrow_batch([{"value": "A"}, {"value": "B"}])
     extension = TENSORFIELDS["category"]
     prepare = extension.prepare
@@ -146,7 +129,7 @@ def test_fully_skipped_source_is_prepared_and_observed(monkeypatch):
 
 
 def test_number_learns_pristine_moments_once_before_forward():
-    configured = model(rf.Number("value", mask=rf.Mask(query="selected")))
+    configured = model(value=rf.Number(mask=rf.Mask(query="selected")))
     source = arrow_batch(
         [
             {"value": 1.0, "selected": True},
@@ -178,7 +161,7 @@ def test_number_learns_pristine_moments_once_before_forward():
 
 
 def test_observation_learning_is_frozen_outside_training():
-    configured = model(rf.Category("value", size=8))
+    configured = model(value=rf.Category(size=8))
     source = arrow_batch([{"value": "A"}, {"value": "B"}])
 
     encoded = encode(
@@ -200,12 +183,7 @@ def test_observation_learning_is_frozen_outside_training():
     ],
 )
 def test_query_selector_requires_non_null_scalar_booleans(selector, message):
-    schema = model(
-        rf.Number(
-            "value",
-            mask=rf.Mask(query="selected", skip=True, dropout=False),
-        )
-    ).schema
+    schema = model(value=rf.Number(mask=rf.Mask(query="selected", skip=True, dropout=False))).schema
     source = arrow_batch([{"value": 1.0, "selected": selector[0]}, {"value": 2.0, "selected": selector[1]}])
 
     with pytest.raises((TypeError, ValueError), match=message):
@@ -213,7 +191,7 @@ def test_query_selector_requires_non_null_scalar_booleans(selector, message):
 
 
 def test_source_less_prediction_uses_vacancy_and_fixed_routing():
-    schema = model(rf.Category("label", size=8, mask=True)).schema
+    schema = model(label=rf.Category(size=8, mask=True)).schema
     source = arrow_batch([{"unused": 1}, {"unused": 2}])
 
     projection = coalesce(source, schema, Strata.predict)["record/label"]
@@ -230,7 +208,7 @@ def test_source_less_prediction_uses_vacancy_and_fixed_routing():
 
 @pytest.mark.parametrize("strata", [Strata.train, Strata.validate, Strata.test])
 def test_source_less_reconstruction_fails_outside_prediction(strata):
-    schema = model(rf.Number("value"), rf.Category("label", size=8, mask=True)).schema
+    schema = model(value=rf.Number(), label=rf.Category(size=8, mask=True)).schema
     source = arrow_batch([{"value": 1.0}, {"value": 2.0}])
 
     with pytest.raises(ValueError, match="field 'label' is absent"):
@@ -238,13 +216,7 @@ def test_source_less_reconstruction_fails_outside_prediction(strata):
 
 
 def test_source_less_learned_mask_reconstruction_remains_present():
-    schema = model(
-        rf.Category(
-            "label",
-            size=8,
-            mask=rf.Mask(dropout=False, reconstruct=True),
-        )
-    ).schema
+    schema = model(label=rf.Category(size=8, mask=rf.Mask(dropout=False, reconstruct=True))).schema
     source = arrow_batch([{"unused": 1}, {"unused": 2}])
 
     projection = coalesce(source, schema, Strata.predict)["record/label"]

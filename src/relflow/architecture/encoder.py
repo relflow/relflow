@@ -1,22 +1,24 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, cast
 
 import torch
 
 from relflow.architecture.attention import RotaryMultiheadAttention
 from relflow.architecture.packed import Packed, block, customized, pack, stochastic, unpack
 from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool
-from relflow.structs.enums import AttentionMode
 from relflow.structs.packages import Parcel
 from relflow.structs.reduction import Attention, Mean
-from relflow.structs.tree import Address, Leaf
+from relflow.structs.tree import Address, Leaf, Node
 
 if TYPE_CHECKING:
     from relflow.structs.experiment import Schema
 
 
 class RotaryTransformerEncoderLayer(torch.nn.Module):
+    """Preserve absent coordinates through attention and feed-forward residuals."""
+
     def __init__(
         self,
         d_model: int,
@@ -24,7 +26,7 @@ class RotaryTransformerEncoderLayer(torch.nn.Module):
         n_kv_heads: int,
         dropout: float,
         ffn_multiplier: int = 4,
-    ):
+    ) -> None:
         super().__init__()
 
         self.attention_norm = torch.nn.LayerNorm(normalized_shape=d_model)
@@ -60,20 +62,26 @@ class RotaryTransformerEncoderLayer(torch.nn.Module):
         inputs = inputs + self.ffn(self.ffn_norm(inputs))
         return inputs.masked_fill(~present.unsqueeze(-1), 0.0)
 
+    if TYPE_CHECKING:
+        __call__ = forward
+
 
 class BranchEncoder(torch.nn.Module):
-    def __init__(self, schema: Schema, address: Address):
+    """Contextualize child parcels and route their reduced branch representation."""
+
+    def __init__(self, schema: Schema, address: Address) -> None:
         super().__init__()
 
         branch = schema.branches[address]
         dropout = float(branch.dropout or 0.0)
 
         self.origin: Address = address
-        self.destination: Address = branch.parent.address
+        # Schema binding attaches every branch to a node, including the schema root.
+        self.destination: Address = cast(Node, branch.parent).address
 
         layers: list[RotaryTransformerEncoderLayer] = []
-        attention = AttentionMode.normalize(branch.attention)
-        if attention != AttentionMode.none:
+        attention = branch.attention
+        if attention is not None:
             for _ in range(branch.n_layers):
                 layers.append(
                     RotaryTransformerEncoderLayer(
@@ -97,7 +105,7 @@ class BranchEncoder(torch.nn.Module):
             child.address for child in branch.fields if isinstance(child, Leaf) and child.active
         )
         self.coordinate_encoder: RotaryTransformerEncoderLayer | None = None
-        if attention != AttentionMode.none and len(self.coordinate_origins) > 1:
+        if attention is not None and len(self.coordinate_origins) > 1:
             coordinate_heads = branch.n_heads
             while coordinate_heads > 0 and (
                 schema.d_model % coordinate_heads != 0 or schema.d_model // coordinate_heads < 2
@@ -168,6 +176,8 @@ class BranchEncoder(torch.nn.Module):
         count = indices.numel()
         complete = count > 0 and count == encoded.shape[0]
         shape = (encoded.shape[0], output_width, C)
+        selected_output = encoded
+        selected_output_present = present
         if count:
             selected = encoded if complete else encoded.index_select(0, indices)
             selected_present = present.index_select(0, indices)
@@ -177,12 +187,18 @@ class BranchEncoder(torch.nn.Module):
             if (
                 self.encoder
                 and not customized(self.encoder)
-                and not stochastic(self.encoder)
+                and not stochastic(cast(Iterable[RotaryTransformerEncoderLayer], self.encoder))
                 and not bool(selected_present.all())
             ):
                 values, packing = pack(selected, selected_present)
                 values = self.compute(values, selected_present, packing=packing)
-                selected = unpack(values, packing, selected, selected_present, self.encoder)
+                selected = unpack(
+                    values,
+                    packing,
+                    selected,
+                    selected_present,
+                    cast(Iterable[RotaryTransformerEncoderLayer], self.encoder),
+                )
             else:
                 selected = self.compute(selected, selected_present)
 
@@ -246,7 +262,7 @@ class BranchEncoder(torch.nn.Module):
 
     def compute(self, inputs: torch.Tensor, present: torch.Tensor, *, packing: Packed | None = None) -> torch.Tensor:
         """Encode prepared sequences without routing or data-dependent selection."""
-        for layer in self.encoder:
+        for layer in cast(Iterable[RotaryTransformerEncoderLayer], self.encoder):
             if packing is None:
                 inputs = layer(inputs, present=present)
             else:
@@ -301,3 +317,6 @@ class BranchEncoder(torch.nn.Module):
                 batch_size=parcel.payload.shape[0],
             )
         return contextualized
+
+    if TYPE_CHECKING:
+        __call__ = forward

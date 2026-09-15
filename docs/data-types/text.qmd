@@ -1,256 +1,77 @@
----
-marimo-static-output: true
-pyproject: |
-  requires-python = ">=3.12"
-  dependencies = [
-    "marimo>=0.23.8",
-    "relflow[text]",
-  ]
----
-
 # Text
 
-**Example status — excerpt:** core blocks isolate Text behavior; the optional
-model integration excerpt requires an external Hugging Face download.
+Use `Text` to encode strings with a frozen Hugging Face model. relflow learns
+how to combine those representations with the other fields. It does not
+fine-tune the external encoder or generate text.
 
-Use `Text` for string fields encoded by a frozen Hugging Face model. The text
-encoder produces a dense representation that `relflow` projects into the model
-dimension.
-
-```json
-{
-  "body": "Customer reported a delayed international transfer."
-}
-```
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-import relflow as rf
-
-body = rf.Text(
-    "body",
-    max_length=128,
-    encoder_pooling="mean",
-    jitter=rf.Jitter(add=0.05),
-)
-
-body
-```
-
-`Text` is semantic feature encoding, not text generation. Use `Category` for
-bounded labels such as merchant names or product codes when exact identity is
-the desired signal.
-
-## Dependency
-
-The text tensorfield requires the optional `transformers` dependency.
-
-```bash
-uv add "relflow[text]"
-```
-
-In a contributor checkout, use `uv sync --extra text` instead.
-
-Without that extra, using `type: text` raises an import error when `relflow`
-tries to load the tokenizer or encoder.
-
-Hugging Face may download model assets the first time a model is used. Use a
-local model path when documentation, training, or serving must run from cached
-files only.
-
-## Input Values
-
-`Text` expects string values. `None` is encoded as a null state, and missing
-branch positions are encoded as padded state.
-
-A non-string valued input raises a `ValueError`; it is not silently coerced.
-An empty string is still a valued string. The tokenizer truncates content past
-`max_length`, so monitor that limit when long text can carry the deciding
-signal.
-
-Text is tokenized with the configured Hugging Face tokenizer using max-length
-padding and truncation. Token IDs and attention masks are stored as tensorfield
-content. Before frozen-encoder inference, right-padded valued rows are stably
-sorted by attended length. Each encoder microbatch is cropped to its longest
-row, and the pooled outputs are restored to their original order. This keeps
-the fixed tensorfield storage contract while avoiding max-length encoder work
-for short text. Left-padded tokenizers retain their original order and full
-width because removing leading padding can change absolute position IDs.
-
-## Examples
-
-Common text fields include:
-
-- Titles, descriptions, reviews, tickets, notes, or messages.
-- Merchant names, product names, search queries, or support subjects.
-- Short explanations or free-form metadata attached to structured events.
-- Text that should be encoded as a semantic feature rather than generated as output.
-
-Text can be nested like any other leaf:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-ticket_events = rf.Branch(
-    name="ticket_events",
-    length=32,
-    message=rf.Text(max_length=128),
-    event_type=rf.Category(size=64),
-)
-
-ticket_events
-```
-
-### Tiny BERT Integration Excerpt
-
-This excerpt becomes a local integration check after the optional model assets
-are available. Keep the `relflow` model shallow and use the default small BERT
-miniature. The first run downloads the Hugging Face model into the local cache;
-later `Text` fields with the same `model` reuse the same frozen encoder module
-inside the process. It is not executed by the core docs suite because it
-requires that external download.
-
-```bash
-uv add "relflow[text]"
+```yaml
+subject: Delayed transfer
+messages:
+  - body: The international transfer has not arrived.
+    author_role: customer
+  - body: The payment is awaiting review.
+    author_role: agent
+escalated: true
 ```
 
 ```python
-import pyarrow as pa
-import pyarrow.compute as pc
-
 import relflow as rf
 
 model = rf.Model(
-    d_model=32,
-    n_layers=1,
-    n_heads=4,
-    batch_size=2,
-    embed=True,
-    message=rf.Text(
-        max_length=32,
-        encoder_batch_size=4,
-        encoder_pooling="mean",
+    name="ticket", d_model=128, n_layers=3, n_heads=8,
+    subject=rf.Text(max_length=64),
+    messages=rf.Branch(
+        length=32,
+        body=rf.Text(max_length=256, encoder_pooling="mean"),
+        author_role=rf.Category(size=4),
     ),
+    escalated=rf.Boolean(mask=True),
 )
-
-records = pa.Table.from_pylist(
-    [
-        {"message": "Refund was approved after manual review."},
-        {"message": "Customer asked for shipment tracking details."},
-    ]
-)
-
-result = model.predict(records)
-record = pc.struct_field(result["predictions"], "record")
-record_embedding = pc.struct_field(record, "embedding")
-
-print(len(record_embedding), record_embedding.type.list_size)
 ```
 
-This is a wiring smoke test, not a trained classifier. It exercises tokenizer
-loading, the frozen BERT encoder, the `Text` projection, and root embedding
-output.
+Install the optional encoder dependency before constructing the model:
 
-## Configuration
+```bash
+uv add "relflow[text]"
+```
 
-| Option | Default | Notes |
+## Input and options
+
+The Arrow leaf must contain strings. An empty string is valued; a null has a
+separate state. Tokenization pads and truncates at `max_length`.
+
+| Option | Default | Meaning |
 | --- | --- | --- |
-| `model` | `"google/bert_uncased_L-2_H-128_A-2"` | Hugging Face model or local path. Must be a non-empty string. |
-| `max_length` | `128` | Tokenizer max length. Must be positive. |
-| `tokenizer_batch_size` | `4096` | Maximum Arrow strings materialized for one batched tokenizer call. Must be positive. |
-| `encoder_batch_size` | `32` | Maximum number of length-grouped, flattened text values per Hugging Face forward pass. |
-| `encoder_pooling` | `"cls"` | Pooling mode: `"cls"`, `"mean"`, or `"pooler"`. |
-| `objective` | `"l2"` | Hidden-embedding reconstruction objective: `"l1"` or `"l2"`. |
-| `jitter` | `rf.Jitter()` | Training-only affine noise applied to the frozen encoder's pooled continuous embedding. |
+| `model` | `"google/bert_uncased_L-2_H-128_A-2"` | Hugging Face identifier or local model path. |
+| `max_length` | `128` | Positive tokenization length limit. |
+| `tokenizer_batch_size` | `4096` | Maximum strings materialized per tokenizer call. |
+| `encoder_batch_size` | `32` | Maximum flattened text values per frozen-encoder call. |
+| `encoder_pooling` | `"cls"` | `"cls"`, `"mean"`, or `"pooler"`; the last requires `pooler_output`. |
+| `objective` | `"l2"` | Embedding reconstruction loss: `"l1"` or `"l2"`. |
+| `jitter` | `rf.Jitter()` | Training noise on the pooled frozen embedding before learned projection. |
 
-`encoder_pooling="pooler"` requires the selected Hugging Face model to expose
-`pooler_output`. The `"cls"` and `"mean"` modes require `last_hidden_state`.
+`cls` and `mean` require `last_hidden_state`. Text fields using the same model
+reuse its frozen encoder within the process. Right-padded values are grouped
+by length and cropped per encoder batch; left-padded values retain their full
+width. `max_length` still controls truncation and tensor storage.
 
-## Jitter
+## Learning and output
 
-`Text` applies configured jitter to the pooled, continuous Hugging Face
-embedding immediately before RelFlow's trainable projection. It never perturbs
-source strings, token IDs, attention masks, or the frozen encoder itself.
+A reconstructing mask trains the decoder against the pristine frozen embedding,
+using state loss and the configured content objective on valued targets.
+[Jitter](../core-concepts/jitter.qmd) affects only visible continuous inputs,
+not strings, token IDs, or target embeddings. Both settings of
+`jitter.normalize` act at the same pooled-embedding boundary.
 
-```python
-message = rf.Text(
-    jitter=rf.Jitter(add=0.05, multiply=0.02),
-)
-```
+Text has no decoded public state/content payload. `embed=True` exports a
+contextual relflow embedding, distinct from the frozen encoder output; see
+[shared leaf options](../core-concepts/data-types.qmd#shared-leaf-options).
+Use [Vector](vector.qmd) when the source already supplies an embedding.
 
-Jitter runs only during training and only on finite coordinates belonging to
-valued text. Evaluation and prediction are deterministic. Reconstruction
-targets are separately encoded from pristine text, so jitter limits the input
-signal without corrupting the target embedding.
+## External model assets
 
-Text has neither a continuous source value nor a separate learned normalization
-boundary: its first continuous representation is the frozen encoder embedding.
-Both values of `jitter.normalize` therefore use this same boundary. The option
-changes placement only for consumers, such as `Number`, that have distinct raw
-and normalized representations.
-
-## Reconstruction Behavior
-
-When `Text` is selected for reconstruction, the decoder predicts:
-
-- `state`: logits for `valued`, `null`, `padded`, `masked`, and reserved
-  `other`.
-- `content`: the frozen encoder hidden embedding for the original text.
-
-The decoder does not generate text tokens. It reconstructs the frozen text
-embedding used as the target representation.
-
-RelFlow resolves visibility before tensorization. Visible strings run through
-the frozen encoder for input content; selected original strings run through it
-for target content. A skipped or learned-mask value never leaks through the
-input projection.
-
-State uses frequency-weighted cross entropy and reports state accuracy. Valued
-targets use the configured `l1` or `l2` content objective and report MAE and
-RMSE in the frozen encoder's hidden-vector space. Null, padded, masked, and
-reserved-other targets do not contribute to content loss.
-
-## Prediction Output
-
-`Text` currently trains and reports losses and metrics, but it does not emit
-generated text in `Model.predict(...)`. Configure it as an input feature or
-embedding-reconstruction target, not as a generated-text output. Configure
-`embed=True` when you want the field address to emit an `embedding` payload.
-
-## Persistence And Deployment
-
-`Model.save(...)` preserves the Text request configuration, RelFlow projection,
-schema, and trained weights. It does not bundle the Hugging Face tokenizer or
-encoder assets named by `model`. The same model identifier must remain
-downloadable, or the referenced local path and its assets must be present in
-every process that calls `Model.load(...)`, predicts, or serves the artifact.
-
-For offline or reproducible deployment, pin the external model revision,
-materialize it at a stable local path, and ship that directory alongside the
-RelFlow artifact. See [Prediction Output](../guides/prediction-output.qmd) for
-the separate contract of the embeddings returned to callers.
-
-## Notes
-
-Text values remain Arrow-backed until each tokenizer batch is needed. RelFlow
-materializes at most `tokenizer_batch_size` Python strings for the Hugging Face
-boundary, writes NumPy tokenizer output directly into the dense batch, and then
-releases that transient batch. The Hugging Face encoder is cached, run in
-evaluation mode, and not fine-tuned by `relflow`. Use `encoder_batch_size` to
-manage device memory when many text values are flattened from nested branches.
-Right-padding removal is dynamic within each encoder call, so `max_length`
-remains a truncation and storage limit rather than the amount of encoder work
-paid by every microbatch.
-
-## Where Next
-
-- Use [Vector](vector.qmd) when the dense representation is already present in
-  each source record.
-- Use [Category](category.qmd) for bounded string labels whose exact identity
-  matters more than semantic similarity.
-- Use [Learning Modes & Embeddings](../core-concepts/embeddings.qmd) to
-  distinguish frozen text content, RelFlow's internal projection, and public
-  `embed=True` output.
+The first use of a remote model identifier may download tokenizer and encoder
+assets. relflow checkpoints save the request and learned relflow weights,
+but do not bundle those external assets. Every loading or serving process
+must be able to resolve the same identifier or local path. For reproducible
+deployment, prepare a pinned encoder directory and ship it with the artifact.

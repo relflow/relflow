@@ -1,12 +1,12 @@
-# ty: ignore[invalid-argument-type,invalid-assignment,unknown-argument,unresolved-attribute]
 from __future__ import annotations
 
 import difflib
 import enum
 import math
 import re
+from dataclasses import InitVar
 from datetime import date, datetime
-from typing import TYPE_CHECKING, Annotated, Any, Callable, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Callable, ClassVar, Literal, Unpack, cast, overload
 
 import numpy as np
 import pyarrow as pa
@@ -21,7 +21,7 @@ from relflow.data.ragged import RaggedField
 from relflow.helpers import Jitter
 from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
-from relflow.structs.tree import Address
+from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
     Context,
     DecoderBase,
@@ -35,9 +35,11 @@ from relflow.tensorfields.base import (
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.structs.experiment import Schema
+    from relflow.structs.structure import Branch
 
 
 class DatePart(enum.StrEnum):
+    REGISTRY: ClassVar[dict["DatePart", Callable[..., tuple[np.ndarray, np.ndarray]]]]
     day_of_year = "day_of_year"
     week_of_year = "week_of_year"
     month_of_year = "month_of_year"
@@ -48,11 +50,13 @@ class DatePart(enum.StrEnum):
     minute_of_hour = "minute_of_hour"
     second_of_minute = "second_of_minute"
 
-    def register(self, func: Callable[..., Any]) -> Callable[..., Any]:
+    def register(
+        self, func: Callable[..., tuple[np.ndarray, np.ndarray]]
+    ) -> Callable[..., tuple[np.ndarray, np.ndarray]]:
         cls = type(self)
 
         if not hasattr(cls, "REGISTRY"):
-            cls.REGISTRY: dict[DatePart, Callable[..., Any]] = {}
+            cls.REGISTRY = {}
 
         if self in cls.REGISTRY:
             raise ValueError(f"{self.name} already has a registered function.")
@@ -61,7 +65,7 @@ class DatePart(enum.StrEnum):
 
         return func
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: Any, **kwargs: Any) -> tuple[np.ndarray, np.ndarray]:
         func = getattr(type(self), "REGISTRY", {}).get(self)
 
         if func is None:
@@ -170,6 +174,14 @@ def second_of_minute(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 dateparts: Extension = Extension(name="dateparts", types=(str | date | datetime,))
 
 
+@overload
+def parse(values: pa.Array, pattern: str | None) -> pa.Array: ...
+
+
+@overload
+def parse(values: pa.ChunkedArray, pattern: str | None) -> pa.ChunkedArray: ...
+
+
 def parse(
     values: pa.Array | pa.ChunkedArray,
     pattern: str | None,
@@ -180,6 +192,7 @@ def parse(
     if isinstance(values, pa.ChunkedArray):
         return pa.chunked_array([parse(chunk, pattern) for chunk in values.chunks], type=datatype)
     if pa.types.is_dictionary(values.type):
+        values = cast(pa.DictionaryArray, values)
         return parse(pc.take(values.dictionary, values.indices), pattern)
     if isinstance(values, pa.ExtensionArray):
         return parse(values.storage, pattern)
@@ -188,6 +201,7 @@ def parse(
             return pc.strptime(values, format=pattern, unit="s") if pattern is not None else pc.cast(values, datatype)
         return pc.cast(values, datatype, safe=True)
 
+    values = cast(pa.UnionArray, values)
     codes, offsets = variants(values)
     result = pa.nulls(len(values), type=datatype)
     for index, code in enumerate(values.type.type_codes):
@@ -197,7 +211,8 @@ def parse(
             continue
         indices = offsets[selected] if offsets is not None else positions
         child = pc.take(values.field(index), pa.array(indices, type=pa.int64()))
-        placed = pc.scatter(
+        # Arrow exposes scatter dynamically; pyarrow-stubs omits it.
+        placed = pc.scatter(  # pyrefly: ignore [missing-attribute]
             parse(child, pattern),
             pa.array(positions, type=pa.int64()),
             max_index=len(values) - 1,
@@ -208,16 +223,36 @@ def parse(
 
 @dateparts.register
 class Request(RequestBase):
-    """Date/time tensorfield request that extracts configured calendar parts."""
+    """Calendar components represented as cyclical sine/cosine pairs.
+
+    ``dateparts`` is a nonempty, unique sequence of ``DatePart`` members or
+    names such as ``"day_of_week"``; names normalize to a list of enum members.
+    Inputs may be dates, datetimes, or strings, with optional ``pattern``
+    specifying string parsing. ``jitter`` perturbs training coordinate pairs.
+    Reconstructing masks train state and per-part cosine losses. Prediction
+    exports a field embedding with ``embed=True``; no datetime is decoded.
+    """
 
     type: Literal["dateparts"] = "dateparts"
     dateparts: list[DatePart]
     pattern: Annotated[str | None, pydantic.Field(default=None)] = None
     jitter: Jitter = pydantic.Field(default_factory=Jitter)
 
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            dateparts: list[DatePart | str] | tuple[DatePart | str, ...],
+            pattern: str | None = None,
+            jitter: Jitter = ...,
+            type: Literal["dateparts"] = "dateparts",
+            **options: Unpack[FieldOptions],
+        ) -> None: ...
+
     @pydantic.field_validator("dateparts", mode="before", check_fields=False)
     @classmethod
-    def coerce_dateparts(cls, value: Any) -> Any:
+    def check_dateparts_input(cls, value: Any) -> Any:
         if not isinstance(value, (list, tuple)):
             return value
 
@@ -271,13 +306,19 @@ class Request(RequestBase):
 
 @dateparts.register
 @tensorclass
-class TensorField(TensorFieldBase):
+class TensorField(TensorFieldBase[TensorDict]):
     state: torch.Tensor
-    content: TensorDict[DatePart, torch.Tensor]
+    content: TensorDict
     present: torch.Tensor
     trainable: torch.Tensor
     inferred: torch.Tensor
-    targets: TensorDict[TensorKey, torch.Tensor]
+    targets: TensorDict
+
+    if TYPE_CHECKING:
+        # TensorClass metadata is accepted by its generated initializer.
+        batch_size: InitVar[int | torch.Size | list[int] | tuple[int, ...] | None] = None
+        device: InitVar[torch.device | str | int | None] = None
+        names: InitVar[list[str | None] | None] = None
 
     @classmethod
     def new(
@@ -291,10 +332,10 @@ class TensorField(TensorFieldBase):
         schema: Schema,
         strata: Strata,
         context: Context,
-    ) -> TensorFieldBase:
-        request: RequestBase = schema.requests[address]
+    ) -> TensorField:
+        request: Request = cast(Request, schema.requests[address])
 
-        def encode(field: RaggedField) -> TensorDict[DatePart, torch.Tensor]:
+        def encode(field: RaggedField) -> TensorDict:
             try:
                 if not len(field.values):
                     date_values = np.empty(0, dtype="datetime64[s]")
@@ -320,7 +361,8 @@ class TensorField(TensorFieldBase):
                 dateparts[datepart] = torch.from_numpy(field.place(embeddings, fill=0.0, value_shape=(2,))).to(
                     dtype=torch.float
                 )
-            return TensorDict(dateparts, batch_size=field.shape)
+            # TensorDict accepts this narrower dictionary; its input type is invariant.
+            return TensorDict(dateparts, batch_size=field.shape)  # pyrefly: ignore [bad-argument-type]
 
         state = torch.from_numpy(input.dense)
 
@@ -346,9 +388,9 @@ class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 
-        request = schema.requests[address]
+        request = cast(Request, schema.requests[address])
         self.origin: Address = address
-        self.destination: Address = request.parent.address
+        self.destination: Address = cast("Branch", request.parent).address
         self.jitter: Jitter = request.jitter
 
         self.embeddings = torch.nn.Embedding(
@@ -371,8 +413,8 @@ class Embedder(EmbedderBase):
         embeddings: torch.Tensor = self.embeddings(state)
 
         for datepart in self.dateparts:
-            projection: torch.nn.Linear = self.dateparts[datepart]
-            content = inputs.content[datepart].reshape(D, 2)
+            projection = cast(torch.nn.Linear, self.dateparts[datepart])
+            content = cast(torch.Tensor, cast(TensorDict, inputs.content)[datepart]).reshape(D, 2)
             if self.training:
                 eligible = valued & torch.isfinite(content)
                 content = self.jitter.apply(content, eligible)
@@ -399,19 +441,20 @@ class Decoder(DecoderBase):
 
         self.dateparts = torch.nn.ModuleDict()
 
-        for datepart in schema.requests[address].dateparts:
+        for datepart in cast(Request, schema.requests[address]).dateparts:
             self.dateparts[datepart] = torch.nn.Linear(in_features=schema.d_model, out_features=2)
 
     @beartype
-    def decode(self, pooled: torch.Tensor) -> TensorDict[TensorKey, torch.Tensor]:
-        content: dict[DatePart, torch.Tensor] = {}
+    def decode(self, pooled: torch.Tensor) -> TensorDict:
+        content: dict[str, torch.Tensor] = {}
         for datepart in self.dateparts:
             content[datepart] = self.dateparts[datepart](pooled)
 
         return TensorDict(
             source={
                 TensorKey.state: self.linear(pooled),
-                TensorKey.content: TensorDict(content, batch_size=pooled.shape[0]),
+                # TensorDict accepts string-keyed tensor dictionaries.
+                TensorKey.content: TensorDict(content, batch_size=pooled.shape[0]),  # pyrefly: ignore [bad-argument-type]
             }
         )
 
@@ -423,7 +466,7 @@ def loss(
     batch: TensorFieldBase,
     strata: Strata,
 ) -> torch.Tensor:
-    numel: int = batch.targets[TensorKey.state].numel()
+    numel: int = cast(torch.Tensor, batch.targets[TensorKey.state]).numel()
 
     trainable = batch.trainable.reshape(numel)
 
@@ -431,8 +474,8 @@ def loss(
         (prediction.address, strata, Metric.loss, TensorKey.state),
         value=(
             torch.nn.functional.cross_entropy(
-                input=(inputs := prediction.payload[TensorKey.state].reshape(numel, -1)),
-                target=(targets := batch.targets[TensorKey.state].reshape(numel)),
+                input=(inputs := cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(numel, -1)),
+                target=(targets := cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(numel)),
                 reduction="none",
             )
             .masked_select(mask=trainable)
@@ -445,13 +488,15 @@ def loss(
         value=inputs.argmax(dim=1).eq(targets).masked_select(trainable).float().mean(),
     )
 
-    request: RequestBase = module.schema.requests[prediction.address]
+    request: Request = cast(Request, module.schema.requests[prediction.address])
 
     losses: list[torch.Tensor] = []
 
     for datepart in request.dateparts:
-        pred_raw: torch.Tensor = prediction.payload[TensorKey.content][datepart].reshape(numel, 2)
-        target: torch.Tensor = batch.targets[TensorKey.content][datepart].reshape(numel, 2)
+        pred_raw = cast(torch.Tensor, cast(TensorDict, prediction.payload[TensorKey.content])[datepart]).reshape(
+            numel, 2
+        )
+        target = cast(torch.Tensor, cast(TensorDict, batch.targets[TensorKey.content])[datepart]).reshape(numel, 2)
 
         pred: torch.Tensor = pred_raw / pred_raw.norm(dim=-1, keepdim=True).clamp_min(1e-6)
         cosine: torch.Tensor = (pred * target).sum(dim=-1)

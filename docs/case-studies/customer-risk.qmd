@@ -1,0 +1,142 @@
+---
+engine: markdown
+---
+
+# Customer Risk
+
+A retailer wants to predict customer churn, future spending, and refunds for
+individual orders. Purchase and browsing histories supply different evidence;
+nested branches keep those contexts distinct.
+
+## One Observation
+
+```yaml
+tenure_days: 420
+orders:
+  - age_days: 3
+    line_items:
+      - sku: A12
+        quantity: 2
+      - sku: B07
+        quantity: 1
+    refunded_next_month: false
+sessions:
+  - device: mobile
+    events:
+      - kind: view
+        elapsed_seconds: 0
+      - kind: add_to_cart
+        elapsed_seconds: 24
+churned: false
+next_month_spend: 75.0
+```
+
+One record describes a customer at a decision time. Histories stop at that
+time; labels describe the following month. Define inactivity, refund
+attribution, and spending consistently before constructing the splits.
+
+## Keep Local Questions Local
+
+```python
+import relflow as rf
+
+model = rf.Model(
+    name="customer",
+    d_model=128,
+    n_layers=3,
+    n_heads=8,
+    batch_size=128,
+    embed=True,
+    tenure_days=rf.Number,
+    orders=rf.Branch(
+        length=64,
+        overflow="tail",
+        age_days=rf.Number,
+        line_items=rf.Branch(
+            length=16,
+            sku=rf.Category(size=8192),
+            quantity=rf.Number,
+        ),
+        refunded_next_month=rf.Boolean(mask=True),
+    ),
+    sessions=rf.Branch(
+        length=128,
+        overflow="tail",
+        device=rf.Category(size=8),
+        events=rf.Branch(
+            length=64,
+            overflow="tail",
+            kind=rf.Category(size=32),
+            elapsed_seconds=rf.Number,
+        ),
+    ),
+    churned=rf.Boolean(mask=True),
+    next_month_spend=rf.Number(mask=True),
+)
+```
+
+```{typst}
+//| label: fig-customer-risk
+//| fig-alt: "Customer context contains tenure, repeated orders with line items and a per-order refund target, and repeated sessions with events. Root targets predict churn and spending."
+//| fig-cap: "The refund target keeps order coordinates; churn and spending belong to the customer."
+#tree(node("customer", kind: "root", detail: "Export embedding", children: (
+  node("tenure_days", type: "Number"),
+  node("orders", kind: "branch", repeated: true, children: (
+    node("age_days", type: "Number"),
+    node("line_items", kind: "branch", repeated: true, children: (
+      node("sku", type: "Category"),
+      node("quantity", type: "Number"),
+    )),
+    node("refunded_next_month", width: 150pt, kind: "target", type: "Boolean", detail: "per order"),
+  )),
+  node("sessions", kind: "branch", repeated: true, children: (
+    node("device", type: "Category"),
+    node("events", kind: "branch", repeated: true, children: (
+      node("kind", type: "Category"),
+      node("elapsed_seconds", type: "Number"),
+    )),
+  )),
+  node("churned", kind: "target", type: "Boolean"),
+  node("next_month_spend", width: 150pt, kind: "target", type: "Number"),
+)))
+```
+
+Line items form context within each order; events form context within each
+session. Each history then sends its reduced representation to the customer
+root. The refund decoder uses its ancestor route and visible sibling context;
+its predictions retain order coordinates even though the orders branch sends
+a summary upward. See [Model Tree](../core-concepts/model-tree.qmd).
+
+All three targets use `mask=True`. Their labels supply supervision but never
+input embeddings. At prediction time, omit the two root targets and omit
+`refunded_next_month` from each order. Keep the orders themselves: they define
+the repeated positions to predict.
+
+## Choose What To Preserve
+
+The default Attention reduction sends one summary per parent coordinate.
+That bounds the context passed upward; it does not preserve a separate token
+for every raw item. If the task requires exact correspondence between a viewed
+SKU and a purchased SKU, establish that relationship in preprocessing or
+aligned schema structure. Nesting does not perform a database join.
+
+`overflow="tail"` assumes histories are sorted oldest to newest. Here it
+applies independently to orders, sessions, and events; line items use the
+first-items policy. Choose these bounds for the application's records.
+
+## Evaluate Each Outcome
+
+Use [Arrow or Polars data modules](../guides/data-modules.qmd) and the
+[Lightning workflow](../guides/lightning.qmd). Hold out later observation
+windows, and prevent related customer snapshots from leaking across splits.
+
+Inspect each objective separately: churn ranking and calibration, spending
+errors, and refund discrimination between orders from the same customer.
+A combined validation loss can hide a regression in one target. This example
+specifies a design, not measured model quality.
+
+The output addresses are `customer/churned`, `customer/next_month_spend`,
+`customer/orders/refunded_next_month`, and the `customer` embedding. Preserve
+request identifiers and the retained order mapping when joining predictions
+back to application records; a learned summary is not an order identifier.
+See [Prediction Output](../guides/prediction-output.qmd).

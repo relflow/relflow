@@ -14,45 +14,58 @@ from relflow.architecture.mutations import MutationLockCallback, RuntimePlacemen
 from relflow.architecture.root import (
     Model,
     OptimizerConfig,
+    Scheduler,
     SchedulerConfig,
+    SchedulerOptions,
 )
 from relflow.data.datasets import (
     ArrowDataModule,
+    ArrowInput,
     CustomDataModule,
     PolarsDataModule,
+    StratumConfig,
     SyntheticDataModule,
 )
 from relflow.data.processors import (
     Postprocessor,
+    PostprocessorInput,
     Preprocessor,
+    PreprocessorInput,
     PreprocessorProvider,
+    PreprocessorResult,
     postprocess,
     preprocess,
 )
 from relflow.data.ragged import RaggedField
 from relflow.data.sources import source
 from relflow.helpers import Jitter
+from relflow.helpers.optimizers import adamw
 from relflow.inference.callback import Writer
 from relflow.structs.enums import (
+    AttentionInput,
     AttentionMode,
     Component,
     Metric,
     Overflow,
+    OverflowInput,
     Strata,
+    StrataInput,
     TensorKey,
     Tokens,
 )
 from relflow.structs.experiment import (
     NodeAttribute,
     NodePredicate,
+    NodeSelector,
     Schema,
     SchemaField,
+    TreeFieldInput,
     predicate,
     where,
 )
 from relflow.structs.reduction import Attention, Mean, ReductionConfig
 from relflow.structs.structure import Branch, Mask
-from relflow.structs.tree import Address, Leaf
+from relflow.structs.tree import Address, Leaf, MaskInput
 from relflow.tensorfields import (
     TENSORFIELDS,
     Context,
@@ -124,7 +137,9 @@ __all__ = [
     "Branch",
     "Boolean",
     "AttentionMode",
+    "AttentionInput",
     "ArrowDataModule",
+    "ArrowInput",
     "Cluster",
     "Category",
     "Component",
@@ -142,20 +157,26 @@ __all__ = [
     "Leaf",
     "Metric",
     "Mask",
+    "MaskInput",
     "Mean",
     "Model",
     "ModelSource",
     "MutationLockCallback",
     "NodeAttribute",
     "NodePredicate",
+    "NodeSelector",
     "Number",
     "OptimizerConfig",
     "Overflow",
+    "OverflowInput",
     "Extension",
     "PolarsDataModule",
     "Postprocessor",
+    "PostprocessorInput",
     "Preprocessor",
+    "PreprocessorInput",
     "PreprocessorProvider",
+    "PreprocessorResult",
     "RaggedField",
     "RequestBase",
     "ReductionConfig",
@@ -163,19 +184,25 @@ __all__ = [
     "RuntimePlacementCallback",
     "Set",
     "SchedulerConfig",
+    "Scheduler",
+    "SchedulerOptions",
     "SchemaField",
     "SyntheticDataModule",
     "Strata",
+    "StrataInput",
+    "StratumConfig",
     "TENSORFIELDS",
     "TensorFieldBase",
     "TensorInput",
     "TensorKey",
     "Text",
     "Tokens",
+    "TreeFieldInput",
     "UpdateOperation",
     "Vector",
     "VocabularySyncCallback",
     "Writer",
+    "adamw",
     "predicate",
     "postprocess",
     "preprocess",

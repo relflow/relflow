@@ -6,13 +6,13 @@ from functools import partialmethod
 from multiprocessing import Manager
 from multiprocessing.managers import ListProxy, SyncManager
 from threading import RLock
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, cast
 
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import torch
-from lightning.pytorch import Callback, Trainer
+from lightning.pytorch import Callback, LightningModule, Trainer
 
 from relflow.distributed import (
     all_gather_object,
@@ -243,7 +243,7 @@ class OnlineVocabularyModel(torch.nn.Module):
             embedder = getattr(node, "embedder", None)
             vocabulary = getattr(embedder, "vocab", None)
             if isinstance(vocabulary, cls):
-                resources[address] = vocabulary
+                resources[cast(Address, address)] = vocabulary
 
         return resources
 
@@ -308,9 +308,9 @@ class OnlineVocabularyModel(torch.nn.Module):
         self.share()
         return self.storage
 
-    def _save_to_state_dict(self, state_dict, prefix, keep_vars):  # ty:ignore[invalid-method-override]
-        super()._save_to_state_dict(state_dict, prefix, keep_vars)
-        state_dict[prefix + "vocabulary"] = list(self.master)
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + "vocabulary"] = list(self.master)
 
     def _load_from_state_dict(
         self,
@@ -468,10 +468,16 @@ def sync(_callback: Callback, trainer: Trainer, pl_module: Model, reason: str) -
 class VocabularySyncCallback(Callback):
     """Synchronize online vocabularies registered by tensorfield extensions."""
 
-    on_fit_start = partialmethod(sync, reason="fit_start")
-    on_train_epoch_end = partialmethod(sync, reason="train_epoch_end")
+    if TYPE_CHECKING:
 
-    def on_fit_end(self, trainer: Trainer, pl_module: Model) -> None:  # ty:ignore[invalid-method-override]
+        def on_fit_start(self, trainer: Trainer, pl_module: LightningModule) -> None: ...
+        def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None: ...
+    else:
+        on_fit_start = partialmethod(sync, reason="fit_start")
+        on_train_epoch_end = partialmethod(sync, reason="train_epoch_end")
+
+    def on_fit_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        pl_module = cast("Model", pl_module)
         for vocabulary in OnlineVocabularyModel.from_model(pl_module).values():
             vocabulary.freeze()
 

@@ -18,7 +18,7 @@ def build() -> rf.Model:
         n_layers=1,
         n_heads=4,
         batch_size=4,
-        attention="none",
+        attention=None,
         flag=rf.Boolean,
     )
 

@@ -11,7 +11,7 @@ from relflow.structs.packages import Parcel
 
 def branch(*fields, attention="mha", dropout=0.0):
     schema = rf.Schema.from_tree(
-        *(rf.Number(name) for name in fields or ("value",)),
+        fields={name: rf.Number for name in fields or ("value",)},
         d_model=20,
         n_layers=2,
         n_heads=4,

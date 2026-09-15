@@ -2,23 +2,33 @@
 
 import functools
 import io
-import re
 from abc import ABC
-from collections.abc import Mapping
-from typing import Annotated, Any, ClassVar, Literal, TypeAlias
+from collections.abc import Generator
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self, TypeAlias, TypedDict, cast
 
 import pydantic
 from anytree import NodeMixin
-from rich.console import Console
+from pydantic_core import CoreSchema
+from rich.console import Console, ConsoleOptions
 from rich.text import Text
 
 from relflow.structs.enums import Overflow
+
+if TYPE_CHECKING:
+    from relflow.structs.structure import Branch
 
 Rate: TypeAlias = Annotated[float, pydantic.Field(ge=0.0, lt=1.0)]
 
 
 class Mask(pydantic.BaseModel):
-    """Selection, encoder effect, and objective policy for a schema node."""
+    """Select coordinates to hide, drop, or reconstruct.
+
+    ``query`` reads an explicit Boolean selection from the input. ``rate``
+    samples coordinates during training. ``skip=True`` prevents embedding;
+    ``reconstruct=True`` makes selected coordinates supervised targets.
+    ``dropout`` defaults to the opposite of ``reconstruct``. These last two
+    effects cannot both be enabled.
+    """
 
     model_config = pydantic.ConfigDict(frozen=True, extra="forbid")
 
@@ -30,13 +40,13 @@ class Mask(pydantic.BaseModel):
 
     @pydantic.field_validator("rate", mode="before")
     @classmethod
-    def validate_rate(cls, value: Any) -> Any:
+    def check_rate(cls, value: Any) -> Any:
         if isinstance(value, bool):
             raise TypeError("Mask.rate must be a number, not a boolean")
         return value
 
     @pydantic.model_validator(mode="after")
-    def validate_policy(self):
+    def check_policy(self) -> Self:
         dropout = not self.reconstruct if self.dropout is None else self.dropout
         if dropout and self.reconstruct:
             raise ValueError("Mask.dropout=True cannot be combined with reconstruct=True")
@@ -86,6 +96,29 @@ class Mask(pydantic.BaseModel):
 MaskInput: TypeAlias = Mask | float | bool | list[Mask] | tuple[Mask, ...]
 
 
+class FieldOptions(TypedDict, total=False):
+    """Shared constructor inputs; requests normalize ``mask`` to a tuple.
+
+    ``mask=True`` declares a supervised target that is never embedded. A float
+    adds training-only random masking. Use explicit ``Mask`` objects to select
+    coordinates or configure reconstruction. ``query`` is always explicit;
+    names alone never infer a structural query.
+    """
+
+    description: str | None
+    embed: bool
+    n_heads: int
+    dropout: float | None
+    active: bool
+    query: str | None
+    nullable: bool
+    pooling: Literal["query", "mean"]
+    decoder_position: bool | None
+    weight: float
+    mask: MaskInput
+    n_linear: int
+
+
 class Renderable(ABC):
     """Base class for objects rendered consistently through Rich."""
 
@@ -93,10 +126,10 @@ class Renderable(ABC):
     RICH_TYPE_STYLE: ClassVar[str] = "bold yellow on #3f3f46"
     RICH_TREE_STYLE: ClassVar[str] = "bold dim"
 
-    def __rich_console__(self, console, options):
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
         yield Text(repr(self))
 
-    def __rich_repr__(self):
+    def __rich_repr__(self) -> Generator[str, None, None]:
         yield str(self)
 
     def __str__(self) -> str:
@@ -104,13 +137,13 @@ class Renderable(ABC):
         console.print(self)
         return console.export_text(clear=False).rstrip("\n")
 
-    def _repr_mimebundle_(self, include=None, exclude=None):
+    def _repr_mimebundle_(self, include: list[str] | None = None, exclude: list[str] | None = None) -> dict[str, str]:
         return {
             "text/plain": str(self),
             "text/html": self._repr_html_(),
         }
 
-    def _repr_html_(self):
+    def _repr_html_(self) -> str:
         console = Console(file=io.StringIO(), record=True, width=120, force_jupyter=False)
         console.print(self)
         return console.export_html(
@@ -123,19 +156,20 @@ class Renderable(ABC):
             ),
         )
 
-    def _mime_(self):
+    def _mime_(self) -> tuple[str, str]:
         return "text/html", self._repr_html_()
 
 
 class Selection(list, Renderable):
     """List-like selection result with readable Rich and pprint output."""
 
-    __rich_repr__: ClassVar[None] = None
+    # Rich supports opting out of its optional representation protocol.
+    __rich_repr__: ClassVar[None] = None  # pyrefly: ignore [bad-override]
 
     def __repr__(self) -> str:
         return str(self)
 
-    def __rich_console__(self, console, options):
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
         if not self:
             yield Text("[]")
             return
@@ -183,28 +217,57 @@ class Node(NodeMixin, Renderable, pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(extra="forbid")
 
-    name: str | None = None
-    type: str
+    if TYPE_CHECKING:
+
+        @property
+        def name(self) -> str | None:
+            """The name assigned when a parent binds this node."""
+            ...
+
+        @name.setter
+        def name(self, value: str | None) -> None: ...
+
+        @property
+        def type(self) -> str:
+            """The concrete node's fixed schema discriminator."""
+            ...
+    else:
+        name: str | None = None
+        type: str
     description: str | None = None
     embed: bool = False
     n_heads: Annotated[int, pydantic.Field(gt=0, default=4)] = 4
     dropout: Rate | None = None
 
     @classmethod
-    def sanitize_name(cls, value: str) -> str:
-        sanitized = re.sub(r"[^0-9A-Za-z_-]+", "_", value).strip("_")
-        return sanitized or "field"
+    def __get_pydantic_core_schema__(cls, source: Any, handler: pydantic.GetCoreSchemaHandler) -> CoreSchema:
+        """Restore serialized nodes through validators without replaying public constructors."""
+        schema = handler(source)
+        model = schema
+        while model["type"] in ("function-before", "function-after", "function-wrap"):
+            model = model["schema"]
+        if model["type"] == "model":
+            model["custom_init"] = False
+        return schema
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        """Keep parent-assigned names out of Pydantic's generated constructor signature."""
+        super().__pydantic_init_subclass__(**kwargs)
+        cls.__signature__ = cls.__signature__.replace(
+            parameters=[parameter for parameter in cls.__signature__.parameters.values() if parameter.name != "name"]
+        )
 
     @functools.cached_property
     def address(self) -> Address:
-        return Address(*(node.name for node in self.path[1:]))
+        return Address(*(cast(str, node.name) for node in self.path[1:]))
 
     @functools.cached_property
     def heritage(self) -> list[Address]:
         return [node.address for node in self.path[1:]]
 
     @pydantic.model_validator(mode="after")
-    def check_node_name(self):
+    def check_node_name(self) -> Self:
         if self.name is None:
             return self
 
@@ -217,7 +280,7 @@ class Node(NodeMixin, Renderable, pydantic.BaseModel):
         return self
 
     @pydantic.model_validator(mode="after")
-    def check_n_heads_is_even(self):
+    def check_n_heads_is_even(self) -> Self:
         if not isinstance(self.n_heads, int):
             raise ValueError("n_heads must be an integer")
 
@@ -228,7 +291,7 @@ class Node(NodeMixin, Renderable, pydantic.BaseModel):
 
     @pydantic.field_validator("description", mode="before")
     @classmethod
-    def normalize_description(cls, value: str | None):
+    def check_description(cls, value: str | None) -> str | None:
         if value is None:
             return None
 
@@ -238,7 +301,7 @@ class Node(NodeMixin, Renderable, pydantic.BaseModel):
         normalized = value.strip()
         return normalized or None
 
-    def post_bind_validate(self):
+    def post_bind_validate(self) -> None:
         return None
 
 
@@ -247,58 +310,41 @@ class Leaf(Node):
 
     Concrete tensorfield constructors such as `Number` and `Category` inherit
     from this class through their registered request models.
+    Options must be declared fields; use ``description`` for notes.
     """
 
-    model_config = pydantic.ConfigDict(extra="allow", validate_default=True)
+    model_config = pydantic.ConfigDict(validate_default=True)
 
     active: bool = True
     embed: bool = False
-    name: str | None = None
-    type: str
+    if TYPE_CHECKING:
+
+        @property
+        def type(self) -> str: ...
+    else:
+        type: str
     query: str | None = None
     nullable: bool = True
     pooling: Literal["query", "mean"] = "query"
     decoder_position: pydantic.StrictBool | None = None
     weight: Annotated[float, pydantic.Field(gt=0.0, default=1.0)] = 1.0
-    mask: tuple[Mask, ...] = pydantic.Field(default=False)
+    # The before-validator normalizes this public Boolean default to a tuple.
+    mask: tuple[Mask, ...] = cast(tuple[Mask, ...], pydantic.Field(default=False))
     n_linear: Annotated[int, pydantic.Field(gt=0, default=1)] = 1
 
-    def __init__(self, name: str | None = None, **data: Any):
-        if name is not None:
-            if "name" in data:
-                raise TypeError("name was provided both positionally and by keyword")
-            data["name"] = name
+    def __init__(self, **data: Any) -> None:
+        if "name" in data:
+            raise TypeError("tensorfield names come from the parent; use field_name=Tensorfield(...)")
         super().__init__(**data)
-
-    @pydantic.model_validator(mode="before")
-    @classmethod
-    def validate_fields(cls, data: Any) -> Any:
-        if not isinstance(data, Mapping):
-            return data
-
-        values = dict(data)
-        kwargs = values.pop("kwargs", None)
-
-        if kwargs is not None:
-            if not isinstance(kwargs, Mapping):
-                raise TypeError("kwargs must be a mapping")
-            for key, value in kwargs.items():
-                values.setdefault(key, value)
-
-        removed = sorted({"masks", "p_mask", "p_prune", "target"} & values.keys())
-        if removed:
-            raise ValueError(f"removed node field(s): {removed}; use mask")
-
-        return values
 
     @pydantic.field_validator("mask", mode="before")
     @classmethod
-    def normalize_mask(cls, value: Any) -> tuple[Mask, ...]:
+    def check_mask(cls, value: Any) -> tuple[Mask, ...]:
         return Mask.normalize(value)
 
     @pydantic.field_validator("type")
     @classmethod
-    def validate_type(cls, value: str) -> str:
+    def check_type(cls, value: str) -> str:
         from relflow.tensorfields import extensions as _extensions  # noqa: F401
         from relflow.tensorfields.base import TENSORFIELDS
 
@@ -308,7 +354,7 @@ class Leaf(Node):
         return value
 
     @pydantic.model_validator(mode="after")
-    def check_query(self):
+    def check_query(self) -> Self:
         if self.query is None:
             return self
 
@@ -317,7 +363,7 @@ class Leaf(Node):
         compile(self.query)
         return self
 
-    def __rich_console__(self, console, options):
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
         flags = ["active" if self.active else "inactive"]
         if self.embed:
             flags.append("embed")
@@ -325,8 +371,9 @@ class Leaf(Node):
             flags.append("reconstruct")
 
         heading = Text()
-        heading.append(self.name, style=self.RICH_NAME_STYLE)
-        heading.append(" ")
+        if self.name is not None:
+            heading.append(self.name, style=self.RICH_NAME_STYLE)
+            heading.append(" ")
         heading.append(f"[{self.type}]", style=self.RICH_TYPE_STYLE)
         for flag in flags:
             heading.append(" ")
@@ -388,7 +435,7 @@ class Leaf(Node):
                 value = value.value
             if not first:
                 specific.append(" ")
-            label = str(field.serialization_alias or field.alias or name)
+            label = field.serialization_alias or field.alias or name
             specific.append(f"{label}=", style="dim")
             specific.append(str(value), style="cyan")
             first = False
@@ -403,7 +450,7 @@ class Leaf(Node):
 
         for node in self.path:
             if node.type == "branch":
-                out.append(node.length)
+                out.append(cast("Branch", node).length)
 
         return tuple(out)
 
@@ -413,6 +460,6 @@ class Leaf(Node):
 
         for node in self.path:
             if node.type == "branch":
-                out.append(node.overflow)
+                out.append(cast("Branch", node).overflow)
 
         return tuple(out)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Mapping, MutableMapping
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar, Self, cast
 
 from rich.console import Console, ConsoleRenderable
 from rich.logging import RichHandler
@@ -67,20 +67,21 @@ class Logger(logging.LoggerAdapter):
     """Standard logger with immutable structured context binding."""
 
     def bind(self, **context: object) -> Self:
-        return type(self)(self.logger, {**self.extra, **context})
+        """Return an adapter combining the configured mapping with new context."""
+        return type(self)(self.logger, {**cast(Mapping[str, object], self.extra), **context})
 
     def process(
         self,
-        message: object,
+        msg: object,
         kwargs: MutableMapping[str, Any],
     ) -> tuple[object, MutableMapping[str, Any]]:
         extra = dict(kwargs.get("extra") or {})
         supplied = extra.pop(CONTEXT, {})
         if not isinstance(supplied, Mapping):
             raise TypeError(f"logging {CONTEXT} must be a mapping, got {type(supplied).__name__}")
-        extra[CONTEXT] = {**self.extra, **supplied}
+        extra[CONTEXT] = {**cast(Mapping[str, object], self.extra), **supplied}
         kwargs["extra"] = extra
-        return message, kwargs
+        return msg, kwargs
 
 
 def configure(*, level: str | int | None = None, output: Console | None = None) -> Logger:

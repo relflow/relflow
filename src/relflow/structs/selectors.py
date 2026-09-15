@@ -118,8 +118,8 @@ class NodeAttribute(pydantic.BaseModel):
     name: str = pydantic.Field(
         description=(
             "Queryable node attribute. Built-ins include name, type, address, parent, "
-            "children, ancestors, descendants, and reconstruct. Pydantic fields and "
-            "extra metadata fields are also queryable."
+            "children, ancestors, descendants, and reconstruct. Declared tensorfield "
+            "options, including description and extension-specific fields, are also queryable."
         )
     )
 
@@ -145,10 +145,6 @@ class NodeAttribute(pydantic.BaseModel):
                 and node.active
                 and any(policy.reconstruct for owner in node.path for policy in getattr(owner, "mask", ()))
             )
-
-        extra = getattr(node, "model_extra", None) or {}
-        if self.name in extra:
-            return extra[self.name]
 
         return getattr(node, self.name, default)
 
@@ -209,13 +205,13 @@ class NodeAttribute(pydantic.BaseModel):
             key=("is_not_null", self.name),
         )
 
-    def __eq__(self, other: Any) -> NodePredicate:  # type: ignore[override]  # ty: ignore[invalid-method-override]
+    def __eq__(self, other: Any) -> NodePredicate:  # type: ignore[override]
         return NodePredicate(
             func=lambda node: self.get(node) == other,
             key=("eq", self.name, cache_value(other)),
         )
 
-    def __ne__(self, other: Any) -> NodePredicate:  # type: ignore[override]  # ty: ignore[invalid-method-override]
+    def __ne__(self, other: Any) -> NodePredicate:  # type: ignore[override]
         return NodePredicate(
             func=lambda node: self.get(node) != other,
             key=("ne", self.name, cache_value(other)),
@@ -228,7 +224,6 @@ def where(name: str) -> NodeAttribute:
 
 
 NodeSelector: TypeAlias = NodePredicate | NodeAttribute | Callable[[Node], bool]
-ExtendArg: TypeAlias = NodeSelector | SchemaField
 
 
 def has_model_attribute(node: Node, name: str) -> bool:
@@ -236,5 +231,4 @@ def has_model_attribute(node: Node, name: str) -> bool:
         return True
 
     fields = getattr(type(node), "model_fields", {})
-    extra = getattr(node, "model_extra", None) or {}
-    return name in fields or name in extra or hasattr(node, name)
+    return name in fields or hasattr(type(node), name)

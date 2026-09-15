@@ -1,287 +1,81 @@
----
-marimo-static-output: true
-pyproject: |
-  requires-python = ">=3.12"
-  dependencies = [
-    "marimo>=0.23.8",
-    "relflow[serving]",
-  ]
----
-
 # Category
 
-**Example status — excerpt:** schema and payload blocks isolate Category
-behavior; use [Getting Started](../getting-started.qmd) for a tested lifecycle.
+Use `Category` for one label from a bounded vocabulary: a country, product
+family, customer tier, or class. Use [Set](set.qmd) for multiple labels,
+[Hash](hash.qmd) for identifier equality, and [Text](text.qmd) for word meaning.
 
-Use `Category` for one label from a bounded vocabulary: a class label, country
-code, product family, customer tier, or similarly discrete value.
-
-```json
-{
-  "merchant_category": "grocery"
-}
+```yaml
+merchant_category: grocery
+fraud: false
 ```
 
-```{python .marimo}
-#| echo: true
-#| output: true
-
+```python
 import relflow as rf
 
-merchant_category = rf.Category(
-    "merchant_category",
-    size=128,
-    topk=[3, 10],
-    p_unavailable=0.02,
+model = rf.Model(
+    d_model=64, n_layers=2, n_heads=4,
+    merchant_category=rf.Category(size=128, topk=[3, 10]),
+    fraud=rf.Boolean(mask=True),
 )
-
-merchant_category
 ```
 
-Use `Set` when several labels may be present at once. Use `Hash` when only
-repeated equality inside one observation matters. Use `Text` when the words or
-subwords inside a string carry the signal.
+## Input and options
 
-Avoid using `Category` for effectively unique customer, account, session, or
-device IDs. Their embedding and decoder tables grow linearly with `size`, and a
-global ID vocabulary usually generalizes poorly. Keep unique IDs as metadata,
-or use `Hash` for equality without a learned vocabulary.
+Accepts scalar Boolean, integer, floating-point, string, or binary labels.
+Keep one compatible Arrow type family per field; normalize inconsistent labels
+upstream. A null is a [value state](../core-concepts/data-types.qmd#value-state),
+not a vocabulary member.
 
-## Input Values
-
-`Category` expects one hashable scalar label. Strings are the usual input. Use
-a preprocessor when upstream labels need normalization so that, for example,
-`"Grocery"` and `"grocery"` intentionally map to the same label. `None` has
-state `null`; a missing slot in a repeated branch has state `padded`.
-
-The online vocabulary distinguishes two kinds of valued input:
-
-| Input | State | Categorical content |
+| Option | Default | Meaning |
 | --- | --- | --- |
-| Label in the learned vocabulary | `valued` | Its index from `0` through `size - 1` |
-| Label outside the learned vocabulary | `valued` | Internal unavailable sentinel `size` |
+| `size` | `1024` | Positive vocabulary capacity; `capacity` is also accepted. Embedding and decoder tables grow with it. |
+| `p_unavailable` | `0.01` | Training probability of replacing a known valued label with unavailable content. Applied independently to input and target content. |
+| `topk` | `[]` | Sorted, unique accuracy cutoffs satisfying `1 < k < size`; also controls prediction candidates. |
 
-The sentinel is not a vocabulary label, embedding-table row, decoder class, or
-prediction candidate. It only records that a source value was present but its
-categorical content is unavailable.
+Capacity counts real labels only. Do not reserve an extra class for null or
+unavailable values. See [shared leaf options](../core-concepts/data-types.qmd#shared-leaf-options)
+for reconstruction and embedding configuration.
 
-## Configuration
+## Vocabulary and learning
 
-| Option | Default | Notes |
-| --- | --- | --- |
-| `size` | `1024` | Maximum number of real labels in the learned vocabulary. Must be positive. There is no extra unavailable class. |
-| `p_unavailable` | `0.01` | Probability of replacing each known valued label with unavailable content during training. Must be between `0` and `1`. |
-| `topk` | `[]` | Optional top-k accuracy values and prediction candidates. Values are deduplicated and sorted; each must be a positive integer other than `1` and less than `size`. |
+Pristine training observations add labels until capacity is full. Validation,
+test, and prediction reuse the learned mapping. The mapping is shared with
+encoding workers and synchronized for DDP; checkpoints preserve it.
 
-Shared options such as `mask`, `embed`, and `weight` are
-described in [Built-In Data Types](../core-concepts/data-types.qmd) and
-[Learning Modes & Embeddings](../core-concepts/embeddings.qmd).
+See [Online Vocabulary](../core-concepts/vocabulary.qmd) for admission order,
+capacity limits, worker synchronization, and reuse during fine-tuning.
 
-```{python .marimo}
-#| echo: true
-#| output: true
+An unknown label stays `valued` but contributes zero categorical content to
+the encoder. Its internal sentinel is not an extra embedding row or decoder
+class. Known labels contribute learned content plus their state embedding.
 
-fraud = rf.Category("fraud", mask=True, size=2)
+Reconstruction uses state cross entropy and frequency-weighted categorical
+cross entropy. Unavailable valued targets use a uniform target over all
+capacity logits and are excluded from content accuracy. Training scores the
+full capacity, including unpopulated slots.
 
-fraud
-```
-
-Here `size=2` means exactly two possible labels. Do not add one for missing or
-unavailable data; state prediction and unavailable content are separate from
-the label classes. Allocate extra capacity only when the training vocabulary
-may legitimately grow, and account for the additional parameters and logits.
-
-## Vocabulary Lifecycle
-
-Training observations add first-seen labels until `size` is full. The shared
-online vocabulary coordinates encoding workers and distributed ranks, and the
-resulting label-to-index mapping is saved in model and checkpoint state.
-Validation, test, and prediction observations reuse the mapping without adding
-labels.
-
-Once the vocabulary is full, every new label is unavailable. Monitor the
-field-level `vocabulary/size` metric and the upstream rate of unseen labels. A
-vocabulary at capacity is not automatically a problem, but frequent unavailable
-values may indicate insufficient capacity, drift, or inconsistent preprocessing.
-
-### Reading The Vocabulary
-
-After training or loading a checkpoint, read the populated labels directly from
-the model:
+For an application-supplied trained `model`:
 
 ```python
-known_categories = rf.Category.vocabulary(
-    model,
-    "record/merchant_category",
-)
+labels = rf.Category.vocabulary(model, "record/merchant_category")
+counts = rf.Category.counts(model, "record/merchant_category")
 ```
 
-`Category.vocabulary(...)` accepts either a `Model` or an
-`InterprocessEncodingContext` as its first argument. It returns an immutable
-tuple of populated labels in categorical-index order. The unavailable sentinel
-and unused capacity are not included. Each call returns a snapshot: later
-vocabulary growth does not change a tuple that was already returned.
+`vocabulary` returns a tuple snapshot in index order; `counts` returns pristine
+valued training exposures, excluding nulls, unavailable values, unused slots,
+and the smoothing prior. Repeated epochs count again; DDP counts synchronize
+at epoch end. `vocabulary` also accepts a preprocessor's `encoding_context`.
+Consult it for inference preprocessing only: training preprocessing occurs
+before new labels are reserved.
 
-Training exposure counts are available from the model:
+## Prediction
 
-```python
-category_counts = rf.Category.counts(
-    model,
-    "record/merchant_category",
-)
-```
+`content` contains `value`, `probability`, and `topk`. The candidate list has
+up to `max(topk)` entries, capped by the populated vocabulary; it is empty
+when no cutoffs are configured. Labels are written as `large_string`.
 
-The result is a new dictionary from each populated label to its observed
-training count. It excludes unused capacity, the unavailable sentinel, nulls,
-and padded positions. These are model-training exposures, not source-dataset
-frequencies: presenting the same observation in another epoch or through
-repeated sampling increments its count again. The counter's internal smoothing
-prior is removed from the public values. Counts come from the canonical pristine
-field, so a valued label still counts when a mask removes or replaces its
-encoder input.
-
-`Category.counts(...)` requires a model because counters are model state. In a
-distributed run, a snapshot taken during an epoch can still be rank-local;
-counter updates are folded together at epoch end.
-
-The pipeline supplies its `InterprocessEncodingContext` to a preprocessor
-through the keyword-only `encoding_context` parameter. This makes the trained
-vocabulary available without binding the model itself. For example, an
-inference-only preprocessor can deliberately turn unseen values into `null`
-instead of leaving them as valued-but-unavailable content:
-
-```python
-import polars as pl
-
-@rf.preprocess
-def null_unseen_category(
-    frame: pl.DataFrame,
-    *,
-    encoding_context,
-) -> pl.DataFrame:
-    vocabulary = rf.Category.vocabulary(
-        encoding_context,
-        "record/merchant_category",
-    )
-    values = pl.col("merchant_category").str.strip_chars().str.to_lowercase()
-    return frame.with_columns(
-        pl.when(values.is_in(vocabulary))
-        .then(values)
-        .otherwise(None)
-        .alias("merchant_category")
-    )
-
-
-predictions = model.predict(
-    records,
-    preprocess=null_unseen_category,
-)
-```
-
-::: {.callout-warning}
-Do not use the current vocabulary to make training-preprocessor decisions.
-Preprocessing runs before the current observation is tensorized and reserved in
-the online vocabulary, so a training observation sees only labels learned from
-earlier work. The resulting bootstrap behavior can depend on traversal order,
-batching, and worker timing. Restrict vocabulary-dependent preprocessing to
-inference after the training or checkpoint vocabulary is established.
-:::
-
-## State, Content, And Encoder Input
-
-State and categorical content make separate contributions to the encoder:
-
-- Every position receives the learned embedding for its state: `valued`,
-  `null`, `padded`, `masked`, or the reserved `other` state.
-- Only an available valued label receives a learned categorical-content
-  embedding.
-- Unavailable valued content contributes an all-zero categorical vector while
-  retaining the separate `valued` state embedding.
-- Non-valued positions also contribute zero categorical content while retaining
-  their distinct state embedding.
-
-This is an internal encoder representation. It is not the normalized public
-embedding returned by `embed=True`; see
-[Internal And Exported Embeddings](../core-concepts/embeddings.qmd#internal-and-exported-embeddings).
-
-`p_unavailable` simulates the same valued-but-content-unavailable condition for
-known labels during training. It does not create a new state or teach the model
-to emit an unavailable class.
-
-## Loss And Metrics
-
-When a `Category` is selected for reconstruction, the decoder produces:
-
-- five state logits for the shared state vocabulary; and
-- exactly `size` content logits for real categorical classes.
-
-Known valued targets use frequency-weighted categorical cross entropy. An
-unavailable valued target uses a uniform target over all `size` content logits,
-so it does not reward any real label. Unavailable targets are excluded from
-primary content accuracy and configured top-k accuracies. They still
-participate in state loss: the correct state remains `valued`.
-
-State accuracy is tracked for selected positions. Content accuracy and each
-configured top-k accuracy are tracked only where the original target is both
-valued and available.
-
-## Prediction Output
-
-The writer scores only labels currently present in the vocabulary snapshot. It
-renormalizes probabilities over that populated vocabulary, excluding unused
-capacity logits. During training, however, all `size` logits participate in the
-content objective. This means prediction confidence can change as the
-vocabulary fills, and a low top probability is not a calibrated detector for
-unseen input.
-
-This excerpt emphasizes `Category` content; the
-[Prediction Output guide](../guides/prediction-output.qmd#the-canonical-payload)
-defines the complete shared `state` and `inferred` members. Prediction output is
-an Arrow table; use struct kernels to select this address without converting
-rows to Python:
-
-```python
-import pyarrow.compute as pc
-
-merchant = pc.struct_field(
-    result["predictions"],
-    "record/merchant_category",
-)
-state = pc.struct_field(merchant, "state")
-content = pc.struct_field(merchant, "content")
-value = pc.struct_field(content, "value")
-probability = pc.struct_field(content, "probability")
-topk = pc.struct_field(content, "topk")
-inferred = pc.struct_field(merchant, "inferred")
-```
-
-`topk` serves two related roles:
-
-- training and evaluation track one accuracy metric for each configured `k`;
-- prediction emits one candidate list of length `max(topk)`, capped by the
-  populated vocabulary size.
-
-Top-1 is already represented by `content.value` and `content.probability`, so
-`topk=1` is invalid. The unavailable sentinel and unused capacity are never
-emitted. There is no separate availability probability: use upstream
-vocabulary monitoring when availability itself matters.
-
-The address remains a slash-delimited Arrow struct field name. `rf.Address`
-still identifies model-tree nodes in schema and extension APIs; it is not the
-container type returned by `Model.predict(...)`.
-
-## Capacity And Compute
-
-The category input table and output head both grow with `size`; training scores
-all capacity logits, while prediction exposes only populated vocabulary labels.
-Increasing `size` therefore raises parameters, memory, and training scoring cost
-even before every slot is populated. Monitor `vocabulary/size`, unavailable
-input rate, step time, and memory together when choosing headroom.
-
-## Where Next
-
-- Use [Set](set.qmd) for unordered multi-label values.
-- Use [Hash](hash.qmd) for large identifiers whose equality matters.
-- Use [Text](text.qmd) when subword meaning matters.
-- Read [Built-In Data Types](../core-concepts/data-types.qmd) for shared state,
-  training, and prediction semantics.
+Probabilities are renormalized over **populated labels**, excluding unused
+capacity and the unavailable sentinel. An empty vocabulary yields a null best
+label and probability zero. Confidence is not an unknown-label detector.
+See the [prediction envelope](../guides/prediction-output.qmd) for shared state
+probabilities, `inferred`, and repeated shapes.

@@ -1,0 +1,201 @@
+---
+engine: markdown
+---
+
+# Pretraining And Fine-Tuning
+
+Pretraining learns from relationships in a broad collection of records.
+Fine-tuning starts from those learned weights and adapts the model to a specific
+task. In relflow, both use `trainer.fit(...)`; the data and reconstruction
+objectives determine what the model learns.
+
+| Stage | Data | Objectives |
+| --- | --- | --- |
+| Self-supervised pretraining | Records without task labels | Reconstruct sampled observed values with `rf.Mask(rate=..., reconstruct=True)`. |
+| Supervised fine-tuning | Labeled task records | Predict always-hidden labels with `mask=True`, optionally retaining some reconstruction objectives. |
+| Resume a run | The same training task | Restore the model, optimizer, scheduler, and loop progress from a full Lightning checkpoint. |
+
+Pretraining is optional. A supervised model can also start from newly
+initialized weights. An ordinary float mask, such as `mask=0.15`, only supplies
+input dropout; pretraining needs `reconstruct=True` to create an objective.
+
+## Pretrain On Histories
+
+This customer record has no churn label. Purchase amounts and merchant types
+provide their own supervision when selected values are hidden:
+
+```yaml
+tenure_days: 420
+region: northeast
+purchases:
+  - days_ago: 12
+    amount: 42.75
+    merchant: grocery
+  - days_ago: 3
+    amount: 18.50
+    merchant: cafe
+```
+
+```python
+import lightning.pytorch as lit
+
+import relflow as rf
+
+model = rf.Model(
+    name="customer",
+    d_model=128,
+    n_layers=3,
+    n_heads=8,
+    tenure_days=rf.Number,
+    region=rf.Category(size=64),
+    purchases=rf.Branch(
+        length=64,
+        overflow="tail",
+        days_ago=rf.Number,
+        amount=rf.Number(mask=rf.Mask(rate=0.15, reconstruct=True)),
+        merchant=rf.Category(
+            size=256,
+            mask=rf.Mask(rate=0.15, reconstruct=True),
+        ),
+    ),
+)
+model.optimizer = rf.adamw(learning_rate=1e-3)
+pretraining_data = rf.ArrowDataModule(
+    model=model,
+    train=pretrain_table,
+    validate=pretrain_validation_table,
+)
+pretrainer = lit.Trainer(max_epochs=50)
+pretrainer.fit(model=model, datamodule=pretraining_data)
+model.save("artifacts/customer-pretrained.rf")
+```
+
+The two tables are independent, application-supplied Arrow splits with this
+record structure. Histories are sorted oldest to newest for `overflow="tail"`.
+Use `rf.PolarsDataModule` with eager frames when the application prepares its
+splits in Polars. Keep preparation consistent through the
+[preprocessing pipeline](preprocessors.qmd).
+
+Each sampled value is predicted from the remaining context; unselected values
+remain inputs. These fractional reconstruction policies also sample during
+validation and test, but are inactive during ordinary prediction. See
+[Masking](../core-concepts/dynamic-masking.qmd) for selection and stage rules.
+
+The example saves the final model. Use the checkpoint selection described in
+[Training](lightning.qmd) to save the best validation state instead.
+
+## Adapt To A Labeled Task
+
+For fine-tuning, each customer record gains `churned: false` or `churned: true`,
+defined over a future outcome window. Its purchase history ends at the decision
+time. Pretraining and fine-tuning splits must respect the same evaluation
+boundaries; pretraining on held-out customers or future observations changes
+what the downstream evaluation measures.
+
+Load the pretrained artifact, remove its sampled reconstruction policies, and
+add a supervised label:
+
+```python
+finetuned = rf.Model.load("artifacts/customer-pretrained.rf")
+reconstructed_inputs = rf.where("address").is_in(
+    ["customer/purchases/amount", "customer/purchases/merchant"]
+)
+finetuned.update(reconstructed_inputs, mask=False)
+finetuned.extend(
+    rf.where("address") == "customer",
+    churned=rf.Boolean(mask=True),
+)
+```
+
+Amount and merchant remain visible inputs. Churn is always excluded from
+input embedding, while its observed label supplies the training loss. If the
+target already exists in the schema, use `finetuned.update(target, mask=True)`
+instead of adding it again.
+
+```{typst}
+//| label: fig-pretraining-transfer
+//| fig-alt: "Customer context combines tenure, region, and repeated purchases containing age, amount, and merchant. Fine-tuning adds a churn prediction at the customer root."
+//| fig-cap: "Pretraining reconstructs selected amounts and merchants. Fine-tuning reuses the customer hierarchy and adds a churn target."
+#tree(node("customer", kind: "root", children: (
+  node("tenure_days", type: "Number"),
+  node("region", type: "Category"),
+  node("purchases", kind: "branch", repeated: true, children: (
+    node("days_ago", type: "Number"),
+    node("amount", type: "Number", detail: "Pretraining objective"),
+    node("merchant", type: "Category", detail: "Pretraining objective"),
+  )),
+  node("churned", kind: "target", type: "Boolean", detail: "Added for fine-tuning"),
+)))
+```
+
+Schema edits rebuild modules and retain state entries whose names, types, and
+tensor shapes still match. The new target starts with newly initialized state;
+changing widths, field types, or structure can also reinitialize incompatible
+parts. Keep existing addresses and geometry stable when reusing a pretrained
+model. Adding a field can change context and reduction behavior even when
+existing weights transfer. [Schema Mutation](schema-mutation.qmd) describes
+these boundaries.
+
+## Start A New Training Run
+
+Assign a fresh optimizer factory after the edits and use a new Trainer with
+labeled Arrow splits. A smaller learning rate is a starting point to evaluate:
+
+```python
+finetuned.optimizer = rf.adamw(learning_rate=1e-4)
+finetuning_data = rf.ArrowDataModule(
+    model=finetuned,
+    train=finetune_table,
+    validate=finetune_validation_table,
+)
+finetuner = lit.Trainer(max_epochs=20)
+finetuner.fit(model=finetuned, datamodule=finetuning_data)
+finetuned.save("artifacts/customer-churn.rf")
+```
+
+This starts new optimization from the transferred model state. Use `ckpt_path`
+with a full Lightning checkpoint when [resuming the same task](lightning.qmd#resume-training),
+including its optimizer and loop progress.
+Reapply any processors, scheduler, and desired compilation after loading and
+schema edits. For DDP, every rank must construct the same final schema.
+
+Fine-tuning here updates the model end to end, including the new decoder and
+existing encoders. Loaded [vocabularies](../core-concepts/vocabulary.qmd) and
+Number normalization statistics also
+continue learning from training observations; loading does not freeze them.
+Validation, test, and prediction reuse that state. For a fixed feature extractor,
+set `embed=True` on the desired root or branch, export
+[embeddings](../core-concepts/embeddings.qmd) in prediction mode, and fit a
+separate downstream model on those vectors.
+
+At inference, omit `churned` from the input and read the prediction at
+`customer/churned`. See [Prediction Output](prediction-output.qmd).
+
+## Keep Auxiliary Objectives Deliberately
+
+To retain amount reconstruction alongside churn, keep that policy when
+adapting the pretrained artifact. Replace the earlier
+`finetuned.update(reconstructed_inputs, mask=False)` call with:
+
+```python
+finetuned.update(
+    rf.where("address") == "customer/purchases/merchant",
+    mask=False,
+)
+finetuned.update(
+    rf.where("address") == "customer/purchases/amount",
+    weight=0.1,
+)
+```
+
+Then add the churn target and start the new run as above. Keeping the amount
+policy preserves its trained decoder; removing reconstruction and later
+reenabling it creates a new decoder. Both amount and churn losses are now
+optimized. `weight` scales the amount loss rather than its sampling rate or a
+fixed fraction of the combined loss.
+
+Compare fine-tuning against the same supervised task trained from scratch.
+Use the same held-out data and churn metric: pretraining loss and fine-tuning
+loss have different objective sets and are not directly comparable. Retaining
+auxiliary objectives may help or hurt the task, so evaluate that choice rather
+than assuming pretraining guarantees a better model. See [Evaluation](evaluation.qmd).

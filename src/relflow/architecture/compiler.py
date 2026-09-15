@@ -1,9 +1,11 @@
 """Transient compilation of the model's prepared tensor regions."""
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from copy import deepcopy
 from types import FunctionType, MethodType
-from typing import Any
+from typing import Any, cast
 
 import torch
 
@@ -14,7 +16,7 @@ from relflow.architecture.pool import CrossAttentionBlock, LearnedQueryCrossAtte
 __all__ = ["clear", "compile"]
 
 
-class Region:
+class Region[**P]:
     """Bind one compiler cache to one compute method, without serializing it."""
 
     def __init__(
@@ -44,15 +46,15 @@ class Region:
         function.__module__ = original.__module__
         function.__qualname__ = original.__qualname__
         self.compiled = torch.compile(
-            MethodType(function, eager.__self__),
+            cast(Callable[P, torch.Tensor], MethodType(function, eager.__self__)),
             backend=backend,
             fullgraph=True,
             dynamic=dynamic,
             options=options or None,
         )
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        owner = self.eager.__self__
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> torch.Tensor:
+        owner = cast(BranchEncoder | LearnedQueryCrossAttention, self.eager.__self__)
         layers = (
             owner.encoder
             if isinstance(owner, BranchEncoder)
@@ -61,13 +63,13 @@ class Region:
         # Torch skips guards for hooks by default. Check outside the graph so
         # callbacks added after warmup and custom replacements still run eager.
         if customized(layers, additional=(CrossAttentionBlock,)):
-            return self.eager(*args, **kwargs)
+            return cast(torch.Tensor, self.eager(*args, **kwargs))
         return self.compiled(*args, **kwargs)
 
-    def __deepcopy__(self, memo: dict[int, Any]) -> MethodType:
+    def __deepcopy__(self, memo: dict[int, object]) -> MethodType:
         return deepcopy(self.eager, memo)
 
-    def __reduce__(self):
+    def __reduce__(self) -> str | tuple[object, ...]:
         return self.eager.__reduce__()
 
 
@@ -77,7 +79,7 @@ def clear(model: torch.nn.Module) -> None:
         region = module.__dict__.get("compute")
         if isinstance(region, Region):
             if region.local:
-                module.compute = region.eager
+                setattr(module, "compute", region.eager)
             else:
                 del module.compute
 

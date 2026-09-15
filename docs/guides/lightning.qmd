@@ -1,285 +1,116 @@
----
-marimo-static-output: true
-eval: false
----
+# Training And Checkpoints
 
-# Training With Lightning
+`rf.Model` is a Lightning module. relflow supplies schema-based computation,
+losses, metrics, and tensorfield callbacks. Lightning controls the training
+loop, devices, precision, logging, and training checkpoints.
 
-**Example status — runnable:** the fit/validate/save/load/predict pattern is
-executed by `uv run pytest tests/examples/test_e2e_examples.py`.
+To learn from unlabeled records and then adapt to a labeled task, follow
+[Pretraining And Fine-Tuning](pretraining.qmd).
 
-`rf.Model` is a Lightning `LightningModule`, and RelFlow data modules implement
-Lightning's `LightningDataModule` contract. RelFlow owns the schema-generated
-model, typed losses, and prediction writing; Lightning owns execution.
+## Fit A Model
 
-Use this guide when the schema and data splits already exist and you need to
-configure a training loop. See [Data Modules](data-modules.qmd) for ingestion
-and [Evaluation And Metrics](evaluation.qmd) for interpreting the result.
+Start with a constructed model and independent Arrow `train_table` and
+`validation_table` inputs. The model needs at least one reconstruction
+objective, such as `mask=True` on a label, and an optimizer before fitting.
 
-## What Each Layer Owns
-
-| Concern | Owner |
-| --- | --- |
-| Schema, addresses, queries, mask policies, embeddings | RelFlow model |
-| Tensorization, value state, datatype losses and metrics | RelFlow model and data module |
-| Optimizer and scheduler factories | `rf.Model` configuration |
-| Epochs, devices, precision, callbacks, loggers, checkpoints | Lightning `Trainer` |
-| Arrow loading, preprocessing, sampling, shuffling, masking | RelFlow data module |
-| Batch prediction files | `Trainer.predict(...)` with `rf.Writer` |
-
-Normal Lightning callbacks, loggers, device placement, precision modes, and
-distributed strategies apply. RelFlow also installs the internal callbacks
-needed by active tensorfields and runtime contracts.
-
-## Minimal Training Loop
-
-The following is a runnable API example. It deliberately reuses the tiny frame
-for validation so the code remains compact; do not treat its validation metric
-as evidence of generalization.
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
+```python
 import lightning.pytorch as lit
-import pyarrow as pa
-import torch
 
 import relflow as rf
 
-records = pa.table(
-    {
-        "amount": [12.5, 8.0, 19.0, 27.5],
-        "merchant": ["books", "coffee", "books", "grocery"],
-        "fraud": ["no", "no", "yes", "no"],
-    }
-)
-
-model = rf.Model(
-    d_model=32,
-    n_layers=1,
-    n_heads=4,
-    batch_size=2,
-    optimizer=lambda module: torch.optim.AdamW(
-        module.parameters(),
-        lr=1e-3,
-    ),
-    amount=rf.Number,
-    merchant=rf.Category(size=3),
-    fraud=rf.Category(mask=True, size=2),
-)
-
+model.optimizer = rf.adamw(learning_rate=1e-3)
 datamodule = rf.ArrowDataModule(
     model=model,
-    train=records,
-    validate=records,
-    num_workers=0,
-    persistent_workers=False,
-    pin_memory=False,
+    train=train_table,
+    validate=validation_table,
 )
-
-trainer = lit.Trainer(
-    accelerator="cpu",
-    max_epochs=1,
-    logger=False,
-    enable_checkpointing=False,
-)
-
-trainer.fit(model=model, datamodule=datamodule)
-results = trainer.validate(model=model, datamodule=datamodule)
-print(results[0]["loss/validate"])
-```
-
-An optimizer is required before fitting. Pass either an optimizer instance or
-a factory that accepts the model. A factory is normally safer because
-Lightning can construct it at the right time and device placement.
-
-Configure a scheduler with the model's `scheduler` argument when needed. A
-scheduler factory receives `(model, optimizer)`; a Lightning-compatible
-scheduler configuration can also be supplied directly.
-
-For optional encoder and attention-pool compilation, call `model.compile()`
-before fitting. The [compiler workflow](performance.qmd#compile-encoder-and-pool-regions)
-covers region selection, warmup, prediction and checkpoint behavior.
-
-## Configure The Matching Loop And Split
-
-Lightning calls the corresponding RelFlow step for each stage:
-
-| Trainer entry point | Data-module split | RelFlow stage |
-| --- | --- | --- |
-| `trainer.fit(...)` | `train`, optionally `validate` | `train`, `validate` |
-| `trainer.validate(...)` | `validate` | `validate` |
-| `trainer.test(...)` | `test` | `test` |
-| `trainer.predict(...)` | `predict` | `predict` |
-
-Configure the split before invoking its loop. Missing optional splits are
-skipped during `fit`, but an explicit loop has nothing to consume without its
-matching split.
-
-The stage controls vocabulary learning, sampling, masking, logged metric names,
-and prediction metadata. Do not use a training dataloader as a convenient
-prediction path: use the intended split so those semantics remain explicit.
-
-## Log And Inspect Metrics
-
-RelFlow logs epoch-level metrics through Lightning. The weighted total losses
-are `loss/train`, `loss/validate`, and `loss/test`; individual leaves emit
-address-specific state and content metrics. Throughput is measured for every
-stage. Train, validation, and test throughput use normal module metrics;
-prediction throughput is sent directly to an attached logger and retained on
-the installed throughput callback because Lightning prediction hooks do not
-support `LightningModule.log(...)`.
-
-After a loop:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-for name, value in trainer.callback_metrics.items():
-    print(name, value)
-```
-
-Attach any Lightning logger for durable experiment tracking. The exact naming
-contract, loss composition, and model-selection advice live in
-[Evaluation And Metrics](evaluation.qmd).
-
-### Terminal Event Logs
-
-Operational events such as model construction, schema mutation, checkpoint
-restoration, vocabulary pressure, and numerical safeguards are separate from
-Lightning metrics. RelFlow renders them through Rich with a level column,
-colored component badge, structured context, and Rich tracebacks. Non-terminal
-destinations receive the same information as plain text.
-
-Set `RELFLOW_LOG_LEVEL` before importing RelFlow, or configure the package
-logger directly:
-
-```{python .marimo}
-#| echo: true
-#| output: false
-
-from relflow.logging import configure
-
-configure(level="INFO")
-```
-
-The supported named levels are `DEBUG`, `INFO`, `WARNING`, `ERROR`, and
-`CRITICAL`. This controls RelFlow's operational logger; Lightning experiment
-loggers and progress bars retain their own configuration.
-
-## Select And Restore Checkpoints
-
-An ordinary Lightning callback records the best path:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-checkpoint = lit.callbacks.ModelCheckpoint(
+checkpoint = rf.RollbackCheckpoint(
     dirpath="checkpoints",
     monitor="loss/validate",
     mode="min",
     save_top_k=1,
     save_last=True,
 )
-
-trainer = lit.Trainer(callbacks=[checkpoint])
+trainer = lit.Trainer(max_epochs=50, callbacks=[checkpoint])
+trainer.fit(model=model, datamodule=datamodule)
 ```
 
-Use `rf.RollbackCheckpoint` with the same arguments when the in-memory `model`
-should be restored to the best full checkpoint at the end of `fit`:
+For eager Polars frames, use `rf.PolarsDataModule(model=model,
+train=train_frame, validate=validation_frame)`. It converts the frames to Arrow
+at ingress. See [Data Modules](data-modules.qmd) for source and split choices.
 
-```{python .marimo}
-#| echo: true
-#| output: true
+Pass an optimizer instance or a factory receiving the model, either through
+`Model(optimizer=...)` or `model.optimizer`. A factory collects the current
+parameters when Lightning configures optimization. `scheduler` accepts a
+scheduler, a Lightning scheduler configuration, or a factory receiving
+`(model, optimizer)`.
 
-checkpoint = rf.RollbackCheckpoint(
-    dirpath="checkpoints",
-    monitor="loss/validate",
-    mode="min",
-    save_top_k=1,
+`RollbackCheckpoint` restores the best saved **model state** when fitting ends.
+It requires full checkpoints and at least one saved checkpoint. Use Lightning's
+ordinary `ModelCheckpoint` if the in-memory model should stay at its final
+training state. Read [Evaluation](evaluation.qmd) before choosing a monitor.
+
+## Choose The Loop
+
+| Call | Required data split | Purpose |
+| --- | --- | --- |
+| `trainer.fit(...)` | `train`; optionally `validate` | Optimize, optionally validating each epoch. |
+| `trainer.validate(...)` | `validate` | Evaluate validation objectives. |
+| `trainer.test(...)` | `test` | Evaluate held-out objectives. |
+| `trainer.predict(...)` | `predict` | Produce predictions through Lightning. |
+
+Stages also control masking and field-owned learning, such as vocabulary and
+normalizer updates. Use the corresponding split rather than repurposing a
+training loader for inference. For bounded requests, the separate
+`model.predict(observations)` convenience returns an Arrow table without a
+Trainer; see [Prediction Output](prediction-output.qmd).
+
+Set `accelerator`, `devices`, `precision`, and distributed `strategy` on the
+Trainer. relflow installs its own required callbacks automatically. Compile
+selected model regions before the loop with `model.compile()` if desired;
+[Performance](performance.qmd) describes exactly what this compiles.
+
+## Save And Load
+
+Use a relflow artifact to retain the schema and learned model state:
+
+```python
+model.save("artifacts/customer.rf")
+loaded = rf.Model.load("artifacts/customer.rf")
+predictions = loaded.predict(observations)
+```
+
+The artifact contains the state dictionary, schema, batch size, and producing
+relflow version. State includes field-owned buffers such as vocabularies and
+normalizers. `load` constructs the model on CPU. Move it to the intended device
+for direct inference; Lightning owns placement when using its loops.
+
+A `Model.save` artifact does not contain optimizer or scheduler state, Trainer
+progress, data sources, or processor configuration. Supply those explicitly
+when fitting a loaded model. Compilation is transient and must be requested
+again after loading.
+
+## Resume Training
+
+Use a full Lightning checkpoint to resume optimizer/scheduler state and loop
+progress. Recreate the runtime configuration and pass the checkpoint to `fit`:
+
+```python
+resumed = rf.Model.load("checkpoints/last.ckpt")
+resumed.optimizer = rf.adamw(learning_rate=1e-3)
+resume_data = rf.ArrowDataModule(
+    model=resumed,
+    train=train_table,
+    validate=validation_table,
+)
+trainer = lit.Trainer(max_epochs=100)
+trainer.fit(
+    model=resumed,
+    datamodule=resume_data,
+    ckpt_path="checkpoints/last.ckpt",
 )
 ```
 
-Do not set `save_weights_only=True` for `RollbackCheckpoint`. For persistence,
-resuming, and checkpoint compatibility, see
-[Model Lifecycle](model-lifecycle.qmd).
-
-## Interactive Prediction Is A Separate Arrow Path
-
-For one bounded Arrow unit, `model.predict(...)` handles encoding, inference
-mode, and output writing without creating a Trainer:
-
-```{python .marimo}
-#| echo: true
-#| output: true
-
-requests = pa.table(
-    {
-        "amount": [12.5, 8.0],
-        "merchant": ["books", "coffee"],
-    }
-)
-predictions = model.predict(requests)
-```
-
-Use it for notebooks, smoke tests, and small request batches. It is not a
-replacement for a data module and `trainer.predict(...)` in a large job. See
-[Prediction Output](prediction-output.qmd) for the returned Arrow table and
-[Batch Inference](batch-inference.qmd) for Parquet output.
-
-## Mutation And Active Loops
-
-RelFlow blocks schema mutation while Lightning owns a training, validation,
-test, or prediction loop.
-
-::: {.callout-warning}
-Do not call `model.update(...)`, `model.extend(...)`, `model.delete(...)`,
-`model.reset(...)`, or enter `model.override(...)` from an active loop or
-callback. Mutate between complete runs, then rebuild any detached data-module
-contract if necessary.
-:::
-
-Changing module shapes also invalidates optimizer state. Treat a shape-changing
-mutation as a new training phase and verify checkpoint compatibility rather
-than trying to splice it into a running Trainer.
-
-## Production Tuning Boundaries
-
-Documentation examples use CPU, one epoch, and zero data-loader workers for
-repeatability. Those values are not production defaults.
-
-Tune these layers independently and measure the result:
-
-- model width, depth, attention, branch lengths, and vocabulary capacities;
-- `model.batch_size` and Lightning precision/device strategy;
-- Arrow storage layout, shuffle window, sampling, and source scan cost; and
-- checkpoint frequency and logger overhead.
-
-The built-in throughput measurement estimates processed observations from
-completed batches and `model.batch_size`. A short final batch can make that
-estimate slightly high, and comparisons are meaningful only with equivalent
-workload, hardware, and measurement windows. After `trainer.predict(...)`, look
-for `throughput/predict` in the attached logger rather than
-`trainer.callback_metrics`.
-
-## Common Failures
-
-| Symptom | Likely cause or next check |
-| --- | --- |
-| Fit raises `optimizer must be passed` | Configure `model.optimizer` with an instance or factory. |
-| An explicit loop has no data | Add the matching `validate`, `test`, or `predict` split. |
-| Checkpoint monitor is missing | Inspect exact keys in `trainer.callback_metrics` and ensure validation runs each epoch. |
-| Mutation raises during a callback | Move the mutation between complete Lightning runs. |
-| Notebook settings are slow on a server | Tune Arrow storage/chunks, workers, pinning, devices, precision, and batch size; keep `num_workers=0` only for interactive debugging. |
-| Metrics are good only on the tutorial frame | Build a non-overlapping, leakage-safe validation split. |
-
-## Where Next
-
-- Choose ingestion and preprocessing with [Data Modules](data-modules.qmd).
-- Interpret results with [Evaluation And Metrics](evaluation.qmd).
-- Preserve the selected model with [Model Lifecycle](model-lifecycle.qmd).
-- Choose interactive, batch, or online prediction in
-  [Prediction Output](prediction-output.qmd).
+Recreate any scheduler and keep optimizer configuration consistent with the
+saved run. `rf.Model.load` restores model state; the `ckpt_path` argument is
+what tells Lightning to resume training state.

@@ -65,7 +65,7 @@ def test_leaf_query_is_observation_relative():
     assert leaf.query == "payload.amount"
 
 
-def test_leaf_query_rejects_the_old_batch_selector():
+def test_leaf_query_rejects_a_batch_axis_prefix():
     with pytest.raises(ValueError, match="must not begin with"):
         Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "query": "[*].payload.amount"})
 
@@ -136,13 +136,7 @@ def test_mask_is_frozen_and_rejects_unknown_fields():
 
 def test_node_rejects_extra_fields():
     with pytest.raises(ValueError, match="Extra inputs are not permitted"):
-        Node.model_validate({"name": "ok_name", "type": "node", "n_heads": 4, "p_prune": 0.0})
-
-
-@pytest.mark.parametrize("name", ["masks", "p_mask", "p_prune", "target"])
-def test_leaf_rejects_removed_mask_fields_even_with_extra_allow(name):
-    with pytest.raises(ValueError, match="removed node field"):
-        Leaf.model_validate({"name": "label", "type": "number", "n_heads": 4, name: False})
+        Node.model_validate({"name": "ok_name", "type": "node", "n_heads": 4, "unexpected": 0.0})
 
 
 def test_node_description_trims_and_accepts_optional_metadata():

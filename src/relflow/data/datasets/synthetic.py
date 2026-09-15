@@ -2,22 +2,28 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any, TypeAlias
 
 import pyarrow as pa
 
 import relflow
 from relflow.data.datasets.arrow import ArrowDataModule, ArrowStream, Retain
+from relflow.data.datasets.base import StratumConfig
 from relflow.data.datasets.custom import adapt, schemas
 from relflow.data.processors import PreprocessorInput
 from relflow.structs.enums import Strata
 
-Generator: TypeAlias = Callable[[], Iterator[Mapping[str, Any]]]
+Generator: TypeAlias = Callable[[], Iterable[Mapping[str, Any]]]
 
 
 class SyntheticDataModule(ArrowDataModule):
-    """Adapt restartable mapping generators to bounded Arrow record batches."""
+    """Adapt restartable mapping factories to bounded Arrow record batches.
+
+    Each split is a zero-argument callable returning a fresh iterable of records.
+    ``ingress_rows`` bounds each Arrow conversion; ``arrow_schema`` can declare
+    field types explicitly, including empty or all-null sources.
+    """
 
     def __init__(
         self,
@@ -29,21 +35,21 @@ class SyntheticDataModule(ArrowDataModule):
         predict: Generator | None = None,
         arrow_schema: pa.Schema | Mapping[Strata | str, pa.Schema] | None = None,
         ingress_rows: int = 4096,
-        preprocessor: PreprocessorInput | Mapping[Strata | str, PreprocessorInput] = (),
+        preprocessor: StratumConfig[PreprocessorInput] = (),
         seed: int = 0,
-        shuffle: bool | None | Mapping[Strata | str, bool | None] = None,
-        sample: float | Mapping[Strata | str, float] = 1.0,
-        replacement: bool | Mapping[Strata | str, bool] = False,
-        epoch_size: int | None | Mapping[Strata | str, int | None] = None,
-        shuffle_rows: int | None | Mapping[Strata | str, int | None] = None,
-        drop_last: bool | Mapping[Strata | str, bool] = False,
-        num_workers: int | Mapping[Strata | str, int] = 0,
-        persistent_workers: bool | Mapping[Strata | str, bool] = False,
-        pin_memory: bool | Mapping[Strata | str, bool] = False,
-        prefetch_factor: int | Mapping[Strata | str, int] = 2,
+        shuffle: StratumConfig[bool | None] = None,
+        sample: StratumConfig[float] = 1.0,
+        replacement: StratumConfig[bool] = False,
+        epoch_size: StratumConfig[int | None] = None,
+        shuffle_rows: StratumConfig[int | None] = None,
+        drop_last: StratumConfig[bool] = False,
+        num_workers: StratumConfig[int] = 0,
+        persistent_workers: StratumConfig[bool] = False,
+        pin_memory: StratumConfig[bool] = False,
+        prefetch_factor: StratumConfig[int] = 2,
         multiprocessing_context: str | None = None,
-        retain: Retain | Mapping[Strata | str, Retain] = (),
-    ):
+        retain: StratumConfig[Retain] = (),
+    ) -> None:
         if not isinstance(ingress_rows, int) or isinstance(ingress_rows, bool) or ingress_rows < 1:
             raise ValueError("ingress_rows must be a positive integer")
 
@@ -94,4 +100,4 @@ class SyntheticDataModule(ArrowDataModule):
         )
 
 
-__all__ = ["SyntheticDataModule"]
+__all__ = ["Generator", "SyntheticDataModule"]
