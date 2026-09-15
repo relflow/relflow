@@ -17,7 +17,7 @@ import relflow as rf
 app = rf.Deployment(checkpoint="order.ckpt").app()
 ```
 
-Or start Uvicorn through RelFlow with
+Or start Uvicorn through relflow with
 `rf.Deployment(checkpoint="order.ckpt").serve()`. The default port is 8000.
 The model is loaded at startup and placed on the selected accelerator.
 

@@ -19,7 +19,7 @@ metrics = trainer.validate(model=model, datamodule=datamodule)
 validation_loss = metrics[0]["loss/validate"]
 ```
 
-RelFlow logs epoch-level metrics. Individual tensorfields determine which
+relflow logs epoch-level metrics. Individual tensorfields determine which
 content metrics are available.
 
 | Metric | Interpretation |

@@ -1,6 +1,6 @@
 # Text
 
-Use `Text` to encode strings with a frozen Hugging Face model. RelFlow learns
+Use `Text` to encode strings with a frozen Hugging Face model. relflow learns
 how to combine those representations with the other fields. It does not
 fine-tune the external encoder or generate text.
 
@@ -64,14 +64,14 @@ not strings, token IDs, or target embeddings. Both settings of
 `jitter.normalize` act at the same pooled-embedding boundary.
 
 Text has no decoded public state/content payload. `embed=True` exports a
-contextual RelFlow embedding, distinct from the frozen encoder output; see
+contextual relflow embedding, distinct from the frozen encoder output; see
 [shared leaf options](../core-concepts/data-types.qmd#shared-leaf-options).
 Use [Vector](vector.qmd) when the source already supplies an embedding.
 
 ## External model assets
 
 The first use of a remote model identifier may download tokenizer and encoder
-assets. RelFlow checkpoints save the request and learned RelFlow weights,
+assets. relflow checkpoints save the request and learned relflow weights,
 but do not bundle those external assets. Every loading or serving process
 must be able to resolve the same identifier or local path. For reproducible
 deployment, prepare a pinned encoder directory and ship it with the artifact.

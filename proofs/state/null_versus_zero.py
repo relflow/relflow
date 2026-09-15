@@ -141,7 +141,7 @@ def score(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator: s
 #
 # ## How it works
 #
-# RelFlow represents a Number's state separately from its continuous content.
+# relflow represents a Number's state separately from its continuous content.
 # The model can therefore distinguish an Arrow null from a valued zero without
 # any variation among the actual numbers.
 #

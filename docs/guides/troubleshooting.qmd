@@ -35,7 +35,7 @@ configure(level="DEBUG")
 ```
 
 Supported levels are `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `CRITICAL`.
-This controls RelFlow event logging. Lightning experiment loggers, progress
+This controls relflow event logging. Lightning experiment loggers, progress
 bars, and [evaluation metrics](evaluation.qmd) have their own configuration.
 
 When isolating a failure, retain the original field types, relevant nested

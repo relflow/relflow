@@ -1,0 +1,15 @@
+@font-face {
+  font-family: "Libertinus Serif";
+  src: url("../fonts/LibertinusSerif-Semibold.otf") format("opentype");
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+
+.navbar-title,
+body.home #title-block-header .title {
+  font-family: "Libertinus Serif", serif;
+  font-weight: 600;
+  font-variant-ligatures: none;
+  letter-spacing: 0.023em;
+}

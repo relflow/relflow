@@ -150,9 +150,9 @@ summary on the model side. The extension owns distributed reduction. With
 `loss(module, prediction, batch, strata)` requires annotated parameters. Use
 `batch.trainable` to select objectives and target state to determine where
 content is meaningful. `module.track((address, strata, metric, component), value=...)`
-records metrics; RelFlow applies the request's loss weight.
+records metrics; relflow applies the request's loss weight.
 
-`output(module, address)` returns a stable `pa.StructType` or None. RelFlow
+`output(module, address)` returns a stable `pa.StructType` or None. relflow
 compiles it once, then passes that exact type to
 `write(module, prediction, datatype)`. The writer returns one flat StructArray
 coordinate per decoded position, with exactly the declared types and order.
@@ -166,12 +166,12 @@ when only embeddings are public. See [Prediction output](prediction-output.qmd).
 
 Schema restoration resolves request types against the **live registry**.
 Import the extension before constructing or loading its models; registration
-need not precede importing RelFlow. Checkpoints store schema and model state,
+need not precede importing relflow. Checkpoints store schema and model state,
 not the extension's Python implementation. Make the same implementation and
 its resources available in loading, data-loader, DDP, and serving processes.
 
 Declare optional dependencies with
-`requires={"import_name": "distribution[extra]"}`. RelFlow checks availability
+`requires={"import_name": "distribution[extra]"}`. relflow checks availability
 before graph construction, including load and rebuild. Register Lightning
 callback classes or factories through `extension.callback(...)`; every rank
 must use the same registrations.
@@ -181,5 +181,5 @@ normalization, Set for vocabularies, or DateParts for structured content.
 Verify schema round trips, nested axes, null/padded/masked/skipped positions,
 source-less prediction, compact embedding shapes, finite losses, stable Arrow
 output, checkpoint state, and the devices/process modes your extension claims
-to support. Keep the implementation importable and test it with the RelFlow
+to support. Keep the implementation importable and test it with the relflow
 version you ship.

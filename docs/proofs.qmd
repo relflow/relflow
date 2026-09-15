@@ -1,6 +1,6 @@
 ---
-title: Modeling Proofs
-description: What RelFlow has learned in controlled experiments, and where information is lost.
+title: Proofs
+description: What relflow has learned in controlled experiments, and where information is lost.
 listing:
   id: proofs
   contents: "proofs/catalog.yaml"

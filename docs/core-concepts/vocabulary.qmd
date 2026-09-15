@@ -117,7 +117,7 @@ targets for Category and Cluster.
 
 ## Workers And Distributed Training
 
-RelFlow shares vocabulary state with local data workers and synchronizes it
+relflow shares vocabulary state with local data workers and synchronizes it
 across DDP ranks. The first consumer admits labels directly; other workers and
 ranks submit new labels for synchronization. Those labels can remain unknown
 until the synchronization boundary, even when capacity is available.

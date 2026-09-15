@@ -37,7 +37,7 @@ for masks, decoder pooling, and embeddings.
 ## Learning and output
 
 Reconstruction combines state cross entropy with frequency-weighted binary
-cross entropy for valued targets. RelFlow tracks AUC and decision accuracy,
+cross entropy for valued targets. relflow tracks AUC and decision accuracy,
 precision, recall, and specificity for each configured threshold; names include
 `accuracy@0.5` and `recall@0.8`.
 

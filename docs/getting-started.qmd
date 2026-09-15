@@ -96,7 +96,7 @@ data = rf.ArrowDataModule(
 )
 ```
 
-Arrow datasets read batches from disk on demand. RelFlow opens a fresh scan
+Arrow datasets read batches from disk on demand. relflow opens a fresh scan
 each epoch, shuffles training through a bounded buffer, and forms batches of
 `model.batch_size` observations. The dataset can be larger than memory; working
 memory depends on scan batches, shuffle buffering, and the size of nested records.
@@ -111,7 +111,7 @@ memory. See [Data Modules](guides/data-modules.qmd) for other sources and
 ## Train And Save
 
 Configure an optimizer before fitting. Lightning runs the training loop;
-RelFlow supplies the typed losses and metrics.
+relflow supplies the typed losses and metrics.
 
 ```python
 import lightning.pytorch as lit

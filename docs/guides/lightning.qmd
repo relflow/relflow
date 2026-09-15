@@ -1,6 +1,6 @@
 # Training And Checkpoints
 
-`rf.Model` is a Lightning module. RelFlow supplies schema-based computation,
+`rf.Model` is a Lightning module. relflow supplies schema-based computation,
 losses, metrics, and tensorfield callbacks. Lightning controls the training
 loop, devices, precision, logging, and training checkpoints.
 
@@ -66,13 +66,13 @@ training loader for inference. For bounded requests, the separate
 Trainer; see [Prediction Output](prediction-output.qmd).
 
 Set `accelerator`, `devices`, `precision`, and distributed `strategy` on the
-Trainer. RelFlow installs its own required callbacks automatically. Compile
+Trainer. relflow installs its own required callbacks automatically. Compile
 selected model regions before the loop with `model.compile()` if desired;
 [Performance](performance.qmd) describes exactly what this compiles.
 
 ## Save And Load
 
-Use a RelFlow artifact to retain the schema and learned model state:
+Use a relflow artifact to retain the schema and learned model state:
 
 ```python
 model.save("artifacts/customer.rf")
@@ -81,7 +81,7 @@ predictions = loaded.predict(observations)
 ```
 
 The artifact contains the state dictionary, schema, batch size, and producing
-RelFlow version. State includes field-owned buffers such as vocabularies and
+relflow version. State includes field-owned buffers such as vocabularies and
 normalizers. `load` constructs the model on CPU. Move it to the intended device
 for direct inference; Lightning owns placement when using its loops.
 

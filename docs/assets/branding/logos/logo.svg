@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" class="typst-doc" viewBox="0 0 195 195" width="195pt" height="195pt" role="img" aria-label="RelFlow">
+<svg xmlns="http://www.w3.org/2000/svg" class="typst-doc" viewBox="0 0 195 195" width="195pt" height="195pt" role="img" aria-label="relflow">
     <defs><g id="relflow-canopy"><g transform="translate(6.462992125984253 30.101123095228353)">
                                     <path class="typst-shape" fill="#a5b989" fill-rule="nonzero" d="M 0.62362206 0 C 0.27951738 0 0 0.27951738 0 0.62362206 L 0 4.0036955 C 0 4.3478003 0.27951738 4.6273174 0.62362206 4.6273174 L 2.3811023 4.6273174 C 2.725207 4.6273174 3.0047245 4.3478003 3.0047245 4.0036955 L 3.0047245 0.62362206 C 3.0047245 0.27951738 2.725207 0 2.3811023 0 L 0.62362206 0 Z " />
                                 </g>
@@ -142,4 +142,4 @@
             </g>
         </g>
     </g>
-<title>RelFlow</title></svg>
+<title>relflow</title></svg>

@@ -26,7 +26,7 @@ result = model.predict(request_table, retain=("request_id",))
 
 Arrow tables and record batches are accepted directly. A nonempty sequence of
 mappings is also supported for small interactive requests. Use a typed Arrow
-object for empty input: RelFlow preserves the output schema and skips the
+object for empty input: relflow preserves the output schema and skips the
 forward pass.
 
 ## Read a field

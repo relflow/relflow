@@ -6,7 +6,7 @@ engine: markdown
 
 Pretraining learns from relationships in a broad collection of records.
 Fine-tuning starts from those learned weights and adapts the model to a specific
-task. In RelFlow, both use `trainer.fit(...)`; the data and reconstruction
+task. In relflow, both use `trainer.fit(...)`; the data and reconstruction
 objectives determine what the model learns.
 
 | Stage | Data | Objectives |

@@ -1,8 +1,9 @@
-"""Render official RelFlow branding with its 35% canopy glow."""
+"""Render official relflow branding with its 35% canopy glow."""
 
 import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
+from copy import deepcopy
 from pathlib import Path
 
 DIRECTORY = Path(__file__).resolve().parent
@@ -109,7 +110,7 @@ def render():
     paints = {}
     with tempfile.TemporaryDirectory(prefix="relflow-branding-") as temporary:
         for asset, title in (
-            ("logo", "RelFlow"),
+            ("logo", "relflow"),
             ("banner", "relflow"),
             ("preview", "relflow"),
         ):
@@ -137,7 +138,9 @@ def render():
                 root = ET.parse(destination).getroot()
                 if asset == "logo":
                     # The logo draws its tile first, then the canopy, then the two branches.
-                    paints[theme] = list(root.iter(f"{{{SVG}}}path"))[1].get("fill")
+                    paths = list(root.iter(f"{{{SVG}}}path"))
+                    background = paths[0].get("fill")
+                    paints[theme] = paths[1].get("fill")
                 glow(root, paints[theme])
                 root.set("role", "img")
                 root.set("aria-label", title)
@@ -145,6 +148,12 @@ def render():
                 themes[theme] = root
                 data = ET.tostring(root, encoding="utf-8") + b"\n"
                 outputs[directory / name] = data
+                if asset == "logo" and theme == "dark":
+                    navbar = deepcopy(root)
+                    for path in navbar.iter(f"{{{SVG}}}path"):
+                        if path.get("fill") == background:
+                            path.set("fill", "none")
+                    outputs[directory / "logo.navbar.svg"] = ET.tostring(navbar, encoding="utf-8") + b"\n"
                 destination.write_bytes(data)
                 png = destination.with_suffix(".png")
                 subprocess.run(

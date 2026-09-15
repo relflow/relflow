@@ -65,4 +65,4 @@ otherwise available in the written table. A `Writer` requires the same output
 schema across batches in its shard.
 
 HTTP serving has an additional requirement: preserve one final row per valid
-request in request order. RelFlow checks the count; the processor owns order.
+request in request order. relflow checks the count; the processor owns order.

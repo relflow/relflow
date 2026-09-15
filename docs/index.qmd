@@ -1,9 +1,10 @@
 ---
-title: RelFlow
+title: relflow
+body-classes: home
 toc: false
 ---
 
-RelFlow builds PyTorch models from nested records. Fields describe values;
+relflow builds PyTorch models from nested records. Fields describe values;
 branches describe relationships. A customer can contain orders, and each order
 can contain line items. Those local contexts feed a shared representation from
 which the model predicts missing or supervised values.
@@ -43,12 +44,9 @@ Applications supply Arrow tables or Polars frames.
 
 ## Explore The Evidence
 
-[Modeling proofs](proofs.qmd) show the schemas, controls, and recorded
+[Proofs](proofs.qmd) show the schemas, controls, and recorded
 results behind individual learning claims, including known limitations. Start
 with a task close to yours and inspect what its model can observe.
 
 Use this hierarchy when the relationships carry useful information. When a
 flat feature table already expresses the task, a simpler model may suffice.
-
-[Source](https://github.com/relflow/relflow) ·
-[Community](https://discord.gg/DVyZUkvTFA)

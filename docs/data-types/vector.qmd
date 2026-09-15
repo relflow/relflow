@@ -2,7 +2,7 @@
 
 Use `Vector` for a fixed-width numeric representation supplied by another
 system, such as an embedding or sensor window. Use [Text](text.qmd) when
-RelFlow should encode strings, or [Branch](branch.qmd) for repeated objects.
+relflow should encode strings, or [Branch](branch.qmd) for repeated objects.
 
 ```yaml
 embedding: [0.12, -0.03, 0.44, 0.08]
@@ -19,7 +19,7 @@ embedding = rf.Vector(n_dim=4, objective="l2", jitter=rf.Jitter(add=0.02))
 Each valued input must be an Arrow list or fixed-size list with exactly
 `n_dim` numeric, non-null elements. Values convert to `float32`. A null vector
 is a separate field state; null elements inside a valued vector are invalid.
-RelFlow does not fit a vector normalizer: prepare coordinate scales upstream.
+relflow does not fit a vector normalizer: prepare coordinate scales upstream.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
