@@ -1,4 +1,4 @@
-"""Render themed PNGs and fixed or adaptive SVGs for RelFlow branding."""
+"""Render official RelFlow branding with its 35% canopy glow."""
 
 import subprocess
 import tempfile
@@ -9,6 +9,77 @@ DIRECTORY = Path(__file__).resolve().parent
 SVG = "http://www.w3.org/2000/svg"
 ET.register_namespace("", SVG)
 ET.register_namespace("xlink", "http://www.w3.org/1999/xlink")
+
+
+def glow(root, paint):
+    """Duplicate the canopy within its native canvas so its glow scales with every layout."""
+    parents = {child: parent for parent in root.iter() for child in parent}
+    paths = [path for path in root.iter(f"{{{SVG}}}path") if path.get("fill") == paint]
+    if not paths:
+        raise ValueError(f"Logo canopy has no paths painted {paint!r}; pass the canopy color from the logo render.")
+    groups = [parents[path] for path in paths]
+    canvas = parents[groups[0]]
+    if any(group.tag != f"{{{SVG}}}g" or len(group) != 1 or parents[group] is not canvas for group in groups):
+        raise ValueError(
+            "Logo canopy paths must have individual transform groups in one canvas; check the Typst layout."
+        )
+    position = list(canvas).index(groups[0])
+    if list(canvas)[position : position + len(groups)] != groups:
+        raise ValueError("Logo canopy paths must be consecutive before the branches; check the Typst draw order.")
+
+    definitions = ET.Element(f"{{{SVG}}}defs")
+    leaves = ET.SubElement(definitions, f"{{{SVG}}}g", {"id": "relflow-canopy"})
+    for group in groups:
+        canvas.remove(group)
+        leaves.append(group)
+
+    # Convert the 195 pt mark's 1.8 pt spread and 3 pt blur into CeTZ's local points.
+    unit = 2.6 * 72 / 2.54 / 195
+    filtering = ET.SubElement(
+        definitions,
+        f"{{{SVG}}}filter",
+        {
+            "id": "relflow-glow",
+            "filterUnits": "userSpaceOnUse",
+            "x": "0",
+            "y": "0",
+            "width": str(195 * unit),
+            "height": str(195 * unit),
+            "color-interpolation-filters": "sRGB",
+        },
+    )
+    ET.SubElement(
+        filtering,
+        f"{{{SVG}}}feMorphology",
+        {
+            "in": "SourceGraphic",
+            "operator": "dilate",
+            "radius": str(1.8 * unit),
+            "result": "expanded",
+        },
+    )
+    ET.SubElement(
+        filtering,
+        f"{{{SVG}}}feGaussianBlur",
+        {
+            "in": "expanded",
+            "stdDeviation": str(3 * unit),
+        },
+    )
+    root.insert(0, definitions)
+    canvas.insert(
+        position,
+        ET.Element(
+            f"{{{SVG}}}use",
+            {
+                "href": "#relflow-canopy",
+                "filter": "url(#relflow-glow)",
+                "opacity": "0.35",
+            },
+        ),
+    )
+    canvas.insert(position + 1, ET.Element(f"{{{SVG}}}use", {"href": "#relflow-canopy"}))
+    return root
 
 
 def adaptive(light, dark):
@@ -35,6 +106,7 @@ def adaptive(light, dark):
 
 def render():
     outputs = {}
+    paints = {}
     with tempfile.TemporaryDirectory(prefix="relflow-branding-") as temporary:
         for asset, title in (
             ("logo", "RelFlow"),
@@ -45,35 +117,41 @@ def render():
             source = directory / f"{asset}.typ"
             themes = {}
             for theme in ("light", "dark"):
-                for extension in ("svg", "png"):
-                    name = f"{asset}.{theme}.{extension}"
-                    destination = Path(temporary) / name
-                    subprocess.run(
-                        [
-                            "typst",
-                            "compile",
-                            "--root",
-                            str(DIRECTORY),
-                            "--ignore-system-fonts",
-                            "--ppi",
-                            "144",
-                            "--input",
-                            f"theme={theme}",
-                            str(source),
-                            str(destination),
-                        ],
-                        cwd=DIRECTORY,
-                        check=True,
-                    )
-                    if extension == "png":
-                        outputs[directory / name] = destination.read_bytes()
-                        continue
-                    root = ET.parse(destination).getroot()
-                    root.set("role", "img")
-                    root.set("aria-label", title)
-                    ET.SubElement(root, f"{{{SVG}}}title").text = title
-                    themes[theme] = root
-                    outputs[directory / name] = ET.tostring(root, encoding="utf-8") + b"\n"
+                name = f"{asset}.{theme}.svg"
+                destination = Path(temporary) / name
+                subprocess.run(
+                    [
+                        "typst",
+                        "compile",
+                        "--root",
+                        str(DIRECTORY),
+                        "--ignore-system-fonts",
+                        "--input",
+                        f"theme={theme}",
+                        str(source),
+                        str(destination),
+                    ],
+                    cwd=DIRECTORY,
+                    check=True,
+                )
+                root = ET.parse(destination).getroot()
+                if asset == "logo":
+                    # The logo draws its tile first, then the canopy, then the two branches.
+                    paints[theme] = list(root.iter(f"{{{SVG}}}path"))[1].get("fill")
+                glow(root, paints[theme])
+                root.set("role", "img")
+                root.set("aria-label", title)
+                ET.SubElement(root, f"{{{SVG}}}title").text = title
+                themes[theme] = root
+                data = ET.tostring(root, encoding="utf-8") + b"\n"
+                outputs[directory / name] = data
+                destination.write_bytes(data)
+                png = destination.with_suffix(".png")
+                subprocess.run(
+                    ["rsvg-convert", "--dpi-x", "144", "--dpi-y", "144", "--output", str(png), str(destination)],
+                    check=True,
+                )
+                outputs[directory / png.name] = png.read_bytes()
             outputs[directory / f"{asset}.svg"] = (
                 ET.tostring(adaptive(themes["light"], themes["dark"]), encoding="utf-8") + b"\n"
             )
