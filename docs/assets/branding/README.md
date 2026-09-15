@@ -25,7 +25,8 @@ The `.light.svg` and `.dark.svg` files have fixed colors. Documentation uses
 `logos/logo.navbar.svg`, which retains the dark palette's columns and branches
 with a transparent background. The navbar and home-page wordmark use a locally
 served copy of Libertinus Serif Semibold, matching the banner's weight,
-tracking, and disabled ligatures. Banners and preview artwork are unused assets.
+tracking, and disabled ligatures. The repository README uses the light/dark
+banners; preview artwork remains available for sharing.
 
 PNGs use fixed light or dark colors and are rendered at 144 ppi:
 
