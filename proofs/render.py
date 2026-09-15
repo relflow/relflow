@@ -104,10 +104,17 @@ def evidence(entry: dict[str, Any]) -> str:
     return "\n\n".join(sections) + "\n"
 
 
+def write(path: Path, content: str) -> None:
+    """Preserve unchanged input timestamps so preview rendering can settle."""
+    if not path.exists() or path.read_text() != content:
+        path.write_text(content)
+
+
 def render(root: Path) -> None:
     docs = root / "docs/proofs"
     source = root / "proofs/results.yaml"
-    document = yaml.safe_load(source.read_text())
+    recorded = source.read_text()
+    document = yaml.safe_load(recorded)
     if document.get("schema") != 1:
         raise ValueError(f"{source}: expected evidence schema 1")
     entries = document["proofs"]
@@ -130,7 +137,7 @@ def render(root: Path) -> None:
             raise ValueError(f"{identifier}: another proof already uses page {page}")
         pages.add(page)
         page.parent.mkdir(exist_ok=True)
-        shutil.copyfile(script, page)
+        write(page, code)
         run = latest(entry)
         state = status(entry)
         if run is None:
@@ -147,25 +154,27 @@ def render(root: Path) -> None:
             if run["outcome"] == "error":
                 summary = "The latest full experiment encountered an execution error. See the recorded error below."
             elif run["outcome"] == "not_met":
-                summary += " The interpretation below is not confirmed by this run."
+                summary += " See the failed checks and their interpretation below."
             recorded_hash = run.get("provenance", {}).get("code_sha256")
             if recorded_hash and recorded_hash != fingerprint(code):
                 summary += (
                     " The experiment code has changed since this run; these measurements describe its earlier version."
                 )
         kind = "warning" if state in {"Gates not met", "Execution error", "Expected limitation"} else "note"
-        (output / f"{identifier}-status.md").write_text(
-            f'::: {{.callout-{kind} title="{identifier} · {title}"}}\n{summary}\n:::\n'
+        write(
+            output / f"{identifier}-status.md",
+            f'::: {{.callout-{kind} title="{identifier} · {title}"}}\n{summary}\n:::\n',
         )
-        (output / f"{identifier}-evidence.md").write_text(evidence(entry))
-        (output / f"{identifier}-script.md").write_text(
+        write(output / f"{identifier}-evidence.md", evidence(entry))
+        write(
+            output / f"{identifier}-script.md",
             f"Run by stable ID from the repository root:\n\n```bash\nuv run python proofs/run.py {identifier}\n```\n\n"
             f"Or run the self-contained script directly:\n\n```bash\nPYTHONPATH=proofs uv run python {entry['script']}\n```\n\n"
             f"Add `--accelerator gpu` for CUDA or `--seed 42` for another seeded experiment. "
             "`--steps 2` checks execution with a short training budget; it is recorded as a smoke run.\n\n"
-            f"[Download the complete proof](../_generated/{identifier}.py).\n"
+            f"[Download the complete proof](../_generated/{identifier}.py).\n",
         )
-        shutil.copyfile(script, output / f"{identifier}.py")
+        write(output / f"{identifier}.py", code)
         catalog.append(
             {
                 "id": identifier,
@@ -179,8 +188,8 @@ def render(root: Path) -> None:
     for page in docs.glob("*/*.py"):
         if page.parent != output and page not in pages:
             page.unlink()
-    (docs / "catalog.yaml").write_text(yaml.safe_dump(catalog, sort_keys=False, allow_unicode=True))
-    shutil.copyfile(source, output / "results.yaml")
+    write(docs / "catalog.yaml", yaml.safe_dump(catalog, sort_keys=False, allow_unicode=True))
+    write(output / "results.yaml", recorded)
 
 
 if __name__ == "__main__":

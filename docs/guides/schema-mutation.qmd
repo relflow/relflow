@@ -79,3 +79,30 @@ A failed update that cannot rebuild restores its previous schema and graph.
 Successful changes clear compilation and cached output contracts. Call
 `model.compile()` again if wanted, reevaluate the changed model, and save the
 artifact you intend to use.
+
+## Evidence For Learned Behavior
+
+The mutation proofs start with trained models, evaluate immediately after an
+edit, and measure adaptation separately:
+
+- [Neutral edits](../proofs/mutations/neutral-edits-preserve-learning.py)
+  check prediction, normalization, and vocabulary retention.
+- [Adding a hidden target](../proofs/mutations/extend-prediction-target.py)
+  checks immediate retention and learning with continuation and scratch controls.
+- [Selective reset](../proofs/mutations/reset-prediction-target.py)
+  checks localized loss and relearning of one hidden output.
+- [Deactivation and restoration](../proofs/mutations/deactivate-and-restore-input.py)
+  removes an informative input, then checks updates, override exits, and
+  reactivation from an inactive checkpoint.
+- [Deletion and adaptation](../proofs/mutations/delete-input-and-adapt.py)
+  compares retraining with inactive, scratch, and continuation controls against
+  the best prediction possible from the remaining information.
+
+These experiments cover specific edits and synthetic tasks. Consult their
+recorded outcomes: retaining state entries does not establish identical
+predictions when a schema-derived computation changes.
+
+The added-target experiment currently fails exact prediction retention with
+the default attention reduction. Adding the hidden field changes the root
+pool's capacity and shifts old predictions despite preserving existing state.
+The new output still learns successfully during adaptation.
