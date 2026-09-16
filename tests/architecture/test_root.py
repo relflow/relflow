@@ -441,6 +441,21 @@ def test_online_vocabulary_model_uses_local_storage_until_shared():
     assert vocab.snapshot() == ["ALPHA", "BETA"]
 
 
+def test_vocabulary_reservations_refresh_after_checkpoint_restore():
+    vocabulary = OnlineVocabularyModel(size=8)
+    vocabulary.load_snapshot(["ALPHA"])
+    checkpoint = vocabulary.state_dict()
+    context = vocabulary.state
+    context.reserve("BETA", learn=True)
+    assert vocabulary.snapshot() == ["ALPHA", "BETA"]
+
+    vocabulary.load_state_dict(checkpoint)
+    assert vocabulary.snapshot() == ["ALPHA"]
+    context.reserve("BETA", learn=True)
+    assert context.encode("BETA") == 1
+    assert vocabulary.snapshot() == ["ALPHA", "BETA"]
+
+
 def test_vocabulary_callback_freezes_model_vocabularies_on_fit_end():
     model = Model(schema=configuration(), batch_size=2)
     address = Address("root", "label")

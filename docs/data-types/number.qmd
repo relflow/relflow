@@ -53,6 +53,13 @@ masking and jitter. Validation, test, and prediction reuse these statistics;
 checkpoints preserve them. Distributed training combines each batch's
 sufficient statistics across ranks before updating.
 
+Training observations, means, and variances use float32, including under BF16
+mixed precision; counts remain int64. Centered batch moments avoid subtracting
+nearly equal squared sums when values have large offsets. Values are rounded
+to float32 before normalization, so choose source units that preserve the
+differences your task needs. Float64 prediction columns do not restore lost
+input precision.
+
 For an application-supplied trained `model`:
 
 ```python

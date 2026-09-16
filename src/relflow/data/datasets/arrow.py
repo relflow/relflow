@@ -788,6 +788,11 @@ class ArrowDataModule(lit.LightningDataModule):
     def batch_size(self) -> int:
         return self.model.batch_size
 
+    @batch_size.setter
+    def batch_size(self, value: int) -> None:
+        """Let Lightning's batch-size finder update the model-owned batch size."""
+        self.model.batch_size = value
+
     @property
     def encoding_context(self) -> InterprocessEncodingContext:
         return self.model.interprocess_encoding_context

@@ -1,11 +1,15 @@
+from datetime import timedelta
 from logging.handlers import BufferingHandler
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pyarrow as pa
 import pydantic
 import pytest
 import torch
+import torch.distributed as distributed
+import torch.multiprocessing as multiprocessing
 from tensordict import TensorDict
 
 import relflow as rf
@@ -385,6 +389,73 @@ def test_number_normalizer_learns_precomputed_finite_moments():
     assert normalizer.count.item() == 2
     assert normalizer.mean.item() == pytest.approx(2.0)
     assert normalizer.var.item() == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("values", [[1.0, 3.0], [], [float("nan"), float("inf")]])
+def test_number_moments_keep_float32_statistics_and_int64_counts(values):
+    observation = moments(torch.tensor(values, dtype=torch.float64))
+    assert observation["count"].dtype == torch.int64
+    assert observation["mean"].dtype == observation["var"].dtype == torch.float32
+    assert observation.batch_size == torch.Size([])
+    assert all(torch.isfinite(observation[key]).all() for key in ("count", "mean", "var"))
+
+
+def test_number_float32_variance_preserves_small_differences_at_large_offsets():
+    values = torch.tensor([1_000_000.0, 1_000_002.0, 1_000_004.0, 1_000_006.0])
+    normalizer = GlobalOnlineNormalizer()
+    normalizer.learn(moments(values[:2]))
+    normalizer.learn(moments(values[2:]))
+    assert normalizer.mean.item() == 1_000_003.0
+    assert normalizer.var.item() == pytest.approx(5.0)
+    assert normalizer.count.item() == 4
+    assert normalizer.mean.dtype == normalizer.var.dtype == torch.float32
+
+
+def test_number_constant_large_values_do_not_overflow_squared_sums():
+    normalizer = GlobalOnlineNormalizer()
+    normalizer.update(torch.full((4,), 1e30))
+    assert torch.isfinite(normalizer.mean).all()
+    assert normalizer.var.item() == 0.0
+
+
+def test_number_observes_large_integers_in_float32():
+    configured = rf.Model(amount=rf.Number, d_model=8, n_layers=1, n_heads=2, batch_size=2)
+    records = pa.table({"amount": [16_777_217, 16_777_219]})
+    datamodule = rf.ArrowDataModule(configured, train=records, shuffle=False)
+    encoded = next(iter(datamodule.train_dataloader()))
+    observation = encoded.observations["record/amount"][TensorKey.content]
+    assert observation["mean"].dtype == torch.float32
+    assert observation["count"].dtype == torch.int64
+    assert observation["mean"].item() == records["amount"].to_numpy().astype("float32").mean().item()
+
+
+def distributed_normalization(rank: int, directory: str, empty: bool) -> None:
+    distributed.init_process_group(
+        "gloo",
+        init_method=(Path(directory) / "rendezvous").as_uri(),
+        rank=rank,
+        world_size=2,
+        timeout=timedelta(seconds=30),
+    )
+    try:
+        normalizer = GlobalOnlineNormalizer()
+        local = [1_000_000.0] if rank == 0 else [1_000_002.0, 1_000_004.0, 1_000_006.0]
+        if empty and rank == 0:
+            local = []
+        normalizer.learn(moments(torch.tensor(local, dtype=torch.float32)))
+        assert normalizer.count.item() == (3 if empty else 4)
+        assert normalizer.mean.item() == (1_000_004.0 if empty else 1_000_003.0)
+        assert normalizer.var.item() == pytest.approx(8 / 3 if empty else 5.0)
+        assert normalizer.mean.dtype == normalizer.var.dtype == torch.float32
+        normalizer.learn(moments(torch.empty(0)))
+        assert normalizer.count.item() == (3 if empty else 4)
+    finally:
+        distributed.destroy_process_group()
+
+
+@pytest.mark.parametrize("empty", [False, True])
+def test_number_float32_moments_merge_across_ranks(tmp_path, empty):
+    multiprocessing.spawn(distributed_normalization, args=(str(tmp_path), empty), nprocs=2, join=True)
 
 
 def test_number_embedder_clamps_unsafe_fourier_inputs_and_warns():

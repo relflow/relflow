@@ -133,8 +133,10 @@ class VocabularyState:
 
     def reserve(self, values: Any, *, learn: bool) -> None:
         """Reserve every scalar token found in a JSON-like nested value."""
+        # A checkpoint restore can shrink the master while an existing loader
+        # still holds this state. Refresh before consulting its cached index.
+        self.refresh()
         if not learn:
-            self.refresh()
             return
 
         candidates: list[Any] = []

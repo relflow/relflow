@@ -66,7 +66,7 @@ class CheckpointState:
     def dump(module: "Model", checkpoint: dict[str, Any]) -> None:
         """Add RelFlow metadata to an otherwise framework-owned checkpoint mapping."""
         checkpoint["version"] = module.version
-        checkpoint["schema"] = module.schema.model_dump(mode="python")
+        checkpoint["schema"] = module.schema.model_dump(mode="json")
         checkpoint["batch_size"] = module.batch_size
 
     @staticmethod
