@@ -1,18 +1,22 @@
 ---
 title: Proofs
 description: What relflow has learned in controlled experiments, and where information is lost.
+format:
+  html:
+    css: assets/stylesheets/proofs.css
+    include-after-body: assets/proof-status.html
 listing:
   id: proofs
   contents: "proofs/catalog.yaml"
   type: table
   fields: [id, title, categories, proof-status]
-  field-links: [id, title]
+  field-links: [title]
   field-display-names:
     id: ID
     title: Proof
     categories: Family
     proof-status: Status
-  sort: [categories, title]
+  sort: id
   filter-ui: [id, title, categories, proof-status]
   sort-ui: [id, title, categories, proof-status]
   categories: false
@@ -46,12 +50,12 @@ experiment results.
 
 | Status | What the evidence establishes |
 | --- | --- |
-| **Provisional pass** | The reported experiment clears its gates, usually for one deterministic seed. Broader stability or generalization remains to be established. |
-| **Expected limitation** | The experiment reproduces a specific loss of information or unsuccessful modeling route. Its checks are met when that limitation appears. |
-| **Partial evidence** | Internal behavior passes a mechanistic check, while a claim such as held-out prediction or partition recovery remains untested. |
-| **Gates not met** | The latest full run completed but did not meet every stated behavioral criterion. |
-| **Execution error** | The latest full run could not complete. Its error is recorded separately from model quality. |
-| **Not run** | No full experiment run has been recorded. |
+| [Passing]{.proof-status data-proof-status="Passing"} | The reported experiment clears its gates, usually for one deterministic seed. The result is provisional: broader stability or generalization remains to be established. |
+| [Limited]{.proof-status data-proof-status="Limited"} | The experiment successfully reproduces an expected loss of information or unsuccessful modeling route. Its checks are met when that limitation appears; this is not a failed experiment. |
+| [Partial]{.proof-status data-proof-status="Partial"} | Internal behavior passes a mechanistic check, while a claim such as held-out prediction or partition recovery remains untested. |
+| [Failing]{.proof-status data-proof-status="Failing"} | The latest full run completed but did not meet every stated behavioral criterion. |
+| [Error]{.proof-status data-proof-status="Error"} | The latest full run could not complete. Its error is recorded separately from model quality. |
+| [Missing]{.proof-status data-proof-status="Missing"} | No full experiment run has been recorded. |
 
 These are empirical checks of learned behavior. Training speed and memory use
 require separate measurements. Learned arithmetic is approximate; use exact
@@ -61,8 +65,8 @@ be exact.
 ## Explore The Proofs
 
 Sort by **ID**, **Proof**, **Family**, or **Status**, using the column headings or the
-order menu. Filter by an ID, task, family, or status, then select a proof to explore
-its insights, examples, and evidence.
+order menu. Filter by an ID, task, family, or status, then select any part of a
+proof's row to explore its insights, examples, and evidence.
 
 ::: {#proofs}
 :::

@@ -4,7 +4,7 @@ proofs:
     script: proofs/aggregation/attention_sum_in_range.py
     page: docs/proofs/aggregation/attention-sum-in-range.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/aggregation/cardinality_generalization/test_attention_sum_in_range.py
@@ -97,7 +97,7 @@ proofs:
     script: proofs/aggregation/attention_sum_unseen_lengths.py
     page: docs/proofs/aggregation/attention-sum-unseen-lengths.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/aggregation/cardinality_generalization/test_attention_sum_unseen_lengths.py
@@ -218,7 +218,7 @@ proofs:
     script: proofs/aggregation/mean_duplicate_invariance.py
     page: docs/proofs/aggregation/mean-duplicate-invariance.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/aggregation/cardinality_generalization/test_mean_duplicate_invariance.py
@@ -316,7 +316,7 @@ proofs:
     script: proofs/aggregation/visible_count_sum.py
     page: docs/proofs/aggregation/visible-count-sum.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/aggregation/cardinality_generalization/test_visible_count_sum.py
@@ -424,7 +424,7 @@ proofs:
     script: proofs/aggregation/visible_count_unseen_lengths.py
     page: docs/proofs/aggregation/visible-count-unseen-lengths.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/aggregation/cardinality_generalization/test_visible_count_unseen_lengths.py
@@ -517,7 +517,7 @@ proofs:
     script: proofs/aggregation/aligned_pair_covariance.py
     page: docs/proofs/aggregation/aligned-pair-covariance.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/aggregation/distribution_statistics/test_aligned_pair_covariance.py
@@ -623,7 +623,7 @@ proofs:
     script: proofs/aggregation/raw_value_variance.py
     page: docs/proofs/aggregation/raw-value-variance.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/aggregation/distribution_statistics/test_raw_value_variance.py
@@ -720,7 +720,7 @@ proofs:
     script: proofs/aggregation/supplied_cross_deviations.py
     page: docs/proofs/aggregation/supplied-cross-deviations.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/aggregation/distribution_statistics/test_supplied_cross_deviations.py
@@ -808,7 +808,7 @@ proofs:
     script: proofs/aggregation/supplied_squared_deviations.py
     page: docs/proofs/aggregation/supplied-squared-deviations.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/aggregation/distribution_statistics/test_supplied_squared_deviations.py
@@ -896,7 +896,7 @@ proofs:
     script: proofs/aggregation/selected_group_raw_weighted_sum.py
     page: docs/proofs/aggregation/selected-group-raw-weighted-sum.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/aggregation/grouped_weighted_aggregation/test_selected_group_raw_weighted_sum.py
@@ -1013,7 +1013,7 @@ proofs:
     script: proofs/aggregation/selected_group_supplied_contribution_sum.py
     page: docs/proofs/aggregation/selected-group-supplied-contribution-sum.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/aggregation/grouped_weighted_aggregation/test_selected_group_supplied_contribution_sum.py
@@ -1123,7 +1123,7 @@ proofs:
     script: proofs/aggregation/requested_rank_values.py
     page: docs/proofs/aggregation/requested-rank-values.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/aggregation/order_statistics/test_requested_rank_values.py
@@ -1370,7 +1370,7 @@ proofs:
     script: proofs/aggregation/mean_erases_contribution_count.py
     page: docs/proofs/aggregation/mean-erases-contribution-count.py
     historical:
-      status: Expected limitation
+      status: Limited
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/aggregation/weighted_aggregation/test_mean_erases_contribution_count.py
@@ -1467,7 +1467,7 @@ proofs:
     script: proofs/aggregation/raw_value_weight_sum.py
     page: docs/proofs/aggregation/raw-value-weight-sum.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/aggregation/weighted_aggregation/test_raw_value_weight_sum.py
@@ -1587,7 +1587,7 @@ proofs:
     script: proofs/aggregation/supplied_contribution_sum.py
     page: docs/proofs/aggregation/supplied-contribution-sum.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/aggregation/weighted_aggregation/test_supplied_contribution_sum.py
@@ -1675,7 +1675,7 @@ proofs:
     script: proofs/aggregation/variable_cardinality_weighted_mean.py
     page: docs/proofs/aggregation/variable-cardinality-weighted-mean.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/aggregation/weighted_aggregation/test_variable_cardinality_weighted_mean.py
@@ -1789,7 +1789,7 @@ proofs:
     script: proofs/calibration/signal_vs_noise.py
     page: docs/proofs/calibration/signal-vs-noise.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/calibration/signal_detection/test_signal_vs_noise.py
@@ -1885,7 +1885,7 @@ proofs:
     script: proofs/cluster/hidden_regression_regimes.py
     page: docs/proofs/cluster/hidden-regression-regimes.py
     historical:
-      status: Partial evidence
+      status: Partial
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/cluster/cluster_convergence/test_hidden_regression_regimes.py
@@ -2120,7 +2120,7 @@ proofs:
     script: proofs/cluster/plain_input_is_dormant.py
     page: docs/proofs/cluster/plain-input-is-dormant.py
     historical:
-      status: Expected limitation
+      status: Limited
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/cluster/cluster_convergence/test_plain_input_is_dormant.py
@@ -2250,7 +2250,7 @@ proofs:
     script: proofs/cluster/reconstructing_category_labels.py
     page: docs/proofs/cluster/reconstructing-category-labels.py
     historical:
-      status: Partial evidence
+      status: Partial
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/cluster/cluster_convergence/test_reconstructing_category_labels.py
@@ -2486,7 +2486,7 @@ proofs:
     script: proofs/identity/unseen_identity_equality.py
     page: docs/proofs/identity/unseen-identity-equality.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/identity/hash_equality/test_unseen_identity_equality.py
@@ -2587,7 +2587,7 @@ proofs:
     script: proofs/relational/attention_number_payload.py
     page: docs/proofs/relational/attention-number-payload.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/relational/argmax_retrieval/test_attention_number_payload.py
@@ -2691,7 +2691,7 @@ proofs:
     script: proofs/relational/pass_through_number_payload.py
     page: docs/proofs/relational/pass-through-number-payload.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/relational/argmax_retrieval/test_pass_through_number_payload.py
@@ -2798,7 +2798,7 @@ proofs:
     script: proofs/relational/aligned_position_control.py
     page: docs/proofs/relational/aligned-position-control.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/relational/associative_recall/test_aligned_position_control.py
@@ -2900,7 +2900,7 @@ proofs:
     script: proofs/relational/hash_recall.py
     page: docs/proofs/relational/hash-recall.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/relational/associative_recall/test_hash_recall.py
@@ -3007,7 +3007,7 @@ proofs:
     script: proofs/relational/filtered_mean.py
     page: docs/proofs/relational/filtered-mean.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/relational/category_conditioned_reduction/test_filtered_mean.py
@@ -3146,7 +3146,7 @@ proofs:
     script: proofs/relational/group_operation_composition.py
     page: docs/proofs/relational/group-operation-composition.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/relational/category_conditioned_reduction/test_group_operation_composition.py
@@ -3356,7 +3356,7 @@ proofs:
     script: proofs/relational/direct_sibling_hash_overlap.py
     page: docs/proofs/relational/direct-sibling-hash-overlap.py
     historical:
-      status: Expected limitation
+      status: Limited
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/relational/collection_overlap/test_direct_sibling_hash_overlap.py
@@ -3504,7 +3504,7 @@ proofs:
     script: proofs/relational/flat_unseen_hash_equality_control.py
     page: docs/proofs/relational/flat-unseen-hash-equality-control.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/relational/collection_overlap/test_flat_unseen_hash_equality_control.py
@@ -3611,7 +3611,7 @@ proofs:
     script: proofs/relational/repeated_subtotal_reconstruction.py
     page: docs/proofs/relational/repeated-subtotal-reconstruction.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/relational/item_alignment/test_repeated_subtotal_reconstruction.py
@@ -3720,7 +3720,7 @@ proofs:
     script: proofs/relational/fixed_length.py
     page: docs/proofs/relational/fixed-length.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/relational/operation_conditioned_reduction/test_fixed_length.py
@@ -3913,7 +3913,7 @@ proofs:
     script: proofs/relational/grouped_peer_deviation.py
     page: docs/proofs/relational/grouped-peer-deviation.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/relational/peer_relative_inference/test_grouped_peer_deviation.py
@@ -4047,7 +4047,7 @@ proofs:
     script: proofs/relational/single_query_preserves_group_membership.py
     page: docs/proofs/relational/single-query-preserves-group-membership.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/relational/peer_relative_inference/test_single_query_preserves_group_membership.py
@@ -4165,7 +4165,7 @@ proofs:
     script: proofs/relational/supplied_peer_mean_control.py
     page: docs/proofs/relational/supplied-peer-mean-control.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/relational/peer_relative_inference/test_supplied_peer_mean_control.py
@@ -4270,7 +4270,7 @@ proofs:
     script: proofs/relational/ungrouped_peer_deviation.py
     page: docs/proofs/relational/ungrouped-peer-deviation.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/relational/peer_relative_inference/test_ungrouped_peer_deviation.py
@@ -4392,7 +4392,7 @@ proofs:
     script: proofs/relational/category_identity.py
     page: docs/proofs/relational/category-identity.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/relational/sibling_entity_transfer/test_category_identity.py
@@ -4505,7 +4505,7 @@ proofs:
     script: proofs/relational/hash_identity.py
     page: docs/proofs/relational/hash-identity.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/relational/sibling_entity_transfer/test_hash_identity.py
@@ -4619,7 +4619,7 @@ proofs:
     script: proofs/state/null_versus_zero.py
     page: docs/proofs/state/null-versus-zero.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/state/missingness/test_null_versus_zero.py
@@ -4777,7 +4777,7 @@ proofs:
     script: proofs/structure/attention_learns_fixed_width_sum.py
     page: docs/proofs/structure/attention-learns-fixed-width-sum.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/structure/hierarchical_statistics/test_attention_learns_fixed_width_sum.py
@@ -4879,7 +4879,7 @@ proofs:
     script: proofs/structure/attention_preserves_nested_cardinality.py
     page: docs/proofs/structure/attention-preserves-nested-cardinality.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/structure/hierarchical_statistics/test_attention_preserves_nested_cardinality.py
@@ -4980,7 +4980,7 @@ proofs:
     script: proofs/structure/mean_erases_cardinality.py
     page: docs/proofs/structure/mean-erases-cardinality.py
     historical:
-      status: Expected limitation
+      status: Limited
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/structure/hierarchical_statistics/test_mean_erases_cardinality.py
@@ -5084,7 +5084,7 @@ proofs:
     script: proofs/temporal/business_window_requires_composition.py
     page: docs/proofs/temporal/business-window-requires-composition.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/temporal/datepart_periodicity/test_business_window_requires_composition.py
@@ -5192,7 +5192,7 @@ proofs:
     script: proofs/temporal/leap_boundary_requires_context.py
     page: docs/proofs/temporal/leap-boundary-requires-context.py
     historical:
-      status: Expected limitation
+      status: Limited
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/temporal/datepart_periodicity/test_leap_boundary_requires_context.py
@@ -5290,7 +5290,7 @@ proofs:
     script: proofs/temporal/month_from_day_of_year.py
     page: docs/proofs/temporal/month-from-day-of-year.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/temporal/datepart_periodicity/test_month_from_day_of_year.py
@@ -5389,7 +5389,7 @@ proofs:
     script: proofs/temporal/weekday_requires_year_context.py
     page: docs/proofs/temporal/weekday-requires-year-context.py
     historical:
-      status: Expected limitation
+      status: Limited
       source_revision: 810b3fe3b0b25c2c7a718571d83f6006f23110c3
       sources:
       - https://github.com/relflow/relflow/blob/810b3fe/proofs/temporal/datepart_periodicity/test_weekday_requires_year_context.py
@@ -5487,7 +5487,7 @@ proofs:
     script: proofs/mutations/neutral_edits_preserve_learning.py
     page: docs/proofs/mutations/neutral-edits-preserve-learning.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: null
       sources: []
       summary: New experiment; no historical run predates registration.
@@ -6340,7 +6340,7 @@ proofs:
     script: proofs/mutations/extend_prediction_target.py
     page: docs/proofs/mutations/extend-prediction-target.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: null
       sources: []
       summary: New experiment; no historical run predates registration.
@@ -10979,7 +10979,7 @@ proofs:
     script: proofs/mutations/reset_prediction_target.py
     page: docs/proofs/mutations/reset-prediction-target.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: null
       sources: []
       summary: New experiment; no historical run predates registration.
@@ -13994,7 +13994,7 @@ proofs:
     script: proofs/mutations/deactivate_and_restore_input.py
     page: docs/proofs/mutations/deactivate-and-restore-input.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: null
       sources: []
       summary: New experiment; no historical run predates registration.
@@ -14891,7 +14891,7 @@ proofs:
     script: proofs/mutations/delete_input_and_adapt.py
     page: docs/proofs/mutations/delete-input-and-adapt.py
     historical:
-      status: Provisional pass
+      status: Passing
       source_revision: null
       sources: []
       summary: New experiment; no historical run predates registration.

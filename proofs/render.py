@@ -42,11 +42,11 @@ def latest(entry: dict[str, Any]) -> dict[str, Any] | None:
 def status(entry: dict[str, Any]) -> str:
     run = latest(entry)
     if run is None:
-        return "Not run"
+        return "Missing"
     if run["outcome"] == "error":
-        return "Execution error"
+        return "Error"
     if run["outcome"] == "not_met":
-        return "Gates not met"
+        return "Failing"
     return entry["historical"]["status"]
 
 
@@ -160,7 +160,7 @@ def render(root: Path) -> None:
                 summary += (
                     " The experiment code has changed since this run; these measurements describe its earlier version."
                 )
-        kind = "warning" if state in {"Gates not met", "Execution error", "Expected limitation"} else "note"
+        kind = "warning" if state in {"Failing", "Error", "Limited"} else "note"
         write(
             output / f"{identifier}-status.md",
             f'::: {{.callout-{kind} title="{identifier} · {title}"}}\n{summary}\n:::\n',

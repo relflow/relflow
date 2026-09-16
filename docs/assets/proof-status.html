@@ -1,0 +1,35 @@
+<script>
+  {
+    const listing = document.querySelector("#listing-proofs");
+
+    const sort = listing.querySelector("#listing-proofs-sort");
+    for (const option of sort.querySelectorAll('option[value=""], option[value="index"]')) {
+      option.remove();
+    }
+    sort.value = "listing-id";
+
+    // Keep Quarto's plain status text intact for listing search and sorting.
+    for (const badge of listing.querySelectorAll(".listing-proof-status")) {
+      badge.classList.add("proof-status");
+      badge.dataset.proofStatus = badge.textContent.trim();
+    }
+
+    // Handle actual cell clicks; the title link remains the keyboard entry point.
+    const navigate = (event) => {
+      if (event.button !== 0 && event.button !== 1) return;
+      if (event.target.closest("a, button, input, select, textarea")) return;
+      if (window.getSelection()?.toString()) return;
+      const link = event.target.closest("tbody tr")?.querySelector("a.listing-title");
+      if (!link) return;
+
+      event.preventDefault();
+      if (event.ctrlKey || event.metaKey || event.button === 1) {
+        window.open(link.href, "_blank", "noopener");
+      } else {
+        link.click();
+      }
+    };
+    listing.addEventListener("click", navigate);
+    listing.addEventListener("auxclick", navigate);
+  }
+</script>

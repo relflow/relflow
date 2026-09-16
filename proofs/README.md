@@ -143,12 +143,14 @@ or measurements.
 
 The docs show the latest full result, with behavioral checks collapsed by
 default and no historical comparison. A proof without a full run is marked
-**Not run**. A new full run that misses a gate is shown as **Gates not met**;
-an execution error is distinct from model quality. Smoke runs do not change
-capability status. Editing or rendering the docs never executes a proof.
+**Missing**. A new full run that misses a gate is shown as **Failing**;
+**Error** means execution could not complete, distinct from model quality.
+Smoke runs do not change capability status. Editing or rendering the docs
+never executes a proof.
 
-One seeded success remains provisional. Expected information-loss examples
-are useful limitations, and mechanistic cluster diagnostics do not establish
+**Passing** remains provisional after one seeded success. **Limited** means
+the experiment successfully demonstrates an expected limitation. **Partial**
+covers mechanistic evidence without establishing broader claims such as
 held-out partition recovery. [SPEC.md](SPEC.md) describes the control and
 multi-seed promotion protocol; [the reduction specification](../ATTENTION_AND_BRANCH_REDUCTION.md)
 explains the architectural boundaries being explored.

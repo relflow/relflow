@@ -31,6 +31,7 @@ def test_registered_proofs_have_unique_standalone_scripts() -> None:
     assert not list((ROOT / "docs/proofs").glob("*/*.qmd")), "author proof pages in their experiment scripts"
 
     for identifier, entry in entries.items():
+        assert entry["historical"]["status"] in {"Passing", "Limited", "Partial"}, identifier
         path = ROOT / entry["script"]
         assert path.parent.parent == PROOFS and path.is_file(), path
         page = ROOT / entry["page"]
