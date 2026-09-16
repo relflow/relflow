@@ -19,11 +19,13 @@ Scripts are grouped by the behavior they examine:
 | `calibration/` | Separating learnable signal from noise |
 | `cluster/` | Cluster objectives and capacity |
 | `identity/` | Equality for unseen identifiers |
+| `masking/` | Sampled reconstruction, query selectors, branch ablation, and prefix generation |
 | `mutations/` | Retention, extension, reset, deactivation, and deletion |
 | `relational/` | Retrieval, grouped context, and field relationships |
 | `state/` | Missing values and real zeroes |
 | `structure/` | Reduction and nested cardinality |
 | `temporal/` | Calendar relationships |
+| `vocabulary/` | Unknown labels, coverage, admission order, set membership, and continued training |
 
 The shared runner, reporting, rendering, source readers, and `results.yaml` stay
 at the root of `proofs/`. Directory categories are broader than the families
@@ -31,7 +33,7 @@ shown in the catalog; each script's page metadata defines its family.
 
 ## Mutation proofs
 
-Five mutation experiments are registered in the 50-script catalog:
+Five mutation experiments are registered in the catalog:
 
 - **P046**: repeated neutral edits preserve a learned numerical and categorical task.
 - **P047**: add a hidden output, measure immediate retention, and learn the new task.
@@ -51,6 +53,58 @@ uv run python proofs/run.py P046 P047 P048 P049 P050
 The broader [mutation designs](SPEC.md#mutation-proofs) also cover informative
 inputs, repeated context, masking-role changes, capacity growth, and
 composed edits. Those additional scenarios remain planned.
+
+## Dynamic masking proofs
+
+Four provisional experiments exercise the existing masking implementation:
+
+- **P051**: sampled learned-mask reconstruction in both directions, with deterministic query-selected prediction.
+- **P052**: item-local query-selected reconstruction, structural skipping, and padding-safe target selection.
+- **P053**: redundant-view prediction under branch ablation and composed ancestor/leaf skips.
+- **P054**: prefix-only next-value prediction and free-running numerical sequence rollout.
+
+Each includes held-out learning gates and corrupted-context or missing-evidence
+controls. Hidden-value poisoning checks leakage separately from accuracy.
+P054 exposes one prefix per observation; it does not claim triangular attention,
+general text generation, or causal discovery. Gates are provisional pending
+the multi-seed calibration protocol in [SPEC.md](SPEC.md).
+
+The initial recorded panel contains each proof's default full CPU run and three
+full GPU runs on lab: its default seed, 6101, and 6102. All gates were met in
+that panel. Invariance is measured with fitted normalization statistics frozen;
+ten-seed threshold calibration and broader tasks remain future work.
+
+```bash
+uv run python proofs/run.py P051 P052 P053 P054
+```
+
+## Vocabulary and OOV proofs
+
+Five provisional experiments distinguish unknown values from missing values
+and vocabulary admission from learned behavior:
+
+- **P055**: unknown Category identities share a learned fallback, while null remains distinguishable.
+- **P056**: known-only accuracy can be perfect with 50% target coverage and confidently wrong OOV predictions; mappings remain field-local.
+- **P057**: early rare labels exhaust capacity, excluding frequent training labels; reordered observations and extra headroom provide controls.
+- **P058**: unknown Set members disappear, so all-unknown and empty sets coincide, but neither is null.
+- **P059**: prediction freezes mappings, checkpoints preserve them, and continued training with rehearsal learns newly admitted labels.
+
+P055–P058 intentionally demonstrate closed-vocabulary limits. Meeting their
+checks does not mean unknown labels become recognizable or predictable.
+P059 uses unused preallocated capacity, not resizing. These experiments cover
+Category and Set on one device without loader workers; Cluster, delayed
+worker/rank admission, and capacity mutation need separate experiments.
+P021 in `identity/` already contrasts unseen-identifier equality with Hash and
+Category.
+
+The initial panel contains each proof's default full CPU run and three full
+GPU runs on lab: its default seed, 6501, and 6502. All 20 runs met their gates.
+Thresholds remain provisional pending the calibration protocol in
+[SPEC.md](SPEC.md); measured results and individual checks live in `results.yaml`.
+
+```bash
+uv run python proofs/run.py P055 P056 P057 P058 P059
+```
 
 ## Run an experiment
 

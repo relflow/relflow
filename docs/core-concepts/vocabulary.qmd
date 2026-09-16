@@ -5,6 +5,11 @@ slots during training. Users supply the labels directly; a separate integer
 encoding step is unnecessary. Each field has its own bounded vocabulary,
 preserved with the model's learned state.
 
+The [Vocabulary and OOV proofs](../proofs.qmd)
+exercise unknown inputs and targets, capacity exhaustion, set membership, and
+checkpoint/continued-training behavior. They distinguish learned fallback
+from information that a closed vocabulary cannot represent.
+
 ## A Vocabulary Belongs To A Field
 
 One customer observation might contain:
