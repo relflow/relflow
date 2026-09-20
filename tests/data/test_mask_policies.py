@@ -235,7 +235,7 @@ def test_arrow_selector_is_atomic_for_a_branch():
                 skip=True,
                 dropout=False,
             ),
-            kind=rf.Category(size=8),
+            kind=rf.Category(),
             amount=rf.Number,
         ),
     )
@@ -255,7 +255,6 @@ def test_shared_selector_can_drive_different_leaf_effects():
         events=rf.Branch(
             length=3,
             kind=rf.Category(
-                size=8,
                 mask=rf.Mask(query="mask_event", dropout=False),
             ),
             amount=rf.Number(

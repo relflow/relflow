@@ -158,7 +158,6 @@ def records(*, start: date, weeks: int, rows: int, seed: int) -> Iterator[dict]:
 def fit(
     *,
     dateparts: Sequence[str],
-    classes: int,
     train: Callable[[], Iterator[dict]],
     validate: Callable[[], Iterator[dict]],
     epochs: int,
@@ -175,7 +174,7 @@ def fit(
         n_heads=4,
         batch_size=128,
         observed_at=rf.DateParts(dateparts=list(dateparts)),
-        target=rf.Category(mask=True, size=classes, p_unavailable=0.0),
+        target=rf.Category(mask=True, p_unavailable=0.0),
     )
     model.optimizer = lambda module: torch.optim.AdamW(module.parameters(), lr=3e-3)
     data = rf.SyntheticDataModule(model=model, train=train, validate=validate, seed=seed)
@@ -215,7 +214,6 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     test = partial(records, start=date(2025, 1, 6), weeks=52, rows=1024, seed=seed + 3)
     day_only = fit(
         dateparts=("day_of_week",),
-        classes=2,
         train=train,
         validate=validate,
         epochs=20,
@@ -226,7 +224,6 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     day_accuracy = accuracy(day_only, test, accelerator)
     hour_only = fit(
         dateparts=("hour_of_day",),
-        classes=2,
         train=train,
         validate=validate,
         epochs=20,
@@ -237,7 +234,6 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     hour_accuracy = accuracy(hour_only, test, accelerator)
     composed = fit(
         dateparts=("day_of_week", "hour_of_day"),
-        classes=2,
         train=train,
         validate=validate,
         epochs=20,

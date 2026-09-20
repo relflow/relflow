@@ -18,7 +18,6 @@ def _payload(*, attention: str | None = "mha", pooling: str = "query") -> dict:
         "type": "category",
         "mask": True,
         "pooling": pooling,
-        "size": 8,
     }
     return {
         "d_model": 16,
@@ -107,7 +106,7 @@ def test_decoder_mean_pooling_repeats_heritage_mean_for_each_target_slot():
 
     assert isinstance(decoder.pool, MeanPool)
     assert prediction.payload[TensorKey.state].shape == (2, 2, len(Tokens))
-    assert prediction.payload[TensorKey.content].shape == (2, 2, 8)
+    assert prediction.payload[TensorKey.content].shape == (2, 2, decoder.linears["content"].out_features)
 
 
 def test_branch_encoder_propagates_presence_and_zeros_empty_rows():
@@ -150,7 +149,6 @@ def test_nested_branch_encoder_preserves_repeated_parent_geometry():
                                     {
                                         "name": "value",
                                         "type": "category",
-                                        "size": 8,
                                     }
                                 ],
                             }
@@ -433,7 +431,7 @@ def test_decoder_supports_zero_context():
     prediction = decoder([], batch_size=2, device=torch.device("cpu"))
 
     assert prediction.payload[TensorKey.state].shape == (2, 2, len(Tokens))
-    assert prediction.payload[TensorKey.content].shape == (2, 2, 8)
+    assert prediction.payload[TensorKey.content].shape == (2, 2, decoder.linears["content"].out_features)
     assert all(torch.isfinite(value).all() for value in prediction.payload.values())
 
 

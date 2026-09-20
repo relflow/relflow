@@ -24,7 +24,6 @@ def build() -> rf.Model:
         batch_size=2,
         attention=None,
         merchant_id=rf.Cluster(
-            capacity=CAPACITY,
             n_clusters=(2, N_CLUSTERS),
             mask=rf.Mask(rate=0.1, reconstruct=True),
             p_unavailable=0.0,
@@ -151,7 +150,6 @@ def test_cluster_decoder_does_not_condition_identity_on_row_siblings() -> None:
         n_layers=1,
         n_heads=2,
         merchant_id=rf.Cluster(
-            capacity=CAPACITY,
             n_clusters=(2, N_CLUSTERS),
             mask=rf.Mask(rate=0.1, reconstruct=True),
         ),

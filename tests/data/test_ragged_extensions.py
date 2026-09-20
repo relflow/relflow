@@ -80,10 +80,10 @@ def test_extension_prepare_validates_and_preserves_one_whole_arrow_array():
 @pytest.mark.parametrize(
     "field",
     [
-        rf.Category(size=8, p_unavailable=0.0),
+        rf.Category(p_unavailable=0.0),
         rf.Hash(),
-        rf.Set(size=8, p_unavailable=0.0),
-        rf.Cluster(capacity=8, n_clusters=2, p_unavailable=0.0),
+        rf.Set(p_unavailable=0.0),
+        rf.Cluster(n_clusters=2, p_unavailable=0.0),
     ],
 )
 def test_multifamily_extensions_accept_all_null_arrow_columns(field):
@@ -126,7 +126,7 @@ def test_builtin_extension_type_contract_fails_before_codec_coercion():
 
 
 def test_mask_spelling_is_ordinary_typed_string_content():
-    model = rf.Model(value=rf.Category(size=8, p_unavailable=0), d_model=8, n_layers=1, n_heads=2)
+    model = rf.Model(value=rf.Category(p_unavailable=0), d_model=8, n_layers=1, n_heads=2)
 
     fields = model.encode(pa.table({"value": ["<MASK>"]}))
 
@@ -154,7 +154,7 @@ def test_nested_dictionary_chunks_decode_without_combining_indices():
     model = rf.Model(
         items=rf.Branch(
             length=100,
-            value=rf.Category(size=256, p_unavailable=0.0),
+            value=rf.Category(p_unavailable=0.0),
         ),
         d_model=8,
         n_layers=1,
@@ -173,7 +173,7 @@ def test_dictionary_null_values_remain_null_after_decoding():
         pa.array(["value", None]),
     )
     model = rf.Model(
-        value=rf.Category(size=8, p_unavailable=0.0),
+        value=rf.Category(p_unavailable=0.0),
         d_model=8,
         n_layers=1,
         n_heads=2,
@@ -210,7 +210,7 @@ def test_extension_storage_uses_dictionary_value_validity():
     )
     values = pa.ExtensionArray.from_storage(EncodedType(), storage)
     model = rf.Model(
-        value=rf.Category(size=8, p_unavailable=0.0),
+        value=rf.Category(p_unavailable=0.0),
         d_model=8,
         n_layers=1,
         n_heads=2,

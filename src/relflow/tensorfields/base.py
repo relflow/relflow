@@ -14,7 +14,20 @@ from collections.abc import Generator, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from types import MappingProxyType, UnionType
-from typing import TYPE_CHECKING, Any, Callable, Generic, Protocol, Self, TypeAlias, TypeVar, cast, get_args, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Generic,
+    Protocol,
+    Self,
+    TypeAlias,
+    TypeVar,
+    cast,
+    get_args,
+    overload,
+    runtime_checkable,
+)
 
 import numpy as np
 import pyarrow as pa
@@ -35,6 +48,7 @@ from relflow.structs.tree import Address, Leaf, Renderable
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.ragged import RaggedField
+    from relflow.helpers.resize import Resize
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
 
@@ -61,6 +75,33 @@ class Learn(Protocol):
     """Apply one field-owned observation to the model's training state."""
 
     def __call__(self, module: Model, observation: TensorDict, *, address: Address, strata: Strata) -> None: ...
+
+
+@runtime_checkable
+class BatchContext(Protocol):
+    """Isolate worker encoding and carry an extension-owned binding to the model.
+
+    The returned pair contains the context used to encode this batch and the
+    metadata supplied to the extension's ``bind`` component before forward.
+    """
+
+    def batch(self, values: pa.Array | pa.ChunkedArray) -> tuple[object, object]: ...
+
+
+class Bind(Protocol):
+    """Resolve worker-local tensors against model resources before forward."""
+
+    def __call__(
+        self,
+        module: Model,
+        field: TensorFieldBase,
+        observation: TensorDict | None,
+        binding: object,
+        *,
+        address: Address,
+        strata: Strata,
+        resize: Resize,
+    ) -> None: ...
 
 
 class Loss(Protocol):
@@ -1018,6 +1059,14 @@ class Extension:
                 if func_params != expected_params:
                     raise TypeError(
                         f"Learn function must accept the following parameters: {expected_params}, got {func_params}"
+                    )
+
+            case Component.bind:
+                expected_params = ["module", "field", "observation", "binding", "address", "strata", "resize"]
+                func_params = list(inspect.signature(obj).parameters)
+                if func_params != expected_params:
+                    raise TypeError(
+                        f"Bind function must accept the following parameters: {expected_params}, got {func_params}"
                     )
 
             case Component.write:

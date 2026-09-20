@@ -96,7 +96,7 @@ def build() -> rf.Model:
         batch_size=64,
         dropout=0.0,
         x=rf.Number,
-        code=rf.Category(size=1024, mask=rf.Mask(query="hide", reconstruct=True)),
+        code=rf.Category(mask=rf.Mask(query="hide", reconstruct=True)),
     )
     model.optimizer = rf.adamw(learning_rate=0.002)
     return model
@@ -112,7 +112,7 @@ def evaluate(trainer: lit.Trainer, model: rf.Model, rows: list[dict]) -> dict[st
 # %% [markdown]
 # ## Training and controls
 #
-# Train for 400 updates on 8,192 rows; all eight labels fit within 1,024 slots.
+# Train for 400 updates on 8,192 rows; storage grows to admit all eight labels.
 # Evaluation selects exactly 1,024 of 2,048 independent records. Compare the
 # original set with copies retaining 50%, 10%, or 0% of selected target names.
 # All copies preserve the exact visible inputs and query-selected masks.

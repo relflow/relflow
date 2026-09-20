@@ -32,10 +32,10 @@ model = rf.Model(
         overflow="tail",
         embed=True,
         age_days=rf.Number,
-        channel=rf.Category(size=16),
+        channel=rf.Category(),
         line_items=rf.Branch(
             length=16,
-            sku=rf.Category(size=8192),
+            sku=rf.Category(),
             quantity=rf.Number,
             unit_price=rf.Number,
         ),

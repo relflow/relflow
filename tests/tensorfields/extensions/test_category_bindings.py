@@ -21,7 +21,7 @@ def build(*, embed: bool = False) -> rf.Model:
         batch_size=2,
         attention=None,
         embed=embed,
-        category=rf.Category(size=8, p_unavailable=0.0),
+        category=rf.Category(p_unavailable=0.0),
     )
 
 
@@ -156,7 +156,7 @@ def test_category_counts_returns_populated_training_counts() -> None:
     counts = rf.Category.counts(model, ADDRESS)
 
     assert counts == {"ALPHA": 2, "BETA": 1}
-    assert len(counts) < model.schema.requests[ADDRESS].size
+    assert len(counts) <= model.nodes[ADDRESS].embedder.vocab.size
 
     counts["ALPHA"] = 100
     assert rf.Category.counts(model, ADDRESS) == {"ALPHA": 2, "BETA": 1}

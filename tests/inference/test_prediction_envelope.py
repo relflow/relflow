@@ -13,7 +13,7 @@ def test_prediction_envelope_includes_target_state_and_normalized_embedding() ->
         batch_size=1,
         embed=True,
         amount=rf.Number,
-        label=rf.Category(mask=True, size=2, p_unavailable=0.0),
+        label=rf.Category(mask=True, p_unavailable=0.0),
     )
     model.encode(
         pa.table({"amount": [1.0, 2.0], "label": ["no", "yes"]}),

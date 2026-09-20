@@ -28,7 +28,7 @@ FRAMEWORK_PROTOCOL_METHODS = frozenset(
 
 
 def _model() -> rf.Model:
-    return rf.Model(amount=rf.Number(), label=rf.Category(mask=True, size=4), d_model=8, n_layers=1, n_heads=2)
+    return rf.Model(amount=rf.Number(), label=rf.Category(mask=True), d_model=8, n_layers=1, n_heads=2)
 
 
 def test_model_uses_mutation_facade() -> None:
@@ -48,7 +48,7 @@ def test_model_mutations_emit_structured_logs() -> None:
         model.update(rf.where("name") == "amount", weight=2.0)
         model.update(rf.where("name") == "amount", description="Transaction amount")
         model.update(rf.where("name") == "amount", mask=True)
-        model.extend(rf.where("name") == "record", extra=rf.Category(size=4))
+        model.extend(rf.where("name") == "record", extra=rf.Category())
         model.reset(rf.where("name") == "amount")
         with model.override(rf.where("name") == "amount", weight=3.0):
             pass

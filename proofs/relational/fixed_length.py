@@ -252,7 +252,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         optimizer=lambda module: torch.optim.Adam(module.parameters(), lr=0.001),
         items=rf.Branch(length=8, n_layers=2, reduction=rf.Attention(n_layers=2), value=rf.Number),
         answer=rf.Number(mask=True, objective="mse"),
-        operation=rf.Category(size=len(OPERATIONS), p_unavailable=0.0),
+        operation=rf.Category(p_unavailable=0.0),
     )
     data = rf.SyntheticDataModule(
         model=model,

@@ -80,7 +80,7 @@ def build(p_unavailable: float) -> rf.Model:
         n_heads=4,
         batch_size=64,
         dropout=0.0,
-        tags=rf.Set(size=128, p_unavailable=p_unavailable),
+        tags=rf.Set(p_unavailable=p_unavailable),
         nonempty=rf.Number(mask=True, objective="mse"),
     )
     model.optimizer = rf.adamw(learning_rate=0.002)

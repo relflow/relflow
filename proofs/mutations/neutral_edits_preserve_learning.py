@@ -160,7 +160,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         dropout=0.0,
         batch_size=128,
         x=rf.Number,
-        code=rf.Category(size=8, p_unavailable=0.0),
+        code=rf.Category(p_unavailable=0.0),
         y=rf.Number(mask=True, objective="mse"),
     )
     model.optimizer = rf.adamw(learning_rate=3e-3, fused=False)

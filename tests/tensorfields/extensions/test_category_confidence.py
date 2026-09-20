@@ -22,7 +22,7 @@ def model():
         n_heads=2,
         n_layers=1,
         x=rf.Number,
-        label=rf.Category(size=8, topk=[2], mask=True),
+        label=rf.Category(topk=[2], mask=True),
     )
     result.encode(pa.table({"x": [0.0, 0.0], "label": ["a", "b"]}), strata="train")
     result.track = lambda names, value: value
@@ -37,7 +37,7 @@ def evaluate(module, labels, logits):
         payload=TensorDict(
             {
                 rf.TensorKey.state: torch.zeros(len(labels), 1, len(rf.Tokens), requires_grad=True),
-                rf.TensorKey.content: logits.reshape(len(labels), 1, 8),
+                rf.TensorKey.content: logits.reshape(len(labels), 1, -1),
             },
             batch_size=[len(labels)],
         ),
@@ -50,12 +50,12 @@ def test_unavailable_simulation_preserves_reconstruction_targets():
         d_model=8,
         n_heads=2,
         n_layers=1,
-        entity=rf.Category(size=8, p_unavailable=1.0),
-        label=rf.Category(size=8, p_unavailable=1.0, mask=True),
+        entity=rf.Category(p_unavailable=1.0),
+        label=rf.Category(p_unavailable=1.0, mask=True),
     )
     encoded = module.encode(pa.table({"label": ["a", "b", None], "entity": ["a", "b", None]}), strata="train")
     field = encoded["record/label"]
-    assert encoded["record/entity"].content.reshape(-1)[:2].tolist() == [8, 8]
+    assert encoded["record/entity"].content.reshape(-1)[:2].tolist() == [-1, -1]
     assert field.targets[rf.TensorKey.content].reshape(-1)[:2].tolist() == [0, 1]
     assert field.targets[rf.TensorKey.state].reshape(-1).tolist() == [
         rf.Tokens.valued,
@@ -66,12 +66,12 @@ def test_unavailable_simulation_preserves_reconstruction_targets():
 
 def test_category_objective_is_unweighted_and_unknown_targets_have_no_content_gradient():
     module = model()
-    module.nodes["record/label"].embedder.counters["content"].counts.copy_(torch.tensor([901, 101, 1, 1, 1, 1, 1, 1]))
+    module.nodes["record/label"].embedder.counters["content"].counts[:2].copy_(torch.tensor([901, 101]))
     logits = torch.randn(4, 8, requires_grad=True)
     result = evaluate(module, ["a", "b", "unseen", None], logits)
     result.backward()
     expected = logits.detach().clone().requires_grad_()
-    torch.nn.functional.cross_entropy(expected[:2], torch.tensor([0, 1])).backward()
+    torch.nn.functional.cross_entropy(expected[:2, :2], torch.tensor([0, 1])).backward()
     torch.testing.assert_close(logits.grad, expected.grad)
 
 
@@ -92,7 +92,7 @@ def test_all_unknown_content_is_zero_for_backward_but_undefined_for_evaluation()
 
 
 def test_single_populated_label_probability_is_conditional_not_learned_competence():
-    module = rf.Model(d_model=8, n_heads=2, n_layers=1, x=rf.Number, label=rf.Category(size=8, mask=True))
+    module = rf.Model(d_model=8, n_heads=2, n_layers=1, x=rf.Number, label=rf.Category(mask=True))
     module.encode(pa.table({"x": [0.0], "label": ["only-label"]}), strata="train")
     result = module.predict(pa.table({"x": [10.0]}))["predictions"].to_pylist()[0]["record/label"]["content"]
     assert result["value"] == "only-label"
@@ -116,7 +116,7 @@ def test_coverage_and_scores_are_invariant_to_batch_partition_and_unused_capacit
     assert first["accuracy.top2"] == 1
     expected = torch.nn.functional.cross_entropy(logits[[0, 3, 4], :2], torch.tensor([0, 1, 0]))
     assert first["nll.content"] == pytest.approx(expected.item())
-    assert first["loss.content"] > 30
+    assert first["loss.content"] == pytest.approx(expected.item())
 
 
 def reduce_statistics(rank, directory):
@@ -192,7 +192,7 @@ def test_lightning_validation_counts_include_an_objective_empty_rank():
         n_heads=2,
         batch_size=2,
         x=rf.Number,
-        label=rf.Category(size=8, mask=rf.Mask(query="selected", reconstruct=True)),
+        label=rf.Category(mask=rf.Mask(query="selected", reconstruct=True)),
     )
     module.encode(pa.table({"x": [0.0, 1.0], "label": ["a", "b"], "selected": [True, True]}), strata="train")
     source = pa.table(

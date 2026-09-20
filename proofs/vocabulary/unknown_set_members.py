@@ -49,7 +49,7 @@ PATTERNS = ((), ("red",), ("blue",), ("red", "blue"), None)
 # Each record samples one of five equally likely patterns: empty, red, blue,
 # both, or null. `target = 1*red - 1.5*blue` for valued sets and 3 for null.
 # A separate masked Set head reconstructs the original membership. Inputs and
-# targets have independent vocabularies, each with four slots. Disable simulated
+# targets have independent, automatically grown vocabularies. Disable simulated
 # unavailability to isolate actual OOV behavior. Splits contain 4,096 training,
 # 512 validation, and 2,048 test records.
 #
@@ -108,8 +108,8 @@ def build() -> rf.Model:
         n_heads=4,
         dropout=0.0,
         batch_size=64,
-        tags=rf.Set(size=4, p_unavailable=0.0),
-        labels=rf.Set(size=4, p_unavailable=0.0, threshold=0.5, mask=True),
+        tags=rf.Set(p_unavailable=0.0),
+        labels=rf.Set(p_unavailable=0.0, threshold=0.5, mask=True),
         target=rf.Number(mask=True, objective="mse"),
     )
 

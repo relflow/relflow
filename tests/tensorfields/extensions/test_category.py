@@ -37,7 +37,6 @@ def _structure_payload(
     field: dict = {
         "name": "category",
         "type": "category",
-        "size": 8,
         "mask": mask,
     }
     if topk is not None:
@@ -100,16 +99,14 @@ def test_category_vocabulary_refreshes_stale_validation_snapshot():
     assert len(validation_state) == 1
 
 
-def test_category_vocabulary_nonzero_rank_proposes_unseen_tokens():
-    vocabulary = OnlineVocabularyModel(size=8)
-    state = vocabulary.state
-    state.configure_distributed(global_rank=1, world_size=2)
+def test_category_vocabulary_batch_dictionary_does_not_publish_unseen_tokens():
+    vocabulary = OnlineVocabularyModel(size=1)
+    state, binding = vocabulary.state.batch(pa.array(["ALPHA", "BETA"]))
 
-    state.reserve("ALPHA", learn=True)
-
-    assert state.encode("ALPHA") == state.unavailable_index
+    assert state.encode("ALPHA") == 0
+    assert state.encode("BETA") == 1
+    assert binding.labels.to_pylist() == ["ALPHA", "BETA"]
     assert vocabulary.snapshot() == []
-    assert list(vocabulary.proposals) == ["ALPHA"]
 
 
 def test_category_vocabulary_reserves_nested_tokens_in_batch():
@@ -123,16 +120,14 @@ def test_category_vocabulary_reserves_nested_tokens_in_batch():
     assert state.encode("BETA") == 1
 
 
-def test_category_vocabulary_batch_proposals_are_unique_per_call():
+def test_category_vocabulary_batch_dictionary_is_unique_per_call():
     vocabulary = OnlineVocabularyModel(size=8)
-    state = vocabulary.state
-    state.configure_distributed(global_rank=1, world_size=2)
+    state, binding = vocabulary.state.batch(pa.array([["ALPHA", "ALPHA"], ["BETA"]]))
 
-    state.reserve([["ALPHA", "ALPHA"], ["BETA"]], learn=True)
-
-    assert state.encode("ALPHA") == state.unavailable_index
+    assert state.encode("ALPHA") == 0
+    assert state.encode("BETA") == 1
+    assert binding.labels.to_pylist() == ["ALPHA", "BETA"]
     assert vocabulary.snapshot() == []
-    assert list(vocabulary.proposals) == ["ALPHA", "BETA"]
 
 
 def test_category_tensorfield_separates_state_and_content():
@@ -172,7 +167,7 @@ def test_category_tensorfield_separates_state_and_content():
 def test_category_tensorfield_marks_oov_as_unavailable_without_changing_state():
     structure = Schema.model_validate(_structure_payload(p_unavailable=0.0))
     schema = structure
-    state = _state(size=structure.requests[ADDRESS].size)
+    state = _state()
 
     _tensorfield(
         rows=[["ALPHA"]],
@@ -194,14 +189,14 @@ def test_category_tensorfield_marks_oov_as_unavailable_without_changing_state():
     )
     assert torch.equal(
         field.content,
-        torch.tensor([[[structure.requests[ADDRESS].size, 0]]], dtype=torch.int64),
+        torch.tensor([[[-1, 0]]], dtype=torch.int64),
     )
 
 
 def test_category_tensorfield_can_simulate_unavailable_during_training():
     structure = Schema.model_validate(_structure_payload(p_unavailable=1.0))
     schema = structure
-    state = _state(size=structure.requests[ADDRESS].size)
+    state = _state()
 
     field = _tensorfield(
         rows=[["ALPHA", None], ["BETA"]],
@@ -214,8 +209,8 @@ def test_category_tensorfield_can_simulate_unavailable_during_training():
         field.content,
         torch.tensor(
             [
-                [[structure.requests[ADDRESS].size, 0]],
-                [[structure.requests[ADDRESS].size, 0]],
+                [[-1, 0]],
+                [[-1, 0]],
             ],
             dtype=torch.int64,
         ),
@@ -224,19 +219,18 @@ def test_category_tensorfield_can_simulate_unavailable_during_training():
 
 def test_category_embedder_and_decoder_use_real_vocab_width():
     structure = Schema.model_validate(_structure_payload(p_unavailable=0.0))
-    request = structure.requests[ADDRESS]
     embedder = Embedder(schema=structure, address=ADDRESS)
     decoder = Decoder(schema=structure, address=ADDRESS)
 
-    assert embedder.embeddings[TensorKey.content.name].num_embeddings == request.size
-    assert embedder.counters[TensorKey.content.name].size == request.size
-    assert decoder.linears[TensorKey.content.name].out_features == request.size
+    assert embedder.embeddings[TensorKey.content.name].num_embeddings == embedder.vocab.size
+    assert embedder.counters[TensorKey.content.name].size == embedder.vocab.size
+    assert decoder.linears[TensorKey.content.name].out_features == embedder.vocab.size
 
 
 def test_category_embedder_zeroes_unavailable_and_non_valued_content_contributions():
     structure = Schema.model_validate(_structure_payload(p_unavailable=0.0))
     embedder = Embedder(schema=structure, address=ADDRESS)
-    unavailable = structure.requests[ADDRESS].size
+    unavailable = -1
     field = TensorField(
         state=torch.tensor(
             [
@@ -284,7 +278,7 @@ class _DummyNode:
 class _DummyModule:
     def __init__(self):
         self.nodes = {ADDRESS: _DummyNode()}
-        self.schema = SimpleNamespace(requests={ADDRESS: SimpleNamespace(topk=[2, 3, 5, 10], size=8)})
+        self.schema = SimpleNamespace(requests={ADDRESS: SimpleNamespace(topk=[2, 3, 5, 10])})
 
 
 def test_category_write_emits_arrow_content_and_candidates():
@@ -390,6 +384,7 @@ def test_category_loss_does_not_mutate_counters():
         state=state,
     )
     embedder = Embedder(schema=structure, address=ADDRESS)
+    embedder.vocab.load_snapshot(state.vocab)
     decoder = Decoder(schema=structure, address=ADDRESS)
     module = _TrackingModule(schema=structure, embedder=embedder, decoder=decoder)
 
@@ -400,7 +395,7 @@ def test_category_loss_does_not_mutate_counters():
                 TensorKey.state: torch.zeros(*field.state.shape, len(Tokens)),
                 TensorKey.content: torch.zeros(
                     *field.content.shape,
-                    structure.requests[ADDRESS].size,
+                    state.size,
                 ),
             },
             batch_size=field.batch_size,
@@ -412,16 +407,13 @@ def test_category_loss_does_not_mutate_counters():
     expected_state_counts = torch.ones(len(Tokens), dtype=torch.int64)
     assert torch.equal(embedder.counters[TensorKey.state.name].counts, expected_state_counts)
 
-    expected_content_counts = torch.ones(
-        structure.requests[ADDRESS].size,
-        dtype=torch.int64,
-    )
+    expected_content_counts = torch.ones_like(embedder.counters[TensorKey.content.name].counts)
     assert torch.equal(embedder.counters[TensorKey.content.name].counts, expected_content_counts)
 
 
 def test_category_loss_retains_state_supervision_for_unavailable_content():
     structure = Schema.model_validate(_structure_payload(p_unavailable=0.0, mask=True))
-    state = _state(size=structure.requests[ADDRESS].size)
+    state = _state()
 
     _tensorfield(
         rows=[["ALPHA"]],
@@ -443,7 +435,7 @@ def test_category_loss_retains_state_supervision_for_unavailable_content():
         payload=TensorDict(
             {
                 TensorKey.state: torch.zeros(*field.state.shape, len(Tokens)),
-                TensorKey.content: torch.zeros(*field.content.shape, structure.requests[ADDRESS].size),
+                TensorKey.content: torch.zeros(*field.content.shape, state.size),
             },
             batch_size=field.batch_size,
         ),

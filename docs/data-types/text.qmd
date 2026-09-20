@@ -23,7 +23,7 @@ model = rf.Model(
     messages=rf.Branch(
         length=32,
         body=rf.Text(max_length=256, encoder_pooling="mean"),
-        author_role=rf.Category(size=4),
+        author_role=rf.Category(),
     ),
     escalated=rf.Boolean(mask=True),
 )

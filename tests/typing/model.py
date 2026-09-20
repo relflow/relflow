@@ -24,7 +24,7 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
         n_layers=1,
         n_heads=4,
         amount=rf.Number,
-        label=rf.Category(mask=True, size=2),
+        label=rf.Category(mask=True),
         optimizer=rf.adamw(1e-3),
     )
     assert_type(model.compile(encoders=True, pools=False), Classifier)

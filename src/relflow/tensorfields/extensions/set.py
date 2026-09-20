@@ -28,11 +28,19 @@ from relflow.tensorfields.base import (
 from relflow.tensorfields.output import array, labels, struct, variable
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
 from relflow.tensorfields.shared.reconstruction import Metrics, Scores, Totals
-from relflow.tensorfields.shared.vocabulary import OnlineVocabularyModel, VocabularyState, VocabularySyncCallback
+from relflow.tensorfields.shared.rows import Embedding, Linear
+from relflow.tensorfields.shared.vocabulary import (
+    INITIAL_CAPACITY,
+    OnlineVocabularyModel,
+    VocabularyBatch,
+    VocabularyState,
+    VocabularySyncCallback,
+)
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.datasets.base import InterprocessEncodingContext
+    from relflow.helpers.resize import Resize
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
 
@@ -44,7 +52,7 @@ sets.callback(VocabularySyncCallback, CounterUpdateCallback, Metrics)
 class Request(RequestBase):
     """Unordered label membership represented by an online vocabulary.
 
-    ``size`` (also accepted as ``capacity``) bounds vocabulary width. Empty
+    Training grows vocabulary storage automatically. Empty
     sets are valued; nulls have a separate state. Unknown members share a
     learned unavailable representation; their identities cannot be recovered.
     ``p_unavailable`` independently drops known positive input labels during
@@ -54,13 +62,7 @@ class Request(RequestBase):
     all entries. This filter leaves the training loss and metrics unchanged.
     """
 
-    model_config = pydantic.ConfigDict(populate_by_name=True, serialize_by_alias=True)
-
     type: Literal["set"] = "set"
-    capacity: Annotated[
-        int,
-        pydantic.Field(alias="size", serialization_alias="size", gt=0, default=10_000),
-    ] = 10_000
     p_unavailable: Annotated[float, pydantic.Field(ge=0.0, le=1.0, default=0.01)] = 0.01
     threshold: Annotated[float | None, pydantic.Field(ge=0.0, le=1.0, default=None)] = None
 
@@ -69,8 +71,6 @@ class Request(RequestBase):
         def __init__(
             self,
             *,
-            size: int = 10_000,
-            capacity: int = ...,
             p_unavailable: float = 0.01,
             threshold: float | None = None,
             type: Literal["set"] = "set",
@@ -114,15 +114,6 @@ class Request(RequestBase):
         with state.lock:
             return tuple(state.master)
 
-    @property
-    def size(self) -> int:
-        return self.capacity
-
-    @size.setter
-    def size(self, value: int) -> None:
-        self.capacity = value
-        self.model_fields_set.add("capacity")
-
 
 @sets.register
 def observe(
@@ -149,7 +140,7 @@ def observe(
     return TensorDict(
         {
             TensorKey.state: tally(torch.from_numpy(field.dense.copy()), len(Tokens)),
-            TensorKey.content: tally(torch.from_numpy(indices.copy()), cast(Request, schema.requests[address]).size),
+            TensorKey.content: tally(torch.from_numpy(indices.copy()), state.size),
         },
         batch_size=[],
     )
@@ -185,10 +176,10 @@ class TensorField(TensorFieldBase[TensorDict]):
         context: Context,
     ) -> TensorField:
         request: Request = cast(Request, schema.requests[address])
-        n_tokens: int = request.size
         state = context.state
         if state is not None and not isinstance(state, VocabularyState):
             raise TypeError(f"set field at '{address}' requires VocabularyState context, got {type(state).__name__}")
+        n_tokens = state.size if state is not None else INITIAL_CAPACITY
 
         def encode(field: RaggedField) -> TensorDict:
             values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
@@ -213,7 +204,7 @@ class TensorField(TensorFieldBase[TensorDict]):
             indices = state.indices(flattened, learn=False) if state is not None else np.empty(0, dtype=np.int64)
             if len(indices):
                 rows = parents.to_numpy(zero_copy_only=False)
-                known = indices < n_tokens
+                known = (indices >= 0) & (indices < n_tokens)
                 encoded[rows[known], indices[known]] = 1.0
                 if not known.all():
                     # Count distinct unknown members, not occurrences: order
@@ -266,9 +257,8 @@ class Embedder(EmbedderBase):
         request: Request = cast(Request, schema.requests[address])
         self.origin: Address = address
         self.destination: Address = cast("Branch", request.parent).address
-        self.size: int = request.size
 
-        self.vocab: OnlineVocabularyModel = OnlineVocabularyModel(size=request.size)
+        self.vocab: OnlineVocabularyModel = OnlineVocabularyModel()
         # A neutral fallback until real or simulated unavailable inputs teach
         # it; absence is not a randomly initialized pseudo-label.
         self.unavailable = torch.nn.Parameter(torch.zeros(schema.d_model))
@@ -279,8 +269,8 @@ class Embedder(EmbedderBase):
                     num_embeddings=len(Tokens),
                     embedding_dim=schema.d_model,
                 ),
-                TensorKey.content.name: torch.nn.Embedding(
-                    num_embeddings=self.size,
+                TensorKey.content.name: Embedding(
+                    num_embeddings=self.vocab.size,
                     embedding_dim=schema.d_model,
                 ),
             }
@@ -288,9 +278,13 @@ class Embedder(EmbedderBase):
         self.counters = torch.nn.ModuleDict(
             {
                 TensorKey.state.name: Counter(address=address, size=len(Tokens)),
-                TensorKey.content.name: Counter(address=address, size=request.size),
+                TensorKey.content.name: Counter(address=address, size=self.vocab.size),
             }
         )
+
+    @property
+    def size(self) -> int:
+        return self.vocab.size
 
     @beartype
     def forward(self, inputs: TensorInput) -> Parcel:
@@ -300,14 +294,14 @@ class Embedder(EmbedderBase):
         content = cast(TensorDict, inputs.content)
         membership = cast(torch.Tensor, content["membership"])
         N, *dims, n_tokens = membership.shape
-        if n_tokens != self.size:
+        if n_tokens > self.size:
             raise ValueError(f"Set in address {self.origin} has invalid vocabulary width")
 
         state = inputs.state.reshape(-1)
         membership = membership.reshape(-1, n_tokens)
         valued = state.eq(Tokens.valued.value)
 
-        weights = cast(torch.nn.Embedding, self.embeddings[TensorKey.content.name]).weight
+        weights = cast(torch.nn.Embedding, self.embeddings[TensorKey.content.name]).weight[:n_tokens]
         counts = membership.sum(dim=-1, keepdim=True).clamp_min(1.0)
         content_embedding = membership.to(dtype=weights.dtype).matmul(weights) / counts
         unavailable = cast(torch.Tensor, content["unavailable"]).reshape(-1, 1).gt(0)
@@ -328,6 +322,43 @@ class Embedder(EmbedderBase):
     @property
     def context(self) -> VocabularyState:
         return self.vocab.state
+
+
+@sets.register
+def bind(
+    module: Model,
+    field: TensorFieldBase,
+    observation: TensorDict | None,
+    binding: object,
+    *,
+    address: Address,
+    strata: Strata,
+    resize: Resize,
+) -> None:
+    """Move membership columns into the vocabulary current at batch consumption."""
+    if not isinstance(binding, VocabularyBatch):
+        raise TypeError(f"set binding at '{address}' requires VocabularyBatch, got {type(binding).__name__}")
+    node = module.nodes[address]
+    embedder = cast(Embedder, node.embedder)
+    mapping, size = binding.resolve(embedder.vocab, learn=strata == Strata.train, device=module.device, resize=resize)
+    resize.embedding(cast(torch.nn.Embedding, embedder.embeddings[TensorKey.content.name]), size)
+    cast(Counter, embedder.counters[TensorKey.content.name]).resize(size, resize)
+    decoder = getattr(node, "decoder", None)
+    if decoder is not None:
+        resize.linear(decoder.linears[TensorKey.content.name], size)
+    field = cast(TensorField, field)
+    for content in (field.content, cast(TensorDict, field.targets[TensorKey.content])):
+        previous = cast(torch.Tensor, content["membership"])
+        indices = mapping[:-1].to(previous.device)
+        known = indices.ge(0) & indices.lt(size)
+        membership = previous.new_zeros((*previous.shape[:-1], size))
+        membership.index_add_(-1, indices[known], previous[..., known])
+        content["membership"] = membership
+        content["unavailable"] = cast(torch.Tensor, content["unavailable"]) + previous[..., ~known].sum(dim=-1).long()
+    if observation is not None:
+        observation[TensorKey.content] = binding.counts(
+            cast(torch.Tensor, observation[TensorKey.content]), mapping, size
+        )
 
 
 @sets.register
@@ -378,7 +409,6 @@ class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 
-        request: Request = cast(Request, schema.requests[address])
         self.metrics = Scores(address, Membership)
         self.linears = torch.nn.ModuleDict(
             {
@@ -386,9 +416,9 @@ class Decoder(DecoderBase):
                     in_features=schema.d_model,
                     out_features=len(Tokens),
                 ),
-                TensorKey.content.name: torch.nn.Linear(
+                TensorKey.content.name: Linear(
                     in_features=schema.d_model,
-                    out_features=request.size,
+                    out_features=INITIAL_CAPACITY,
                 ),
             }
         )
@@ -439,7 +469,10 @@ def loss(
     size = len(embedder.vocab.master)
     content_inputs = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N, -1)[valued, :size].float()
     targets = cast(TensorDict, batch.targets[TensorKey.content])
-    content_targets = cast(torch.Tensor, targets["membership"]).reshape(N, -1)[valued, :size]
+    memberships = cast(torch.Tensor, targets["membership"]).reshape(N, -1)
+    if memberships.shape[-1] < size:
+        memberships = torch.nn.functional.pad(memberships, (0, size - memberships.shape[-1]))
+    content_targets = memberships[valued, :size]
     unavailable = cast(torch.Tensor, targets["unavailable"]).reshape(N)[valued]
     # Complete set annotations supervise all populated memberships, including
     # known negatives in partially/all-OOV sets. Unallocated slots are not

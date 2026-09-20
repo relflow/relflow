@@ -51,9 +51,7 @@ def test_leaf_rich_display_shows_nondefault_decoder_position() -> None:
 
 
 def test_leaf_display_flags() -> None:
-    reconstruct = (
-        render_text(rf.Category.model_validate({"name": "returned", "mask": True, "size": 2})).splitlines()[0].split()
-    )
+    reconstruct = render_text(rf.Category.model_validate({"name": "returned", "mask": True})).splitlines()[0].split()
     embedded = render_text(rf.Number.model_validate({"name": "amount", "embed": True})).splitlines()[0].split()
     inactive = render_text(rf.Category.model_validate({"name": "customer_id", "active": False})).splitlines()[0].split()
 
@@ -86,7 +84,7 @@ def test_leaf_display_separates_common_and_specific_attributes() -> None:
     number_lines = render_text(
         rf.Number.model_validate({"name": "amount", "mask": 0.15, "objective": "huber"})
     ).splitlines()
-    category_lines = render_text(rf.Category.model_validate({"name": "sku", "size": 2048})).splitlines()
+    category_lines = render_text(rf.Category.model_validate({"name": "sku"})).splitlines()
 
     assert number_lines[1].startswith(" ")
     assert "objective=huber" not in number_lines[1]
@@ -95,8 +93,8 @@ def test_leaf_display_separates_common_and_specific_attributes() -> None:
 
     assert "pooling=query" in category_lines[1]
     assert category_lines[1].startswith(" ")
-    assert "size=2048" not in category_lines[1]
-    assert "size=2048" in category_lines[2]
+    assert "size=" not in "\n".join(category_lines)
+    assert "p_unavailable=" in category_lines[2]
     assert category_lines[2].startswith(" ")
 
 
@@ -107,7 +105,7 @@ def test_branch_rich_display_renders_child_subtree() -> None:
                 "name": "line_items",
                 "length": 32,
                 "fields": [
-                    rf.Category.model_validate({"name": "sku", "size": 2048}),
+                    rf.Category.model_validate({"name": "sku"}),
                     rf.Number.model_validate({"name": "quantity"}),
                 ],
             }
@@ -216,11 +214,11 @@ def test_nested_branch_rich_display_renders_nested_tree_prefixes() -> None:
                             "overflow": "tail",
                             "fields": [
                                 rf.Number.model_validate({"name": "amount"}),
-                                rf.Category.model_validate({"name": "merchant", "size": 4096}),
+                                rf.Category.model_validate({"name": "merchant"}),
                             ],
                         }
                     ),
-                    rf.Category.model_validate({"name": "churned", "mask": True, "size": 2}),
+                    rf.Category.model_validate({"name": "churned", "mask": True}),
                 ],
             }
         )
@@ -256,7 +254,7 @@ def test_common_display_surfaces_are_backed_by_rich() -> None:
 
 def test_schema_rich_display_uses_root_schema_tree() -> None:
     schema = rf.Schema.from_tree(
-        amount=rf.Number(), label=rf.Category(mask=True, size=2), name="record", d_model=8, n_layers=1, n_heads=4
+        amount=rf.Number(), label=rf.Category(mask=True), name="record", d_model=8, n_layers=1, n_heads=4
     )
 
     assert isinstance(schema, Renderable)
@@ -276,7 +274,7 @@ def test_schema_rich_display_uses_root_schema_tree() -> None:
 def test_model_rich_display_uses_runtime_summary_and_schema_tree() -> None:
     model = rf.Model(
         amount=rf.Number(),
-        label=rf.Category(mask=True, size=2),
+        label=rf.Category(mask=True),
         name="record",
         d_model=8,
         n_layers=1,
@@ -301,7 +299,7 @@ def test_model_rich_display_uses_runtime_summary_and_schema_tree() -> None:
 
 def test_model_select_pprint_uses_rich_node_display() -> None:
     model = rf.Model(
-        amount=rf.Number(), species=rf.Category(mask=True, size=4), name="record", d_model=8, n_layers=1, n_heads=4
+        amount=rf.Number(), species=rf.Category(mask=True), name="record", d_model=8, n_layers=1, n_heads=4
     )
 
     selection = model.select(rf.where("address") == "record/species")
@@ -315,7 +313,7 @@ def test_model_select_pprint_uses_rich_node_display() -> None:
         assert "species [category] active reconstruct" in output
         assert "query=" not in output
         assert " pooling=query weight=1 n_heads=4 n_linear=1" in output
-        assert " size=4 p_unavailable=0.01 topk=[]" in output
+        assert " p_unavailable=0.01 topk=[]" in output
         assert "Request(name=" not in output
         assert "Selection(" not in output
 
@@ -324,7 +322,7 @@ def test_model_select_pprint_uses_rich_node_display() -> None:
 def test_tensorfield_rich_display_previews_state_tokens(objective: bool) -> None:
     model = rf.Model(
         letters=rf.Branch(
-            letter=rf.Category(size=4, p_unavailable=0.0, mask=rf.Mask(dropout=False, reconstruct=objective)), length=4
+            letter=rf.Category(p_unavailable=0.0, mask=rf.Mask(dropout=False, reconstruct=objective)), length=4
         ),
         d_model=8,
         n_layers=1,
@@ -351,7 +349,7 @@ def test_tensorfield_rich_display_previews_state_tokens(objective: bool) -> None
 
 def test_tensorfield_rich_display_separates_nested_array_state_tokens() -> None:
     model = rf.Model(
-        words=rf.Branch(letters=rf.Branch(letter=rf.Category(size=8, p_unavailable=0.0), length=3), length=2),
+        words=rf.Branch(letters=rf.Branch(letter=rf.Category(p_unavailable=0.0), length=3), length=2),
         d_model=8,
         n_layers=1,
         n_heads=4,

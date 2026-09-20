@@ -194,7 +194,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         n_layers=1,
         n_heads=4,
         batch_size=128,
-        id=rf.Cluster(capacity=128, n_clusters=(3, 15), mask=rf.Mask(rate=0.5, reconstruct=True)),
+        id=rf.Cluster(n_clusters=(3, 15), mask=rf.Mask(rate=0.5, reconstruct=True)),
         x=rf.Number,
         y=rf.Number(mask=True),
     )

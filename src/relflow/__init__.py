@@ -68,6 +68,7 @@ from relflow.structs.structure import Branch, Mask
 from relflow.structs.tree import Address, Leaf, MaskInput
 from relflow.tensorfields import (
     TENSORFIELDS,
+    BatchContext,
     Context,
     DecoderBase,
     EmbedderBase,
@@ -135,6 +136,7 @@ __all__ = [
     "Accelerator",
     "Attention",
     "Branch",
+    "BatchContext",
     "Boolean",
     "AttentionMode",
     "AttentionInput",

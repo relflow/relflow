@@ -62,7 +62,7 @@ model = rf.Model(
         length=2,
         overflow="error",
         account=rf.Hash,
-        role=rf.Category(size=2),
+        role=rf.Category(),
     ),
     amount=rf.Number,
     flagged=rf.Boolean(mask=True),

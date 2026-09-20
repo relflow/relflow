@@ -173,8 +173,8 @@ def fit(*, signal: bool, seed: int, steps: int | None, accelerator: str) -> floa
         n_heads=4,
         batch_size=128,
         x=rf.Number,
-        segment=rf.Category(size=4, p_unavailable=0.0),
-        tags=rf.Set(size=6, p_unavailable=0.0),
+        segment=rf.Category(p_unavailable=0.0),
+        tags=rf.Set(p_unavailable=0.0),
         leak=rf.Boolean,
         target=rf.Boolean(mask=True),
     )

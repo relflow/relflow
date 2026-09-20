@@ -54,7 +54,7 @@ model = rf.Model(
         age_days=rf.Number,
         line_items=rf.Branch(
             length=16,
-            sku=rf.Category(size=8192),
+            sku=rf.Category(),
             quantity=rf.Number,
         ),
         refunded_next_month=rf.Boolean(mask=True),
@@ -62,11 +62,11 @@ model = rf.Model(
     sessions=rf.Branch(
         length=128,
         overflow="tail",
-        device=rf.Category(size=8),
+        device=rf.Category(),
         events=rf.Branch(
             length=64,
             overflow="tail",
-            kind=rf.Category(size=32),
+            kind=rf.Category(),
             elapsed_seconds=rf.Number,
         ),
     ),

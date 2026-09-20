@@ -2,7 +2,7 @@
 
 Use `Hash` when equality between identifiers matters, but their identities
 should not become a learned vocabulary. Use [Category](category.qmd) for
-bounded labels whose individual meaning should persist across observations.
+labels whose individual meaning should persist across observations.
 
 ```yaml
 account_id: account-17

@@ -104,8 +104,8 @@ def build(unavailable: float) -> rf.Model:
         dropout=0.0,
         batch_size=128,
         x=rf.Number,
-        entity=rf.Category(size=16384, p_unavailable=unavailable),
-        label=rf.Category(size=2, mask=True),
+        entity=rf.Category(p_unavailable=unavailable),
+        label=rf.Category(mask=True),
     )
     model.optimizer = rf.adamw(learning_rate=0.002)
     return model
@@ -142,7 +142,7 @@ def score(p: np.ndarray, rows: list[dict], novel: bool) -> dict[str, float]:
 # %% [markdown]
 # ## Training and controls
 #
-# Use 32,768 training rows over 4,096 identities, 16,384 available input slots,
+# Use 32,768 training rows over 4,096 identities, automatically growing storage,
 # and 600 updates. Independent validation has 1,024 rows. Evaluation has 8,192
 # known-ID rows and 8,192 entity-disjoint rows, with identical visible x and
 # known yes/no output labels. The latent sign is only available to the evaluator.

@@ -28,7 +28,6 @@ def _structure_payload(
     field: dict = {
         "name": "tags",
         "type": "set",
-        "size": 8,
         "mask": mask,
     }
     if p_unavailable is not None:
@@ -83,7 +82,7 @@ def test_set_request_is_available_in_schema():
     request = structure.requests[ADDRESS]
 
     assert request.type == "set"
-    assert request.size == 8
+    assert "size" not in request.model_dump()
     assert request.threshold is None
 
 
@@ -113,7 +112,7 @@ def test_set_tensorfield_encodes_multi_hot_content():
             dtype=torch.int64,
         ),
     )
-    assert field.content["membership"].shape == (2, 1, 2, structure.requests[ADDRESS].size)
+    assert field.content["membership"].shape == (2, 1, 2, state.size)
     assert field.content["membership"][0, 0, 0, 0] == 1.0
     assert field.content["membership"][0, 0, 0, 1] == 1.0
     assert field.content["membership"][0, 0, 1].sum() == 0.0
@@ -138,7 +137,7 @@ def test_set_nested_mask_string_is_an_ordinary_label():
 
 def test_set_tensorfield_reserves_real_vocabulary_in_batch():
     structure = Schema.model_validate(_structure_payload(p_unavailable=0.0))
-    vocabulary = OnlineVocabularyModel(size=structure.requests[ADDRESS].size)
+    vocabulary = OnlineVocabularyModel()
 
     _new_tensorfield(
         values=[[[["ALPHA", "BETA"], ["ALPHA"]]], [[["BETA"]]]],
@@ -152,7 +151,7 @@ def test_set_tensorfield_reserves_real_vocabulary_in_batch():
 
 def test_set_tensorfield_zeros_oov_content_without_changing_state():
     structure = Schema.model_validate(_structure_payload(p_unavailable=0.0))
-    state = _state(size=structure.requests[ADDRESS].size)
+    state = _state()
 
     _new_tensorfield(
         values=[[[["ALPHA"]]]],
@@ -174,7 +173,7 @@ def test_set_tensorfield_zeros_oov_content_without_changing_state():
 
 def test_set_tensorfield_simulated_unavailable_zeros_content():
     structure = Schema.model_validate(_structure_payload(p_unavailable=1.0))
-    state = _state(size=structure.requests[ADDRESS].size)
+    state = _state()
 
     field = _new_tensorfield(
         values=[[[["ALPHA", "BETA"]]]],
@@ -183,7 +182,7 @@ def test_set_tensorfield_simulated_unavailable_zeros_content():
         state=state,
     )
 
-    assert field.content["membership"].shape[-1] == structure.requests[ADDRESS].size
+    assert field.content["membership"].shape[-1] == state.size
     assert field.content["membership"][0, 0, 0].sum() == 0.0
 
 

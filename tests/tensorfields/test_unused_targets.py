@@ -24,7 +24,7 @@ class Tokenizer:
     [
         ("number", 1.5, {}),
         ("boolean", True, {}),
-        ("category", "known", {"size": 8, "p_unavailable": 0.0}),
+        ("category", "known", {"p_unavailable": 0.0}),
         ("hash", "identifier", {}),
         ("text", "hello", {"model": "local-test", "max_length": 4}),
     ],

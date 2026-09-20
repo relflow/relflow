@@ -13,7 +13,6 @@ def _structure_payload() -> dict:
                 {
                     "name": "identifier",
                     "type": "category",
-                    "size": 1024,
                 }
             ],
         },

@@ -461,11 +461,6 @@ class ArrowDataset(IterableDataset[Encoded]):
 
     def __iter__(self) -> Iterator[Encoded]:
         epoch, consumer, consumers = self.iteration()
-        for field_context in self.encoding_context.values():
-            configure = getattr(field_context, "configure_distributed", None)
-            if callable(configure):
-                configure(global_rank=consumer, world_size=consumers)
-
         scanned: Iterable[pa.Table] = scan(self.source, schemas=self.schemas)
         batches: Iterable[pa.Table] = process(
             scanned,

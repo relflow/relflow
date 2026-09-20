@@ -230,7 +230,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             n_layers=2,
             reduction=rf.Attention(n_outputs=1, n_layers=2),
             value=rf.Number,
-            group=rf.Category(size=len(GROUPS), p_unavailable=0.0),
+            group=rf.Category(p_unavailable=0.0),
             deviation=rf.Number(mask=True, objective="mse", n_linear=2),
         ),
     )

@@ -22,11 +22,11 @@ def request(field_type: str, *, query: str | None = None):
     if field_type == "hash":
         return rf.Hash(query=query, n_hashes=2)
     if field_type == "category":
-        return rf.Category(query=query, size=8, p_unavailable=0.0)
+        return rf.Category(query=query, p_unavailable=0.0)
     if field_type == "cluster":
-        return rf.Cluster(query=query, capacity=8, n_clusters=2, p_unavailable=0.0)
+        return rf.Cluster(query=query, n_clusters=2, p_unavailable=0.0)
     if field_type == "set":
-        return rf.Set(query=query, size=8, p_unavailable=0.0)
+        return rf.Set(query=query, p_unavailable=0.0)
     raise AssertionError(f"unsupported test field type: {field_type}")
 
 
@@ -159,7 +159,7 @@ def test_coalesce_rejects_modeled_field_missing_from_arrow_schema():
 
 
 def test_mask_spelling_is_ordinary_string_content():
-    model = build(label=rf.Category(size=8, p_unavailable=0.0))
+    model = build(label=rf.Category(p_unavailable=0.0))
     field = model.encode(table([{"label": "<MASK>"}]), strata=Strata.train)["record/label"]
 
     assert field.state.tolist() == [[Tokens.valued.value]]
@@ -167,7 +167,7 @@ def test_mask_spelling_is_ordinary_string_content():
 
 
 def test_structured_leaf_mask_spelling_is_ordinary_codec_input():
-    model = build(labels=rf.Set(size=8, p_unavailable=0.0))
+    model = build(labels=rf.Set(p_unavailable=0.0))
     field = coalesce(
         arrow_batch([{"labels": ["<MASK>", "A"]}]),
         schema=model.schema,
@@ -404,7 +404,7 @@ def test_dateparts_tensorfield_encodes_arrow_timestamp_end_to_end():
     ],
 )
 def test_set_accepts_arrow_lists_and_scalar_labels(value, expected_vocabulary):
-    model = build(labels=rf.Set(size=8, p_unavailable=0.0))
+    model = build(labels=rf.Set(p_unavailable=0.0))
     field = model.encode(
         table([{"labels": value}]),
         strata=Strata.train,

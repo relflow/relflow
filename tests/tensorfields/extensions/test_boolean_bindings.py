@@ -65,7 +65,7 @@ def test_boolean_counts_validates_model_and_address() -> None:
         d_model=8,
         n_layers=1,
         n_heads=4,
-        category=rf.Category(size=4),
+        category=rf.Category(),
     )
     with pytest.raises(TypeError, match="not a Boolean field"):
         rf.Boolean.counts(wrong_model, "record/category")

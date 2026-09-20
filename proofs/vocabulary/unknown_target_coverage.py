@@ -48,7 +48,7 @@ LABELS = ("negative", "positive", "novel-negative", "novel-positive")
 # including names never used as training targets. Splits have 4,096 training,
 # 512 validation, and 2,048 test rows, with exactly balanced signs. On half of
 # test rows, rename the target to its novel counterpart without changing x.
-# The output vocabulary has eight slots but only two populated labels.
+# The output vocabulary automatically stores its two discovered training labels.
 #
 # ```yaml
 # x: 0.7
@@ -108,8 +108,8 @@ def build() -> rf.Model:
         dropout=0.0,
         batch_size=64,
         x=rf.Number,
-        hint=rf.Category(size=8, p_unavailable=0.0),
-        label=rf.Category(size=8, p_unavailable=0.0, topk=[2], mask=True),
+        hint=rf.Category(p_unavailable=0.0),
+        label=rf.Category(p_unavailable=0.0, topk=[2], mask=True),
     )
 
 
@@ -203,7 +203,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         "Labels known in another field remain unknown here": set(LABELS[2:]) <= set(hints)
         and not set(LABELS[2:]) & set(vocabulary),
         "Unknown target content uses the unavailable sentinel": bool(
-            (field.targets[rf.TensorKey.content].reshape(-1).cpu().numpy()[~known] == 8).all()
+            (field.targets[rf.TensorKey.content].reshape(-1).cpu().numpy()[~known] == -1).all()
         ),
         "Evaluation preserves output vocabulary and exposure counts": rf.Category.vocabulary(model, "record/label")
         == vocabulary

@@ -1,6 +1,6 @@
 # Category
 
-Use `Category` for one label from a bounded vocabulary: a country, product
+Use `Category` for one label from a learned vocabulary: a country, product
 family, customer tier, or class. Use [Set](set.qmd) for multiple labels,
 [Hash](hash.qmd) for identifier equality, and [Text](text.qmd) for word meaning.
 
@@ -14,7 +14,7 @@ import relflow as rf
 
 model = rf.Model(
     d_model=64, n_layers=2, n_heads=4,
-    merchant_category=rf.Category(size=128, topk=[3, 10]),
+    merchant_category=rf.Category(topk=[3, 10]),
     fraud=rf.Boolean(mask=True),
 )
 ```
@@ -28,22 +28,23 @@ not a vocabulary member.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `size` | `1024` | Positive vocabulary capacity; `capacity` is also accepted. Embedding and decoder tables grow with it. |
 | `p_unavailable` | `0.01` | Training probability of replacing known valued **input** content with unavailable content. Reconstruction targets are unchanged. |
-| `topk` | `[]` | Sorted, unique accuracy cutoffs satisfying `1 < k < size`; also controls prediction candidates. |
+| `topk` | `[]` | Sorted, unique integer accuracy cutoffs greater than one; also controls prediction candidates. Each cutoff is capped by the discovered label count at runtime. |
 
-Capacity counts real labels only. Do not reserve an extra class for null or
-unavailable values. See [shared leaf options](../core-concepts/data-types.qmd#shared-leaf-options)
+Vocabulary storage grows automatically; there is no size option to configure.
+See [shared leaf options](../core-concepts/data-types.qmd#shared-leaf-options)
 for reconstruction and embedding configuration.
 
 ## Vocabulary and learning
 
-Pristine training observations add labels until capacity is full. Validation,
-test, and prediction reuse the learned mapping. The mapping is shared with
-encoding workers and synchronized for DDP; checkpoints preserve it.
+Pristine training observations add labels before forward, growing storage as
+needed. The training process resolves batch-local dictionaries from encoding
+workers and gathers labels across DDP ranks. Validation, test, and prediction
+reuse the frozen mapping; checkpoints preserve it and the grown tables.
 
 See [Online Vocabulary](../core-concepts/vocabulary.qmd) for admission order,
-capacity limits, worker synchronization, and reuse during fine-tuning.
+growth and state preservation, supported training strategies, and reuse during
+fine-tuning.
 
 An unknown label stays `valued` but contributes zero categorical content to
 the encoder. Its internal sentinel is not an extra embedding row or decoder
@@ -51,8 +52,8 @@ class. Known labels contribute learned content plus their state embedding.
 
 Reconstruction uses unweighted state and categorical cross entropy. Class
 frequencies remain observable through `counts`, but do not silently change
-the probability objective. Training scores the full capacity, including
-unpopulated slots. Unavailable valued targets have no categorical loss or
+the probability objective. Training scores only discovered labels; spare
+storage does not contribute classes or gradients. Unavailable valued targets have no categorical loss or
 gradient: an unknown answer does not imply a uniform distribution over known
 answers. State supervision is retained.
 
@@ -65,7 +66,7 @@ For each reconstruction objective, epoch metrics separate coverage from quality:
 | `accuracy.content`, `accuracy.topK` | Correct predictions among known targets, using populated candidates. |
 | `accuracy.all` | Correct predictions divided by all selected valued targets; unavailable answers count as wrong. |
 | `nll.content` | Unweighted negative log likelihood over populated candidates, matching written probabilities. |
-| `loss.content` | Unweighted categorical training objective over the full capacity, averaged over known targets. |
+| `loss.content` | Unweighted categorical training objective over populated labels, averaged over known targets; equal to `nll.content`. |
 
 Names include the field address and stage, for example
 `record.merchant_category/validate.coverage.content`. Counts and sums aggregate
@@ -73,10 +74,6 @@ across batches and ranks before division. With no known targets, conditional
 accuracy, NLL, and content loss are `NaN`, not zero; coverage and all-target
 accuracy are zero when selected valued targets exist. With no selected valued
 targets, coverage and all-target accuracy are also undefined.
-
-This intentionally replaces the earlier frequency-weighted objective and
-uniform-target OOV penalty. Existing checkpoints retain their learned weights;
-loading one does not recalibrate it. Continued fitting uses the new objective.
 
 For an application-supplied trained `model`:
 

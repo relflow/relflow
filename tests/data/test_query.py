@@ -232,7 +232,7 @@ def test_root_and_branch_queries_feed_coalesce_from_arrow():
         events=rf.Branch(
             query="events[-2:]",
             length=2,
-            sku=rf.Category(query="product.sku", size=8, p_unavailable=0.0),
+            sku=rf.Category(query="product.sku", p_unavailable=0.0),
             risk=rf.Number(query='metrics["risk score"]'),
         ),
         d_model=8,

@@ -196,7 +196,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             n_layers=2,
             reduction=rf.Attention(),
             entity_id=rf.Hash(n_hashes=4, n_bands=8),
-            role=rf.Category(size=2, p_unavailable=0.0),
+            role=rf.Category(p_unavailable=0.0),
             is_query=rf.Boolean,
             value=rf.Number(mask=rf.Mask(query="is_query", dropout=False, reconstruct=True), objective="mse"),
         ),

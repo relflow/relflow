@@ -15,7 +15,7 @@
 # ## Insights
 #
 # Prediction cannot teach a vocabulary. Training-time encoding can admit a
-# label into preallocated headroom without taking an optimizer step; admission
+# label through automatic storage growth without taking an optimizer step; admission
 # alone does not establish learned behavior. Check both mapping retention and
 # held-out accuracy after continued fitting. Rehearse original classes so that
 # old-task retention is an explicit part of the experiment.
@@ -51,7 +51,7 @@ CENTERS = (-1.0, 1.0, -3.0, 3.0)
 # New classes lie within 0.15 of -3 or +3. Each split balances its classes and
 # shuffles them with an independent local RNG. Each fitting phase uses 4,096
 # training and 512 validation rows; the old and new tests each use 1,024 rows.
-# Four output slots exist from construction, but initially only two are used.
+# Storage initially learns two output labels, then grows to hold four.
 #
 # ```yaml
 # x: -0.9
@@ -78,10 +78,10 @@ CENTERS = (-1.0, 1.0, -3.0, 3.0)
 # ```{typst}
 # //| label: fig-proof-vocabulary-admission-training
 # //| fig-cap: "Output-vocabulary admission and optimizer learning are separate events."
-# //| fig-alt: "Record contains Number x and hidden Category label with four preallocated slots, two initially populated and two reserved for later training."
+# //| fig-alt: "Record contains Number x and hidden Category label, whose vocabulary grows from two to four discovered labels during continued training."
 # #tree(node("record", kind: "root", children: (
 #   node("x", type: "Number", body: [Four separated numerical regions]),
-#   node("label", kind: "target", type: "Category", body: [Two initial labels; four slots]),
+#   node("label", kind: "target", type: "Category", body: [Two labels, growing to four]),
 # )))
 # ```
 
@@ -105,7 +105,7 @@ def build() -> rf.Model:
         dropout=0.0,
         batch_size=64,
         x=rf.Number,
-        label=rf.Category(size=4, p_unavailable=0.0, topk=[3], mask=True),
+        label=rf.Category(p_unavailable=0.0, topk=[3], mask=True),
     )
 
 
@@ -169,7 +169,7 @@ def roundtrip(model: rf.Model, rows: list[dict], path: Path) -> tuple[rf.Model, 
 # 0.5 on each two-class test. Before admission, new-class accuracy is necessarily
 # zero. Validation, test, and prediction must not admit labels or change counts
 # or numerical moments. Explicit train encoding must append labels without
-# changing any named parameter; normalization and count buffers may change.
+# changing existing parameter rows; new rows, normalization, and count buffers may change.
 # Save/load must preserve labels, counts, and predictions in both phases.
 # Immediate accuracy after admission is diagnostic, not an acceptance gate.
 
@@ -215,8 +215,9 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         checks["Training admission appends both labels without moving old indices"] = (
             admitted[:2] == vocabulary and len(admitted) == 4 and set(admitted) == set(LABELS)
         )
-        checks["Admission alone changes no learned parameter"] = all(
-            torch.equal(parameters[name], value) for name, value in model.named_parameters()
+        checks["Admission alone preserves existing learned parameter rows"] = all(
+            torch.equal(parameters[name], value[: parameters[name].shape[0]])
+            for name, value in model.named_parameters()
         )
         after_admission = accuracy(prediction(model, new), new)
         continuation_steps = fit(
@@ -250,11 +251,11 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 #
 # {{< proof P059 evidence >}}
 #
-# Gates are provisional. This exercises unused preallocated capacity, not
-# resizing a trained head. It does not claim retention without rehearsal,
+# Gates are provisional. This exercises automatic growth of a trained head.
+# It does not claim retention without rehearsal,
 # optimal continual learning, or vocabulary synchronization across workers or
 # distributed ranks. Admission may change buffers and the output softmax
-# denominator, so unchanged parameters do not imply unchanged predictions.
+# denominator, so preserved old rows do not imply unchanged predictions.
 #
 # ## Reproduce
 #

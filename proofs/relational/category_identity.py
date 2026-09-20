@@ -201,14 +201,14 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
                 length=PAIR_COUNT,
                 n_layers=2,
                 reduction=reduction,
-                entity_id=rf.Category(size=PAIR_COUNT, p_unavailable=0.0),
+                entity_id=rf.Category(p_unavailable=0.0),
                 value=rf.Number,
             ),
             target=rf.Branch(
                 length=PAIR_COUNT,
                 n_layers=2,
                 reduction=reduction,
-                entity_id=rf.Category(size=PAIR_COUNT, p_unavailable=0.0),
+                entity_id=rf.Category(p_unavailable=0.0),
                 value=rf.Number(mask=True, objective="mse"),
             ),
         )

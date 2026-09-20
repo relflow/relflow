@@ -232,7 +232,7 @@ def test_distributed_ownership_is_independent_of_arrow_batch_boundaries():
 
 def test_arrow_dataset_uses_distributed_rank_and_world_size(monkeypatch: pytest.MonkeyPatch):
     configured = rf.Model(
-        id=rf.Category(size=32),
+        id=rf.Category(),
         d_model=8,
         n_layers=1,
         n_heads=4,
@@ -250,8 +250,8 @@ def test_arrow_dataset_uses_distributed_rank_and_world_size(monkeypatch: pytest.
     batches = collect(dataset, monkeypatch)
 
     assert [batch["id"].to_pylist() for batch in batches] == [["b", "d"]]
-    context = dataset.encoding_context[next(iter(dataset.encoding_context))]
-    assert context.global_rank == 1
+    assert dataset.distributed_rank == 1
+    assert dataset.distributed_world_size == 2
 
 
 def test_arrow_workers_combine_parent_rank_and_local_worker_identity(monkeypatch: pytest.MonkeyPatch):

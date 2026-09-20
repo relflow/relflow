@@ -20,7 +20,7 @@ def test_parent_mappings_accept_names_that_collide_with_configuration():
         items=rf.Branch(
             length=3,
             fields={"length": rf.Number, "mask": rf.Number, "description": rf.Number},
-            name=rf.Category(size=8),
+            name=rf.Category(),
         ),
     )
     assert list(model.schema.requests) == [
@@ -36,7 +36,7 @@ def test_parent_mappings_accept_names_that_collide_with_configuration():
 
 
 def test_reused_definitions_bind_independent_nodes_without_changing_templates():
-    category = rf.Category(size=8, topk=[2], mask=True)
+    category = rf.Category(topk=[2], mask=True)
     branch = rf.Branch(length=3, left=category, right=category)
     model = rf.Model(d_model=16, n_layers=1, n_heads=4, first=branch, second=branch)
 
@@ -78,7 +78,7 @@ def test_named_checkpoint_restoration_preserves_masks_aliases_and_weights(tmp_pa
         d_model=16,
         n_layers=1,
         n_heads=4,
-        items=rf.Branch(length=3, label=rf.Category(size=8, mask=True)),
+        items=rf.Branch(length=3, label=rf.Category(mask=True)),
     )
     restored = rf.Model.load(model.save(tmp_path / "named.ckpt"))
     assert restored.schema.model_dump() == model.schema.model_dump()
@@ -86,7 +86,7 @@ def test_named_checkpoint_restoration_preserves_masks_aliases_and_weights(tmp_pa
         torch.testing.assert_close(restored.state_dict()[name], tensor)
     request = restored.schema.requests["record/items/label"]
     assert request.parent is restored.schema.branches["record/items"]
-    assert request.size == 8 and request.mask[0].skip
+    assert request.mask[0].skip
 
 
 def test_late_extension_fields_keep_the_same_binding_and_validation_contract():

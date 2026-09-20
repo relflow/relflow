@@ -178,8 +178,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         n_layers=1,
         n_heads=4,
         batch_size=64,
-        merchant_id=rf.Cluster(capacity=64, n_clusters=(3, 15)),
-        label=rf.Category(mask=True, size=5, p_unavailable=0.0),
+        merchant_id=rf.Cluster(n_clusters=(3, 15)),
+        label=rf.Category(mask=True, p_unavailable=0.0),
     )
     model.optimizer = lambda module: torch.optim.AdamW(module.parameters(), lr=3e-3)
     source = partial(records, seed=seed)

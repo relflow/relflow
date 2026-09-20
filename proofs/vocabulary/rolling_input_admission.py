@@ -107,9 +107,9 @@ def build() -> rf.Model:
         n_heads=4,
         batch_size=128,
         dropout=0.0,
-        entity=rf.Category(size=16384, p_unavailable=0.2),
-        context=rf.Category(size=2, p_unavailable=0.0),
-        label=rf.Category(size=2, p_unavailable=0.0, mask=rf.Mask(query="hide", reconstruct=True)),
+        entity=rf.Category(p_unavailable=0.2),
+        context=rf.Category(p_unavailable=0.0),
+        label=rf.Category(p_unavailable=0.0, mask=rf.Mask(query="hide", reconstruct=True)),
     )
     model.optimizer = rf.adamw(learning_rate=0.002)
     return model

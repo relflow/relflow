@@ -19,6 +19,7 @@ from torchmetrics import Metric as TorchMetric
 
 from relflow._version import __version__
 from relflow.architecture import compiler
+from relflow.architecture.binding import bind
 from relflow.architecture.checkpoint import CheckpointState, RollbackCheckpoint
 from relflow.architecture.contracts import ContractScheduler
 from relflow.architecture.graph import ModelGraph
@@ -114,8 +115,8 @@ class Model(lit.LightningModule, Renderable):
         import relflow as rf
 
         model = rf.Model(
-            segment=rf.Category(size=32),
-            label=rf.Category(mask=True, size=4),
+            segment=rf.Category(),
+            label=rf.Category(mask=True),
             d_model=16,
             n_layers=1,
             n_heads=4,
@@ -638,6 +639,22 @@ class Model(lit.LightningModule, Renderable):
             retain=retain,
         )
 
+    def on_before_batch_transfer(self, batch: Any, dataloader_idx: int) -> Any:
+        """Commit extension resources before DDP starts this batch's graph."""
+        if isinstance(batch, Encoded):
+            trainer = self.trainer
+            strata = (
+                Strata.train
+                if trainer.training
+                else Strata.validate
+                if trainer.validating or trainer.sanity_checking
+                else Strata.test
+                if trainer.testing
+                else Strata.predict
+            )
+            return bind(self, batch, strata)
+        return batch
+
     def transfer_batch_to_device(
         self,
         batch: Any,
@@ -652,6 +669,7 @@ class Model(lit.LightningModule, Renderable):
                 source=batch.source,
                 retain=batch.retain,
                 observations={address: value.to(device) for address, value in batch.observations.items()},
+                bindings=batch.bindings,
             )
         return super().transfer_batch_to_device(batch, device, dataloader_idx)
 

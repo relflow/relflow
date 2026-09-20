@@ -21,7 +21,6 @@ def test_category_topk_rejects_non_positive():
         {
             "name": "cat",
             "type": "category",
-            "size": 64,
             "topk": [0],
         }
     )
@@ -29,17 +28,15 @@ def test_category_topk_rejects_non_positive():
         Schema.model_validate(payload)
 
 
-def test_category_topk_rejects_values_at_or_above_vocab():
+def test_category_topk_is_independent_of_vocabulary_storage():
     payload = _structure_with_field(
         {
             "name": "cat",
             "type": "category",
-            "size": 8,
-            "topk": [8],
+            "topk": [10000, 8, 10000],
         }
     )
-    with pytest.raises(ValueError, match="topk values must be less than size"):
-        Schema.model_validate(payload)
+    assert Schema.model_validate(payload).requests["root/cat"].topk == [8, 10000]
 
 
 def test_category_rejects_number_only_n_bands_option():
@@ -47,7 +44,6 @@ def test_category_rejects_number_only_n_bands_option():
         {
             "name": "cat",
             "type": "category",
-            "size": 64,
             "n_bands": 8,
         }
     )

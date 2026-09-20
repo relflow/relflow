@@ -102,6 +102,7 @@ class Component(enum.StrEnum):
     TensorField = "TensorField"
     observe = "observe"
     learn = "learn"
+    bind = "bind"
     loss = "loss"
     output = "output"
     write = "write"

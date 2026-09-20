@@ -102,7 +102,7 @@ def build() -> rf.Model:
         dropout=0.0,
         batch_size=64,
         x=rf.Number,
-        code=rf.Category(size=4, p_unavailable=0.3),
+        code=rf.Category(p_unavailable=0.3),
         target=rf.Number(mask=True, objective="mse"),
     )
 
@@ -188,7 +188,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     checks.update(
         {
             "Unknown codes retain valued state": bool(field.state.eq(rf.Tokens.valued).all()),
-            "Unknown content uses the capacity sentinel": bool(field.content.eq(4).all()),
+            "Unknown content uses the allocation-independent sentinel": bool(field.content.eq(-1).all()),
             "Unknown fallback nRMSE below 0.25": metrics["unknown"]["fallback_nrmse"] < 0.25,
             "Paired novel identities stay near their information limit": 1.5 - 1e-6
             <= metrics["unknown"]["paired_rmse"]

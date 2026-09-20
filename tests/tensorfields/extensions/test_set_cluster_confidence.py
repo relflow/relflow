@@ -15,11 +15,11 @@ from relflow.tensorfields.extensions import set as sets
 from relflow.tensorfields.shared.reconstruction import Metrics
 
 
-def model(kind, *, size=8, p_unavailable=0.0, mask=True):
+def model(kind, *, p_unavailable=0.0, mask=True):
     request = (
-        rf.Set(size=size, p_unavailable=p_unavailable, mask=mask)
+        rf.Set(p_unavailable=p_unavailable, mask=mask)
         if kind == "set"
-        else rf.Cluster(capacity=size, n_clusters=(2, 4), p_unavailable=p_unavailable, mask=mask)
+        else rf.Cluster(n_clusters=(2, 4), p_unavailable=p_unavailable, mask=mask)
     )
     result = rf.Model(d_model=8, n_heads=2, n_layers=1, x=rf.Number, label=request)
     labels = [["a"], ["b"]] if kind == "set" else ["a", "b"]
@@ -61,7 +61,7 @@ def test_input_augmentation_preserves_pristine_answers(kind):
         assert answers["membership"].sum() == 2
         assert not answers["unavailable"].any()
     else:
-        assert field.content.reshape(-1)[:2].tolist() == [8, 8]
+        assert field.content.reshape(-1)[:2].tolist() == [-1, -1]
         assert answers.reshape(-1)[:2].tolist() == [0, 1]
 
 
@@ -115,7 +115,7 @@ def test_scores_do_not_depend_on_batch_partition(kind):
 
 
 def test_set_unused_capacity_does_not_inflate_bit_accuracy_or_dilute_loss():
-    small, large = model("set", size=2), model("set", size=1024)
+    small, large = model("set"), model("set")
     evaluate(small, [["a"]], torch.tensor([[-2.0, -2.0]]))
     evaluate(large, [["a"]], torch.full((1, 1024), -2.0))
     left = small.nodes["record/label"].decoder.metrics["test_metrics"].compute()
@@ -178,7 +178,7 @@ def test_cluster_balancing_can_escape_saturated_initial_assignments():
 
 @pytest.mark.parametrize("kind", ["set", "cluster"])
 def test_empty_vocabulary_has_differentiable_zero_content_loss(kind):
-    request = rf.Set(size=8, mask=True) if kind == "set" else rf.Cluster(capacity=8, n_clusters=4, mask=True)
+    request = rf.Set(mask=True) if kind == "set" else rf.Cluster(n_clusters=4, mask=True)
     module = rf.Model(d_model=8, n_heads=2, n_layers=1, x=rf.Number, label=request)
     module.track = lambda names, value: value
     logits = torch.randn(2, 8 if kind == "set" else 4, requires_grad=True)
@@ -197,8 +197,8 @@ def test_registered_metrics_share_one_callback_and_reset_each_stage():
         n_heads=2,
         n_layers=1,
         category=rf.Category(mask=True),
-        tags=rf.Set(size=8, mask=True),
-        group=rf.Cluster(capacity=8, n_clusters=4, mask=True),
+        tags=rf.Set(mask=True),
+        group=rf.Cluster(n_clusters=4, mask=True),
     )
     assert sum(isinstance(callback, Metrics) for callback in module.configure_callbacks()) == 1
     for node in module.nodes.values():
@@ -239,9 +239,9 @@ def test_mixed_vocabulary_metrics_include_a_distributed_objective_empty_rank():
         n_layers=1,
         batch_size=2,
         x=rf.Number,
-        label=rf.Category(size=8, mask=selection),
-        tags=rf.Set(size=8, mask=selection),
-        group=rf.Cluster(capacity=8, bounds=(2, 4), mask=selection),
+        label=rf.Category(mask=selection),
+        tags=rf.Set(mask=selection),
+        group=rf.Cluster(bounds=(2, 4), mask=selection),
     )
     module.encode(
         pa.table(
@@ -298,7 +298,7 @@ def test_set_checkpoint_preserves_learned_unavailable_embedding(tmp_path):
 
 @pytest.mark.parametrize("known,unknown", [(False, True), (1, 3), (1.5, 3.5), (b"a", b"new"), ("a", "new")])
 def test_set_unknown_members_are_distinct_within_each_arrow_atom_family(known, unknown):
-    module = rf.Model(d_model=8, n_heads=2, n_layers=1, tags=rf.Set(size=8, p_unavailable=0.0))
+    module = rf.Model(d_model=8, n_heads=2, n_layers=1, tags=rf.Set(p_unavailable=0.0))
     module.encode(pa.table({"tags": [[known]]}), strata="train")
     field = module.encode(pa.table({"tags": [[known, unknown, unknown, None], [unknown], []]}), strata="test")[
         "record/tags"
@@ -318,8 +318,8 @@ def test_set_and_cluster_train_with_bfloat16_mixed_precision(accelerator):
         n_layers=1,
         batch_size=4,
         x=rf.Number,
-        tags=rf.Set(size=2, p_unavailable=0.5, mask=rf.Mask(rate=0.5, reconstruct=True)),
-        group=rf.Cluster(capacity=2, bounds=(2, 4), p_unavailable=0.5, mask=True),
+        tags=rf.Set(p_unavailable=0.5, mask=rf.Mask(rate=0.5, reconstruct=True)),
+        group=rf.Cluster(bounds=(2, 4), p_unavailable=0.5, mask=True),
     )
     module.optimizer = rf.adamw(learning_rate=0.001)
     source = pa.table(

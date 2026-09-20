@@ -269,11 +269,11 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             n_layers=2,
             reduction=None,
             value=rf.Number,
-            group=rf.Category(size=len(GROUPS), p_unavailable=0.0),
+            group=rf.Category(p_unavailable=0.0),
         ),
         answer=rf.Number(mask=True, objective="mse"),
-        operation=rf.Category(size=len(OPERATIONS), p_unavailable=0.0),
-        selected_group=rf.Category(size=len(GROUPS), p_unavailable=0.0),
+        operation=rf.Category(p_unavailable=0.0),
+        selected_group=rf.Category(p_unavailable=0.0),
     )
     data = rf.SyntheticDataModule(
         model=model,

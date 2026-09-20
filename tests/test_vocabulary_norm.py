@@ -6,15 +6,15 @@ from types import SimpleNamespace
 import pyarrow as pa
 import pytest
 import torch
+from experiments.vocabulary_norm import ROOT, Budget, Norm, category, load, project, radius, trajectory
 
 import relflow as rf
-from experiments.vocabulary_norm import ROOT, Budget, Norm, category, load, project, radius, trajectory
 from relflow.tensorfields.base import TensorInput
 
 
 @pytest.fixture
 def experiment():
-    model = rf.Model(d_model=8, n_layers=1, n_heads=2, entity=rf.Category(size=8, p_unavailable=0.0))
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, entity=rf.Category(p_unavailable=0.0))
     optimizer = torch.optim.SGD(model.parameters(), lr=1.0)
     trainer = SimpleNamespace(world_size=1, optimizers=[optimizer])
     journal = []

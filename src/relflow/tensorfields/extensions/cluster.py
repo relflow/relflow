@@ -17,6 +17,7 @@ from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
 from relflow.distributed import broadcast_object
+from relflow.helpers.resize import Resize
 from relflow.logging import logger
 from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
@@ -33,7 +34,14 @@ from relflow.tensorfields.base import (
 from relflow.tensorfields.output import array, labels, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
 from relflow.tensorfields.shared.reconstruction import Metrics, Reconstruction, Scores
-from relflow.tensorfields.shared.vocabulary import OnlineVocabularyModel, VocabularyState, VocabularySyncCallback
+from relflow.tensorfields.shared.rows import Embedding
+from relflow.tensorfields.shared.vocabulary import (
+    OnlineVocabularyModel,
+    VocabularyBatch,
+    VocabularyState,
+    VocabularySyncCallback,
+    capacity,
+)
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
@@ -60,7 +68,7 @@ Assignment = int | torch.Tensor | list[float] | tuple[float, ...]
 class Request(RequestBase):
     """Scalar labels represented through shared, learned latent clusters.
 
-    ``capacity`` limits source labels. ``bounds=K`` normalizes to ``(K, K)``;
+    Training grows label storage automatically. ``bounds=K`` normalizes to ``(K, K)``;
     ``bounds=(lower, upper)`` allows an adaptive cluster count within that
     range. The normalized tuple is stored as ``n_clusters``. ``p_unavailable``
     routes known training labels through shared unavailable content.
@@ -72,10 +80,6 @@ class Request(RequestBase):
     model_config = pydantic.ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
     type: Literal["cluster"] = "cluster"
-    capacity: Annotated[
-        int,
-        pydantic.Field(gt=0, default=1024),
-    ] = 1024
     p_unavailable: Annotated[float, pydantic.Field(ge=0.0, le=1.0, default=0.01)] = 0.01
 
     ema_decay: Annotated[float, pydantic.Field(ge=0.0, le=1.0, default=0.99)] = 0.99
@@ -98,7 +102,6 @@ class Request(RequestBase):
             *,
             bounds: int | tuple[int, int],
             n_clusters: int | tuple[int, int] = ...,
-            capacity: int = 1024,
             p_unavailable: float = 0.01,
             ema_decay: float = 0.99,
             revive_temperature: float = 10.0,
@@ -112,7 +115,6 @@ class Request(RequestBase):
             *,
             n_clusters: int | tuple[int, int],
             bounds: int | tuple[int, int] = ...,
-            capacity: int = 1024,
             p_unavailable: float = 0.01,
             ema_decay: float = 0.99,
             revive_temperature: float = 10.0,
@@ -126,10 +128,6 @@ class Request(RequestBase):
         if isinstance(value, int) and not isinstance(value, bool):
             return (value, value)
         return value
-
-    @property
-    def size(self) -> int:
-        return self.n_clusters[-1]
 
     @pydantic.model_validator(mode="after")
     def check_n_clusters(self):
@@ -263,11 +261,11 @@ def observe(
         raise RuntimeError(f"cluster field at '{address}' requires a vocabulary encoding context")
 
     indices = state.indices(field.values, learn=True)
-    request: Request = cast(Request, schema.requests[address])
+    content = torch.from_numpy(indices.copy())
     return TensorDict(
         {
             TensorKey.state: tally(torch.from_numpy(field.dense.copy()), len(Tokens)),
-            TensorKey.content: tally(torch.from_numpy(indices.copy()), request.capacity + 1),
+            TensorKey.content: tally(content.masked_fill(content < 0, state.size), state.size + 1),
         },
         batch_size=[],
     )
@@ -319,20 +317,11 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         content = encode(input)
         target_content = encode(target)
 
-        if state is not None and len(state) > (capacity := cast(Request, schema.requests[address]).capacity):
-            logger.bind(
-                component="tensorfield",
-                field_type="cluster",
-                address=str(address),
-                vocabulary_size=len(state),
-                capacity=capacity,
-            ).warning("vocabulary exceeds configured capacity")
-
         state_tensor = torch.from_numpy(input.dense)
         target_state = torch.from_numpy(target.dense)
         if strata == Strata.train:
             p_unavailable: float = cast(Request, schema.requests[address]).p_unavailable
-            unavailable_index: int = cast(Request, schema.requests[address]).capacity
+            unavailable_index = -1
 
             if p_unavailable > 0.0:
                 # OOV simulation is input corruption, not a change to answers.
@@ -369,8 +358,7 @@ class Embedder(EmbedderBase):
         request: Request = cast(Request, schema.requests[address])
         self.origin: Address = address
         self.destination: Address = cast("Branch", request.parent).address
-        self.capacity: int = request.capacity
-        self.size: int = request.size
+        self.size: int = request.n_clusters[-1]
 
         if address not in schema.reconstruct:
             # Cluster loss fires only for reconstructed rows; a plain-input
@@ -380,7 +368,7 @@ class Embedder(EmbedderBase):
                 "will not engage. Add Mask(reconstruct=True) to train the cluster head."
             )
 
-        self.vocab: OnlineVocabularyModel = OnlineVocabularyModel(size=self.capacity)
+        self.vocab: OnlineVocabularyModel = OnlineVocabularyModel()
         self._override_depth: int = 0
 
         self.embeddings = torch.nn.ModuleDict(
@@ -389,7 +377,7 @@ class Embedder(EmbedderBase):
                     num_embeddings=len(Tokens),
                     embedding_dim=schema.d_model,
                 ),
-                TensorKey.cluster.name: torch.nn.Embedding(
+                TensorKey.cluster.name: Embedding(
                     num_embeddings=self.capacity + 1,
                     embedding_dim=self.size,
                 ),
@@ -416,6 +404,17 @@ class Embedder(EmbedderBase):
         self.register_buffer("committed", committed_init)
         self.register_buffer("adherence_ema", torch.zeros(()))
 
+    @property
+    def capacity(self) -> int:
+        return self.vocab.size
+
+    def resize(self, size: int, resize: Resize) -> None:
+        """Expand identity rows without changing cluster columns or their state."""
+        resize.embedding(cast(torch.nn.Embedding, self.embeddings[TensorKey.cluster.name]), size + 1, tail=True)
+        cast(Counter, self.counters[TensorKey.content.name]).resize(size + 1, resize, tail=True)
+        if self.vocab.size != size:
+            resize.attribute(self.vocab, "size", size)
+
     @beartype
     def forward(self, inputs: TensorInput) -> Parcel:
         N: int
@@ -428,10 +427,10 @@ class Embedder(EmbedderBase):
 
         if valued.any():
             valid_content = content.masked_select(valued)
-            if ((valid_content < 0) | (valid_content > self.capacity)).any().item():
-                raise ValueError(f"Token in address {self.origin} outside [0, {self.capacity}]")
+            if ((valid_content < -1) | (valid_content >= self.capacity)).any().item():
+                raise ValueError(f"Token in address {self.origin} outside [-1, {self.capacity})")
 
-        safe_content = content.masked_fill(~valued, 0)
+        safe_content = content.masked_fill(content.eq(-1), self.capacity).masked_fill(~valued, 0)
         assign_logits = self.embeddings[TensorKey.cluster.name](safe_content)
         if self.training:
             cluster_assignments = torch.nn.functional.gumbel_softmax(assign_logits, hard=True, dim=-1)
@@ -488,6 +487,8 @@ class Embedder(EmbedderBase):
             if len(self.vocab.master) >= self.capacity:
                 raise ValueError(f"cluster field {self.origin} at capacity ({self.capacity}); cannot assign {token!r}")
             self.vocab.master.append(token)
+            self.vocab._snapshot_cache = None
+            self.vocab._snapshot_size = -1
             index = len(self.vocab.master) - 1
         with torch.no_grad():
             weight[index].copy_(logits)
@@ -527,6 +528,8 @@ class Embedder(EmbedderBase):
                         weight[index].copy_(original)
                         if was_new and self.vocab.master:
                             self.vocab.master.pop()
+                            self.vocab._snapshot_cache = None
+                            self.vocab._snapshot_size = -1
             finally:
                 self._override_depth -= 1
 
@@ -534,6 +537,35 @@ class Embedder(EmbedderBase):
         if self._override_depth:
             raise RuntimeError("cannot save or rebuild a model while Cluster assignment overrides are active")
         super()._save_to_state_dict(destination, prefix, keep_vars)
+
+
+@cluster.register
+def bind(
+    module: Model,
+    field: TensorFieldBase,
+    observation: TensorDict | None,
+    binding: object,
+    *,
+    address: Address,
+    strata: Strata,
+    resize: Resize,
+) -> None:
+    """Grow source identities while preserving the unavailable row and cluster count."""
+    if not isinstance(binding, VocabularyBatch):
+        raise TypeError(f"cluster binding at '{address}' requires VocabularyBatch, got {type(binding).__name__}")
+    embedder = cast(Embedder, module.nodes[address].embedder)
+    mapping, size = binding.resolve(embedder.vocab, learn=strata == Strata.train, device=module.device, resize=resize)
+    embedder.resize(size, resize)
+    field = cast(TensorField, field)
+    field.content = mapping.to(field.content.device)[field.content]
+    values = cast(torch.Tensor, field.targets[TensorKey.content])
+    field.targets[TensorKey.content] = mapping.to(values.device)[values]
+    if observation is not None:
+        counter_mapping = mapping.clone()
+        counter_mapping[-1] = size
+        observation[TensorKey.content] = binding.counts(
+            cast(torch.Tensor, observation[TensorKey.content]), counter_mapping, size + 1
+        )
 
 
 @cluster.register
@@ -599,16 +631,32 @@ class ClusterRuntime:
             raise RuntimeError(f"Cluster assignments cannot change while the model is active: {', '.join(active)}")
 
     def assign(self, token: Any, assignment: Assignment) -> int:
+        from relflow.architecture.binding import optimizers
+
         model, embedder = self.resolve()
         with embedder.vocab.lock:
             self.assert_writable(model, embedder)
+            embedder.assignment_logits(assignment)
+            required = len(embedder.vocab.master) + int(token not in embedder.vocab.state.index)
+            resize = Resize(optimizers(model))
+            embedder.resize(capacity(embedder.capacity, required), resize)
+            resize.commit()
             return embedder.assign_token(token, assignment)
 
     @contextmanager
     def override(self, assignments: Mapping[Any, Assignment]) -> Generator[None, None, None]:
+        from relflow.architecture.binding import optimizers
+
         model, embedder = self.resolve()
         with embedder.vocab.lock:
             self.assert_writable(model, embedder)
+            index = embedder.vocab.state.index
+            for assignment in assignments.values():
+                embedder.assignment_logits(assignment)
+            required = len(index) + sum(token not in index for token in assignments)
+            resize = Resize(optimizers(model))
+            embedder.resize(capacity(embedder.capacity, required), resize)
+            resize.commit()
             model.locks[_OVERRIDE_LOCK] += 1
             try:
                 with embedder.override_assignments(assignments):
@@ -629,7 +677,7 @@ class Decoder(DecoderBase):
         super().__init__(schema=schema, address=address, conditioned=False)
 
         request: Request = cast(Request, schema.requests[address])
-        n_clusters: int = request.size
+        n_clusters: int = request.n_clusters[-1]
         self.metrics = Scores(address, Reconstruction)
 
         self.linears = torch.nn.ModuleDict(
@@ -697,7 +745,7 @@ def loss(
 
     assign_weight: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.cluster.name].weight)
     vocab_size = len(embedder.vocab.master)
-    known = valued & content_targets.lt(vocab_size)
+    known = valued & content_targets.ge(0) & content_targets.lt(vocab_size)
     # The reconstruction support matches the writer. Neither the unavailable
     # input embedding nor unallocated label rows are output candidates.
     cluster_probs = cluster_logits[known].float().softmax(dim=-1)

@@ -236,10 +236,10 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             length=ITEMS,
             n_layers=2,
             reduction=None,
-            group=rf.Category(size=len(GROUPS), p_unavailable=0.0),
+            group=rf.Category(p_unavailable=0.0),
             contribution=rf.Number,
         ),
-        selected_group=rf.Category(size=len(GROUPS), p_unavailable=0.0),
+        selected_group=rf.Category(p_unavailable=0.0),
         answer=rf.Number(mask=True, objective="mse"),
     )
     datamodule = rf.SyntheticDataModule(

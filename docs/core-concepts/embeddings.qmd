@@ -22,7 +22,7 @@ model = rf.Model(
     n_layers=3,
     n_heads=8,
     embed=True,
-    region=rf.Category(size=64),
+    region=rf.Category(),
     purchases=rf.Branch(
         length=64,
         embed=True,
@@ -31,7 +31,6 @@ model = rf.Model(
         items=rf.Branch(
             length=24,
             product=rf.Category(
-                size=8192,
                 mask=rf.Mask(rate=0.10, reconstruct=True),
             ),
             quantity=rf.Number,

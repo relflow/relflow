@@ -22,7 +22,7 @@ def test_schema_binding_preserves_sparse_coordinates() -> None:
         n_heads=2,
         events=rf.Branch(
             length=3,
-            ip_country=rf.Category(size=4),
+            ip_country=rf.Category(),
             amount=rf.Number,
         ),
     )
@@ -51,7 +51,7 @@ def test_schema_binding_preserves_sparse_coordinates() -> None:
         n_heads=2,
         login_events=rf.Branch(
             length=2,
-            device_id=rf.Category(size=4),
+            device_id=rf.Category(),
             risk_score=rf.Number,
         ),
     )

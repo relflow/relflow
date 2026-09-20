@@ -9,12 +9,12 @@ import relflow as rf
 
 REQUESTS = [
     (rf.Boolean, {}),
-    (rf.Category, {"size": 8}),
+    (rf.Category, {}),
     (rf.Cluster, {"bounds": 4}),
     (rf.DateParts, {"dateparts": ["day_of_week"]}),
     (rf.Hash, {}),
     (rf.Number, {}),
-    (rf.Set, {"size": 8}),
+    (rf.Set, {}),
     (rf.Text, {}),
     (rf.Vector, {"n_dim": 4}),
 ]
@@ -91,10 +91,8 @@ def test_mutations_reject_metadata_even_when_validation_is_disabled(schema_only)
 @pytest.mark.parametrize(
     "field, attribute, value, canonical",
     [
-        (rf.Category(size=8), "size", 16, "capacity"),
-        (rf.Category(size=8), "capacity", 16, "capacity"),
-        (rf.Set(size=8), "size", 16, "capacity"),
-        (rf.Set(size=8), "capacity", 16, "capacity"),
+        (rf.Category(), "topk", [2, 100], "topk"),
+        (rf.Set(), "threshold", 0.8, "threshold"),
         (rf.Cluster(bounds=4), "n_clusters", (4, 8), "n_clusters"),
     ],
 )
@@ -111,7 +109,7 @@ def test_mutations_accept_declared_options_with_serialization_aliases(schema_onl
 
 
 def test_partial_updates_still_accept_options_supported_by_some_selected_nodes():
-    model = rf.Model(d_model=16, n_layers=1, n_heads=4, amount=rf.Number, label=rf.Category(size=8))
+    model = rf.Model(d_model=16, n_layers=1, n_heads=4, amount=rf.Number, label=rf.Category())
     model.update(n_bands=4, strict=False)
     assert model.schema.requests["record/amount"].n_bands == 4
     assert not hasattr(model.schema.requests["record/label"], "n_bands")

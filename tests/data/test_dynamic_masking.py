@@ -3,6 +3,7 @@ import pyarrow as pa
 import pytest
 
 import relflow as rf
+from relflow.architecture.binding import bind
 from relflow.data.iterables import encode
 from relflow.data.ragged import boolean, coalesce
 from relflow.structs.enums import Strata, TensorKey, Tokens
@@ -22,7 +23,7 @@ def test_branch_query_skip_is_atomic_across_descendants():
     schema = model(
         items=rf.Branch(
             amount=rf.Number(),
-            code=rf.Category(size=8),
+            code=rf.Category(),
             length=3,
             mask=rf.Mask(query="selected", skip=True, dropout=False, reconstruct=True),
         )
@@ -85,7 +86,7 @@ def test_query_and_rate_sample_only_eligible_owner_coordinates():
     ],
 )
 def test_category_observes_pristine_values_before_mask_projection(mask):
-    configured = model(value=rf.Category(size=8, mask=mask))
+    configured = model(value=rf.Category(mask=mask))
     source = arrow_batch(
         [
             {"value": "hidden", "selected": True},
@@ -100,12 +101,14 @@ def test_category_observes_pristine_values_before_mask_projection(mask):
         configured.interprocess_encoding_context,
     )
 
+    assert rf.Category.vocabulary(configured, "record/value") == ()
+    encoded = bind(configured, encoded, Strata.train)
     assert rf.Category.vocabulary(configured, "record/value") == ("hidden", "visible")
     assert encoded.observations["record/value"][TensorKey.content].sum() == 2
 
 
 def test_fully_skipped_source_is_prepared_and_observed(monkeypatch):
-    configured = model(value=rf.Category(size=8, mask=rf.Mask(skip=True, dropout=False)))
+    configured = model(value=rf.Category(mask=rf.Mask(skip=True, dropout=False)))
     source = arrow_batch([{"value": "A"}, {"value": "B"}])
     extension = TENSORFIELDS["category"]
     prepare = extension.prepare
@@ -124,6 +127,7 @@ def test_fully_skipped_source_is_prepared_and_observed(monkeypatch):
     )
 
     assert seen == [["A", "B"]]
+    encoded = bind(configured, encoded, Strata.train)
     assert rf.Category.vocabulary(configured, "record/value") == ("A", "B")
     assert encoded.tensors["record/value"].state.reshape(-1).tolist() == [Tokens.padded.value] * 2
 
@@ -161,7 +165,7 @@ def test_number_learns_pristine_moments_once_before_forward():
 
 
 def test_observation_learning_is_frozen_outside_training():
-    configured = model(value=rf.Category(size=8))
+    configured = model(value=rf.Category())
     source = arrow_batch([{"value": "A"}, {"value": "B"}])
 
     encoded = encode(
@@ -191,7 +195,7 @@ def test_query_selector_requires_non_null_scalar_booleans(selector, message):
 
 
 def test_source_less_prediction_uses_vacancy_and_fixed_routing():
-    schema = model(label=rf.Category(size=8, mask=True)).schema
+    schema = model(label=rf.Category(mask=True)).schema
     source = arrow_batch([{"unused": 1}, {"unused": 2}])
 
     projection = coalesce(source, schema, Strata.predict)["record/label"]
@@ -208,7 +212,7 @@ def test_source_less_prediction_uses_vacancy_and_fixed_routing():
 
 @pytest.mark.parametrize("strata", [Strata.train, Strata.validate, Strata.test])
 def test_source_less_reconstruction_fails_outside_prediction(strata):
-    schema = model(value=rf.Number(), label=rf.Category(size=8, mask=True)).schema
+    schema = model(value=rf.Number(), label=rf.Category(mask=True)).schema
     source = arrow_batch([{"value": 1.0}, {"value": 2.0}])
 
     with pytest.raises(ValueError, match="field 'label' is absent"):
@@ -216,7 +220,7 @@ def test_source_less_reconstruction_fails_outside_prediction(strata):
 
 
 def test_source_less_learned_mask_reconstruction_remains_present():
-    schema = model(label=rf.Category(size=8, mask=rf.Mask(dropout=False, reconstruct=True))).schema
+    schema = model(label=rf.Category(mask=rf.Mask(dropout=False, reconstruct=True))).schema
     source = arrow_batch([{"unused": 1}, {"unused": 2}])
 
     projection = coalesce(source, schema, Strata.predict)["record/label"]

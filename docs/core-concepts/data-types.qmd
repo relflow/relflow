@@ -10,7 +10,7 @@ type from the meaning of the value, not just its storage format.
 | --- | --- |
 | Continuous amount, count, age, or measurement | [Number](../data-types/number.qmd) |
 | True or false | [Boolean](../data-types/boolean.qmd) |
-| One bounded label | [Category](../data-types/category.qmd) |
+| One learned label | [Category](../data-types/category.qmd) |
 | Labels sharing learned latent groups | [Cluster](../data-types/cluster.qmd) |
 | Unordered label membership | [Set](../data-types/set.qmd) |
 | Related objects or repeated records | [Branch](../data-types/branch.qmd) |

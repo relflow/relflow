@@ -8,7 +8,7 @@ from relflow.structs.enums import TensorKey
 
 
 def test_schema_pickle_discards_derived_selection_predicates():
-    model = rf.Model(id=rf.Category(size=32), d_model=8, n_layers=1, n_heads=2)
+    model = rf.Model(id=rf.Category(), d_model=8, n_layers=1, n_heads=2)
     selected = model.select(rf.where("type") == "category")
 
     restored = pickle.loads(pickle.dumps(model.schema))
@@ -20,7 +20,7 @@ def test_schema_pickle_discards_derived_selection_predicates():
 
 def test_model_constructor_supports_direct_binding_and_opt_in_queries():
     model = rf.Model(
-        job_code=rf.Category(query='source["job code"]', description="Job code from OpenML", size=128),
+        job_code=rf.Category(query='source["job code"]', description="Job code from OpenML"),
         amount=rf.Number(),
         label=rf.Category(mask=True, embed=False, topk=[2, 3]),
         d_model=32,
@@ -41,7 +41,7 @@ def test_model_constructor_supports_direct_binding_and_opt_in_queries():
     assert job.name == "job_code"
     assert job.description == "Job code from OpenML"
     assert job.query == 'source["job code"]'
-    assert job.size == 128
+    assert "size" not in job.model_dump()
 
     amount = params.requests["record/amount"]
     assert amount.query is None
@@ -71,7 +71,7 @@ def test_model_constructor_accepts_branch_nodes_with_optional_leaf_queries():
     model = rf.Model(
         transactions=rf.Branch(
             amount=rf.Number(),
-            merchant_code=rf.Category(query='source["merchant code"]', description="merchant code", size=32),
+            merchant_code=rf.Category(query='source["merchant code"]', description="merchant code"),
             length=4,
         ),
         d_model=16,
@@ -90,7 +90,7 @@ def test_model_constructor_accepts_branch_nodes_with_optional_leaf_queries():
     assert merchant.name == "merchant_code"
     assert merchant.description == "merchant code"
     assert merchant.query == 'source["merchant code"]'
-    assert merchant.size == 32
+    assert "capacity" not in merchant.model_dump()
 
 
 def test_branch_mask_shorthand_normalizes_and_exports_public_api():
@@ -297,18 +297,17 @@ def test_model_update_can_deactivate_and_reactivate_leaf_nodes():
 
 
 def test_model_update_applies_validated_values_before_rebuilding_modules():
-    model = rf.Model(label=rf.Category(size=8, topk=[2]), d_model=16, n_layers=1, n_heads=4)
+    model = rf.Model(label=rf.Category(topk=[2]), d_model=16, n_layers=1, n_heads=4)
     address = "record/label"
     before = model.nodes[address]
 
-    model.update(rf.where("name") == "label", size=16, topk=[3, 2])
+    model.update(rf.where("name") == "label", topk=[100, 3, 2])
 
     request = model.schema.requests[address]
-    assert request.size == 16
-    assert request.topk == [2, 3]
+    assert request.topk == [2, 3, 100]
     assert model.nodes[address] is not before
-    assert model.nodes[address].embedder.size == 16
-    assert model.nodes[address].embedder.embeddings[TensorKey.content.name].num_embeddings == 16
+    assert model.nodes[address].embedder.size == before.embedder.size
+    assert model.nodes[address].embedder.embeddings[TensorKey.content.name].num_embeddings == before.embedder.size
 
 
 def test_model_update_disables_attention_without_removing_reduction() -> None:
@@ -365,12 +364,12 @@ def test_model_extend_appends_fields_under_one_selected_array_and_rebuilds_modul
 
 
 def test_model_extend_appends_category_field_and_preserves_existing_vocabulary():
-    model = rf.Model(label=rf.Category(size=10), d_model=16, n_layers=1, n_heads=4)
+    model = rf.Model(label=rf.Category(), d_model=16, n_layers=1, n_heads=4)
 
     label_vocab = model.nodes["record/label"].embedder.vocab
     label_vocab.extend(["alpha", "beta"])
 
-    model.extend(rf.where("name") == "record", caretaker=rf.Category(size=10))
+    model.extend(rf.where("name") == "record", caretaker=rf.Category())
 
     assert "record/caretaker" in model.schema.requests
     assert "record/caretaker" in model.nodes

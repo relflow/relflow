@@ -18,7 +18,7 @@ def build() -> rf.Model:
         n_heads=4,
         batch_size=2,
         attention=None,
-        tags=rf.Set(size=8, p_unavailable=0.0),
+        tags=rf.Set(p_unavailable=0.0),
     )
 
 

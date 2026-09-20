@@ -87,7 +87,7 @@ def test_schema_converts_leaf_instances_nested_in_branches():
     )
 
     request = structure.requests["root/branch/category_leaf"]
-    assert request.size == 1024
+    assert "size" not in request.model_dump()
 
 
 def test_schema_depthwise_contains_branch_levels():

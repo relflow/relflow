@@ -24,8 +24,8 @@ model = rf.Model(
     n_layers=2,
     n_heads=4,
     amount=rf.Number,
-    merchant=rf.Category(size=4096),
-    label=rf.Category(mask=True, size=2),
+    merchant=rf.Category(),
+    label=rf.Category(mask=True),
 )
 ```
 
@@ -38,10 +38,10 @@ model = rf.Model(
     n_heads=4,
     line_items=rf.Branch(
         length=32,
-        sku=rf.Category(size=2048),
+        sku=rf.Category(),
         quantity=rf.Number,
     ),
-    returned=rf.Category(mask=True, size=2),
+    returned=rf.Category(mask=True),
 )
 ```
 

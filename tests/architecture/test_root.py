@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 import polars as pl
 import pyarrow as pa
@@ -9,6 +10,7 @@ import pytest
 import torch
 
 import relflow as rf
+from relflow.architecture.binding import bind
 from relflow.architecture.root import Model, MutationLockCallback, RollbackCheckpoint, RuntimePlacementCallback
 from relflow.architecture.runtime import ModelRuntime
 from relflow.data.iterables import encode
@@ -38,7 +40,6 @@ def configuration() -> Schema:
                     {
                         "name": "label",
                         "type": "category",
-                        "size": 32,
                     }
                 ],
             },
@@ -120,7 +121,6 @@ def prediction_schema() -> Schema:
                     "type": "category",
                     "embed": False,
                     "p_unavailable": 0.0,
-                    "size": 16,
                 },
                 {
                     "name": "label",
@@ -128,7 +128,6 @@ def prediction_schema() -> Schema:
                     "embed": False,
                     "mask": True,
                     "p_unavailable": 0.0,
-                    "size": 16,
                     "topk": [2],
                 },
             ],
@@ -139,19 +138,17 @@ def prediction_schema() -> Schema:
 def primed() -> Model:
     schema = prediction_schema()
     model = Model(schema=schema, batch_size=2)
-    inputs = encode(
-        batch=arrow_batch(
+    inputs = model.encode(
+        arrow_batch(
             [
                 {"color": "red", "label": "warm"},
                 {"color": "blue", "label": "cool"},
             ]
         ),
-        schema=schema,
         strata=Strata.train,
-        interprocess_encoding_context=model.interprocess_encoding_context,
     )
 
-    model(inputs.tensors, strata=Strata.train)
+    model(inputs, strata=Strata.train)
     return model
 
 
@@ -330,12 +327,10 @@ def test_configure_callbacks_deduplicates_shared_extension_callbacks() -> None:
                     {
                         "name": "label",
                         "type": "category",
-                        "size": 16,
                     },
                     {
                         "name": "tags",
                         "type": "set",
-                        "size": 16,
                     },
                 ],
             },
@@ -497,6 +492,7 @@ def test_training_counters_observe_all_encoded_fields() -> None:
         interprocess_encoding_context=model.interprocess_encoding_context,
     )
 
+    inputs = bind(model, inputs, Strata.train)
     ModelRuntime.learn(model, inputs.observations, strata=Strata.train)
 
     for address in (Address("root", "color"), Address("root", "label")):
@@ -504,9 +500,51 @@ def test_training_counters_observe_all_encoded_fields() -> None:
         observation = inputs.observations[address]
 
         expected_state = torch.ones(len(Tokens), dtype=torch.int64) + observation[TensorKey.state]
-        expected_content = torch.ones(schema.requests[address].size, dtype=torch.int64) + observation[TensorKey.content]
+        expected_content = (
+            torch.ones_like(embedder.counters[TensorKey.content.name].counts) + observation[TensorKey.content]
+        )
         assert torch.equal(embedder.counters[TensorKey.state.name].counts.cpu(), expected_state)
         assert torch.equal(embedder.counters[TensorKey.content.name].counts.cpu(), expected_content)
+
+
+def test_distributed_step_rejects_bindings_that_bypassed_pre_forward_transfer():
+    model = Model(schema=prediction_schema(), batch_size=2)
+    batch = encode(
+        batch=arrow_batch([{"color": "red", "label": "warm"}]),
+        schema=model.schema,
+        strata=Strata.train,
+        interprocess_encoding_context=model.interprocess_encoding_context,
+    )
+    model._trainer = SimpleNamespace(world_size=2)
+    try:
+        with pytest.raises(RuntimeError, match="before forward.*on_before_batch_transfer"):
+            model.training_step(batch, 0)
+    finally:
+        model._trainer = None
+    assert model.nodes[Address("root", "color")].embedder.vocab.snapshot() == []
+
+
+def test_sanity_check_batch_binding_uses_validation_stage(monkeypatch):
+    model = Model(schema=prediction_schema(), batch_size=2)
+    batch = encode(
+        batch=arrow_batch([{"color": "red", "label": "warm"}]),
+        schema=model.schema,
+        strata=Strata.validate,
+        interprocess_encoding_context=model.interprocess_encoding_context,
+    )
+    stages = []
+
+    def capture(module, encoded, strata):
+        stages.append(strata)
+        return encoded
+
+    monkeypatch.setattr("relflow.architecture.root.bind", capture)
+    model._trainer = SimpleNamespace(training=False, validating=False, sanity_checking=True, testing=False)
+    try:
+        assert model.on_before_batch_transfer(batch, 0) is batch
+    finally:
+        model._trainer = None
+    assert stages == [Strata.validate]
 
 
 def test_training_counters_learn_fixed_width_empty_observations() -> None:
@@ -532,6 +570,7 @@ def test_training_counters_learn_fixed_width_empty_observations() -> None:
         interprocess_encoding_context=model.interprocess_encoding_context,
     )
 
+    inputs = bind(model, inputs, Strata.train)
     address = Address("root", "color")
     spy = SpyCounter()
     model.nodes[address].embedder.counters[TensorKey.content.name] = spy
@@ -539,7 +578,7 @@ def test_training_counters_learn_fixed_width_empty_observations() -> None:
     ModelRuntime.learn(model, inputs.observations, strata=Strata.train)
 
     assert len(spy.calls) == 1
-    assert tuple(spy.calls[0].shape) == (schema.requests[address].size,)
+    assert tuple(spy.calls[0].shape) == (model.nodes[address].embedder.vocab.size,)
     assert not spy.calls[0].any()
 
 
@@ -598,7 +637,6 @@ def test_inactive_leaf_nodes_are_ignored_by_encoding_and_forward() -> None:
                     {
                         "name": "color",
                         "type": "category",
-                        "size": 16,
                     },
                     {
                         "name": "ignored",
@@ -606,7 +644,6 @@ def test_inactive_leaf_nodes_are_ignored_by_encoding_and_forward() -> None:
                         "active": False,
                         "embed": True,
                         "mask": True,
-                        "size": 16,
                     },
                 ],
             },
@@ -625,7 +662,7 @@ def test_inactive_leaf_nodes_are_ignored_by_encoding_and_forward() -> None:
         strata=Strata.train,
         interprocess_encoding_context=model.interprocess_encoding_context,
     )
-    inputs = inputs.tensors
+    inputs = bind(model, inputs, Strata.train).tensors
     predictions = model(inputs, strata=Strata.train)
 
     assert Address("root", "ignored") not in inputs.keys()
@@ -809,7 +846,6 @@ def test_leaf_embed_uses_decoder_pooled_embedding() -> None:
                         "name": "color",
                         "type": "category",
                         "embed": True,
-                        "size": 16,
                     }
                 ],
             },

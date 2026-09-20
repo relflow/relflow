@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from functools import partialmethod
+from functools import partial, partialmethod
 from multiprocessing import Manager
 from multiprocessing.managers import ListProxy, SyncManager
 from threading import RLock
@@ -16,6 +16,7 @@ from lightning.pytorch import Callback, LightningModule, Trainer
 
 from relflow.distributed import (
     all_gather_object,
+    all_reduce_max,
     broadcast_object,
     is_distributed,
     is_rank_zero,
@@ -28,9 +29,60 @@ from relflow.tensorfields.shared.counter import Counter
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
+    from relflow.helpers.resize import Resize
 
 
 MIN_OBSERVATIONS = 10
+INITIAL_CAPACITY = 1
+
+
+def capacity(initial: int, required: int) -> int:
+    """Grow geometrically without declaring an upper vocabulary limit."""
+    return initial << (max(required - 1, 0) // initial).bit_length()
+
+
+@dataclass(frozen=True)
+class VocabularyBatch:
+    """An immutable Arrow dictionary for the IDs in one prefetched batch."""
+
+    labels: pa.Array
+    size: int
+
+    def resolve(
+        self, vocabulary: OnlineVocabularyModel, *, learn: bool, device: torch.device, resize: Resize
+    ) -> tuple[torch.Tensor, int]:
+        """Admit the current ranks' labels and map local IDs, including unknown."""
+        indices = vocabulary.lookup(self.labels)
+        size = vocabulary.size
+        if learn:
+            unseen = indices < 0
+            needed = bool(unseen.any())
+            if is_distributed():
+                needed = bool(all_reduce_max(torch.tensor(needed, dtype=torch.int64, device=device)).item())
+            if needed:
+                gathered = all_gather_object(pc.filter(self.labels, pa.array(unseen)))
+                existing = vocabulary.index()
+                additions: dict[Any, int] = {}
+                for labels in gathered:
+                    for label in labels.to_pylist():
+                        if label not in existing and label not in additions:
+                            additions[label] = len(existing) + len(additions)
+                size = capacity(size, len(existing) + len(additions))
+                for position, label in enumerate(self.labels.to_pylist()):
+                    if indices[position] < 0:
+                        indices[position] = additions[label]
+                resize.publish(partial(vocabulary.extend, list(additions)))
+        mapping = torch.full((self.size + 1,), -1, dtype=torch.int64)
+        mapping[: len(indices)] = torch.from_numpy(indices.copy())
+        return mapping, size
+
+    def counts(self, values: torch.Tensor, mapping: torch.Tensor, size: int) -> torch.Tensor:
+        """Move pristine exposure to global IDs without counting unused rows."""
+        indices = mapping[: values.numel()].to(values.device)
+        valid = indices.ge(0) & indices.lt(size)
+        result = values.new_zeros(size)
+        result.index_add_(0, indices[valid], values[valid])
+        return result
 
 
 class LocalLock:
@@ -56,8 +108,6 @@ class LocalLock:
 class VocabularyStorage:
     master: list[Any] | ListProxy[Any]
     lock: Any
-    proposals: list[Any] | ListProxy[Any]
-    proposal_lock: Any
 
 
 class VocabularyState:
@@ -72,8 +122,6 @@ class VocabularyState:
         self._share = share
         self.vocab: list[Any] = []
         self.index: dict[Any, int] = {}
-        self._proposed: set[Any] = set()
-        self.global_rank: int = 0
         self.refresh(force=True)
 
     def __getstate__(self) -> dict[str, Any]:
@@ -84,8 +132,20 @@ class VocabularyState:
     def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__.update(state)
 
-    def configure_distributed(self, global_rank: int = 0, world_size: int = 1) -> None:
-        self.global_rank = global_rank
+    def batch(self, values: pa.Array | pa.ChunkedArray) -> tuple[object, object]:
+        """Keep worker IDs independent of rank, prefetch order, and live capacity."""
+        array = values.combine_chunks() if isinstance(values, pa.ChunkedArray) else values
+        while (
+            pa.types.is_list(array.type)
+            or pa.types.is_large_list(array.type)
+            or pa.types.is_fixed_size_list(array.type)
+        ):
+            array = pc.list_flatten(array)
+        labels = pc.unique(pc.drop_null(array))
+        size = max(1, len(labels))
+        local = OnlineVocabularyModel(size=size)
+        local.load_snapshot(labels.to_pylist())
+        return local.state, VocabularyBatch(labels=labels, size=size)
 
     def share(self) -> None:
         if self._share is None:
@@ -104,7 +164,6 @@ class VocabularyState:
         if force or master_size < vocab_size:
             self.vocab = list(self.master)
             self.index = {word: index for index, word in enumerate(self.vocab)}
-            self._proposed.difference_update(self.index)
             return
 
         for word in self.master[vocab_size:]:
@@ -113,8 +172,6 @@ class VocabularyState:
 
             self.index[word] = len(self.vocab)
             self.vocab.append(word)
-
-        self._proposed.difference_update(self.index)
 
     @property
     def master(self) -> list[Any] | ListProxy[Any]:
@@ -125,16 +182,8 @@ class VocabularyState:
         return self.storage.lock
 
     @property
-    def proposals(self) -> list[Any] | ListProxy[Any]:
-        return self.storage.proposals
-
-    @property
-    def proposal_lock(self) -> Any:
-        return self.storage.proposal_lock
-
-    @property
     def unavailable_index(self) -> int:
-        return self.size
+        return -1
 
     def reserve(self, values: Any, *, learn: bool) -> None:
         """Reserve every scalar token found in a JSON-like nested value."""
@@ -156,42 +205,20 @@ class VocabularyState:
         if not candidates:
             return
 
-        if self.global_rank != 0:
-            proposals = []
-            for word in candidates:
-                if word in self._proposed:
-                    continue
-
-                self._proposed.add(word)
-                proposals.append(word)
-
-            if not proposals:
-                return
-
-            with self.proposal_lock:
-                self.proposals.extend(proposals)
-
-            return
-
         with self.lock:
             self.refresh()
             for word in candidates:
                 if word in self.index:
                     continue
 
-                if len(self.vocab) >= self.size:
-                    break
-
                 self.index[word] = len(self.vocab)
                 self.vocab.append(word)
                 self.master.append(word)
+            self.size = capacity(self.size, len(self.vocab))
 
     def encode(self, word: Any) -> int | None:
         if word is None:
             return None
-
-        if word in self._proposed:
-            return self.unavailable_index
 
         if word not in self.index:
             self.refresh()
@@ -254,27 +281,31 @@ class OnlineVocabularyModel(torch.nn.Module):
 
         return resources
 
-    def __init__(self, size: int):
+    def __init__(self, size: int = INITIAL_CAPACITY):
         super().__init__()
 
         self.size: int = size
         self.manager: SyncManager | None = None
         self.master: list[Any] | ListProxy[Any] = []
         self.lock: Any = LocalLock()
-        self.proposals: list[Any] | ListProxy[Any] = []
-        self.proposal_lock: Any = LocalLock()
         self._snapshot_cache: list[Any] | None = None
         self._snapshot_size: int = -1
         self._labels_cache: pa.Array | None = None
         self._labels_source: list[Any] | None = None
+        self._index_cache: dict[Any, int] = {}
+        self._index_source: list[Any] | None = None
+        self._index_size: int = 0
+
+    def rebuild_state(self, previous: torch.nn.Module) -> dict[str, Any]:
+        if not isinstance(previous, OnlineVocabularyModel):
+            return {}
+        return {"capacity": previous.size, "vocabulary": previous.snapshot()}
 
     @property
     def storage(self) -> VocabularyStorage:
         return VocabularyStorage(
             master=self.master,
             lock=self.lock,
-            proposals=self.proposals,
-            proposal_lock=self.proposal_lock,
         )
 
     @property
@@ -287,12 +318,9 @@ class OnlineVocabularyModel(torch.nn.Module):
             return
 
         master = list(self.master)
-        proposals = list(self.proposals)
         self.manager = Manager()
         self.master = self.manager.list(master)
         self.lock = self.manager.Lock()
-        self.proposals = self.manager.list(proposals)
-        self.proposal_lock = self.manager.Lock()
         self._snapshot_cache = None
         self._snapshot_size = -1
 
@@ -304,8 +332,6 @@ class OnlineVocabularyModel(torch.nn.Module):
         manager = self.manager
         self.master = list(self.master)
         self.lock = LocalLock()
-        self.proposals = []
-        self.proposal_lock = LocalLock()
         self.manager = None
         self._snapshot_cache = None
         self._snapshot_size = -1
@@ -318,6 +344,7 @@ class OnlineVocabularyModel(torch.nn.Module):
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + "vocabulary"] = list(self.master)
+        destination[prefix + "capacity"] = self.size
 
     def _load_from_state_dict(
         self,
@@ -330,6 +357,11 @@ class OnlineVocabularyModel(torch.nn.Module):
         error_msgs,
     ):
         key = prefix + "vocabulary"
+        saved_size = state_dict.pop(prefix + "capacity", self.size)
+        if not isinstance(saved_size, int) or isinstance(saved_size, bool) or saved_size < 1:
+            error_msgs.append(f"{prefix}capacity must be a positive integer, got {saved_size!r}")
+        else:
+            self.size = saved_size
         if key in state_dict:
             vocab: list[Any] = state_dict.pop(key)
             self.load_snapshot(vocab)
@@ -377,99 +409,42 @@ class OnlineVocabularyModel(torch.nn.Module):
 
         return self._labels_cache
 
-    def drain_proposals(self) -> list[Any]:
-        with self.proposal_lock:
-            proposals = list(self.proposals)
-            self.proposals[:] = []
+    def index(self) -> dict[Any, int]:
+        """Extend the model's lookup cache only for newly committed labels."""
+        snapshot = self.snapshot()
+        if self._index_source is not snapshot:
+            self._index_cache = {}
+            self._index_size = 0
+            self._index_source = snapshot
+        for index in range(self._index_size, len(snapshot)):
+            self._index_cache[snapshot[index]] = index
+        self._index_size = len(snapshot)
+        return self._index_cache
 
-        return proposals
+    def lookup(self, values: pa.Array) -> np.ndarray:
+        index = self.index()
+        return np.asarray([index.get(value, -1) for value in values.to_pylist()], dtype=np.int64)
 
-    def extend(self, proposals: list[Any]) -> tuple[int, int]:
-        accepted = 0
-        rejected = 0
-
+    def extend(self, labels: list[Any]) -> None:
+        """Publish labels already bound to their model-owned rows."""
         with self.lock:
-            vocab = list(self.master)
-            index = set(vocab)
-            for word in proposals:
+            index = self.index()
+            for word in labels:
                 if word in index:
                     continue
 
-                if len(vocab) >= self.size:
-                    rejected += 1
-                    continue
-
-                vocab.append(word)
-                index.add(word)
+                index[word] = len(self.master)
                 self.master.append(word)
-                accepted += 1
 
-        if accepted:
-            self._snapshot_cache = None
-            self._snapshot_size = -1
-
-        return accepted, rejected
+            self.size = capacity(self.size, len(self.master))
 
     def load_snapshot(self, vocabulary: list[Any]) -> None:
         with self.lock:
-            self.master[:] = vocabulary[: self.size]
-
-        with self.proposal_lock:
-            self.proposals[:] = []
+            self.size = capacity(self.size, len(vocabulary))
+            self.master[:] = vocabulary
 
         self._snapshot_cache = None
         self._snapshot_size = -1
-
-
-def sync(_callback: Callback, trainer: Trainer, pl_module: Model, reason: str) -> None:
-    resources = OnlineVocabularyModel.from_model(pl_module)
-    if not resources or (not is_distributed() and not any(vocab.is_shared for vocab in resources.values())):
-        return
-
-    if reason == "train_epoch_end":
-        synchronize_epoch_metrics(trainer)
-
-    local_proposals = {address: vocab.drain_proposals() for address, vocab in resources.items()}
-    gathered = all_gather_object(local_proposals)
-
-    payload = None
-    if is_rank_zero():
-        snapshots = {}
-        stats = {}
-        for address, vocab in resources.items():
-            proposals = []
-            for rank_proposals in gathered:
-                proposals.extend(rank_proposals.get(address, []))
-
-            accepted, rejected = vocab.extend(proposals)
-            snapshot = vocab.snapshot()
-            snapshots[address] = snapshot
-            stats[address] = {
-                "proposed": len(proposals),
-                "accepted": accepted,
-                "rejected_full": rejected,
-                "size": len(snapshot),
-                "max": vocab.size,
-            }
-
-        payload = {"snapshots": snapshots, "stats": stats}
-
-    payload = broadcast_object(payload, src=0)
-
-    for address, snapshot in payload["snapshots"].items():
-        resources[address].load_snapshot(snapshot)
-
-    trainer.strategy.barrier(name=f"vocabulary-sync-{reason}")
-
-    if is_rank_zero():
-        for address, stats in payload["stats"].items():
-            if stats["max"] > 0 and stats["size"] / stats["max"] >= 0.95:
-                logger.bind(
-                    component="vocabulary",
-                    address=address,
-                    size=stats["size"],
-                    max=stats["max"],
-                ).warning("vocabulary is near capacity")
 
 
 class VocabularySyncCallback(Callback):
@@ -478,6 +453,15 @@ class VocabularySyncCallback(Callback):
     Exposure checks use an embedder's shared ``vocab`` and ``counters['content']``
     resources. Extensions without a content Counter retain synchronization only.
     """
+
+    def on_fit_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """Match initial label metadata to DDP's rank-zero parameter broadcast."""
+        if not is_distributed():
+            return
+        resources = OnlineVocabularyModel.from_model(cast("Model", pl_module))
+        snapshots = {address: vocabulary.snapshot() for address, vocabulary in resources.items()}
+        for address, snapshot in broadcast_object(snapshots, src=0).items():
+            resources[address].load_snapshot(snapshot)
 
     @torch.no_grad()
     def warn(self, trainer: Trainer, pl_module: LightningModule, strata: Strata) -> None:
@@ -527,16 +511,10 @@ class VocabularySyncCallback(Callback):
             )
 
     if TYPE_CHECKING:
-
-        def on_fit_start(self, trainer: Trainer, pl_module: LightningModule) -> None: ...
-        def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None: ...
-
         on_validation_start = Callback.on_validation_start
         on_test_start = Callback.on_test_start
         on_predict_start = Callback.on_predict_start
     else:
-        on_fit_start = partialmethod(sync, reason="fit_start")
-        on_train_epoch_end = partialmethod(sync, reason="train_epoch_end")
         on_validation_start = partialmethod(warn, strata=Strata.validate)
         on_test_start = partialmethod(warn, strata=Strata.test)
         on_predict_start = partialmethod(warn, strata=Strata.predict)
@@ -548,6 +526,7 @@ class VocabularySyncCallback(Callback):
 
 
 __all__ = [
+    "INITIAL_CAPACITY",
     "OnlineVocabularyModel",
     "VocabularyState",
     "VocabularySyncCallback",

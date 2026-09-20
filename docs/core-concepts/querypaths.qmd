@@ -33,7 +33,7 @@ model = rf.Model(
     items=rf.Branch(
         query="items[-32:]",
         length=32,
-        sku=rf.Category(query="product.sku", size=4096),
+        sku=rf.Category(query="product.sku"),
         quantity=rf.Number(query="qty"),
     ),
     returned=rf.Boolean(query="outcome", mask=True),

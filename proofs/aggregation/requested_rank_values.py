@@ -291,7 +291,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         batch_size=128,
         optimizer=lambda module: torch.optim.AdamW(module.parameters(), lr=0.003),
         items=rf.Branch(length=LENGTH, overflow="error", n_layers=3, n_heads=4, reduction=None, value=rf.Number),
-        rank=rf.Category(size=len(RANKS), p_unavailable=0.0),
+        rank=rf.Category(p_unavailable=0.0),
         answer=rf.Number(mask=True, objective="mse"),
     )
     datamodule = rf.SyntheticDataModule(

@@ -47,14 +47,13 @@ model = rf.Model(
     n_layers=3,
     n_heads=8,
     tenure_days=rf.Number,
-    region=rf.Category(size=64),
+    region=rf.Category(),
     purchases=rf.Branch(
         length=64,
         overflow="tail",
         days_ago=rf.Number,
         amount=rf.Number(mask=rf.Mask(rate=0.15, reconstruct=True)),
         merchant=rf.Category(
-            size=256,
             mask=rf.Mask(rate=0.15, reconstruct=True),
         ),
     ),

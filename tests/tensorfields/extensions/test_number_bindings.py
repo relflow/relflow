@@ -84,7 +84,7 @@ def test_number_normalization_rejects_non_number_model_field() -> None:
         d_model=8,
         n_layers=1,
         n_heads=4,
-        category=rf.Category(size=8),
+        category=rf.Category(),
     )
 
     with pytest.raises(TypeError, match="not a Number field"):

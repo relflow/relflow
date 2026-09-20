@@ -20537,6 +20537,122 @@ proofs:
         Evaluation does not admit labels or change counts: true
       outcome: met
       duration_seconds: 18.062
+    - started_at: '2026-09-20T02:47:17.945300+00:00'
+      mode: full
+      seed: 5501
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: 64241a854656709a47cd718e4146d23c903072c0
+        source_sha256: 1090ddfd0832a6a18a76d3d61e02051d4d41a5e8774af617405c16d291af6435
+        script_sha256: f05769c04bf2d1d2f4b18c045b7415fb863a81af0c4cdb8ea9b4287d16a4958e
+        code_sha256: b11768a556c8a7670c41a37bdaac8570bb11b3861a8acc7c039a70d23bbdbde0
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        steps: 600
+        vocabulary:
+        - left
+        - right
+        known:
+          rmse: 0.1192534406787548
+          baseline_rmse: 1.9253678498400628
+          nrmse: 0.06193800352938322
+        'null':
+          rmse: 0.06946674025941126
+          baseline_rmse: 1.1205872792139533
+          nrmse: 0.06199136965764895
+        unknown:
+          fallback_nrmse: 0.05957623994587403
+          paired_rmse: 1.5015744054806008
+          information_limit_rmse: 1.5
+          renaming_drift: 0.0
+          null_prediction_gap: 3.015149595150433
+      checks:
+        'known: held-out nRMSE below 0.25': true
+        'null: held-out nRMSE below 0.25': true
+        Unknown codes retain valued state: true
+        Unknown content uses the allocation-independent sentinel: true
+        Unknown fallback nRMSE below 0.25: true
+        Paired novel identities stay near their information limit: true
+        Unknown spelling cannot alter predictions: true
+        Null remains distinct from unknown content: true
+        Evaluation does not admit labels or change counts: true
+      outcome: met
+      duration_seconds: 4.168
+    - started_at: '2026-09-20T02:52:41.387186+00:00'
+      mode: full
+      seed: 5501
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: 64241a854656709a47cd718e4146d23c903072c0
+        source_sha256: addca421b180271940631533de4f530790b136f60dc15c800d97645b65a4681c
+        script_sha256: f05769c04bf2d1d2f4b18c045b7415fb863a81af0c4cdb8ea9b4287d16a4958e
+        code_sha256: b11768a556c8a7670c41a37bdaac8570bb11b3861a8acc7c039a70d23bbdbde0
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        steps: 600
+        vocabulary:
+        - left
+        - right
+        known:
+          rmse: 0.1192534406787548
+          baseline_rmse: 1.9253678498400628
+          nrmse: 0.06193800352938322
+        'null':
+          rmse: 0.06946674025941126
+          baseline_rmse: 1.1205872792139533
+          nrmse: 0.06199136965764895
+        unknown:
+          fallback_nrmse: 0.05957623994587403
+          paired_rmse: 1.5015744054806008
+          information_limit_rmse: 1.5
+          renaming_drift: 0.0
+          null_prediction_gap: 3.015149595150433
+      checks:
+        'known: held-out nRMSE below 0.25': true
+        'null: held-out nRMSE below 0.25': true
+        Unknown codes retain valued state: true
+        Unknown content uses the allocation-independent sentinel: true
+        Unknown fallback nRMSE below 0.25: true
+        Paired novel identities stay near their information limit: true
+        Unknown spelling cannot alter predictions: true
+        Null remains distinct from unknown content: true
+        Evaluation does not admit labels or change counts: true
+      outcome: met
+      duration_seconds: 4.26
   P056:
     script: proofs/vocabulary/unknown_target_coverage.py
     page: docs/proofs/vocabulary/unknown-target-coverage.py
@@ -20976,6 +21092,128 @@ proofs:
         Evaluation preserves hint vocabulary and numerical moments: true
       outcome: met
       duration_seconds: 9.688
+    - started_at: '2026-09-20T02:47:26.524051+00:00'
+      mode: full
+      seed: 5601
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: 64241a854656709a47cd718e4146d23c903072c0
+        source_sha256: 7c14f4171539a390c7bb9a452f34fd6594200040b134bad703178785e7396c79
+        script_sha256: c5b82bdd284e9f1fbb00e7b0ef116b768371ff5a63412c80a67754161c1248af
+        code_sha256: 4e711d55b2edfbab57a2c30504a9de6e25813d1c083368a69809ac976ca1a3f0
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        steps: 350
+        output_vocabulary:
+        - negative
+        - positive
+        hint_vocabulary:
+        - novel-positive
+        - novel-negative
+        - positive
+        - negative
+        coverage: 0.5
+        builtin_content_accuracy: 1.0
+        known_accuracy: 1.0
+        all_row_accuracy: 0.5
+        unknown_accuracy: 0.0
+        unknown_mean_confidence: 0.9999978662235662
+        shuffled_known_accuracy: 0.48046875
+        majority_baseline: 0.25634765625
+      checks:
+        Known-only content accuracy reaches 0.95: true
+        Built-in accuracy agrees with known-only external scoring: true
+        Coverage is exactly one half: true
+        All-row accuracy exposes the coverage ceiling: true
+        Unseen output labels cannot be emitted: true
+        Unknown answers still receive confident known-label predictions: true
+        Shuffling x removes known-label accuracy: true
+        Predictions and candidates use populated output labels only: true
+        Candidate probabilities normalize over populated labels: true
+        Labels known in another field remain unknown here: true
+        Unknown target content uses the unavailable sentinel: true
+        Evaluation preserves output vocabulary and exposure counts: true
+        Evaluation preserves hint vocabulary and numerical moments: true
+      outcome: met
+      duration_seconds: 2.557
+    - started_at: '2026-09-20T02:52:50.225971+00:00'
+      mode: full
+      seed: 5601
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: 64241a854656709a47cd718e4146d23c903072c0
+        source_sha256: 6f587831a8232e475bd3221312caf2d42d5a43f881573ee8c4d4627e8487c004
+        script_sha256: c5b82bdd284e9f1fbb00e7b0ef116b768371ff5a63412c80a67754161c1248af
+        code_sha256: 4e711d55b2edfbab57a2c30504a9de6e25813d1c083368a69809ac976ca1a3f0
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        steps: 350
+        output_vocabulary:
+        - negative
+        - positive
+        hint_vocabulary:
+        - novel-positive
+        - novel-negative
+        - positive
+        - negative
+        coverage: 0.5
+        builtin_content_accuracy: 1.0
+        known_accuracy: 1.0
+        all_row_accuracy: 0.5
+        unknown_accuracy: 0.0
+        unknown_mean_confidence: 0.9999978662235662
+        shuffled_known_accuracy: 0.48046875
+        majority_baseline: 0.25634765625
+      checks:
+        Known-only content accuracy reaches 0.95: true
+        Built-in accuracy agrees with known-only external scoring: true
+        Coverage is exactly one half: true
+        All-row accuracy exposes the coverage ceiling: true
+        Unseen output labels cannot be emitted: true
+        Unknown answers still receive confident known-label predictions: true
+        Shuffling x removes known-label accuracy: true
+        Predictions and candidates use populated output labels only: true
+        Candidate probabilities normalize over populated labels: true
+        Labels known in another field remain unknown here: true
+        Unknown target content uses the unavailable sentinel: true
+        Evaluation preserves output vocabulary and exposure counts: true
+        Evaluation preserves hint vocabulary and numerical moments: true
+      outcome: met
+      duration_seconds: 3.202
   P057:
     script: proofs/vocabulary/capacity_admission_order.py
     page: docs/proofs/vocabulary/capacity-admission-order.py
@@ -21562,6 +21800,392 @@ proofs:
         'headroom: prediction does not change admission': true
       outcome: met
       duration_seconds: 17.303
+    - started_at: '2026-09-20T01:58:53.184848+00:00'
+      mode: full
+      seed: 5701
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: 64241a854656709a47cd718e4146d23c903072c0
+        source_sha256: ffe3651f6900d29f2bdc9da1332f0946eaf7c184871d8cf17985379b93485e4c
+        script_sha256: 71d117a34a62695a86b0b8f17a5ecb40803625715cc97a2245ab8894c78fce23
+        code_sha256: 7c262a64ce4a9e524a8a4da71f90b4b880e4a9465a29c857cb9e91a19a63ad1e
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        baseline_rmse: 0.9999224678348755
+        arms:
+          rare_first:
+            steps: 300
+            initial_size: 2
+            allocated_size: 4
+            vocabulary:
+            - rare-left
+            - rare-right
+            - hot
+            - cold
+            counts:
+              rare-left: 5
+              rare-right: 5
+              hot: 9604
+              cold: 9586
+            common_coverage: 1.0
+            nrmse: 0.023542848843018046
+            identity_swap_drift: 2.022590160369873
+          common_first:
+            steps: 300
+            initial_size: 2
+            allocated_size: 4
+            vocabulary:
+            - cold
+            - hot
+            - rare-left
+            - rare-right
+            counts:
+              cold: 9586
+              hot: 9604
+              rare-left: 5
+              rare-right: 5
+            common_coverage: 1.0
+            nrmse: 0.020260906141569706
+            identity_swap_drift: 1.9918057918548584
+          headroom:
+            steps: 300
+            initial_size: 4
+            allocated_size: 4
+            vocabulary:
+            - rare-left
+            - rare-right
+            - hot
+            - cold
+            counts:
+              rare-left: 5
+              rare-right: 5
+              hot: 9604
+              cold: 9586
+            common_coverage: 1.0
+            nrmse: 0.04043806291002735
+            identity_swap_drift: 1.9322330355644226
+      checks:
+        'rare_first: all four labels are admitted': true
+        'rare_first: first label IDs are preserved': true
+        'rare_first: allocation holds all four labels': true
+        'rare_first: all labels have training exposures': true
+        'rare_first: common-label coverage is complete': true
+        'rare_first: common-label nRMSE below 0.15': true
+        'rare_first: common identities have distinct learned effects': true
+        'rare_first: prediction does not change admission': true
+        'common_first: all four labels are admitted': true
+        'common_first: first label IDs are preserved': true
+        'common_first: allocation holds all four labels': true
+        'common_first: all labels have training exposures': true
+        'common_first: common-label coverage is complete': true
+        'common_first: common-label nRMSE below 0.15': true
+        'common_first: common identities have distinct learned effects': true
+        'common_first: prediction does not change admission': true
+        'headroom: all four labels are admitted': true
+        'headroom: first label IDs are preserved': true
+        'headroom: allocation holds all four labels': true
+        'headroom: all labels have training exposures': true
+        'headroom: common-label coverage is complete': true
+        'headroom: common-label nRMSE below 0.15': true
+        'headroom: common identities have distinct learned effects': true
+        'headroom: prediction does not change admission': true
+      outcome: met
+      duration_seconds: 6.596
+    - started_at: '2026-09-20T02:03:09.373288+00:00'
+      mode: full
+      seed: 5701
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: 64241a854656709a47cd718e4146d23c903072c0
+        source_sha256: f7053dd2abaaad9070756cc641275a147045bbc7fb26c77f22939f1cd21fc805
+        script_sha256: e7ef89bdd2be61eb5edb13f507f244c6e7bc2a2c50219d80bc2e2748c0ea01ab
+        code_sha256: 7c262a64ce4a9e524a8a4da71f90b4b880e4a9465a29c857cb9e91a19a63ad1e
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        baseline_rmse: 0.9999224678348755
+        arms:
+          rare_first:
+            steps: 300
+            initial_size: 2
+            allocated_size: 4
+            vocabulary:
+            - rare-left
+            - rare-right
+            - hot
+            - cold
+            counts:
+              rare-left: 5
+              rare-right: 5
+              hot: 9604
+              cold: 9586
+            common_coverage: 1.0
+            nrmse: 0.023542848843018046
+            identity_swap_drift: 2.022590160369873
+          common_first:
+            steps: 300
+            initial_size: 2
+            allocated_size: 4
+            vocabulary:
+            - cold
+            - hot
+            - rare-left
+            - rare-right
+            counts:
+              cold: 9586
+              hot: 9604
+              rare-left: 5
+              rare-right: 5
+            common_coverage: 1.0
+            nrmse: 0.020260906141569706
+            identity_swap_drift: 1.9918057918548584
+          headroom:
+            steps: 300
+            initial_size: 4
+            allocated_size: 4
+            vocabulary:
+            - rare-left
+            - rare-right
+            - hot
+            - cold
+            counts:
+              rare-left: 5
+              rare-right: 5
+              hot: 9604
+              cold: 9586
+            common_coverage: 1.0
+            nrmse: 0.04043806291002735
+            identity_swap_drift: 1.9322330355644226
+      checks:
+        'rare_first: all four labels are admitted': true
+        'rare_first: first label IDs are preserved': true
+        'rare_first: allocation holds all four labels': true
+        'rare_first: all labels have training exposures': true
+        'rare_first: common-label coverage is complete': true
+        'rare_first: common-label nRMSE below 0.15': true
+        'rare_first: common identities have distinct learned effects': true
+        'rare_first: prediction does not change admission': true
+        'common_first: all four labels are admitted': true
+        'common_first: first label IDs are preserved': true
+        'common_first: allocation holds all four labels': true
+        'common_first: all labels have training exposures': true
+        'common_first: common-label coverage is complete': true
+        'common_first: common-label nRMSE below 0.15': true
+        'common_first: common identities have distinct learned effects': true
+        'common_first: prediction does not change admission': true
+        'headroom: all four labels are admitted': true
+        'headroom: first label IDs are preserved': true
+        'headroom: allocation holds all four labels': true
+        'headroom: all labels have training exposures': true
+        'headroom: common-label coverage is complete': true
+        'headroom: common-label nRMSE below 0.15': true
+        'headroom: common identities have distinct learned effects': true
+        'headroom: prediction does not change admission': true
+      outcome: met
+      duration_seconds: 6.26
+    - started_at: '2026-09-20T02:45:15.566324+00:00'
+      mode: full
+      seed: 5701
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: 64241a854656709a47cd718e4146d23c903072c0
+        source_sha256: a092d72644c71117ed371c6662c52ce2384b5b430feda92099ffec72eae8408b
+        script_sha256: 6275b6fc92298d9290043c6f36a8ea0c8b59d12ebbc1b56be68b1a5035647b21
+        code_sha256: 958cf8cb6f4521ef1fbe60d9249ae32823a4a9ed0316f724bbd93d3350d8347f
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        baseline_rmse: 0.9999224678348755
+        arms:
+          rare_first:
+            steps: 300
+            initial_size: 1
+            allocated_size: 4
+            vocabulary:
+            - rare-left
+            - rare-right
+            - hot
+            - cold
+            counts:
+              rare-left: 5
+              rare-right: 5
+              hot: 9604
+              cold: 9586
+            common_coverage: 1.0
+            nrmse: 0.031326202577571086
+            identity_swap_drift: 1.9562826752662659
+          common_first:
+            steps: 300
+            initial_size: 1
+            allocated_size: 4
+            vocabulary:
+            - cold
+            - hot
+            - rare-left
+            - rare-right
+            counts:
+              cold: 9586
+              hot: 9604
+              rare-left: 5
+              rare-right: 5
+            common_coverage: 1.0
+            nrmse: 0.038701768919776586
+            identity_swap_drift: 1.983716070652008
+      checks:
+        'rare_first: all four labels are admitted': true
+        'rare_first: first label IDs are preserved': true
+        'rare_first: allocation holds all four labels': true
+        'rare_first: storage grows automatically': true
+        'rare_first: all labels have training exposures': true
+        'rare_first: common-label coverage is complete': true
+        'rare_first: common-label nRMSE below 0.15': true
+        'rare_first: common identities have distinct learned effects': true
+        'rare_first: prediction does not change admission': true
+        'common_first: all four labels are admitted': true
+        'common_first: first label IDs are preserved': true
+        'common_first: allocation holds all four labels': true
+        'common_first: storage grows automatically': true
+        'common_first: all labels have training exposures': true
+        'common_first: common-label coverage is complete': true
+        'common_first: common-label nRMSE below 0.15': true
+        'common_first: common identities have distinct learned effects': true
+        'common_first: prediction does not change admission': true
+      outcome: met
+      duration_seconds: 4.234
+    - started_at: '2026-09-20T02:51:59.249769+00:00'
+      mode: full
+      seed: 5701
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: 64241a854656709a47cd718e4146d23c903072c0
+        source_sha256: 4fe548c3d64f5cae3f15b6b6ed54b056502a1c10a97c90bf57359d40fd295f43
+        script_sha256: 6275b6fc92298d9290043c6f36a8ea0c8b59d12ebbc1b56be68b1a5035647b21
+        code_sha256: 958cf8cb6f4521ef1fbe60d9249ae32823a4a9ed0316f724bbd93d3350d8347f
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        baseline_rmse: 0.9999224678348755
+        arms:
+          rare_first:
+            steps: 300
+            initial_size: 1
+            allocated_size: 4
+            vocabulary:
+            - rare-left
+            - rare-right
+            - hot
+            - cold
+            counts:
+              rare-left: 5
+              rare-right: 5
+              hot: 9604
+              cold: 9586
+            common_coverage: 1.0
+            nrmse: 0.031326202577571086
+            identity_swap_drift: 1.9562826752662659
+          common_first:
+            steps: 300
+            initial_size: 1
+            allocated_size: 4
+            vocabulary:
+            - cold
+            - hot
+            - rare-left
+            - rare-right
+            counts:
+              cold: 9586
+              hot: 9604
+              rare-left: 5
+              rare-right: 5
+            common_coverage: 1.0
+            nrmse: 0.038701768919776586
+            identity_swap_drift: 1.983716070652008
+      checks:
+        'rare_first: all four labels are admitted': true
+        'rare_first: first label IDs are preserved': true
+        'rare_first: allocation holds all four labels': true
+        'rare_first: storage grows automatically': true
+        'rare_first: all labels have training exposures': true
+        'rare_first: common-label coverage is complete': true
+        'rare_first: common-label nRMSE below 0.15': true
+        'rare_first: common identities have distinct learned effects': true
+        'rare_first: prediction does not change admission': true
+        'common_first: all four labels are admitted': true
+        'common_first: first label IDs are preserved': true
+        'common_first: allocation holds all four labels': true
+        'common_first: storage grows automatically': true
+        'common_first: all labels have training exposures': true
+        'common_first: common-label coverage is complete': true
+        'common_first: common-label nRMSE below 0.15': true
+        'common_first: common identities have distinct learned effects': true
+        'common_first: prediction does not change admission': true
+      outcome: met
+      duration_seconds: 4.311
   P058:
     script: proofs/vocabulary/unknown_set_members.py
     page: docs/proofs/vocabulary/unknown-set-members.py
@@ -22061,6 +22685,128 @@ proofs:
         Evaluation does not grow either vocabulary: true
       outcome: met
       duration_seconds: 14.156
+    - started_at: '2026-09-20T02:47:33.536335+00:00'
+      mode: full
+      seed: 5801
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: 64241a854656709a47cd718e4146d23c903072c0
+        source_sha256: 3dccbd7473683e1f54161aa7698bd8bcc08570aead5560848a2f2abbb8aa3bb5
+        script_sha256: 0d7b277a5e477d2213b5e0debe4e39ec4772ab0f76804f2d14327b699d87e164
+        code_sha256: 34e11fd2f3d4f9b96a1539b02a517669e546251f6254e5f4b81494eb4b6b162a
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        steps: 400
+        vocabularies:
+          tags:
+          - blue
+          - red
+          labels:
+          - blue
+          - red
+        baseline_rmse: 1.5152353198723871
+        nrmse: 0.010835121836666151
+        known_exact_set_accuracy: 1.0
+        shuffled_nrmse: 1.4473595786386118
+        unknown_and_duplicate_drift: 0.0
+        boundary_predictions:
+          empty: -0.009670473635196686
+          all_unknown: -0.009670473635196686
+          'null': 3.0093512535095215
+          partial_unknown: 0.9923840165138245
+        all_unknown_target_exact_match: false
+      checks:
+        Known membership regression nRMSE below 0.15: true
+        Known valued sets reconstruct above 0.95 exact accuracy: true
+        Shuffled tags remove predictive accuracy: true
+        Unknown and duplicate members leave regression unchanged: true
+        Unknown and duplicate members leave reconstructed sets unchanged: true
+        All-unknown and empty inputs have identical known membership bits: true
+        All-unknown and empty targets have identical membership bits: true
+        Untrained fallback leaves all-unknown and empty predictions identical: true
+        Null remains distinct from valued empty content: true
+        Unknown target labels cannot be recovered: true
+        Evaluation does not grow either vocabulary: true
+      outcome: met
+      duration_seconds: 3.444
+    - started_at: '2026-09-20T02:52:57.798350+00:00'
+      mode: full
+      seed: 5801
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: 64241a854656709a47cd718e4146d23c903072c0
+        source_sha256: ba81d540b3c99719bfd3172b15d25e3d26fef5fd14ae210298deaa7b36936ae1
+        script_sha256: 0d7b277a5e477d2213b5e0debe4e39ec4772ab0f76804f2d14327b699d87e164
+        code_sha256: 34e11fd2f3d4f9b96a1539b02a517669e546251f6254e5f4b81494eb4b6b162a
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        steps: 400
+        vocabularies:
+          tags:
+          - blue
+          - red
+          labels:
+          - blue
+          - red
+        baseline_rmse: 1.5152353198723871
+        nrmse: 0.010835121836666151
+        known_exact_set_accuracy: 1.0
+        shuffled_nrmse: 1.4473595786386118
+        unknown_and_duplicate_drift: 0.0
+        boundary_predictions:
+          empty: -0.009670473635196686
+          all_unknown: -0.009670473635196686
+          'null': 3.0093512535095215
+          partial_unknown: 0.9923840165138245
+        all_unknown_target_exact_match: false
+      checks:
+        Known membership regression nRMSE below 0.15: true
+        Known valued sets reconstruct above 0.95 exact accuracy: true
+        Shuffled tags remove predictive accuracy: true
+        Unknown and duplicate members leave regression unchanged: true
+        Unknown and duplicate members leave reconstructed sets unchanged: true
+        All-unknown and empty inputs have identical known membership bits: true
+        All-unknown and empty targets have identical membership bits: true
+        Untrained fallback leaves all-unknown and empty predictions identical: true
+        Null remains distinct from valued empty content: true
+        Unknown target labels cannot be recovered: true
+        Evaluation does not grow either vocabulary: true
+      outcome: met
+      duration_seconds: 4.104
   P059:
     script: proofs/vocabulary/admission_and_continued_training.py
     page: docs/proofs/vocabulary/admission-and-continued-training.py
@@ -22493,6 +23239,186 @@ proofs:
         Continued checkpoint preserves mapping, counts, and predictions: true
       outcome: met
       duration_seconds: 17.169
+    - started_at: '2026-09-20T02:45:46.783822+00:00'
+      mode: full
+      seed: 5901
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: 64241a854656709a47cd718e4146d23c903072c0
+        source_sha256: 5d18a8e7d62e59ebe2f20f49eaa2b5f63666056f3e1cd32bb7522a4376992f7c
+        script_sha256: 2fb7766825e1f16605f3ad07e9d166292f2eaa8bc4eaa81af3f4a12e71b5b18e
+        code_sha256: 2575869fcbc888e13c7c7c8158c18cd66419d3ee01e41758ef1d2c4d277c42fe
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        initial_steps: 300
+        continuation_steps: 400
+        initial_vocabulary:
+        - positive
+        - negative
+        final_vocabulary:
+        - positive
+        - negative
+        - far-positive
+        - far-negative
+        initial_accuracy: 1.0
+        new_accuracy_before_admission: 0.0
+        new_accuracy_immediately_after_admission: 0.0
+        final_old_accuracy: 1.0
+        final_new_accuracy: 1.0
+        two_class_chance: 0.5
+      checks:
+        Cold prediction leaves the vocabulary empty: true
+        Empty output vocabulary returns no label and zero probability: true
+        Initial known-label accuracy reaches 0.95: true
+        Initial checkpoint preserves mapping, counts, and predictions: true
+        Evaluation cannot admit new output labels: true
+        Evaluation leaves exposure counts and numerical moments frozen: true
+        Unadmitted labels cannot be predicted: true
+        Training admission appends both labels without moving old indices: true
+        Admission alone preserves existing learned parameter rows: true
+        Continued fitting learns new labels above 0.95 accuracy: true
+        Rehearsal retains old labels above 0.95 accuracy: true
+        Continued fitting preserves all admitted indices: true
+        Continued checkpoint preserves mapping, counts, and predictions: true
+      outcome: met
+      duration_seconds: 5.008
+    - started_at: '2026-09-20T02:47:08.114849+00:00'
+      mode: full
+      seed: 5901
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: 64241a854656709a47cd718e4146d23c903072c0
+        source_sha256: c431cb6864d62b6823528e061b3b46fdaa9e3d873e1536c8d53c4315a2a0b57a
+        script_sha256: dd2bc7dea3cb10a2fb30bf62ab29c5c1dd63446a0a14084deecf9edfbb622026
+        code_sha256: 2575869fcbc888e13c7c7c8158c18cd66419d3ee01e41758ef1d2c4d277c42fe
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        initial_steps: 300
+        continuation_steps: 400
+        initial_vocabulary:
+        - positive
+        - negative
+        final_vocabulary:
+        - positive
+        - negative
+        - far-positive
+        - far-negative
+        initial_accuracy: 1.0
+        new_accuracy_before_admission: 0.0
+        new_accuracy_immediately_after_admission: 0.0
+        final_old_accuracy: 1.0
+        final_new_accuracy: 1.0
+        two_class_chance: 0.5
+      checks:
+        Cold prediction leaves the vocabulary empty: true
+        Empty output vocabulary returns no label and zero probability: true
+        Initial known-label accuracy reaches 0.95: true
+        Initial checkpoint preserves mapping, counts, and predictions: true
+        Evaluation cannot admit new output labels: true
+        Evaluation leaves exposure counts and numerical moments frozen: true
+        Unadmitted labels cannot be predicted: true
+        Training admission appends both labels without moving old indices: true
+        Admission alone preserves existing learned parameter rows: true
+        Continued fitting learns new labels above 0.95 accuracy: true
+        Rehearsal retains old labels above 0.95 accuracy: true
+        Continued fitting preserves all admitted indices: true
+        Continued checkpoint preserves mapping, counts, and predictions: true
+      outcome: met
+      duration_seconds: 5.013
+    - started_at: '2026-09-20T02:52:31.605258+00:00'
+      mode: full
+      seed: 5901
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: 64241a854656709a47cd718e4146d23c903072c0
+        source_sha256: b4ca6246ec532d060f6b9f031df8161b3b991a2983f0f6ec192df3da502e5c38
+        script_sha256: dd2bc7dea3cb10a2fb30bf62ab29c5c1dd63446a0a14084deecf9edfbb622026
+        code_sha256: 2575869fcbc888e13c7c7c8158c18cd66419d3ee01e41758ef1d2c4d277c42fe
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        initial_steps: 300
+        continuation_steps: 400
+        initial_vocabulary:
+        - positive
+        - negative
+        final_vocabulary:
+        - positive
+        - negative
+        - far-positive
+        - far-negative
+        initial_accuracy: 1.0
+        new_accuracy_before_admission: 0.0
+        new_accuracy_immediately_after_admission: 0.0
+        final_old_accuracy: 1.0
+        final_new_accuracy: 1.0
+        two_class_chance: 0.5
+      checks:
+        Cold prediction leaves the vocabulary empty: true
+        Empty output vocabulary returns no label and zero probability: true
+        Initial known-label accuracy reaches 0.95: true
+        Initial checkpoint preserves mapping, counts, and predictions: true
+        Evaluation cannot admit new output labels: true
+        Evaluation leaves exposure counts and numerical moments frozen: true
+        Unadmitted labels cannot be predicted: true
+        Training admission appends both labels without moving old indices: true
+        Admission alone preserves existing learned parameter rows: true
+        Continued fitting learns new labels above 0.95 accuracy: true
+        Rehearsal retains old labels above 0.95 accuracy: true
+        Continued fitting preserves all admitted indices: true
+        Continued checkpoint preserves mapping, counts, and predictions: true
+      outcome: met
+      duration_seconds: 5.067
   P060:
     script: proofs/calibration/categorical_prior.py
     page: docs/proofs/calibration/categorical-prior.py
@@ -22501,7 +23427,8 @@ proofs:
       source_revision: null
       sources: []
       summary: Provisional probability-objective experiment; no run predates registration.
-      insights: A 90/10 population prior distinguishes calibrated probabilities from the 75/25 optimum of inverse-square-root class weighting.
+      insights: A 90/10 population prior distinguishes calibrated probabilities from the 75/25 optimum of inverse-square-root
+        class weighting.
       evidence: No historical measurements. Actual runs are recorded below.
     runs:
     - started_at: '2026-09-16T23:45:55.739082+00:00'
@@ -23164,6 +24091,126 @@ proofs:
         'capacity_128: evaluation preserves vocabulary and counts': true
       outcome: met
       duration_seconds: 14.128
+    - started_at: '2026-09-20T02:45:24.101852+00:00'
+      mode: full
+      seed: 7601
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: 64241a854656709a47cd718e4146d23c903072c0
+        source_sha256: a3351dfd256b3f6f89b8a917a5c7d542425b0c5c6fc49bae4f1e8aac9cca913b
+        script_sha256: 08962d9c95a3057de7cf339ad5f9750efd045ce04ae161de77940169f6f72592
+        code_sha256: 95df8f9222c5e5482e82b08d203ebe692e5e5df6fabe8e604af40072661dc89d
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        prior: 0.9
+        weighted_optimum: 0.75
+        oracle_nll: 0.3250829733914482
+        capacity_2_known:
+          mean_probability: 0.9170460563982488
+          prior_rmse: 0.017553178023317444
+          excess_nll: 0.0019385099335855749
+        capacity_2_novel:
+          mean_probability: 0.9167478680610657
+          prior_rmse: 0.01674786806106565
+          excess_nll: 0.0017356985820936588
+        capacity_128_known:
+          mean_probability: 0.9181426878567436
+          prior_rmse: 0.018659608468037877
+          excess_nll: 0.0022085426064262226
+        capacity_128_novel:
+          mean_probability: 0.9187109470367432
+          prior_rmse: 0.018710947036743142
+          excess_nll: 0.0021967811345214305
+      checks:
+        'capacity_2_known: probability RMSE below 0.06': true
+        'capacity_2_known: excess expected NLL below 0.02': true
+        'capacity_2_novel: probability RMSE below 0.06': true
+        'capacity_2_novel: excess expected NLL below 0.02': true
+        'capacity_2: evaluation preserves vocabulary and counts': true
+        'capacity_128_known: probability RMSE below 0.06': true
+        'capacity_128_known: excess expected NLL below 0.02': true
+        'capacity_128_novel: probability RMSE below 0.06': true
+        'capacity_128_novel: excess expected NLL below 0.02': true
+        'capacity_128: evaluation preserves vocabulary and counts': true
+      outcome: met
+      duration_seconds: 7.708
+    - started_at: '2026-09-20T02:52:08.223317+00:00'
+      mode: full
+      seed: 7601
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: 64241a854656709a47cd718e4146d23c903072c0
+        source_sha256: 9ec1c366dd3c613caf1ab0391f628ca413f28d48b3ad0055592c0c3045819b27
+        script_sha256: 08962d9c95a3057de7cf339ad5f9750efd045ce04ae161de77940169f6f72592
+        code_sha256: 95df8f9222c5e5482e82b08d203ebe692e5e5df6fabe8e604af40072661dc89d
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        prior: 0.9
+        weighted_optimum: 0.75
+        oracle_nll: 0.3250829733914482
+        capacity_2_known:
+          mean_probability: 0.9170460563982488
+          prior_rmse: 0.017553178023317444
+          excess_nll: 0.0019385099335855749
+        capacity_2_novel:
+          mean_probability: 0.9167478680610657
+          prior_rmse: 0.01674786806106565
+          excess_nll: 0.0017356985820936588
+        capacity_128_known:
+          mean_probability: 0.9181426878567436
+          prior_rmse: 0.018659608468037877
+          excess_nll: 0.0022085426064262226
+        capacity_128_novel:
+          mean_probability: 0.9187109470367432
+          prior_rmse: 0.018710947036743142
+          excess_nll: 0.0021967811345214305
+      checks:
+        'capacity_2_known: probability RMSE below 0.06': true
+        'capacity_2_known: excess expected NLL below 0.02': true
+        'capacity_2_novel: probability RMSE below 0.06': true
+        'capacity_2_novel: excess expected NLL below 0.02': true
+        'capacity_2: evaluation preserves vocabulary and counts': true
+        'capacity_128_known: probability RMSE below 0.06': true
+        'capacity_128_known: excess expected NLL below 0.02': true
+        'capacity_128_novel: probability RMSE below 0.06': true
+        'capacity_128_novel: excess expected NLL below 0.02': true
+        'capacity_128: evaluation preserves vocabulary and counts': true
+      outcome: met
+      duration_seconds: 8.02
   P061:
     script: proofs/vocabulary/cold_start_confidence.py
     page: docs/proofs/vocabulary/cold-start-confidence.py
@@ -23172,7 +24219,8 @@ proofs:
       source_revision: null
       sources: []
       summary: Provisional entity-disjoint confidence experiment; no run predates registration.
-      insights: Unknown input identities require marginalizing unavailable identity effects while retaining confidence from decisive visible context. Admission alone does not learn an embedding.
+      insights: Unknown input identities require marginalizing unavailable identity effects while retaining confidence
+        from decisive visible context. Admission alone does not learn an embedding.
       evidence: No historical measurements. Actual runs are recorded below.
     runs:
     - started_at: '2026-09-16T23:59:12.806330+00:00'
@@ -23963,7 +25011,8 @@ proofs:
       source_revision: null
       sources: []
       summary: Provisional coverage-aware pretraining evaluation; no run predates registration.
-      insights: Unknown reconstruction targets affect coverage and all-target accuracy, not a fictitious uniform-label objective. Conditional quality is undefined with no known targets.
+      insights: Unknown reconstruction targets affect coverage and all-target accuracy, not a fictitious uniform-label
+        objective. Conditional quality is undefined with no known targets.
       evidence: No historical measurements. Actual runs are recorded below.
     runs:
     - started_at: '2026-09-17T00:03:36.763376+00:00'
@@ -24618,7 +25667,8 @@ proofs:
       source_revision: null
       sources: []
       summary: Provisional Set probability and coverage experiment; no historical measurements.
-      insights: Input corruption must not thin membership prevalence, and partial-OOV sets retain known positives and negatives.
+      insights: Input corruption must not thin membership prevalence, and partial-OOV sets retain known positives
+        and negatives.
       evidence: Actual runs are recorded below.
     runs:
     - started_at: '2026-09-17T00:43:58.477589+00:00'
@@ -25423,6 +26473,190 @@ proofs:
         '512: evaluation never admits unknown labels': true
       outcome: met
       duration_seconds: 13.071
+    - started_at: '2026-09-20T02:45:36.278499+00:00'
+      mode: full
+      seed: 7631
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: 64241a854656709a47cd718e4146d23c903072c0
+        source_sha256: 5084d852c256b3a3af742c13df635492dd88dd95fd2ecc362a63329f534afc8c
+        script_sha256: 76340876d8025deeb0f656f58fd76915595bb8e5579e0fb56eb9626f2669caf6
+        code_sha256: 27e78b913e911747eacc2511b731daf8fd7963ed3f588a1571216dae9513c4c9
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        oracle_nll: 0.41274269846481804
+        capacity_2:
+          probabilities:
+            red: 0.9053354859352112
+            blue: 0.20259059965610504
+          excess_nll: 9.210136093962262e-05
+          steps: 400
+        coverage_2:
+          loss.state: 2.6652448177337646
+          accuracy.state: 0.800000011920929
+          vocabulary.size: 2.0
+          targets.known: 256.0
+          targets.unavailable: 256.0
+          coverage.content: 0.5
+          sets.valued: 512.0
+          sets.complete: 256.0
+          coverage.set: 0.5
+          accuracy.content: 0.5
+          accuracy.set: 0.0
+          precision.content: 0.25
+          recall.content: 0.5
+          recall.all: 0.25
+          f1.content: 0.3333333432674408
+          f1.all: 0.25
+          loss.content: 1.1809282302856445
+        capacity_512:
+          probabilities:
+            red: 0.9081773161888123
+            blue: 0.1950017660856247
+          excess_nll: 0.0002348784425068584
+          steps: 400
+        coverage_512:
+          loss.state: 2.613093137741089
+          accuracy.state: 0.800000011920929
+          vocabulary.size: 2.0
+          targets.known: 256.0
+          targets.unavailable: 256.0
+          coverage.content: 0.5
+          sets.valued: 512.0
+          sets.complete: 256.0
+          coverage.set: 0.5
+          accuracy.content: 0.5
+          accuracy.set: 0.0
+          precision.content: 0.25
+          recall.content: 0.5
+          recall.all: 0.25
+          f1.content: 0.3333333432674408
+          f1.all: 0.25
+          loss.content: 1.1931869983673096
+      checks:
+        '2: probabilities recover prevalence within 0.06': true
+        '2: excess expected NLL below 0.02': true
+        '2: member counts include partial and all-OOV targets': true
+        '2: member and complete-set coverage are one half': true
+        '2: rebatching preserves epoch scores': true
+        '2: evaluation never admits unknown labels': true
+        '512: probabilities recover prevalence within 0.06': true
+        '512: excess expected NLL below 0.02': true
+        '512: member counts include partial and all-OOV targets': true
+        '512: member and complete-set coverage are one half': true
+        '512: rebatching preserves epoch scores': true
+        '512: evaluation never admits unknown labels': true
+      outcome: met
+      duration_seconds: 5.927
+    - started_at: '2026-09-20T02:52:20.743327+00:00'
+      mode: full
+      seed: 7631
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: 64241a854656709a47cd718e4146d23c903072c0
+        source_sha256: b01ac2fd736809ab32c7cd83ccf2732cacd9b9eba4d93bca355c735605d5e593
+        script_sha256: 76340876d8025deeb0f656f58fd76915595bb8e5579e0fb56eb9626f2669caf6
+        code_sha256: 27e78b913e911747eacc2511b731daf8fd7963ed3f588a1571216dae9513c4c9
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        oracle_nll: 0.41274269846481804
+        capacity_2:
+          probabilities:
+            red: 0.9053354859352112
+            blue: 0.20259059965610504
+          excess_nll: 9.210136093962262e-05
+          steps: 400
+        coverage_2:
+          loss.state: 2.6652448177337646
+          accuracy.state: 0.800000011920929
+          vocabulary.size: 2.0
+          targets.known: 256.0
+          targets.unavailable: 256.0
+          coverage.content: 0.5
+          sets.valued: 512.0
+          sets.complete: 256.0
+          coverage.set: 0.5
+          accuracy.content: 0.5
+          accuracy.set: 0.0
+          precision.content: 0.25
+          recall.content: 0.5
+          recall.all: 0.25
+          f1.content: 0.3333333432674408
+          f1.all: 0.25
+          loss.content: 1.1809282302856445
+        capacity_512:
+          probabilities:
+            red: 0.9081773161888123
+            blue: 0.1950017660856247
+          excess_nll: 0.0002348784425068584
+          steps: 400
+        coverage_512:
+          loss.state: 2.613093137741089
+          accuracy.state: 0.800000011920929
+          vocabulary.size: 2.0
+          targets.known: 256.0
+          targets.unavailable: 256.0
+          coverage.content: 0.5
+          sets.valued: 512.0
+          sets.complete: 256.0
+          coverage.set: 0.5
+          accuracy.content: 0.5
+          accuracy.set: 0.0
+          precision.content: 0.25
+          recall.content: 0.5
+          recall.all: 0.25
+          f1.content: 0.3333333432674408
+          f1.all: 0.25
+          loss.content: 1.1931869983673096
+      checks:
+        '2: probabilities recover prevalence within 0.06': true
+        '2: excess expected NLL below 0.02': true
+        '2: member counts include partial and all-OOV targets': true
+        '2: member and complete-set coverage are one half': true
+        '2: rebatching preserves epoch scores': true
+        '2: evaluation never admits unknown labels': true
+        '512: probabilities recover prevalence within 0.06': true
+        '512: excess expected NLL below 0.02': true
+        '512: member counts include partial and all-OOV targets': true
+        '512: member and complete-set coverage are one half': true
+        '512: rebatching preserves epoch scores': true
+        '512: evaluation never admits unknown labels': true
+      outcome: met
+      duration_seconds: 6.304
   P064:
     script: proofs/vocabulary/set_unavailable_fallback.py
     page: docs/proofs/vocabulary/set-unavailable-fallback.py
@@ -25431,7 +26665,8 @@ proofs:
       source_revision: null
       sources: []
       summary: Provisional learned Set fallback experiment; no historical measurements.
-      insights: Simulated unavailable inputs can teach the distinction between unknown membership and genuinely empty sets.
+      insights: Simulated unavailable inputs can teach the distinction between unknown membership and genuinely
+        empty sets.
       evidence: Actual runs are recorded below.
     runs:
     - started_at: '2026-09-17T00:44:15.616735+00:00'
@@ -25855,7 +27090,8 @@ proofs:
       status: Partial
       source_revision: null
       sources: []
-      summary: Coverage bookkeeping is verified; eight-way reconstruction remains seed-sensitive in the initial panel.
+      summary: Coverage bookkeeping is verified; eight-way reconstruction remains seed-sensitive in the initial
+        panel.
       insights: Reconstruction quality is conditional on known labels and must be reported alongside target coverage.
       evidence: Actual runs are recorded below.
     runs:
@@ -26982,9 +28218,12 @@ proofs:
     page: docs/proofs/vocabulary/rolling-input-admission.py
     historical:
       status: Partial
-      summary: Input vocabulary admission changes pretraining predictions before learning; tested fixes regress other learning proofs.
-      insights: Admission stability, identity learning, and calibration must pass together. Target coverage alone does not reveal input cold starts.
-      evidence: Baseline, rejected initialization candidates, and restored-current-model runs are recorded below. Output label support and masks stay fixed.
+      summary: Input vocabulary admission changes pretraining predictions before learning; tested fixes regress
+        other learning proofs.
+      insights: Admission stability, identity learning, and calibration must pass together. Target coverage alone
+        does not reveal input cold starts.
+      evidence: Baseline, rejected initialization candidates, and restored-current-model runs are recorded below.
+        Output label support and masks stay fixed.
       sources: []
     runs:
     - started_at: '2026-09-18T16:33:29.036700+00:00'

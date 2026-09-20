@@ -35,6 +35,7 @@ import pyarrow as pa
 from reporting import report
 
 import relflow as rf
+from relflow.helpers.resize import Resize
 
 PROOF_ID = "P060"
 BUDGET = 400
@@ -95,9 +96,17 @@ def build(size: int) -> rf.Model:
         dropout=0.0,
         batch_size=128,
         x=rf.Number,
-        entity=rf.Category(size=8192),
-        label=rf.Category(size=size, mask=True),
+        entity=rf.Category(),
+        label=rf.Category(mask=True),
     )
+    # Experimental storage control only: allocation is not a schema option.
+    node = model.nodes["record/label"]
+    resize = Resize()
+    resize.embedding(node.embedder.embeddings["content"], size)
+    resize.linear(node.decoder.linears["content"], size)
+    node.embedder.counters["content"].resize(size, resize)
+    resize.attribute(node.embedder.vocab, "size", size)
+    resize.commit()
     model.optimizer = rf.adamw(learning_rate=0.002)
     return model
 
@@ -105,7 +114,8 @@ def build(size: int) -> rf.Model:
 # %% [markdown]
 # ## Training and evaluation
 #
-# Both output capacities use identical 32,768-row training streams and 400
+# The proof forces internal output allocations of 2 and 128 as experimental
+# controls; users do not configure storage. Both use identical 32,768-row training streams and 400
 # updates. Validation has its own seed. Each held-out evaluation has 8,192
 # rows, with known or disjoint input IDs. Compare written probabilities with
 # the true 0.9 prior using RMSE and expected log loss, not sample accuracy.

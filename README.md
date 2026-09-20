@@ -58,7 +58,7 @@ model = rf.Model(
     batch_size=128,
     line_items=rf.Branch(
         length=32,
-        sku=rf.Category(size=4096),
+        sku=rf.Category(),
         quantity=rf.Number,
         price=rf.Number,
     ),

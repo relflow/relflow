@@ -138,7 +138,6 @@ def schema() -> Schema:
                         "name": "label",
                         "type": "category",
                         "embed": True,
-                        "size": 32,
                     }
                 ],
             },

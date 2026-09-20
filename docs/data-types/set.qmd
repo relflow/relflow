@@ -1,6 +1,6 @@
 # Set
 
-Use `Set` for unordered membership in a bounded vocabulary. Use
+Use `Set` for unordered membership in a learned vocabulary. Use
 [Category](category.qmd) for one label and [Branch](branch.qmd) when each item
 has attributes or position.
 
@@ -14,7 +14,7 @@ tags:
 ```python
 import relflow as rf
 
-tags = rf.Set(size=2048, threshold=0.75)
+tags = rf.Set(threshold=0.75)
 ```
 
 ## Input and options
@@ -26,7 +26,6 @@ members are ignored. An empty list is valued; a null list has state `null`.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `size` | `10000` | Positive vocabulary capacity; `capacity` is also accepted. |
 | `p_unavailable` | `0.01` | Training probability of hiding each known positive input member. Reconstruction answers remain intact. |
 | `threshold` | `None` | Prediction filter in `[0, 1]`; retain labels whose probability meets it. `None` returns every populated label. |
 
@@ -35,11 +34,15 @@ for target and embedding configuration.
 
 ## Vocabulary and learning
 
+Vocabulary storage grows automatically, with no size option to configure.
 The shared [Online Vocabulary](../core-concepts/vocabulary.qmd) contract covers
-admission order, capacity limits, worker synchronization, and checkpoint reuse.
+admission order, growth and state preservation, supported training strategies,
+and checkpoint reuse.
 
-Training grows a checkpointed vocabulary; validation, test, and prediction
-reuse it. For an application-supplied trained `model`:
+The training process binds batch-local member dictionaries before forward,
+growing embedding rows, membership width, counters, and decoder rows as needed.
+Validation, test, and prediction reuse the frozen mapping. For an
+application-supplied trained `model`:
 
 ```python
 labels = rf.Set.vocabulary(model, "record/tags")
@@ -49,8 +52,8 @@ This tuple snapshot lists populated labels in index order. It also accepts a
 preprocessor's `encoding_context`; consult established vocabularies for
 inference preprocessing, not to decide which training labels may be learned.
 
-Content contains capacity-wide membership bits and a count of distinct
-unavailable members. Unknown identities have no positive bit; duplicates and
+Content contains membership bits spanning the current allocation and a count
+of distinct unavailable members. Unknown identities have no positive bit; duplicates and
 member order do not affect either representation. The encoder averages known
 member embeddings and adds a learned contribution when **any** member is
 unavailable, plus the value-state embedding. That contribution starts at zero;
@@ -93,7 +96,7 @@ checkpoint loader; there is no automatic artifact migration in this change.
 `content` is a list of `value` / `probability` structs, with string labels and
 independent membership probabilities. Only populated vocabulary entries appear.
 The configured threshold filters this list; it changes neither training metrics
-nor the capacity-wide decoder computation.
+nor the decoder computation over the current allocation.
 
 See the [prediction envelope](../guides/prediction-output.qmd) for shared
 state probabilities, `inferred`, and repeated shapes.

@@ -3,9 +3,9 @@
 import pyarrow as pa
 import pytest
 import torch
+from experiments.category_hash import ARMS, Embedder, variant
 
 import relflow as rf
-from experiments.category_hash import ARMS, Embedder, variant
 from relflow.structs.enums import Component
 from relflow.tensorfields.extensions.category import category
 from relflow.tensorfields.extensions.hashable import hashable
@@ -16,8 +16,8 @@ def paired():
         d_model=16,
         n_layers=1,
         n_heads=4,
-        left=rf.Category(size=8, p_unavailable=0.0, query="value"),
-        right=rf.Category(size=8, p_unavailable=0.0, query="value"),
+        left=rf.Category(p_unavailable=0.0, query="value"),
+        right=rf.Category(p_unavailable=0.0, query="value"),
         fingerprint=rf.Hash(n_hashes=4, query="value"),
     )
 
@@ -55,7 +55,7 @@ def test_dictionary_encoded_atoms_have_the_same_fingerprint():
 @pytest.mark.parametrize("arm", ["sum-1", "sum-4", "project-4"])
 def test_hash_exists_before_admission_and_admission_preserves_embeddings(arm):
     with variant(ARMS[arm]):
-        model = rf.Model(d_model=16, n_layers=1, n_heads=4, code=rf.Category(size=8, p_unavailable=0.0))
+        model = rf.Model(d_model=16, n_layers=1, n_heads=4, code=rf.Category(p_unavailable=0.0))
         embedder = model.nodes["record/code"].embedder
         assert isinstance(embedder, Embedder)
         old = model.encode(pa.table({"code": ["old"]}), strata="train")["record/code"]
@@ -82,7 +82,7 @@ def test_unavailable_augmentation_keeps_hash_and_pristine_category_target():
             d_model=16,
             n_layers=1,
             n_heads=4,
-            code=rf.Category(size=8, p_unavailable=1.0, mask=rf.Mask(query="hide", reconstruct=True)),
+            code=rf.Category(p_unavailable=1.0, mask=rf.Mask(query="hide", reconstruct=True)),
             reference=rf.Hash(n_hashes=4, query="code"),
         )
         batch = model.encode(pa.table({"code": ["A", "B"], "hide": [False, False]}), strata="train")
@@ -99,7 +99,7 @@ def test_masking_removes_fingerprint_and_hidden_label_poison_cannot_change_predi
             d_model=16,
             n_layers=1,
             n_heads=4,
-            code=rf.Category(size=8, p_unavailable=0.0, mask=rf.Mask(query="hide", reconstruct=True)),
+            code=rf.Category(p_unavailable=0.0, mask=rf.Mask(query="hide", reconstruct=True)),
         )
         rows = pa.table({"code": ["A", "B"], "hide": [True, True]})
         field = model.encode(rows, strata="train")["record/code"]
@@ -117,7 +117,7 @@ def test_null_padding_and_compact_row_selection_preserve_alignment():
             d_model=16,
             n_layers=1,
             n_heads=4,
-            items=rf.Branch(length=3, code=rf.Category(size=8, p_unavailable=0.0)),
+            items=rf.Branch(length=3, code=rf.Category(p_unavailable=0.0)),
         )
         rows = pa.Table.from_pylist([{"items": [{"code": "A"}, {"code": None}]}, {"items": [{"code": "B"}]}])
         field = model.encode(rows, strata="predict")["record/items/code"]
@@ -136,8 +136,8 @@ def test_baseline_preserves_parameters_targets_and_predictions_exactly():
             d_model=16,
             n_layers=1,
             n_heads=4,
-            code=rf.Category(size=8, p_unavailable=0.0),
-            label=rf.Category(size=2, mask=True),
+            code=rf.Category(p_unavailable=0.0),
+            label=rf.Category(mask=True),
         )
 
     torch.manual_seed(119)
@@ -161,8 +161,8 @@ def test_checkpoint_roundtrip_inside_the_same_experiment_context(tmp_path, arm):
             d_model=16,
             n_layers=1,
             n_heads=4,
-            code=rf.Category(size=8, p_unavailable=0.0),
-            label=rf.Category(size=2, mask=True),
+            code=rf.Category(p_unavailable=0.0),
+            label=rf.Category(mask=True),
         )
         rows = pa.table({"code": ["A", "B"], "label": ["yes", "no"]})
         model.encode(rows, strata="train")
@@ -175,7 +175,7 @@ def test_checkpoint_roundtrip_inside_the_same_experiment_context(tmp_path, arm):
 @pytest.mark.parametrize("value", [True, 1.5])
 def test_experiment_rejects_unsupported_hash_atoms_explicitly(value):
     with variant(ARMS["sum-4"]):
-        model = rf.Model(d_model=16, n_layers=1, n_heads=4, code=rf.Category(size=8))
+        model = rf.Model(d_model=16, n_layers=1, n_heads=4, code=rf.Category())
         with pytest.raises(TypeError, match="integer/string/binary"):
             model.encode(pa.table({"code": [value]}), strata="predict")
 

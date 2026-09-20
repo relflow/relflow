@@ -145,7 +145,6 @@ def records(years: Sequence[int], *, parity: int) -> Iterator[dict]:
 def fit(
     *,
     dateparts: Sequence[str],
-    classes: int,
     train: Callable[[], Iterator[dict]],
     validate: Callable[[], Iterator[dict]],
     epochs: int,
@@ -162,7 +161,7 @@ def fit(
         n_heads=4,
         batch_size=128,
         observed_at=rf.DateParts(dateparts=list(dateparts)),
-        target=rf.Category(mask=True, size=classes, p_unavailable=0.0),
+        target=rf.Category(mask=True, p_unavailable=0.0),
     )
     model.optimizer = lambda module: torch.optim.AdamW(module.parameters(), lr=3e-3)
     data = rf.SyntheticDataModule(model=model, train=train, validate=validate, seed=seed)
@@ -202,7 +201,6 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     test = list(records((2023, 2025), parity=0))
     model = fit(
         dateparts=("day_of_year",),
-        classes=12,
         train=train,
         validate=validate,
         epochs=70,

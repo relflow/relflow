@@ -8,13 +8,13 @@ from lightning.pytorch.tuner import Tuner
 import relflow as rf
 
 
-def model():
+def model(merchant=rf.Category):
     configured = rf.Model(
         d_model=8,
         n_layers=1,
         n_heads=2,
         amount=rf.Number,
-        merchant=rf.Category(size=8),
+        merchant=merchant,
         label=rf.Boolean(mask=True),
     )
     configured.optimizer = rf.adamw(learning_rate=1e-3, fused=None)
@@ -49,14 +49,17 @@ def test_checkpoint_schema_loads_without_custom_pickle_globals(tmp_path):
 
 
 @pytest.mark.parametrize("accelerator", ["cpu", "cuda", "mps", "auto"])
-def test_native_batch_size_callback_restores_state_then_trains_bf16(tmp_path, accelerator):
+@pytest.mark.parametrize("kind", ["category", "set", "cluster"])
+def test_native_batch_size_callback_restores_state_then_trains_bf16(tmp_path, accelerator, kind):
     if accelerator == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA is unavailable")
     if accelerator == "mps" and not torch.backends.mps.is_available():
         pytest.skip("MPS is unavailable")
     if accelerator == "auto" and torch.cuda.device_count() > 1:
         pytest.skip("Lightning's batch-size finder requires a single device")
-    configured = model()
+    field = {"category": rf.Category, "set": rf.Set, "cluster": rf.Cluster}[kind]
+    options = {"bounds": 2, "revive_temperature": 0.0} if kind == "cluster" else {}
+    configured = model(field(mask=rf.Mask(reconstruct=True), **options))
     initial = {name: value.clone() for name, value in configured.named_parameters()}
     finder = BatchSizeFinder(mode="binsearch", init_val=2, max_trials=2, max_val=8, margin=0)
     restored = []
@@ -64,7 +67,7 @@ def test_native_batch_size_callback_restores_state_then_trains_bf16(tmp_path, ac
     class CheckRestore(lit.Callback):
         def on_train_start(self, trainer, pl_module):
             assert rf.Number.normalization(pl_module, "record/amount")["count"] == 0
-            assert rf.Category.vocabulary(pl_module, "record/merchant") == ()
+            assert field.vocabulary(pl_module, "record/merchant") == ()
             parameters = {id(parameter) for parameter in pl_module.parameters()}
             optimized = {id(parameter) for group in trainer.optimizers[0].param_groups for parameter in group["params"]}
             assert optimized == parameters
@@ -93,7 +96,7 @@ def test_native_batch_size_callback_restores_state_then_trains_bf16(tmp_path, ac
     assert configured.batch_size == finder.optimal_batch_size == 4
     assert trainer.global_step == 1
     assert rf.Number.normalization(configured, "record/amount")["count"] == 4
-    assert rf.Category.vocabulary(configured, "record/merchant") == ("alpha", "beta")
+    assert field.vocabulary(configured, "record/merchant") == ("alpha", "beta")
     assert any(
         not torch.equal(parameter.detach().cpu(), initial[name]) for name, parameter in configured.named_parameters()
     )

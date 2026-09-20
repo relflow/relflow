@@ -1,17 +1,20 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 from lightning.pytorch import Callback, LightningModule
+from torch.nn.parallel import DistributedDataParallel
 
 from relflow.distributed import all_reduce_sum, is_distributed, synchronize_epoch_metrics
+from relflow.helpers.state import compatible
 from relflow.structs.tree import Address
 
 if TYPE_CHECKING:
     from lightning.pytorch import Trainer
 
     from relflow.architecture.root import Model
+    from relflow.helpers.resize import Resize
 
 
 class Counter(torch.nn.Module):
@@ -19,6 +22,7 @@ class Counter(torch.nn.Module):
         super().__init__()
 
         self.size: int = size
+        self.initial_size = size
 
         # Seed each category so downstream normalizations are defined before observations.
         self.counts: torch.Tensor
@@ -26,6 +30,45 @@ class Counter(torch.nn.Module):
         self.register_buffer("counts", torch.ones(size, dtype=torch.int64))
         self.register_buffer("_pending_counts", torch.zeros(size, dtype=torch.int64), persistent=False)
         self.is_full: bool = False
+
+    def rebuild_state(self, previous: torch.nn.Module) -> dict[str, Any]:
+        if not isinstance(previous, Counter):
+            return {}
+        if self.initial_size == previous.initial_size:
+            self.size = previous.size
+            self.counts = self.counts.new_ones(self.size)
+        if self.counts.shape == previous.counts.shape:
+            self._pending_counts = previous._pending_counts.to(self._pending_counts).clone()
+            self.is_full = previous.is_full
+        return compatible(self.state_dict(), previous.state_dict())
+
+    def resize(self, size: int, resize: Resize, *, tail: bool = False) -> None:
+        """Preserve exposure and pending rank updates, relocating a sentinel if present."""
+        if size == self.size:
+            return
+        counts = self.counts.new_ones(size)
+        pending = self._pending_counts.new_zeros(size)
+        prefix = self.size - int(tail)
+        counts[:prefix].copy_(self.counts[:prefix])
+        pending[:prefix].copy_(self._pending_counts[:prefix])
+        if tail:
+            counts[-1].copy_(self.counts[-1])
+            pending[-1].copy_(self._pending_counts[-1])
+        resize.buffer(self, "counts", counts)
+        resize.buffer(self, "_pending_counts", pending)
+        resize.attribute(self, "size", size)
+
+    def _load_from_state_dict(
+        self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+    ):
+        counts = state_dict.get(prefix + "counts")
+        if isinstance(counts, torch.Tensor) and counts.ndim == 1 and counts.numel() != self.size:
+            self.size = counts.numel()
+            self.counts = self.counts.new_ones(self.size)
+            self._pending_counts = self._pending_counts.new_zeros(self.size)
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+        )
 
     def __str__(self) -> str:
         counts = self.counts.detach().cpu().tolist()
@@ -105,6 +148,18 @@ class Counter(torch.nn.Module):
 
 
 class CounterUpdateCallback(Callback):
+    def on_fit_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """Counters reduce their own deltas; DDP broadcasts would overwrite them."""
+        ignored = set(getattr(pl_module, "_ddp_params_and_buffers_to_ignore", ()))
+        for name, resource in pl_module.named_modules():
+            if isinstance(resource, Counter):
+                ignored.update(f"{name}.{buffer}" for buffer in ("counts", "_pending_counts"))
+        DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(pl_module, ignored)
+        wrapped = trainer.strategy.model
+        if isinstance(wrapped, DistributedDataParallel):
+            wrapped.parameters_to_ignore.update(ignored)
+            wrapped._assign_modules_buffers()
+
     @torch.no_grad()
     def on_train_epoch_end(
         self,

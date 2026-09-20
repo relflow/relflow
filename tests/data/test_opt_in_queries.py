@@ -51,7 +51,7 @@ def test_filters_are_rejected_with_a_preprocessor_remedy():
 
 
 def test_query_backed_leaf_ignores_same_named_direct_source_values():
-    model = build(label=rf.Category(query="payload.label", size=8, p_unavailable=0.0))
+    model = build(label=rf.Category(query="payload.label", p_unavailable=0.0))
 
     encoded = model.encode(
         table(
@@ -84,7 +84,7 @@ def test_scalar_extension_rejects_list_valued_query_with_field_context():
 
 
 def test_set_owns_the_list_produced_by_a_traversal_query():
-    model = build(aliases=rf.Set(query="contacts[*].alias", size=8, p_unavailable=0.0))
+    model = build(aliases=rf.Set(query="contacts[*].alias", p_unavailable=0.0))
 
     encoded = model.encode(
         table(

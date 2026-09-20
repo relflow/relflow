@@ -36,9 +36,9 @@ def model():
         n_layers=1,
         n_heads=2,
         batch_size=4,
-        category=rf.Category(size=16, mask=True, p_unavailable=1.0),
-        tags=rf.Set(size=16, mask=True, p_unavailable=1.0),
-        cluster=rf.Cluster(capacity=16, bounds=2, mask=True, p_unavailable=1.0),
+        category=rf.Category(mask=True, p_unavailable=1.0),
+        tags=rf.Set(mask=True, p_unavailable=1.0),
+        cluster=rf.Cluster(bounds=2, mask=True, p_unavailable=1.0),
     )
 
 
@@ -87,8 +87,14 @@ def test_warning_excludes_empty_vocabularies_unused_slots_and_smoothing_prior(re
     assert not warnings(records)
 
     # Allocation alone does not count as an observation.
-    for vocabulary in OnlineVocabularyModel.from_model(module).values():
-        vocabulary.state.reserve(["cold"], learn=True)
+    from relflow.architecture.binding import bind
+    from relflow.data.iterables import encode
+
+    bind(
+        module,
+        encode(table(["cold"]), module.schema, rf.Strata.train, module.interprocess_encoding_context),
+        rf.Strata.train,
+    )
     callback.on_test_start(None, module)
     assert len(warnings(records)) == 3
     assert all(event["minimum_observations"] == 0 for event in warnings(records))

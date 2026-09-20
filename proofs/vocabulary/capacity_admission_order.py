@@ -1,9 +1,9 @@
 # %% [markdown]
 # ---
-# title: Early rare labels can exhaust vocabulary capacity
+# title: Vocabulary growth preserves labels across admission orders
 # categories: [Vocabulary and OOV]
 # proof-id: P057
-# description: Compare rare-first and common-first admission with equal observations, then restore headroom as a positive control.
+# description: Compare rare-first and common-first admission with automatic storage growth; both arms must admit all labels and learn their effects.
 # execute:
 #   enabled: false
 #   eval: false
@@ -14,17 +14,17 @@
 #
 # ## Insights
 #
-# Vocabulary capacity is first-come admission, not a top-frequency filter.
-# A label can occur thousands of times during training yet remain unavailable
-# because earlier labels filled every slot. Such labels are model-OOV, even
-# though they are not data-unseen. Reordering the same observations or reserving
-# more capacity provides a matched positive control. This proof intentionally
-# exercises one consumer with shuffling disabled; it is not a worker-order test.
+# Vocabulary storage is managed internally. Training admits every observed
+# label and grows storage when needed, preserving earlier IDs. Encounter order
+# changes which labels receive the first IDs; it does not exclude later labels.
+# This proof requires equal coverage and learned common-label distinctions from
+# both encounter orders, without specifying a vocabulary size.
+# It exercises one consumer with shuffling disabled, not distributed ordering.
 #
 # ## Setup
 
 # %%
-"""P057: first-come capacity saturation removes a learnable category distinction."""
+"""P057: vocabulary growth retains admission order and learnable distinctions."""
 
 from collections.abc import Iterator
 from functools import partial
@@ -46,8 +46,7 @@ EFFECTS = {"rare-left": -1.0, "rare-right": 1.0, "cold": -1.0, "hot": 1.0}
 # A training pass has 4,096 rows: one of each rare label and 4,094 balanced
 # common labels. The target is the label's effect plus Gaussian noise with SD
 # 0.02. For common-first, move the first cold and hot observations to the front
-# without duplicating, deleting, or otherwise changing any record. A third
-# model keeps rare-first order but has four slots instead of two.
+# without duplicating, deleting, or otherwise changing any record.
 # Validation uses 512 independent observations. Test generation uses 2,050
 # independent observations and scores only its 2,048 common-label rows.
 #
@@ -56,29 +55,30 @@ EFFECTS = {"rare-left": -1.0, "rare-right": 1.0, "cold": -1.0, "hot": 1.0}
 # target: -1.0
 # ```
 #
-# Together with rare-right, an early singleton can consume all two slots.
+# Together with rare-right, this singleton takes the first two IDs in the
+# rare-first arms. Those IDs must survive admission of the common labels.
 #
 # ```yaml
 # code: cold
 # target: -1.0
 # ```
 #
-# Cold can then occur repeatedly without obtaining a learnable identity.
+# Cold must obtain its own identity regardless of which labels arrive first.
 #
 # ```yaml
 # code: hot
 # target: 1.0
 # ```
 #
-# If neither common label is admitted, their encoder representations coincide.
-# The best prediction over the balanced mixture is approximately zero.
+# Every arm must distinguish cold from hot. A constant prediction over their
+# balanced mixture is approximately zero and supplies the error baseline.
 #
 # ```{typst}
 # //| label: fig-proof-capacity-admission-order
-# //| fig-cap: "Only category identity can distinguish the signed target; admission order controls which identities survive."
-# //| fig-alt: "Record has Category code and hidden Number target. The arms differ in encounter order or vocabulary headroom, not observations or update budget."
+# //| fig-cap: "Category identity distinguishes the signed target across encounter orders with automatic growth."
+# //| fig-alt: "Record has Category code and hidden Number target. Each arm admits all four labels; the arms differ in encounter order, with the same observations and update budget."
 # #tree(node("record", kind: "root", children: (
-#   node("code", type: "Category", body: [Bounded first-come vocabulary]),
+#   node("code", type: "Category", body: [Growing vocabulary with stable IDs]),
 #   node("target", kind: "target", type: "Number"),
 # )))
 # ```
@@ -105,14 +105,14 @@ def records(*, rows: int, seed: int, common_first: bool = False) -> Iterator[dic
         yield observations[index]
 
 
-def build(size: int) -> rf.Model:
+def build() -> rf.Model:
     return rf.Model(
         d_model=32,
         n_layers=1,
         n_heads=4,
         dropout=0.0,
         batch_size=64,
-        code=rf.Category(size=size, p_unavailable=0.0),
+        code=rf.Category(p_unavailable=0.0),
         target=rf.Number(mask=True, objective="mse"),
     )
 
@@ -126,11 +126,11 @@ def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
 # ## Training and controls
 #
 # Each arm uses the same seed and 300 AdamW updates at learning rate 0.002,
-# with `shuffle=False`, `num_workers=0`, and one device. The rare-first two-slot
-# model must have zero coverage of common labels and nRMSE near one. The
-# common-first and headroom controls must cover both labels and achieve nRMSE
-# below 0.15. Renaming one overflow label to the other must have no effect on
-# the saturated model. Gates are declared before the first full run.
+# with `shuffle=False`, `num_workers=0`, and one device. Every arm must admit
+# all four labels, retain the first two IDs, have common-label coverage of one,
+# and achieve nRMSE below 0.15. Swapping cold and hot must change predictions
+# by more than 1.5 on average, demonstrating use of their distinct identities.
+# Both arms must grow to hold all four labels.
 
 
 # %%
@@ -141,9 +141,10 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     baseline = float(np.sqrt(np.mean((actual - np.mean([row["target"] for row in train])) ** 2)))
     metrics = {"baseline_rmse": baseline, "arms": {}}
     checks = {}
-    for name, size, common_first in (("rare_first", 2, False), ("common_first", 2, True), ("headroom", 4, False)):
+    for name, common_first in (("rare_first", False), ("common_first", True)):
         lit.seed_everything(seed, workers=True)
-        model = build(size)
+        model = build()
+        initial_size = model.nodes["record/code"].embedder.size
         model.optimizer = rf.adamw(learning_rate=0.002)
         data = rf.SyntheticDataModule(
             model=model,
@@ -169,24 +170,28 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         model.eval()
         vocabulary = rf.Category.vocabulary(model, "record/code")
         predicted = prediction(model, test)
+        renamed = [{**row, "code": "hot" if row["code"] == "cold" else "cold"} for row in test]
         measured = {
             "steps": trainer.global_step,
-            "capacity": size,
+            "initial_size": initial_size,
+            "allocated_size": model.nodes["record/code"].embedder.size,
             "vocabulary": vocabulary,
             "counts": rf.Category.counts(model, "record/code"),
             "common_coverage": float(np.mean([row["code"] in vocabulary for row in test])),
             "nrmse": float(np.sqrt(np.mean((actual - predicted) ** 2))) / baseline,
+            "identity_swap_drift": float(np.mean(np.abs(predicted - prediction(model, renamed)))),
         }
-        if name == "rare_first":
-            renamed = [{**row, "code": "hot" if row["code"] == "cold" else "cold"} for row in test]
-            measured["overflow_renaming_drift"] = float(np.max(np.abs(predicted - prediction(model, renamed))))
-            checks["First rare labels occupy every slot"] = vocabulary == ("rare-left", "rare-right")
-            checks["Frequently seen common labels remain OOV"] = measured["common_coverage"] == 0.0
-            checks["Overflow identities cannot be distinguished"] = measured["overflow_renaming_drift"] < 1e-5
-            checks["Saturated model remains near the constant baseline"] = 0.90 < measured["nrmse"] < 1.10
-        else:
-            checks[f"{name}: common-label coverage is complete"] = measured["common_coverage"] == 1.0
-            checks[f"{name}: common-label nRMSE below 0.15"] = measured["nrmse"] < 0.15
+        first = ("cold", "hot") if common_first else ("rare-left", "rare-right")
+        checks[f"{name}: all four labels are admitted"] = len(vocabulary) == 4 and set(vocabulary) == set(EFFECTS)
+        checks[f"{name}: first label IDs are preserved"] = vocabulary[:2] == first
+        checks[f"{name}: allocation holds all four labels"] = measured["allocated_size"] == 4
+        checks[f"{name}: storage grows automatically"] = measured["allocated_size"] > initial_size
+        checks[f"{name}: all labels have training exposures"] = all(
+            measured["counts"].get(label, 0) > 0 for label in EFFECTS
+        )
+        checks[f"{name}: common-label coverage is complete"] = measured["common_coverage"] == 1.0
+        checks[f"{name}: common-label nRMSE below 0.15"] = measured["nrmse"] < 0.15
+        checks[f"{name}: common identities have distinct learned effects"] = measured["identity_swap_drift"] > 1.5
         checks[f"{name}: prediction does not change admission"] = (
             rf.Category.vocabulary(model, "record/code") == vocabulary
         )
@@ -195,14 +200,20 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 # %% [markdown]
-# ## Evidence and remaining work
+# ## Scope of evidence
+#
+# Earlier fixed-capacity runs used different gates. Assess this revision using
+# a full run whose source fingerprint matches the current script; earlier
+# scores do not establish its autoscaling behavior.
 #
 # {{< proof P057 evidence >}}
 #
-# This is an admission-order limitation, not a guarantee about shuffled or
-# distributed loaders. The headroom arm is trained from scratch; changing the
-# capacity of a trained model is a different mutation with different state
-# retention behavior. Thresholds remain provisional pending calibration.
+# This checks one-device admission and common-label learning. The singleton
+# rare labels establish admission and ID order, not reliable rare-label
+# predictions. It does not establish worker/DDP ordering or optimizer-state
+# preservation after growth later in training. Dedicated runtime tests cover
+# those invariants separately, including two-rank DDP, persistent workers,
+# gradient accumulation, and checkpoint resume.
 #
 # ## Reproduce
 #

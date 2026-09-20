@@ -46,7 +46,7 @@ def test_unknown_category_inputs_remain_valued_and_differ_from_null():
     rows = [{"x": 0.0, "code": code, "target": 0.0} for code in ("new-left", "new-right", None)]
     field = model.encode(pa.Table.from_pylist(rows), strata="test")["record/code"]
     assert field.state.reshape(-1)[:2].eq(rf.Tokens.valued).all()
-    assert field.content.reshape(-1)[:2].eq(4).all()
+    assert field.content.reshape(-1)[:2].eq(-1).all()
     assert field.state.reshape(-1)[2] != rf.Tokens.valued
 
 
@@ -63,7 +63,7 @@ def test_target_coverage_shift_preserves_inputs_and_field_local_vocabularies():
     assert sum(row["label"] in proof.LABELS[:2] for row in shifted) == 32
     counts = rf.Category.counts(model, "record/label")
     targets = model.encode(pa.Table.from_pylist(shifted), strata="test")["record/label"].targets[rf.TensorKey.content]
-    np.testing.assert_array_equal(targets.reshape(-1).numpy() == 8, np.arange(64) % 2 == 1)
+    np.testing.assert_array_equal(targets.reshape(-1).numpy() == -1, np.arange(64) % 2 == 1)
     assert rf.Category.counts(model, "record/label") == counts
 
 
@@ -76,10 +76,29 @@ def test_capacity_controls_reorder_identical_records_without_duplication():
     )
     assert [row["code"] for row in rare[:2]] == ["rare-left", "rare-right"]
     assert [row["code"] for row in common[:2]] == ["cold", "hot"]
-    for observations, expected in ((rare, ("rare-left", "rare-right")), (common, ("cold", "hot"))):
-        model = proof.build(size=2)
-        model.encode(pa.Table.from_pylist(observations), strata="train")
+    for observations in (rare, common):
+        model = proof.build()
+        first = model.encode(pa.Table.from_pylist(observations[:2]), strata="train")["record/code"].content.clone()
+        expected = tuple(dict.fromkeys(row["code"] for row in observations))
+        assert rf.Category.vocabulary(model, "record/code") == expected[:2]
+        assert first.reshape(-1).tolist() == [0, 1]
+
+        model.encode(pa.Table.from_pylist(observations[2:]), strata="train")
         assert rf.Category.vocabulary(model, "record/code") == expected
+        assert set(expected) == set(proof.EFFECTS)
+        assert model.nodes["record/code"].embedder.size == 4
+        assert "size" not in model.schema.requests["record/code"].model_dump()
+        counts = rf.Category.counts(model, "record/code")
+        assert counts == Counter(row["code"] for row in observations)
+
+        encoded = model.encode(pa.Table.from_pylist(observations), strata="test")["record/code"]
+        assert torch.equal(encoded.content[:2], first)
+        assert encoded.content.reshape(-1).tolist() == [expected.index(row["code"]) for row in observations]
+        assert all(label in expected for label in ("cold", "hot"))
+        for strata in ("validate", "test", "predict"):
+            model.encode(pa.Table.from_pylist([{"code": "unseen", "target": 0.0}]), strata=strata)
+        assert rf.Category.vocabulary(model, "record/code") == expected
+        assert rf.Category.counts(model, "record/code") == counts
 
 
 def test_set_probes_distinguish_omitted_members_from_null_state():
@@ -127,7 +146,9 @@ def test_lifecycle_empty_prediction_admission_and_checkpoint(tmp_path):
     admitted = rf.Category.vocabulary(model, "record/label")
     assert admitted[:2] == vocabulary
     assert set(admitted) == set(proof.LABELS)
-    assert all(torch.equal(parameters[name], value) for name, value in model.named_parameters())
+    assert all(
+        torch.equal(parameters[name], value[: parameters[name].shape[0]]) for name, value in model.named_parameters()
+    )
 
 
 def test_continued_training_generator_rehearses_old_classes():

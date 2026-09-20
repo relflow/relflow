@@ -35,10 +35,10 @@ model = rf.Model(
     d_model=64,
     n_layers=2,
     n_heads=4,
-    customer_tier=rf.Category(size=16),
+    customer_tier=rf.Category(),
     line_items=rf.Branch(
         length=32,
-        sku=rf.Category(size=8192),
+        sku=rf.Category(),
         quantity=rf.Number,
         price=rf.Number,
     ),
@@ -91,7 +91,7 @@ with a configuration option:
 ```python
 measurements = rf.Branch(
     length=8,
-    fields={"length": rf.Number, "description": rf.Category(size=16)},
+    fields={"length": rf.Number, "description": rf.Category()},
 )
 ```
 

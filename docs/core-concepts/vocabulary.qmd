@@ -2,13 +2,13 @@
 
 `Category`, `Set`, and `Cluster` learn a mapping from observed labels to model
 slots during training. Users supply the labels directly; a separate integer
-encoding step is unnecessary. Each field has its own bounded vocabulary,
+encoding step is unnecessary. Each field has its own growing vocabulary,
 preserved with the model's learned state.
 
 The [Vocabulary and OOV proofs](../proofs.qmd)
-exercise unknown inputs and targets, capacity exhaustion, set membership, and
+exercise unknown inputs and targets, vocabulary growth, set membership, and
 checkpoint/continued-training behavior. They distinguish learned fallback
-from information that a closed vocabulary cannot represent.
+from information that a frozen evaluation vocabulary cannot represent.
 
 ## A Vocabulary Belongs To A Field
 
@@ -37,10 +37,10 @@ model = rf.Model(
     n_heads=8,
     orders=rf.Branch(
         length=64,
-        merchant=rf.Category(size=4096),
-        tags=rf.Set(size=512),
+        merchant=rf.Category(),
+        tags=rf.Set(),
     ),
-    preferred_channel=rf.Category(size=16, mask=True),
+    preferred_channel=rf.Category(mask=True),
 )
 ```
 
@@ -58,10 +58,10 @@ vocabulary slot. Set members are labels; the entire set is not one vocabulary en
 
 | Stage | Vocabulary behavior |
 | --- | --- |
-| Training | Admit new labels while capacity remains. |
+| Training | Admit new labels before the batch's forward pass, growing storage as needed. |
 | Validation and test | Reuse the existing mapping; unseen labels remain unknown. |
 | Prediction and serving | Reuse the loaded mapping; requests do not teach new labels. |
-| Fine-tuning or resumed training | Continue from the saved mapping, with further admission while capacity remains. |
+| Fine-tuning or resumed training | Continue from the saved mapping, admitting new labels and growing storage as needed. |
 
 Learning observes the pristine values retained by the schema, after
 preprocessing and query/overflow selection but before input masking and
@@ -74,32 +74,45 @@ update this state even without an optimizer step. Validation or prediction on
 a newly constructed model starts with empty vocabularies; load a trained
 artifact to reuse its mappings.
 
-## Capacity And Admission Order
+## Automatic Storage Growth
 
-`size` on Category/Set, or `capacity` on Cluster, sets the maximum number of
-learned labels. Category and Set also accept `capacity`. Relevant tensor widths
-are allocated for that capacity when the model is built; admission fills slots
-rather than growing the tensor shapes for each new label.
+Category, Set, and Cluster manage vocabulary storage automatically. Neither
+`size` nor `capacity` is a field option, and there is no configured maximum.
+When a training batch introduces more labels than fit, storage grows
+geometrically until it can hold them. Users do not need to estimate the number
+of labels before training. Cluster's `bounds` controls latent clusters, not
+vocabulary storage.
 
-Labels are admitted in encounter order, subject to worker/rank synchronization.
-Ordinary training appends entries without evicting or renumbering existing
-ones. Capacity does not select the most frequent labels: early rare labels
-can fill it before later common labels arrive. Record order, shuffle settings,
-and worker layout can therefore affect the learned vocabulary.
+Growth preserves existing label IDs, learned embedding and decoder rows,
+exposure counters, partial gradients, and optimizer history: Adam/AdamW moments
+and step counters, or SGD momentum. New parameter rows receive standard
+initialization and zeroed optimizer moments or momentum. Cluster preserves its unavailable assignment
+while growing per-label rows; its configured cluster bounds are unchanged.
+Checkpoints preserve the mapping and grown tensor sizes, so resumed training
+can continue from that allocation. Vocabulary storage is runtime state, not
+schema configuration; growing it does not change the schema.
 
-Once full, additional labels follow the unknown-value behavior below. Monitor
-occupancy explicitly; reaching capacity does not reliably produce a warning
-in every loader configuration. Reserve headroom for expected growth, while
-accounting for memory and decoder cost. In particular, Set content and decoder
-outputs have capacity-wide representations.
+Labels append in encounter order without evicting or renumbering existing ones.
+With DDP, each batch's labels are gathered in rank order, preserving encounter
+order within each rank. Record order, shuffling, and rank layout can change the
+assigned IDs, but early rare labels do not exclude later common labels.
+[P057](../proofs/vocabulary/capacity-admission-order.py) checks admission and
+learning across encounter orders.
+
+Automatic growth still consumes memory and increases decoder cost. In particular,
+Set membership and decoder outputs span the current allocation. Spare rows are
+not labels: reconstruction objectives and written probabilities use only
+discovered labels. Actual new labels can change the learning objective;
+additional storage alone does not add classes.
 
 Use [Hash](../data-types/hash.qmd) for identifier equality without a persistent
 vocabulary. [Cluster](../data-types/cluster.qmd) shares latent representations
-between labels but still keeps bounded per-label state.
+between labels but still keeps growing per-label state.
 
 ## Unknown Values And Prediction
 
-An unseen or over-capacity label remains `valued`; it does not become null.
+At evaluation, a label outside the learned mapping remains `valued`; it does
+not become null.
 Its content representation depends on the datatype:
 
 | Type | Unknown content |
@@ -140,13 +153,13 @@ development split; do not learn a vocabulary from validation to conceal OOVs.
 includes decisive-context controls. Its synthetic missing-ID population does
 not establish robustness to arbitrary new-population effects.
 
-Vocabulary admission activates a previously unused embedding. It does not
-train that embedding and can change predictions immediately. Keep serving
-vocabularies frozen, and evaluate a separately continued-training artifact
-before promotion. Counts measure exposures, not representation competence.
+Vocabulary admission activates an unused or newly allocated representation.
+It does not train that representation and can change predictions immediately.
+Keep serving vocabularies frozen, and evaluate a separately continued-training
+artifact before promotion. Counts measure exposures, not representation competence.
 
 At the start of each Lightning validation, test, or prediction loop, RelFlow
-logs one warning per field if any allocated vocabulary entry has fewer than
+logs one warning per field if any populated vocabulary entry has fewer than
 **10 training observations**. This includes validation and sanity checks during
 fitting. The warning reports the field address, affected-entry count, vocabulary
 size, and lowest exposure count without logging label values. Empty vocabularies,
@@ -166,21 +179,34 @@ For pretraining targets, see
 
 ## Workers And Distributed Training
 
-relflow shares vocabulary state with local data workers and synchronizes it
-across DDP ranks. The first consumer admits labels directly; other workers and
-ranks submit new labels for synchronization. Those labels can remain unknown
-until the synchronization boundary, even when capacity is available.
+Data workers encode immutable dictionaries local to each batch. The training
+process binds those dictionaries to the model's current vocabulary before
+forward, admits the new labels, and remaps inputs, targets, and exposure counts.
+Prefetched batches remain valid across growth because their local IDs are
+resolved when consumed. Labels are available to their first training batch,
+including with multiple workers.
 
-Synchronization runs at fit start and training epoch end. This delay also
-matters on one device with multiple workers. With one device and
-`num_workers=0`, training admission is immediate before the batch is encoded.
-Do not treat integer slots as portable class IDs across independently trained
-models; preserve the model artifact and inspect its mapping.
+Under DDP, every rank gathers that batch's dictionaries and applies the same
+ordered admission. When parameters grow, RelFlow replaces the DDP wrapper
+during the current fit, before the affected batch enters forward, and migrates
+optimizer state to the grown parameters.
 
-Checkpoints include accepted labels, not pending proposals. A checkpoint saved
-mid-epoch therefore does not preserve labels still awaiting synchronization.
-Admission itself also does not establish that a label's representation has
-been trained.
+Growth also happens before the affected batch during gradient accumulation
+(`accumulate_grad_batches > 1`). Before replacing the DDP wrapper, RelFlow
+synchronizes which parameters have gradients and their partial gradients across
+ranks. Resizing preserves these gradients, including contributions from
+parameters used only in earlier microbatches, and accumulation continues.
+
+Automatic growth supports single-device training and standard eager Lightning
+DDP with automatic optimization and `static_graph=False`; DDP growth during
+accumulation requires dense gradients. FSDP, DeepSpeed, other sharded backends,
+compiled DDP, and DDP configurations with native mixed precision, custom
+communication hooks, or delayed all-reduce are unsupported for growth.
+
+Checkpoints record the model's admitted vocabulary and allocated rows.
+Prefetching alone does not admit labels or record training exposures. Integer
+slots are local to a trained model; preserve its artifact and inspect its mapping
+when reusing it.
 
 ## Inspect And Reuse The Mapping
 
@@ -190,7 +216,7 @@ After training the example model:
 merchant_labels = rf.Category.vocabulary(model, "customer/orders/merchant")
 merchant_counts = rf.Category.counts(model, "customer/orders/merchant")
 tag_labels = rf.Set.vocabulary(model, "customer/orders/tags")
-occupancy = len(merchant_labels) / 4096
+merchant_label_count = len(merchant_labels)
 ```
 
 Vocabulary accessors return immutable tuples in slot order. Category counts
@@ -198,8 +224,7 @@ are pristine training exposures for populated labels, excluding the smoothing
 prior and unavailable values. Repeated epochs count again; these are not
 unique-record counts. DDP exposure counts synchronize at epoch end and before
 the evaluation-loop warning checks.
-Encounters while a label was unavailable are not counted retroactively after
-its admission.
+New training labels are counted from their first consumed batch.
 `rf.Cluster.vocabulary(model, address)` provides the same mapping inspection
 for Cluster fields.
 
@@ -215,11 +240,8 @@ learning from it; freezing parameter gradients alone does not freeze vocabulary
 admission. Use prediction stages for a fixed vocabulary.
 
 Cluster also has an explicit [assignment API](../data-types/cluster.qmd#learning-and-inspection)
-that can add labels to an idle model outside training.
+that can add labels and grow storage on an idle model outside training.
 
-Changing capacity with a schema update rebuilds the affected modules. Resized
-embedding, decoder, and counter tensors are newly initialized; it is not a
-weight-preserving expansion. The ordered vocabulary can survive an expansion,
-while shrinking truncates it. Resetting a field discards its learned vocabulary
-and runtime state. Review [Schema Mutation](../guides/schema-mutation.qmd)
-before changing a trained model's capacity.
+Automatic growth needs no schema update. Resetting a field discards its learned
+vocabulary and runtime state. Review [Schema Mutation](../guides/schema-mutation.qmd)
+before explicitly rebuilding a trained field.

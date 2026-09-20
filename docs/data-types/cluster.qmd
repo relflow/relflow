@@ -2,7 +2,7 @@
 
 Use `Cluster` for scalar labels represented through shared latent groups. It
 factorizes label representation into a label-to-cluster assignment and a
-cluster-to-model projection. It still keeps a bounded vocabulary; it does not
+cluster-to-model projection. It keeps a growing vocabulary; it does not
 eliminate per-label state.
 
 ```yaml
@@ -17,7 +17,6 @@ import relflow as rf
 model = rf.Model(
     d_model=64, n_layers=2, n_heads=4,
     merchant_id=rf.Cluster(
-        capacity=100_000,
         bounds=64,
         mask=rf.Mask(rate=0.15, reconstruct=True),
     ),
@@ -36,12 +35,12 @@ one compatible Arrow family per field. Training grows the vocabulary;
 validation, test, and prediction reuse it. Unknown labels remain `valued` and
 use a shared unavailable assignment. Nulls have a separate state.
 
-See [Online Vocabulary](../core-concepts/vocabulary.qmd) for capacity limits,
-admission timing with workers/DDP, and changes during fine-tuning.
+See [Online Vocabulary](../core-concepts/vocabulary.qmd) for automatic growth,
+admission timing with workers/DDP, supported training strategies, and changes
+during fine-tuning.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `capacity` | `1024` | Positive maximum number of learned labels. |
 | `bounds` | required | Integer `K` fixes the cluster count; `(lower, upper)` enables adaptive committed clusters with `0 < lower <= upper`. Stored as `n_clusters`. |
 | `p_unavailable` | `0.01` | Training probability of replacing known input labels with unavailable content. Reconstruction answers remain intact. |
 | `ema_decay` | `0.99` | Smoothing for usage and range-adherence statistics, in `[0, 1]`. |
@@ -49,9 +48,14 @@ admission timing with workers/DDP, and changes during fine-tuning.
 
 The upper bound fixes physical cluster width. Ranged bounds allow callbacks to
 revive inactive columns or merge similar active columns. They do not guarantee
-equal use or human-interpretable groups.
+equal use or human-interpretable groups. Vocabulary growth expands label rows
+without changing these cluster bounds.
 
 ## Learning and inspection
+
+The training process binds batch-local label dictionaries before forward.
+Growth preserves existing IDs, learned assignment rows, exposure counters, and
+supported optimizer state, including the shared unavailable assignment.
 
 A reconstructing mask is required to train the cluster head and adaptive
 selection. A plain visible Cluster can influence other targets, but creates no
@@ -101,9 +105,12 @@ IDs and usage EMA; these inspection calls read local model state under DDP.
 An idle model also supports `rf.Cluster.assign(model, address, label, assignment)`
 for persistent changes and `rf.Cluster.override(model, address, assignments)`
 as a temporary context manager. An assignment is a cluster ID or a nonnegative
-probability vector of upper-bound width summing to one. Adding a label consumes
-capacity. Overrides restore state on exit; saving or rebuilding during an open
-override is rejected.
+probability vector of upper-bound width summing to one. These imperative APIs
+grow per-label storage before writing when necessary, preserving earlier rows,
+the unavailable assignment, and cluster width. They cannot run while the model
+is active or vocabulary state is shared with workers. Overrides restore labels
+and assignments on exit; any expanded allocation remains available. Saving or
+rebuilding during an open override is rejected.
 
 ## Prediction
 

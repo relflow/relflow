@@ -51,7 +51,7 @@ def test_entity_disjoint_split_changes_only_identity_spelling():
     module.encode(pa.Table.from_pylist(known), strata="train")
     vocab = rf.Category.vocabulary(module, "record/entity")
     field = module.encode(pa.Table.from_pylist(novel), strata="test")["record/entity"]
-    assert field.content.eq(16384).all()
+    assert field.content.eq(-1).all()
     assert field.state.eq(rf.Tokens.valued).all()
     assert rf.Category.vocabulary(module, "record/entity") == vocab
 
@@ -76,7 +76,7 @@ def test_rolling_admission_keeps_future_identities_unknown_and_masks_fixed():
     module.encode(pa.Table.from_pylist(training), strata="train")
     snapshot = rf.Category.vocabulary(module, "record/entity")
     fields = module.encode(pa.Table.from_pylist(future), strata="validate")
-    assert fields["record/entity"].content.eq(16384).all()
+    assert fields["record/entity"].content.eq(-1).all()
     assert fields["record/label"].targets[rf.TensorKey.content].lt(2).all()
     np.testing.assert_array_equal(fields["record/label"].trainable.numpy().reshape(-1), [row["hide"] for row in future])
     assert rf.Category.vocabulary(module, "record/entity") == snapshot

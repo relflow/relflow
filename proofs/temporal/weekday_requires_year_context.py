@@ -152,7 +152,6 @@ def records(*, years: Sequence[int], ordinal_step: int = 5) -> Iterator[dict]:
 def fit(
     *,
     dateparts: Sequence[str],
-    classes: int,
     train: Callable[[], Iterator[dict]],
     validate: Callable[[], Iterator[dict]],
     epochs: int,
@@ -169,7 +168,7 @@ def fit(
         n_heads=4,
         batch_size=128,
         observed_at=rf.DateParts(dateparts=list(dateparts)),
-        target=rf.Category(mask=True, size=classes, p_unavailable=0.0),
+        target=rf.Category(mask=True, p_unavailable=0.0),
     )
     model.optimizer = lambda module: torch.optim.AdamW(module.parameters(), lr=3e-3)
     data = rf.SyntheticDataModule(model=model, train=train, validate=validate, seed=seed)
@@ -209,7 +208,6 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     test = partial(records, years=tuple(range(2001, 2036)))
     day_only = fit(
         dateparts=("day_of_year",),
-        classes=7,
         train=train,
         validate=validate,
         epochs=14,
@@ -220,7 +218,6 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     ambiguous_accuracy = accuracy(day_only, test, accelerator)
     identified = fit(
         dateparts=("day_of_year", "day_of_week"),
-        classes=7,
         train=train,
         validate=validate,
         epochs=14,

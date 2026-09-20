@@ -20,8 +20,9 @@
 # complete sets, so omitted known members are valid negatives even when other
 # members are unknown. This is not a partially annotated-label task.
 #
-# Split by independent rows. Compare capacities 2 and 512 under identical
-# seeds and 400 updates. `p_unavailable=1` must not erase the hidden answers.
+# Split by independent rows. Force internal allocations of 2 and 512 as
+# experimental controls, not schema options, under identical seeds and 400
+# updates. `p_unavailable=1` must not erase the hidden answers.
 # The analytic oracle is (0.9, 0.2); the old target-corruption control predicts
 # neither member. This does not establish general OOD calibration.
 #
@@ -67,6 +68,7 @@ import pyarrow as pa
 from reporting import report
 
 import relflow as rf
+from relflow.helpers.resize import Resize
 
 PROOF_ID = "P063"
 BUDGET = 400
@@ -86,8 +88,16 @@ def build(size: int) -> rf.Model:
         batch_size=128,
         dropout=0.0,
         x=rf.Number,
-        labels=rf.Set(size=size, p_unavailable=1.0, mask=True),
+        labels=rf.Set(p_unavailable=1.0, mask=True),
     )
+    # Experimental storage control only: allocation is not a schema option.
+    node = model.nodes["record/labels"]
+    resize = Resize()
+    resize.embedding(node.embedder.embeddings["content"], size)
+    resize.linear(node.decoder.linears["content"], size)
+    node.embedder.counters["content"].resize(size, resize)
+    resize.attribute(node.embedder.vocab, "size", size)
+    resize.commit()
     model.optimizer = rf.adamw(learning_rate=0.002)
     return model
 
