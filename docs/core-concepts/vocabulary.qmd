@@ -120,6 +120,17 @@ does not establish that a request belongs to the known vocabulary. Evaluate
 unknown-label coverage alongside content accuracy, which excludes unknown
 targets for Category and Cluster.
 
+At the start of each Lightning validation, test, or prediction loop, RelFlow
+logs one warning per field if any allocated vocabulary entry has fewer than
+**10 training observations**. This includes validation and sanity checks during
+fitting. The warning reports the field address, affected-entry count, vocabulary
+size, and lowest exposure count without logging label values. Empty vocabularies,
+unused slots, and the counter's smoothing prior are excluded. Evaluation does
+not add observations; the warning does not change predictions or losses.
+This is a loop-start diagnostic, not a check on every batch or direct
+`model.predict(...)` call. Ten exposures are a warning threshold, not a guarantee
+that a representation has been learned.
+
 ## Workers And Distributed Training
 
 relflow shares vocabulary state with local data workers and synchronizes it
@@ -152,7 +163,8 @@ occupancy = len(merchant_labels) / 4096
 Vocabulary accessors return immutable tuples in slot order. Category counts
 are pristine training exposures for populated labels, excluding the smoothing
 prior and unavailable values. Repeated epochs count again; these are not
-unique-record counts. DDP exposure counts synchronize at epoch end.
+unique-record counts. DDP exposure counts synchronize at epoch end and before
+the evaluation-loop warning checks.
 Encounters while a label was unavailable are not counted retroactively after
 its admission.
 `rf.Cluster.vocabulary(model, address)` provides the same mapping inspection

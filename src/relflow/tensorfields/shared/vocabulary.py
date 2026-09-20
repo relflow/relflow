@@ -22,10 +22,15 @@ from relflow.distributed import (
     synchronize_epoch_metrics,
 )
 from relflow.logging import logger
+from relflow.structs.enums import Strata, TensorKey
 from relflow.structs.tree import Address
+from relflow.tensorfields.shared.counter import Counter
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
+
+
+MIN_OBSERVATIONS = 10
 
 
 class LocalLock:
@@ -468,15 +473,73 @@ def sync(_callback: Callback, trainer: Trainer, pl_module: Model, reason: str) -
 
 
 class VocabularySyncCallback(Callback):
-    """Synchronize online vocabularies registered by tensorfield extensions."""
+    """Synchronize vocabularies and warn about low exposure before evaluation.
+
+    Exposure checks use an embedder's shared ``vocab`` and ``counters['content']``
+    resources. Extensions without a content Counter retain synchronization only.
+    """
+
+    @torch.no_grad()
+    def warn(self, trainer: Trainer, pl_module: LightningModule, strata: Strata) -> None:
+        module = cast("Model", pl_module)
+        resources: list[tuple[Address, OnlineVocabularyModel, Counter]] = []
+        for address, vocabulary in sorted(
+            OnlineVocabularyModel.from_model(module).items(), key=lambda item: str(item[0])
+        ):
+            counters = getattr(module.nodes[address].embedder, "counters", {})
+            if TensorKey.content.name not in counters:
+                continue
+            counter = counters[TensorKey.content.name]
+            if isinstance(counter, Counter):
+                resources.append((address, vocabulary, counter))
+
+        if resources and is_distributed():
+            # Validation can start before epoch-end counter synchronization.
+            # All ranks participate, even with empty local vocabularies.
+            synchronize_epoch_metrics(trainer)
+            for _, _, counter in resources:
+                counter.sync()
+
+        if not is_rank_zero():
+            return
+
+        for address, vocabulary, counter in resources:
+            size = len(vocabulary.master)
+            if not size:
+                continue
+            # Counters start at one for smoothing, not an observed example.
+            counts = counter.counts[:size] - 1
+            underobserved = int(counts.lt(MIN_OBSERVATIONS).sum().item())
+            if not underobserved:
+                continue
+            logger.bind(
+                component="vocabulary",
+                address=str(address),
+                strata=strata.value,
+                underobserved=underobserved,
+                size=size,
+                threshold=MIN_OBSERVATIONS,
+                minimum_observations=int(counts.min().item()),
+            ).warning(
+                f"vocabulary entries have fewer than {MIN_OBSERVATIONS} training observations; "
+                "cold-start representations may affect metrics or predictions. "
+                "Continue training and evaluate low-exposure labels separately."
+            )
 
     if TYPE_CHECKING:
 
         def on_fit_start(self, trainer: Trainer, pl_module: LightningModule) -> None: ...
         def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None: ...
+
+        on_validation_start = Callback.on_validation_start
+        on_test_start = Callback.on_test_start
+        on_predict_start = Callback.on_predict_start
     else:
         on_fit_start = partialmethod(sync, reason="fit_start")
         on_train_epoch_end = partialmethod(sync, reason="train_epoch_end")
+        on_validation_start = partialmethod(warn, strata=Strata.validate)
+        on_test_start = partialmethod(warn, strata=Strata.test)
+        on_predict_start = partialmethod(warn, strata=Strata.predict)
 
     def on_fit_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         pl_module = cast("Model", pl_module)
