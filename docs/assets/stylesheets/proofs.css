@@ -1,3 +1,8 @@
+#read-the-status table :is(th, td):first-child {
+  width: 1%;
+  white-space: nowrap;
+}
+
 #listing-proofs tbody tr {
   cursor: pointer;
 }
@@ -16,7 +21,8 @@
   outline: none;
 }
 
-#listing-proofs tbody tr:focus-within {
+#listing-proofs tbody tr:focus-within,
+#listing-proofs .table-responsive:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: -2px;
 }

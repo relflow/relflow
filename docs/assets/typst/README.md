@@ -107,9 +107,9 @@ same pipeline in a temporary directory.
 
 The project configures Typst Render with light/dark backgrounds. The extension
 compiles each diagram declaration to two SVGs and wraps them in Quarto's
-`light-content` and `dark-content` classes. This follows the site's manual theme
-toggle as well as its initial color-scheme selection; no extra diagram markup
-or JavaScript is needed.
+`light-content` and `dark-content` classes. This follows the site's automatic
+device color-scheme selection, including changes while the page is open; no
+extra diagram markup or JavaScript is needed.
 
 The dark variant uses a charcoal background, `#181c1b`. Typst Render passes
 that value through `sys.inputs["typst-render-background"]` to select the dark

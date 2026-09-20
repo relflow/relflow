@@ -5,6 +5,7 @@ format:
   html:
     css: assets/stylesheets/proofs.css
     include-after-body: assets/proof-status.html
+    tbl-colwidths: false
 listing:
   id: proofs
   contents: "proofs/catalog.yaml"
@@ -20,7 +21,6 @@ listing:
   filter-ui: [id, title, categories, proof-status]
   sort-ui: [id, title, categories, proof-status]
   categories: false
-  page-size: 50
 ---
 
 Can a model find a matching identity, recover a hidden subtotal, or preserve
@@ -33,7 +33,7 @@ Each scenario opens with a short **Insights** summary: what the proof shows,
 why it matters, and where the conclusion stops. A model tree, contrasting
 records, and expandable code sections explain the experiment together. Each
 page comes from the same Python file you can download and run. The collection
-covers 50 scenarios in 23 families, including retention, adaptation, reset,
+includes retention, adaptation, reset,
 deactivation, and deletion after schema mutations.
 
 ## Read The Status

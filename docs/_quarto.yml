@@ -22,7 +22,7 @@ website:
     logo-alt: relflow
   sidebar:
     style: floating
-    search: true
+    search: false
     collapse-level: 99
     contents:
       - href: index.qmd
@@ -110,6 +110,7 @@ website:
           - href: case-studies/customer-risk.qmd
             text: Customer Risk Example
   page-footer:
+    border: true
     left: Grantham Taylor
     right:
       - text: GitHub
@@ -126,6 +127,7 @@ website:
 format:
   html:
     css: assets/stylesheets/branding.css
+    include-in-header: assets/color-scheme.html
     include-after-body: assets/sidebar.html
     theme:
       light:

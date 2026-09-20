@@ -33,6 +33,7 @@ private/
 
 **/site_libs/
 docs/**/*.html
+!docs/assets/color-scheme.html
 !docs/assets/sidebar.html
 !docs/assets/proof-status.html
 docs/assets/diagrams/

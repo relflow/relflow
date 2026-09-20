@@ -2,6 +2,22 @@
   {
     const listing = document.querySelector("#listing-proofs");
 
+    // Quarto initializes the listing first; keep every matching proof visible.
+    document.addEventListener("DOMContentLoaded", () => {
+      listing.querySelector(".listing-pagination")?.remove();
+      window["quarto-listings"]["listing-proofs"].show(1, Infinity);
+    });
+
+    // Contain wide rows without scrolling the filter and sort controls.
+    const table = listing.querySelector("table");
+    const viewport = document.createElement("div");
+    viewport.className = "table-responsive";
+    viewport.tabIndex = 0;
+    viewport.setAttribute("role", "region");
+    viewport.setAttribute("aria-label", "Proofs table");
+    table.before(viewport);
+    viewport.append(table);
+
     const sort = listing.querySelector("#listing-proofs-sort");
     for (const option of sort.querySelectorAll('option[value=""], option[value="index"]')) {
       option.remove();
