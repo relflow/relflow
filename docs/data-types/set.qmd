@@ -27,7 +27,7 @@ members are ignored. An empty list is valued; a null list has state `null`.
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `size` | `10000` | Positive vocabulary capacity; `capacity` is also accepted. |
-| `p_unavailable` | `0.01` | Training probability of dropping each known positive label, independently in input and target content. |
+| `p_unavailable` | `0.01` | Training probability of hiding each known positive input member. Reconstruction answers remain intact. |
 | `threshold` | `None` | Prediction filter in `[0, 1]`; retain labels whose probability meets it. `None` returns every populated label. |
 
 See [shared leaf options](../core-concepts/data-types.qmd#shared-leaf-options)
@@ -49,15 +49,44 @@ This tuple snapshot lists populated labels in index order. It also accepts a
 preprocessor's `encoding_context`; consult established vocabularies for
 inference preprocessing, not to decide which training labels may be learned.
 
-Content is a capacity-wide multi-hot vector. Unknown members have no positive
-bit. A valued empty set, an all-unknown set, and a set whose members were all
-dropped therefore share zero content. Their `valued` state distinguishes them
-from nulls and padding. The encoder averages active label embeddings and adds
-the state embedding.
+Content contains capacity-wide membership bits and a count of distinct
+unavailable members. Unknown identities have no positive bit; duplicates and
+member order do not affect either representation. The encoder averages known
+member embeddings and adds a learned contribution when **any** member is
+unavailable, plus the value-state embedding. That contribution starts at zero;
+real or simulated OOV training teaches it. It distinguishes unavailable
+membership from genuinely empty input without inventing unknown identities.
 
-Reconstruction combines state loss with binary cross entropy for valued target
-sets. Content accuracy uses a fixed `0.5` cutoff. Unknown target labels cannot
-supply positive-label supervision.
+Reconstruction combines unweighted state classification with binary cross
+entropy over **populated** labels in valued target sets. Unallocated slots are
+not negative examples of future labels. Complete set annotations are assumed:
+known positives and known negatives remain supervised even in a partial-OOV
+or all-OOV set. Unknown members cannot supply identity-specific positives.
+An empty set supplies known negatives; null is a separate state.
+
+Epoch metrics use summed counts, including under DDP, and a fixed `0.5` cutoff:
+
+| Metric | Meaning |
+| --- | --- |
+| `targets.known`, `targets.unavailable` | Counts of distinct positive memberships per selected valued set, summed across observations. |
+| `coverage.content` | Known positive memberships / all positive memberships. |
+| `sets.valued`, `sets.complete`, `coverage.set` | Selected valued sets, sets with no unknown members, and their complete fraction. Empty sets are complete. |
+| `loss.content`, `accuracy.content` | BCE and bit accuracy over populated membership slots only. |
+| `accuracy.set` | Exact-set accuracy; any unknown target member makes the complete answer unrecoverable. |
+| `precision.content`, `recall.content`, `f1.content` | Micro membership scores on known labels. |
+| `recall.all`, `f1.all` | Micro scores also counting unknown target members as missed positives. |
+
+An empty denominator yields `NaN`, not perfect reconstruction. Bit accuracy
+alone can still be misleading for sparse sets; examine F1, exact-set accuracy,
+and coverage together. Output `threshold` does not change these metrics.
+
+[P063](../proofs/vocabulary/set-reconstruction-coverage.py) tests probability
+preservation and coverage; [P064](../proofs/vocabulary/set-unavailable-fallback.py)
+tests learning the empty/unknown distinction.
+
+The unavailable-input contribution adds a parameter to Set artifacts. Older
+checkpoints without that parameter cannot be loaded unchanged by the strict
+checkpoint loader; there is no automatic artifact migration in this change.
 
 ## Prediction
 

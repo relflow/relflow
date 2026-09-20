@@ -384,18 +384,11 @@ def test_fit_start_rejects_a_model_without_reconstruction_objectives() -> None:
 
 def test_configure_callbacks_skips_callbacks_already_attached_to_trainer() -> None:
     model = Model(schema=configuration(), batch_size=2)
+    attached = model.configure_callbacks()
     model._trainer = type(  # noqa: SLF001
         "TrainerStub",
         (),
-        {
-            "callbacks": [
-                RuntimePlacementCallback(),
-                MutationLockCallback(),
-                ThroughputLogger(),
-                VocabularySyncCallback(),
-                CounterUpdateCallback(),
-            ]
-        },
+        {"callbacks": attached},
     )()
 
     assert model.configure_callbacks() == []

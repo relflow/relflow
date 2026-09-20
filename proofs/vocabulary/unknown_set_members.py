@@ -1,9 +1,9 @@
 # %% [markdown]
 # ---
-# title: Unknown set members disappear from membership
+# title: Unknown Set identities and an untrained fallback
 # categories: [Vocabulary and OOV]
 # proof-id: P058
-# description: Demonstrate partial-OOV invariance and the collision between all-unknown and empty valued sets, including reconstruction targets.
+# description: Known membership bits omit unknown identities; an untrained neutral fallback still coincides with empty input.
 # execute:
 #   enabled: false
 #   eval: false
@@ -14,12 +14,15 @@
 #
 # ## Insights
 #
-# Set drops unknown members from its multi-hot representation. Known members
-# remain usable in a partially unknown set, but an all-unknown set and an empty
-# set become indistinguishable. Both differ from null. Unknown target members
-# also provide no positive supervision, and prediction cannot invent new label
-# names. These are representational limits, not automatic graceful handling of
-# applications where unknown membership itself carries information.
+# Unknown members have no identity-specific membership bit. Set now retains
+# their count and has a learned unavailable-input contribution. This experiment
+# disables augmentation and never trains on unknown members, so that initially
+# neutral contribution remains untrained: unknown and empty inputs still have
+# identical predictions here. P064 tests learning that distinction.
+#
+# Unknown target identities still cannot supply positive-label supervision or
+# appear in predictions. Historical runs predate the unavailable contribution;
+# the current checks compare membership bits, not the complete content tree.
 #
 # ## Setup
 
@@ -65,7 +68,7 @@ PATTERNS = ((), ("red",), ("blue",), ("red", "blue"), None)
 # target: 0.0
 # ```
 #
-# The valued content is identical to an empty list. The target here explicitly
+# The known-membership bits are identical to an empty list. The target here explicitly
 # scores only known membership; other applications may need a different policy.
 #
 # ```yaml
@@ -79,7 +82,7 @@ PATTERNS = ((), ("red",), ("blue",), ("red", "blue"), None)
 # ```{typst}
 # //| label: fig-proof-unknown-set-members
 # //| fig-cap: "Known membership supports regression and reconstruction; unknown membership has no bit."
-# //| fig-alt: "Record has Set tags, hidden Set labels, and hidden Number target. Empty and all-unknown tags share valued zero content, unlike null tags."
+# //| fig-alt: "Record has Set tags, hidden Set labels, and hidden Number target. With no unavailable-input training, empty and unknown sets produce the same embedding."
 # #tree(node("record", kind: "root", children: (
 #   node("tags", type: "Set"),
 #   node("labels", kind: "target", type: "Set"),
@@ -176,7 +179,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     boundary, boundary_labels = prediction(model, probes)
     fields = model.encode(pa.Table.from_pylist(probes), strata="test")
     input_field = fields["record/tags"]
-    target_bits = fields["record/labels"].targets[rf.TensorKey.content]
+    target_bits = fields["record/labels"].targets[rf.TensorKey.content]["membership"]
     metrics = {
         "steps": trainer.global_step,
         "vocabularies": vocabularies,
@@ -204,12 +207,12 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         "Shuffled tags remove predictive accuracy": metrics["shuffled_nrmse"] > 0.85,
         "Unknown and duplicate members leave regression unchanged": metrics["unknown_and_duplicate_drift"] < 1e-5,
         "Unknown and duplicate members leave reconstructed sets unchanged": labels == repeated_labels,
-        "All-unknown and empty inputs have identical valued content": bool(
+        "All-unknown and empty inputs have identical known membership bits": bool(
             input_field.state[:2].eq(rf.Tokens.valued).all()
         )
-        and bool((input_field.content[0] == input_field.content[1]).all()),
+        and bool((input_field.content["membership"][0] == input_field.content["membership"][1]).all()),
         "All-unknown and empty targets have identical membership bits": bool((target_bits[0] == target_bits[1]).all()),
-        "All-unknown and empty sets have identical predictions": abs(boundary[0] - boundary[1]) < 1e-5
+        "Untrained fallback leaves all-unknown and empty predictions identical": abs(boundary[0] - boundary[1]) < 1e-5
         and boundary_labels[0] == boundary_labels[1],
         "Null remains distinct from valued empty content": abs(boundary[2] - boundary[0]) > 2.0,
         "Unknown target labels cannot be recovered": not metrics["all_unknown_target_exact_match"]
@@ -225,10 +228,10 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 #
 # {{< proof P058 evidence >}}
 #
-# This intentionally demonstrates a loss of information about unknown members.
-# It does not validate an application that treats unseen labels as meaningful
-# new outcomes. Coverage auditing and upstream unknown-member indicators would
-# be separate application choices. Gates remain provisional.
+# This demonstrates the absence of identity information about unknown members,
+# not an unavoidable empty/unknown collision. P063 checks coverage and P064
+# trains the new fallback. None can recover novel output names. Gates remain
+# provisional; earlier evidence records the previous representation.
 #
 # ## Reproduce
 #

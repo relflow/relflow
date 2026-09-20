@@ -104,14 +104,16 @@ Its content representation depends on the datatype:
 
 | Type | Unknown content |
 | --- | --- |
-| Category | Zero categorical input content plus its value-state embedding. Unavailable reconstruction targets use a uniform content objective and are excluded from content accuracy. |
-| Set | Unknown members supply no positive bits. An all-unknown set shares zero content with a valued empty set; unknown target members cannot supply positive-label supervision. |
-| Cluster | A shared unavailable assignment. Unknown targets are excluded from content accuracy. |
+| Category | Zero categorical input content plus its value-state embedding. Unavailable reconstruction targets supply no categorical gradient; coverage and all-target accuracy report their exclusion from conditional quality metrics. |
+| Set | Known membership bits plus distinct unavailable-member counts. A learned unavailable-input contribution can distinguish unknown from empty sets; it cannot recover unknown identities. |
+| Cluster | A shared unavailable assignment. Unknown targets do not drive label reconstruction or balancing; coverage reports their exclusion. |
 
 These types default to `p_unavailable=0.01`, which simulates unavailable content
-during training. Input and target perturbations are independent. This changes
-content, not membership in the learned vocabulary or pristine exposure counts.
-See the datatype pages for their respective loss definitions.
+during training. All three perturb inputs only, preserving the original
+reconstruction answers. This changes input content, not membership in the
+learned vocabulary or pristine exposure counts. See the datatype pages for
+their respective loss and coverage definitions: a Set counts memberships,
+where Category and Cluster count scalar targets.
 
 Predictions name only populated vocabulary entries. Category and Cluster label
 probabilities are normalized over those entries; Set emits their independent
@@ -119,6 +121,29 @@ membership probabilities. None can name an unseen label. A high probability
 does not establish that a request belongs to the known vocabulary. Evaluate
 unknown-label coverage alongside content accuracy, which excludes unknown
 targets for Category and Cluster.
+
+### Cold input identities
+
+Simulated unavailable inputs teach prediction from the context that
+remains. They cannot teach the identity-specific effect of an unseen arbitrary
+ID. A model can legitimately remain confident when other fields are decisive;
+there is no universal OOV confidence cap. Use entity-disjoint or time-respecting
+validation to assess the actual cold-start population, not just a stratified
+row split. Evaluate proper scores such as NLL or Brier score separately for
+known and unseen input groups.
+
+`p_unavailable` is an explicit input-augmentation policy, not an estimate of
+how often a category will be missing at deployment. Increasing it can improve
+the fallback while weakening use of known identity. Select it on a separate
+development split; do not learn a vocabulary from validation to conceal OOVs.
+[P061](../proofs/vocabulary/cold-start-confidence.py) measures both regimes and
+includes decisive-context controls. Its synthetic missing-ID population does
+not establish robustness to arbitrary new-population effects.
+
+Vocabulary admission activates a previously unused embedding. It does not
+train that embedding and can change predictions immediately. Keep serving
+vocabularies frozen, and evaluate a separately continued-training artifact
+before promotion. Counts measure exposures, not representation competence.
 
 At the start of each Lightning validation, test, or prediction loop, RelFlow
 logs one warning per field if any allocated vocabulary entry has fewer than
@@ -130,6 +155,14 @@ not add observations; the warning does not change predictions or losses.
 This is a loop-start diagnostic, not a check on every batch or direct
 `model.predict(...)` call. Ten exposures are a warning threshold, not a guarantee
 that a representation has been learned.
+
+[P066](../proofs/vocabulary/rolling-input-admission.py) isolates this failure
+across successive training cohorts: input admission can change reconstruction
+NLL even with fixed masks, fixed output labels, and complete target coverage.
+Zero-content and gated-content candidates remove that jump but regress other
+learning proofs; they have not replaced the current implementation.
+For pretraining targets, see
+[coverage-aware evaluation](../guides/pretraining.qmd#evaluate-vocabulary-coverage).
 
 ## Workers And Distributed Training
 

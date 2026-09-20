@@ -43,7 +43,7 @@ admission timing with workers/DDP, and changes during fine-tuning.
 | --- | --- | --- |
 | `capacity` | `1024` | Positive maximum number of learned labels. |
 | `bounds` | required | Integer `K` fixes the cluster count; `(lower, upper)` enables adaptive committed clusters with `0 < lower <= upper`. Stored as `n_clusters`. |
-| `p_unavailable` | `0.01` | Training probability of replacing known labels with unavailable content, independently in input and targets. |
+| `p_unavailable` | `0.01` | Training probability of replacing known input labels with unavailable content. Reconstruction answers remain intact. |
 | `ema_decay` | `0.99` | Smoothing for usage and range-adherence statistics, in `[0, 1]`. |
 | `revive_temperature` | `10.0` | Nonnegative revival schedule control; zero disables inactive-cluster revival. |
 
@@ -58,9 +58,33 @@ selection. A plain visible Cluster can influence other targets, but creates no
 cluster reconstruction loss of its own. See
 [shared leaf options](../core-concepts/data-types.qmd#shared-leaf-options).
 
-Reconstruction combines state classification with label recovery through
-clusters. Content accuracy excludes unknown labels. The decoder uses ancestor
-memory but opts out of direct sibling query conditioning.
+Reconstruction combines unweighted state classification with unweighted label
+cross entropy through clusters, normalized over populated labels only.
+Unallocated label rows and the unavailable input assignment are not output
+candidates. The decoder uses ancestor memory but opts out of direct sibling
+query conditioning.
+
+Unknown target identities contribute neither label reconstruction nor
+balancing updates. Usage EMA, committed-cluster selection, and adherence use
+known reconstruction targets only. An epoch with no known targets also skips
+revival and merging. Known-input augmentation does not remove that target's
+supervision. The auxiliary `loss.cluster` still encourages balanced use of
+latent clusters; this is not a guarantee of calibrated label probabilities.
+
+Epoch metrics separate vocabulary coverage from reconstruction quality:
+
+| Metric | Meaning |
+| --- | --- |
+| `targets.known`, `targets.unavailable` | Known and unknown selected valued target counts. |
+| `coverage.content` | Known / all selected valued targets. |
+| `accuracy.content`, `nll.content`, `loss.content` | Known-label accuracy and unweighted cross entropy over populated labels. |
+| `accuracy.all` | Correct known predictions / all selected valued targets, counting unknown answers as incorrect. |
+
+Counts and sums aggregate across batches and DDP ranks. With no known targets,
+conditional reconstruction metrics are `NaN`; state supervision remains valid.
+`coverage.content` and the target counts replace the old training-only
+`cluster.sentinel_share` diagnostic. See
+[pretraining evaluation](../guides/pretraining.qmd#evaluate-vocabulary-coverage).
 
 For an application-supplied trained `model`:
 
@@ -88,6 +112,10 @@ override is rejected.
 Label probabilities are normalized over populated labels, excluding unused
 capacity and the unavailable row. Labels use `large_string`; an empty
 vocabulary yields a null label and zero probability.
+
+Cluster confidence and vocabulary-label confidence answer different questions.
+Neither estimates the probability that an input belongs to the known
+vocabulary. Evaluate cold-input populations separately.
 
 See the [prediction envelope](../guides/prediction-output.qmd) for shared
 state probabilities, `inferred`, and repeated shapes.

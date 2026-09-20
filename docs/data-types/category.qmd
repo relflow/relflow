@@ -29,7 +29,7 @@ not a vocabulary member.
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `size` | `1024` | Positive vocabulary capacity; `capacity` is also accepted. Embedding and decoder tables grow with it. |
-| `p_unavailable` | `0.01` | Training probability of replacing a known valued label with unavailable content. Applied independently to input and target content. |
+| `p_unavailable` | `0.01` | Training probability of replacing known valued **input** content with unavailable content. Reconstruction targets are unchanged. |
 | `topk` | `[]` | Sorted, unique accuracy cutoffs satisfying `1 < k < size`; also controls prediction candidates. |
 
 Capacity counts real labels only. Do not reserve an extra class for null or
@@ -49,10 +49,34 @@ An unknown label stays `valued` but contributes zero categorical content to
 the encoder. Its internal sentinel is not an extra embedding row or decoder
 class. Known labels contribute learned content plus their state embedding.
 
-Reconstruction uses state cross entropy and frequency-weighted categorical
-cross entropy. Unavailable valued targets use a uniform target over all
-capacity logits and are excluded from content accuracy. Training scores the
-full capacity, including unpopulated slots.
+Reconstruction uses unweighted state and categorical cross entropy. Class
+frequencies remain observable through `counts`, but do not silently change
+the probability objective. Training scores the full capacity, including
+unpopulated slots. Unavailable valued targets have no categorical loss or
+gradient: an unknown answer does not imply a uniform distribution over known
+answers. State supervision is retained.
+
+For each reconstruction objective, epoch metrics separate coverage from quality:
+
+| Metric suffix | Meaning |
+| --- | --- |
+| `targets.known`, `targets.unavailable` | Counts of selected valued targets inside and outside the vocabulary. |
+| `coverage.content` | Known targets divided by all selected valued targets. |
+| `accuracy.content`, `accuracy.topK` | Correct predictions among known targets, using populated candidates. |
+| `accuracy.all` | Correct predictions divided by all selected valued targets; unavailable answers count as wrong. |
+| `nll.content` | Unweighted negative log likelihood over populated candidates, matching written probabilities. |
+| `loss.content` | Unweighted categorical training objective over the full capacity, averaged over known targets. |
+
+Names include the field address and stage, for example
+`record.merchant_category/validate.coverage.content`. Counts and sums aggregate
+across batches and ranks before division. With no known targets, conditional
+accuracy, NLL, and content loss are `NaN`, not zero; coverage and all-target
+accuracy are zero when selected valued targets exist. With no selected valued
+targets, coverage and all-target accuracy are also undefined.
+
+This intentionally replaces the earlier frequency-weighted objective and
+uniform-target OOV penalty. Existing checkpoints retain their learned weights;
+loading one does not recalibrate it. Continued fitting uses the new objective.
 
 For an application-supplied trained `model`:
 
@@ -77,5 +101,9 @@ when no cutoffs are configured. Labels are written as `large_string`.
 Probabilities are renormalized over **populated labels**, excluding unused
 capacity and the unavailable sentinel. An empty vocabulary yields a null best
 label and probability zero. Confidence is not an unknown-label detector.
+With only one populated label, its conditional probability is one even before
+learning; vocabulary membership is not evidence of predictive competence.
+Unweighted cross entropy removes a systematic class-weighting distortion, but
+does not guarantee calibration under finite data or distribution shift.
 See the [prediction envelope](../guides/prediction-output.qmd) for shared state
 probabilities, `inferred`, and repeated shapes.

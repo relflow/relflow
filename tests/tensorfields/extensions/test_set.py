@@ -113,11 +113,11 @@ def test_set_tensorfield_encodes_multi_hot_content():
             dtype=torch.int64,
         ),
     )
-    assert field.content.shape == (2, 1, 2, structure.requests[ADDRESS].size)
-    assert field.content[0, 0, 0, 0] == 1.0
-    assert field.content[0, 0, 0, 1] == 1.0
-    assert field.content[0, 0, 1].sum() == 0.0
-    assert field.content[1, 0, 0, 1] == 1.0
+    assert field.content["membership"].shape == (2, 1, 2, structure.requests[ADDRESS].size)
+    assert field.content["membership"][0, 0, 0, 0] == 1.0
+    assert field.content["membership"][0, 0, 0, 1] == 1.0
+    assert field.content["membership"][0, 0, 1].sum() == 0.0
+    assert field.content["membership"][1, 0, 0, 1] == 1.0
 
 
 def test_set_nested_mask_string_is_an_ordinary_label():
@@ -133,7 +133,7 @@ def test_set_nested_mask_string_is_an_ordinary_label():
 
     assert state.vocab == ["<MASK>", "ALPHA"]
     assert field.state.tolist() == [[[Tokens.valued.value, Tokens.padded.value]]]
-    assert field.content[0, 0, 0, :2].tolist() == [1.0, 1.0]
+    assert field.content["membership"][0, 0, 0, :2].tolist() == [1.0, 1.0]
 
 
 def test_set_tensorfield_reserves_real_vocabulary_in_batch():
@@ -169,7 +169,7 @@ def test_set_tensorfield_zeros_oov_content_without_changing_state():
     )
 
     assert field.state[0, 0, 0] == Tokens.valued.value
-    assert field.content[0, 0, 0].sum() == 0.0
+    assert field.content["membership"][0, 0, 0].sum() == 0.0
 
 
 def test_set_tensorfield_simulated_unavailable_zeros_content():
@@ -183,8 +183,8 @@ def test_set_tensorfield_simulated_unavailable_zeros_content():
         state=state,
     )
 
-    assert field.content.shape[-1] == structure.requests[ADDRESS].size
-    assert field.content[0, 0, 0].sum() == 0.0
+    assert field.content["membership"].shape[-1] == structure.requests[ADDRESS].size
+    assert field.content["membership"][0, 0, 0].sum() == 0.0
 
 
 class _DummyVocab:
@@ -314,7 +314,7 @@ def test_set_loss_does_not_mutate_counter():
         payload=TensorDict(
             {
                 TensorKey.state: torch.zeros(*field.state.shape, len(Tokens)),
-                TensorKey.content: torch.zeros(*field.content.shape),
+                TensorKey.content: torch.zeros(*field.content["membership"].shape),
             },
             batch_size=field.batch_size,
         ),

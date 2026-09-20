@@ -419,7 +419,7 @@ def test_category_loss_does_not_mutate_counters():
     assert torch.equal(embedder.counters[TensorKey.content.name].counts, expected_content_counts)
 
 
-def test_category_loss_uses_uniform_target_for_unavailable_content():
+def test_category_loss_retains_state_supervision_for_unavailable_content():
     structure = Schema.model_validate(_structure_payload(p_unavailable=0.0, mask=True))
     state = _state(size=structure.requests[ADDRESS].size)
 
