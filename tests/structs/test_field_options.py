@@ -36,7 +36,7 @@ def test_declared_options_and_descriptions_survive_checkpoint_round_trip(tmp_pat
     model = rf.Model(d_model=16, n_layers=1, n_heads=4, amount=rf.Number(**options))
     model.update(rf.where("name") == "amount", description="  Amount in USD  ")
     restored = rf.Model.load(model.save(tmp_path / "model.ckpt"))
-    amount = restored.schema.requests["record/amount"]
+    amount = restored.schema.requests["/amount"]
     assert amount.description == "Amount in USD"
     assert amount.n_bands == 4
     assert amount.model_extra is None
@@ -100,16 +100,16 @@ def test_mutations_accept_declared_options_with_serialization_aliases(schema_onl
     model = rf.Model(d_model=16, n_layers=1, n_heads=4, value=field)
     target = model.schema if schema_only else model
     selector = rf.where("name") == "value"
-    original = getattr(model.schema.requests["record/value"], canonical)
+    original = getattr(model.schema.requests["/value"], canonical)
     with target.override(selector, **{attribute: value}):
-        assert getattr(model.schema.requests["record/value"], canonical) == value
-    assert getattr(model.schema.requests["record/value"], canonical) == original
+        assert getattr(model.schema.requests["/value"], canonical) == value
+    assert getattr(model.schema.requests["/value"], canonical) == original
     target.update(selector, **{attribute: value})
-    assert getattr(model.schema.requests["record/value"], canonical) == value
+    assert getattr(model.schema.requests["/value"], canonical) == value
 
 
 def test_partial_updates_still_accept_options_supported_by_some_selected_nodes():
     model = rf.Model(d_model=16, n_layers=1, n_heads=4, amount=rf.Number, label=rf.Category())
     model.update(n_bands=4, strict=False)
-    assert model.schema.requests["record/amount"].n_bands == 4
-    assert not hasattr(model.schema.requests["record/label"], "n_bands")
+    assert model.schema.requests["/amount"].n_bands == 4
+    assert not hasattr(model.schema.requests["/label"], "n_bands")

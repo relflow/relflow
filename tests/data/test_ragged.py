@@ -44,7 +44,7 @@ def test_ragged_field_distinguishes_value_null_and_missing():
         schema=pa.schema([pa.field("value", pa.float64())]),
     )
 
-    field = coalesce(source, schema=model.schema, strata=Strata.predict)["record/value"].pristine
+    field = coalesce(source, schema=model.schema, strata=Strata.predict)["/value"].pristine
 
     assert field.shape == (3, 1)
     assert field.batch_size == 3
@@ -77,8 +77,8 @@ def test_sibling_fields_share_branch_geometry_without_sharing_leaf_state():
         strata=Strata.train,
     )
 
-    left = fields["record/items/left"].pristine
-    right = fields["record/items/right"].pristine
+    left = fields["/items/left"].pristine
+    right = fields["/items/right"].pristine
     assert left.dense.tolist() == [[[Tokens.valued.value, Tokens.padded.value, Tokens.null.value]]]
     assert right.dense.tolist() == [[[Tokens.null.value, Tokens.padded.value, Tokens.valued.value]]]
     assert left.values.to_pylist() == [1.0]
@@ -132,7 +132,7 @@ def test_union_leaf_uses_selected_child_validity(values):
     model = build(value=rf.Number())
     source = convert(pa.table({"value": values}))
 
-    field = coalesce(source, schema=model.schema, strata=Strata.train)["record/value"].pristine
+    field = coalesce(source, schema=model.schema, strata=Strata.train)["/value"].pristine
 
     assert field.dense.tolist() == [
         [Tokens.valued.value],
@@ -142,7 +142,7 @@ def test_union_leaf_uses_selected_child_validity(values):
     assert field.values.to_pylist() == [1, 2]
     assert field.placement.to_pylist() == [0, 1]
 
-    encoded = model.encode(source, strata=Strata.predict)["record/value"]
+    encoded = model.encode(source, strata=Strata.predict)["/value"]
     assert encoded.content.tolist() == [[1.0], [2.0], [0.0]]
     assert encoded.state.tolist() == field.dense.tolist()
 
@@ -160,10 +160,10 @@ def test_coalesce_rejects_modeled_field_missing_from_arrow_schema():
 
 def test_mask_spelling_is_ordinary_string_content():
     model = build(label=rf.Category(p_unavailable=0.0))
-    field = model.encode(table([{"label": "<MASK>"}]), strata=Strata.train)["record/label"]
+    field = model.encode(table([{"label": "<MASK>"}]), strata=Strata.train)["/label"]
 
     assert field.state.tolist() == [[Tokens.valued.value]]
-    assert rf.Category.vocabulary(model, "record/label") == ("<MASK>",)
+    assert rf.Category.vocabulary(model, "/label") == ("<MASK>",)
 
 
 def test_structured_leaf_mask_spelling_is_ordinary_codec_input():
@@ -172,7 +172,7 @@ def test_structured_leaf_mask_spelling_is_ordinary_codec_input():
         arrow_batch([{"labels": ["<MASK>", "A"]}]),
         schema=model.schema,
         strata=Strata.predict,
-    )["record/labels"].pristine
+    )["/labels"].pristine
 
     assert field.dense.tolist() == [[Tokens.valued.value]]
     assert field.values.to_pylist() == [["<MASK>", "A"]]
@@ -184,7 +184,7 @@ def test_tail_overflow_finishes_before_leaf_codec_observes_values():
         arrow_batch([{"items": [{"value": [0, 1, 2]}, {"value": [2, 3]}, {"value": [4, 5]}]}]),
         schema=model.schema,
         strata=Strata.train,
-    )["record/items/value"].pristine
+    )["/items/value"].pristine
 
     assert field.dense.tolist() == [[[Tokens.valued.value, Tokens.valued.value]]]
     assert field.values.to_pylist() == [[2, 3], [4, 5]]
@@ -212,14 +212,14 @@ def test_branch_overflow_precedes_queries_on_discarded_children():
         convert(source),
         schema=model.schema,
         strata=Strata.train,
-    )["record/items/value"].pristine
+    )["/items/value"].pristine
 
     assert field.values.to_pylist() == [1.0]
 
 
 def test_error_overflow_names_address_and_axis():
     model = build(items=rf.Branch(value=rf.Number(), length=1, overflow="error"))
-    with pytest.raises(ValueError, match="branch overflow at dimension 2 for record/items/value"):
+    with pytest.raises(ValueError, match="branch overflow at dimension 2 for /items/value"):
         coalesce(
             arrow_batch([{"items": [{"value": 1}, {"value": 2}]}]),
             schema=model.schema,
@@ -239,7 +239,7 @@ def test_all_empty_deep_branches_materialize_declared_geometry():
         ),
         schema=model.schema,
         strata=Strata.train,
-    )["record/outer/inner/deep/value"].pristine
+    )["/outer/inner/deep/value"].pristine
 
     assert field.shape == (2, 1, 2, 2, 2)
     assert np.all(field.dense == Tokens.padded.value)
@@ -254,7 +254,7 @@ def test_typed_empty_nested_batch_preserves_declared_geometry():
         arrow_batch([], schema=pa.schema([pa.field("items", pa.list_(item))])),
         schema=model.schema,
         strata=Strata.train,
-    )["record/items/value"].pristine
+    )["/items/value"].pristine
 
     assert field.shape == (0, 1, 3)
     assert field.dense.shape == field.shape
@@ -268,7 +268,7 @@ def test_singleton_branch_accepts_one_item_list():
         arrow_batch([{"details": [{"value": 4}]}]),
         schema=model.schema,
         strata=Strata.train,
-    )["record/details/value"].pristine
+    )["/details/value"].pristine
 
     assert field.dense.tolist() == [[[Tokens.valued.value]]]
     assert field.values.to_pylist() == [4]
@@ -286,7 +286,7 @@ def test_singleton_branch_lists_nest_inside_repeated_branch():
             }
         ]
     )
-    field = coalesce(source, schema=model.schema, strata=Strata.train)["record/items/details/value"].pristine
+    field = coalesce(source, schema=model.schema, strata=Strata.train)["/items/details/value"].pristine
 
     assert field.dense.tolist() == [
         [
@@ -316,7 +316,7 @@ def test_coalesce_ignores_unmodeled_arrow_columns():
     model = build(identifier=rf.Hash())
     source = arrow_batch([{"identifier": "A", "metadata": {"tags": [1, 2]}}])
 
-    field = coalesce(source, schema=model.schema, strata=Strata.train)["record/identifier"].pristine
+    field = coalesce(source, schema=model.schema, strata=Strata.train)["/identifier"].pristine
 
     assert source["metadata"].to_pylist() == [{"tags": [1, 2]}]
     assert field.values.to_pylist() == ["A"]
@@ -326,7 +326,7 @@ def test_coalesce_does_not_ingest_inactive_field_values():
     model = build(value=rf.Number(), unused=rf.Hash(active=False))
     source = arrow_batch([{"value": 1.0, "unused": {"opaque": True}}])
 
-    field = coalesce(source, schema=model.schema, strata=Strata.train)["record/value"].pristine
+    field = coalesce(source, schema=model.schema, strata=Strata.train)["/value"].pristine
 
     assert source["unused"].to_pylist() == [{"opaque": True}]
     assert field.values.to_pylist() == [1.0]
@@ -355,7 +355,7 @@ def test_query_only_branch_ignores_same_named_direct_source_value():
         strata=Strata.predict,
     )
 
-    field = encoded[rf.Address("record/synthetic/value")]
+    field = encoded[rf.Address("/synthetic/value")]
     assert field.state.tolist() == [[[Tokens.valued.value, Tokens.valued.value]]]
     assert field.content.tolist() == [[[1.0, 2.0]]]
 
@@ -364,7 +364,7 @@ def test_inactive_only_branch_does_not_ingest_same_named_source_value():
     model = build(value=rf.Number(), synthetic=rf.Branch(unused=rf.Hash(active=False), length=2))
     source = arrow_batch([{"value": 1.0, "synthetic": {"opaque": True}}])
 
-    field = coalesce(source, schema=model.schema, strata=Strata.train)["record/value"].pristine
+    field = coalesce(source, schema=model.schema, strata=Strata.train)["/value"].pristine
 
     assert source["synthetic"].to_pylist() == [{"opaque": True}]
     assert field.values.to_pylist() == [1.0]
@@ -377,7 +377,7 @@ def test_datetime_leaf_remains_arrow_backed():
         arrow_batch([{"created": value}]),
         schema=model.schema,
         strata=Strata.train,
-    )["record/created"].pristine
+    )["/created"].pristine
 
     assert field.values.to_pylist() == [value]
 
@@ -387,7 +387,7 @@ def test_dateparts_tensorfield_encodes_arrow_timestamp_end_to_end():
     encoded = model.encode(
         table([{"created": datetime.datetime(2025, 2, 3, 4, 5, 6)}]),
         strata=Strata.train,
-    )[rf.Address("record/created")]
+    )[rf.Address("/created")]
 
     assert encoded.state.tolist() == [[Tokens.valued.value]]
     assert encoded.content["day_of_year"].shape == (1, 1, 2)
@@ -408,10 +408,10 @@ def test_set_accepts_arrow_lists_and_scalar_labels(value, expected_vocabulary):
     field = model.encode(
         table([{"labels": value}]),
         strata=Strata.train,
-    )[rf.Address("record/labels")]
+    )[rf.Address("/labels")]
 
     assert field.state.tolist() == [[Tokens.valued.value]]
-    assert rf.Set.vocabulary(model, "record/labels") == expected_vocabulary
+    assert rf.Set.vocabulary(model, "/labels") == expected_vocabulary
     assert field.content["membership"].sum(dim=-1).tolist() == [[float(len(expected_vocabulary))]]
 
 
@@ -422,9 +422,9 @@ def test_set_treats_scalar_bytes_as_one_label(query):
     field = model.encode(
         table([{key: b"AB"}, {key: b"AB"}]),
         strata=Strata.train,
-    )[rf.Address("record/identity")]
+    )[rf.Address("/identity")]
 
-    assert rf.Set.vocabulary(model, "record/identity") == (b"AB",)
+    assert rf.Set.vocabulary(model, "/identity") == (b"AB",)
     assert field.content["membership"].sum(dim=-1).tolist() == [[1.0], [1.0]]
     assert field.content["membership"][0].tolist() == field.content["membership"][1].tolist()
 
@@ -435,7 +435,7 @@ def test_place_validates_encoded_count_and_value_shape():
         arrow_batch([{"value": 1}, {"value": 2}]),
         schema=model.schema,
         strata=Strata.train,
-    )["record/value"].pristine
+    )["/value"].pristine
 
     with pytest.raises(ValueError, match=r"must have shape \(2,\), got \(1,\)"):
         field.place(np.asarray([1]), fill=0)

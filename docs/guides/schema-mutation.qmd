@@ -19,7 +19,7 @@ a broad change:
 ```python
 import relflow as rf
 
-prices = rf.where("address") == "order/line_items/price"
+prices = rf.where("address") == rf.Address("line_items", "price")
 selected = model.select(prices)
 model.update(prices, mask=0.10)
 ```
@@ -57,10 +57,10 @@ ablation example.
 | `reset(...)` | Keep the schema and reinitialize selected runtime modules. |
 
 ```python
-root = rf.where("address") == "order"
-model.extend(root, expedited=rf.Boolean, region=rf.Category())
-model.reset(rf.where("address") == "order/region")
-model.delete(rf.where("address") == "order/expedited")
+root = rf.where("address") == rf.Address()
+model.extend(root, expedited=rf.Boolean, region=rf.Category)
+model.reset(rf.where("address") == rf.Address("region"))
+model.delete(rf.where("address") == rf.Address("expedited"))
 ```
 
 An extension accepts keyword children or a `fields` mapping, following the same

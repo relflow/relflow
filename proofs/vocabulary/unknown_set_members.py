@@ -116,8 +116,8 @@ def build() -> rf.Model:
 
 def prediction(model: rf.Model, rows: list[dict]) -> tuple[np.ndarray, list[set[str]]]:
     output = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
-    values = np.asarray([row["record/target"]["content"] for row in output], dtype=np.float64)
-    labels = [{candidate["value"] for candidate in row["record/labels"]["content"]} for row in output]
+    values = np.asarray([row["/target"]["content"] for row in output], dtype=np.float64)
+    labels = [{candidate["value"] for candidate in row["/labels"]["content"]} for row in output]
     return values, labels
 
 
@@ -157,7 +157,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     )
     trainer.fit(model, datamodule=data)
     model.eval()
-    vocabularies = {name: rf.Set.vocabulary(model, f"record/{name}") for name in ("tags", "labels")}
+    vocabularies = {name: rf.Set.vocabulary(model, f"/{name}") for name in ("tags", "labels")}
     train = list(records(rows=4096, seed=seed + 1))
     test = list(records(rows=2048, seed=seed + 3))
     actual = np.asarray([row["target"] for row in test])
@@ -178,8 +178,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     ]
     boundary, boundary_labels = prediction(model, probes)
     fields = model.encode(pa.Table.from_pylist(probes), strata="test")
-    input_field = fields["record/tags"]
-    target_bits = fields["record/labels"].targets[rf.TensorKey.content]["membership"]
+    input_field = fields["/tags"]
+    target_bits = fields["/labels"].targets[rf.TensorKey.content]["membership"]
     metrics = {
         "steps": trainer.global_step,
         "vocabularies": vocabularies,
@@ -218,7 +218,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         "Unknown target labels cannot be recovered": not metrics["all_unknown_target_exact_match"]
         and all("never-seen" not in row for row in boundary_labels),
         "Evaluation does not grow either vocabulary": all(
-            rf.Set.vocabulary(model, f"record/{name}") == vocabulary for name, vocabulary in vocabularies.items()
+            rf.Set.vocabulary(model, f"/{name}") == vocabulary for name, vocabulary in vocabularies.items()
         ),
     }
 

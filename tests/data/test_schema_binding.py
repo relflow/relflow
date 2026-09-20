@@ -27,8 +27,8 @@ def test_schema_binding_preserves_sparse_coordinates() -> None:
         ),
     )
     encoded = model.encode(observation)
-    assert encoded[rf.Address("record", "events", "ip_country")].state.tolist() == [[[0, 1, 0]]]
-    assert encoded[rf.Address("record", "events", "amount")].state.tolist() == [[[1, 0, 1]]]
+    assert encoded[rf.Address("/", "events", "ip_country")].state.tolist() == [[[0, 1, 0]]]
+    assert encoded[rf.Address("/", "events", "amount")].state.tolist() == [[[1, 0, 1]]]
 
     source = [
         {
@@ -56,5 +56,5 @@ def test_schema_binding_preserves_sparse_coordinates() -> None:
         ),
     )
     filtered_encoded = filtered_model.encode(pa.Table.from_pylist(filtered))
-    assert filtered_encoded[rf.Address("record", "login_events", "device_id")].state.tolist() == [[[0, 0]]]
-    assert filtered_encoded[rf.Address("record", "login_events", "risk_score")].state.tolist() == [[[1, 0]]]
+    assert filtered_encoded[rf.Address("/", "login_events", "device_id")].state.tolist() == [[[0, 0]]]
+    assert filtered_encoded[rf.Address("/", "login_events", "risk_score")].state.tolist() == [[[1, 0]]]

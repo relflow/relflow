@@ -167,7 +167,6 @@ def fit(*, signal: bool, seed: int, steps: int | None, accelerator: str) -> floa
     """Fit one relationship and measure its held-out Boolean AUC."""
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
-        name="calibration",
         d_model=24,
         n_layers=1,
         n_heads=4,
@@ -198,7 +197,7 @@ def fit(*, signal: bool, seed: int, steps: int | None, accelerator: str) -> floa
     )
     trainer.fit(model=model, datamodule=data)
     metrics = trainer.test(model=model, datamodule=data, verbose=False)[0]
-    return float(metrics["calibration.target/test.auc.content"])
+    return float(metrics["/target/test.auc.content"])
 
 
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:

@@ -181,7 +181,6 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
-        name="order",
         d_model=48,
         n_layers=1,
         n_heads=4,
@@ -217,7 +216,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     test = list(records(rows=2048, seed=seed + 3))
     broken = list(records(rows=2048, seed=seed + 3, permute_targets=True))
     output = model.predict(inputs(test)).to_pylist()
-    coordinates = [row["predictions"]["order/items/subtotal"] for row in output]
+    coordinates = [row["predictions"]["/items/subtotal"] for row in output]
     lengths = [len(row["items"]) for row in test]
     predicted = np.asarray(
         [value["content"] for row, length in zip(coordinates, lengths, strict=True) for value in row[:length]]

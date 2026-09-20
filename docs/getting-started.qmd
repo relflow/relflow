@@ -32,7 +32,6 @@ following month. This is one illustrative record, not a training dataset.
 import relflow as rf
 
 model = rf.Model(
-    name="customer",
     d_model=128,
     n_layers=3,
     n_heads=8,
@@ -45,7 +44,7 @@ model = rf.Model(
         age_days=rf.Number,
         line_items=rf.Branch(
             length=16,
-            sku=rf.Category(),
+            sku=rf.Category,
             quantity=rf.Number,
         ),
     ),
@@ -72,8 +71,8 @@ model = rf.Model(
 )))
 ```
 
-Parent keywords name the fields. The root name, `customer`, prefixes output
-addresses; it does not add a wrapper around the input record.
+Parent keywords name the fields. The anonymous root has address `/`; child
+addresses start with `/`, without adding a wrapper around the input record.
 
 `mask=True` keeps a target out of the encoder while retaining its value for
 supervised learning. `embed=True` exports the root representation; it adds no
@@ -151,7 +150,7 @@ predictions = ds.dataset("predictions", format="parquet")
 `return_predictions=False` keeps Lightning from accumulating results in memory.
 The output remains a file-backed Arrow dataset. Its `inputs` column retains
 `customer_id` for joining results, and its `predictions` column contains
-`customer/churned`, `customer/next_month_spend`, and the exported `customer`
+`/churned`, `/next_month_spend`, and the exported `/`
 embedding. See [Prediction Output](guides/prediction-output.qmd) for their shapes
 and [Batch Inference](guides/batch-inference.qmd) for output shards and distributed
 jobs. For small interactive requests, `restored.predict(request_table)` returns

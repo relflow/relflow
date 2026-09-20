@@ -51,14 +51,13 @@ and lists in Parquet datasets; relflow scans them in batches.
 import relflow as rf
 
 model = rf.Model(
-    name="order",
     d_model=64,
     n_layers=2,
     n_heads=4,
     batch_size=128,
     line_items=rf.Branch(
         length=32,
-        sku=rf.Category(),
+        sku=rf.Category,
         quantity=rf.Number,
         price=rf.Number,
     ),
@@ -101,7 +100,7 @@ as records arrive. `rf.Writer` writes prediction batches to
 `predictions/rank-0.parquet`; `return_predictions=False` avoids collecting
 all outputs in memory. Open the output as an Arrow dataset for further batch
 processing. Decoded values live under its `predictions` column at addresses
-such as `order/returned`.
+such as `/returned`.
 
 ## Documentation
 

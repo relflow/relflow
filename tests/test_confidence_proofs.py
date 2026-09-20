@@ -49,11 +49,11 @@ def test_entity_disjoint_split_changes_only_identity_spelling():
     assert set(known[0]) == {"x", "entity", "label"}
     module = proof.build(0.2)
     module.encode(pa.Table.from_pylist(known), strata="train")
-    vocab = rf.Category.vocabulary(module, "record/entity")
-    field = module.encode(pa.Table.from_pylist(novel), strata="test")["record/entity"]
+    vocab = rf.Category.vocabulary(module, "/entity")
+    field = module.encode(pa.Table.from_pylist(novel), strata="test")["/entity"]
     assert field.content.eq(-1).all()
     assert field.state.eq(rf.Tokens.valued).all()
-    assert rf.Category.vocabulary(module, "record/entity") == vocab
+    assert rf.Category.vocabulary(module, "/entity") == vocab
 
 
 def test_cold_start_oracle_distinguishes_ambiguous_and_decisive_context():
@@ -74,12 +74,12 @@ def test_rolling_admission_keeps_future_identities_unknown_and_masks_fixed():
     future = list(proof.records(rows=1024, seed=12, cohort=1))
     assert not {row["entity"] for row in training} & {row["entity"] for row in future}
     module.encode(pa.Table.from_pylist(training), strata="train")
-    snapshot = rf.Category.vocabulary(module, "record/entity")
+    snapshot = rf.Category.vocabulary(module, "/entity")
     fields = module.encode(pa.Table.from_pylist(future), strata="validate")
-    assert fields["record/entity"].content.eq(-1).all()
-    assert fields["record/label"].targets[rf.TensorKey.content].lt(2).all()
-    np.testing.assert_array_equal(fields["record/label"].trainable.numpy().reshape(-1), [row["hide"] for row in future])
-    assert rf.Category.vocabulary(module, "record/entity") == snapshot
+    assert fields["/entity"].content.eq(-1).all()
+    assert fields["/label"].targets[rf.TensorKey.content].lt(2).all()
+    np.testing.assert_array_equal(fields["/label"].trainable.numpy().reshape(-1), [row["hide"] for row in future])
+    assert rf.Category.vocabulary(module, "/entity") == snapshot
     assert set(training[0]) == {"entity", "context", "label", "hide"}
 
 
@@ -91,7 +91,7 @@ def test_pretraining_queries_fix_selected_targets_across_validation_calls(name):
     module.encode(source, strata="train")
     expected = np.arange(128) % 2 == 0
     for _ in range(2):
-        field = module.encode(source, strata="validate")["record/code"]
+        field = module.encode(source, strata="validate")["/code"]
         np.testing.assert_array_equal(field.trainable.numpy().reshape(-1), expected)
         assert field.targets[rf.TensorKey.content].reshape(-1)[expected].lt(1024).all()
 
@@ -104,5 +104,5 @@ def test_set_fallback_split_changes_names_without_changing_observability():
     assert [row["nonempty"] for row in known] == [row["nonempty"] for row in novel]
     module = proof.build(0.5)
     module.encode(pa.Table.from_pylist(known), strata="train")
-    field = module.encode(pa.Table.from_pylist(novel), strata="test")["record/tags"]
+    field = module.encode(pa.Table.from_pylist(novel), strata="test")["/tags"]
     np.testing.assert_array_equal(field.content["unavailable"].numpy().reshape(-1), [row["nonempty"] for row in novel])

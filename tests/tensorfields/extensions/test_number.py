@@ -37,7 +37,7 @@ from relflow.tensorfields.extensions.number import (
 from tests.arrow import batch as arrow_batch
 from tests.tensorfields.helpers import tensorize
 
-ADDRESS = "root/items/amount"
+ADDRESS = "/items/amount"
 
 
 def structure_payload(*, mask: bool | Mask = False, jitter: Jitter | dict[str, object] | None = None) -> dict:
@@ -51,7 +51,6 @@ def structure_payload(*, mask: bool | Mask = False, jitter: Jitter | dict[str, o
     return {
         "d_model": 16,
         "fields": {
-            "name": "root",
             "type": "branch",
             "dropout": 0.1,
             "fields": [
@@ -103,8 +102,8 @@ def test_number_jitter_round_trips_through_model_checkpoint(tmp_path: Path):
     model.save(pathname)
     restored = rf.Model.load(pathname)
 
-    request = restored.schema.requests[rf.Address("record", "amount")]
-    embedder = restored.nodes[rf.Address("record", "amount")].embedder
+    request = restored.schema.requests[rf.Address("/", "amount")]
+    embedder = restored.nodes[rf.Address("/", "amount")].embedder
     assert request.jitter == configured
     assert embedder.jitter == configured
 
@@ -144,7 +143,7 @@ def test_number_monotone_lane_retains_autograd_at_model_width_one():
     schema = rf.Schema.from_tree(
         amount=rf.Number(), d_model=1, n_layers=1, n_heads=2, attention=None, reduction=rf.Mean()
     )
-    embedder = Embedder(schema=schema, address="record/amount")
+    embedder = Embedder(schema=schema, address="/amount")
     inputs = TensorInput(
         state=torch.tensor([Tokens.valued, Tokens.valued]),
         content=torch.tensor([1.0, 2.0]),
@@ -264,7 +263,7 @@ def test_number_jitter_is_configuration_not_checkpoint_state():
 
 def test_number_jitter_mutation_rebuilds_runtime_configuration():
     model = rf.Model(amount=rf.Number(jitter=rf.Jitter(add=0.1)), d_model=8, n_layers=1, n_heads=2)
-    address = rf.Address("record", "amount")
+    address = rf.Address("/", "amount")
 
     model.update(
         lambda node: node.address == address,
@@ -423,7 +422,7 @@ def test_number_observes_large_integers_in_float32():
     records = pa.table({"amount": [16_777_217, 16_777_219]})
     datamodule = rf.ArrowDataModule(configured, train=records, shuffle=False)
     encoded = next(iter(datamodule.train_dataloader()))
-    observation = encoded.observations["record/amount"][TensorKey.content]
+    observation = encoded.observations["/amount"][TensorKey.content]
     assert observation["mean"].dtype == torch.float32
     assert observation["count"].dtype == torch.int64
     assert observation["mean"].item() == records["amount"].to_numpy().astype("float32").mean().item()

@@ -79,13 +79,29 @@ def test_docs_disable_python_execution() -> None:
         assert not re.search(r"`\{python\}", text), source
 
 
-def test_static_python_examples_have_valid_syntax() -> None:
+def test_diagram_roots_have_descriptive_labels() -> None:
+    for source, text in documents().items():
+        for label in re.findall(r'\bnode\("([^\"]*)",\s*kind:\s*"root"', text):
+            assert label.strip() and not label.strip().startswith("/"), (
+                f"{source}: root labels describe the observation"
+            )
+
+
+def test_static_python_examples_have_valid_syntax_and_address_components() -> None:
     for source, text in documents().items():
         for snippet in re.finditer(
             r"^(`{3,}|~{3,})python[ \t]*\n(.*?)^\1[ \t]*$", text, flags=re.MULTILINE | re.DOTALL
         ):
             padding = "\n" * text[: snippet.start(2)].count("\n")
-            ast.parse(padding + snippet[2], filename=str(source))
+            tree = ast.parse(padding + snippet[2], filename=str(source))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call) or ast.unparse(node.func) != "rf.Address":
+                    continue
+                for part in node.args:
+                    if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                        assert "/" not in part.value, (
+                            f"{source}:{node.lineno}: pass one child name per Address argument"
+                        )
 
 
 def test_data_examples_are_single_yaml_records() -> None:

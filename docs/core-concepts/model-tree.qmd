@@ -31,14 +31,13 @@ The parent supplies each child's name:
 import relflow as rf
 
 model = rf.Model(
-    name="order",
     d_model=64,
     n_layers=2,
     n_heads=4,
-    customer_tier=rf.Category(),
+    customer_tier=rf.Category,
     line_items=rf.Branch(
         length=32,
-        sku=rf.Category(),
+        sku=rf.Category,
         quantity=rf.Number,
         price=rf.Number,
     ),
@@ -75,15 +74,20 @@ joins and derived values belong in [preprocessing](../guides/preprocessors.qmd).
 
 ## Names And Addresses
 
-`Model(name="order")` names the generated root, whose default name is `record`.
-The root is always a singleton; repeated data belongs in a child branch.
+The generated root is anonymous and has address `/`. It is always a singleton;
+repeated data belongs in a child branch. There is no root-name option.
+Diagrams use a descriptive root label such as `order` or `customer` to identify
+the observation. That label is illustrative, not model configuration or an
+address prefix; the root address remains `rf.Address()`.
+
 A child branch reads a list even when `length=1`; a bare child mapping is not
 a branch collection. Branch and leaf definitions have no `name` or positional
 arguments.
 
-`amount=rf.Number` uses the field's defaults. Use `rf.Number(...)` to configure
-it. Reusing a definition creates independent named nodes and learned modules;
-it does not share model weights.
+Bare tensorfield classes such as `amount=rf.Number` and `sku=rf.Category` use
+the field's defaults. Call them only to configure options, such as
+`returned=rf.Boolean(mask=True)`. Reusing a definition creates independent
+named nodes and learned modules; it does not share model weights.
 
 Use a `fields` mapping when generating children or when a child name collides
 with a configuration option:
@@ -91,15 +95,35 @@ with a configuration option:
 ```python
 measurements = rf.Branch(
     length=8,
-    fields={"length": rf.Number, "description": rf.Category()},
+    fields={"length": rf.Number, "description": rf.Category},
 )
 ```
 
-An address identifies a schema location, such as `order/line_items/price`.
+An address starts with `/` and identifies a schema location, such as
+`/line_items/price`. A field named `name` is an ordinary child: `name=rf.Category`
+has address `/name`. The leading slash is not an input-data wrapper or a query.
 Addresses appear in prediction fields, metric names, and mutation predicates.
 They describe the model's structure even when an explicit `query` reads a
 differently named source path. Names and nesting match input data by default;
 see [Binding Data](binding-data.qmd) for other source layouts.
+
+Use `rf.Address(...)` with one argument per child name to distinguish a schema
+address from an ordinary data key or query string. The leading slash and
+separators are added automatically; no arguments selects the root:
+
+```python
+root = rf.Address()
+price = rf.Address("line_items", "price")
+selected = model.select(rf.where("address") == price)
+```
+
+For example, `rf.Address("transactions", "amount")` represents
+`/transactions/amount`. Serialized paths such as `/transactions/amount` can
+also be read back with `rf.Address(path)`.
+
+`rf.Address` is a string subclass, so the same value works with RelFlow
+accessors and Arrow or Polars prediction-field lookups. Serialized output
+still uses plain string keys.
 
 ## Configure The Context
 

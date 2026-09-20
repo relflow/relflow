@@ -80,28 +80,28 @@ def test_encoded_pins_every_tensor_payload(monkeypatch: pytest.MonkeyPatch):
         tensors=tensors,
         source=source,
         retain=("value",),
-        observations={Address("record/value"): observation},
-        bindings={Address("record/value"): binding},
+        observations={Address("/value"): observation},
+        bindings={Address("/value"): binding},
     )
 
     pinned = encoded.pin_memory()
 
     assert calls == [tensors, observation]
     assert pinned.tensors is not tensors
-    assert pinned.observations["record/value"] is not observation
+    assert pinned.observations["/value"] is not observation
     assert pinned.source is source
     assert pinned.retain == ("value",)
-    assert pinned.bindings["record/value"] is binding
+    assert pinned.bindings["/value"] is binding
 
 
 def test_encoded_copies_and_validates_extension_bindings():
     source = pa.table({"value": [10]})
     tensors = TensorDict({}, batch_size=[])
     binding = object()
-    supplied = {Address("record/value"): binding}
+    supplied = {Address("/value"): binding}
     encoded = Encoded(tensors=tensors, source=source, bindings=supplied)
     supplied.clear()
-    assert encoded.bindings == {Address("record/value"): binding}
+    assert encoded.bindings == {Address("/value"): binding}
     with pytest.raises(TypeError, match="bindings must be a mapping"):
         Encoded(tensors=tensors, source=source, bindings=[])
     with pytest.raises(TypeError, match="binding addresses must be non-empty"):
@@ -112,16 +112,16 @@ def test_encoded_copies_and_validates_pristine_observations():
     source = pa.table({"value": [10]})
     tensors = TensorDict({}, batch_size=[])
     observation = TensorDict({"counts": torch.ones(3, dtype=torch.int64)}, batch_size=[])
-    supplied = {Address("record/value"): observation}
+    supplied = {Address("/value"): observation}
 
     encoded = Encoded(tensors=tensors, source=source, observations=supplied)
     supplied.clear()
 
-    assert tuple(encoded.observations) == (Address("record/value"),)
-    assert encoded.observations["record/value"] is observation
+    assert tuple(encoded.observations) == (Address("/value"),)
+    assert encoded.observations["/value"] is observation
 
     with pytest.raises(TypeError, match="must be a TensorDict"):
-        Encoded(tensors=tensors, source=source, observations={Address("record/value"): object()})
+        Encoded(tensors=tensors, source=source, observations={Address("/value"): object()})
 
 
 def test_encoded_validates_source_and_retain():

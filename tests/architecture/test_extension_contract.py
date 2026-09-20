@@ -171,7 +171,7 @@ def test_model_reports_missing_extension_packages_before_building_runtime_nodes(
 
         message = str(raised.value)
         assert raised.value.name == module
-        assert "record/value" in message
+        assert "/value" in message
         assert extension.name in message
         assert "uv add 'example-extension[fast]'" in message
         assert embedders == []
@@ -188,7 +188,7 @@ def test_third_party_extension_receives_one_explicit_context_contract():
 
         model.encode(pa.table({"value": ["abc"]}))
 
-        assert model.interprocess_encoding_context == {Address("record/value"): marker}
+        assert model.interprocess_encoding_context == {Address("/value"): marker}
         assert len(contexts) == 2  # mocked graph input, then the real batch
         assert contexts[-1] == rf.Context(state=marker, salt=0)
     finally:
@@ -224,11 +224,11 @@ def test_reconstruction_requires_decoder_and_loss_as_one_capability():
 def test_leaf_embedding_requires_a_decoder_but_branch_embedding_does_not():
     extension, Request = build_extension(decoder=False, loss=False)
     try:
-        with pytest.raises(ValueError, match=rf"embedded leaf 'record/value'.*extension '{extension.name}'.*Decoder"):
+        with pytest.raises(ValueError, match=rf"embedded leaf '/value'.*extension '{extension.name}'.*Decoder"):
             rf.Model(value=Request(embed=True), d_model=8, n_layers=1, n_heads=2)
 
         model = rf.Model(value=Request(), d_model=8, n_layers=1, n_heads=2, embed=True)
-        assert "record" in model.schema.embed
+        assert "/" in model.schema.embed
     finally:
         TENSORFIELDS.pop(extension.name, None)
 
@@ -242,7 +242,7 @@ def test_failed_capability_mutation_restores_schema_and_runtime_graph():
         with pytest.raises(ValueError, match=rf"extension '{extension.name}'.*Decoder, loss"):
             model.update(rf.where("name") == "value", mask=True)
 
-        assert model.schema.requests["record/value"].mask == ()
+        assert model.schema.requests["/value"].mask == ()
         assert model.schema.objectives == []
         assert model.nodes is nodes
     finally:
@@ -258,7 +258,7 @@ def test_failed_runtime_rebuild_restores_schema_and_runtime_graph():
         with pytest.raises(RuntimeError, match="decoder exploded"):
             model.update(rf.where("name") == "value", mask=True)
 
-        assert model.schema.requests["record/value"].mask == ()
+        assert model.schema.requests["/value"].mask == ()
         assert model.schema.objectives == []
         assert model.nodes is nodes
     finally:
@@ -275,10 +275,10 @@ def test_late_extension_schema_round_trip_uses_the_live_registry():
         restored = rf.Schema.model_validate(schema.model_dump(mode="python", round_trip=True))
         restored_json = rf.Schema.model_validate_json(schema.model_dump_json())
 
-        assert isinstance(restored.requests["record/items/value"], Request)
-        assert restored.requests["record/items/value"].family == "bytes"
-        assert isinstance(restored_json.requests["record/items/value"], Request)
-        assert restored_json.requests["record/items/value"].family == "bytes"
+        assert isinstance(restored.requests["/items/value"], Request)
+        assert restored.requests["/items/value"].family == "bytes"
+        assert isinstance(restored_json.requests["/items/value"], Request)
+        assert restored_json.requests["/items/value"].family == "bytes"
     finally:
         TENSORFIELDS.pop(extension.name, None)
 
@@ -298,7 +298,7 @@ def test_custom_tensordict_trailing_axes_gather_embed_and_scatter():
             strata=Strata.train,
         )
         seen = []
-        embedder = model.nodes["record/value"].embedder
+        embedder = model.nodes["/value"].embedder
         handle = embedder.register_forward_pre_hook(lambda module, args: seen.append(args[0]))
         try:
             predictions = model(inputs, strata=Strata.train)
@@ -307,7 +307,7 @@ def test_custom_tensordict_trailing_axes_gather_embed_and_scatter():
 
         assert seen[0].content["matrix"].shape == (2, 2, 3)
         assert seen[0].content["nested", "cube"].shape == (2, 2, 2, 2)
-        root = next(prediction for prediction in predictions if prediction.address == "record")
+        root = next(prediction for prediction in predictions if prediction.address == "/")
         assert root.payload[TensorKey.embedding].shape == (3, 8)
         assert torch.equal(root.payload[TensorKey.embedding][1], torch.zeros(8))
     finally:
@@ -318,8 +318,8 @@ def test_compact_extension_presence_is_scattered_without_routing_its_payload(mon
     extension, Request = build_extension(decoder=False, loss=False)
     try:
         model = rf.Model(value=Request(), d_model=8, n_layers=1, n_heads=2)
-        field = model.encode(pa.table({"value": ["a", "bb"]}), strata=Strata.train)["record/value"]
-        embedder = model.nodes["record/value"].embedder
+        field = model.encode(pa.table({"value": ["a", "bb"]}), strata=Strata.train)["/value"]
+        embedder = model.nodes["/value"].embedder
         original = embedder.forward
 
         def omit(inputs):
@@ -364,8 +364,8 @@ def test_all_skipped_custom_embedder_accepts_zero_sized_parameters():
             n_layers=1,
             n_heads=2,
         )
-        field = model.encode(pa.table({"value": ["a"]}), strata=Strata.train)["record/value"]
-        embedder = model.nodes["record/value"].embedder
+        field = model.encode(pa.table({"value": ["a"]}), strata=Strata.train)["/value"]
+        embedder = model.nodes["/value"].embedder
 
         parcel = embedder.embed(field)
         parcel.payload.sum().backward()

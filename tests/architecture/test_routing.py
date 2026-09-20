@@ -19,7 +19,7 @@ class Field(TensorFieldBase):
 
 class Probe(EmbedderBase):
     def __init__(self, schema):
-        super().__init__(schema, "record/value")
+        super().__init__(schema, "/value")
         self.linear = torch.nn.Linear(7, schema.d_model)
         self.dropout = torch.nn.Dropout(0.3)
 
@@ -44,7 +44,7 @@ class Probe(EmbedderBase):
 def test_plain_input_node_allocates_only_an_embedder():
     model = rf.Model(value=rf.Number, d_model=8, n_layers=1, n_heads=2)
 
-    node = model.nodes["record/value"]
+    node = model.nodes["/value"]
 
     assert hasattr(node, "embedder")
     assert not hasattr(node, "decoder")
@@ -191,8 +191,8 @@ def test_embedder_compacts_present_coordinates_and_restores_fixed_geometry():
         pa.table({"value": [1.0, 2.0, 3.0], "skip": [False, True, False]}),
         strata=Strata.train,
     )
-    field = inputs["record/value"]
-    embedder = model.nodes["record/value"].embedder
+    field = inputs["/value"]
+    embedder = model.nodes["/value"].embedder
     seen = []
     handle = embedder.register_forward_pre_hook(lambda module, args: seen.append(args[0]))
 
@@ -216,8 +216,8 @@ def test_embedder_is_not_called_for_an_all_skipped_field():
         n_layers=1,
         n_heads=2,
     )
-    field = model.encode(pa.table({"value": [1.0, 2.0]}), strata=Strata.train)["record/value"]
-    embedder = model.nodes["record/value"].embedder
+    field = model.encode(pa.table({"value": [1.0, 2.0]}), strata=Strata.train)["/value"]
+    embedder = model.nodes["/value"].embedder
     calls = 0
 
     def count(module, args):
@@ -250,7 +250,7 @@ def test_runtime_keeps_mixed_skip_rows_out_of_branch_context():
     )
 
     predictions = model(inputs, strata=Strata.train)
-    root = next(prediction for prediction in predictions if prediction.address == "record")
+    root = next(prediction for prediction in predictions if prediction.address == "/")
     embedding = root.payload[TensorKey.embedding]
 
     assert torch.isfinite(embedding).all()
@@ -292,12 +292,12 @@ def test_peer_objective_selection_runs_the_same_decoder_and_anchors_local_backwa
 
     assert len(calls) == 2
     assert all(torch.equal(call, torch.zeros(2, dtype=torch.uint8)) for call in calls)
-    assert [prediction.address for prediction in predictions] == ["record/second"]
+    assert [prediction.address for prediction in predictions] == ["/second"]
     assert output["loss"].requires_grad
     assert torch.isfinite(output["loss"])
     output["loss"].backward()
-    assert all(parameter.grad is not None for parameter in model.nodes["record/second"].decoder.parameters())
-    assert all(parameter.grad is None for parameter in model.nodes["record/first"].decoder.parameters())
+    assert all(parameter.grad is not None for parameter in model.nodes["/second"].decoder.parameters())
+    assert all(parameter.grad is None for parameter in model.nodes["/first"].decoder.parameters())
 
 
 @pytest.mark.parametrize(

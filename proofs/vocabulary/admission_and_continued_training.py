@@ -136,7 +136,7 @@ def fit(model: rf.Model, phase: str, seed: int, budget: int, accelerator: str) -
 
 def prediction(model: rf.Model, rows: list[dict]) -> list[dict]:
     output = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
-    return [row["record/label"]["content"] for row in output]
+    return [row["/label"]["content"] for row in output]
 
 
 def accuracy(output: list[dict], rows: list[dict]) -> float:
@@ -145,14 +145,14 @@ def accuracy(output: list[dict], rows: list[dict]) -> float:
 
 def roundtrip(model: rf.Model, rows: list[dict], path: Path) -> tuple[rf.Model, bool]:
     before = prediction(model, rows)
-    vocabulary = rf.Category.vocabulary(model, "record/label")
-    counts = rf.Category.counts(model, "record/label")
+    vocabulary = rf.Category.vocabulary(model, "/label")
+    counts = rf.Category.counts(model, "/label")
     model.save(path)
     loaded = rf.Model.load(path).to(model.device)
     loaded.eval()
     after = prediction(loaded, rows)
-    matches = rf.Category.vocabulary(loaded, "record/label") == vocabulary
-    matches &= rf.Category.counts(loaded, "record/label") == counts
+    matches = rf.Category.vocabulary(loaded, "/label") == vocabulary
+    matches &= rf.Category.counts(loaded, "/label") == counts
     matches &= all(
         a["value"] == b["value"] and abs(a["probability"] - b["probability"]) < 1e-5
         for a, b in zip(before, after, strict=True)
@@ -182,16 +182,16 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     new = list(records(rows=1024, seed=seed + 4, phase="new"))
     cold = prediction(model, new)
     checks = {
-        "Cold prediction leaves the vocabulary empty": rf.Category.vocabulary(model, "record/label") == (),
+        "Cold prediction leaves the vocabulary empty": rf.Category.vocabulary(model, "/label") == (),
         "Empty output vocabulary returns no label and zero probability": all(
             row["value"] is None and row["probability"] == 0.0 for row in cold
         ),
     }
     initial_steps = fit(model, "initial", seed, BUDGET if steps is None else min(steps, BUDGET), accelerator)
     initial_accuracy = accuracy(prediction(model, old), old)
-    vocabulary = rf.Category.vocabulary(model, "record/label")
-    counts = rf.Category.counts(model, "record/label")
-    normalization = rf.Number.normalization(model, "record/x")
+    vocabulary = rf.Category.vocabulary(model, "/label")
+    counts = rf.Category.counts(model, "/label")
+    normalization = rf.Number.normalization(model, "/x")
     checks["Initial known-label accuracy reaches 0.95"] = initial_accuracy >= 0.95
     with TemporaryDirectory(prefix="relflow-vocabulary-") as directory:
         model, matches = roundtrip(model, old, Path(directory) / "initial.pt")
@@ -200,18 +200,15 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         source = pa.Table.from_pylist(new)
         for strata in ("validate", "test", "predict"):
             model.encode(source, strata=strata)
-        checks["Evaluation cannot admit new output labels"] = (
-            rf.Category.vocabulary(model, "record/label") == vocabulary
-        )
+        checks["Evaluation cannot admit new output labels"] = rf.Category.vocabulary(model, "/label") == vocabulary
         checks["Evaluation leaves exposure counts and numerical moments frozen"] = (
-            rf.Category.counts(model, "record/label") == counts
-            and rf.Number.normalization(model, "record/x") == normalization
+            rf.Category.counts(model, "/label") == counts and rf.Number.normalization(model, "/x") == normalization
         )
         checks["Unadmitted labels cannot be predicted"] = before_admission == 0.0
         parameters = {name: value.detach().clone() for name, value in model.named_parameters()}
         admission = pa.Table.from_pylist(list(records(rows=32, seed=seed + 10, phase="new")))
         model.encode(admission, strata="train")
-        admitted = rf.Category.vocabulary(model, "record/label")
+        admitted = rf.Category.vocabulary(model, "/label")
         checks["Training admission appends both labels without moving old indices"] = (
             admitted[:2] == vocabulary and len(admitted) == 4 and set(admitted) == set(LABELS)
         )
@@ -227,9 +224,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         final_new = accuracy(prediction(model, new), new)
         checks["Continued fitting learns new labels above 0.95 accuracy"] = final_new >= 0.95
         checks["Rehearsal retains old labels above 0.95 accuracy"] = final_old >= 0.95
-        checks["Continued fitting preserves all admitted indices"] = (
-            rf.Category.vocabulary(model, "record/label") == admitted
-        )
+        checks["Continued fitting preserves all admitted indices"] = rf.Category.vocabulary(model, "/label") == admitted
         model, matches = roundtrip(model, old + new, Path(directory) / "continued.pt")
         checks["Continued checkpoint preserves mapping, counts, and predictions"] = matches
     return {

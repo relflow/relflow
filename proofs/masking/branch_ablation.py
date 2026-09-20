@@ -128,7 +128,7 @@ def build() -> rf.Model:
 
 def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
     output = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
-    return np.asarray([row["record/target"]["content"] for row in output], dtype=np.float64)
+    return np.asarray([row["/target"]["content"] for row in output], dtype=np.float64)
 
 
 # %% [markdown]
@@ -224,7 +224,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
                 for row in test
             ]
         )
-        present = fields[f"record/views/{name}"].present.cpu().numpy().reshape(expected.shape)
+        present = fields[f"/views/{name}"].present.cpu().numpy().reshape(expected.shape)
         checks[f"{name}: ancestor and local skips compose"] = bool(np.array_equal(present, expected))
     return metrics, checks
 

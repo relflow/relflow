@@ -42,8 +42,12 @@ node(label, kind: "field", type: none, detail: none, body: none, width: 120pt,
 ```
 
 `node` returns one diagram description. `tree(node(...))` draws it, including a
-single node when there are no children. Use the exact schema names for roots,
-branches, and leaves, preserving case and underscores as in the sample inputs.
+single node when there are no children. Give the root a descriptive label such
+as `order`, `customer`, or `record` to identify the observation. This label is
+illustrative only: it is not defined in `Model(...)` and is not an address prefix;
+the model root remains anonymous at `rf.Address()`.
+Use the exact schema names for branches and leaves, preserving case and
+underscores as in the sample inputs.
 Names render in monospace. For nodes with an explicit query, keep the schema
 name as the label and show the source path in `detail` or `body`.
 

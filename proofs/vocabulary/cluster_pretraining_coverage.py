@@ -105,7 +105,7 @@ def build() -> rf.Model:
 def evaluate(trainer: lit.Trainer, model: rf.Model, rows: list[dict]) -> dict[str, float]:
     data = rf.SyntheticDataModule(model=model, validate=lambda: iter(rows), seed=0)
     result = trainer.validate(model, datamodule=data, verbose=False)[0]
-    prefix = "record.code/validate."
+    prefix = "/code/validate."
     return {name.removeprefix(prefix): float(value) for name, value in result.items() if name.startswith(prefix)}
 
 
@@ -147,8 +147,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     )
     trainer.fit(model, datamodule=data)
     original = list(records(rows=2048, seed=seed + 3))
-    vocabulary = rf.Cluster.vocabulary(model, "record/code")
-    counts = tuple(model.nodes["record/code"].embedder.counters["content"].counts.tolist())
+    vocabulary = rf.Cluster.vocabulary(model, "/code")
+    counts = tuple(model.nodes["/code"].embedder.counters["content"].counts.tolist())
     metrics, checks = {}, {}
     for keep in (1024, 512, 102, 0):
         selected = 0
@@ -199,8 +199,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             metrics["reported_content_loss_drift"] = abs(measured["loss.content"] - regrouped["loss.content"])
             checks["Rebatching preserves counts and scores"] = drift is not None and drift < 1e-5
     checks["Validation leaves mapping and exposures frozen"] = (
-        rf.Cluster.vocabulary(model, "record/code") == vocabulary
-        and tuple(model.nodes["record/code"].embedder.counters["content"].counts.tolist()) == counts
+        rf.Cluster.vocabulary(model, "/code") == vocabulary
+        and tuple(model.nodes["/code"].embedder.counters["content"].counts.tolist()) == counts
     )
     return metrics, checks
 

@@ -122,9 +122,7 @@ def prediction(model: rf.Model, rows: list[dict], targets: tuple[str, ...], *, c
         for row in inputs:
             row.update({name: 1000.0 for name in TARGETS})
     output = model.predict(inputs)["predictions"].to_pylist()
-    return {
-        name: np.asarray([row[f"record/{name}"]["content"] for row in output], dtype=np.float64) for name in targets
-    }
+    return {name: np.asarray([row[f"/{name}"]["content"] for row in output], dtype=np.float64) for name in targets}
 
 
 def scores(rows: list[dict], predicted: dict, means: dict) -> dict:
@@ -291,7 +289,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             )
             targets = TARGETS[:2] if arm == "continuation" else TARGETS
             if arm == "extended":
-                model.extend(rf.where("address") == "record", w=rf.Number(mask=True, objective="mse"))
+                model.extend(rf.where("address") == "/", w=rf.Number(mask=True, objective="mse"))
                 extended_schema = model.schema.model_dump()
                 retained = model.state_dict()
                 changes = [
@@ -300,7 +298,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
                     if name not in retained or not equal(value, retained[name])
                 ]
                 checks["Extension preserves every existing state entry"] = not changes
-                head = {name: p.detach().clone() for name, p in model.nodes["record/w"].named_parameters()}
+                head = {name: p.detach().clone() for name, p in model.nodes["/w"].named_parameters()}
             elif arm.startswith("scratch"):
                 checks[f"{arm}: schema and field order match extension"] = model.schema.model_dump() == extended_schema
             model.eval()
@@ -313,9 +311,9 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
                 )
                 # Isolate a schema-derived scale that is absent from state_dict.
                 # Restore the edited scale before any fitting or checkpointing.
-                pool = model.nodes["record"].encoder.pool
+                pool = model.nodes["/"].encoder.pool
                 capacity = pool.mass_capacity
-                source_capacity = source.nodes["record"].encoder.pool.mass_capacity
+                source_capacity = source.nodes["/"].encoder.pool.mass_capacity
                 try:
                     pool.mass_capacity = source_capacity
                     fixed_scale = prediction(model, test, TARGETS)
@@ -356,9 +354,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             if arm == "extended":
                 arms[arm]["changed_existing_state_entries"] = changes
                 arms[arm]["pooling_scale_control"] = scale_control
-                changed = [
-                    name for name, p in model.nodes["record/w"].named_parameters() if not torch.equal(head[name], p)
-                ]
+                changed = [name for name, p in model.nodes["/w"].named_parameters() if not torch.equal(head[name], p)]
                 arms[arm]["new_head_updated_parameters"] = changed
                 checks["Added head parameters actually learn"] = bool(changed)
                 corrupted = prediction(model, test, TARGETS, corrupt=True)
@@ -385,7 +381,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         "test_rows": len(test),
         "baseline": "Source-training mean for test comparisons; phase-training mean for validation curves",
         "optimizer_policy": "New AdamW factory and Trainer for every fit; all available labels rehearsed",
-        "mutation": "extend record with hidden Number record/w",
+        "mutation": "extend record with hidden Number /w",
     }, checks
 
 

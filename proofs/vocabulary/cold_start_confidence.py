@@ -113,7 +113,7 @@ def build(unavailable: float) -> rf.Model:
 
 def probability(model: rf.Model, rows: list[dict]) -> np.ndarray:
     predictions = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
-    content = [row["record/label"]["content"] for row in predictions]
+    content = [row["/label"]["content"] for row in predictions]
     return np.asarray([item["probability"] if item["value"] == "yes" else 1 - item["probability"] for item in content])
 
 
@@ -180,8 +180,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         )
         trainer.fit(model, datamodule=data)
         model.eval()
-        vocabulary = rf.Category.vocabulary(model, "record/entity")
-        counts = rf.Category.counts(model, "record/entity")
+        vocabulary = rf.Category.vocabulary(model, "/entity")
+        counts = rf.Category.counts(model, "/entity")
         arm = {}
         for novel in (False, True):
             rows = list(records(rows=8192, seed=seed + 3, novel=novel))
@@ -191,8 +191,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         renamed = [{**row, "entity": "another-unseen-identity"} for row in rows]
         arm["renaming_drift"] = float(np.max(np.abs(before - probability(model, renamed))))
         checks[f"{unavailable}: evaluation preserves mapping and exposures"] = vocabulary == rf.Category.vocabulary(
-            model, "record/entity"
-        ) and counts == rf.Category.counts(model, "record/entity")
+            model, "/entity"
+        ) and counts == rf.Category.counts(model, "/entity")
         checks[f"{unavailable}: unseen spelling is uninformative"] = arm["renaming_drift"] < 1e-5
         model.encode(pa.Table.from_pylist(rows), strata="train")
         arm["admission_mean_drift"] = float(np.mean(np.abs(before - probability(model, rows))))

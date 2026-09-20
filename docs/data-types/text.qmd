@@ -18,12 +18,12 @@ escalated: true
 import relflow as rf
 
 model = rf.Model(
-    name="ticket", d_model=128, n_layers=3, n_heads=8,
+    d_model=128, n_layers=3, n_heads=8,
     subject=rf.Text(max_length=64),
     messages=rf.Branch(
         length=32,
         body=rf.Text(max_length=256, encoder_pooling="mean"),
-        author_role=rf.Category(),
+        author_role=rf.Category,
     ),
     escalated=rf.Boolean(mask=True),
 )

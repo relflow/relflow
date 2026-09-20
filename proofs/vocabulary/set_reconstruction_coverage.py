@@ -91,7 +91,7 @@ def build(size: int) -> rf.Model:
         labels=rf.Set(p_unavailable=1.0, mask=True),
     )
     # Experimental storage control only: allocation is not a schema option.
-    node = model.nodes["record/labels"]
+    node = model.nodes["/labels"]
     resize = Resize()
     resize.embedding(node.embedder.embeddings["content"], size)
     resize.linear(node.decoder.linears["content"], size)
@@ -142,8 +142,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             num_sanity_val_steps=0,
         )
         trainer.fit(model, datamodule=data)
-        vocabulary = rf.Set.vocabulary(model, "record/labels")
-        written = model.predict(pa.table({"x": [0.0]}))["predictions"].to_pylist()[0]["record/labels"]["content"]
+        vocabulary = rf.Set.vocabulary(model, "/labels")
+        written = model.predict(pa.table({"x": [0.0]}))["predictions"].to_pylist()[0]["/labels"]["content"]
         probabilities = {item["value"]: item["probability"] for item in written}
         p = np.asarray([probabilities[name] for name in ("red", "blue")]).clip(1e-7, 1 - 1e-7)
         excess = float(np.mean(-prior * np.log(p) - (1 - prior) * np.log1p(-p)) - oracle)
@@ -165,7 +165,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             measured = trainer.validate(
                 model, datamodule=rf.ArrowDataModule(model=model, validate=table, num_workers=0), verbose=False
             )[0]
-            prefix = "record.labels/validate."
+            prefix = "/labels/validate."
             results.append(
                 {key.removeprefix(prefix): float(value) for key, value in measured.items() if key.startswith(prefix)}
             )
@@ -189,9 +189,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         checks[f"{size}: rebatching preserves epoch scores"] = all(
             name in first and name in second and abs(first[name] - second[name]) < 1e-5 for name in names
         )
-        checks[f"{size}: evaluation never admits unknown labels"] = (
-            rf.Set.vocabulary(model, "record/labels") == vocabulary
-        )
+        checks[f"{size}: evaluation never admits unknown labels"] = rf.Set.vocabulary(model, "/labels") == vocabulary
     return metrics, checks
 
 

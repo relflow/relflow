@@ -136,7 +136,6 @@ class Schema(Node):
         n_layers: int,
         n_heads: int,
         fields: Mapping[str, TreeFieldInput] | None = None,
-        name: str = "record",
         query: str | None = None,
         description: str | None = None,
         embed: bool = False,
@@ -152,7 +151,6 @@ class Schema(Node):
             raise ValueError("from_tree requires at least one field")
         branch = Branch.model_validate(
             dict(
-                name=name,
                 query=query,
                 description=description,
                 embed=embed,
@@ -192,7 +190,15 @@ class Schema(Node):
         self.fields.length = 1
         self.fields.overflow = Overflow.error
         self.fields.parent = self
+        self.clear_tree_caches()
         self.post_bind_validate()
+
+    @pydantic.field_serializer("fields", mode="wrap")
+    def serialize_root(self, root: Branch, handler: pydantic.SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Only child nodes have parent-assigned names in a persisted schema."""
+        payload = handler(root)
+        payload.pop("name", None)
+        return payload
 
     @property
     def reconstruct(self) -> list[Address]:
@@ -337,6 +343,11 @@ class Schema(Node):
         }
 
     def post_bind_validate(self) -> None:
+        if self.fields.name is not None:
+            raise ValueError(
+                f"model root must be anonymous, got name {self.fields.name!r}; "
+                "rebuild the schema without a root name (named-root checkpoints are not supported)"
+            )
         for branch in self.branches.values():
             branch.post_bind_validate()
             if branch.embed and self.branch_outputs[branch.address] == 0:
@@ -576,8 +587,9 @@ class Schema(Node):
 
         remaining_branch_addresses = {address for address in self.branches if address not in removed_addresses}
         for address in remaining_branch_addresses:
-            prefix = f"{address}/"
-            if not any(str(request_address).startswith(prefix) for request_address in remaining_request_addresses):
+            if not any(
+                descendant.address in remaining_request_addresses for descendant in self.branches[address].descendants
+            ):
                 raise ValueError(f"delete would leave branch '{address}' without request descendants")
 
         for node in roots:

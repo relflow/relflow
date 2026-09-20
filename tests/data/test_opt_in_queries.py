@@ -30,8 +30,8 @@ def test_direct_schema_binding_and_explicit_nested_query_can_share_a_batch():
         strata=Strata.predict,
     )
 
-    direct = encoded[rf.Address("record/items/value")]
-    queried = encoded[rf.Address("record/gross_amount")]
+    direct = encoded[rf.Address("/items/value")]
+    queried = encoded[rf.Address("/gross_amount")]
 
     assert direct.state.tolist() == [
         [[Tokens.valued.value, Tokens.valued.value]],
@@ -63,11 +63,11 @@ def test_query_backed_leaf_ignores_same_named_direct_source_values():
         strata=Strata.train,
     )
 
-    assert encoded[rf.Address("record/label")].state.tolist() == [
+    assert encoded[rf.Address("/label")].state.tolist() == [
         [Tokens.valued.value],
         [Tokens.valued.value],
     ]
-    assert rf.Category.vocabulary(model, "record/label") == ("A", "B")
+    assert rf.Category.vocabulary(model, "/label") == ("A", "B")
 
 
 def test_scalar_extension_rejects_list_valued_query_with_field_context():
@@ -75,7 +75,7 @@ def test_scalar_extension_rejects_list_valued_query_with_field_context():
 
     with pytest.raises(
         ValueError,
-        match=r"number field at 'record/items/value' expects scalar Arrow values",
+        match=r"number field at '/items/value' expects scalar Arrow values",
     ):
         model.encode(
             table([{"items": [{"values": [1.0, 2.0]}]}]),
@@ -95,14 +95,14 @@ def test_set_owns_the_list_produced_by_a_traversal_query():
             ]
         ),
         strata=Strata.train,
-    )[rf.Address("record/aliases")]
+    )[rf.Address("/aliases")]
 
     assert encoded.state.tolist() == [
         [Tokens.valued.value],
         [Tokens.valued.value],
         [Tokens.padded.value],
     ]
-    assert rf.Set.vocabulary(model, "record/aliases") == ("Ada", "A")
+    assert rf.Set.vocabulary(model, "/aliases") == ("Ada", "A")
     assert encoded.content["membership"][0, 0].sum().item() == 2
     assert encoded.content["membership"][1, 0].sum().item() == 0
 
@@ -118,7 +118,7 @@ def test_vector_owns_the_list_produced_by_a_traversal_query():
             ]
         ),
         strata=Strata.predict,
-    )[rf.Address("record/coordinates")]
+    )[rf.Address("/coordinates")]
 
     assert encoded.state.tolist() == [
         [Tokens.valued.value],

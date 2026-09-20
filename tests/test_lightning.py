@@ -66,8 +66,8 @@ def test_native_batch_size_callback_restores_state_then_trains_bf16(tmp_path, ac
 
     class CheckRestore(lit.Callback):
         def on_train_start(self, trainer, pl_module):
-            assert rf.Number.normalization(pl_module, "record/amount")["count"] == 0
-            assert field.vocabulary(pl_module, "record/merchant") == ()
+            assert rf.Number.normalization(pl_module, "/amount")["count"] == 0
+            assert field.vocabulary(pl_module, "/merchant") == ()
             parameters = {id(parameter) for parameter in pl_module.parameters()}
             optimized = {id(parameter) for group in trainer.optimizers[0].param_groups for parameter in group["params"]}
             assert optimized == parameters
@@ -95,12 +95,12 @@ def test_native_batch_size_callback_restores_state_then_trains_bf16(tmp_path, ac
     assert restored == [True]
     assert configured.batch_size == finder.optimal_batch_size == 4
     assert trainer.global_step == 1
-    assert rf.Number.normalization(configured, "record/amount")["count"] == 4
-    assert field.vocabulary(configured, "record/merchant") == ("alpha", "beta")
+    assert rf.Number.normalization(configured, "/amount")["count"] == 4
+    assert field.vocabulary(configured, "/merchant") == ("alpha", "beta")
     assert any(
         not torch.equal(parameter.detach().cpu(), initial[name]) for name, parameter in configured.named_parameters()
     )
-    assert configured.nodes["record/amount"].embedder.normalizer.mean.dtype == torch.float32
+    assert configured.nodes["/amount"].embedder.normalizer.mean.dtype == torch.float32
     assert not list(tmp_path.glob(".scale_batch_size_*.ckpt"))
 
 
@@ -121,7 +121,7 @@ def test_native_tuner_can_prepare_a_separate_training_run(tmp_path):
         configured, datamodule=datamodule, mode="binsearch", init_val=2, max_trials=2, max_val=8, margin=0
     )
     assert configured.batch_size == batch_size == 4
-    assert rf.Number.normalization(configured, "record/amount")["count"] == 0
+    assert rf.Number.normalization(configured, "/amount")["count"] == 0
 
     trainer = lit.Trainer(
         accelerator="cpu",
@@ -139,4 +139,4 @@ def test_native_tuner_can_prepare_a_separate_training_run(tmp_path):
     )
     trainer.fit(configured, datamodule=datamodule)
     assert trainer.global_step == 1
-    assert rf.Number.normalization(configured, "record/amount")["count"] == 4
+    assert rf.Number.normalization(configured, "/amount")["count"] == 4

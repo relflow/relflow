@@ -138,11 +138,11 @@ def build() -> rf.Model:
 def prediction(model: rf.Model, rows: list[dict]) -> tuple[np.ndarray, np.ndarray]:
     output = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
     content = np.asarray(
-        [[item["content"] for item in row["record/events/value"]] for row in output], dtype=np.float64
+        [[item["content"] for item in row["/events/value"]] for row in output], dtype=np.float64
     ).reshape(len(rows), LENGTH)
-    inferred = np.asarray(
-        [[item["inferred"] for item in row["record/events/value"]] for row in output], dtype=bool
-    ).reshape(len(rows), LENGTH)
+    inferred = np.asarray([[item["inferred"] for item in row["/events/value"]] for row in output], dtype=bool).reshape(
+        len(rows), LENGTH
+    )
     return content, inferred
 
 
@@ -256,7 +256,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         checks[f"prefix {cut}: next-value nRMSE below 0.35"] = measured["nrmse"] < 0.35
         checks[f"prefix {cut}: shuffled prefix nRMSE above 0.85"] = measured["shuffled_nrmse"] > 0.85
         checks[f"prefix {cut}: future cannot affect prediction"] = measured["future_value_drift"] < 1e-5
-        field = probe.encode(pa.Table.from_pylist(selected), strata="train")["record/events/value"]
+        field = probe.encode(pa.Table.from_pylist(selected), strata="train")["/events/value"]
         expected = np.broadcast_to(np.arange(LENGTH) == cut, inferred.shape)
         visible = np.broadcast_to(np.arange(LENGTH) < cut, inferred.shape)
         checks[f"prefix {cut}: exactly the next coordinate is requested"] = bool(np.array_equal(inferred, expected))

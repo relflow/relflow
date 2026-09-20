@@ -42,12 +42,11 @@ import lightning.pytorch as lit
 import relflow as rf
 
 model = rf.Model(
-    name="customer",
     d_model=128,
     n_layers=3,
     n_heads=8,
     tenure_days=rf.Number,
-    region=rf.Category(),
+    region=rf.Category,
     purchases=rf.Branch(
         length=64,
         overflow="tail",
@@ -87,9 +86,9 @@ The example saves the final model. Use the checkpoint selection described in
 
 For large-vocabulary reconstruction, report how many selected answers the
 model can express as well as how well it predicts them. For example, monitor
-`customer.purchases.merchant/validate.coverage.content` alongside
-`customer.purchases.merchant/validate.nll.content` and
-`customer.purchases.merchant/validate.accuracy.all`.
+`/purchases/merchant/validate.coverage.content` alongside
+`/purchases/merchant/validate.nll.content` and
+`/purchases/merchant/validate.accuracy.all`.
 The [Category metrics](../data-types/category.qmd#vocabulary-and-learning) and
 [Cluster metrics](../data-types/cluster.qmd#learning-and-inspection)
 define these denominators and count unavailable targets explicitly.
@@ -154,11 +153,11 @@ add a supervised label:
 ```python
 finetuned = rf.Model.load("artifacts/customer-pretrained.rf")
 reconstructed_inputs = rf.where("address").is_in(
-    ["customer/purchases/amount", "customer/purchases/merchant"]
+    [rf.Address("purchases", "amount"), rf.Address("purchases", "merchant")]
 )
 finetuned.update(reconstructed_inputs, mask=False)
 finetuned.extend(
-    rf.where("address") == "customer",
+    rf.where("address") == rf.Address(),
     churned=rf.Boolean(mask=True),
 )
 ```
@@ -225,7 +224,7 @@ set `embed=True` on the desired root or branch, export
 separate downstream model on those vectors.
 
 At inference, omit `churned` from the input and read the prediction at
-`customer/churned`. See [Prediction Output](prediction-output.qmd).
+`/churned`. See [Prediction Output](prediction-output.qmd).
 
 ## Keep Auxiliary Objectives Deliberately
 
@@ -235,11 +234,11 @@ adapting the pretrained artifact. Replace the earlier
 
 ```python
 finetuned.update(
-    rf.where("address") == "customer/purchases/merchant",
+    rf.where("address") == rf.Address("purchases", "merchant"),
     mask=False,
 )
 finetuned.update(
-    rf.where("address") == "customer/purchases/amount",
+    rf.where("address") == rf.Address("purchases", "amount"),
     weight=0.1,
 )
 ```

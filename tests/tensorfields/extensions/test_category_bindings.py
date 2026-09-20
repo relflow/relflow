@@ -9,12 +9,11 @@ import relflow as rf
 from relflow.structs.enums import TensorKey
 from tests.arrow import table
 
-ADDRESS = rf.Address("record/category")
+ADDRESS = rf.Address("/category")
 
 
 def build(*, embed: bool = False) -> rf.Model:
     return rf.Model(
-        name="record",
         d_model=8,
         n_layers=1,
         n_heads=4,
@@ -52,7 +51,7 @@ def test_category_vocabulary_returns_immutable_model_snapshot() -> None:
 
     # A returned snapshot must not be a live view of the model's vocabulary.
     assert snapshot == ("ALPHA", "BETA")
-    assert rf.Category.vocabulary(model, "record/category") == (
+    assert rf.Category.vocabulary(model, "/category") == (
         "ALPHA",
         "BETA",
         "GAMMA",
@@ -111,7 +110,7 @@ def test_category_vocabulary_is_available_to_inference_preprocessor() -> None:
     assert seen == [("ALPHA", "BETA")]
     assert len(contexts) == 1
     assert rf.Category.vocabulary(contexts[0], ADDRESS) == ("ALPHA", "BETA")
-    root = predictions["predictions"].combine_chunks().field("record")
+    root = predictions["predictions"].combine_chunks().field("/")
     assert len(root.field("embedding")) == 2
 
 
@@ -121,7 +120,7 @@ def test_category_vocabulary_raises_for_missing_address(use_model: bool) -> None
     source = model if use_model else model.interprocess_encoding_context
 
     with pytest.raises(KeyError, match="missing"):
-        rf.Category.vocabulary(source, "record/missing")
+        rf.Category.vocabulary(source, "/missing")
 
 
 def test_category_vocabulary_rejects_invalid_context_resource() -> None:
@@ -138,7 +137,6 @@ def test_category_vocabulary_rejects_invalid_source() -> None:
 
 def test_category_vocabulary_rejects_non_category_model_field() -> None:
     model = rf.Model(
-        name="record",
         d_model=8,
         n_layers=1,
         n_heads=4,
@@ -146,7 +144,7 @@ def test_category_vocabulary_rejects_non_category_model_field() -> None:
     )
 
     with pytest.raises(TypeError, match="not a Category field"):
-        rf.Category.vocabulary(model, "record/amount")
+        rf.Category.vocabulary(model, "/amount")
 
 
 def test_category_counts_returns_populated_training_counts() -> None:
@@ -177,14 +175,13 @@ def test_category_counts_validates_model_and_address() -> None:
     with pytest.raises(TypeError, match="must be a Model"):
         rf.Category.counts(model.interprocess_encoding_context, ADDRESS)
     with pytest.raises(KeyError, match="missing"):
-        rf.Category.counts(model, "record/missing")
+        rf.Category.counts(model, "/missing")
 
     wrong_model = rf.Model(
-        name="record",
         d_model=8,
         n_layers=1,
         n_heads=4,
         amount=rf.Number,
     )
     with pytest.raises(TypeError, match="not a Category field"):
-        rf.Category.counts(wrong_model, "record/amount")
+        rf.Category.counts(wrong_model, "/amount")

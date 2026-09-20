@@ -119,7 +119,7 @@ def build() -> rf.Model:
 
 def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
     output = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
-    return np.asarray([row["record/target"]["content"] for row in output], dtype=np.float64)
+    return np.asarray([row["/target"]["content"] for row in output], dtype=np.float64)
 
 
 # %% [markdown]
@@ -144,7 +144,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     for name, common_first in (("rare_first", False), ("common_first", True)):
         lit.seed_everything(seed, workers=True)
         model = build()
-        initial_size = model.nodes["record/code"].embedder.size
+        initial_size = model.nodes["/code"].embedder.size
         model.optimizer = rf.adamw(learning_rate=0.002)
         data = rf.SyntheticDataModule(
             model=model,
@@ -168,15 +168,15 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         )
         trainer.fit(model, datamodule=data)
         model.eval()
-        vocabulary = rf.Category.vocabulary(model, "record/code")
+        vocabulary = rf.Category.vocabulary(model, "/code")
         predicted = prediction(model, test)
         renamed = [{**row, "code": "hot" if row["code"] == "cold" else "cold"} for row in test]
         measured = {
             "steps": trainer.global_step,
             "initial_size": initial_size,
-            "allocated_size": model.nodes["record/code"].embedder.size,
+            "allocated_size": model.nodes["/code"].embedder.size,
             "vocabulary": vocabulary,
-            "counts": rf.Category.counts(model, "record/code"),
+            "counts": rf.Category.counts(model, "/code"),
             "common_coverage": float(np.mean([row["code"] in vocabulary for row in test])),
             "nrmse": float(np.sqrt(np.mean((actual - predicted) ** 2))) / baseline,
             "identity_swap_drift": float(np.mean(np.abs(predicted - prediction(model, renamed)))),
@@ -192,9 +192,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         checks[f"{name}: common-label coverage is complete"] = measured["common_coverage"] == 1.0
         checks[f"{name}: common-label nRMSE below 0.15"] = measured["nrmse"] < 0.15
         checks[f"{name}: common identities have distinct learned effects"] = measured["identity_swap_drift"] > 1.5
-        checks[f"{name}: prediction does not change admission"] = (
-            rf.Category.vocabulary(model, "record/code") == vocabulary
-        )
+        checks[f"{name}: prediction does not change admission"] = rf.Category.vocabulary(model, "/code") == vocabulary
         metrics["arms"][name] = measured
     return metrics, checks
 

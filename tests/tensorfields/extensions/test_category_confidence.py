@@ -31,9 +31,9 @@ def model():
 
 def evaluate(module, labels, logits):
     fields = module.encode(pa.table({"x": [0.0] * len(labels), "label": labels}), strata="test")
-    batch = fields["record/label"]
+    batch = fields["/label"]
     prediction = Prediction(
-        address="record/label",
+        address="/label",
         payload=TensorDict(
             {
                 rf.TensorKey.state: torch.zeros(len(labels), 1, len(rf.Tokens), requires_grad=True),
@@ -54,8 +54,8 @@ def test_unavailable_simulation_preserves_reconstruction_targets():
         label=rf.Category(p_unavailable=1.0, mask=True),
     )
     encoded = module.encode(pa.table({"label": ["a", "b", None], "entity": ["a", "b", None]}), strata="train")
-    field = encoded["record/label"]
-    assert encoded["record/entity"].content.reshape(-1)[:2].tolist() == [-1, -1]
+    field = encoded["/label"]
+    assert encoded["/entity"].content.reshape(-1)[:2].tolist() == [-1, -1]
     assert field.targets[rf.TensorKey.content].reshape(-1)[:2].tolist() == [0, 1]
     assert field.targets[rf.TensorKey.state].reshape(-1).tolist() == [
         rf.Tokens.valued,
@@ -66,7 +66,7 @@ def test_unavailable_simulation_preserves_reconstruction_targets():
 
 def test_category_objective_is_unweighted_and_unknown_targets_have_no_content_gradient():
     module = model()
-    module.nodes["record/label"].embedder.counters["content"].counts[:2].copy_(torch.tensor([901, 101]))
+    module.nodes["/label"].embedder.counters["content"].counts[:2].copy_(torch.tensor([901, 101]))
     logits = torch.randn(4, 8, requires_grad=True)
     result = evaluate(module, ["a", "b", "unseen", None], logits)
     result.backward()
@@ -82,7 +82,7 @@ def test_all_unknown_content_is_zero_for_backward_but_undefined_for_evaluation()
     result.backward()
     assert torch.isfinite(result)
     assert torch.equal(logits.grad, torch.zeros_like(logits))
-    metrics = module.nodes["record/label"].decoder.metrics["test_metrics"].compute()
+    metrics = module.nodes["/label"].decoder.metrics["test_metrics"].compute()
     assert metrics["targets.known"] == 0
     assert metrics["targets.unavailable"] == 3
     assert metrics["coverage.content"] == 0
@@ -94,7 +94,7 @@ def test_all_unknown_content_is_zero_for_backward_but_undefined_for_evaluation()
 def test_single_populated_label_probability_is_conditional_not_learned_competence():
     module = rf.Model(d_model=8, n_heads=2, n_layers=1, x=rf.Number, label=rf.Category(mask=True))
     module.encode(pa.table({"x": [0.0], "label": ["only-label"]}), strata="train")
-    result = module.predict(pa.table({"x": [10.0]}))["predictions"].to_pylist()[0]["record/label"]["content"]
+    result = module.predict(pa.table({"x": [10.0]}))["predictions"].to_pylist()[0]["/label"]["content"]
     assert result["value"] == "only-label"
     assert result["probability"] == 1.0
 
@@ -106,8 +106,8 @@ def test_coverage_and_scores_are_invariant_to_batch_partition_and_unused_capacit
     evaluate(joint, labels, logits)
     for start, end in ((0, 1), (1, 3), (3, 7)):
         evaluate(split, labels[start:end], logits[start:end])
-    first = joint.nodes["record/label"].decoder.metrics["test_metrics"].compute()
-    second = split.nodes["record/label"].decoder.metrics["test_metrics"].compute()
+    first = joint.nodes["/label"].decoder.metrics["test_metrics"].compute()
+    second = split.nodes["/label"].decoder.metrics["test_metrics"].compute()
     for name, value in first.items():
         torch.testing.assert_close(value, second[name])
     assert first["coverage.content"] == 0.5
@@ -154,7 +154,7 @@ def test_reconstruction_counts_reduce_globally_with_an_all_unknown_rank(tmp_path
 
 def test_epoch_start_resets_and_detaches_spawn_shared_metric_storage():
     module = model()
-    metric = module.nodes["record/label"].decoder.metrics["test_metrics"]
+    metric = module.nodes["/label"].decoder.metrics["test_metrics"]
     metric.counts.share_memory_().fill_(5)
     metric.sums.share_memory_().fill_(5)
     previous = metric.counts
@@ -213,6 +213,6 @@ def test_lightning_validation_counts_include_an_objective_empty_rank():
         enable_model_summary=False,
     )
     measured = trainer.validate(module, datamodule=data, verbose=False)[0]
-    assert measured["record.label/validate.targets.known"] == 4
-    assert measured["record.label/validate.targets.unavailable"] == 4
-    assert measured["record.label/validate.coverage.content"] == 0.5
+    assert measured["/label/validate.targets.known"] == 4
+    assert measured["/label/validate.targets.unavailable"] == 4
+    assert measured["/label/validate.coverage.content"] == 0.5

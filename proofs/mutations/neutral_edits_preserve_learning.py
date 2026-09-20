@@ -69,7 +69,7 @@ OFFSETS = (-0.75, -0.25, 0.25, 0.75)
 # ```
 #
 # After rebinding the schema's `x` field to `renamed_x`, the same information
-# should produce the same first answer. The schema address remains `record/x`.
+# should produce the same first answer. The schema address remains `/x`.
 #
 # ```yaml
 # renamed_x: 0.5
@@ -91,7 +91,7 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
 
 def prediction(model: rf.Model, rows: list[dict], *, key: str = "x") -> np.ndarray:
     output = model.predict([{key: row["x"], "code": row["code"]} for row in rows])["predictions"].to_pylist()
-    return np.asarray([row["record/y"]["content"] for row in output], dtype=np.float64)
+    return np.asarray([row["/y"]["content"] for row in output], dtype=np.float64)
 
 
 def equal(first, second) -> bool:
@@ -186,9 +186,9 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     model.eval()
     reference = prediction(model, test)
     state = deepcopy(model.state_dict())
-    vocabulary = model.nodes["record/code"].embedder.vocab.snapshot()
-    root = rf.where("address") == "record"
-    source = rf.where("address") == "record/x"
+    vocabulary = model.nodes["/code"].embedder.vocab.snapshot()
+    root = rf.where("address") == "/"
+    source = rf.where("address") == "/x"
     measured = errors(actual, reference, baseline)
     edits = []
     checks = {"Source learns the relationship below 0.25 nRMSE": measured["nrmse"] < 0.25}
@@ -198,7 +198,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         current = model.state_dict()
         missing = [name for name, value in state.items() if name not in current or not equal(value, current[name])]
         preserved = bool(np.allclose(reference, result, rtol=1e-5, atol=1e-6 * scale))
-        same_vocabulary = model.nodes["record/code"].embedder.vocab.snapshot() == vocabulary
+        same_vocabulary = model.nodes["/code"].embedder.vocab.snapshot() == vocabulary
         edits.append(
             {
                 "edit": label,
@@ -216,7 +216,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         observe(f"cycle {cycle + 1} metadata")
         model.extend(root, unused=rf.Number(active=False))
         observe(f"cycle {cycle + 1} inactive extension")
-        model.delete(rf.where("address") == "record/unused")
+        model.delete(rf.where("address") == "/unused")
         observe(f"cycle {cycle + 1} inactive deletion")
     model.update(source, query="renamed_x")
     observe("equivalent source rebind", key="renamed_x")

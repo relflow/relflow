@@ -14,7 +14,7 @@ from relflow.helpers.state import Rebuild, compatible
 from relflow.tensorfields.base import TENSORFIELDS, Extension
 from relflow.tensorfields.extensions import number
 
-ADDRESS = rf.Address("record/value")
+ADDRESS = rf.Address("/value")
 KINDS = ("category", "set", "cluster")
 LABELS = ("a", "b", "c", "d", "e", "a")
 

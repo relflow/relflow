@@ -38,10 +38,10 @@ def test_sampled_proof_does_not_use_query_targets_during_training():
     training = model.encode(source, strata="train", seed=11)
     ordinary = model.encode(source, strata="predict")
     for name in ("x", "y"):
-        field = training[f"record/{name}"]
+        field = training[f"/{name}"]
         assert field.trainable.any() and not field.trainable.all()
         assert field.present.all()
-        assert not ordinary[f"record/{name}"].inferred.any()
+        assert not ordinary[f"/{name}"].inferred.any()
 
 
 def test_nested_query_proof_selects_real_targets_not_padding():
@@ -51,7 +51,7 @@ def test_nested_query_proof_selects_real_targets_not_padding():
         [[item["selected"] for item in row["items"]] + [False] * (proof.LENGTH - len(row["items"])) for row in rows]
     )
     assert any(len(row["items"]) < proof.LENGTH for row in rows)
-    field = proof.build().encode(pa.Table.from_pylist(rows), strata="train")["record/items/value"]
+    field = proof.build().encode(pa.Table.from_pylist(rows), strata="train")["/items/value"]
     np.testing.assert_array_equal(field.trainable.numpy().reshape(expected.shape), expected)
     assert not field.present.numpy().reshape(expected.shape)[expected].any()
 
@@ -73,7 +73,7 @@ def test_branch_proof_selectors_cover_all_visibility_patterns_and_compose():
                 for row in rows
             ]
         )
-        np.testing.assert_array_equal(fields[f"record/views/{name}"].present.numpy().reshape(expected.shape), expected)
+        np.testing.assert_array_equal(fields[f"/views/{name}"].present.numpy().reshape(expected.shape), expected)
 
 
 def test_prefix_proof_hides_every_future_and_trains_one_next_value():
@@ -81,7 +81,7 @@ def test_prefix_proof_hides_every_future_and_trains_one_next_value():
     rows = list(proof.records(rows=32, seed=11))
     model = proof.build()
     source = pa.Table.from_pylist(rows)
-    field = model.encode(source, strata="train")["record/events/value"]
+    field = model.encode(source, strata="train")["/events/value"]
     next_value = np.asarray([[event["next"] for event in row["events"]] for row in rows])
     visible = np.asarray([[not event["future"] for event in row["events"]] for row in rows])
     assert (next_value.sum(axis=1) == 1).all()
@@ -96,7 +96,7 @@ def test_repeated_prediction_reads_public_output_without_learning(name):
 
     proof = load(name)
     model = proof.build()
-    address = "record/items/value" if name == "query_reconstruction" else "record/events/value"
+    address = "/items/value" if name == "query_reconstruction" else "/events/value"
     before = rf.Number.normalization(model, address)
     content, inferred = proof.prediction(model, list(proof.records(rows=4, seed=11)))
     assert content.shape == inferred.shape == (4, proof.LENGTH)

@@ -41,7 +41,6 @@ attribution, and spending consistently before constructing the splits.
 import relflow as rf
 
 model = rf.Model(
-    name="customer",
     d_model=128,
     n_layers=3,
     n_heads=8,
@@ -54,7 +53,7 @@ model = rf.Model(
         age_days=rf.Number,
         line_items=rf.Branch(
             length=16,
-            sku=rf.Category(),
+            sku=rf.Category,
             quantity=rf.Number,
         ),
         refunded_next_month=rf.Boolean(mask=True),
@@ -62,11 +61,11 @@ model = rf.Model(
     sessions=rf.Branch(
         length=128,
         overflow="tail",
-        device=rf.Category(),
+        device=rf.Category,
         events=rf.Branch(
             length=64,
             overflow="tail",
-            kind=rf.Category(),
+            kind=rf.Category,
             elapsed_seconds=rf.Number,
         ),
     ),
@@ -135,8 +134,8 @@ errors, and refund discrimination between orders from the same customer.
 A combined validation loss can hide a regression in one target. This example
 specifies a design, not measured model quality.
 
-The output addresses are `customer/churned`, `customer/next_month_spend`,
-`customer/orders/refunded_next_month`, and the `customer` embedding. Preserve
+The output addresses are `/churned`, `/next_month_spend`,
+`/orders/refunded_next_month`, and the `/` embedding. Preserve
 request identifiers and the retained order mapping when joining predictions
 back to application records; a learned summary is not an order identifier.
 See [Prediction Output](../guides/prediction-output.qmd).

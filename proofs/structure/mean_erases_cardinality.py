@@ -124,7 +124,7 @@ def prediction(model: rf.Model, rows: list[dict], source: str, target: str) -> n
     """Predict one hidden scalar from its visible repeated context."""
     inputs = [{source: row[source]} for row in rows]
     output = model.predict(inputs).to_pylist()
-    return np.asarray([row["predictions"][f"record/{target}"]["content"] for row in output], dtype=np.float64)
+    return np.asarray([row["predictions"][f"/{target}"]["content"] for row in output], dtype=np.float64)
 
 
 def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:

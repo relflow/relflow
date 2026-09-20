@@ -31,20 +31,19 @@ preferred_channel: email
 import relflow as rf
 
 model = rf.Model(
-    name="customer",
     d_model=128,
     n_layers=3,
     n_heads=8,
     orders=rf.Branch(
         length=64,
-        merchant=rf.Category(),
-        tags=rf.Set(),
+        merchant=rf.Category,
+        tags=rf.Set,
     ),
     preferred_channel=rf.Category(mask=True),
 )
 ```
 
-All orders share `customer/orders/merchant`, so that field learns one merchant
+All orders share `/orders/merchant`, so that field learns one merchant
 vocabulary across customers and order positions. Tags and preferred channels
 have separate mappings. Matching labels in different fields do not imply
 shared slots or embeddings. Use one repeated field when roles should share a
@@ -213,9 +212,9 @@ when reusing it.
 After training the example model:
 
 ```python
-merchant_labels = rf.Category.vocabulary(model, "customer/orders/merchant")
-merchant_counts = rf.Category.counts(model, "customer/orders/merchant")
-tag_labels = rf.Set.vocabulary(model, "customer/orders/tags")
+merchant_labels = rf.Category.vocabulary(model, rf.Address("orders", "merchant"))
+merchant_counts = rf.Category.counts(model, rf.Address("orders", "merchant"))
+tag_labels = rf.Set.vocabulary(model, rf.Address("orders", "tags"))
 merchant_label_count = len(merchant_labels)
 ```
 

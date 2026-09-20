@@ -30,7 +30,7 @@ from relflow.tensorfields.shared.vocabulary import OnlineVocabularyModel, Vocabu
 from tests.arrow import batch as arrow_batch
 from tests.tensorfields.helpers import tensorize
 
-ADDRESS = "root/items/cluster"
+ADDRESS = "/items/cluster"
 
 
 def build_embedder(schema):
@@ -66,7 +66,6 @@ def _structure_payload(
     return {
         "d_model": 16,
         "fields": {
-            "name": "root",
             "type": "branch",
             "dropout": 0.1,
             "fields": [

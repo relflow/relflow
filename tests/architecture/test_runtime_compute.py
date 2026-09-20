@@ -29,19 +29,19 @@ def test_forward_and_training_step_share_compute_after_host_preparation(monkeypa
         pin_memory=False,
     )
     batch = next(iter(data.train_dataloader()))
-    assert rf.Number.normalization(model, "record/value")["count"] == 0
+    assert rf.Number.normalization(model, "/value")["count"] == 0
     calls = []
     original = ModelRuntime.compute
 
     def compute(module, inputs, *, plan, decoders, predict):
-        calls.append((module, inputs, decoders, predict, rf.Number.normalization(module, "record/value")))
+        calls.append((module, inputs, decoders, predict, rf.Number.normalization(module, "/value")))
         return original(module, inputs, plan=plan, decoders=decoders, predict=predict)
 
     monkeypatch.setattr(ModelRuntime, "compute", staticmethod(compute))
     monkeypatch.setattr(model, "log", lambda *args, **kwargs: None)
     if entry == "forward":
         predictions = model(batch.tensors, strata=" TrAiN ")
-        prediction = next(value for value in predictions if value.address == "record/label")
+        prediction = next(value for value in predictions if value.address == "/label")
         loss = prediction.payload[TensorKey.state].square().mean()
     else:
         result = model.training_step(batch, 0)
@@ -52,11 +52,11 @@ def test_forward_and_training_step_share_compute_after_host_preparation(monkeypa
     module, inputs, decoders, predict, normalization = calls[0]
     assert module is model and inputs is batch.tensors
     assert not predict
-    assert tuple(route.address for route in decoders) == (Address("record/label"),)
+    assert tuple(route.address for route in decoders) == (Address("/label"),)
     assert normalization["count"] == (2 if entry == "training_step" else 0)
     assert torch.isfinite(loss)
     loss.backward()
-    gradient = model.nodes["record/label"].decoder.state.weight.grad
+    gradient = model.nodes["/label"].decoder.state.weight.grad
     assert gradient is not None and torch.isfinite(gradient).all()
     assert gradient.abs().sum() > 0
 
@@ -65,7 +65,7 @@ def test_forward_and_training_step_share_compute_after_host_preparation(monkeypa
 def test_host_validation_rejects_invalid_inputs_before_compute(monkeypatch, entry):
     model = rf.Model(value=rf.Number, label=rf.Boolean(mask=True), d_model=8, n_layers=1, n_heads=2)
     inputs = model.encode(pa.table({"value": [1.0], "label": [True]}), strata=Strata.train)
-    inputs["record/value"].state = inputs["record/value"].state.float()
+    inputs["/value"].state = inputs["/value"].state.float()
 
     def compute(*args, **kwargs):
         pytest.fail("invalid inputs reached the tensor computation")
@@ -92,7 +92,7 @@ def test_compute_preserves_late_extension_nested_content_and_module_hooks():
             pa.table({"value": ["a", "bb", "ccc"], "skip": [False, True, False]}),
             strata=Strata.train,
         )
-        embedder = model.nodes["record/value"].embedder
+        embedder = model.nodes["/value"].embedder
         seen = []
         handle = embedder.register_forward_pre_hook(lambda module, args: seen.append(args[0]))
         try:
@@ -105,7 +105,7 @@ def test_compute_preserves_late_extension_nested_content_and_module_hooks():
         for compact in seen:
             assert compact.content["matrix"].shape == (2, 2, 3)
             assert compact.content["nested", "cube"].shape == (2, 2, 2, 2)
-        assert [prediction.address for prediction in computed] == [Address("record")]
+        assert [prediction.address for prediction in computed] == [Address("/")]
         actual = computed[0].payload[TensorKey.embedding]
         torch.testing.assert_close(actual, public[0].payload[TensorKey.embedding], rtol=0, atol=0)
         assert actual.shape == (3, 8)
@@ -137,17 +137,17 @@ def test_execution_plan_follows_schema_updates_resets_and_checkpoint_restore():
     model.update(rf.where("name") == "value", embed=True)
     assert model.execution_plan is None
     updated = model(inputs, strata=Strata.predict)
-    assert [prediction.address for prediction in updated] == ["record", "record/value"]
+    assert [prediction.address for prediction in updated] == ["/", "/value"]
     assert execution(model) is not cached
 
     model.reset(rf.where("name") == "value")
     assert model.execution_plan is None
-    assert [prediction.address for prediction in model(inputs, strata=Strata.predict)] == ["record", "record/value"]
+    assert [prediction.address for prediction in model(inputs, strata=Strata.predict)] == ["/", "/value"]
 
     model.restore_checkpoint_state(checkpoint)
     assert model.execution_plan is None
     restored = model(inputs, strata=Strata.predict)
-    assert [prediction.address for prediction in restored] == ["record"]
+    assert [prediction.address for prediction in restored] == ["/"]
     torch.testing.assert_close(
         restored[0].payload[TensorKey.embedding], original[0].payload[TensorKey.embedding], rtol=0, atol=0
     )
@@ -181,7 +181,7 @@ def test_failed_checkpoint_restore_keeps_original_execution_plan():
 def test_cached_schema_plan_preserves_live_decoder_context_routes():
     model = rf.Model(value=rf.Number, label=rf.Number(mask=True), d_model=8, n_layers=1, n_heads=2)
     inputs = model.encode(pa.table({"value": [1.0]}))
-    decoder = model.nodes["record/label"].decoder
+    decoder = model.nodes["/label"].decoder
     seen = []
     handle = decoder.register_forward_pre_hook(
         lambda module, args, kwargs: seen.append(tuple(parcel.origin for parcel in kwargs["contexts"])),
@@ -196,4 +196,4 @@ def test_cached_schema_plan_preserves_live_decoder_context_routes():
         handle.remove()
 
     assert execution(model) is cached
-    assert seen == [(Address("record/value"),), ()]
+    assert seen == [(Address("/value"),), ()]

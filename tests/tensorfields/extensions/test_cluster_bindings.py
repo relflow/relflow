@@ -9,7 +9,7 @@ import relflow as rf
 from relflow.tensorfields.extensions.cluster import Embedder
 from tests.arrow import table
 
-ADDRESS = rf.Address("record/merchant_id")
+ADDRESS = rf.Address("/merchant_id")
 CAPACITY = 6
 N_CLUSTERS = 3
 
@@ -17,7 +17,6 @@ N_CLUSTERS = 3
 def build() -> rf.Model:
     torch.manual_seed(0)
     return rf.Model(
-        name="record",
         d_model=8,
         n_layers=1,
         n_heads=4,
@@ -56,7 +55,7 @@ def test_cluster_vocabulary_returns_immutable_model_snapshot() -> None:
     learn(model, "GAMMA")
 
     assert snapshot == ("ALPHA", "BETA")
-    assert rf.Cluster.vocabulary(model, "record/merchant_id") == (
+    assert rf.Cluster.vocabulary(model, "/merchant_id") == (
         "ALPHA",
         "BETA",
         "GAMMA",
@@ -145,7 +144,6 @@ def test_cluster_status_returns_detached_cpu_native_snapshot() -> None:
 
 def test_cluster_decoder_does_not_condition_identity_on_row_siblings() -> None:
     model = rf.Model(
-        name="record",
         d_model=8,
         n_layers=1,
         n_heads=2,
@@ -179,7 +177,7 @@ def test_cluster_status_preserves_usage_precision() -> None:
 )
 def test_cluster_model_bindings_reject_missing_address(binding) -> None:
     with pytest.raises(KeyError, match="missing"):
-        binding(build(), "record/missing")
+        binding(build(), "/missing")
 
 
 @pytest.mark.parametrize(
@@ -189,7 +187,6 @@ def test_cluster_model_bindings_reject_missing_address(binding) -> None:
 )
 def test_cluster_model_bindings_reject_non_cluster_field(binding) -> None:
     model = rf.Model(
-        name="record",
         d_model=8,
         n_layers=1,
         n_heads=4,
@@ -197,7 +194,7 @@ def test_cluster_model_bindings_reject_non_cluster_field(binding) -> None:
     )
 
     with pytest.raises(TypeError, match="not a Cluster field"):
-        binding(model, "record/amount")
+        binding(model, "/amount")
 
 
 def test_cluster_vocabulary_validates_context_resource_and_source() -> None:

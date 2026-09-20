@@ -89,10 +89,7 @@ def build(p_unavailable: float) -> rf.Model:
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray(
-        [
-            row["record/nonempty"]["content"]
-            for row in model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
-        ]
+        [row["/nonempty"]["content"] for row in model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()]
     )
 
 
@@ -132,7 +129,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             num_sanity_val_steps=0,
         )
         trainer.fit(model, datamodule=data)
-        vocabulary = rf.Set.vocabulary(model, "record/tags")
+        vocabulary = rf.Set.vocabulary(model, "/tags")
         arm = "augmented" if probability else "control"
         for novel in (False, True):
             rows = list(records(rows=2048, seed=seed + 3, novel=novel))
@@ -147,9 +144,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
                 drift = float(np.max(np.abs(values - predict(model, changed))))
                 metrics[f"{arm}_duplicate_and_identity_drift"] = drift
                 checks[f"{arm}: unknown spelling and duplicates are invariant"] = drift < 1e-5
-        checks[f"{arm}: unknown evaluation leaves vocabulary frozen"] = (
-            rf.Set.vocabulary(model, "record/tags") == vocabulary
-        )
+        checks[f"{arm}: unknown evaluation leaves vocabulary frozen"] = rf.Set.vocabulary(model, "/tags") == vocabulary
     checks["Trained fallback improves unknown-input RMSE by more than 0.40"] = (
         metrics["control_unknown"] - metrics["augmented_unknown"] > 0.40
     )

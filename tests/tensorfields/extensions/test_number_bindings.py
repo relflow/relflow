@@ -9,12 +9,11 @@ import torch
 
 import relflow as rf
 
-ADDRESS = rf.Address("record/amount")
+ADDRESS = rf.Address("/amount")
 
 
 def _model(*, alpha: float | None = None) -> rf.Model:
     return rf.Model(
-        name="record",
         d_model=8,
         n_layers=1,
         n_heads=4,
@@ -50,7 +49,7 @@ def test_number_normalization_reports_ema_configuration_without_count() -> None:
     normalizer = model.nodes[ADDRESS].embedder.normalizer
     normalizer.update(torch.tensor([2.0, 4.0]))
 
-    snapshot = rf.Number.normalization(model, "record/amount")
+    snapshot = rf.Number.normalization(model, "/amount")
 
     assert snapshot["mean"] == pytest.approx(0.75)
     assert snapshot["variance"] == pytest.approx(1.0)
@@ -75,12 +74,11 @@ def test_number_normalization_rejects_invalid_model_and_address() -> None:
 
     model = _model()
     with pytest.raises(KeyError, match="missing"):
-        rf.Number.normalization(model, "record/missing")
+        rf.Number.normalization(model, "/missing")
 
 
 def test_number_normalization_rejects_non_number_model_field() -> None:
     model = rf.Model(
-        name="record",
         d_model=8,
         n_layers=1,
         n_heads=4,
@@ -88,4 +86,4 @@ def test_number_normalization_rejects_non_number_model_field() -> None:
     )
 
     with pytest.raises(TypeError, match="not a Number field"):
-        rf.Number.normalization(model, "record/category")
+        rf.Number.normalization(model, "/category")

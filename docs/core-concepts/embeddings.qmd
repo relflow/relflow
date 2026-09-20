@@ -17,12 +17,11 @@ application supplies its own customer observations and training splits.
 import relflow as rf
 
 model = rf.Model(
-    name="customer",
     d_model=128,
     n_layers=3,
     n_heads=8,
     embed=True,
-    region=rf.Category(),
+    region=rf.Category,
     purchases=rf.Branch(
         length=64,
         embed=True,
@@ -76,11 +75,11 @@ import pyarrow.compute as pc
 
 predictions = model.predict(observations)["predictions"]
 customer_embedding = pc.struct_field(
-    pc.struct_field(predictions, "customer"),
+    pc.struct_field(predictions, rf.Address()),
     "embedding",
 )
 purchase_history_embedding = pc.struct_field(
-    pc.struct_field(predictions, "customer/purchases"),
+    pc.struct_field(predictions, rf.Address("purchases")),
     "embedding",
 )
 ```

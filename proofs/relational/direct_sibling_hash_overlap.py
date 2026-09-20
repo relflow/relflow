@@ -203,7 +203,7 @@ def overlap_truth(rows: list[dict]) -> np.ndarray:
 
 def probabilities(model: rf.Model, rows: list[dict]) -> np.ndarray:
     output = model.predict(rows).to_pylist()
-    return np.asarray([row["predictions"]["overlap/has_overlap"]["content"]["probability"] for row in output])
+    return np.asarray([row["predictions"]["/has_overlap"]["content"]["probability"] for row in output])
 
 
 # %% [markdown]
@@ -255,7 +255,6 @@ def probabilities(model: rf.Model, rows: list[dict]) -> np.ndarray:
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
-        name="overlap",
         d_model=48,
         n_layers=3,
         n_heads=4,

@@ -61,7 +61,7 @@ def test_extension_rejects_unregistered_arrow_terminal_families(family, datatype
     try:
         assert not extension.accepts(datatype)
         with pytest.raises(TypeError, match="does not accept Arrow type.*normalize it in a preprocessor"):
-            extension.prepare(pa.array([], type=datatype), address=Address("record/value"))
+            extension.prepare(pa.array([], type=datatype), address=Address("/value"))
     finally:
         TENSORFIELDS.pop(extension.name, None)
 
@@ -70,7 +70,7 @@ def test_extension_prepare_validates_and_preserves_one_whole_arrow_array():
     extension = Extension(extension_name(), types=(int | float,))
     values = pa.array([[1, 2], [3]], type=pa.large_list(pa.int64()))
     try:
-        prepared = extension.prepare(values, address=Address("record/value"))
+        prepared = extension.prepare(values, address=Address("/value"))
 
         assert prepared is values
     finally:
@@ -89,7 +89,7 @@ def test_extension_prepare_validates_and_preserves_one_whole_arrow_array():
 def test_multifamily_extensions_accept_all_null_arrow_columns(field):
     model = rf.Model(value=field, d_model=8, n_layers=1, n_heads=2)
 
-    encoded = model.encode(pa.table({"value": pa.nulls(2)}))["record/value"]
+    encoded = model.encode(pa.table({"value": pa.nulls(2)}))["/value"]
 
     assert encoded.state.tolist() == [
         [Tokens.null.value],
@@ -130,7 +130,7 @@ def test_mask_spelling_is_ordinary_typed_string_content():
 
     fields = model.encode(pa.table({"value": ["<MASK>"]}))
 
-    assert fields["record/value"].state.tolist() == [[Tokens.valued.value]]
+    assert fields["/value"].state.tolist() == [[Tokens.valued.value]]
 
 
 def test_nested_dictionary_chunks_decode_without_combining_indices():
@@ -161,10 +161,10 @@ def test_nested_dictionary_chunks_decode_without_combining_indices():
         n_heads=2,
     )
 
-    encoded = model.encode(source, strata=Strata.train)["record/items/value"]
+    encoded = model.encode(source, strata=Strata.train)["/items/value"]
 
     assert encoded.state.eq(Tokens.valued.value).all()
-    assert set(rf.Category.vocabulary(model, "record/items/value")) == set(expected)
+    assert set(rf.Category.vocabulary(model, "/items/value")) == set(expected)
 
 
 def test_dictionary_null_values_remain_null_after_decoding():
@@ -179,14 +179,14 @@ def test_dictionary_null_values_remain_null_after_decoding():
         n_heads=2,
     )
 
-    encoded = model.encode(pa.table({"value": values}), strata=Strata.train)["record/value"]
+    encoded = model.encode(pa.table({"value": values}), strata=Strata.train)["/value"]
 
     assert encoded.state.tolist() == [
         [Tokens.valued.value],
         [Tokens.null.value],
         [Tokens.null.value],
     ]
-    assert rf.Category.vocabulary(model, "record/value") == ("value",)
+    assert rf.Category.vocabulary(model, "/value") == ("value",)
 
 
 def test_extension_storage_uses_dictionary_value_validity():
@@ -216,7 +216,7 @@ def test_extension_storage_uses_dictionary_value_validity():
         n_heads=2,
     )
 
-    encoded = model.encode(pa.table({"value": values}), strata=Strata.train)["record/value"]
+    encoded = model.encode(pa.table({"value": values}), strata=Strata.train)["/value"]
 
     assert encoded.state.tolist() == [
         [Tokens.valued.value],
@@ -242,7 +242,7 @@ def test_dateparts_encodes_heterogeneous_date_union():
         n_heads=2,
     )
 
-    encoded = model.encode(pa.table({"value": values}), strata=Strata.test)["record/value"]
+    encoded = model.encode(pa.table({"value": values}), strata=Strata.test)["/value"]
 
     assert encoded.state.tolist() == [
         [Tokens.valued.value],
@@ -267,7 +267,7 @@ model = rf.Model(
     n_layers=1,
     n_heads=2,
 )
-field = coalesce(convert(source), model.schema, Strata.predict)["record/value"].pristine
+field = coalesce(convert(source), model.schema, Strata.predict)["/value"].pristine
 assert field.shape == (0, 1)
 assert field.values.type == pa.float64()
 """
@@ -297,7 +297,7 @@ def test_typed_empty_branch_preserves_union_storage():
         n_heads=2,
     )
 
-    encoded = model.encode(source, strata=Strata.test)["record/items/value"]
+    encoded = model.encode(source, strata=Strata.test)["/items/value"]
 
     assert encoded.state.shape == (0, 1, 3)
     assert encoded.content.shape == (0, 1, 3)
@@ -312,7 +312,7 @@ def test_coalesce_returns_arrow_backed_projections():
     )
     source = batch([{"items": [{"value": 1.0}, {"value": None}]}])
 
-    projection = coalesce(source, schema=model.schema, strata=Strata.predict)["record/items/value"]
+    projection = coalesce(source, schema=model.schema, strata=Strata.predict)["/items/value"]
     field = projection.pristine
 
     assert isinstance(projection, Projection)

@@ -150,14 +150,14 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     )
     trainer.fit(model, datamodule=data)
     model.eval()
-    vocabulary = rf.Category.vocabulary(model, "record/label")
-    hints = rf.Category.vocabulary(model, "record/hint")
-    counts = rf.Category.counts(model, "record/label")
-    normalization = rf.Number.normalization(model, "record/x")
+    vocabulary = rf.Category.vocabulary(model, "/label")
+    hints = rf.Category.vocabulary(model, "/hint")
+    counts = rf.Category.counts(model, "/label")
+    normalization = rf.Number.normalization(model, "/x")
     test = list(records(rows=2048, seed=seed + 3, shifted=True))
     source = pa.Table.from_pylist(test)
     output = model.predict(source)["predictions"].to_pylist()
-    content = [row["record/label"]["content"] for row in output]
+    content = [row["/label"]["content"] for row in output]
     actual = np.asarray([row["label"] for row in test])
     predicted = np.asarray([row["value"] for row in content])
     known = np.isin(actual, vocabulary)
@@ -167,12 +167,12 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         datamodule=rf.SyntheticDataModule(model=model, test=partial(records, rows=2048, seed=seed + 3, shifted=True)),
         verbose=False,
     )[0]
-    builtin = float(evaluated["record.label/test.accuracy.content"])
+    builtin = float(evaluated["/label/test.accuracy.content"])
     order = np.random.default_rng(seed + 4).permutation(len(test))
     corrupted = [{**row, "x": test[index]["x"]} for row, index in zip(test, order, strict=True)]
     broken = model.predict(pa.Table.from_pylist(corrupted))["predictions"].to_pylist()
-    broken_values = np.asarray([row["record/label"]["content"]["value"] for row in broken])
-    field = model.encode(source, strata="test")["record/label"]
+    broken_values = np.asarray([row["/label"]["content"]["value"] for row in broken])
+    field = model.encode(source, strata="test")["/label"]
     metrics = {
         "steps": trainer.global_step,
         "output_vocabulary": vocabulary,
@@ -205,12 +205,11 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         "Unknown target content uses the unavailable sentinel": bool(
             (field.targets[rf.TensorKey.content].reshape(-1).cpu().numpy()[~known] == -1).all()
         ),
-        "Evaluation preserves output vocabulary and exposure counts": rf.Category.vocabulary(model, "record/label")
+        "Evaluation preserves output vocabulary and exposure counts": rf.Category.vocabulary(model, "/label")
         == vocabulary
-        and rf.Category.counts(model, "record/label") == counts,
-        "Evaluation preserves hint vocabulary and numerical moments": rf.Category.vocabulary(model, "record/hint")
-        == hints
-        and rf.Number.normalization(model, "record/x") == normalization,
+        and rf.Category.counts(model, "/label") == counts,
+        "Evaluation preserves hint vocabulary and numerical moments": rf.Category.vocabulary(model, "/hint") == hints
+        and rf.Number.normalization(model, "/x") == normalization,
     }
 
 

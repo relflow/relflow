@@ -63,7 +63,7 @@ input precision.
 For an application-supplied trained `model`:
 
 ```python
-normalization = rf.Number.normalization(model, "record/amount")
+normalization = rf.Number.normalization(model, rf.Address("amount"))
 ```
 
 The snapshot contains `mean`, `variance`, `std`, `count`, and `alpha`. Repeated

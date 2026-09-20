@@ -30,11 +30,11 @@ def model(kind, *, p_unavailable=0.0, mask=True):
 
 def evaluate(module, labels, logits, strata=rf.Strata.test):
     # Encode without admission, including when testing the training objective.
-    batch = module.encode(pa.table({"x": [0.0] * len(labels), "label": labels}), strata="test")["record/label"]
-    kind = module.schema.requests["record/label"].type
+    batch = module.encode(pa.table({"x": [0.0] * len(labels), "label": labels}), strata="test")["/label"]
+    kind = module.schema.requests["/label"].type
     key = rf.TensorKey.content if kind == "set" else rf.TensorKey.cluster
     prediction = Prediction(
-        address="record/label",
+        address="/label",
         payload=TensorDict(
             {
                 rf.TensorKey.state: torch.zeros(len(labels), 1, len(rf.Tokens), requires_grad=True),
@@ -50,9 +50,9 @@ def evaluate(module, labels, logits, strata=rf.Strata.test):
 def test_input_augmentation_preserves_pristine_answers(kind):
     module = model(kind, p_unavailable=1.0, mask=False)
     labels = [["a", "b"], [], None] if kind == "set" else ["a", "b", None]
-    field = module.encode(pa.table({"x": [0.0] * 3, "label": labels}), strata="train")["record/label"]
+    field = module.encode(pa.table({"x": [0.0] * 3, "label": labels}), strata="train")["/label"]
     supervised = model(kind, p_unavailable=1.0)
-    answers = supervised.encode(pa.table({"x": [0.0] * 3, "label": labels}), strata="train")["record/label"].targets[
+    answers = supervised.encode(pa.table({"x": [0.0] * 3, "label": labels}), strata="train")["/label"].targets[
         rf.TensorKey.content
     ]
     if kind == "set":
@@ -68,17 +68,17 @@ def test_input_augmentation_preserves_pristine_answers(kind):
 def test_set_unknown_counts_preserve_set_semantics_and_reach_encoder():
     module = model("set", mask=False)
     labels = [["a", "new", "new", "other", None], ["other", "new", "a"], [], ["new"], None]
-    batch = module.encode(pa.table({"x": [0.0] * 5, "label": labels}), strata="test")["record/label"]
+    batch = module.encode(pa.table({"x": [0.0] * 5, "label": labels}), strata="test")["/label"]
     assert batch.content["unavailable"].reshape(-1).tolist() == [2, 2, 0, 1, 0]
     assert torch.equal(batch.content["membership"][0], batch.content["membership"][1])
-    embedder = module.nodes["record/label"].embedder
+    embedder = module.nodes["/label"].embedder
     with torch.no_grad():
         embedder.unavailable.fill_(1)
     embedded = embedder(batch.take(torch.arange(5))).payload
     torch.testing.assert_close(embedded[0], embedded[1])
     assert not torch.equal(embedded[2], embedded[3])
     assert not torch.equal(embedded[3], embedded[4])
-    assert rf.Set.vocabulary(module, "record/label") == ("a", "b")
+    assert rf.Set.vocabulary(module, "/label") == ("a", "b")
 
 
 def test_set_partial_unknown_targets_keep_known_positive_and_negative_gradients():
@@ -90,7 +90,7 @@ def test_set_partial_unknown_targets_keep_known_positive_and_negative_gradients(
         expected[:3, :2], torch.tensor([[1.0, 0.0], [0.0, 0.0], [0.0, 0.0]])
     ).backward()
     torch.testing.assert_close(logits.grad, expected.grad)
-    scores = module.nodes["record/label"].decoder.metrics["test_metrics"].compute()
+    scores = module.nodes["/label"].decoder.metrics["test_metrics"].compute()
     assert scores["targets.known"] == 1
     assert scores["targets.unavailable"] == 2
     assert scores["coverage.content"] == pytest.approx(1 / 3)
@@ -108,8 +108,8 @@ def test_scores_do_not_depend_on_batch_partition(kind):
     evaluate(joint, labels, logits)
     for start, end in ((0, 1), (1, 3), (3, 6)):
         evaluate(split, labels[start:end], logits[start:end])
-    first = joint.nodes["record/label"].decoder.metrics["test_metrics"].compute()
-    second = split.nodes["record/label"].decoder.metrics["test_metrics"].compute()
+    first = joint.nodes["/label"].decoder.metrics["test_metrics"].compute()
+    second = split.nodes["/label"].decoder.metrics["test_metrics"].compute()
     for name, value in first.items():
         torch.testing.assert_close(value, second[name], equal_nan=True)
 
@@ -118,8 +118,8 @@ def test_set_unused_capacity_does_not_inflate_bit_accuracy_or_dilute_loss():
     small, large = model("set"), model("set")
     evaluate(small, [["a"]], torch.tensor([[-2.0, -2.0]]))
     evaluate(large, [["a"]], torch.full((1, 1024), -2.0))
-    left = small.nodes["record/label"].decoder.metrics["test_metrics"].compute()
-    right = large.nodes["record/label"].decoder.metrics["test_metrics"].compute()
+    left = small.nodes["/label"].decoder.metrics["test_metrics"].compute()
+    right = large.nodes["/label"].decoder.metrics["test_metrics"].compute()
     for name, value in left.items():
         torch.testing.assert_close(value, right[name], equal_nan=True)
     assert left["accuracy.content"] == 0.5
@@ -128,7 +128,7 @@ def test_set_unused_capacity_does_not_inflate_bit_accuracy_or_dilute_loss():
 
 def test_cluster_unknown_targets_do_not_change_assignment_or_adaptive_state():
     module = model("cluster")
-    embedder = module.nodes["record/label"].embedder
+    embedder = module.nodes["/label"].embedder
     usage, committed, adherence = (
         value.clone() for value in (embedder.usage_ema, embedder.committed, embedder.adherence_ema)
     )
@@ -141,7 +141,7 @@ def test_cluster_unknown_targets_do_not_change_assignment_or_adaptive_state():
     torch.testing.assert_close(embedder.usage_ema, usage)
     torch.testing.assert_close(embedder.committed, committed)
     torch.testing.assert_close(embedder.adherence_ema, adherence)
-    scores = module.nodes["record/label"].decoder.metrics["train_metrics"].compute()
+    scores = module.nodes["/label"].decoder.metrics["train_metrics"].compute()
     assert scores["targets.unavailable"] == 6
     assert scores["coverage.content"] == 0
     assert torch.isnan(scores["loss.content"])
@@ -150,14 +150,14 @@ def test_cluster_unknown_targets_do_not_change_assignment_or_adaptive_state():
 def test_cluster_balancing_uses_known_rows_and_proper_unweighted_label_objective():
     base, mixed = model("cluster"), model("cluster")
     mixed.load_state_dict(base.state_dict())
-    mixed.nodes["record/label"].embedder.counters["content"].counts[0] = 1000
+    mixed.nodes["/label"].embedder.counters["content"].counts[0] = 1000
     known_logits = torch.randn(4, 4, requires_grad=True)
     mixed_logits = torch.cat((known_logits.detach(), torch.full((7, 4), 30.0))).requires_grad_()
     evaluate(base, ["a", "b", "a", "b"], known_logits, rf.Strata.train).backward()
     evaluate(mixed, ["a", "b", "a", "b"] + ["new"] * 7, mixed_logits, rf.Strata.train).backward()
     torch.testing.assert_close(known_logits.grad, mixed_logits.grad[:4])
     assert not mixed_logits.grad[4:].any()
-    left, right = (module.nodes["record/label"].embedder for module in (base, mixed))
+    left, right = (module.nodes["/label"].embedder for module in (base, mixed))
     torch.testing.assert_close(left.usage_ema, right.usage_ema)
     torch.testing.assert_close(left.committed, right.committed)
     torch.testing.assert_close(left.adherence_ema, right.adherence_ema)
@@ -187,7 +187,7 @@ def test_empty_vocabulary_has_differentiable_zero_content_loss(kind):
     objective.backward()
     assert torch.isfinite(objective)
     assert not logits.grad.any()
-    scores = module.nodes["record/label"].decoder.metrics["test_metrics"].compute()
+    scores = module.nodes["/label"].decoder.metrics["test_metrics"].compute()
     assert torch.isnan(scores["loss.content"])
 
 
@@ -215,8 +215,8 @@ def test_registered_metrics_share_one_callback_and_reset_each_stage():
 
 def test_unknown_only_epoch_does_not_revive_or_merge_from_stale_cluster_statistics():
     module = model("cluster")
-    embedder = module.nodes["record/label"].embedder
-    decoder = module.nodes["record/label"].decoder
+    embedder = module.nodes["/label"].embedder
+    decoder = module.nodes["/label"].decoder
     with torch.no_grad():
         embedder.adherence_ema.fill_(1)
         embedder.committed[:3] = True
@@ -278,31 +278,29 @@ def test_mixed_vocabulary_metrics_include_a_distributed_objective_empty_rank():
         module, datamodule=rf.ArrowDataModule(model=module, validate=source, num_workers=0), verbose=False
     )[0]
     for name in ("label", "tags", "group"):
-        assert result[f"record.{name}/validate.targets.known"] == 4
-        assert result[f"record.{name}/validate.targets.unavailable"] == 4
-        assert result[f"record.{name}/validate.coverage.content"] == 0.5
+        assert result[f"/{name}/validate.targets.known"] == 4
+        assert result[f"/{name}/validate.targets.unavailable"] == 4
+        assert result[f"/{name}/validate.coverage.content"] == 0.5
 
 
 def test_set_checkpoint_preserves_learned_unavailable_embedding(tmp_path):
     module = model("set", mask=False)
     with torch.no_grad():
-        module.nodes["record/label"].embedder.unavailable.fill_(0.75)
+        module.nodes["/label"].embedder.unavailable.fill_(0.75)
     path = tmp_path / "set.rf"
     module.save(path)
     restored = rf.Model.load(path)
     torch.testing.assert_close(
-        restored.nodes["record/label"].embedder.unavailable, module.nodes["record/label"].embedder.unavailable
+        restored.nodes["/label"].embedder.unavailable, module.nodes["/label"].embedder.unavailable
     )
-    assert rf.Set.vocabulary(restored, "record/label") == ("a", "b")
+    assert rf.Set.vocabulary(restored, "/label") == ("a", "b")
 
 
 @pytest.mark.parametrize("known,unknown", [(False, True), (1, 3), (1.5, 3.5), (b"a", b"new"), ("a", "new")])
 def test_set_unknown_members_are_distinct_within_each_arrow_atom_family(known, unknown):
     module = rf.Model(d_model=8, n_heads=2, n_layers=1, tags=rf.Set(p_unavailable=0.0))
     module.encode(pa.table({"tags": [[known]]}), strata="train")
-    field = module.encode(pa.table({"tags": [[known, unknown, unknown, None], [unknown], []]}), strata="test")[
-        "record/tags"
-    ]
+    field = module.encode(pa.table({"tags": [[known, unknown, unknown, None], [unknown], []]}), strata="test")["/tags"]
     assert field.content["unavailable"].reshape(-1).tolist() == [1, 1, 0]
     assert field.content["membership"].sum(dim=-1).reshape(-1).tolist() == [1, 0, 0]
 
@@ -345,5 +343,5 @@ def test_set_and_cluster_train_with_bfloat16_mixed_precision(accelerator):
     trainer.fit(module, datamodule=rf.ArrowDataModule(model=module, train=source, validate=source, num_workers=0))
     assert trainer.global_step == 1
     for name in ("tags", "group"):
-        scores = module.nodes[f"record/{name}"].decoder.metrics["validate_metrics"].compute()
+        scores = module.nodes[f"/{name}"].decoder.metrics["validate_metrics"].compute()
         assert torch.isfinite(scores["loss.content"])

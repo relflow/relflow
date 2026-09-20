@@ -117,7 +117,7 @@ def build() -> rf.Model:
 
 def probability(model: rf.Model, rows: list[dict]) -> np.ndarray:
     predictions = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
-    content = [row["record/label"]["content"] for row in predictions]
+    content = [row["/label"]["content"] for row in predictions]
     return np.asarray([item["probability"] if item["value"] == "yes" else 1 - item["probability"] for item in content])
 
 
@@ -142,7 +142,7 @@ def score(p: np.ndarray, rows: list[dict], cohort: int, *, cold: bool = False) -
 def evaluate(trainer: lit.Trainer, model: rf.Model, rows: list[dict]) -> dict[str, float]:
     data = rf.SyntheticDataModule(model=model, validate=lambda: iter(rows), seed=0)
     result = trainer.validate(model, datamodule=data, verbose=False)[0]
-    prefix = "record.label/validate."
+    prefix = "/label/validate."
     return {name.removeprefix(prefix): float(value) for name, value in result.items() if name.startswith(prefix)}
 
 
@@ -175,11 +175,11 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         training = list(records(rows=8192, seed=seed + 1 + cohort, cohort=cohort))
         arm = {}
         if trainer is not None:
-            vocabulary = rf.Category.vocabulary(model, "record/entity")
+            vocabulary = rf.Category.vocabulary(model, "/entity")
             before = probability(model, rows)
             before_metrics = evaluate(trainer, model, rows)
             checks[f"{cohort}: cold evaluation preserves vocabulary"] = (
-                rf.Category.vocabulary(model, "record/entity") == vocabulary
+                rf.Category.vocabulary(model, "/entity") == vocabulary
             )
             arm["cold"] = score(before, rows, cohort, cold=True)
             model.encode(pa.Table.from_pylist(training), strata="train")
@@ -193,7 +193,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             checks.update(
                 {
                     f"{cohort}: admission actually adds training identities": len(
-                        rf.Category.vocabulary(model, "record/entity")
+                        rf.Category.vocabulary(model, "/entity")
                     )
                     == (cohort + 1) * IDENTITIES,
                     f"{cohort}: admission preserves predictions": arm["admission_max_drift"] < 1e-6,

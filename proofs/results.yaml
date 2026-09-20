@@ -8338,6 +8338,147 @@ proofs:
         Complete reset loses the learned relationship: true
       outcome: met
       duration_seconds: 11.269
+    - started_at: '2026-09-20T21:19:17.663480+00:00'
+      mode: full
+      seed: 4601
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: c4f3168e47b69e17e050bde45079ce8d8fdff877
+        source_sha256: 262afd81607a4fe2c23a0d9d605c9bdfcfa02dbadaf5fc65ebaef6e04bb7d5c1
+        script_sha256: 027c52c4ca91567cf2de14e516342cf64201d52e22e8ff26e0a9a7ad73180084
+        code_sha256: 60f3391baf36ecb7e3c0daf54c1696aa495e5ac19738f2d92d38f8ed0c82e96b
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        source:
+          rmse: 0.011579966920453707
+          baseline_rmse: 0.8103651362027426
+          nrmse: 0.014289813817405581
+        source_prerequisite_met: true
+        downstream_interpretable: true
+        source_steps: 512
+        edits:
+        - edit: cycle 1 metadata
+          max_prediction_drift: 0.0
+          nrmse: 0.014289813817405581
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: cycle 1 inactive extension
+          max_prediction_drift: 0.0
+          nrmse: 0.014289813817405581
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: cycle 1 inactive deletion
+          max_prediction_drift: 0.0
+          nrmse: 0.014289813817405581
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: cycle 2 metadata
+          max_prediction_drift: 0.0
+          nrmse: 0.014289813817405581
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: cycle 2 inactive extension
+          max_prediction_drift: 0.0
+          nrmse: 0.014289813817405581
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: cycle 2 inactive deletion
+          max_prediction_drift: 0.0
+          nrmse: 0.014289813817405581
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: cycle 3 metadata
+          max_prediction_drift: 0.0
+          nrmse: 0.014289813817405581
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: cycle 3 inactive extension
+          max_prediction_drift: 0.0
+          nrmse: 0.014289813817405581
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: cycle 3 inactive deletion
+          max_prediction_drift: 0.0
+          nrmse: 0.014289813817405581
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: equivalent source rebind
+          max_prediction_drift: 0.0
+          nrmse: 0.014289813817405581
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: source rebind restoration
+          max_prediction_drift: 0.0
+          nrmse: 0.014289813817405581
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: rejected duplicate extension
+          max_prediction_drift: 0.0
+          nrmse: 0.014289813817405581
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        controls:
+          complete_reset:
+            rmse: 0.7947012065661679
+            baseline_rmse: 0.8103651362027426
+            nrmse: 0.9806705287076223
+        source_vocabulary:
+        - code-1
+        - code-2
+        - code-3
+        - code-0
+        test_rows: 1024
+        optimizer_policy: Fresh AdamW for source training; no post-edit fitting
+      checks:
+        Source learns the relationship below 0.25 nRMSE: true
+        'cycle 1 metadata: predictions survive': true
+        'cycle 1 metadata: all original state and vocabulary survive': true
+        'cycle 1 inactive extension: predictions survive': true
+        'cycle 1 inactive extension: all original state and vocabulary survive': true
+        'cycle 1 inactive deletion: predictions survive': true
+        'cycle 1 inactive deletion: all original state and vocabulary survive': true
+        'cycle 2 metadata: predictions survive': true
+        'cycle 2 metadata: all original state and vocabulary survive': true
+        'cycle 2 inactive extension: predictions survive': true
+        'cycle 2 inactive extension: all original state and vocabulary survive': true
+        'cycle 2 inactive deletion: predictions survive': true
+        'cycle 2 inactive deletion: all original state and vocabulary survive': true
+        'cycle 3 metadata: predictions survive': true
+        'cycle 3 metadata: all original state and vocabulary survive': true
+        'cycle 3 inactive extension: predictions survive': true
+        'cycle 3 inactive extension: all original state and vocabulary survive': true
+        'cycle 3 inactive deletion: predictions survive': true
+        'cycle 3 inactive deletion: all original state and vocabulary survive': true
+        'equivalent source rebind: predictions survive': true
+        'equivalent source rebind: all original state and vocabulary survive': true
+        'source rebind restoration: predictions survive': true
+        'source rebind restoration: all original state and vocabulary survive': true
+        Duplicate-name edit is rejected: true
+        'rejected duplicate extension: predictions survive': true
+        'rejected duplicate extension: all original state and vocabulary survive': true
+        Edited checkpoint preserves schema: true
+        Edited checkpoint preserves learned state: true
+        Edited checkpoint preserves predictions: true
+        Complete reset loses the learned relationship: true
+      outcome: met
+      duration_seconds: 6.21
   P047:
     script: proofs/mutations/extend_prediction_target.py
     page: docs/proofs/mutations/extend-prediction-target.py
@@ -22186,6 +22327,91 @@ proofs:
         'common_first: prediction does not change admission': true
       outcome: met
       duration_seconds: 4.311
+    - started_at: '2026-09-20T21:19:28.373595+00:00'
+      mode: full
+      seed: 5701
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: c4f3168e47b69e17e050bde45079ce8d8fdff877
+        source_sha256: 6d252f9e843e80314f8edae8c89cb81ede2ff3c0783191b4f80fa13e221253bb
+        script_sha256: e9ba1505b71aeb6d58d6982e8224dcbe4743f9404f363387d0d7b7c5af055500
+        code_sha256: b97c5a47e01eaac8421a129e31eee22c7b5fa75d2445bdc7fafcac02206a792f
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        baseline_rmse: 0.9999224678348755
+        arms:
+          rare_first:
+            steps: 300
+            initial_size: 1
+            allocated_size: 4
+            vocabulary:
+            - rare-left
+            - rare-right
+            - hot
+            - cold
+            counts:
+              rare-left: 5
+              rare-right: 5
+              hot: 9604
+              cold: 9586
+            common_coverage: 1.0
+            nrmse: 0.031326202577571086
+            identity_swap_drift: 1.9562826752662659
+          common_first:
+            steps: 300
+            initial_size: 1
+            allocated_size: 4
+            vocabulary:
+            - cold
+            - hot
+            - rare-left
+            - rare-right
+            counts:
+              cold: 9586
+              hot: 9604
+              rare-left: 5
+              rare-right: 5
+            common_coverage: 1.0
+            nrmse: 0.038701768919776586
+            identity_swap_drift: 1.983716070652008
+      checks:
+        'rare_first: all four labels are admitted': true
+        'rare_first: first label IDs are preserved': true
+        'rare_first: allocation holds all four labels': true
+        'rare_first: storage grows automatically': true
+        'rare_first: all labels have training exposures': true
+        'rare_first: common-label coverage is complete': true
+        'rare_first: common-label nRMSE below 0.15': true
+        'rare_first: common identities have distinct learned effects': true
+        'rare_first: prediction does not change admission': true
+        'common_first: all four labels are admitted': true
+        'common_first: first label IDs are preserved': true
+        'common_first: allocation holds all four labels': true
+        'common_first: storage grows automatically': true
+        'common_first: all labels have training exposures': true
+        'common_first: common-label coverage is complete': true
+        'common_first: common-label nRMSE below 0.15': true
+        'common_first: common identities have distinct learned effects': true
+        'common_first: prediction does not change admission': true
+      outcome: met
+      duration_seconds: 4.079
   P058:
     script: proofs/vocabulary/unknown_set_members.py
     page: docs/proofs/vocabulary/unknown-set-members.py
@@ -23419,6 +23645,66 @@ proofs:
         Continued checkpoint preserves mapping, counts, and predictions: true
       outcome: met
       duration_seconds: 5.067
+    - started_at: '2026-09-20T21:19:36.866317+00:00'
+      mode: full
+      seed: 5901
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: c4f3168e47b69e17e050bde45079ce8d8fdff877
+        source_sha256: 5f4c1137dceae95073a4baf4cfc39f0c3d3b4bdac38bdbc6097b0ba83b0f9dcc
+        script_sha256: bcfa51f2bbd89f465c2960b60323ace37875ca55587559ce2d4883bd941b8f24
+        code_sha256: 3cd155b23a9b01d77bf89d3213228641a6deda54d68be48688382ca59961ebb9
+        python: 3.12.10
+        platform: macOS-26.5.2-arm64-arm-64bit
+        host: Granthams-MacBook-Pro.local
+        relflow_path: /Users/grantham/Desktop/relflow/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: null
+        gpu: null
+      metrics:
+        initial_steps: 300
+        continuation_steps: 400
+        initial_vocabulary:
+        - positive
+        - negative
+        final_vocabulary:
+        - positive
+        - negative
+        - far-positive
+        - far-negative
+        initial_accuracy: 1.0
+        new_accuracy_before_admission: 0.0
+        new_accuracy_immediately_after_admission: 0.0
+        final_old_accuracy: 1.0
+        final_new_accuracy: 1.0
+        two_class_chance: 0.5
+      checks:
+        Cold prediction leaves the vocabulary empty: true
+        Empty output vocabulary returns no label and zero probability: true
+        Initial known-label accuracy reaches 0.95: true
+        Initial checkpoint preserves mapping, counts, and predictions: true
+        Evaluation cannot admit new output labels: true
+        Evaluation leaves exposure counts and numerical moments frozen: true
+        Unadmitted labels cannot be predicted: true
+        Training admission appends both labels without moving old indices: true
+        Admission alone preserves existing learned parameter rows: true
+        Continued fitting learns new labels above 0.95 accuracy: true
+        Rehearsal retains old labels above 0.95 accuracy: true
+        Continued fitting preserves all admitted indices: true
+        Continued checkpoint preserves mapping, counts, and predictions: true
+      outcome: met
+      duration_seconds: 4.736
   P060:
     script: proofs/calibration/categorical_prior.py
     page: docs/proofs/calibration/categorical-prior.py

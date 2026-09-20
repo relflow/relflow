@@ -62,7 +62,7 @@ def test_warning_counts_only_allocated_pristine_training_exposures(records, stag
 
     events = warnings(records)
     assert len(events) == 3
-    assert [event["address"] for event in events] == ["record/category", "record/cluster", "record/tags"]
+    assert [event["address"] for event in events] == ["/category", "/cluster", "/tags"]
     for event in events:
         assert event == {
             "component": "vocabulary",
@@ -150,7 +150,7 @@ def test_warning_uses_shared_resources_without_a_builtin_field_type(records):
 def test_lightning_warns_once_per_field_not_per_batch(records, stage):
     module = model()
     module.encode(table(["rare"] * 9), strata="train")
-    before = rf.Category.counts(module, "record/category")
+    before = rf.Category.counts(module, "/category")
     data = rf.ArrowDataModule(model=module, **{stage: table(["rare"] * 8)})
     trainer = lit.Trainer(
         accelerator="cpu",
@@ -163,7 +163,7 @@ def test_lightning_warns_once_per_field_not_per_batch(records, stage):
     getattr(trainer, stage)(module, datamodule=data)
     assert len(warnings(records)) == 3
     assert all(event["strata"] == stage for event in warnings(records))
-    assert rf.Category.counts(module, "record/category") == before
+    assert rf.Category.counts(module, "/category") == before
 
 
 def test_validation_during_fit_warns_using_only_training_exposures(records):
@@ -189,7 +189,7 @@ def test_validation_during_fit_warns_using_only_training_exposures(records):
     assert len(events) == 6
     assert [event["minimum_observations"] for event in events] == [0, 0, 0, 4, 4, 4]
     assert all(event["strata"] == "validate" for event in events)
-    assert rf.Category.counts(module, "record/category") == {"rare": 4}
+    assert rf.Category.counts(module, "/category") == {"rare": 4}
 
 
 def test_distributed_warning_flushes_metrics_before_count_collectives(monkeypatch, records):
@@ -212,7 +212,7 @@ def test_distributed_warning_flushes_metrics_before_count_collectives(monkeypatc
     VocabularySyncCallback().on_validation_start(TrainerStub(), module)
     assert events == ["metrics", "counts", "counts", "counts"]
     assert not warnings(records)
-    assert rf.Category.counts(module, "record/category") == {"warm": 10}
+    assert rf.Category.counts(module, "/category") == {"warm": 10}
 
 
 def distributed_warning(rank, directory):

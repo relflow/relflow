@@ -34,7 +34,7 @@ def parameters(model):
     """Include growing rows, decoder biases, and Cluster's fixed latent decoder."""
     result = {}
     for name in FIELDS:
-        node = model.nodes[f"record/{name}"]
+        node = model.nodes[f"/{name}"]
         key = "cluster" if name == "cluster" else "content"
         result[f"{name}/embedding"] = node.embedder.embeddings[key].weight
         result[f"{name}/decoder.weight"] = node.decoder.linears[key].weight
@@ -58,10 +58,10 @@ def snapshot(trainer, model):
         "moments": {name: deepcopy(optimizer.state.get(value, {})) for name, value in parameters(model).items()},
         "fields": {
             name: {
-                "vocabulary": list(model.nodes[f"record/{name}"].embedder.vocab.snapshot()),
-                "capacity": model.nodes[f"record/{name}"].embedder.vocab.size,
-                "counts": model.nodes[f"record/{name}"].embedder.counters["content"].counts.cpu().clone(),
-                "pending": model.nodes[f"record/{name}"].embedder.counters["content"]._pending_counts.cpu().clone(),
+                "vocabulary": list(model.nodes[f"/{name}"].embedder.vocab.snapshot()),
+                "capacity": model.nodes[f"/{name}"].embedder.vocab.size,
+                "counts": model.nodes[f"/{name}"].embedder.counters["content"].counts.cpu().clone(),
+                "pending": model.nodes[f"/{name}"].embedder.counters["content"]._pending_counts.cpu().clone(),
             }
             for name in FIELDS
         },
@@ -159,7 +159,7 @@ class GrowthAudit(lit.Callback):
         assert batch.source["row"].to_pylist() == [batch_idx * 4 + rank, batch_idx * 4 + rank + 2]
         self.sources.append(batch.source["row"].to_pylist())
         for name in FIELDS:
-            address = f"record/{name}"
+            address = f"/{name}"
             values = batch.source[name].to_pylist()
             assert values == ([[label], [label]] if name == "tags" else [label, label])
             field = batch.tensors[address]

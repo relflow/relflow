@@ -109,7 +109,7 @@ def build() -> rf.Model:
 
 def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
     result = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
-    return np.asarray([row["record/target"]["content"] for row in result], dtype=np.float64)
+    return np.asarray([row["/target"]["content"] for row in result], dtype=np.float64)
 
 
 def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
@@ -154,8 +154,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     model.eval()
     train = list(records(rows=4096, seed=seed + 1))
     test = list(records(rows=2048, seed=seed + 3))
-    vocabulary = rf.Category.vocabulary(model, "record/code")
-    counts = rf.Category.counts(model, "record/code")
+    vocabulary = rf.Category.vocabulary(model, "/code")
+    counts = rf.Category.counts(model, "/code")
     predicted = prediction(model, test)
     metrics = {"steps": trainer.global_step, "vocabulary": vocabulary}
     checks = {}
@@ -184,7 +184,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         "renaming_drift": float(np.max(np.abs(first - second))),
         "null_prediction_gap": float(np.mean(np.abs(first - prediction(model, nulls)))),
     }
-    field = model.encode(pa.Table.from_pylist(novel), strata="test")["record/code"]
+    field = model.encode(pa.Table.from_pylist(novel), strata="test")["/code"]
     checks.update(
         {
             "Unknown codes retain valued state": bool(field.state.eq(rf.Tokens.valued).all()),
@@ -195,9 +195,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             < 1.5 * 1.15,
             "Unknown spelling cannot alter predictions": metrics["unknown"]["renaming_drift"] < 1e-5,
             "Null remains distinct from unknown content": metrics["unknown"]["null_prediction_gap"] > 2.0,
-            "Evaluation does not admit labels or change counts": rf.Category.vocabulary(model, "record/code")
-            == vocabulary
-            and rf.Category.counts(model, "record/code") == counts,
+            "Evaluation does not admit labels or change counts": rf.Category.vocabulary(model, "/code") == vocabulary
+            and rf.Category.counts(model, "/code") == counts,
         }
     )
     return metrics, checks

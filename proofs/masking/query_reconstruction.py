@@ -121,8 +121,8 @@ def build() -> rf.Model:
 
 def prediction(model: rf.Model, rows: list[dict]) -> tuple[np.ndarray, np.ndarray]:
     output = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
-    content = np.asarray([[item["content"] for item in row["record/items/value"]] for row in output], dtype=np.float64)
-    inferred = np.asarray([[item["inferred"] for item in row["record/items/value"]] for row in output], dtype=bool)
+    content = np.asarray([[item["content"] for item in row["/items/value"]] for row in output], dtype=np.float64)
+    inferred = np.asarray([[item["inferred"] for item in row["/items/value"]] for row in output], dtype=bool)
     return content.reshape(len(rows), LENGTH), inferred.reshape(len(rows), LENGTH)
 
 
@@ -180,7 +180,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     broken, _ = prediction(model, corrupted)
     replaced, _ = prediction(model, poisoned)
     # Audit labels on an independent model, leaving fitted normalizers frozen.
-    field = build().encode(pa.Table.from_pylist(test), strata="train")["record/items/value"]
+    field = build().encode(pa.Table.from_pylist(test), strata="train")["/items/value"]
     measured = float(np.sqrt(np.mean((content[expected] - actual) ** 2)))
     metrics = {
         "steps": trainer.global_step,

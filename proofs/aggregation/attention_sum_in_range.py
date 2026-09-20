@@ -128,7 +128,7 @@ def permute(observations: list[dict], *, seed: int) -> list[dict]:
 def prediction(model: rf.Model, observations: list[dict]) -> np.ndarray:
     inputs = [{"items": row["items"]} for row in observations]
     output = model.predict(inputs)["predictions"].to_pylist()
-    return np.asarray([row["record/total"]["content"] for row in output], dtype=np.float64)
+    return np.asarray([row["/total"]["content"] for row in output], dtype=np.float64)
 
 
 def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:

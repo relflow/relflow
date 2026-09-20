@@ -49,7 +49,7 @@ shared `state` and `inferred` members in the
 For an application-supplied trained `model`:
 
 ```python
-counts = rf.Boolean.counts(model, "record/converted")
+counts = rf.Boolean.counts(model, rf.Address("converted"))
 ```
 
 Counts include pristine valued training presentations, even when masked, and

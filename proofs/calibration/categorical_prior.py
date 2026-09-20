@@ -100,7 +100,7 @@ def build(size: int) -> rf.Model:
         label=rf.Category(mask=True),
     )
     # Experimental storage control only: allocation is not a schema option.
-    node = model.nodes["record/label"]
+    node = model.nodes["/label"]
     resize = Resize()
     resize.embedding(node.embedder.embeddings["content"], size)
     resize.linear(node.decoder.linears["content"], size)
@@ -151,12 +151,12 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         )
         trainer.fit(model, datamodule=data)
         model.eval()
-        counts = rf.Category.counts(model, "record/label")
-        vocabulary = rf.Category.vocabulary(model, "record/entity")
+        counts = rf.Category.counts(model, "/label")
+        vocabulary = rf.Category.vocabulary(model, "/entity")
         for novel in (False, True):
             rows = list(records(rows=8192, seed=seed + 3, novel=novel))
             predictions = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
-            values = [row["record/label"]["content"] for row in predictions]
+            values = [row["/label"]["content"] for row in predictions]
             p = np.asarray(
                 [item["probability"] if item["value"] == "yes" else 1 - item["probability"] for item in values]
             )
@@ -168,8 +168,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             checks[f"{key}: probability RMSE below 0.06"] = rmse < 0.06
             checks[f"{key}: excess expected NLL below 0.02"] = excess < 0.02
         checks[f"capacity_{size}: evaluation preserves vocabulary and counts"] = vocabulary == rf.Category.vocabulary(
-            model, "record/entity"
-        ) and counts == rf.Category.counts(model, "record/label")
+            model, "/entity"
+        ) and counts == rf.Category.counts(model, "/label")
     return metrics, checks
 
 

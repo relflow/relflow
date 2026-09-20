@@ -13,7 +13,7 @@ from relflow.structs.packages import Prediction
 from relflow.tensorfields.extensions import category, cluster
 from relflow.tensorfields.extensions import set as sets
 
-ADDRESS = "record/label"
+ADDRESS = "/label"
 FIELDS = (rf.Category, rf.Set, rf.Cluster)
 
 

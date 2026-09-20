@@ -17,13 +17,12 @@ from relflow.tensorfields.extensions.cluster import Embedder, TensorField
 
 CAPACITY = 8
 K = 4
-ADDRESS = "record/merchant_id"
+ADDRESS = "/merchant_id"
 
 
 def _model() -> rf.Model:
     torch.manual_seed(0)
     return rf.Model(
-        name="record",
         d_model=16,
         n_layers=1,
         n_heads=4,
@@ -146,13 +145,12 @@ def test_assign_raises_for_unknown_address():
     model = _model()
 
     with pytest.raises(KeyError):
-        rf.Cluster.assign(model, "record/nonexistent", "tok", 0)
+        rf.Cluster.assign(model, "/nonexistent", "tok", 0)
 
 
 def test_assign_raises_for_non_cluster_field():
     torch.manual_seed(0)
     model = rf.Model(
-        name="record",
         d_model=16,
         n_layers=1,
         n_heads=4,
@@ -161,7 +159,7 @@ def test_assign_raises_for_non_cluster_field():
     )
 
     with pytest.raises(TypeError, match="not a Cluster field"):
-        rf.Cluster.assign(model, "record/amount", "tok", 0)
+        rf.Cluster.assign(model, "/amount", "tok", 0)
 
 
 # ---------- scoped overrides ----------

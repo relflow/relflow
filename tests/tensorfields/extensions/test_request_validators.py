@@ -7,7 +7,6 @@ def _structure_with_field(field: dict) -> dict:
     return {
         "d_model": 16,
         "fields": {
-            "name": "root",
             "type": "branch",
             "dropout": 0.1,
             "length": 2,
@@ -36,7 +35,7 @@ def test_category_topk_is_independent_of_vocabulary_storage():
             "topk": [10000, 8, 10000],
         }
     )
-    assert Schema.model_validate(payload).requests["root/cat"].topk == [8, 10000]
+    assert Schema.model_validate(payload).requests["/cat"].topk == [8, 10000]
 
 
 def test_category_rejects_number_only_n_bands_option():
@@ -117,7 +116,7 @@ def test_dateparts_normalizes_friendly_datepart_names():
         }
     )
     structure = Schema.model_validate(payload)
-    request = structure.requests["root/ts"]
+    request = structure.requests["/ts"]
 
     assert [datepart.value for datepart in request.dateparts] == [
         "day_of_week",
@@ -161,4 +160,4 @@ def test_dateparts_pattern_accepts_valid_format():
         }
     )
     structure = Schema.model_validate(payload)
-    assert "root/ts" in structure.requests
+    assert "/ts" in structure.requests

@@ -93,9 +93,9 @@ conditional reconstruction metrics are `NaN`; state supervision remains valid.
 For an application-supplied trained `model`:
 
 ```python
-labels = rf.Cluster.vocabulary(model, "record/merchant_id")
-assignments = rf.Cluster.assignments(model, "record/merchant_id")
-status = rf.Cluster.status(model, "record/merchant_id")
+labels = rf.Cluster.vocabulary(model, rf.Address("merchant_id"))
+assignments = rf.Cluster.assignments(model, rf.Address("merchant_id"))
+status = rf.Cluster.status(model, rf.Address("merchant_id"))
 ```
 
 `labels` is an index-ordered tuple. Each assignment contains a cluster ID and

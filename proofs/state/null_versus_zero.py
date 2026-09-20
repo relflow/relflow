@@ -118,7 +118,7 @@ def score(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator: s
         deterministic=True,
     )
     metrics = trainer.test(model=model, datamodule=data, verbose=False)[0]
-    return float(metrics["state.target/test.auc.content"]), float(metrics["state.target/test.accuracy@0.5.content"])
+    return float(metrics["/target/test.auc.content"]), float(metrics["/target/test.accuracy@0.5.content"])
 
 
 # %% [markdown]
@@ -160,7 +160,6 @@ def score(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator: s
 def fit(*, signal: bool, seed: int, steps: int | None, accelerator: str) -> rf.Model:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
-        name="state",
         d_model=16,
         n_layers=1,
         n_heads=4,

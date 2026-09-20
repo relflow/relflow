@@ -115,7 +115,7 @@ def build() -> rf.Model:
 
 def prediction(model: rf.Model, rows: list[dict], target: str) -> np.ndarray:
     output = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
-    return np.asarray([row[f"record/{target}"]["content"] for row in output], dtype=np.float64)
+    return np.asarray([row[f"/{target}"]["content"] for row in output], dtype=np.float64)
 
 
 def error(actual: np.ndarray, predicted: np.ndarray | float) -> float:
@@ -185,7 +185,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             "both_hidden_nrmse": error(actual, prediction(model, hidden, target)) / baseline,
             "hidden_value_drift": float(np.max(np.abs(predicted - prediction(model, poisoned, target)))),
         }
-        masks = [batch[f"record/{target}"].trainable for batch in encoded]
+        masks = [batch[f"/{target}"].trainable for batch in encoded]
         measured["sampled_fraction"] = float(masks[0].float().mean())
         metrics["directions"][target] = measured
         checks[f"{target}: held-out nRMSE below 0.25"] = measured["nrmse"] < 0.25
@@ -196,7 +196,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         checks[f"{target}: sampling repeats within an epoch"] = bool((masks[0] == masks[1]).all())
         checks[f"{target}: sampling changes across epochs"] = bool((masks[0] != masks[2]).any())
         checks[f"{target}: ordinary prediction requests no reconstruction"] = not bool(
-            ordinary[f"record/{target}"].inferred.any()
+            ordinary[f"/{target}"].inferred.any()
         )
     return metrics, checks
 

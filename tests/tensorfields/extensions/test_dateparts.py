@@ -12,7 +12,7 @@ from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.tensorfields.base import TensorInput
 from relflow.tensorfields.extensions.dateparts import DatePart, Embedder
 
-ADDRESS = rf.Address("record", "created")
+ADDRESS = rf.Address("/", "created")
 
 
 def build(jitter: Jitter | dict[str, object] | None = None) -> rf.Model:

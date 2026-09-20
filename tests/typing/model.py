@@ -42,7 +42,8 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
     rf.Model(model.schema, optimizer=rf.adamw(1e-3))
     rf.Model(schema=model.schema, optimizer=rf.adamw(1e-3))
     rf.Model(d_model=32, n_heads=4, n_layers=1, fields={"name": rf.Number, "batch_size": rf.Boolean})
-    model.extend(rf.where("name") == "record", risk_score=rf.Number)
+    rf.Model(d_model=32, n_heads=4, n_layers=1, name=rf.Category())
+    model.extend(rf.where("address") == "/", risk_score=rf.Number)
     model.extend(fields={"fields": rf.Number})
 
 

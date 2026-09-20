@@ -68,10 +68,10 @@ def test_names_and_type_labels_have_background_styles() -> None:
         {"name": "items", "fields": [rf.Number.model_validate({"name": "amount"})]}
     )._repr_html_()
     schema_html = rf.Schema.from_tree(
-        amount=rf.Number(), label=rf.Number(mask=True), name="record", d_model=8, n_layers=1, n_heads=4
+        amount=rf.Number(), label=rf.Number(mask=True), d_model=8, n_layers=1, n_heads=4
     )._repr_html_()
     model_html = rf.Model(
-        amount=rf.Number(), label=rf.Number(mask=True), name="record", d_model=8, n_layers=1, n_heads=4
+        amount=rf.Number(), label=rf.Number(mask=True), d_model=8, n_layers=1, n_heads=4
     )._repr_html_()
 
     for html in (number_html, category_html, branch_html, schema_html, model_html):
@@ -193,11 +193,9 @@ def test_branch_rich_display_renders_reduction_configuration() -> None:
 
 
 def test_root_branch_embed_renders_as_flag() -> None:
-    rendered = render_text(
-        rf.Schema.from_tree(amount=rf.Number(), name="record", d_model=8, n_layers=1, n_heads=4, embed=True)
-    )
+    rendered = render_text(rf.Schema.from_tree(amount=rf.Number(), d_model=8, n_layers=1, n_heads=4, embed=True))
 
-    assert "`-- record [root] embed attention=mha" in rendered
+    assert "`-- [root] embed attention=mha" in rendered
     assert "embed=True" not in rendered
 
 
@@ -253,16 +251,14 @@ def test_common_display_surfaces_are_backed_by_rich() -> None:
 
 
 def test_schema_rich_display_uses_root_schema_tree() -> None:
-    schema = rf.Schema.from_tree(
-        amount=rf.Number(), label=rf.Category(mask=True), name="record", d_model=8, n_layers=1, n_heads=4
-    )
+    schema = rf.Schema.from_tree(amount=rf.Number(), label=rf.Category(mask=True), d_model=8, n_layers=1, n_heads=4)
 
     assert isinstance(schema, Renderable)
     rendered = render_text(schema)
 
     assert rendered == str(schema)
     assert "schema [schema] d_model=8 branches=1 fields=2 reconstruct=1 embeds=0" in rendered
-    root_line = next(line for line in rendered.splitlines() if "`-- record [root]" in line)
+    root_line = next(line for line in rendered.splitlines() if "`-- [root]" in line)
     assert "length=" not in root_line
     assert "overflow=" not in root_line
     assert "embed=False" not in root_line
@@ -275,7 +271,6 @@ def test_model_rich_display_uses_runtime_summary_and_schema_tree() -> None:
     model = rf.Model(
         amount=rf.Number(),
         label=rf.Category(mask=True),
-        name="record",
         d_model=8,
         n_layers=1,
         n_heads=4,
@@ -288,7 +283,7 @@ def test_model_rich_display_uses_runtime_summary_and_schema_tree() -> None:
     assert rendered == str(model)
     assert "Model [model] batch_size=3 d_model=8 parameters=" in rendered
     assert "branches=1 fields=2 reconstruct=1 embeds=0" in rendered
-    root_line = next(line for line in rendered.splitlines() if "`-- record [root]" in line)
+    root_line = next(line for line in rendered.splitlines() if "`-- [root]" in line)
     assert "length=" not in root_line
     assert "overflow=" not in root_line
     assert "embed=False" not in root_line
@@ -298,11 +293,9 @@ def test_model_rich_display_uses_runtime_summary_and_schema_tree() -> None:
 
 
 def test_model_select_pprint_uses_rich_node_display() -> None:
-    model = rf.Model(
-        amount=rf.Number(), species=rf.Category(mask=True), name="record", d_model=8, n_layers=1, n_heads=4
-    )
+    model = rf.Model(amount=rf.Number(), species=rf.Category(mask=True), d_model=8, n_layers=1, n_heads=4)
 
-    selection = model.select(rf.where("address") == "record/species")
+    selection = model.select(rf.where("address") == "/species")
     rendered = pformat(selection)
     console = Console(record=True, width=120)
     console.print(Pretty(selection))
@@ -331,7 +324,7 @@ def test_tensorfield_rich_display_previews_state_tokens(objective: bool) -> None
     field = model.encode(
         pa.Table.from_pylist([{"letters": [{"letter": "A"}, {"letter": "B"}]}]),
         strata=rf.Strata.train,
-    )["record/letters/letter"]
+    )["/letters/letter"]
 
     field.state[field.present] = rf.Tokens.valued
     selected = torch.tensor([[[False, True, False, False]]])
@@ -366,7 +359,7 @@ def test_tensorfield_rich_display_separates_nested_array_state_tokens() -> None:
             ]
         ),
         strata=rf.Strata.train,
-    )["record/words/letters/letter"]
+    )["/words/letters/letter"]
 
     rendered = render_text(field)
 

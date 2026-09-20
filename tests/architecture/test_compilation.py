@@ -66,9 +66,9 @@ def test_compile_selects_tensor_regions_without_changing_model_state(model, comp
         or (pools and isinstance(module, LearnedQueryCrossAttention))
     }
     assert selected == expected
-    assert model.nodes["record/history"].encoder not in selected
+    assert model.nodes["/history"].encoder not in selected
     if pools:
-        assert model.nodes["record/label"].decoder.pool in selected
+        assert model.nodes["/label"].decoder.pool in selected
     for module in eager.keys() - selected:
         assert module.compute == eager[module]
     assert parameters == {name: id(parameter) for name, parameter in model.named_parameters()}
@@ -168,7 +168,7 @@ def test_compilation_cannot_change_during_a_lightning_training_loop(model, compi
 
 
 def test_compile_preserves_custom_compute_and_custom_owner_classes(model, compiler, monkeypatch):
-    encoder = model.nodes["record"].encoder
+    encoder = model.nodes["/"].encoder
 
     def compute(self, inputs, present):
         return inputs * 3
@@ -192,8 +192,8 @@ def test_compile_preserves_custom_compute_and_custom_owner_classes(model, compil
 
 
 def test_compute_borrowed_from_another_owner_remains_bound_to_that_owner(model, compiler, monkeypatch):
-    encoder = model.nodes["record"].encoder
-    donor = BranchEncoder(model.schema, "record")
+    encoder = model.nodes["/"].encoder
+    donor = BranchEncoder(model.schema, "/")
     monkeypatch.setattr(encoder, "compute", donor.compute)
     inputs = torch.randn(2, 3, 8)
     present = torch.ones(2, 3, dtype=torch.bool)
@@ -332,10 +332,10 @@ def test_descendant_hooks_added_after_warmup_run_eager_then_compilation_resumes(
 
     model.eval()
     if boundary == "encoder":
-        owner = model.nodes["record"].encoder
+        owner = model.nodes["/"].encoder
         descendant = owner.encoder[0].ffn_norm
     else:
-        owner = model.nodes["record/label"].decoder.pool
+        owner = model.nodes["/label"].decoder.pool
         descendant = owner.norm
     inputs = torch.randn(2, 3, 8)
     present = torch.ones(2, 3, dtype=torch.bool)

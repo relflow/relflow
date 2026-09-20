@@ -176,7 +176,6 @@ class Trajectory(lit.Callback):
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
-        name="event",
         d_model=32,
         n_layers=1,
         n_heads=4,
@@ -187,7 +186,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     model.optimizer = lambda module: torch.optim.AdamW(module.parameters(), lr=3e-3)
     source = partial(records, seed=seed)
     data = rf.SyntheticDataModule(model=model, train=source, validate=source, seed=seed)
-    trajectory = Trajectory(rf.Address("event", "merchant_id"))
+    trajectory = Trajectory(rf.Address("/", "merchant_id"))
     trainer = lit.Trainer(
         accelerator=accelerator,
         max_epochs=30,

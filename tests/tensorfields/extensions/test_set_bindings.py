@@ -7,12 +7,11 @@ import pytest
 import relflow as rf
 from tests.arrow import table
 
-ADDRESS = rf.Address("record/tags")
+ADDRESS = rf.Address("/tags")
 
 
 def build() -> rf.Model:
     return rf.Model(
-        name="record",
         d_model=8,
         n_layers=1,
         n_heads=4,
@@ -41,7 +40,7 @@ def test_set_vocabulary_returns_immutable_model_snapshot() -> None:
     learn(model, ["GAMMA"])
 
     assert snapshot == ("ALPHA", "BETA")
-    assert rf.Set.vocabulary(model, "record/tags") == ("ALPHA", "BETA", "GAMMA")
+    assert rf.Set.vocabulary(model, "/tags") == ("ALPHA", "BETA", "GAMMA")
 
 
 def test_set_vocabulary_reads_latest_encoding_context_snapshot() -> None:
@@ -69,7 +68,7 @@ def test_set_vocabulary_raises_for_missing_address(use_model: bool) -> None:
     source = model if use_model else model.interprocess_encoding_context
 
     with pytest.raises(KeyError, match="missing"):
-        rf.Set.vocabulary(source, "record/missing")
+        rf.Set.vocabulary(source, "/missing")
 
 
 def test_set_vocabulary_rejects_invalid_context_resource_and_source() -> None:
@@ -82,7 +81,6 @@ def test_set_vocabulary_rejects_invalid_context_resource_and_source() -> None:
 
 def test_set_vocabulary_rejects_non_set_model_field() -> None:
     model = rf.Model(
-        name="record",
         d_model=8,
         n_layers=1,
         n_heads=4,
@@ -90,4 +88,4 @@ def test_set_vocabulary_rejects_non_set_model_field() -> None:
     )
 
     with pytest.raises(TypeError, match="not a Set field"):
-        rf.Set.vocabulary(model, "record/amount")
+        rf.Set.vocabulary(model, "/amount")

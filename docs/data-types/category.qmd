@@ -69,7 +69,7 @@ For each reconstruction objective, epoch metrics separate coverage from quality:
 | `loss.content` | Unweighted categorical training objective over populated labels, averaged over known targets; equal to `nll.content`. |
 
 Names include the field address and stage, for example
-`record.merchant_category/validate.coverage.content`. Counts and sums aggregate
+`/merchant_category/validate.coverage.content`. Counts and sums aggregate
 across batches and ranks before division. With no known targets, conditional
 accuracy, NLL, and content loss are `NaN`, not zero; coverage and all-target
 accuracy are zero when selected valued targets exist. With no selected valued
@@ -78,8 +78,8 @@ targets, coverage and all-target accuracy are also undefined.
 For an application-supplied trained `model`:
 
 ```python
-labels = rf.Category.vocabulary(model, "record/merchant_category")
-counts = rf.Category.counts(model, "record/merchant_category")
+labels = rf.Category.vocabulary(model, rf.Address("merchant_category"))
+counts = rf.Category.counts(model, rf.Address("merchant_category"))
 ```
 
 `vocabulary` returns a tuple snapshot in index order; `counts` returns pristine

@@ -131,7 +131,7 @@ def auc(target: np.ndarray, predicted: np.ndarray) -> float:
 
 def probabilities(model: rf.Model, rows: list[dict]) -> np.ndarray:
     output = model.predict(rows).to_pylist()
-    return np.asarray([row["predictions"]["pair/equal"]["content"]["probability"] for row in output])
+    return np.asarray([row["predictions"]["/equal"]["content"]["probability"] for row in output])
 
 
 # %% [markdown]
@@ -172,7 +172,6 @@ def probabilities(model: rf.Model, rows: list[dict]) -> np.ndarray:
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
-        name="pair",
         d_model=48,
         n_layers=2,
         n_heads=4,

@@ -14,7 +14,7 @@ from relflow.architecture.binding import bind
 from relflow.data.iterables import encode
 from relflow.tensorfields.shared.vocabulary import VocabularyBatch
 
-ADDRESS = rf.Address("record/value")
+ADDRESS = rf.Address("/value")
 KINDS = ("category", "set", "cluster")
 REQUESTS = {"category": rf.Category, "set": rf.Set, "cluster": rf.Cluster}
 
@@ -315,10 +315,10 @@ def test_retained_encoded_unknown_still_forwards_as_unknown_after_growth(kind):
         current = model(fresh, strata="predict")
 
     assert (retained == pristine).all()
-    actual = next(prediction.payload[rf.TensorKey.embedding] for prediction in after if prediction.address == "record")
+    actual = next(prediction.payload[rf.TensorKey.embedding] for prediction in after if prediction.address == "/")
     for predictions in (before, current):
         expected = next(
-            prediction.payload[rf.TensorKey.embedding] for prediction in predictions if prediction.address == "record"
+            prediction.payload[rf.TensorKey.embedding] for prediction in predictions if prediction.address == "/"
         )
         torch.testing.assert_close(actual, expected, rtol=0, atol=0)
     assert "never-trained" not in REQUESTS[kind].vocabulary(model, ADDRESS)
@@ -525,9 +525,9 @@ def test_lightning_checkpoint_resume_restores_training_state_before_further_grow
     rates = [group["lr"] for group in optimizer.param_groups]
     assert rates == pytest.approx([1e-3 * 0.5**2] * len(rates))
     growing = (
-        "nodes.record/value.embedder.embeddings.cluster.weight"
+        "nodes./value.embedder.embeddings.cluster.weight"
         if kind == "cluster"
-        else "nodes.record/value.decoder.linears.content.weight"
+        else "nodes./value.decoder.linears.content.weight"
     )
     assert moments[growing]["step"].item() == 2
     assert moments[growing]["exp_avg"].count_nonzero() > 0

@@ -124,7 +124,7 @@ class AttributeChange(pydantic.BaseModel):
     original: Any
     definition_attribute: bool
     address: str
-    node_name: str
+    node_name: str | None
     node_type: str
     changed: Any = _MISSING
     changed_address: Any = _MISSING
@@ -330,7 +330,7 @@ class SchemaEditor:
                         original=getattr(node, name, _MISSING),
                         definition_attribute=is_definition_attribute(node, name),
                         address=str(node.address),
-                        node_name=cast(str, node.name),
+                        node_name=node.name,
                         node_type=node.type,
                     )
                 )

@@ -5,7 +5,7 @@ title: Postprocessors
 A postprocessor turns the [prediction table](prediction-output.qmd) into the
 shape an application needs. It receives and returns an eager Polars DataFrame.
 
-For a trained order model with a Boolean `order/returned` target:
+For a trained order model with a Boolean `/returned` target:
 
 ```python
 import polars as pl
@@ -13,7 +13,7 @@ import relflow as rf
 
 @rf.postprocess
 def decision(frame: pl.DataFrame, *, threshold: float) -> pl.DataFrame:
-    returned = pl.col("predictions").struct.field("order/returned")
+    returned = pl.col("predictions").struct.field(rf.Address("returned"))
     probability = returned.struct.field("content").struct.field("probability")
     return frame.select(
         request_id=pl.col("inputs").struct.field("request_id"),

@@ -25,12 +25,13 @@ content metrics are available.
 | Metric | Interpretation |
 | --- | --- |
 | `loss/train`, `loss/validate`, `loss/test` | Sum of active leaf losses after each leaf's `weight` is applied. |
-| `order.returned/validate.loss.state` | Reconstruction loss for value state at `order/returned`. |
-| `order.returned/validate.loss.content` | Datatype-specific content loss at that address. |
-| `order.returned/validate.auc.content` | Example Boolean content metric; availability depends on datatype. |
+| `/returned/validate.loss.state` | Reconstruction loss for value state at `/returned`. |
+| `/returned/validate.loss.content` | Datatype-specific content loss at that address. |
+| `/returned/validate.auc.content` | Example Boolean content metric; availability depends on datatype. |
 | `throughput/train` | Estimated observations per second across the training epoch. |
 
-Metric names convert schema address slashes to dots. A leaf can contribute
+Metric names preserve the schema address, including its slashes and case,
+then append `/stage.metric.component`. A leaf can contribute
 both state and content loss. State metrics describe valued, null, padded,
 masked, and other states; content metrics describe the value being predicted.
 Leaf metrics are logged before weighting, so their unweighted sum need not
@@ -70,7 +71,7 @@ see the relevant [datatype reference](../core-concepts/data-types.qmd).
 An ablation temporarily removes an input and reevaluates the trained model:
 
 ```python
-price = rf.where("address") == "order/line_items/price"
+price = rf.where("address") == rf.Address("line_items", "price")
 baseline = trainer.test(model=model, datamodule=test_data)[0]
 with model.override(price, active=False):
     ablated = trainer.test(model=model, datamodule=test_data)[0]

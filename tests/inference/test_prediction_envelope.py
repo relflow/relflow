@@ -22,8 +22,8 @@ def test_prediction_envelope_includes_target_state_and_normalized_embedding() ->
 
     output = model.predict(pa.table({"amount": [1.5]}))
     predictions = output["predictions"].combine_chunks()
-    target = predictions.field("record/label")
-    root = predictions.field("record")
+    target = predictions.field("/label")
+    root = predictions.field("/")
 
     assert {field.name for field in target.type} == {"state", "content", "inferred"}
     assert {field.name for field in target.type.field("state").type} == {token.name for token in rf.Tokens}

@@ -45,7 +45,7 @@ Validation, test, and prediction reuse the frozen mapping. For an
 application-supplied trained `model`:
 
 ```python
-labels = rf.Set.vocabulary(model, "record/tags")
+labels = rf.Set.vocabulary(model, rf.Address("tags"))
 ```
 
 This tuple snapshot lists populated labels in index order. It also accepts a

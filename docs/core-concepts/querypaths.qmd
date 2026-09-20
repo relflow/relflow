@@ -25,7 +25,6 @@ payload:
 import relflow as rf
 
 model = rf.Model(
-    name="order",
     query="payload",
     d_model=64,
     n_layers=2,

@@ -31,13 +31,15 @@ forward pass.
 
 ## Read a field
 
-Prediction keys are full schema addresses. For `rf.Model(name="order", ...)`,
-the return target is the literal struct field `order/returned`:
+Prediction keys are full, slash-prefixed schema addresses. A return target
+is the literal struct field `/returned`; a model-level embedding uses `/`.
+See [Names And Addresses](../core-concepts/model-tree.qmd#names-and-addresses).
 
 ```python
 import pyarrow.compute as pc
+import relflow as rf
 
-returned = pc.struct_field(result["predictions"], "order/returned")
+returned = pc.struct_field(result["predictions"], rf.Address("returned"))
 content = pc.struct_field(returned, "content")
 probability = pc.struct_field(content, "probability")
 ```
@@ -49,7 +51,7 @@ they are placeholders, not measured predictions.
 inputs:
   request_id: order-42
 predictions:
-  order/returned:
+  /returned:
     state:
       valued: <probability>
       "null": <probability>

@@ -202,7 +202,7 @@ def cycle_rank(observations: list[dict]) -> list[dict]:
 def prediction(model: rf.Model, observations: list[dict]) -> np.ndarray:
     inputs = [{"items": row["items"], "rank": row["rank"]} for row in observations]
     output = model.predict(inputs)["predictions"].to_pylist()
-    return np.asarray([row["request/answer"]["content"] for row in output], dtype=np.float64)
+    return np.asarray([row["/answer"]["content"] for row in output], dtype=np.float64)
 
 
 def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
@@ -283,7 +283,6 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     validate = list(records(bags=192, seed=seed + 2))
     test = list(records(bags=384, seed=seed + 3))
     model = rf.Model(
-        name="request",
         d_model=64,
         n_layers=3,
         n_heads=4,

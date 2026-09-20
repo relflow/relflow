@@ -24,14 +24,13 @@ returned: false
 import relflow as rf
 
 model = rf.Model(
-    name="order",
     d_model=64,
     n_layers=2,
     n_heads=4,
     amount=rf.Number,
     items=rf.Branch(
         length=32,
-        sku=rf.Category(),
+        sku=rf.Category,
         quantity=rf.Number,
     ),
     returned=rf.Boolean(mask=True),
