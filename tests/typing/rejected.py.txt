@@ -15,6 +15,11 @@ rf.Quantile(objective="l2")  # rejected
 rf.Quantile(jitter=rf.Jitter())  # rejected
 rf.Quantile("amount")  # rejected
 rf.Category(size=16, notes="Merchant label")  # rejected
+rf.Enum()  # rejected
+rf.Enum(values=["yes", "no"])  # rejected
+rf.Enum(values=(None,))  # rejected
+rf.Enum(("yes", "no"))  # rejected
+rf.Enum(values=("yes", "no"), size=16)  # rejected
 rf.Vector()  # rejected
 rf.Cluster(bounds=(1, 2, 3))  # rejected
 rf.Category(size="large")  # rejected

@@ -12,6 +12,7 @@ type from the meaning of the value, not just its storage format.
 | Numeric position in a learned distribution | [Quantile](../data-types/quantile.qmd) |
 | True or false | [Boolean](../data-types/boolean.qmd) |
 | One learned label | [Category](../data-types/category.qmd) |
+| One label from a declared fixed set | [Enum](../data-types/enum.qmd) |
 | Labels sharing learned latent groups | [Cluster](../data-types/cluster.qmd) |
 | Unordered label membership | [Set](../data-types/set.qmd) |
 | Related objects or repeated records | [Branch](../data-types/branch.qmd) |
@@ -27,6 +28,7 @@ prices belong in a Branch.
 Category, Set, and Cluster learn labels through an
 [online vocabulary](vocabulary.qmd). Its capacity, admission timing, and unknown
 values affect both training and prediction.
+Enum uses the labels declared in its schema and rejects values outside that set.
 
 ## Value state {#value-state}
 
@@ -111,7 +113,7 @@ its remaining payload:
 | Number | Scalar in source units |
 | Quantile | Scalar in source units; null before learning a distribution |
 | Boolean | Probability of true |
-| Category | Best label, probability, and optional candidates |
+| Category, Enum | Best label, probability, and optional candidates |
 | Cluster | Best cluster and best vocabulary label, each with probability |
 | Set | Label/probability pairs |
 | Vector | Fixed-width reconstructed vector |

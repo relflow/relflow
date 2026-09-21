@@ -3,6 +3,7 @@
 Use `Category` for one label from a learned vocabulary: a country, product
 family, customer tier, or class. Use [Set](set.qmd) for multiple labels,
 [Hash](hash.qmd) for identifier equality, and [Text](text.qmd) for word meaning.
+Use [Enum](enum.qmd) when the schema declares every allowed label in advance.
 
 ```yaml
 merchant_category: grocery

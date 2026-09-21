@@ -23,6 +23,10 @@ def schema_api() -> None:
     assert_type(quantile.objective, Literal["mae", "mse", "huber"])
     assert_type(quantile.mask, tuple[rf.Mask, ...])
     assert_type(rf.Category(topk=[2, 3]).topk, list[int] | None)
+    enum = rf.Enum(values=("standard", "express", "pickup"), topk=[2], mask=True)
+    assert_type(enum.values, tuple[bool | int | float | str | bytes, ...])
+    assert_type(enum.topk, list[int] | None)
+    assert_type(enum.mask, tuple[rf.Mask, ...])
     assert_type(rf.Cluster(bounds=4).n_clusters, tuple[int, int])
     assert_type(rf.Cluster(n_clusters=(2, 8)).n_clusters, tuple[int, int])
     assert_type(rf.DateParts(dateparts=["day_of_week", DatePart.hour_of_day]).dateparts, list[DatePart])
@@ -46,6 +50,7 @@ def schema_api() -> None:
     rf.Branch(fields={"length": number, "description": rf.Category}, reduction=rf.Mean())
     rf.Model(d_model=32, n_heads=4, n_layers=1, items=branch, label=rf.Boolean(mask=True))
     rf.Model.xs(value=rf.Quantile, target=quantile)
+    rf.Model.sm(target=enum)
     rf.Model(d_model=32, n_heads=4, n_layers=1, attention=None, items=rf.Branch(attention=None, value=rf.Number))
 
 

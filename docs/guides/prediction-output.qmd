@@ -81,7 +81,7 @@ branch embeddings contain no decoded value.
 | `Number` | `content`: floating-point reconstruction |
 | `Quantile` | `content`: floating-point reconstruction in source units; null before learning a distribution |
 | `Vector` | `content`: fixed-width list |
-| `Category` | `content.value`, `content.probability`, `content.topk` candidates |
+| `Category`, `Enum` | `content.value`, `content.probability`, `content.topk` candidates |
 | `Set` | `content`: list of value/probability candidates |
 | `Cluster` | `cluster.value`, `cluster.probability`, plus content value/probability |
 | `Text`, `Hash`, `DateParts` | No decoded public value; embeddings are available |
@@ -91,10 +91,10 @@ internal transformations do not change the output units. Quantile clips the
 inverse transformation to its learned minimum and maximum. Vector predicts the supplied
 coordinates and writes zeros where the most likely state is not `valued`. If
 your preprocessor transforms units, reverse that application transform in a
-[postprocessor](postprocessors.qmd). Category and Set labels are Arrow
+[postprocessor](postprocessors.qmd). Category, Enum, and Set labels are Arrow
 `large_string` values.
-Category `topk` is present even when empty; a Set threshold can vary the number
-of returned candidates.
+Category and Enum always include `topk`, even when empty. A Set threshold can
+vary the number of returned candidates.
 
 The Arrow row dimension always means observations. A repeated branch appears
 as fixed-width lists inside each leaf's output, including length-one branches.

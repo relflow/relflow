@@ -157,7 +157,19 @@ def test_quarto_navigation_and_relative_links_resolve() -> None:
 
 def test_datatype_references_cover_public_options_and_states() -> None:
     common_fields = set(rf.RequestBase.model_fields)
-    for name in ("Boolean", "Category", "Cluster", "DateParts", "Hash", "Number", "Quantile", "Set", "Text", "Vector"):
+    for name in (
+        "Boolean",
+        "Category",
+        "Cluster",
+        "DateParts",
+        "Enum",
+        "Hash",
+        "Number",
+        "Quantile",
+        "Set",
+        "Text",
+        "Vector",
+    ):
         request = getattr(rf, name)
         reference = (DOCS / f"data-types/{name.lower()}.qmd").read_text()
         for field_name, field in request.model_fields.items():

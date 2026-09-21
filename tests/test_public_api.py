@@ -59,6 +59,8 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.UpdateOperation is not None
     assert relflow.SchemaField is not None
     assert relflow.Category.model_fields["type"].default == "category"
+    assert relflow.Enum.model_fields["type"].default == "enum"
+    assert relflow.Enum.model_fields["values"].is_required()
     assert relflow.Boolean.model_fields["type"].default == "boolean"
     assert relflow.Number.model_fields["type"].default == "number"
     assert relflow.Quantile.model_fields["type"].default == "quantile"
@@ -69,6 +71,7 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.Overflow.tail == "tail"
     assert relflow.VocabularySyncCallback.__name__ == "VocabularySyncCallback"
     assert "number" in relflow.TENSORFIELDS
+    assert "enum" in relflow.TENSORFIELDS
     assert "quantile" in relflow.TENSORFIELDS
     assert "boolean" in relflow.TENSORFIELDS
     assert "set" in relflow.TENSORFIELDS

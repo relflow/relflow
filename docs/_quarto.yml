@@ -61,6 +61,8 @@ website:
             text: Cluster
           - href: data-types/dateparts.qmd
             text: DateParts
+          - href: data-types/enum.qmd
+            text: Enum
           - href: data-types/hash.qmd
             text: Hash
           - href: data-types/number.qmd
