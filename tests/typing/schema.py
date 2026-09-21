@@ -18,6 +18,10 @@ def schema_api() -> None:
     assert_type(number.mask, tuple[rf.Mask, ...])
     assert_type(number.objective, Objective)
     assert_type(number.n_bands, int)
+    quantile = rf.Quantile(compression=200, n_bands=4, objective="mse", mask=True)
+    assert_type(quantile.compression, int)
+    assert_type(quantile.objective, Literal["mae", "mse", "huber"])
+    assert_type(quantile.mask, tuple[rf.Mask, ...])
     assert_type(rf.Category(topk=[2, 3]).topk, list[int] | None)
     assert_type(rf.Cluster(bounds=4).n_clusters, tuple[int, int])
     assert_type(rf.Cluster(n_clusters=(2, 8)).n_clusters, tuple[int, int])
@@ -41,6 +45,7 @@ def schema_api() -> None:
     assert_type(branch.mask, tuple[rf.Mask, ...])
     rf.Branch(fields={"length": number, "description": rf.Category}, reduction=rf.Mean())
     rf.Model(d_model=32, n_heads=4, n_layers=1, items=branch, label=rf.Boolean(mask=True))
+    rf.Model.xs(value=rf.Quantile, target=quantile)
     rf.Model(d_model=32, n_heads=4, n_layers=1, attention=None, items=rf.Branch(attention=None, value=rf.Number))
 
 

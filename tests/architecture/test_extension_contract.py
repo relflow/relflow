@@ -143,6 +143,9 @@ def build_extension(
                 super().__init__(schema=schema, address=address)
                 self.state = torch.nn.Linear(schema.d_model, 5)
 
+            def attach(self, context: object | None) -> None:
+                self.resource = context
+
             def decode(self, pooled: torch.Tensor) -> TensorDict:
                 return TensorDict(
                     {TensorKey.state: self.state(pooled)},
@@ -191,6 +194,27 @@ def test_third_party_extension_receives_one_explicit_context_contract():
         assert model.interprocess_encoding_context == {Address("/value"): marker}
         assert len(contexts) == 2  # mocked graph input, then the real batch
         assert contexts[-1] == rf.Context(state=marker, salt=0)
+    finally:
+        TENSORFIELDS.pop(extension.name, None)
+
+
+@pytest.mark.parametrize("options", [{"mask": True}, {"embed": True}])
+def test_third_party_decoder_attaches_the_live_embedder_context(options):
+    marker = object()
+    extension, Request = build_extension(state=marker)
+    try:
+        model = rf.Model(value=Request(**options), d_model=8, n_layers=1, n_heads=2)
+        node = model.nodes[Address("value")]
+
+        assert node.decoder.resource is marker
+        assert node.decoder.resource is node.embedder.context
+        assert node.decoder.resource is model.interprocess_encoding_context[Address("value")]
+
+        model.extend(extra=rf.Number)
+        rebuilt = model.nodes[Address("value")]
+
+        assert rebuilt.decoder is not node.decoder
+        assert rebuilt.decoder.resource is rebuilt.embedder.context is marker
     finally:
         TENSORFIELDS.pop(extension.name, None)
 

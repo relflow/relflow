@@ -9,6 +9,7 @@ type from the meaning of the value, not just its storage format.
 | Meaning | Type |
 | --- | --- |
 | Continuous amount, count, age, or measurement | [Number](../data-types/number.qmd) |
+| Numeric position in a learned distribution | [Quantile](../data-types/quantile.qmd) |
 | True or false | [Boolean](../data-types/boolean.qmd) |
 | One learned label | [Category](../data-types/category.qmd) |
 | Labels sharing learned latent groups | [Cluster](../data-types/cluster.qmd) |
@@ -57,8 +58,8 @@ inputs use separate presence information rather than a sixth state token.
 An unknown Category is still valued; its categorical content is unavailable.
 Unknown Set members simply have no active vocabulary bit. Neither case is
 null. Keep one compatible Arrow value family per identity field: strings,
-binary values, integers, floats, and Booleans are distinct families. Number
-and Vector allow integer/float promotion. Datatypes own these contracts;
+binary values, integers, floats, and Booleans are distinct families. Number,
+Quantile, and Vector allow integer/float promotion. Datatypes own these contracts;
 [custom tensorfields](../guides/custom-tensorfields.qmd) can declare their own.
 
 ## Shared leaf options {#shared-leaf-options}
@@ -108,6 +109,7 @@ its remaining payload:
 | Type | Decoded content |
 | --- | --- |
 | Number | Scalar in source units |
+| Quantile | Scalar in source units; null before learning a distribution |
 | Boolean | Probability of true |
 | Category | Best label, probability, and optional candidates |
 | Cluster | Best cluster and best vocabulary label, each with probability |

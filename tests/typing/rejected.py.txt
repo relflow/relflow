@@ -9,6 +9,11 @@ rf.Number(objective="l2")  # rejected
 rf.Number(mask=None)  # rejected
 rf.Number(n_bnads=4)  # rejected
 rf.Number(note="Transaction amount")  # rejected
+rf.Quantile(compression="large")  # rejected
+rf.Quantile(n_bands="eight")  # rejected
+rf.Quantile(objective="l2")  # rejected
+rf.Quantile(jitter=rf.Jitter())  # rejected
+rf.Quantile("amount")  # rejected
 rf.Category(size=16, notes="Merchant label")  # rejected
 rf.Vector()  # rejected
 rf.Cluster(bounds=(1, 2, 3))  # rejected

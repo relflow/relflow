@@ -1,7 +1,8 @@
 # Number
 
 Use `Number` for a scalar whose magnitude matters: an amount, quantity, age,
-or measurement. Use [Category](category.qmd) for numeric-looking labels and
+or measurement. Use [Quantile](quantile.qmd) for a percentile representation,
+[Category](category.qmd) for numeric-looking labels, and
 [DateParts](dateparts.qmd) for recurring calendar positions.
 
 ```yaml

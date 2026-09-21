@@ -65,6 +65,8 @@ website:
             text: Hash
           - href: data-types/number.qmd
             text: Number
+          - href: data-types/quantile.qmd
+            text: Quantile
           - href: data-types/set.qmd
             text: Set
           - href: data-types/text.qmd

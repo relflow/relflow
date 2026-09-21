@@ -132,6 +132,13 @@ context and optional aligned sibling conditioning. Implement `decode(pooled)`
 to return a TensorDict of raw predictions. Pass `conditioned=False` to the base
 constructor to disable direct sibling conditioning.
 
+After constructing both modules, relflow calls
+`decoder.attach(embedder.context)`. Override `DecoderBase.attach(context)` when
+decoding needs the same live resource as encoding, such as a learned inverse
+transform. Keep persistent ownership in the embedder and retain a reference
+to its context in the decoder; checkpoint restoration then updates one
+authoritative resource.
+
 ### Observe and learn
 
 An embedder's `context` property exposes its worker-safe resource; it becomes

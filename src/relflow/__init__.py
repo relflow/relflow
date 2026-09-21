@@ -84,6 +84,7 @@ from relflow.tensorfields.extensions.cluster import Request as Cluster
 from relflow.tensorfields.extensions.dateparts import Request as DateParts
 from relflow.tensorfields.extensions.hashable import Request as Hash
 from relflow.tensorfields.extensions.number import Request as Number
+from relflow.tensorfields.extensions.quantile import Request as Quantile
 from relflow.tensorfields.extensions.set import Request as Set
 from relflow.tensorfields.extensions.text import Request as Text
 from relflow.tensorfields.extensions.vector import Request as Vector
@@ -169,6 +170,7 @@ __all__ = [
     "NodePredicate",
     "NodeSelector",
     "Number",
+    "Quantile",
     "OptimizerConfig",
     "Overflow",
     "OverflowInput",

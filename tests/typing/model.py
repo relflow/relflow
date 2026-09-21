@@ -42,6 +42,10 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
     assert_type(Classifier.compact(amount=rf.Number, n_layers=2), Classifier)
     assert_type(model.track(("train", "loss"), loss), torch.Tensor)
     assert_type(model.encode(table), TensorDict)
+    assert_type(rf.Quantile.normalization(model, rf.Address("amount")), dict[str, int | float | None])
+    assert_type(
+        rf.Quantile.normalization(model.interprocess_encoding_context, "/amount"), dict[str, int | float | None]
+    )
     assert_type(model(batch, strata="train"), list[Prediction])
     assert_type(model.training_step(batch, 0), Output | None)
     assert_type(model.validation_step(batch, 0), Output)

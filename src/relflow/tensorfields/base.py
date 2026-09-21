@@ -341,6 +341,10 @@ class DecoderBase(torch.nn.Module):
             case _:
                 raise ValueError(f"unsupported decoder pooling: {request.pooling}")
 
+    def attach(self, context: object | None) -> None:
+        """Attach live resources owned by this field's embedder after construction."""
+        return None
+
     def decode(self, pooled: torch.Tensor) -> TensorDict:
         raise NotImplementedError("decoder must implement decode(pooled)")
 

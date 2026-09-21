@@ -79,14 +79,16 @@ branch embeddings contain no decoded value.
 | --- | --- |
 | `Boolean` | `content.probability`: probability of `True` |
 | `Number` | `content`: floating-point reconstruction |
+| `Quantile` | `content`: floating-point reconstruction in source units; null before learning a distribution |
 | `Vector` | `content`: fixed-width list |
 | `Category` | `content.value`, `content.probability`, `content.topk` candidates |
 | `Set` | `content`: list of value/probability candidates |
 | `Cluster` | `cluster.value`, `cluster.probability`, plus content value/probability |
 | `Text`, `Hash`, `DateParts` | No decoded public value; embeddings are available |
 
-Number predicts in the units supplied after preprocessing. Its internal
-normalizer does not change the output units. Vector predicts the supplied
+Number and Quantile predict in the units supplied after preprocessing. Their
+internal transformations do not change the output units. Quantile clips the
+inverse transformation to its learned minimum and maximum. Vector predicts the supplied
 coordinates and writes zeros where the most likely state is not `valued`. If
 your preprocessor transforms units, reverse that application transform in a
 [postprocessor](postprocessors.qmd). Category and Set labels are Arrow
