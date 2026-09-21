@@ -110,11 +110,7 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
 
 
 def build() -> rf.Model:
-    return rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
+    return rf.Model.xs(
         batch_size=64,
         views=rf.Branch(
             length=2,
@@ -133,6 +129,8 @@ def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
 
 # %% [markdown]
 # ## Training and controls
+#
+# The model uses the [xs preset](../../core-concepts/model-tree.qmd#choose-a-size).
 #
 # Fit for 500 AdamW updates at learning rate 0.002. On the same test observations,
 # set each of the four branch-mask patterns deterministically. At least one

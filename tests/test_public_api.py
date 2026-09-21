@@ -8,6 +8,7 @@ import relflow.tensorfields as tensorfields
 
 def test_common_resources_are_available_from_package_root():
     assert relflow.Model.__name__ == "Model"
+    assert relflow.presets.SM.name == "sm"
     assert relflow.Attention().type == "attention"
     assert relflow.AttentionMode.mha == "mha"
     assert relflow.Mean().type == "mean"

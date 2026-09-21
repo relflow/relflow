@@ -62,7 +62,11 @@ def bind_tree_field(name: str, value: TreeFieldInput) -> SchemaField:
     if isinstance(value, Branch):
         payload["fields"] = [bind_tree_field(cast(str, child.name), child) for child in value.fields]
     constructor = TENSORFIELDS[value.type].Request if type(value) is Leaf else type(value)
-    return constructor.model_validate(payload)
+    bound = constructor.model_validate(payload)
+    # Cloning retains materialized defaults (including extension factories),
+    # while preserving which options the reusable definition supplied.
+    object.__setattr__(bound, "__pydantic_fields_set__", value.model_fields_set | {"name"})
+    return bound
 
 
 def bind_fields(
@@ -350,6 +354,14 @@ class Schema(Node):
             )
         for branch in self.branches.values():
             branch.post_bind_validate()
+            if branch.attention is not None and (
+                self.d_model % branch.n_heads != 0 or self.d_model // branch.n_heads < 2
+            ):
+                raise ValueError(
+                    f"branch '{branch.address}' encoder: d_model must be divisible by nhead "
+                    f"with at least two dimensions per head; got d_model={self.d_model}, "
+                    f"n_heads={branch.n_heads}; override d_model or this branch's n_heads"
+                )
             if branch.embed and self.branch_outputs[branch.address] == 0:
                 raise ValueError(
                     f"branch '{branch.address}' has embed=True but no active descendant output; "
@@ -357,14 +369,33 @@ class Schema(Node):
                 )
             if isinstance(branch.reduction, Attention):
                 n_heads = branch.reduction.n_heads or branch.n_heads
-                if self.d_model % n_heads != 0 or self.d_model // n_heads < 2:
+                minimum = 2 if branch.reduction.position else 1
+                if self.d_model % n_heads != 0 or self.d_model // n_heads < minimum:
                     raise ValueError(
                         f"branch '{branch.address}' Attention reduction requires n_heads to divide "
-                        "d_model with at least two dimensions per head"
+                        f"d_model with at least {minimum} dimensions per head; got d_model={self.d_model}, "
+                        f"n_heads={n_heads}, position={branch.reduction.position}; "
+                        "override d_model or the reduction's n_heads"
                     )
 
+        decoded = {*self.objectives, *self.embed}
         for request in self.requests.values():
             request.post_bind_validate()
+            if request.address not in decoded or request.pooling != "query":
+                continue
+            positional = (
+                any(length > 1 for length in request.shape)
+                if request.decoder_position is None
+                else request.decoder_position
+            )
+            minimum = 2 if positional else 1
+            if self.d_model % request.n_heads != 0 or self.d_model // request.n_heads < minimum:
+                raise ValueError(
+                    f"leaf '{request.address}' query decoder requires n_heads to divide d_model "
+                    f"with at least {minimum} dimensions per head; got d_model={self.d_model}, "
+                    f"n_heads={request.n_heads}, decoder_position={request.decoder_position}; "
+                    "override d_model or this leaf's n_heads"
+                )
 
         self.validate_capabilities()
 

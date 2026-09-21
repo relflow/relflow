@@ -23,10 +23,7 @@ returned: false
 ```python
 import relflow as rf
 
-model = rf.Model(
-    d_model=64,
-    n_layers=2,
-    n_heads=4,
+model = rf.Model.sm(
     amount=rf.Number,
     items=rf.Branch(
         length=32,

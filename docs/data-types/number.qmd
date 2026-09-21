@@ -13,8 +13,7 @@ returned: false
 ```python
 import relflow as rf
 
-model = rf.Model(
-    d_model=64, n_layers=2, n_heads=4,
+model = rf.Model.sm(
     amount=rf.Number(jitter=rf.Jitter(add=0.02)),
     age_days=rf.Number,
     returned=rf.Boolean(mask=True),

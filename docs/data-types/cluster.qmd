@@ -14,8 +14,7 @@ fraud: false
 ```python
 import relflow as rf
 
-model = rf.Model(
-    d_model=64, n_layers=2, n_heads=4,
+model = rf.Model.sm(
     merchant_id=rf.Cluster(
         bounds=64,
         mask=rf.Mask(rate=0.15, reconstruct=True),

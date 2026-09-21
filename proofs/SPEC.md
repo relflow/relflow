@@ -204,6 +204,11 @@ it tests optimization state rather than generalization.
 
 - Exercise `rf.Model`, built-in public tensorfield constructors, and
   `rf.SyntheticDataModule` through a normal Lightning training loop.
+- Prefer `rf.Model.xs(...)` for small behavioral proofs whose architecture is
+  incidental. Keep explicit configurations when attention, reduction geometry,
+  or model capacity is an experimental control. Presets also fill omitted
+  branch and decoder options, so adopting one requires a new full run with
+  the existing data, budget, and gates; retain earlier evidence as history.
 - Use `lit.seed_everything(seed, workers=True)` and
   `Trainer(deterministic=True)`.
 - Prefer fixed optimizer steps. Fixed epochs are acceptable when complete data

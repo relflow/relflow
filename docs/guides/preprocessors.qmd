@@ -53,10 +53,7 @@ parties:
 Define the model against this processed shape:
 
 ```python
-model = rf.Model(
-    d_model=64,
-    n_layers=2,
-    n_heads=4,
+model = rf.Model.sm(
     parties=rf.Branch(
         length=2,
         overflow="error",

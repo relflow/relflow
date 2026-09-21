@@ -101,11 +101,7 @@ def records(*, rows: int, seed: int, shifted: bool = False) -> Iterator[dict]:
 
 
 def build() -> rf.Model:
-    return rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
+    return rf.Model.xs(
         batch_size=64,
         x=rf.Number,
         hint=rf.Category(p_unavailable=0.0),
@@ -115,6 +111,8 @@ def build() -> rf.Model:
 
 # %% [markdown]
 # ## Training and controls
+#
+# The model uses the [xs preset](../../core-concepts/model-tree.qmd#choose-a-size).
 #
 # Fit for 350 AdamW updates at learning rate 0.002. Require at least 0.95
 # known-only accuracy, exactly 50% output-label coverage, and zero accuracy on

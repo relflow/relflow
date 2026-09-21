@@ -30,10 +30,7 @@ preferred_channel: email
 ```python
 import relflow as rf
 
-model = rf.Model(
-    d_model=128,
-    n_layers=3,
-    n_heads=8,
+model = rf.Model.sm(
     orders=rf.Branch(
         length=64,
         merchant=rf.Category,

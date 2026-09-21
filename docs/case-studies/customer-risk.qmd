@@ -40,10 +40,7 @@ attribution, and spending consistently before constructing the splits.
 ```python
 import relflow as rf
 
-model = rf.Model(
-    d_model=128,
-    n_layers=3,
-    n_heads=8,
+model = rf.Model.md(
     batch_size=128,
     embed=True,
     tenure_days=rf.Number,
@@ -104,7 +101,7 @@ Line items form context within each order; events form context within each
 session. Each history then sends its reduced representation to the customer
 root. The refund decoder uses its ancestor route and visible sibling context;
 its predictions retain order coordinates even though the orders branch sends
-a summary upward. See [Model Tree](../core-concepts/model-tree.qmd).
+reduced context upward. See [Model Tree](../core-concepts/model-tree.qmd).
 
 All three targets use `mask=True`. Their labels supply supervision but never
 input embeddings. At prediction time, omit the two root targets and omit
@@ -113,7 +110,7 @@ the repeated positions to predict.
 
 ## Choose What To Preserve
 
-The default Attention reduction sends one summary per parent coordinate.
+The `md` preset's Attention reductions send four summaries per parent coordinate.
 That bounds the context passed upward; it does not preserve a separate token
 for every raw item. If the task requires exact correspondence between a viewed
 SKU and a purchased SKU, establish that relationship in preprocessing or

@@ -17,8 +17,7 @@ fraud: false
 ```python
 import relflow as rf
 
-model = rf.Model(
-    d_model=64, n_layers=2, n_heads=4,
+model = rf.Model.sm(
     account_id=rf.Hash(n_hashes=4),
     transfers=rf.Branch(
         length=32,

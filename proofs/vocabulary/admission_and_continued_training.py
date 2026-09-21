@@ -98,11 +98,7 @@ def records(*, rows: int, seed: int, phase: str = "initial") -> Iterator[dict]:
 
 
 def build() -> rf.Model:
-    return rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
+    return rf.Model.xs(
         batch_size=64,
         x=rf.Number,
         label=rf.Category(p_unavailable=0.0, topk=[3], mask=True),
@@ -162,6 +158,8 @@ def roundtrip(model: rf.Model, rows: list[dict], path: Path) -> tuple[rf.Model, 
 
 # %% [markdown]
 # ## Training and controls
+#
+# The model uses the [xs preset](../../core-concepts/model-tree.qmd#choose-a-size).
 #
 # Use 300 initial and 400 continuation AdamW updates at learning rate 0.002,
 # one device, and no loader workers. Require 0.95 accuracy on the initial task,

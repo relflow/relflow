@@ -17,6 +17,7 @@ from rich.console import Console, ConsoleOptions
 from rich.text import Text
 from torchmetrics import Metric as TorchMetric
 
+from relflow import presets
 from relflow._version import __version__
 from relflow.architecture import compiler
 from relflow.architecture.binding import bind
@@ -237,6 +238,7 @@ class Model(lit.LightningModule, Renderable):
         # internal integer state-dict revision; preserve the existing artifact contract.
         self._version: str = __version__  # pyrefly: ignore[bad-override-mutable-attribute]
         self.schema: Schema = schema
+        self.preset: presets.Preset | None = None
         self.batch_size: int = batch_size
         self.optimizer: OptimizerConfig | None = optimizer
         self.scheduler: SchedulerConfig | None = scheduler
@@ -257,6 +259,12 @@ class Model(lit.LightningModule, Renderable):
             branches=len(self.schema.branches),
             embeds=len(self.schema.embed),
         ).info("initialized Model module")
+
+    xs = presets.factory(presets.XS)
+    sm = presets.factory(presets.SM)
+    md = presets.factory(presets.MD)
+    lg = presets.factory(presets.LG)
+    xl = presets.factory(presets.XL)
 
     @property
     def version(self) -> str:
@@ -564,7 +572,7 @@ class Model(lit.LightningModule, Renderable):
         CheckpointState.dump(self, checkpoint)
 
     def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
-        CheckpointState.restore_version(self, checkpoint)
+        CheckpointState.restore_metadata(self, checkpoint)
 
     def restore_checkpoint_state(self, checkpoint: dict[str, Any]) -> None:
         """Restore this model in place from a `relflow` checkpoint dictionary."""

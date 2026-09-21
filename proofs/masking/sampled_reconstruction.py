@@ -94,11 +94,7 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
 
 
 def build() -> rf.Model:
-    return rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
+    return rf.Model.xs(
         batch_size=64,
         fields={
             name: rf.Number(
@@ -124,6 +120,8 @@ def error(actual: np.ndarray, predicted: np.ndarray | float) -> float:
 
 # %% [markdown]
 # ## Training and controls
+#
+# The model uses the [xs preset](../../core-concepts/model-tree.qmd#choose-a-size).
 #
 # Fit for 400 AdamW updates at learning rate 0.002. Evaluate the final model;
 # no checkpoint or gate is selected using the test set. Each direction must

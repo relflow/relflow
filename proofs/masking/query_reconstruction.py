@@ -104,11 +104,7 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
 
 
 def build() -> rf.Model:
-    return rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
+    return rf.Model.xs(
         batch_size=64,
         items=rf.Branch(
             length=LENGTH,
@@ -128,6 +124,10 @@ def prediction(model: rf.Model, rows: list[dict]) -> tuple[np.ndarray, np.ndarra
 
 # %% [markdown]
 # ## Training and controls
+#
+# The [xs preset](../../core-concepts/model-tree.qmd#choose-a-size) supplies the
+# architecture defaults; the items branch keeps `reduction=None` to retain
+# its coordinate slots.
 #
 # Fit for 400 AdamW updates at learning rate 0.002. The primary gate is selected
 # coordinate nRMSE below 0.25, relative to the selected training-label mean.

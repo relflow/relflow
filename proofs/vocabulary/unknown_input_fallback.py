@@ -95,11 +95,7 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
 
 
 def build() -> rf.Model:
-    return rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
+    return rf.Model.xs(
         batch_size=64,
         x=rf.Number,
         code=rf.Category(p_unavailable=0.3),
@@ -118,6 +114,8 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
 
 # %% [markdown]
 # ## Training and controls
+#
+# The model uses the [xs preset](../../core-concepts/model-tree.qmd#choose-a-size).
 #
 # Use 600 AdamW updates at learning rate 0.002. Known-code and null predictions
 # must each achieve nRMSE below 0.25 against their training-mean baseline.

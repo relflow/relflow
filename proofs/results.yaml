@@ -2029,6 +2029,43 @@ proofs:
         Signal exceeds noise by at least 0.40 AUC: true
       outcome: met
       duration_seconds: 6.714
+    - started_at: '2026-09-21T18:45:44.208421+00:00'
+      mode: full
+      seed: 7
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: null
+        source_sha256: 3f92f808b13a39020d1a53ff4057f2b272ae82cfbfb5e5167a362b603267e4ab
+        script_sha256: 500c97497cdc899f2e353fb1720653e472302612e53c9f86ba2e5df54f0c6b60
+        code_sha256: d485fb2254ed0c221e9b4c9fff09e84f41ae13cee3b0ca703f72ad92c07a3488
+        python: 3.12.6
+        platform: Linux-6.8.0-138-generic-x86_64-with-glibc2.35
+        host: lab
+        relflow_path: /home/grantham/relflow-presets.Rt5OFG/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: '13.0'
+        gpu: NVIDIA GeForce RTX 3090
+      metrics:
+        signal_auc: 1.0
+        noise_auc: 0.47458934783935547
+        auc_gap: 0.5254106521606445
+      checks:
+        Signal AUC is at least 0.98: true
+        Independent noise AUC remains between 0.42 and 0.58: true
+        Signal exceeds noise by at least 0.40 AUC: true
+      outcome: met
+      duration_seconds: 5.896
   P018:
     script: proofs/cluster/hidden_regression_regimes.py
     page: docs/proofs/cluster/hidden-regression-regimes.py
@@ -5472,6 +5509,45 @@ proofs:
         Permuting targets increases nRMSE by >= 0.50: true
       outcome: met
       duration_seconds: 24.979
+    - started_at: '2026-09-21T18:46:19.520713+00:00'
+      mode: full
+      seed: 31
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: null
+        source_sha256: 474646bfdffea08d135d9925b6dece0a2d5774e65b645715aec018b019d9f9d1
+        script_sha256: 12d6cb3b29b7a74653e9bdc4140d8596110f9d2eed2dc1edaa8776643d66740d
+        code_sha256: 9014285d5dc5f1266da3847fec41b1ff3d745bb18baf0895038101178ca17ef4
+        python: 3.12.6
+        platform: Linux-6.8.0-138-generic-x86_64-with-glibc2.35
+        host: lab
+        relflow_path: /home/grantham/relflow-presets.Rt5OFG/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: '13.0'
+        gpu: NVIDIA GeForce RTX 3090
+      metrics:
+        aligned_nrmse: 0.01921761230552758
+        permuted_target_nrmse: 1.1583676397341647
+        baseline_rmse: 1.0618151651706766
+      checks:
+        Target permutation preserves visible inputs: true
+        Output retains the fixed branch length: true
+        Inferred flags match real and padded coordinates: true
+        Aligned subtotal nRMSE <= 0.25: true
+        Permuting targets increases nRMSE by >= 0.50: true
+      outcome: met
+      duration_seconds: 31.363
   P031:
     script: proofs/relational/fixed_length.py
     page: docs/proofs/relational/fixed-length.py
@@ -6775,6 +6851,51 @@ proofs:
         State exceeds its control by at least 0.40 AUC: true
       outcome: met
       duration_seconds: 3.926
+    - started_at: '2026-09-21T18:45:55.020601+00:00'
+      mode: full
+      seed: 11
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: null
+        source_sha256: 0f3a23824b8fdfd61912dfda6b5ed822871518a220e96c533974fbf56892f4a0
+        script_sha256: da10c3c57e213c3671d8ce1f2e326371d9f33a02633370d12429cd1cb64b5f0e
+        code_sha256: 9a8ba02f3604ccaaee297f22c7f59b66f36c68cc023489b53161f6002932b138
+        python: 3.12.6
+        platform: Linux-6.8.0-138-generic-x86_64-with-glibc2.35
+        host: lab
+        relflow_path: /home/grantham/relflow-presets.Rt5OFG/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: '13.0'
+        gpu: NVIDIA GeForce RTX 3090
+      metrics:
+        state_auc: 1.0
+        state_accuracy: 1.0
+        independent_auc: 0.50634765625
+        independent_accuracy: 0.5
+        prefilled_auc: 0.5
+        prefilled_accuracy: 0.5
+        auc_gap: 0.49365234375
+      checks:
+        Null state reaches 0.99 AUC: true
+        Null state reaches 0.98 accuracy: true
+        Independent validity AUC remains between 0.42 and 0.58: true
+        Independent validity accuracy remains between 0.45 and 0.55: true
+        Null-to-zero AUC remains between 0.42 and 0.58: true
+        Null-to-zero accuracy remains between 0.45 and 0.55: true
+        State exceeds its control by at least 0.40 AUC: true
+      outcome: met
+      duration_seconds: 2.697
   P039:
     script: proofs/structure/attention_learns_fixed_width_sum.py
     page: docs/proofs/structure/attention-learns-fixed-width-sum.py
@@ -8479,6 +8600,147 @@ proofs:
         Complete reset loses the learned relationship: true
       outcome: met
       duration_seconds: 6.21
+    - started_at: '2026-09-21T18:47:33.195287+00:00'
+      mode: full
+      seed: 4601
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: null
+        source_sha256: 452732d13c5b75035a4b9b4ca38dd1bc0b9e2d1e503ed5f0d05bc48e0d075bd3
+        script_sha256: db5e6f92ec0c3cc326920bc21034799415366f83d289aa992145547e39a56a9a
+        code_sha256: d730d5d6bdce840aea3c4f7d2d1ba5ac0033828db4e4eaf06f1be4f1087aef82
+        python: 3.12.6
+        platform: Linux-6.8.0-138-generic-x86_64-with-glibc2.35
+        host: lab
+        relflow_path: /home/grantham/relflow-presets.Rt5OFG/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: '13.0'
+        gpu: NVIDIA GeForce RTX 3090
+      metrics:
+        source:
+          rmse: 0.025036459738561393
+          baseline_rmse: 0.8103651362027426
+          nrmse: 0.030895282410443682
+        source_prerequisite_met: true
+        downstream_interpretable: true
+        source_steps: 512
+        edits:
+        - edit: cycle 1 metadata
+          max_prediction_drift: 0.0
+          nrmse: 0.030895282410443682
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: cycle 1 inactive extension
+          max_prediction_drift: 0.0
+          nrmse: 0.030895282410443682
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: cycle 1 inactive deletion
+          max_prediction_drift: 0.0
+          nrmse: 0.030895282410443682
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: cycle 2 metadata
+          max_prediction_drift: 0.0
+          nrmse: 0.030895282410443682
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: cycle 2 inactive extension
+          max_prediction_drift: 0.0
+          nrmse: 0.030895282410443682
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: cycle 2 inactive deletion
+          max_prediction_drift: 0.0
+          nrmse: 0.030895282410443682
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: cycle 3 metadata
+          max_prediction_drift: 0.0
+          nrmse: 0.030895282410443682
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: cycle 3 inactive extension
+          max_prediction_drift: 0.0
+          nrmse: 0.030895282410443682
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: cycle 3 inactive deletion
+          max_prediction_drift: 0.0
+          nrmse: 0.030895282410443682
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: equivalent source rebind
+          max_prediction_drift: 0.0
+          nrmse: 0.030895282410443682
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: source rebind restoration
+          max_prediction_drift: 0.0
+          nrmse: 0.030895282410443682
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        - edit: rejected duplicate extension
+          max_prediction_drift: 0.0
+          nrmse: 0.030895282410443682
+          changed_or_missing_state_entries: []
+          vocabulary_preserved: true
+        controls:
+          complete_reset:
+            rmse: 0.7617805784697297
+            baseline_rmse: 0.8103651362027426
+            nrmse: 0.9400460908761779
+        source_vocabulary:
+        - code-1
+        - code-2
+        - code-3
+        - code-0
+        test_rows: 1024
+        optimizer_policy: Fresh AdamW for source training; no post-edit fitting
+      checks:
+        Source learns the relationship below 0.25 nRMSE: true
+        'cycle 1 metadata: predictions survive': true
+        'cycle 1 metadata: all original state and vocabulary survive': true
+        'cycle 1 inactive extension: predictions survive': true
+        'cycle 1 inactive extension: all original state and vocabulary survive': true
+        'cycle 1 inactive deletion: predictions survive': true
+        'cycle 1 inactive deletion: all original state and vocabulary survive': true
+        'cycle 2 metadata: predictions survive': true
+        'cycle 2 metadata: all original state and vocabulary survive': true
+        'cycle 2 inactive extension: predictions survive': true
+        'cycle 2 inactive extension: all original state and vocabulary survive': true
+        'cycle 2 inactive deletion: predictions survive': true
+        'cycle 2 inactive deletion: all original state and vocabulary survive': true
+        'cycle 3 metadata: predictions survive': true
+        'cycle 3 metadata: all original state and vocabulary survive': true
+        'cycle 3 inactive extension: predictions survive': true
+        'cycle 3 inactive extension: all original state and vocabulary survive': true
+        'cycle 3 inactive deletion: predictions survive': true
+        'cycle 3 inactive deletion: all original state and vocabulary survive': true
+        'equivalent source rebind: predictions survive': true
+        'equivalent source rebind: all original state and vocabulary survive': true
+        'source rebind restoration: predictions survive': true
+        'source rebind restoration: all original state and vocabulary survive': true
+        Duplicate-name edit is rejected: true
+        'rejected duplicate extension: predictions survive': true
+        'rejected duplicate extension: all original state and vocabulary survive': true
+        Edited checkpoint preserves schema: true
+        Edited checkpoint preserves learned state: true
+        Edited checkpoint preserves predictions: true
+        Complete reset loses the learned relationship: true
+      outcome: met
+      duration_seconds: 8.876
   P047:
     script: proofs/mutations/extend_prediction_target.py
     page: docs/proofs/mutations/extend-prediction-target.py
@@ -18999,6 +19261,71 @@ proofs:
         'x: ordinary prediction requests no reconstruction': true
       outcome: met
       duration_seconds: 10.022
+    - started_at: '2026-09-21T18:46:55.911653+00:00'
+      mode: full
+      seed: 5101
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: null
+        source_sha256: 16b1b4583e97acdd5cfca92775ce9237b56ac0a5dfe75a4bd6bf213340f6294f
+        script_sha256: 6fce2c7c9cdaf5b1d6b1ca59c0c1dd7f66148a63ad284a4c7cdd53dc6163a206
+        code_sha256: d118b5ad1ac7a30d318209e62d43f913cdb52836e5dad5b4f3ec5a05978f213f
+        python: 3.12.6
+        platform: Linux-6.8.0-138-generic-x86_64-with-glibc2.35
+        host: lab
+        relflow_path: /home/grantham/relflow-presets.Rt5OFG/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: '13.0'
+        gpu: NVIDIA GeForce RTX 3090
+      metrics:
+        steps: 400
+        directions:
+          y:
+            rmse: 0.15137146223937037
+            baseline_rmse: 1.15431297403784
+            nrmse: 0.13113554611611616
+            shuffled_nrmse: 1.4079426757111781
+            both_hidden_nrmse: 1.0026266589760637
+            hidden_value_drift: 0.0
+            sampled_fraction: 0.3564453125
+          x:
+            rmse: 0.06543095357319988
+            baseline_rmse: 0.57715648701892
+            nrmse: 0.11336778680450829
+            shuffled_nrmse: 1.3891487662477953
+            both_hidden_nrmse: 1.003670268591943
+            hidden_value_drift: 0.0
+            sampled_fraction: 0.361328125
+      checks:
+        'y: held-out nRMSE below 0.25': true
+        'y: shuffled context nRMSE above 0.85': true
+        'y: no context nRMSE above 0.85': true
+        'y: hidden values cannot affect predictions': true
+        'y: sampling is partial': true
+        'y: sampling repeats within an epoch': true
+        'y: sampling changes across epochs': true
+        'y: ordinary prediction requests no reconstruction': true
+        'x: held-out nRMSE below 0.25': true
+        'x: shuffled context nRMSE above 0.85': true
+        'x: no context nRMSE above 0.85': true
+        'x: hidden values cannot affect predictions': true
+        'x: sampling is partial': true
+        'x: sampling repeats within an epoch': true
+        'x: sampling changes across epochs': true
+        'x: ordinary prediction requests no reconstruction': true
+      outcome: met
+      duration_seconds: 5.961
   P052:
     script: proofs/masking/query_reconstruction.py
     page: docs/proofs/masking/query-reconstruction.py
@@ -19319,6 +19646,50 @@ proofs:
         Selected coordinates are absent from encoder input: true
       outcome: met
       duration_seconds: 14.945
+    - started_at: '2026-09-21T18:47:06.795550+00:00'
+      mode: full
+      seed: 5201
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: null
+        source_sha256: d0ab50127f161f842ebf2c2b71401edb54460abff41dfc7a8c5f072336facd62
+        script_sha256: 1586049d40f35e1594906cfeb2b19f920168abbc5d8a92e955837e686d13fe47
+        code_sha256: 1f7905e61cb3360a9d6686a246c5d84229e9caa1c052d13f4891b70efe14bba1
+        python: 3.12.6
+        platform: Linux-6.8.0-138-generic-x86_64-with-glibc2.35
+        host: lab
+        relflow_path: /home/grantham/relflow-presets.Rt5OFG/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: '13.0'
+        gpu: NVIDIA GeForce RTX 3090
+      metrics:
+        steps: 400
+        selected_coordinates: 1792
+        rmse: 0.011269338620488767
+        baseline_rmse: 1.1622731152476307
+        nrmse: 0.009695947082186232
+        corrupted_context_nrmse: 1.393681311894954
+        hidden_value_drift: 0.0
+      checks:
+        Selected held-out nRMSE below 0.25: true
+        Corrupted context nRMSE above 0.85: true
+        Hidden values cannot affect predictions: true
+        Prediction flags match selectors including padding: true
+        Training objectives match selectors including padding: true
+        Selected coordinates are absent from encoder input: true
+      outcome: met
+      duration_seconds: 8.208
   P053:
     script: proofs/masking/branch_ablation.py
     page: docs/proofs/masking/branch-ablation.py
@@ -19737,6 +20108,64 @@ proofs:
         'backup: ancestor and local skips compose': true
       outcome: met
       duration_seconds: 15.778
+    - started_at: '2026-09-21T18:47:19.973284+00:00'
+      mode: full
+      seed: 5301
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: null
+        source_sha256: 68ae528a982385fa46354985b31767dab46f2db409db4c4bfe1971984b7260a6
+        script_sha256: 6896ab0b42650f570d4702b6afe76602635370e91fccd982fa2f45caa571ab80
+        code_sha256: 7a87d917b8d44009cf7d4b54fae1d94ac799484108719a1dac79814f944ad5a2
+        python: 3.12.6
+        platform: Linux-6.8.0-138-generic-x86_64-with-glibc2.35
+        host: lab
+        relflow_path: /home/grantham/relflow-presets.Rt5OFG/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: '13.0'
+        gpu: NVIDIA GeForce RTX 3090
+      metrics:
+        steps: 500
+        baseline_rmse: 0.8548844813618697
+        patterns:
+          visiblevisible:
+            nrmse: 0.04400240093873786
+            hidden_value_drift: 0.0
+          hiddenvisible:
+            nrmse: 0.04432706949323367
+            hidden_value_drift: 0.0
+          visiblehidden:
+            nrmse: 0.04432507835598125
+            hidden_value_drift: 0.0
+          hiddenhidden:
+            nrmse: 1.0023526397141547
+            hidden_value_drift: 0.0
+        shuffled_nrmse: 1.39987729050893
+      checks:
+        'visiblevisible: expected information boundary': true
+        'visiblevisible: skipped values cannot affect predictions': true
+        'hiddenvisible: expected information boundary': true
+        'hiddenvisible: skipped values cannot affect predictions': true
+        'visiblehidden: expected information boundary': true
+        'visiblehidden: skipped values cannot affect predictions': true
+        'hiddenhidden: expected information boundary': true
+        'hiddenhidden: skipped values cannot affect predictions': true
+        Shuffling available evidence removes accuracy: true
+        'reading: ancestor and local skips compose': true
+        'backup: ancestor and local skips compose': true
+      outcome: met
+      duration_seconds: 8.297
   P054:
     script: proofs/masking/prefix_generation.py
     page: docs/proofs/masking/prefix-generation.py
@@ -20794,6 +21223,64 @@ proofs:
         Evaluation does not admit labels or change counts: true
       outcome: met
       duration_seconds: 4.26
+    - started_at: '2026-09-21T18:47:47.028550+00:00'
+      mode: full
+      seed: 5501
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: null
+        source_sha256: 628b126af744d38b1fbc857587343fe944aea8af6f2c878fa23a704287e40f3d
+        script_sha256: cac1f5dae9aa08852ddc20a4e3366c76ff295b0f08a7c0487c651bc1adc5018b
+        code_sha256: bbc66c4f70c5642249fbffed7f2cc5ccfe2024fc470292a491776c39e05fe51e
+        python: 3.12.6
+        platform: Linux-6.8.0-138-generic-x86_64-with-glibc2.35
+        host: lab
+        relflow_path: /home/grantham/relflow-presets.Rt5OFG/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: '13.0'
+        gpu: NVIDIA GeForce RTX 3090
+      metrics:
+        steps: 600
+        vocabulary:
+        - left
+        - right
+        known:
+          rmse: 0.177016705571094
+          baseline_rmse: 1.9253678498400628
+          nrmse: 0.09193916143650081
+        'null':
+          rmse: 0.1021816251348
+          baseline_rmse: 1.1205872792139533
+          nrmse: 0.09118578001927372
+        unknown:
+          fallback_nrmse: 0.1578196002013915
+          paired_rmse: 1.5110135845267243
+          information_limit_rmse: 1.5
+          renaming_drift: 0.0
+          null_prediction_gap: 2.9226493082751404
+      checks:
+        'known: held-out nRMSE below 0.25': true
+        'null: held-out nRMSE below 0.25': true
+        Unknown codes retain valued state: true
+        Unknown content uses the allocation-independent sentinel: true
+        Unknown fallback nRMSE below 0.25: true
+        Paired novel identities stay near their information limit: true
+        Unknown spelling cannot alter predictions: true
+        Null remains distinct from unknown content: true
+        Evaluation does not admit labels or change counts: true
+      outcome: met
+      duration_seconds: 7.21
   P056:
     script: proofs/vocabulary/unknown_target_coverage.py
     page: docs/proofs/vocabulary/unknown-target-coverage.py
@@ -21355,6 +21842,67 @@ proofs:
         Evaluation preserves hint vocabulary and numerical moments: true
       outcome: met
       duration_seconds: 3.202
+    - started_at: '2026-09-21T18:47:59.175390+00:00'
+      mode: full
+      seed: 5601
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: null
+        source_sha256: 9371f829f3b9087ca2280fbda473e1771ad6046d59e6538da71d43d23b32d559
+        script_sha256: 348326e7914510424f0aa73285ef34dc4d11fb802ab3c69703679e2298bd849b
+        code_sha256: 3c13a16796e77ad4ecfe1a80cfed0683b0cf7030cb6407c4cac35f5d55da16a4
+        python: 3.12.6
+        platform: Linux-6.8.0-138-generic-x86_64-with-glibc2.35
+        host: lab
+        relflow_path: /home/grantham/relflow-presets.Rt5OFG/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: '13.0'
+        gpu: NVIDIA GeForce RTX 3090
+      metrics:
+        steps: 350
+        output_vocabulary:
+        - negative
+        - positive
+        hint_vocabulary:
+        - novel-positive
+        - novel-negative
+        - positive
+        - negative
+        coverage: 0.5
+        builtin_content_accuracy: 1.0
+        known_accuracy: 1.0
+        all_row_accuracy: 0.5
+        unknown_accuracy: 0.0
+        unknown_mean_confidence: 0.9999995118705556
+        shuffled_known_accuracy: 0.48046875
+        majority_baseline: 0.25634765625
+      checks:
+        Known-only content accuracy reaches 0.95: true
+        Built-in accuracy agrees with known-only external scoring: true
+        Coverage is exactly one half: true
+        All-row accuracy exposes the coverage ceiling: true
+        Unseen output labels cannot be emitted: true
+        Unknown answers still receive confident known-label predictions: true
+        Shuffling x removes known-label accuracy: true
+        Predictions and candidates use populated output labels only: true
+        Candidate probabilities normalize over populated labels: true
+        Labels known in another field remain unknown here: true
+        Unknown target content uses the unavailable sentinel: true
+        Evaluation preserves output vocabulary and exposure counts: true
+        Evaluation preserves hint vocabulary and numerical moments: true
+      outcome: met
+      duration_seconds: 4.507
   P057:
     script: proofs/vocabulary/capacity_admission_order.py
     page: docs/proofs/vocabulary/capacity-admission-order.py
@@ -23705,6 +24253,66 @@ proofs:
         Continued checkpoint preserves mapping, counts, and predictions: true
       outcome: met
       duration_seconds: 4.736
+    - started_at: '2026-09-21T18:48:08.610532+00:00'
+      mode: full
+      seed: 5901
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: null
+        source_sha256: 38ffe90218c84ba8cebab1513ac48212fcaf995d0c93f4c0a20a333c94359451
+        script_sha256: f0172aeb4f352bf0a0931a95c6e7fce96696629325ebd3e2f8a78c80ae3c3cd6
+        code_sha256: 6d4ebea2aeb2b6390e48bcbf58076fb8bf4db9e988047deee5d2faad4458be61
+        python: 3.12.6
+        platform: Linux-6.8.0-138-generic-x86_64-with-glibc2.35
+        host: lab
+        relflow_path: /home/grantham/relflow-presets.Rt5OFG/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: '13.0'
+        gpu: NVIDIA GeForce RTX 3090
+      metrics:
+        initial_steps: 300
+        continuation_steps: 400
+        initial_vocabulary:
+        - positive
+        - negative
+        final_vocabulary:
+        - positive
+        - negative
+        - far-positive
+        - far-negative
+        initial_accuracy: 1.0
+        new_accuracy_before_admission: 0.0
+        new_accuracy_immediately_after_admission: 0.0
+        final_old_accuracy: 1.0
+        final_new_accuracy: 1.0
+        two_class_chance: 0.5
+      checks:
+        Cold prediction leaves the vocabulary empty: true
+        Empty output vocabulary returns no label and zero probability: true
+        Initial known-label accuracy reaches 0.95: true
+        Initial checkpoint preserves mapping, counts, and predictions: true
+        Evaluation cannot admit new output labels: true
+        Evaluation leaves exposure counts and numerical moments frozen: true
+        Unadmitted labels cannot be predicted: true
+        Training admission appends both labels without moving old indices: true
+        Admission alone preserves existing learned parameter rows: true
+        Continued fitting learns new labels above 0.95 accuracy: true
+        Rehearsal retains old labels above 0.95 accuracy: true
+        Continued fitting preserves all admitted indices: true
+        Continued checkpoint preserves mapping, counts, and predictions: true
+      outcome: met
+      duration_seconds: 7.142
   P060:
     script: proofs/calibration/categorical_prior.py
     page: docs/proofs/calibration/categorical-prior.py
@@ -24497,6 +25105,66 @@ proofs:
         'capacity_128: evaluation preserves vocabulary and counts': true
       outcome: met
       duration_seconds: 8.02
+    - started_at: '2026-09-21T18:46:02.628010+00:00'
+      mode: full
+      seed: 7601
+      steps_override: null
+      accelerator: cpu
+      threads: 1
+      provenance:
+        revision: null
+        source_sha256: 248e741ac2fcab55ada3fed9fdefe01cfe761b571679a89e8bc5c62227055607
+        script_sha256: 92eca5bc4096f1dedc3162005da48204501203366b265160d0d730e2ed7dc279
+        code_sha256: 7c8561340407a6741d1d31fd1d771d119f4bb1291b9d9d5f1e8b05487cbce99f
+        python: 3.12.6
+        platform: Linux-6.8.0-138-generic-x86_64-with-glibc2.35
+        host: lab
+        relflow_path: /home/grantham/relflow-presets.Rt5OFG/src/relflow
+        packages:
+          relflow: 0.2.2
+          torch: 2.12.0
+          lightning: 2.6.4
+          numpy: 2.4.6
+          pyarrow: 24.0.0
+          polars: 1.44.1
+          torchmetrics: 1.9.0
+          tensordict: 0.12.4
+          pydantic: 2.13.4
+        cuda: '13.0'
+        gpu: NVIDIA GeForce RTX 3090
+      metrics:
+        prior: 0.9
+        weighted_optimum: 0.75
+        oracle_nll: 0.3250829733914482
+        capacity_2_known:
+          mean_probability: 0.9177792074769968
+          prior_rmse: 0.019093929522002402
+          excess_nll: 0.0023455258829381265
+        capacity_2_novel:
+          mean_probability: 0.919603168964386
+          prior_rmse: 0.019603168964385968
+          excess_nll: 0.002426814530788024
+        capacity_128_known:
+          mean_probability: 0.9155484228394926
+          prior_rmse: 0.016006825692360147
+          excess_nll: 0.001592113381159388
+        capacity_128_novel:
+          mean_probability: 0.9151918292045593
+          prior_rmse: 0.015191829204559304
+          excess_nll: 0.001412792967651899
+      checks:
+        'capacity_2_known: probability RMSE below 0.06': true
+        'capacity_2_known: excess expected NLL below 0.02': true
+        'capacity_2_novel: probability RMSE below 0.06': true
+        'capacity_2_novel: excess expected NLL below 0.02': true
+        'capacity_2: evaluation preserves vocabulary and counts': true
+        'capacity_128_known: probability RMSE below 0.06': true
+        'capacity_128_known: excess expected NLL below 0.02': true
+        'capacity_128_novel: probability RMSE below 0.06': true
+        'capacity_128_novel: excess expected NLL below 0.02': true
+        'capacity_128: evaluation preserves vocabulary and counts': true
+      outcome: met
+      duration_seconds: 12.013
   P061:
     script: proofs/vocabulary/cold_start_confidence.py
     page: docs/proofs/vocabulary/cold-start-confidence.py

@@ -83,6 +83,10 @@ are rejected.
 | `n_linear` | `1` | Positive number of learned-query decoder pooling blocks. |
 | `decoder_position` | `None` | Automatic: off for scalar targets, on for repeated targets. A Boolean overrides it. |
 
+These are the ordinary constructor defaults. Model
+[size factories](model-tree.qmd#choose-a-size) supply omitted decoder settings
+from their preset; explicit field options take precedence.
+
 The common masking forms are:
 
 - `mask=False`: visible input with no reconstruction policy.

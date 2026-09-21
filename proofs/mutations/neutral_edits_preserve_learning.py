@@ -136,7 +136,8 @@ def errors(actual: np.ndarray, predicted: np.ndarray, baseline: float) -> dict:
 # Train on 2,048 records, validate on 512, and evaluate on 1,024 independent
 # records. Category identities are shared across splits; numerical values are
 # freshly drawn. This is retention of known identities, not OOV generalization.
-# Training uses 512 updates. Evaluation performs no more optimization.
+# The [xs preset](../../core-concepts/model-tree.qmd#choose-a-size) trains for
+# 512 updates. Evaluation performs no more optimization.
 # nRMSE divides prediction RMSE by the error of a constant predictor fitted
 # to the source-training targets. The provisional learning gate is 0.25.
 # Prediction preservation uses `rtol=1e-5` and `atol=1e-6` times training target SD.
@@ -153,11 +154,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     actual = np.asarray([row["y"] for row in test])
     baseline = float(np.sqrt(np.mean((actual - np.mean([row["y"] for row in train])) ** 2)))
     scale = float(np.std([row["y"] for row in train]))
-    model = rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
+    model = rf.Model.xs(
         batch_size=128,
         x=rf.Number,
         code=rf.Category(p_unavailable=0.0),

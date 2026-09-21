@@ -160,8 +160,9 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
 # )))
 # ```
 #
-# The branch uses default attention reduction. Related inputs and their target
-# stay together instead of being flattened into unrelated rows.
+# The `xs` preset supplies one attention summary at both the root and branch.
+# The item encoder uses two layers. Related inputs and their target stay
+# together instead of being flattened into unrelated rows.
 #
 # ## How it works
 #
@@ -180,10 +181,7 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
 # %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
-    model = rf.Model(
-        d_model=48,
-        n_layers=1,
-        n_heads=4,
+    model = rf.Model.xs(
         batch_size=128,
         optimizer=lambda module: torch.optim.Adam(module.parameters(), lr=1e-3),
         items=rf.Branch(

@@ -14,6 +14,8 @@ from relflow.structs.packages import Prediction
 
 
 class Classifier(rf.Model):
+    compact = rf.presets.factory(rf.presets.SM)
+
     def label(self) -> str:
         return "classifier"
 
@@ -31,6 +33,13 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
     assert_type(model.save("model.ckpt"), str)
     assert_type(model.save(Path("model.ckpt")), Path)
     assert_type(Classifier.load("model.ckpt"), Classifier)
+    assert_type(Classifier.xs(amount=rf.Number, label=rf.Category(mask=True)), Classifier)
+    assert_type(Classifier.sm(amount=rf.Number, n_heads=2), Classifier)
+    assert_type(Classifier.md(amount=rf.Number, reduction=None), Classifier)
+    assert_type(Classifier.lg(amount=rf.Number, attention=None), Classifier)
+    assert_type(Classifier.xl(amount=rf.Number, dropout=None, optimizer=rf.adamw(1e-3)), Classifier)
+    assert_type(rf.Model.md(fields={"size": rf.Number}, scheduler=schedule), rf.Model)
+    assert_type(Classifier.compact(amount=rf.Number, n_layers=2), Classifier)
     assert_type(model.track(("train", "loss"), loss), torch.Tensor)
     assert_type(model.encode(table), TensorDict)
     assert_type(model(batch, strata="train"), list[Prediction])

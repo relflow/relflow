@@ -19,6 +19,23 @@ rf.Model(d_model=32, n_heads=4, n_layers=1, value=rf.Number, scheduler="cosine")
 model = rf.Model(d_model=32, n_heads=4, n_layers=1, value=rf.Number)
 model.compile(encoders="yes")  # rejected
 model.predict(123)  # rejected
+rf.Model.xs(d_model="wide", value=rf.Number)  # rejected
+rf.Model.sm(n_heads="four", value=rf.Number)  # rejected
+rf.Model.md(attention="fast", value=rf.Number)  # rejected
+rf.Model.lg(reduction="mean", value=rf.Number)  # rejected
+rf.Model.xl(schema=model.schema)  # rejected
+rf.Model.md(model.schema)  # rejected
+rf.Model.xs(scheduler="cosine", value=rf.Number)  # rejected
+rf.presets.factory(3)  # rejected
+rf.presets.factory("sm")  # rejected
+
+
+class CustomModel(rf.Model):
+    compact = rf.presets.factory(rf.presets.SM)
+
+
+CustomModel.compact(d_model="wide", value=rf.Number)  # rejected
+CustomModel.compact(rf.presets.SM, value=rf.Number)  # rejected
 
 rf.Number("amount")  # rejected
 rf.Number(name="amount")  # rejected

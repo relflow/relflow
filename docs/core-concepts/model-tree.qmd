@@ -127,9 +127,11 @@ still uses plain string keys.
 
 ## Configure The Context
 
-`d_model`, `n_layers`, and `n_heads` are required when building a `Model` from
-fields. `d_model` is the shared embedding width. The model's encoder settings
-configure the root; child branches have their own settings.
+`d_model`, `n_layers`, and `n_heads` are required when building with
+`rf.Model(...)` from fields. The [size factories](#choose-a-size) supply defaults
+for those settings and the rest of the tree. `d_model` is the shared embedding
+width. The model's encoder settings configure the root; child branches have
+their own settings.
 
 | Setting | Controls |
 | --- | --- |
@@ -158,3 +160,94 @@ Only declared options are accepted. Use `description` for notes. A leaf's
 change an existing model through [mutation methods](../guides/schema-mutation.qmd).
 For learning and output roles, continue to [Masking](dynamic-masking.qmd) and
 [Embeddings](embeddings.qmd).
+
+## Choose A Size
+
+`rf.Model.xs(...)`, `.sm(...)`, `.md(...)`, `.lg(...)`, and `.xl(...)` build the
+same kinds of model trees with different capacity defaults. Start with `md`
+for a nested relational task or `sm` for faster iteration, then compare on
+validation data. These are starting configurations; schema size, vocabularies,
+and decoded fields also affect parameter counts and compute.
+
+The bundled revision-1 configurations are:
+
+| Factory | Width | Root layers | Child branch layers | Heads | Root outputs | Child branch outputs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `rf.Model.xs` | 64 | 1 | 1 | 2 | 1 | 1 |
+| `rf.Model.sm` | 128 | 2 | 1 | 4 | 2 | 2 |
+| `rf.Model.md` | 256 | 3 | 2 | 8 | 4 | 4 |
+| `rf.Model.lg` | 384 | 4 | 2 | 8 | 8 | 4 |
+| `rf.Model.xl` | 512 | 6 | 3 | 8 | 16 | 8 |
+
+Every child branch receives its preset defaults at every depth. All five
+presets use MHA encoders, zero dropout, and attention reductions with one layer
+and positional information. Reduction heads and dropout inherit their owning
+branch. Leaf decoders use query pooling, one cross-attention block, zero
+dropout, and the preset head count; their automatic positional policy remains
+`decoder_position=None`.
+
+For example, this model uses the `md` defaults for customer history, with an
+explicit root depth and a larger history reduction:
+
+```python
+import relflow as rf
+
+model = rf.Model.md(
+    n_layers=4,
+    balance=rf.Number,
+    customer_tier=rf.Category,
+    transactions=rf.Branch(
+        length=128,
+        overflow="tail",
+        reduction=rf.Attention(n_outputs=8),
+        merchant=rf.Category,
+        amount=rf.Number,
+        days_ago=rf.Number,
+    ),
+    returned=rf.Boolean(mask=True),
+)
+```
+
+Explicit settings win at their own node. Here, `n_layers=4` configures only
+the root; the transaction branch keeps two encoder layers. A leaf's decoder
+heads remain independent of its parent's overrides. Changing `d_model` changes
+the shared width and must remain compatible with every effective head count.
+
+An explicit reduction replaces the whole preset reduction. Passing
+`reduction=rf.Attention()` selects its one-output defaults even under `xl`.
+`rf.Mean()` and `None` also retain their usual behavior. Explicit values equal
+to ordinary defaults still win, including `n_layers=1` on a branch and
+`dropout=None` for zero dropout. Reusing a branch or field definition across
+different factories leaves that definition unchanged.
+
+Presets leave collection lengths, overflow, queries, masking, datatype options,
+optimizer settings, and runtime settings under application control. They keep
+the anonymous singleton root at `/`. Reduction outputs are context vectors;
+they do not create prediction records. With `embed=True`, `xs` exports one
+width-64 root vector, while `md` exports four width-256 root vectors. Set
+`reduction=rf.Attention(n_outputs=1)` explicitly when an application needs one
+root vector, and evaluate that bottleneck.
+
+The resolved schema records the actual architecture. `model.preset` holds the
+selected immutable policy, including its name and revision; ordinary
+`rf.Model(...)` construction has no preset policy. Restore a schema directly
+with `rf.Model(schema=schema)`; preset factories reject `schema=...`.
+
+The factories bind immutable configurations from `rf.presets`. An application
+can use the same factory to declare a classmethod on its own subclass:
+
+```python
+import relflow as rf
+
+class SupportModel(rf.Model):
+    compact = rf.presets.factory(rf.presets.SM)
+```
+
+`SupportModel.compact(...)` accepts the usual model construction keywords and
+returns a `SupportModel` with the bound `sm` defaults.
+
+Checkpoints retain the full original preset policy alongside the resolved
+schema. New nodes added with [`extend(...)`](../guides/schema-mutation.qmd)
+receive those saved defaults after loading, even if the bundled configurations
+change later. Existing nodes keep their resolved settings. A schema-only model
+constructed without a saved policy uses ordinary defaults when extending it.

@@ -8,6 +8,7 @@ mutation predicates, and the `@preprocess` and `@postprocess` decorators.
 
 from typing import TYPE_CHECKING, Any
 
+from relflow import presets as presets
 from relflow._version import __version__
 from relflow.architecture.checkpoint import RollbackCheckpoint
 from relflow.architecture.mutations import MutationLockCallback, RuntimePlacementCallback
@@ -208,6 +209,7 @@ __all__ = [
     "predicate",
     "postprocess",
     "preprocess",
+    "presets",
     "where",
     "source",
 ]

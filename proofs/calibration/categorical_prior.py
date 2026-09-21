@@ -89,11 +89,7 @@ def records(*, rows: int, seed: int, novel: bool = False) -> Iterator[dict]:
 
 
 def build(size: int) -> rf.Model:
-    model = rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
+    model = rf.Model.xs(
         batch_size=128,
         x=rf.Number,
         entity=rf.Category(),
@@ -115,8 +111,9 @@ def build(size: int) -> rf.Model:
 # ## Training and evaluation
 #
 # The proof forces internal output allocations of 2 and 128 as experimental
-# controls; users do not configure storage. Both use identical 32,768-row training streams and 400
-# updates. Validation has its own seed. Each held-out evaluation has 8,192
+# controls; users do not configure storage. Both use the `xs` preset, identical
+# 32,768-row training streams, and 400 updates. Validation has its own seed.
+# Each held-out evaluation has 8,192
 # rows, with known or disjoint input IDs. Compare written probabilities with
 # the true 0.9 prior using RMSE and expected log loss, not sample accuracy.
 # The constant 0.9 oracle and the analytic weighted-loss optimum are controls.

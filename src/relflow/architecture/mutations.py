@@ -15,8 +15,9 @@ from lightning.pytorch import Callback
 
 from relflow.architecture.graph import ModelGraph
 from relflow.logging import logger
+from relflow.presets.base import subtree
 from relflow.structs.enums import Strata
-from relflow.structs.experiment import NodeAttribute, NodePredicate, TreeFieldInput
+from relflow.structs.experiment import NodeAttribute, NodePredicate, TreeFieldInput, bind_fields
 from relflow.structs.structure import Branch
 from relflow.structs.tree import Node
 
@@ -209,6 +210,13 @@ class SchemaEditor:
         self.assert_mutation_allowed("extend")
         parent = self.extend_target(*predicates, include_root=include_root, use_cache=use_cache)
         field_count = len(parent.fields)
+        if self.module.preset is not None:
+            definitions = bind_fields(fields, children)
+            fields = {
+                cast(str, field.name): subtree(self.module.preset, cast(str, field.name), field)
+                for field in definitions
+            }
+            children = {}
         with self.transaction():
             self.module.schema.extend(
                 *predicates, fields=fields, include_root=include_root, use_cache=use_cache, **children
