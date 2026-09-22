@@ -131,3 +131,6 @@ reports internal convergence for repeated identities. Its page distinguishes
 that evidence from partition recovery and held-out prediction. The
 [plain-input control](../proofs/cluster/plain-input-is-dormant.html) shows why
 downstream supervision alone leaves adaptive Cluster state dormant.
+The [regime recovery proof](../proofs/cluster/regime-recovery.html) tests the
+stronger claim directly: assignment agreement with hidden generating groups
+and prediction quality on independent observations, against a no-regime control.

@@ -36,6 +36,13 @@ page comes from the same Python file you can download and run. The collection
 includes retention, adaptation, reset,
 deactivation, and deletion after schema mutations.
 
+The capability experiments P071–P078 test unfamiliar instruction combinations,
+[rules inferred from examples](proofs/composition/context-examples.html),
+frozen representation transfer, incomplete evidence, larger and two-hop
+relations, contextual inconsistency, numerical representation tradeoffs,
+and hidden-group recovery. Their controls distinguish a successful local task
+from broader reuse of a learned relationship.
+
 ## Read The Status
 
 Statuses summarize recorded evidence in `proofs/results.yaml`. Each experiment
@@ -52,7 +59,7 @@ experiment results.
 | --- | --- |
 | [Passing]{.proof-status data-proof-status="Passing"} | The reported experiment clears its gates, usually for one deterministic seed. The result is provisional: broader stability or generalization remains to be established. |
 | [Limited]{.proof-status data-proof-status="Limited"} | The experiment successfully reproduces an expected loss of information or unsuccessful modeling route. Its checks are met when that limitation appears; this is not a failed experiment. |
-| [Partial]{.proof-status data-proof-status="Partial"} | Internal behavior passes a mechanistic check, while a claim such as held-out prediction or partition recovery remains untested. |
+| [Partial]{.proof-status data-proof-status="Partial"} | Some behavior is supported, while a broader claim remains untested or inconsistent across recorded conditions and seeds. |
 | [Failing]{.proof-status data-proof-status="Failing"} | The latest full run completed but did not meet every stated behavioral criterion. |
 | [Error]{.proof-status data-proof-status="Error"} | The latest full run could not complete. Its error is recorded separately from model quality. |
 | [Missing]{.proof-status data-proof-status="Missing"} | No full experiment run has been recorded. |

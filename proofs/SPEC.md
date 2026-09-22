@@ -107,6 +107,8 @@ Within that boundary, the public package should support these claims:
 | Entity-keyed transfer | A target item can retrieve information attached to the same logical entity in another branch, even when branch order differs. |
 | Set | Unordered membership and co-occurrence can predict outcomes, invariant to member order and duplicates. |
 | Category | Repeated labels in an automatically growing learned vocabulary can acquire persistent label-specific behavior. |
+| Enum | A declared, fixed set of labels can learn categorical relationships; declaring a class does not teach its relationship. |
+| Quantile | Training percentiles can support numeric regression in source units; the inverse transform remains bounded by learned support. |
 | Hash | Equality can generalize to identifiers never seen during training while equal tokens remain in one encoded context. |
 | DateParts | Recurring calendar phase can generalize across dates without treating absolute timestamp magnitude as the signal. |
 | DatePart composition | Multiple visible calendar coordinates can jointly identify periodic behavior that no one coordinate determines. |
@@ -273,6 +275,31 @@ epoch improve. Assert a terminal window or best validation checkpoint when
 optimization trajectories are expected to oscillate.
 
 ## Core Proof Matrix
+
+### Reusable relationship experiments
+
+P071–P078 implement the following bounded challenges. Each script owns its
+generator, fixed budget, gates, and matched controls. A capability gate that
+fails remains a recorded failure; these experiments do not redefine success
+as reproducing that failure. Initial three-seed CPU panels characterize the
+claims, while thresholds remain provisional until ten-seed calibration.
+
+| ID | Capability under test | Held-out condition and decisive control |
+| --- | --- | --- |
+| P071 | Compose familiar Enum group/operation instructions | Withhold entire request combinations; compare full-combination training and corrupted requests. |
+| P072 | Infer a fresh numerical rule from visible examples | Withhold an affine-parameter quadrant; compare swapped examples, query-only training, and a visible-example least-squares oracle. |
+| P073 | Export useful reconstruction-trained representations | Freeze the encoder and fit a small labeled probe; compare raw features, random initialization, and independently permuted training views. |
+| P074 | Combine noisy, incomplete measurements | Compare every visibility pattern with its analytical Gaussian oracle, including one unseen pattern and absent-all, nuisance, and corruption controls. |
+| P075 | Retrieve fresh identities with distractors and two hops | Score each collection size and hop count separately, with key corruption and record permutation; missing and duplicate matches are excluded explicitly. |
+| P076 | Detect cross-field inconsistency | Preserve every individual-field marginal when corrupting relationships; use clean-validation thresholds, rare valid tails, and shuffled training. |
+| P077 | Characterize Number/Quantile tradeoffs | Compare clean/contaminated rank and amount tasks, central/tail errors, and noisy-target objectives against analytical population optima. |
+| P078 | Recover meaningful latent regimes | Require partition ARI and independent regression skill; compare a no-regime process with exactly matched numerical marginals. |
+
+These bounded tasks do not establish general algorithms, exact joins,
+uncertainty calibration, semantic meaning of label strings, or transfer across
+arbitrary domains. Learning a new head or classifier on a familiar latent
+process is distinguished from transfer to unseen classes. Only the reporting
+and static rendering infrastructure is shared across scripts.
 
 ### Proof-harness calibration
 

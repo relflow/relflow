@@ -91,3 +91,11 @@ the field has learned a distribution. Read the scalar alongside `state` and
 
 These percentiles describe the numeric representation. They are not prediction
 intervals or coverage estimates.
+
+The [regression proof](../proofs/quantile/rank-regression.html) measures held-out
+learning against shuffled inputs. The
+[extrapolation proof](../proofs/quantile/clipped-extrapolation.html) measures the
+error imposed by the learned support boundary.
+The [representation tradeoff proof](../proofs/quantile/representation-tradeoffs.html)
+compares Number and Quantile under contaminated inputs and distinguishes
+percentile-loss predictions from source-unit conditional means and medians.

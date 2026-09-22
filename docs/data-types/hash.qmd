@@ -63,6 +63,9 @@ Compare the [unseen-identity equality proof](../proofs/identity/unseen-identity-
 with the [sibling-collection overlap boundary](../proofs/relational/direct-sibling-hash-overlap.html).
 Their trees show why a working equality representation alone does not establish
 successful comparison across collections.
+The [retrieval capacity proof](../proofs/relational/retrieval-capacity.html)
+extends this evaluation to distractors, larger collections, and a separately
+trained two-hop task, with a separate result for each condition.
 
 ## Output
 

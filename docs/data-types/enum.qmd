@@ -99,3 +99,11 @@ membership in the schema does not establish prediction quality. With only one
 declared label, its conditional probability is one. Read content probabilities
 alongside `state` and `inferred` in the
 [prediction envelope](../guides/prediction-output.qmd).
+
+The [fixed-class proof](../proofs/enum/fixed-class-learning.html) compares
+informative and shuffled context. The
+[withheld-class proof](../proofs/enum/declared-without-examples.html) follows a
+declared class before and after it receives training examples.
+The [held-out instruction proof](../proofs/composition/held-out-requests.html)
+tests whether familiar group and operation labels compose in combinations
+excluded from training.

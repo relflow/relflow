@@ -7,6 +7,9 @@ for downstream use. It does not create a learning objective.
 
 [Pretraining And Fine-Tuning](../guides/pretraining.qmd) shows how to transfer
 learned context from reconstruction to a labeled task.
+The [reconstruction transfer proof](../proofs/representation/reconstruction-transfer.html)
+evaluates frozen root embeddings with a small labeled probe, against raw
+features, an untrained encoder, and training on independently permuted views.
 
 ## Learn Without A Label
 
