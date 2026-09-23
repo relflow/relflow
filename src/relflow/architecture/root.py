@@ -5,12 +5,13 @@ from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from functools import partialmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Protocol, Required, Self, TypedDict, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, Protocol, Required, Self, TypedDict, TypeVar, Unpack, cast, overload
 
 import lightning.pytorch as lit
 import pyarrow as pa
 import torch
 from beartype import beartype
+from beartype.roar import BeartypeCallHintParamViolation
 from lightning.pytorch import Callback
 from lightning.pytorch.utilities.types import LRSchedulerConfigType, OptimizerLRSchedulerConfig
 from rich.console import Console, ConsoleOptions
@@ -19,7 +20,7 @@ from torchmetrics import Metric as TorchMetric
 
 from relflow import presets
 from relflow._version import __version__
-from relflow.architecture import compiler
+from relflow.architecture import compiler, template
 from relflow.architecture.binding import bind
 from relflow.architecture.checkpoint import CheckpointState, RollbackCheckpoint
 from relflow.architecture.contracts import ContractScheduler
@@ -265,6 +266,21 @@ class Model(lit.LightningModule, Renderable):
     md = presets.factory(presets.MD)
     lg = presets.factory(presets.LG)
     xl = presets.factory(presets.XL)
+
+    @classmethod
+    def from_yaml(cls, pathname: str | Path, /, **overrides: Unpack[template.Options]) -> Self:
+        """Construct a fresh model from a named YAML schema and its optional preset.
+
+        Explicit root and runtime overrides replace file values. Fields and the
+        built-in preset name come from the file. Loading retains ordinary schema
+        validation, registered datatype options, and subclass construction.
+        """
+        options, profile = template.read(pathname, overrides)
+        constructor = cls if profile is None else presets.factory(profile).__get__(None, cls)
+        try:
+            return constructor(**options)
+        except (TypeError, ValueError, BeartypeCallHintParamViolation) as error:
+            raise ValueError(f"model template {pathname}: {error}") from error
 
     @property
     def version(self) -> str:

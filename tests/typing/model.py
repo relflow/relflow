@@ -33,6 +33,8 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
     assert_type(model.save("model.ckpt"), str)
     assert_type(model.save(Path("model.ckpt")), Path)
     assert_type(Classifier.load("model.ckpt"), Classifier)
+    assert_type(Classifier.from_yaml("model.yaml"), Classifier)
+    assert_type(rf.Model.from_yaml(Path("model.yaml"), d_model=32, optimizer=rf.adamw(1e-3)), rf.Model)
     assert_type(Classifier.xs(amount=rf.Number, label=rf.Category(mask=True)), Classifier)
     assert_type(Classifier.sm(amount=rf.Number, n_heads=2), Classifier)
     assert_type(Classifier.md(amount=rf.Number, reduction=None), Classifier)

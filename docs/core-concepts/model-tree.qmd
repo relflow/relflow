@@ -169,6 +169,10 @@ for a nested relational task or `sm` for faster iteration, then compare on
 validation data. These are starting configurations; schema size, vocabularies,
 and decoded fields also affect parameter counts and compute.
 
+For a configuration file, use `rf.Model.from_yaml(path)` with a `preset` and
+named field definitions. [Model Templates](../guides/model-templates.qmd)
+describes the YAML format and override rules.
+
 The bundled revision-1 configurations are:
 
 | Factory | Width | Root layers | Child branch layers | Heads | Root outputs | Child branch outputs |

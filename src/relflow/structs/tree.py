@@ -3,7 +3,7 @@
 import functools
 import io
 from abc import ABC
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self, TypeAlias, TypedDict, cast
 
 import pydantic
@@ -91,6 +91,17 @@ class Mask(pydantic.BaseModel):
             seen.add(policy)
             normalized.append(policy)
         return tuple(normalized)
+
+    @classmethod
+    def restore(cls, value: Any) -> Any:
+        """Restore serialized policies while retaining the constructor input contract."""
+        if isinstance(value, Mapping):
+            return cls.model_validate(dict(value))
+        if isinstance(value, (list, tuple)):
+            return tuple(
+                cls.model_validate(dict(policy)) if isinstance(policy, Mapping) else policy for policy in value
+            )
+        return value
 
 
 MaskInput: TypeAlias = Mask | float | bool | list[Mask] | tuple[Mask, ...]

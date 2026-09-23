@@ -109,21 +109,12 @@ class Schema(Node):
 
         values = dict(data)
 
-        def restore_policy(value: Mapping[str, Any]) -> Mask:
-            return Mask.model_validate(dict(value))
-
         def restore(node: Any) -> Any:
             if not isinstance(node, Mapping):
                 return node
             payload = dict(node)
             if "mask" in payload:
-                value = payload["mask"]
-                if isinstance(value, Mapping):
-                    payload["mask"] = restore_policy(value)
-                elif isinstance(value, (list, tuple)):
-                    payload["mask"] = tuple(
-                        restore_policy(policy) if isinstance(policy, Mapping) else policy for policy in value
-                    )
+                payload["mask"] = Mask.restore(payload["mask"])
             if isinstance(payload.get("fields"), (list, tuple)):
                 payload["fields"] = [restore(field) for field in payload["fields"]]
             return payload

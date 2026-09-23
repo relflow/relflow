@@ -35,6 +35,8 @@ website:
         contents:
           - href: core-concepts/model-tree.qmd
             text: Structure And Context
+          - href: guides/model-templates.qmd
+            text: Model Templates
           - href: core-concepts/binding-data.qmd
             text: Binding Data
           - href: core-concepts/querypaths.qmd

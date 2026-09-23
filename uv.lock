@@ -1657,6 +1657,7 @@ dependencies = [
     { name = "polars" },
     { name = "pyarrow" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "rich" },
     { name = "tensordict" },
     { name = "torch" },
@@ -1676,6 +1677,7 @@ text = [
 ]
 typing = [
     { name = "pyarrow-stubs" },
+    { name = "types-pyyaml" },
 ]
 
 [package.dev-dependencies]
@@ -1688,9 +1690,9 @@ dev = [
     { name = "pyrefly" },
     { name = "pytest" },
     { name = "pytest-xdist" },
-    { name = "pyyaml" },
     { name = "ruff" },
     { name = "transformers" },
+    { name = "types-pyyaml" },
     { name = "uvicorn" },
 ]
 
@@ -1707,11 +1709,13 @@ requires-dist = [
     { name = "pyarrow-stubs", marker = "extra == 'typing'", specifier = ">=20.0.0.20260819" },
     { name = "pydantic", specifier = ">=2.11.7" },
     { name = "pydantic-settings", marker = "extra == 'serving'", specifier = ">=2.10.1" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "rich", specifier = ">=14.0.0" },
     { name = "tensordict", specifier = ">=0.10.0" },
     { name = "torch", specifier = ">=2.7.1" },
     { name = "torchmetrics", specifier = ">=1.9.0" },
     { name = "transformers", marker = "extra == 'text'", specifier = ">=4.55.0" },
+    { name = "types-pyyaml", marker = "extra == 'typing'", specifier = ">=6.0.12" },
     { name = "typing-extensions", specifier = ">=4.12" },
     { name = "uvicorn", marker = "extra == 'serving'", specifier = ">=0.38.0" },
 ]
@@ -1727,9 +1731,9 @@ dev = [
     { name = "pyrefly", specifier = ">=1.3.0,<2" },
     { name = "pytest", specifier = ">=8.4.1" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
-    { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "ruff", specifier = ">=0.12.12" },
     { name = "transformers", specifier = ">=4.55.0" },
+    { name = "types-pyyaml", specifier = ">=6.0.12" },
     { name = "uvicorn", specifier = ">=0.38.0" },
 ]
 
@@ -2019,6 +2023,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e4/51/9aed62104cea109b820bbd6c14245af756112017d309da813ef107d42e7e/typer-0.25.1.tar.gz", hash = "sha256:9616eb8853a09ffeabab1698952f33c6f29ffdbceb4eaeecf571880e8d7664cc", size = 122276, upload-time = "2026-04-30T19:32:16.964Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3f/f9/2b3ff4e56e5fa7debfaf9eb135d0da96f3e9a1d5b27222223c7296336e5f/typer-0.25.1-py3-none-any.whl", hash = "sha256:75caa44ed46a03fb2dab8808753ffacdbfea88495e74c85a28c5eefcf5f39c89", size = 58409, upload-time = "2026-04-30T19:32:18.271Z" },
+]
+
+[[package]]
+name = "types-pyyaml"
+version = "6.0.12.20260906"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/90/6e/abec85b9013db5b934b0280a6dd104904d84f7bcbaab2e2f3def87ac7463/types_pyyaml-6.0.12.20260906.tar.gz", hash = "sha256:f59c1cc05010b833d2d72287bbaa72610106b28d42d89a907313117faba85212", size = 18649, upload-time = "2026-09-06T06:35:35.362Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/15/c0/fc0644b7ddcfb969e95845837143cb5173ddd6e06ee4ba5fc493cd9329b7/types_pyyaml-6.0.12.20260906-py3-none-any.whl", hash = "sha256:bca893ff0d51df5c9053137d5d0e6ccd36e939a196356f1d5c16372422f5137b", size = 21282, upload-time = "2026-09-06T06:35:34.372Z" },
 ]
 
 [[package]]
