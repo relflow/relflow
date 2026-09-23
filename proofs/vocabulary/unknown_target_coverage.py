@@ -165,7 +165,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         datamodule=rf.SyntheticDataModule(model=model, test=partial(records, rows=2048, seed=seed + 3, shifted=True)),
         verbose=False,
     )[0]
-    builtin = float(evaluated["/label/test.accuracy.content"])
+    builtin = float(evaluated[".label/test.accuracy.content"])
     order = np.random.default_rng(seed + 4).permutation(len(test))
     corrupted = [{**row, "x": test[index]["x"]} for row, index in zip(test, order, strict=True)]
     broken = model.predict(pa.Table.from_pylist(corrupted))["predictions"].to_pylist()

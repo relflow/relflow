@@ -158,13 +158,30 @@ def test_root_query_prediction_envelope_and_checkpoint_round_trip(tmp_path):
     assert set(restored.nodes) == {"/", "/items", "/items/value"}
 
 
-def test_metric_names_preserve_canonical_addresses_and_case(monkeypatch):
+@pytest.mark.parametrize(
+    ("names", "expected"),
+    [
+        (("/Amount", "validate", "loss"), ".Amount/validate.loss"),
+        (("/items/Amount", "validate", "loss"), ".items.Amount/validate.loss"),
+        (("/items/Amount/", "Validate", "Loss/Content"), ".items.Amount/validate.loss.content"),
+        ((rf.Address("returned"), "validate", "loss", "state"), ".returned/validate.loss.state"),
+        (
+            (rf.Address("carriers", "cxr"), rf.Strata.validate, "accuracy", "content"),
+            ".carriers.cxr/validate.accuracy.content",
+        ),
+        ((rf.Address(), "validate", "loss"), "./validate.loss"),
+        ((rf.Address("loss"), "train"), ".loss/train"),
+        (("loss", "train"), "loss/train"),
+        ((rf.Address("throughput"), "predict"), ".throughput/predict"),
+        (("throughput", "predict"), "throughput/predict"),
+    ],
+)
+def test_metric_names_use_dotted_addresses_and_preserve_case(monkeypatch, names, expected):
     logged = []
     monkeypatch.setattr(rf.Model, "log", lambda self, **kwargs: logged.append(kwargs["name"]))
     model = rf.Model(d_model=8, n_layers=1, n_heads=2, Amount=rf.Number)
-    for group in ("/Amount", "/items/Amount", "/", "loss"):
-        model.track((group, "validate", "loss"), value=torch.tensor(1.0))
-    assert logged == ["/Amount/validate.loss", "/items/Amount/validate.loss", "/validate.loss", "loss/validate.loss"]
+    model.track(names, value=torch.tensor(1.0))
+    assert logged == [expected]
 
 
 def test_absolute_routing_preserves_forward_values_and_gradients(monkeypatch):

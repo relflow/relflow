@@ -25,14 +25,17 @@ content metrics are available.
 | Metric | Interpretation |
 | --- | --- |
 | `loss/train`, `loss/validate`, `loss/test` | Sum of active leaf losses after each leaf's `weight` is applied. |
-| `/returned/validate.loss.state` | Reconstruction loss for value state at `/returned`. |
-| `/returned/validate.loss.content` | Datatype-specific content loss at that address. |
-| `/returned/validate.auc.content` | Example Boolean content metric; availability depends on datatype. |
+| `.returned/validate.loss.state` | Reconstruction loss for value state at `/returned`. |
+| `.returned/validate.loss.content` | Datatype-specific content loss at that address. |
+| `.returned/validate.auc.content` | Example Boolean content metric; availability depends on datatype. |
 | `throughput/train` | Estimated observations per second across the training epoch. |
 
-Metric names preserve the schema address, including its slashes and case,
-then append `/stage.metric.component`. A leaf can contribute
-both state and content loss. State metrics describe valued, null, padded,
+Metric names join schema-address components with periods, preserve case,
+and prefix the address group with a period before appending `/stage.metric.component`.
+For example, `/carriers/cxr` becomes `.carriers.cxr/validate.accuracy.content`.
+The leading period distinguishes address groups from aggregate groups
+such as `loss` and `throughput`. The root uses `.`, as in `./validate.loss.state`.
+A leaf can contribute both state and content loss. State metrics describe valued, null, padded,
 masked, and other states; content metrics describe the value being predicted.
 Leaf metrics are logged before weighting, so their unweighted sum need not
 match the total loss.

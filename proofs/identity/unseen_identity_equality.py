@@ -205,7 +205,7 @@ def score(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator: s
         deterministic=True,
     )
     metrics = trainer.test(model=model, datamodule=data, verbose=False)[0]
-    return float(metrics["/equal/test.auc.content"])
+    return float(metrics[".equal/test.auc.content"])
 
 
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:

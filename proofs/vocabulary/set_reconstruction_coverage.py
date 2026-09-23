@@ -165,7 +165,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             measured = trainer.validate(
                 model, datamodule=rf.ArrowDataModule(model=model, validate=table, num_workers=0), verbose=False
             )[0]
-            prefix = "/labels/validate."
+            prefix = ".labels/validate."
             results.append(
                 {key.removeprefix(prefix): float(value) for key, value in measured.items() if key.startswith(prefix)}
             )

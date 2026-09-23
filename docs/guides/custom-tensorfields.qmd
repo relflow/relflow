@@ -157,7 +157,8 @@ summary on the model side. The extension owns distributed reduction. With
 `loss(module, prediction, batch, strata)` requires annotated parameters. Use
 `batch.trainable` to select objectives and target state to determine where
 content is meaningful. `module.track((address, strata, metric, component), value=...)`
-records metrics; relflow applies the request's loss weight.
+records metrics using the [evaluation naming convention](evaluation.qmd#read-the-metrics);
+relflow applies the request's loss weight.
 
 `output(module, address)` returns a stable `pa.StructType` or None. relflow
 compiles it once, then passes that exact type to

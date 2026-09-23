@@ -142,7 +142,7 @@ def score(p: np.ndarray, rows: list[dict], cohort: int, *, cold: bool = False) -
 def evaluate(trainer: lit.Trainer, model: rf.Model, rows: list[dict]) -> dict[str, float]:
     data = rf.SyntheticDataModule(model=model, validate=lambda: iter(rows), seed=0)
     result = trainer.validate(model, datamodule=data, verbose=False)[0]
-    prefix = "/label/validate."
+    prefix = ".label/validate."
     return {name.removeprefix(prefix): float(value) for name, value in result.items() if name.startswith(prefix)}
 
 

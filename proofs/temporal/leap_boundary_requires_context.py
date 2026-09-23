@@ -191,7 +191,7 @@ def accuracy(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator
         deterministic=True,
     )
     metrics = trainer.test(model=model, datamodule=data, verbose=False)[0]
-    return float(metrics["/target/test.accuracy.content"])
+    return float(metrics[".target/test.accuracy.content"])
 
 
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:

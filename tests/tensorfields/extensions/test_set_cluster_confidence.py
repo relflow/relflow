@@ -278,9 +278,9 @@ def test_mixed_vocabulary_metrics_include_a_distributed_objective_empty_rank():
         module, datamodule=rf.ArrowDataModule(model=module, validate=source, num_workers=0), verbose=False
     )[0]
     for name in ("label", "tags", "group"):
-        assert result[f"/{name}/validate.targets.known"] == 4
-        assert result[f"/{name}/validate.targets.unavailable"] == 4
-        assert result[f"/{name}/validate.coverage.content"] == 0.5
+        assert result[f".{name}/validate.targets.known"] == 4
+        assert result[f".{name}/validate.targets.unavailable"] == 4
+        assert result[f".{name}/validate.coverage.content"] == 0.5
 
 
 def test_set_checkpoint_preserves_learned_unavailable_embedding(tmp_path):

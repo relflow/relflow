@@ -195,7 +195,7 @@ def fit(*, signal: bool, seed: int, steps: int | None, accelerator: str) -> floa
     )
     trainer.fit(model=model, datamodule=data)
     metrics = trainer.test(model=model, datamodule=data, verbose=False)[0]
-    return float(metrics["/target/test.auc.content"])
+    return float(metrics[".target/test.auc.content"])
 
 
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:

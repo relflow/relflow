@@ -83,9 +83,9 @@ The example saves the final model. Use the checkpoint selection described in
 
 For large-vocabulary reconstruction, report how many selected answers the
 model can express as well as how well it predicts them. For example, monitor
-`/purchases/merchant/validate.coverage.content` alongside
-`/purchases/merchant/validate.nll.content` and
-`/purchases/merchant/validate.accuracy.all`.
+`.purchases.merchant/validate.coverage.content` alongside
+`.purchases.merchant/validate.nll.content` and
+`.purchases.merchant/validate.accuracy.all`.
 The [Category metrics](../data-types/category.qmd#vocabulary-and-learning) and
 [Cluster metrics](../data-types/cluster.qmd#learning-and-inspection)
 define these denominators and count unavailable targets explicitly.

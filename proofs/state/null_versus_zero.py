@@ -118,7 +118,7 @@ def score(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator: s
         deterministic=True,
     )
     metrics = trainer.test(model=model, datamodule=data, verbose=False)[0]
-    return float(metrics["/target/test.auc.content"]), float(metrics["/target/test.accuracy@0.5.content"])
+    return float(metrics[".target/test.auc.content"]), float(metrics[".target/test.accuracy@0.5.content"])
 
 
 # %% [markdown]

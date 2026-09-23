@@ -69,7 +69,7 @@ For each reconstruction objective, epoch metrics separate coverage from quality:
 | `loss.content` | Unweighted categorical training objective over populated labels, averaged over known targets; equal to `nll.content`. |
 
 Names include the field address and stage, for example
-`/merchant_category/validate.coverage.content`. Counts and sums aggregate
+`.merchant_category/validate.coverage.content`. Counts and sums aggregate
 across batches and ranks before division. With no known targets, conditional
 accuracy, NLL, and content loss are `NaN`, not zero; coverage and all-target
 accuracy are zero when selected valued targets exist. With no selected valued

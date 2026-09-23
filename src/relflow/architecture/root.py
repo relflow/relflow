@@ -492,22 +492,18 @@ class Model(lit.LightningModule, Renderable):
             )
 
     def track(self, names: tuple[str, ...], /, value: MetricValue) -> MetricValue:
-        """Log an epoch metric and return the original tensor or metric object."""
-
-        def groupname(names: tuple[str, ...]) -> str:
-            assert len(names) > 1
-
-            group, *keys = names
-            key = ".".join(part.replace("/", ".").lower() for part in keys)
-
-            return f"{group.rstrip('/')}/{key}"
+        """Log an epoch metric with a leading dot for address groups and return its value."""
+        assert len(names) > 1
+        group, *keys = names
+        group = ("." if group.startswith("/") else "") + group.strip("/").replace("/", ".")
+        key = ".".join(part.replace("/", ".").lower() for part in keys)
 
         # Scalar metrics are emitted from data-dependent branches, so DDP ranks cannot
         # safely synchronize every scalar log call as a collective. Stateful
         # TorchMetrics are updated/logged on every rank and can aggregate their state.
         stateful = isinstance(value, TorchMetric)
         self.log(
-            name=groupname(names),
+            name=f"{group}/{key}",
             value=value.detach() if isinstance(value, torch.Tensor) else value,
             on_step=False,
             on_epoch=True,

@@ -213,6 +213,6 @@ def test_lightning_validation_counts_include_an_objective_empty_rank():
         enable_model_summary=False,
     )
     measured = trainer.validate(module, datamodule=data, verbose=False)[0]
-    assert measured["/label/validate.targets.known"] == 4
-    assert measured["/label/validate.targets.unavailable"] == 4
-    assert measured["/label/validate.coverage.content"] == 0.5
+    assert measured[".label/validate.targets.known"] == 4
+    assert measured[".label/validate.targets.unavailable"] == 4
+    assert measured[".label/validate.coverage.content"] == 0.5
