@@ -28,7 +28,7 @@ from relflow.tensorfields.extensions.text import (
 from tests.arrow import batch as arrow_batch
 from tests.tensorfields.helpers import tensorize
 
-ADDRESS = "root/items/body"
+ADDRESS = "/items/body"
 
 
 def _structure_payload(
@@ -57,7 +57,6 @@ def _structure_payload(
     return {
         "d_model": 16,
         "fields": {
-            "name": "root",
             "type": "branch",
             "dropout": 0.1,
             "fields": [

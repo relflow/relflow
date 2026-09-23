@@ -461,11 +461,6 @@ class ArrowDataset(IterableDataset[Encoded]):
 
     def __iter__(self) -> Iterator[Encoded]:
         epoch, consumer, consumers = self.iteration()
-        for field_context in self.encoding_context.values():
-            configure = getattr(field_context, "configure_distributed", None)
-            if callable(configure):
-                configure(global_rank=consumer, world_size=consumers)
-
         scanned: Iterable[pa.Table] = scan(self.source, schemas=self.schemas)
         batches: Iterable[pa.Table] = process(
             scanned,
@@ -787,6 +782,11 @@ class ArrowDataModule(lit.LightningDataModule):
     @property
     def batch_size(self) -> int:
         return self.model.batch_size
+
+    @batch_size.setter
+    def batch_size(self, value: int) -> None:
+        """Let Lightning's batch-size finder update the model-owned batch size."""
+        self.model.batch_size = value
 
     @property
     def encoding_context(self) -> InterprocessEncodingContext:

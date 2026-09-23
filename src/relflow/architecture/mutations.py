@@ -15,8 +15,9 @@ from lightning.pytorch import Callback
 
 from relflow.architecture.graph import ModelGraph
 from relflow.logging import logger
+from relflow.presets.base import subtree
 from relflow.structs.enums import Strata
-from relflow.structs.experiment import NodeAttribute, NodePredicate, TreeFieldInput
+from relflow.structs.experiment import NodeAttribute, NodePredicate, TreeFieldInput, bind_fields
 from relflow.structs.structure import Branch
 from relflow.structs.tree import Node
 
@@ -124,7 +125,7 @@ class AttributeChange(pydantic.BaseModel):
     original: Any
     definition_attribute: bool
     address: str
-    node_name: str
+    node_name: str | None
     node_type: str
     changed: Any = _MISSING
     changed_address: Any = _MISSING
@@ -209,6 +210,13 @@ class SchemaEditor:
         self.assert_mutation_allowed("extend")
         parent = self.extend_target(*predicates, include_root=include_root, use_cache=use_cache)
         field_count = len(parent.fields)
+        if self.module.preset is not None:
+            definitions = bind_fields(fields, children)
+            fields = {
+                cast(str, field.name): subtree(self.module.preset, cast(str, field.name), field)
+                for field in definitions
+            }
+            children = {}
         with self.transaction():
             self.module.schema.extend(
                 *predicates, fields=fields, include_root=include_root, use_cache=use_cache, **children
@@ -330,7 +338,7 @@ class SchemaEditor:
                         original=getattr(node, name, _MISSING),
                         definition_attribute=is_definition_attribute(node, name),
                         address=str(node.address),
-                        node_name=cast(str, node.name),
+                        node_name=node.name,
                         node_type=node.type,
                     )
                 )

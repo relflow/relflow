@@ -17,18 +17,17 @@ from relflow.tensorfields.extensions.cluster import Embedder, TensorField
 
 CAPACITY = 8
 K = 4
-ADDRESS = "record/merchant_id"
+ADDRESS = "/merchant_id"
 
 
 def _model() -> rf.Model:
     torch.manual_seed(0)
     return rf.Model(
-        name="record",
         d_model=16,
         n_layers=1,
         n_heads=4,
         batch_size=4,
-        merchant_id=rf.Cluster(capacity=CAPACITY, n_clusters=(K, K), p_unavailable=0.0),
+        merchant_id=rf.Cluster(n_clusters=(K, K), p_unavailable=0.0),
     )
 
 
@@ -91,15 +90,18 @@ def test_assign_overwrites_existing_token():
     assert int(embedder.embeddings["cluster"].weight[idx].argmax().item()) == 3
 
 
-def test_assign_raises_when_capacity_full():
+def test_assign_grows_when_capacity_full():
     model = _model()
     embedder = _embedder(model)
     for i in range(CAPACITY):
         rf.Cluster.assign(model, ADDRESS, f"tok-{i}", i % K)
     assert len(embedder.vocab.master) == CAPACITY
 
-    with pytest.raises(ValueError, match="at capacity"):
-        rf.Cluster.assign(model, ADDRESS, "one-too-many", 0)
+    before = embedder.embeddings["cluster"].weight.detach().clone()
+    assert rf.Cluster.assign(model, ADDRESS, "one-more", 0) == CAPACITY
+    assert embedder.capacity == CAPACITY * 2
+    torch.testing.assert_close(embedder.embeddings["cluster"].weight[:CAPACITY], before[:CAPACITY])
+    torch.testing.assert_close(embedder.embeddings["cluster"].weight[-1], before[-1])
 
 
 def test_assign_rejects_out_of_range_cluster():
@@ -143,13 +145,12 @@ def test_assign_raises_for_unknown_address():
     model = _model()
 
     with pytest.raises(KeyError):
-        rf.Cluster.assign(model, "record/nonexistent", "tok", 0)
+        rf.Cluster.assign(model, "/nonexistent", "tok", 0)
 
 
 def test_assign_raises_for_non_cluster_field():
     torch.manual_seed(0)
     model = rf.Model(
-        name="record",
         d_model=16,
         n_layers=1,
         n_heads=4,
@@ -158,7 +159,7 @@ def test_assign_raises_for_non_cluster_field():
     )
 
     with pytest.raises(TypeError, match="not a Cluster field"):
-        rf.Cluster.assign(model, "record/amount", "tok", 0)
+        rf.Cluster.assign(model, "/amount", "tok", 0)
 
 
 # ---------- scoped overrides ----------
@@ -188,7 +189,7 @@ def test_override_is_used_by_tensorization():
         assert int(overridden.state.item()) == Tokens.valued.value
 
     unavailable = model.encode(pa.table({"merchant_id": ["overridden"]}))[Address(ADDRESS)]
-    assert int(unavailable.content.item()) == CAPACITY
+    assert int(unavailable.content.item()) == -1
 
 
 def test_override_rolls_back_when_prediction_scope_raises():
@@ -274,8 +275,8 @@ def test_override_replaces_encoder_row_for_oov_token():
     embedder.eval()
 
     with torch.no_grad():
-        embedder.embeddings["cluster"].weight[CAPACITY].zero_()  # dull sentinel
-        embedder.embeddings["cluster"].weight[CAPACITY, 0] = 10.0  # sentinel argmax = 0
+        embedder.embeddings["cluster"].weight[embedder.capacity].zero_()  # dull sentinel
+        embedder.embeddings["cluster"].weight[embedder.capacity, 0] = 10.0  # sentinel argmax = 0
 
     with rf.Cluster.override(model, ADDRESS, {"overridden-oov": 2}):
         # During the override, this token is encoded as valued/index 0.

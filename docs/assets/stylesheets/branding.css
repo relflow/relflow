@@ -6,6 +6,10 @@
   font-display: swap;
 }
 
+.quarto-color-scheme-toggle {
+  display: none !important;
+}
+
 .navbar-title,
 body.home #title-block-header .title {
   font-family: "Libertinus Serif", serif;

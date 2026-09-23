@@ -8,6 +8,7 @@ import relflow.tensorfields as tensorfields
 
 def test_common_resources_are_available_from_package_root():
     assert relflow.Model.__name__ == "Model"
+    assert relflow.presets.SM.name == "sm"
     assert relflow.Attention().type == "attention"
     assert relflow.AttentionMode.mha == "mha"
     assert relflow.Mean().type == "mean"
@@ -20,7 +21,9 @@ def test_common_resources_are_available_from_package_root():
     assert not hasattr(relflow, "StreamingDataModule")
     assert relflow.SyntheticDataModule.__name__ == "SyntheticDataModule"
     assert relflow.Schema.__name__ == "Schema"
-    assert relflow.Address("root", "label") == "root/label"
+    assert relflow.Address("label") == "/label"
+    assert relflow.Address("transactions", "amount") == "/transactions/amount"
+    assert relflow.Address() == "/"
     assert relflow.Branch.__name__ == "Branch"
     assert relflow.Extension.__name__ == "Extension"
     assert tensorfields.Extension is relflow.Extension
@@ -56,8 +59,11 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.UpdateOperation is not None
     assert relflow.SchemaField is not None
     assert relflow.Category.model_fields["type"].default == "category"
+    assert relflow.Enum.model_fields["type"].default == "enum"
+    assert relflow.Enum.model_fields["values"].is_required()
     assert relflow.Boolean.model_fields["type"].default == "boolean"
     assert relflow.Number.model_fields["type"].default == "number"
+    assert relflow.Quantile.model_fields["type"].default == "quantile"
     assert relflow.Set.model_fields["type"].default == "set"
     assert relflow.Hash.model_fields["type"].default == "hash"
     assert not hasattr(relflow, "Entity")
@@ -65,6 +71,8 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.Overflow.tail == "tail"
     assert relflow.VocabularySyncCallback.__name__ == "VocabularySyncCallback"
     assert "number" in relflow.TENSORFIELDS
+    assert "enum" in relflow.TENSORFIELDS
+    assert "quantile" in relflow.TENSORFIELDS
     assert "boolean" in relflow.TENSORFIELDS
     assert "set" in relflow.TENSORFIELDS
     assert "hash" in relflow.TENSORFIELDS

@@ -27,38 +27,42 @@ from relflow.tensorfields.base import (
 )
 from relflow.tensorfields.output import array, labels, struct, variable
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
-from relflow.tensorfields.shared.vocabulary import OnlineVocabularyModel, VocabularyState, VocabularySyncCallback
+from relflow.tensorfields.shared.reconstruction import Metrics, Scores, Totals
+from relflow.tensorfields.shared.rows import Embedding, Linear
+from relflow.tensorfields.shared.vocabulary import (
+    INITIAL_CAPACITY,
+    OnlineVocabularyModel,
+    VocabularyBatch,
+    VocabularyState,
+    VocabularySyncCallback,
+)
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.datasets.base import InterprocessEncodingContext
+    from relflow.helpers.resize import Resize
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
 
 sets: Extension = Extension(name="set", types=(bool, int, float, str, bytes))
-sets.callback(VocabularySyncCallback, CounterUpdateCallback)
+sets.callback(VocabularySyncCallback, CounterUpdateCallback, Metrics)
 
 
 @sets.register
 class Request(RequestBase):
     """Unordered label membership represented by an online vocabulary.
 
-    ``size`` (also accepted as ``capacity``) bounds vocabulary width. Empty
-    sets are valued; nulls have a separate state. Unknown members are omitted.
+    Training grows vocabulary storage automatically. Empty
+    sets are valued; nulls have a separate state. Unknown members share a
+    learned unavailable representation; their identities cannot be recovered.
     ``p_unavailable`` independently drops known positive input labels during
-    training. ``mask=True`` makes the set a supervised reconstruction target.
+    training without changing targets. ``mask=True`` makes the set a supervised reconstruction target.
     Predictions contain label/probability pairs for populated vocabulary
     entries. ``threshold`` in ``[0, 1]`` filters those pairs; ``None`` keeps
     all entries. This filter leaves the training loss and metrics unchanged.
     """
 
-    model_config = pydantic.ConfigDict(populate_by_name=True, serialize_by_alias=True)
-
     type: Literal["set"] = "set"
-    capacity: Annotated[
-        int,
-        pydantic.Field(alias="size", serialization_alias="size", gt=0, default=10_000),
-    ] = 10_000
     p_unavailable: Annotated[float, pydantic.Field(ge=0.0, le=1.0, default=0.01)] = 0.01
     threshold: Annotated[float | None, pydantic.Field(ge=0.0, le=1.0, default=None)] = None
 
@@ -67,8 +71,6 @@ class Request(RequestBase):
         def __init__(
             self,
             *,
-            size: int = 10_000,
-            capacity: int = ...,
             p_unavailable: float = 0.01,
             threshold: float | None = None,
             type: Literal["set"] = "set",
@@ -112,15 +114,6 @@ class Request(RequestBase):
         with state.lock:
             return tuple(state.master)
 
-    @property
-    def size(self) -> int:
-        return self.capacity
-
-    @size.setter
-    def size(self, value: int) -> None:
-        self.capacity = value
-        self.model_fields_set.add("capacity")
-
 
 @sets.register
 def observe(
@@ -147,7 +140,7 @@ def observe(
     return TensorDict(
         {
             TensorKey.state: tally(torch.from_numpy(field.dense.copy()), len(Tokens)),
-            TensorKey.content: tally(torch.from_numpy(indices.copy()), cast(Request, schema.requests[address]).size),
+            TensorKey.content: tally(torch.from_numpy(indices.copy()), state.size),
         },
         batch_size=[],
     )
@@ -155,9 +148,9 @@ def observe(
 
 @sets.register
 @tensorclass
-class TensorField(TensorFieldBase[torch.Tensor]):
+class TensorField(TensorFieldBase[TensorDict]):
     state: torch.Tensor
-    content: torch.Tensor
+    content: TensorDict
     present: torch.Tensor
     trainable: torch.Tensor
     inferred: torch.Tensor
@@ -183,17 +176,16 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         context: Context,
     ) -> TensorField:
         request: Request = cast(Request, schema.requests[address])
-        n_tokens: int = request.size
         state = context.state
         if state is not None and not isinstance(state, VocabularyState):
             raise TypeError(f"set field at '{address}' requires VocabularyState context, got {type(state).__name__}")
+        n_tokens = state.size if state is not None else INITIAL_CAPACITY
 
-        def encode(field: RaggedField) -> torch.Tensor:
+        def encode(field: RaggedField) -> TensorDict:
             values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
             encoded = np.zeros((len(values), n_tokens), dtype=np.float32)
-            if not len(values):
-                return torch.from_numpy(field.place(encoded, fill=0.0, value_shape=(n_tokens,)))
-            if state is None:
+            unavailable = np.zeros(len(values), dtype=np.int64)
+            if len(values) and state is None:
                 raise RuntimeError(f"set field at '{address}' requires a vocabulary encoding context")
             if (
                 pa.types.is_list(values.type)
@@ -209,26 +201,36 @@ class TensorField(TensorFieldBase[torch.Tensor]):
                 valid = pc.is_valid(flattened)
                 flattened = pc.filter(flattened, valid)
                 parents = pc.filter(parents, valid)
-            indices = state.indices(flattened, learn=False)
+            indices = state.indices(flattened, learn=False) if state is not None else np.empty(0, dtype=np.int64)
             if len(indices):
                 rows = parents.to_numpy(zero_copy_only=False)
-                known = indices < n_tokens
+                known = (indices >= 0) & (indices < n_tokens)
                 encoded[rows[known], indices[known]] = 1.0
-            return torch.from_numpy(field.place(encoded, fill=0.0, value_shape=(n_tokens,)))
+                if not known.all():
+                    # Count distinct unknown members, not occurrences: order
+                    # and duplicates must not change a set's representation.
+                    unknown = cast(
+                        pa.DictionaryArray, pc.dictionary_encode(pc.filter(flattened, pa.array(~known)))
+                    ).indices.to_numpy()
+                    pairs = np.unique(np.column_stack((rows[~known], unknown)), axis=0)
+                    unavailable = np.bincount(pairs[:, 0], minlength=len(values))
+            return TensorDict(
+                {
+                    "membership": torch.from_numpy(field.place(encoded, fill=0.0, value_shape=(n_tokens,))),
+                    "unavailable": torch.from_numpy(field.place(unavailable, fill=0)),
+                },
+                batch_size=field.shape,
+            )
 
         state_tensor = torch.from_numpy(input.dense)
         content = encode(input)
         target_content = encode(target)
 
         if strata == Strata.train and request.p_unavailable > 0.0:
-            # Training learns vocabulary online, so known set labels rarely look OOV.
-            # Simulate partial observation by randomly dropping positive labels.
-            def regularize(values: torch.Tensor) -> torch.Tensor:
-                selected = torch.rand_like(values).lt(request.p_unavailable) & values.bool()
-                return values.masked_fill(selected, 0.0)
-
-            content = regularize(content)
-            target_content = regularize(target_content)
+            membership = cast(torch.Tensor, content["membership"])
+            selected = torch.rand_like(membership).lt(request.p_unavailable) & membership.bool()
+            content["membership"] = membership.masked_fill(selected, 0.0)
+            content["unavailable"] += selected.sum(dim=-1)
 
         return cls(
             state=state_tensor,
@@ -255,9 +257,11 @@ class Embedder(EmbedderBase):
         request: Request = cast(Request, schema.requests[address])
         self.origin: Address = address
         self.destination: Address = cast("Branch", request.parent).address
-        self.size: int = request.size
 
-        self.vocab: OnlineVocabularyModel = OnlineVocabularyModel(size=request.size)
+        self.vocab: OnlineVocabularyModel = OnlineVocabularyModel()
+        # A neutral fallback until real or simulated unavailable inputs teach
+        # it; absence is not a randomly initialized pseudo-label.
+        self.unavailable = torch.nn.Parameter(torch.zeros(schema.d_model))
 
         self.embeddings = torch.nn.ModuleDict(
             {
@@ -265,8 +269,8 @@ class Embedder(EmbedderBase):
                     num_embeddings=len(Tokens),
                     embedding_dim=schema.d_model,
                 ),
-                TensorKey.content.name: torch.nn.Embedding(
-                    num_embeddings=self.size,
+                TensorKey.content.name: Embedding(
+                    num_embeddings=self.vocab.size,
                     embedding_dim=schema.d_model,
                 ),
             }
@@ -274,26 +278,34 @@ class Embedder(EmbedderBase):
         self.counters = torch.nn.ModuleDict(
             {
                 TensorKey.state.name: Counter(address=address, size=len(Tokens)),
-                TensorKey.content.name: Counter(address=address, size=request.size),
+                TensorKey.content.name: Counter(address=address, size=self.vocab.size),
             }
         )
+
+    @property
+    def size(self) -> int:
+        return self.vocab.size
 
     @beartype
     def forward(self, inputs: TensorInput) -> Parcel:
         N: int
         dims: list[int]
 
-        N, *dims, n_tokens = cast(torch.Tensor, inputs.content).shape
-        if n_tokens != self.size:
+        content = cast(TensorDict, inputs.content)
+        membership = cast(torch.Tensor, content["membership"])
+        N, *dims, n_tokens = membership.shape
+        if n_tokens > self.size:
             raise ValueError(f"Set in address {self.origin} has invalid vocabulary width")
 
         state = inputs.state.reshape(-1)
-        content = cast(torch.Tensor, inputs.content).reshape(-1, n_tokens)
+        membership = membership.reshape(-1, n_tokens)
         valued = state.eq(Tokens.valued.value)
 
-        weights = cast(torch.nn.Embedding, self.embeddings[TensorKey.content.name]).weight
-        counts = content.sum(dim=-1, keepdim=True).clamp_min(1.0)
-        content_embedding = content.to(dtype=weights.dtype).matmul(weights) / counts
+        weights = cast(torch.nn.Embedding, self.embeddings[TensorKey.content.name]).weight[:n_tokens]
+        counts = membership.sum(dim=-1, keepdim=True).clamp_min(1.0)
+        content_embedding = membership.to(dtype=weights.dtype).matmul(weights) / counts
+        unavailable = cast(torch.Tensor, content["unavailable"]).reshape(-1, 1).gt(0)
+        content_embedding = content_embedding + unavailable * self.unavailable
 
         embeddings: torch.Tensor = (
             self.embeddings[TensorKey.state.name](state) + content_embedding * valued.unsqueeze(-1)
@@ -313,6 +325,43 @@ class Embedder(EmbedderBase):
 
 
 @sets.register
+def bind(
+    module: Model,
+    field: TensorFieldBase,
+    observation: TensorDict | None,
+    binding: object,
+    *,
+    address: Address,
+    strata: Strata,
+    resize: Resize,
+) -> None:
+    """Move membership columns into the vocabulary current at batch consumption."""
+    if not isinstance(binding, VocabularyBatch):
+        raise TypeError(f"set binding at '{address}' requires VocabularyBatch, got {type(binding).__name__}")
+    node = module.nodes[address]
+    embedder = cast(Embedder, node.embedder)
+    mapping, size = binding.resolve(embedder.vocab, learn=strata == Strata.train, device=module.device, resize=resize)
+    resize.embedding(cast(torch.nn.Embedding, embedder.embeddings[TensorKey.content.name]), size)
+    cast(Counter, embedder.counters[TensorKey.content.name]).resize(size, resize)
+    decoder = getattr(node, "decoder", None)
+    if decoder is not None:
+        resize.linear(decoder.linears[TensorKey.content.name], size)
+    field = cast(TensorField, field)
+    for content in (field.content, cast(TensorDict, field.targets[TensorKey.content])):
+        previous = cast(torch.Tensor, content["membership"])
+        indices = mapping[:-1].to(previous.device)
+        known = indices.ge(0) & indices.lt(size)
+        membership = previous.new_zeros((*previous.shape[:-1], size))
+        membership.index_add_(-1, indices[known], previous[..., known])
+        content["membership"] = membership
+        content["unavailable"] = cast(torch.Tensor, content["unavailable"]) + previous[..., ~known].sum(dim=-1).long()
+    if observation is not None:
+        observation[TensorKey.content] = binding.counts(
+            cast(torch.Tensor, observation[TensorKey.content]), mapping, size
+        )
+
+
+@sets.register
 def learn(
     module: Model,
     observation: TensorDict,
@@ -329,22 +378,47 @@ def learn(
     cast(Counter, embedder.counters[TensorKey.content.name]).learn(cast(torch.Tensor, observation[TensorKey.content]))
 
 
+class Membership(Totals):
+    """Set-member coverage and micro scores over populated vocabulary entries."""
+
+    def __init__(self):
+        super().__init__(counts=9, sums=1)
+
+    def compute(self) -> dict[str, torch.Tensor]:
+        known, unavailable, sets, complete, bits, correct, exact, tp, predicted = self.counts.unbind()
+        return {
+            "targets.known": known,
+            "targets.unavailable": unavailable,
+            "coverage.content": known / (known + unavailable),
+            "sets.valued": sets,
+            "sets.complete": complete,
+            "coverage.set": complete / sets,
+            "accuracy.content": correct / bits,
+            "accuracy.set": exact / sets,
+            "precision.content": tp / predicted,
+            "recall.content": tp / known,
+            "recall.all": tp / (known + unavailable),
+            "f1.content": 2 * tp / (predicted + known),
+            "f1.all": 2 * tp / (predicted + known + unavailable),
+            "loss.content": self.sums[0] / bits,
+        }
+
+
 @sets.register
 class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 
-        request: Request = cast(Request, schema.requests[address])
-
+        self.metrics = Scores(address, Membership)
         self.linears = torch.nn.ModuleDict(
             {
                 TensorKey.state.name: torch.nn.Linear(
                     in_features=schema.d_model,
                     out_features=len(Tokens),
                 ),
-                TensorKey.content.name: torch.nn.Linear(
+                TensorKey.content.name: Linear(
                     in_features=schema.d_model,
-                    out_features=request.size,
+                    out_features=INITIAL_CAPACITY,
                 ),
             }
         )
@@ -379,7 +453,6 @@ def loss(
             torch.nn.functional.cross_entropy(
                 input=state_inputs,
                 target=state_targets,
-                weight=cast(Counter, embedder.counters[TensorKey.state.name]).weight,
                 reduction="none",
             )
             .masked_select(trainable)
@@ -393,33 +466,43 @@ def loss(
     )
 
     valued = trainable & state_targets.eq(Tokens.valued.value)
-    if not valued.any():
-        return loss
-
-    content_inputs = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N, -1)
-    content_targets = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(N, -1)
-
-    loss += module.track(
-        (prediction.address, strata, Metric.loss, TensorKey.content),
-        value=torch.nn.functional.binary_cross_entropy_with_logits(
-            input=content_inputs.masked_select(valued.unsqueeze(1)).reshape(-1, content_inputs.shape[-1]),
-            target=content_targets.masked_select(valued.unsqueeze(1)).reshape(-1, content_targets.shape[-1]),
-        ),
-    )
-
+    size = len(embedder.vocab.master)
+    content_inputs = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N, -1)[valued, :size].float()
+    targets = cast(TensorDict, batch.targets[TensorKey.content])
+    memberships = cast(torch.Tensor, targets["membership"]).reshape(N, -1)
+    if memberships.shape[-1] < size:
+        memberships = torch.nn.functional.pad(memberships, (0, size - memberships.shape[-1]))
+    content_targets = memberships[valued, :size]
+    unavailable = cast(torch.Tensor, targets["unavailable"]).reshape(N)[valued]
+    # Complete set annotations supervise all populated memberships, including
+    # known negatives in partially/all-OOV sets. Unallocated slots are not
+    # negative examples of future labels.
+    objective = torch.nn.functional.binary_cross_entropy_with_logits(content_inputs, content_targets, reduction="sum")
+    decoder = cast(Decoder, module.nodes[prediction.address].decoder)
+    metric = cast(Membership, decoder.metrics[f"{strata.value}_metrics"])
+    with torch.no_grad():
+        expected = content_targets.bool()
+        predicted = content_inputs.ge(0)
+        correct = predicted.eq(expected)
+        complete = unavailable.eq(0)
+        counts = torch.stack(
+            (
+                expected.sum(),
+                unavailable.sum(),
+                valued.sum(),
+                complete.sum(),
+                valued.sum() * size,
+                correct.sum(),
+                (correct.all(dim=-1) & complete).sum(),
+                (predicted & expected).sum(),
+                predicted.sum(),
+            )
+        )
+        metric.update(counts, objective.unsqueeze(0))
     module.track(
-        (prediction.address, strata, Metric.accuracy, TensorKey.content),
-        value=(
-            content_inputs.sigmoid()
-            .ge(0.5)
-            .eq(content_targets.bool())
-            .masked_select(valued.unsqueeze(1))
-            .float()
-            .mean()
-        ),
+        (prediction.address, strata, "vocabulary", "size"), value=state_inputs.new_tensor(size, dtype=torch.float32)
     )
-
-    return loss
+    return loss + objective / max(content_inputs.numel(), 1)
 
 
 @sets.register

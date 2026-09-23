@@ -28,7 +28,7 @@ FRAMEWORK_PROTOCOL_METHODS = frozenset(
 
 
 def _model() -> rf.Model:
-    return rf.Model(amount=rf.Number(), label=rf.Category(mask=True, size=4), d_model=8, n_layers=1, n_heads=2)
+    return rf.Model(amount=rf.Number(), label=rf.Category(mask=True), d_model=8, n_layers=1, n_heads=2)
 
 
 def test_model_uses_mutation_facade() -> None:
@@ -48,7 +48,7 @@ def test_model_mutations_emit_structured_logs() -> None:
         model.update(rf.where("name") == "amount", weight=2.0)
         model.update(rf.where("name") == "amount", description="Transaction amount")
         model.update(rf.where("name") == "amount", mask=True)
-        model.extend(rf.where("name") == "record", extra=rf.Category(size=4))
+        model.extend(rf.where("address") == "/", extra=rf.Category())
         model.reset(rf.where("name") == "amount")
         with model.override(rf.where("name") == "amount", weight=3.0):
             pass
@@ -74,16 +74,16 @@ def test_model_mutations_emit_structured_logs() -> None:
         event.get("attribute") == "mask" and event.get("definition_attribute") is True for event in mutation_events
     )
     assert any(
-        event.get("address") == "record/amount"
+        event.get("address") == "/amount"
         and event.get("attribute") == "weight"
         and event.get("previous_value") == "1.0"
         and event.get("value") == "2.0"
         and event.get("change") == "weight: 1.0 -> 2.0"
         for event in mutation_events
     )
-    assert any("mutated record/amount: weight 1.0 -> 2.0" in message for message in messages)
-    assert any("extended schema node record/extra under record" in message for message in messages)
-    assert any("deleted schema node record/extra descendants=0" in message for message in messages)
+    assert any("mutated /amount: weight 1.0 -> 2.0" in message for message in messages)
+    assert any("extended schema node /extra under /" in message for message in messages)
+    assert any("deleted schema node /extra descendants=0" in message for message in messages)
 
 
 def test_model_mutation_logs_include_previous_and_current_address_for_renames() -> None:
@@ -104,14 +104,14 @@ def test_model_mutation_logs_include_previous_and_current_address_for_renames() 
     assert any(
         event.get("action") == "update"
         and event.get("attribute") == "name"
-        and event.get("previous_address") == "record/amount"
-        and event.get("address") == "record/total"
+        and event.get("previous_address") == "/amount"
+        and event.get("address") == "/total"
         and event.get("previous_node_name") == "amount"
         and event.get("node_name") == "total"
         and event.get("change") == "name: 'amount' -> 'total'"
         for event in mutation_events
     )
-    assert any("mutated record/amount -> record/total: name 'amount' -> 'total'" in message for message in messages)
+    assert any("mutated /amount -> /total: name 'amount' -> 'total'" in message for message in messages)
 
 
 def test_model_graph_rebuild_preserves_compatible_state() -> None:

@@ -13,7 +13,6 @@ import relflow as rf
 
 def _model() -> rf.Model:
     return rf.Model(
-        name="record",
         d_model=8,
         n_layers=1,
         n_heads=4,

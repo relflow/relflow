@@ -35,7 +35,7 @@ def test_rich_handler_renders_component_message_and_context():
     )
     logger = Logger(core, {})
 
-    logger.bind(component="tensorfield", address="record/amount", count=12, trainable=True).warning(
+    logger.bind(component="tensorfield", address="/amount", count=12, trainable=True).warning(
         "values exceeded the safe range"
     )
 
@@ -43,7 +43,7 @@ def test_rich_handler_renders_component_message_and_context():
     assert "WARNING" in rendered
     assert "TENSORFIELD" in rendered
     assert "values exceeded the safe range" in rendered
-    assert "address=record/amount" in rendered
+    assert "address=/amount" in rendered
     assert "count=12" in rendered
     assert "trainable=true" in rendered
     assert "•" in rendered

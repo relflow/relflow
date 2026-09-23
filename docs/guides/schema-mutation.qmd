@@ -5,6 +5,12 @@ runtime graph, and retain state-dictionary entries whose names, types, and
 tensor shapes still match. An edit can therefore retain some learned state
 while initializing incompatible parts anew.
 
+Runtime resources can own their rebuild rules. Online vocabularies preserve
+their grown storage, label IDs, and compatible learned rows across schema
+edits. Storage is managed automatically, not configured through field options.
+Changing Cluster bounds can reinitialize assignment columns while preserving
+its vocabulary; changing embedding dimensions likewise resets incompatible weights.
+
 ## Select And Update
 
 Predicates combine with logical AND. Inspect selected addresses before making
@@ -13,7 +19,7 @@ a broad change:
 ```python
 import relflow as rf
 
-prices = rf.where("address") == "order/line_items/price"
+prices = rf.where("address") == rf.Address("line_items", "price")
 selected = model.select(prices)
 model.update(prices, mask=0.10)
 ```
@@ -51,10 +57,10 @@ ablation example.
 | `reset(...)` | Keep the schema and reinitialize selected runtime modules. |
 
 ```python
-root = rf.where("address") == "order"
-model.extend(root, expedited=rf.Boolean, region=rf.Category(size=32))
-model.reset(rf.where("address") == "order/region")
-model.delete(rf.where("address") == "order/expedited")
+root = rf.where("address") == rf.Address()
+model.extend(root, expedited=rf.Boolean, region=rf.Category)
+model.reset(rf.where("address") == rf.Address("region"))
+model.delete(rf.where("address") == rf.Address("expedited"))
 ```
 
 An extension accepts keyword children or a `fields` mapping, following the same

@@ -24,7 +24,7 @@ class Tokenizer:
     [
         ("number", 1.5, {}),
         ("boolean", True, {}),
-        ("category", "known", {"size": 8, "p_unavailable": 0.0}),
+        ("category", "known", {"p_unavailable": 0.0}),
         ("hash", "identifier", {}),
         ("text", "hello", {"model": "local-test", "max_length": 4}),
     ],
@@ -37,7 +37,6 @@ def test_targets_follow_objectives(kind, value, options, objective, strata, monk
         {
             "d_model": 8,
             "fields": {
-                "name": "root",
                 "type": "branch",
                 "fields": [
                     {
@@ -50,16 +49,16 @@ def test_targets_follow_objectives(kind, value, options, objective, strata, monk
             },
         }
     )
-    context = {"root/value": OnlineVocabularyModel(size=8).state} if kind == "category" else {}
+    context = {"/value": OnlineVocabularyModel(size=8).state} if kind == "category" else {}
     batch = encode(
         pa.table({"value": [value, None]}),
         schema=schema,
         strata=strata,
         interprocess_encoding_context=context,
     )
-    field = batch.tensors["root/value"]
+    field = batch.tensors["/value"]
     assert field.targets.batch_size == field.state.shape
-    assert ("root/value" in schema.objectives) == objective
+    assert ("/value" in schema.objectives) == objective
     assert set(field.targets.keys()) == ({TensorKey.state, TensorKey.content} if objective else set())
     assert bool(field.trainable.any()) == (objective and strata == rf.Strata.train)
 
@@ -73,13 +72,12 @@ def test_unused_targets_preserve_masked_pristine_validation(kind, invalid):
         {
             "d_model": 8,
             "fields": {
-                "name": "root",
                 "type": "branch",
                 "fields": [{"name": "value", "type": kind, "mask": rf.Mask(rate=1.0, reconstruct=False)}],
             },
         }
     )
-    assert "root/value" not in schema.objectives
+    assert "/value" not in schema.objectives
     with pytest.raises((TypeError, ValueError), match="value"):
         encode(
             pa.table({"value": [invalid]}),

@@ -1,7 +1,8 @@
 # Number
 
 Use `Number` for a scalar whose magnitude matters: an amount, quantity, age,
-or measurement. Use [Category](category.qmd) for numeric-looking labels and
+or measurement. Use [Quantile](quantile.qmd) for a percentile representation,
+[Category](category.qmd) for numeric-looking labels, and
 [DateParts](dateparts.qmd) for recurring calendar positions.
 
 ```yaml
@@ -13,8 +14,7 @@ returned: false
 ```python
 import relflow as rf
 
-model = rf.Model(
-    d_model=64, n_layers=2, n_heads=4,
+model = rf.Model.sm(
     amount=rf.Number(jitter=rf.Jitter(add=0.02)),
     age_days=rf.Number,
     returned=rf.Boolean(mask=True),
@@ -53,10 +53,17 @@ masking and jitter. Validation, test, and prediction reuse these statistics;
 checkpoints preserve them. Distributed training combines each batch's
 sufficient statistics across ranks before updating.
 
+Training observations, means, and variances use float32, including under BF16
+mixed precision; counts remain int64. Centered batch moments avoid subtracting
+nearly equal squared sums when values have large offsets. Values are rounded
+to float32 before normalization, so choose source units that preserve the
+differences your task needs. Float64 prediction columns do not restore lost
+input precision.
+
 For an application-supplied trained `model`:
 
 ```python
-normalization = rf.Number.normalization(model, "record/amount")
+normalization = rf.Number.normalization(model, rf.Address("amount"))
 ```
 
 The snapshot contains `mean`, `variance`, `std`, `count`, and `alpha`. Repeated

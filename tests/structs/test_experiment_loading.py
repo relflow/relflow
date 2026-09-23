@@ -5,7 +5,6 @@ def _structure_payload() -> dict:
     return {
         "d_model": 16,
         "fields": {
-            "name": "root",
             "type": "branch",
             "dropout": 0.1,
             "length": 1,
@@ -13,7 +12,6 @@ def _structure_payload() -> dict:
                 {
                     "name": "identifier",
                     "type": "category",
-                    "size": 1024,
                 }
             ],
         },
@@ -24,4 +22,4 @@ def test_schema_supports_programmatic_instantiation():
     schema = Schema.model_validate(_structure_payload())
 
     assert schema.d_model == 16
-    assert "root/identifier" in schema.requests
+    assert "/identifier" in schema.requests

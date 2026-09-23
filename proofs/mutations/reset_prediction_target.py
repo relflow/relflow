@@ -95,9 +95,7 @@ def prediction(model: rf.Model, rows: list[dict], *, corrupt: bool = False) -> d
         for row in inputs:
             row.update({name: 1000.0 for name in TARGETS})
     output = model.predict(inputs)["predictions"].to_pylist()
-    return {
-        name: np.asarray([row[f"record/{name}"]["content"] for row in output], dtype=np.float64) for name in TARGETS
-    }
+    return {name: np.asarray([row[f"/{name}"]["content"] for row in output], dtype=np.float64) for name in TARGETS}
 
 
 def scores(rows: list[dict], predicted: dict, means: dict) -> dict:
@@ -256,20 +254,18 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             lit.seed_everything(seed + 100 + index, workers=True)
             model = rf.Model.load(checkpoint).to(source.device)
             if arm == "selective_reset":
-                model.reset(rf.where("address") == "record/u")
+                model.reset(rf.where("address") == "/u")
             elif arm == "complete_reset":
-                model.reset(rf.where("address") == "record", descendants=True)
+                model.reset(rf.where("address") == "/", descendants=True)
             model.eval()
             current = model.state_dict()
             changes = [name for name, value in state.items() if name not in current or not equal(value, current[name])]
             before = prediction(model, test)
             immediate = scores(test, before, means)
             if arm == "selective_reset":
-                checks["Reset changes selected learned state"] = any(
-                    name.startswith("nodes.record/u.") for name in changes
-                )
+                checks["Reset changes selected learned state"] = any(name.startswith("nodes./u.") for name in changes)
                 checks["Reset preserves every unselected state entry"] = all(
-                    name.startswith("nodes.record/u.") for name in changes
+                    name.startswith("nodes./u.") for name in changes
                 )
                 checks["Reset preserves the schema"] = model.schema.model_dump() == source.schema.model_dump()
                 checks["Selected target immediately loses its skill"] = (
@@ -278,7 +274,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
                 checks["Unselected target immediately preserves predictions"] = bool(
                     np.allclose(reference["v"], before["v"], rtol=1e-5, atol=1e-6 * scales["v"])
                 )
-                head = {name: p.detach().clone() for name, p in model.nodes["record/u"].named_parameters()}
+                head = {name: p.detach().clone() for name, p in model.nodes["/u"].named_parameters()}
             if arm == "complete_reset":
                 checks["Complete reset loses both learned tasks"] = all(
                     immediate[name]["nrmse"] > 0.8 and immediate[name]["nrmse"] > 3 * initial[name]["nrmse"]
@@ -301,9 +297,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
                 value["nrmse"] < 0.25 for value in final.values()
             )
             if arm == "selective_reset":
-                changed = [
-                    name for name, p in model.nodes["record/u"].named_parameters() if not torch.equal(head[name], p)
-                ]
+                changed = [name for name, p in model.nodes["/u"].named_parameters() if not torch.equal(head[name], p)]
                 arms[arm]["reset_head_updated_parameters"] = changed
                 checks["Reset head parameters actually relearn"] = bool(changed)
                 corrupted = prediction(model, test, corrupt=True)
@@ -330,7 +324,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         "test_rows": len(test),
         "baseline": "Source-training mean for test comparisons; phase-training mean for validation curves",
         "optimizer_policy": "New AdamW factory and Trainer for every fit; both hidden labels rehearsed",
-        "mutation": "reset record/u; complete-reset control resets record with descendants=True",
+        "mutation": "reset /u; complete-reset control resets record with descendants=True",
     }, checks
 
 

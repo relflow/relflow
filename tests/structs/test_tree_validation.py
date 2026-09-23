@@ -9,22 +9,38 @@ class AddressPayload(pydantic.BaseModel):
 
 
 def test_address_can_be_initialized_from_path_parts():
-    address = Address("record", "label")
+    address = Address("transactions", "amount")
 
-    assert address == "record/label"
+    assert address == "/transactions/amount"
     assert isinstance(address, str)
 
 
 def test_address_accepts_slash_delimited_or_path_parts():
-    assert Address("record/label") == Address("record", "label")
-    assert Address("record/metrics/sepal_length") == Address("record", "metrics", "sepal_length")
+    assert Address("/label") == Address("label") == Address("/", "label")
+    assert Address("/metrics/sepal_length") == Address("metrics", "sepal_length")
+    assert Address("metrics/sepal_length") == "/metrics/sepal_length"
+    assert Address(Address("metrics", "sepal_length")) == "/metrics/sepal_length"
+
+
+def test_empty_components_select_the_root_but_explicit_empty_paths_are_unbound():
+    assert Address() == Address("/") == "/"
+    assert Address("") == ""
+    assert Address() != Address("")
+
+
+@pytest.mark.parametrize("parts", [(None,), (1,), (b"amount",), ("transactions", None), (1, "amount")])
+def test_address_rejects_non_string_components(parts):
+    with pytest.raises(TypeError, match="Address parts must be strings"):
+        Address(*parts)
 
 
 def test_address_can_be_pydantic_coerced_from_string():
-    payload = AddressPayload.model_validate({"address": "record/label"})
+    payload = AddressPayload.model_validate({"address": "/label"})
 
-    assert payload.address == Address("record", "label")
+    assert payload.address == Address("label")
     assert isinstance(payload.address, Address)
+    assert payload.model_dump(mode="json") == {"address": "/label"}
+    assert AddressPayload.model_validate({"address": "label"}).address == payload.address
 
 
 def test_node_rejects_invalid_name_characters():

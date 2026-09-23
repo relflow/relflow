@@ -164,13 +164,12 @@ def fit(*, identity: Literal["hash", "category"], seed: int, steps: int | None, 
     """Train one representation on the same identity pairs."""
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
-        name="identity",
         d_model=48,
         n_layers=2,
         n_heads=4,
         batch_size=128,
-        left_id=rf.Hash(n_hashes=4) if identity == "hash" else rf.Category(size=8192, p_unavailable=0.0),
-        right_id=rf.Hash(n_hashes=4) if identity == "hash" else rf.Category(size=8192, p_unavailable=0.0),
+        left_id=rf.Hash(n_hashes=4) if identity == "hash" else rf.Category(p_unavailable=0.0),
+        right_id=rf.Hash(n_hashes=4) if identity == "hash" else rf.Category(p_unavailable=0.0),
         equal=rf.Boolean(mask=True),
     )
     model.optimizer = lambda module: torch.optim.AdamW(module.parameters(), lr=3e-3)
@@ -206,7 +205,7 @@ def score(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator: s
         deterministic=True,
     )
     metrics = trainer.test(model=model, datamodule=data, verbose=False)[0]
-    return float(metrics["identity.equal/test.auc.content"])
+    return float(metrics[".equal/test.auc.content"])
 
 
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:

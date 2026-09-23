@@ -2,7 +2,7 @@
 
 Use `Cluster` for scalar labels represented through shared latent groups. It
 factorizes label representation into a label-to-cluster assignment and a
-cluster-to-model projection. It still keeps a bounded vocabulary; it does not
+cluster-to-model projection. It keeps a growing vocabulary; it does not
 eliminate per-label state.
 
 ```yaml
@@ -14,10 +14,8 @@ fraud: false
 ```python
 import relflow as rf
 
-model = rf.Model(
-    d_model=64, n_layers=2, n_heads=4,
+model = rf.Model.sm(
     merchant_id=rf.Cluster(
-        capacity=100_000,
         bounds=64,
         mask=rf.Mask(rate=0.15, reconstruct=True),
     ),
@@ -36,38 +34,67 @@ one compatible Arrow family per field. Training grows the vocabulary;
 validation, test, and prediction reuse it. Unknown labels remain `valued` and
 use a shared unavailable assignment. Nulls have a separate state.
 
-See [Online Vocabulary](../core-concepts/vocabulary.qmd) for capacity limits,
-admission timing with workers/DDP, and changes during fine-tuning.
+See [Online Vocabulary](../core-concepts/vocabulary.qmd) for automatic growth,
+admission timing with workers/DDP, supported training strategies, and changes
+during fine-tuning.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `capacity` | `1024` | Positive maximum number of learned labels. |
 | `bounds` | required | Integer `K` fixes the cluster count; `(lower, upper)` enables adaptive committed clusters with `0 < lower <= upper`. Stored as `n_clusters`. |
-| `p_unavailable` | `0.01` | Training probability of replacing known labels with unavailable content, independently in input and targets. |
+| `p_unavailable` | `0.01` | Training probability of replacing known input labels with unavailable content. Reconstruction answers remain intact. |
 | `ema_decay` | `0.99` | Smoothing for usage and range-adherence statistics, in `[0, 1]`. |
 | `revive_temperature` | `10.0` | Nonnegative revival schedule control; zero disables inactive-cluster revival. |
 
 The upper bound fixes physical cluster width. Ranged bounds allow callbacks to
 revive inactive columns or merge similar active columns. They do not guarantee
-equal use or human-interpretable groups.
+equal use or human-interpretable groups. Vocabulary growth expands label rows
+without changing these cluster bounds.
 
 ## Learning and inspection
+
+The training process binds batch-local label dictionaries before forward.
+Growth preserves existing IDs, learned assignment rows, exposure counters, and
+supported optimizer state, including the shared unavailable assignment.
 
 A reconstructing mask is required to train the cluster head and adaptive
 selection. A plain visible Cluster can influence other targets, but creates no
 cluster reconstruction loss of its own. See
 [shared leaf options](../core-concepts/data-types.qmd#shared-leaf-options).
 
-Reconstruction combines state classification with label recovery through
-clusters. Content accuracy excludes unknown labels. The decoder uses ancestor
-memory but opts out of direct sibling query conditioning.
+Reconstruction combines unweighted state classification with unweighted label
+cross entropy through clusters, normalized over populated labels only.
+Unallocated label rows and the unavailable input assignment are not output
+candidates. The decoder uses ancestor memory but opts out of direct sibling
+query conditioning.
+
+Unknown target identities contribute neither label reconstruction nor
+balancing updates. Usage EMA, committed-cluster selection, and adherence use
+known reconstruction targets only. An epoch with no known targets also skips
+revival and merging. Known-input augmentation does not remove that target's
+supervision. The auxiliary `loss.cluster` still encourages balanced use of
+latent clusters; this is not a guarantee of calibrated label probabilities.
+
+Epoch metrics separate vocabulary coverage from reconstruction quality:
+
+| Metric | Meaning |
+| --- | --- |
+| `targets.known`, `targets.unavailable` | Known and unknown selected valued target counts. |
+| `coverage.content` | Known / all selected valued targets. |
+| `accuracy.content`, `nll.content`, `loss.content` | Known-label accuracy and unweighted cross entropy over populated labels. |
+| `accuracy.all` | Correct known predictions / all selected valued targets, counting unknown answers as incorrect. |
+
+Counts and sums aggregate across batches and DDP ranks. With no known targets,
+conditional reconstruction metrics are `NaN`; state supervision remains valid.
+`coverage.content` and the target counts replace the old training-only
+`cluster.sentinel_share` diagnostic. See
+[pretraining evaluation](../guides/pretraining.qmd#evaluate-vocabulary-coverage).
 
 For an application-supplied trained `model`:
 
 ```python
-labels = rf.Cluster.vocabulary(model, "record/merchant_id")
-assignments = rf.Cluster.assignments(model, "record/merchant_id")
-status = rf.Cluster.status(model, "record/merchant_id")
+labels = rf.Cluster.vocabulary(model, rf.Address("merchant_id"))
+assignments = rf.Cluster.assignments(model, rf.Address("merchant_id"))
+status = rf.Cluster.status(model, rf.Address("merchant_id"))
 ```
 
 `labels` is an index-ordered tuple. Each assignment contains a cluster ID and
@@ -77,9 +104,12 @@ IDs and usage EMA; these inspection calls read local model state under DDP.
 An idle model also supports `rf.Cluster.assign(model, address, label, assignment)`
 for persistent changes and `rf.Cluster.override(model, address, assignments)`
 as a temporary context manager. An assignment is a cluster ID or a nonnegative
-probability vector of upper-bound width summing to one. Adding a label consumes
-capacity. Overrides restore state on exit; saving or rebuilding during an open
-override is rejected.
+probability vector of upper-bound width summing to one. These imperative APIs
+grow per-label storage before writing when necessary, preserving earlier rows,
+the unavailable assignment, and cluster width. They cannot run while the model
+is active or vocabulary state is shared with workers. Overrides restore labels
+and assignments on exit; any expanded allocation remains available. Saving or
+rebuilding during an open override is rejected.
 
 ## Prediction
 
@@ -89,6 +119,10 @@ Label probabilities are normalized over populated labels, excluding unused
 capacity and the unavailable row. Labels use `large_string`; an empty
 vocabulary yields a null label and zero probability.
 
+Cluster confidence and vocabulary-label confidence answer different questions.
+Neither estimates the probability that an input belongs to the known
+vocabulary. Evaluate cold-input populations separately.
+
 See the [prediction envelope](../guides/prediction-output.qmd) for shared
 state probabilities, `inferred`, and repeated shapes.
 
@@ -97,3 +131,6 @@ reports internal convergence for repeated identities. Its page distinguishes
 that evidence from partition recovery and held-out prediction. The
 [plain-input control](../proofs/cluster/plain-input-is-dormant.html) shows why
 downstream supervision alone leaves adaptive Cluster state dormant.
+The [regime recovery proof](../proofs/cluster/regime-recovery.html) tests the
+stronger claim directly: assignment agreement with hidden generating groups
+and prediction quality on independent observations, against a no-regime control.

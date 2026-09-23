@@ -160,8 +160,9 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
 # )))
 # ```
 #
-# The branch uses default attention reduction. Related inputs and their target
-# stay together instead of being flattened into unrelated rows.
+# The `xs` preset supplies one attention summary at both the root and branch.
+# The item encoder uses two layers. Related inputs and their target stay
+# together instead of being flattened into unrelated rows.
 #
 # ## How it works
 #
@@ -180,11 +181,7 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
 # %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
-    model = rf.Model(
-        name="order",
-        d_model=48,
-        n_layers=1,
-        n_heads=4,
+    model = rf.Model.xs(
         batch_size=128,
         optimizer=lambda module: torch.optim.Adam(module.parameters(), lr=1e-3),
         items=rf.Branch(
@@ -217,7 +214,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     test = list(records(rows=2048, seed=seed + 3))
     broken = list(records(rows=2048, seed=seed + 3, permute_targets=True))
     output = model.predict(inputs(test)).to_pylist()
-    coordinates = [row["predictions"]["order/items/subtotal"] for row in output]
+    coordinates = [row["predictions"]["/items/subtotal"] for row in output]
     lengths = [len(row["items"]) for row in test]
     predicted = np.asarray(
         [value["content"] for row, length in zip(coordinates, lengths, strict=True) for value in row[:length]]

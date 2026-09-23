@@ -18,12 +18,10 @@ def _payload(*, attention: str | None = "mha", pooling: str = "query") -> dict:
         "type": "category",
         "mask": True,
         "pooling": pooling,
-        "size": 8,
     }
     return {
         "d_model": 16,
         "fields": {
-            "name": "root",
             "type": "branch",
             "attention": attention,
             "dropout": 0.0,
@@ -41,7 +39,7 @@ def _payload(*, attention: str | None = "mha", pooling: str = "query") -> dict:
 
 def test_branch_encoder_uses_gqa_kv_head_count():
     schema = Schema.model_validate(_payload(attention="gqa"))
-    encoder = BranchEncoder(schema=schema, address="root")
+    encoder = BranchEncoder(schema=schema, address="/")
 
     assert len(encoder.encoder) == 1
     assert encoder.encoder[0].attention.n_kv_heads == 2
@@ -49,7 +47,7 @@ def test_branch_encoder_uses_gqa_kv_head_count():
 
 def test_branch_encoder_uses_mqa_kv_head_count():
     schema = Schema.model_validate(_payload(attention="mqa"))
-    encoder = BranchEncoder(schema=schema, address="root")
+    encoder = BranchEncoder(schema=schema, address="/")
 
     assert len(encoder.encoder) == 1
     assert encoder.encoder[0].attention.n_kv_heads == 1
@@ -57,7 +55,7 @@ def test_branch_encoder_uses_mqa_kv_head_count():
 
 def test_branch_encoder_none_skips_transformer_layers():
     schema = Schema.model_validate(_payload(attention=None))
-    encoder = BranchEncoder(schema=schema, address="root")
+    encoder = BranchEncoder(schema=schema, address="/")
 
     assert len(encoder.encoder) == 0
     assert encoder.coordinate_encoder is None
@@ -68,7 +66,7 @@ def test_branch_encoder_skips_coordinate_head_resolution_when_attention_is_disab
         first=rf.Number(), second=rf.Number(), d_model=1, n_layers=1, n_heads=2, attention=None, reduction=rf.Mean()
     )
 
-    encoder = BranchEncoder(schema=schema, address="record")
+    encoder = BranchEncoder(schema=schema, address="/")
 
     assert encoder.coordinate_encoder is None
 
@@ -85,7 +83,7 @@ def test_coordinate_encoder_uses_configured_attention_mode():
             reduction=None,
         )
 
-        encoder = BranchEncoder(schema=schema, address="record")
+        encoder = BranchEncoder(schema=schema, address="/")
 
         assert encoder.coordinate_encoder is not None
         assert encoder.coordinate_encoder.attention.n_kv_heads == expected_kv_heads
@@ -94,9 +92,9 @@ def test_coordinate_encoder_uses_configured_attention_mode():
 def test_decoder_mean_pooling_repeats_heritage_mean_for_each_target_slot():
     schema = Schema.model_validate(_payload(pooling="mean"))
     model = Model(schema=schema, batch_size=2)
-    decoder = model.nodes["root/items/category"].decoder
+    decoder = model.nodes["/items/category"].decoder
     parcel = Parcel(
-        origin="root",
+        origin="/",
         destination="",
         payload=torch.randn(2, 3, 16),
         present=torch.ones(2, 3, dtype=torch.bool),
@@ -107,16 +105,16 @@ def test_decoder_mean_pooling_repeats_heritage_mean_for_each_target_slot():
 
     assert isinstance(decoder.pool, MeanPool)
     assert prediction.payload[TensorKey.state].shape == (2, 2, len(Tokens))
-    assert prediction.payload[TensorKey.content].shape == (2, 2, 8)
+    assert prediction.payload[TensorKey.content].shape == (2, 2, decoder.linears["content"].out_features)
 
 
 def test_branch_encoder_propagates_presence_and_zeros_empty_rows():
     schema = Schema.model_validate(_payload())
-    encoder = BranchEncoder(schema=schema, address="root")
+    encoder = BranchEncoder(schema=schema, address="/")
     payload = torch.randn(2, 3, 16)
     parcel = Parcel(
-        origin="root/items",
-        destination="root",
+        origin="/items",
+        destination="/",
         payload=payload,
         present=torch.tensor([[True, False, True], [False, False, False]]),
         batch_size=2,
@@ -134,7 +132,6 @@ def test_nested_branch_encoder_preserves_repeated_parent_geometry():
         {
             "d_model": 16,
             "fields": {
-                "name": "root",
                 "type": "branch",
                 "fields": [
                     {
@@ -150,7 +147,6 @@ def test_nested_branch_encoder_preserves_repeated_parent_geometry():
                                     {
                                         "name": "value",
                                         "type": "category",
-                                        "size": 8,
                                     }
                                 ],
                             }
@@ -160,7 +156,7 @@ def test_nested_branch_encoder_preserves_repeated_parent_geometry():
             },
         }
     )
-    encoder = BranchEncoder(schema=schema, address="root/parents/children")
+    encoder = BranchEncoder(schema=schema, address="/parents/children")
     present = torch.tensor(
         [
             [[[True, False], [False, False], [True, True]]],
@@ -168,8 +164,8 @@ def test_nested_branch_encoder_preserves_repeated_parent_geometry():
         ]
     )
     parcel = Parcel(
-        origin="root/parents/children/value",
-        destination="root/parents/children",
+        origin="/parents/children/value",
+        destination="/parents/children",
         payload=torch.randn(2, 1, 3, 2, 16),
         present=present,
         batch_size=2,
@@ -186,7 +182,6 @@ def test_branch_encoder_routes_multiple_attention_outputs_to_its_parent():
         {
             "d_model": 16,
             "fields": {
-                "name": "root",
                 "type": "branch",
                 "fields": [
                     {
@@ -207,10 +202,10 @@ def test_branch_encoder_routes_multiple_attention_outputs_to_its_parent():
             },
         }
     )
-    encoder = BranchEncoder(schema=schema, address="root/parents/children")
+    encoder = BranchEncoder(schema=schema, address="/parents/children")
     parcel = Parcel(
-        origin="root/parents/children/value",
-        destination="root/parents/children",
+        origin="/parents/children/value",
+        destination="/parents/children",
         payload=torch.randn(2, 1, 3, 2, 16),
         present=torch.tensor(
             [
@@ -237,17 +232,17 @@ def test_branch_encoder_none_reduction_routes_every_encoded_token_and_presence()
         n_heads=2,
         attention=None,
     )
-    encoder = BranchEncoder(schema=schema, address="record/items")
+    encoder = BranchEncoder(schema=schema, address="/items")
     first = Parcel(
-        origin="record/items/first",
-        destination="record/items",
+        origin="/items/first",
+        destination="/items",
         payload=torch.arange(16, dtype=torch.float32).reshape(2, 1, 2, 4),
         present=torch.tensor([[[True, False]], [[True, True]]]),
         batch_size=2,
     )
     second = Parcel(
-        origin="record/items/second",
-        destination="record/items",
+        origin="/items/second",
+        destination="/items",
         payload=torch.arange(16, 32, dtype=torch.float32).reshape(2, 1, 2, 4),
         present=torch.tensor([[[False, True]], [[False, False]]]),
         batch_size=2,
@@ -275,17 +270,17 @@ def test_branch_encoder_orders_nested_and_leaf_parcels_by_schema() -> None:
         attention=None,
         reduction=None,
     )
-    encoder = BranchEncoder(schema=schema, address="record")
+    encoder = BranchEncoder(schema=schema, address="/")
     nested = Parcel(
-        origin="record/nested",
-        destination="record",
+        origin="/nested",
+        destination="/",
         payload=torch.tensor([[[1.0] * 4, [2.0] * 4]]),
         present=torch.ones((1, 2), dtype=torch.bool),
         batch_size=1,
     )
     direct = Parcel(
-        origin="record/direct",
-        destination="record",
+        origin="/direct",
+        destination="/",
         payload=torch.tensor([[[3.0] * 4]]),
         present=torch.ones((1, 1), dtype=torch.bool),
         batch_size=1,
@@ -303,17 +298,17 @@ def test_branch_encoder_contextualizes_only_jointly_aligned_field_coordinates():
         n_layers=1,
         n_heads=2,
     )
-    encoder = BranchEncoder(schema=schema, address="record/items").eval()
+    encoder = BranchEncoder(schema=schema, address="/items").eval()
     first = Parcel(
-        origin="record/items/first",
-        destination="record/items",
+        origin="/items/first",
+        destination="/items",
         payload=torch.randn(2, 1, 3, 8),
         present=torch.ones(2, 1, 3, dtype=torch.bool),
         batch_size=2,
     )
     second = Parcel(
-        origin="record/items/second",
-        destination="record/items",
+        origin="/items/second",
+        destination="/items",
         payload=torch.randn(2, 1, 3, 8),
         present=torch.ones(2, 1, 3, dtype=torch.bool),
         batch_size=2,
@@ -352,10 +347,10 @@ def test_branch_encoder_mean_reduction_uses_one_output_and_ignores_padding():
         n_heads=2,
         attention=None,
     )
-    encoder = BranchEncoder(schema=schema, address="record/items")
+    encoder = BranchEncoder(schema=schema, address="/items")
     parcel = Parcel(
-        origin="record/items/value",
-        destination="record/items",
+        origin="/items/value",
+        destination="/items",
         payload=torch.tensor([[[[1.0] * 4, [100.0] * 4, [3.0] * 4]]]),
         present=torch.tensor([[[True, False, True]]]),
         batch_size=1,
@@ -375,7 +370,7 @@ def test_attention_reduction_can_disable_only_its_rotary_position() -> None:
         n_layers=1,
         n_heads=2,
     )
-    encoder = BranchEncoder(schema=schema, address="record/items")
+    encoder = BranchEncoder(schema=schema, address="/items")
 
     assert encoder.coordinate_encoder is None
     assert len(encoder.encoder) == 0
@@ -407,19 +402,19 @@ def test_decoder_receives_canonical_heritage_and_separate_sibling_context():
         strata=Strata.train,
     )
 
-    decoder = model.nodes["record/answer"].decoder
+    decoder = model.nodes["/answer"].decoder
     with patch.object(decoder, "forward", wraps=decoder.forward) as forward:
         predictions = model(inputs, strata=Strata.train)
-    answer = next(prediction for prediction in predictions if prediction.address == "record/answer")
+    answer = next(prediction for prediction in predictions if prediction.address == "/answer")
 
     parcels = forward.call_args.args[0]
     contexts = forward.call_args.kwargs["contexts"]
-    assert [parcel.origin for parcel in parcels] == ["record", "record/answer"]
+    assert [parcel.origin for parcel in parcels] == ["/", "/answer"]
     assert not parcels[1].present.any()
     assert [parcel.origin for parcel in contexts] == [
-        "record/items",
-        "record/items/value",
-        "record/selector",
+        "/items",
+        "/items/value",
+        "/selector",
     ]
     assert answer.payload[TensorKey.content].shape == (2, 1, 1)
     assert all(torch.isfinite(value).all() for value in answer.payload.values())
@@ -428,12 +423,12 @@ def test_decoder_receives_canonical_heritage_and_separate_sibling_context():
 def test_decoder_supports_zero_context():
     schema = Schema.model_validate(_payload(pooling="mean"))
     model = Model(schema=schema, batch_size=2)
-    decoder = model.nodes["root/items/category"].decoder
+    decoder = model.nodes["/items/category"].decoder
 
     prediction = decoder([], batch_size=2, device=torch.device("cpu"))
 
     assert prediction.payload[TensorKey.state].shape == (2, 2, len(Tokens))
-    assert prediction.payload[TensorKey.content].shape == (2, 2, 8)
+    assert prediction.payload[TensorKey.content].shape == (2, 2, decoder.linears["content"].out_features)
     assert all(torch.isfinite(value).all() for value in prediction.payload.values())
 
 
@@ -455,14 +450,14 @@ def test_decoder_sibling_context_descends_only_through_unreduced_branches():
         n_heads=2,
     )
 
-    preserved_decoder = preserved.nodes["record/answer"].decoder
-    compressed_decoder = compressed.nodes["record/answer"].decoder
+    preserved_decoder = preserved.nodes["/answer"].decoder
+    compressed_decoder = compressed.nodes["/answer"].decoder
 
-    assert "record/items" in preserved_decoder.context_addresses
-    assert "record/items/value" in preserved_decoder.context_addresses
-    assert "record/selector" in preserved_decoder.context_addresses
-    assert "record/items" in compressed_decoder.context_addresses
-    assert "record/items/value" not in compressed_decoder.context_addresses
+    assert "/items" in preserved_decoder.context_addresses
+    assert "/items/value" in preserved_decoder.context_addresses
+    assert "/selector" in preserved_decoder.context_addresses
+    assert "/items" in compressed_decoder.context_addresses
+    assert "/items/value" not in compressed_decoder.context_addresses
 
 
 def test_decoder_does_not_build_query_projection_for_only_unaligned_context() -> None:
@@ -473,9 +468,9 @@ def test_decoder_does_not_build_query_projection_for_only_unaligned_context() ->
         n_layers=1,
         n_heads=2,
     )
-    decoder = model.nodes["record/answer"].decoder
+    decoder = model.nodes["/answer"].decoder
 
-    assert decoder.context_addresses == ("record/items", "record/items/value")
+    assert decoder.context_addresses == ("/items", "/items/value")
     assert decoder.context_projection is None
 
 
@@ -501,7 +496,7 @@ def test_all_absent_heritage_retains_masked_sibling_context_in_autograd() -> Non
     assert output is not None
     output["loss"].backward()
 
-    for address in ("record/hidden", "record/answer"):
+    for address in ("/hidden", "/answer"):
         decoder = model.nodes[address].decoder
         projection = decoder.context_projection
         assert projection is not None
@@ -524,8 +519,8 @@ def test_scalar_decoder_position_defaults_off_and_can_be_enabled() -> None:
         n_heads=2,
     )
 
-    automatic_pool = automatic.nodes["record/answer"].decoder.pool
-    ordered_pool = ordered.nodes["record/answer"].decoder.pool
+    automatic_pool = automatic.nodes["/answer"].decoder.pool
+    ordered_pool = ordered.nodes["/answer"].decoder.pool
     assert automatic_pool.blocks[0].attention.rotary is None
     assert ordered_pool.blocks[0].attention.rotary is not None
 
@@ -543,10 +538,10 @@ def test_repeated_target_uses_coordinate_conditioned_queries():
         n_heads=2,
         reduction=None,
     )
-    decoder = model.nodes["record/items/value"].decoder
+    decoder = model.nodes["/items/value"].decoder
 
     assert decoder.n_context == 3
-    assert decoder.context_addresses == ("record/items/entity_id",)
+    assert decoder.context_addresses == ("/items/entity_id",)
     assert decoder.pool.blocks[0].attention.rotary is not None
 
 
@@ -559,6 +554,6 @@ def test_decoder_ignores_inactive_sibling_branches() -> None:
         n_layers=1,
         n_heads=2,
     )
-    decoder = model.nodes["record/answer"].decoder
+    decoder = model.nodes["/answer"].decoder
 
-    assert decoder.context_addresses == ("record/visible",)
+    assert decoder.context_addresses == ("/visible",)

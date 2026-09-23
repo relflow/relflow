@@ -11,6 +11,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 
 from relflow.architecture.graph import ModelGraph
 from relflow.logging import logger
+from relflow.presets import Preset
 from relflow.structs.experiment import Schema
 
 if TYPE_CHECKING:
@@ -66,16 +67,20 @@ class CheckpointState:
     def dump(module: "Model", checkpoint: dict[str, Any]) -> None:
         """Add RelFlow metadata to an otherwise framework-owned checkpoint mapping."""
         checkpoint["version"] = module.version
-        checkpoint["schema"] = module.schema.model_dump(mode="python")
+        checkpoint["schema"] = module.schema.model_dump(mode="json")
         checkpoint["batch_size"] = module.batch_size
+        checkpoint["preset"] = None if module.preset is None else module.preset.model_dump(mode="json")
 
     @staticmethod
-    def restore_version(module: "Model", checkpoint: dict[str, Any]) -> None:
-        """Restore checkpoint provenance after validating its version field."""
+    def restore_metadata(module: "Model", checkpoint: dict[str, Any]) -> None:
+        """Restore validated package provenance and the policy for future schema additions."""
         saved = checkpoint["version"]
         if not isinstance(saved, str):
             raise ValueError("checkpoint version must be a string")
+        policy = checkpoint.get("preset")
+        preset = None if policy is None else Preset.model_validate(policy)
         object.__setattr__(module, "_version", saved)
+        module.preset = preset
 
     @staticmethod
     def save(module: "Model", pathname: str | Path) -> None:
@@ -101,9 +106,12 @@ class CheckpointState:
         previous_batch_size = module.batch_size
         previous_nodes = module.nodes
         previous_example = module.example_input_array
+        previous_preset = module.preset
+        previous_version = module.version
         try:
             module.schema = Schema.model_validate(checkpoint["schema"])
             module.batch_size = checkpoint["batch_size"]
+            CheckpointState.restore_metadata(module, checkpoint)
             ModelGraph.install(module)
             if isinstance(device, torch.device):
                 module.to(device=device)
@@ -113,10 +121,11 @@ class CheckpointState:
             module.batch_size = previous_batch_size
             module.nodes = previous_nodes
             module.example_input_array = previous_example
+            module.preset = previous_preset
+            object.__setattr__(module, "_version", previous_version)
             module.train(was_training)
             raise
         module.train(was_training)
-        CheckpointState.restore_version(module, checkpoint)
         module.reset_contracts()
 
     @staticmethod

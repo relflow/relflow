@@ -58,7 +58,7 @@ def evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleTyp
     scripts.mkdir()
     pages.mkdir(parents=True)
     entries = {}
-    for identifier, slug, state in (("P001", "signal", "Provisional pass"), ("P002", "noise", "Expected limitation")):
+    for identifier, slug, state in (("P001", "signal", "Passing"), ("P002", "noise", "Limited")):
         script = scripts / f"{slug}.py"
         metadata = {
             "proof-id": identifier,
@@ -94,6 +94,42 @@ def evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleTyp
     monkeypatch.setattr(reporting, "provenance", lambda script: deepcopy(result()["provenance"]))
     monkeypatch.setattr(torch, "set_num_threads", lambda threads: None)
     return reporting, renderer, tmp_path
+
+
+@pytest.mark.parametrize(
+    ("historical", "outcome", "expected", "kind"),
+    [
+        ("Passing", "met", "Passing", "note"),
+        ("Limited", "met", "Limited", "warning"),
+        ("Partial", "met", "Partial", "note"),
+        ("Passing", "not_met", "Failing", "warning"),
+        ("Passing", "error", "Error", "warning"),
+        ("Passing", None, "Missing", "note"),
+    ],
+)
+def test_statuses_match_catalog_callouts_legend_and_colors(
+    evidence: tuple[ModuleType, ModuleType, Path], historical: str, outcome: str | None, expected: str, kind: str
+) -> None:
+    _, renderer, root = evidence
+    source = root / "proofs/results.yaml"
+    document = yaml.safe_load(source.read_text())
+    entry = document["proofs"]["P001"]
+    entry["historical"]["status"] = historical
+    entry["runs"] = [result(outcome=outcome)] if outcome is not None else []
+    source.write_text(yaml.safe_dump(document))
+
+    renderer.render(root)
+
+    catalog = yaml.safe_load((root / "docs/proofs/catalog.yaml").read_text())
+    assert next(row for row in catalog if row["id"] == "P001")["proof-status"] == expected
+    notice = (root / "docs/proofs/_generated/P001-status.md").read_text()
+    title = f"Latest full run · {expected}" if outcome is not None else expected
+    assert f'::: {{.callout-{kind} title="P001 · {title}"}}' in notice
+    legend = (ROOT / "docs/proofs.qmd").read_text()
+    assert f'[{expected}]{{.proof-status data-proof-status="{expected}"}}' in legend
+    styles = (ROOT / "docs/assets/stylesheets/proofs.css").read_text()
+    assert f'\n.proof-status[data-proof-status="{expected}"] {{' in styles
+    assert f'\nbody.quarto-dark .proof-status[data-proof-status="{expected}"] {{' in styles
 
 
 def test_concurrent_appends_preserve_history_and_other_proofs(evidence: tuple[ModuleType, ModuleType, Path]) -> None:
@@ -195,7 +231,7 @@ def test_cli_records_execution_errors_before_exiting(
     assert entry["runs"][-1]["seed"] == 19
     assert "RuntimeError: synthetic generation failed" in entry["runs"][-1]["error"]
     renderer.render(root)
-    assert "Execution error" in (root / "docs/proofs/_generated/P001-status.md").read_text()
+    assert "Error" in (root / "docs/proofs/_generated/P001-status.md").read_text()
     assert "synthetic generation failed" in (root / "docs/proofs/_generated/P001-evidence.md").read_text()
 
 
@@ -219,7 +255,7 @@ def test_smoke_runs_do_not_replace_full_evidence_or_status(
     assert renderer.latest(entry) == full
     renderer.render(root)
     generated = root / "docs/proofs/_generated"
-    assert "Gates not met" in (generated / "P001-status.md").read_text()
+    assert "Failing" in (generated / "P001-status.md").read_text()
     text = (generated / "P001-evidence.md").read_text()
     assert "Seed **7**" in text
     assert "| held_out_rmse | 0.125 |" in text
@@ -236,7 +272,7 @@ def test_docs_refresh_from_yaml_and_embed_scripts_without_executing(
     generated = root / "docs/proofs/_generated"
     renderer.render(root)
     notice = (generated / "P001-status.md").read_text()
-    assert "Not run" in notice and "No full experiment has been recorded." in notice
+    assert "Missing" in notice and "No full experiment has been recorded." in notice
     assert "Historical summary" not in notice
     assert "Historical measurements" not in (generated / "P001-evidence.md").read_text()
 
@@ -246,15 +282,15 @@ def test_docs_refresh_from_yaml_and_embed_scripts_without_executing(
     renderer.render(root)
     catalog = yaml.safe_load((root / "docs/proofs/catalog.yaml").read_text())
     assert {row["id"]: row["proof-status"] for row in catalog} == {
-        "P001": "Gates not met",
-        "P002": "Not run",
+        "P001": "Failing",
+        "P002": "Missing",
     }
     assert "0 of 1 behavioral checks met" in (generated / "P001-status.md").read_text()
     assert "| held_out_rmse | 0.875 |" in (generated / "P001-evidence.md").read_text()
 
     reporting.save("P001", result(seed=29), source)
     renderer.render(root)
-    assert "Provisional pass" in (generated / "P001-status.md").read_text()
+    assert "Passing" in (generated / "P001-status.md").read_text()
     text = (generated / "P001-evidence.md").read_text()
     assert "Seed **29**" in text and "| held_out_rmse | 0.125 |" in text
     assert "| held_out_rmse | 0.875 |" not in text
@@ -383,10 +419,10 @@ def test_provenance_failure_is_recorded_and_docs_remain_renderable(
 
     renderer.render(root)
     generated = root / "docs/proofs/_generated"
-    assert "Execution error" in (generated / "P001-status.md").read_text()
+    assert "Error" in (generated / "P001-status.md").read_text()
     assert "cannot read installed package source" in (generated / "P001-evidence.md").read_text()
     catalog = yaml.safe_load((root / "docs/proofs/catalog.yaml").read_text())
-    assert next(row for row in catalog if row["id"] == "P001")["proof-status"] == "Execution error"
+    assert next(row for row in catalog if row["id"] == "P001")["proof-status"] == "Error"
 
 
 def test_changed_script_warns_without_rewriting_recorded_results(
@@ -412,7 +448,7 @@ def test_changed_script_warns_without_rewriting_recorded_results(
     status = (generated / "P001-status.md").read_text()
     assert "code has changed" in status
     assert "earlier version" in status
-    assert "Provisional pass" in status
+    assert "Passing" in status
     evidence_text = (generated / "P001-evidence.md").read_text()
     assert "Seed **43**" in evidence_text
     assert "| held_out_rmse | 0.125 |" in evidence_text

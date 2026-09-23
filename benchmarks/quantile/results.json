@@ -1,0 +1,1059 @@
+{
+  "environment": {
+    "python": "3.12.10",
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "numpy": "2.4.6",
+    "pyarrow": "24.0.0",
+    "datasketches": "5.2.0"
+  },
+  "parameters": {
+    "total": 1000000,
+    "repeats": 3,
+    "compression": 100,
+    "output": "/Users/grantham/Desktop/relflow/benchmarks/quantile/results.json"
+  },
+  "correctness": {
+    "arrow": {
+      "standard_checks": "pass: empty/null/nonfinite/count/constant/bounds/merge/persistence",
+      "float64_extreme_stress": {
+        "count": 3000,
+        "finite_cdf": true,
+        "finite_quantiles": true,
+        "cdf_max_rank_error": 1.1102230246251565e-16,
+        "quantile_nonfinite_count": 0
+      }
+    },
+    "datasketches": {
+      "standard_checks": "pass: empty/null/nonfinite/count/constant/bounds/merge/persistence",
+      "float64_extreme_stress": {
+        "count": 3000,
+        "finite_cdf": true,
+        "finite_quantiles": false,
+        "cdf_max_rank_error": 0.16649999999999998,
+        "quantile_nonfinite_count": 76
+      }
+    }
+  },
+  "stream": {
+    "128": {
+      "arrow": {
+        "update": {
+          "median_s": 2.424232976511121,
+          "samples_s": [
+            2.4964727899059653,
+            2.424232976511121,
+            2.41699342103675
+          ]
+        },
+        "cdf": {
+          "median_s": 0.42753582866862416,
+          "samples_s": [
+            0.4535068874247372,
+            0.42753582866862416,
+            0.4213993987068534
+          ]
+        },
+        "combined": {
+          "median_s": 2.851768805179745,
+          "samples_s": [
+            2.9499796773307025,
+            2.851768805179745,
+            2.8383928197436035
+          ]
+        },
+        "serialized_bytes": [
+          1656,
+          1656,
+          1656
+        ]
+      },
+      "datasketches": {
+        "update": {
+          "median_s": 0.0326407621614635,
+          "samples_s": [
+            0.03341614035889506,
+            0.032039529643952847,
+            0.0326407621614635
+          ]
+        },
+        "cdf": {
+          "median_s": 0.24913483764976263,
+          "samples_s": [
+            0.25739334477111697,
+            0.24749648943543434,
+            0.24913483764976263
+          ]
+        },
+        "combined": {
+          "median_s": 0.28177559981122613,
+          "samples_s": [
+            0.29080948513001204,
+            0.2795360190793872,
+            0.28177559981122613
+          ]
+        },
+        "serialized_bytes": [
+          2576,
+          2576,
+          2576
+        ]
+      }
+    },
+    "256": {
+      "arrow": {
+        "update": {
+          "median_s": 1.231192505452782,
+          "samples_s": [
+            1.231192505452782,
+            1.2385121919214725,
+            1.2204791917465627
+          ]
+        },
+        "cdf": {
+          "median_s": 0.25607911264523864,
+          "samples_s": [
+            0.25607911264523864,
+            0.26059124944731593,
+            0.25107444263994694
+          ]
+        },
+        "combined": {
+          "median_s": 1.4872716180980206,
+          "samples_s": [
+            1.4872716180980206,
+            1.4991034413687885,
+            1.4715536343865097
+          ]
+        },
+        "serialized_bytes": [
+          1600,
+          1600,
+          1600
+        ]
+      },
+      "datasketches": {
+        "update": {
+          "median_s": 0.018175732344388962,
+          "samples_s": [
+            0.018175732344388962,
+            0.01860629441216588,
+            0.017773401457816362
+          ]
+        },
+        "cdf": {
+          "median_s": 0.1945580686442554,
+          "samples_s": [
+            0.1945580686442554,
+            0.19928282033652067,
+            0.19391376664862037
+          ]
+        },
+        "combined": {
+          "median_s": 0.21273380098864436,
+          "samples_s": [
+            0.21273380098864436,
+            0.21788911474868655,
+            0.21168716810643673
+          ]
+        },
+        "serialized_bytes": [
+          2544,
+          2544,
+          2544
+        ]
+      }
+    },
+    "1000": {
+      "arrow": {
+        "update": {
+          "median_s": 0.339336936827749,
+          "samples_s": [
+            0.34520285902544856,
+            0.339336936827749,
+            0.33791291480883956
+          ]
+        },
+        "cdf": {
+          "median_s": 0.1161652747541666,
+          "samples_s": [
+            0.11909616878256202,
+            0.1161652747541666,
+            0.11521609220653772
+          ]
+        },
+        "combined": {
+          "median_s": 0.4555022115819156,
+          "samples_s": [
+            0.4642990278080106,
+            0.4555022115819156,
+            0.4531290070153773
+          ]
+        },
+        "serialized_bytes": [
+          1536,
+          1536,
+          1536
+        ]
+      },
+      "datasketches": {
+        "update": {
+          "median_s": 0.03865954652428627,
+          "samples_s": [
+            0.038800399750471115,
+            0.03865954652428627,
+            0.03825169103220105
+          ]
+        },
+        "cdf": {
+          "median_s": 0.13159757107496262,
+          "samples_s": [
+            0.1324848593212664,
+            0.13159757107496262,
+            0.13100529089570045
+          ]
+        },
+        "combined": {
+          "median_s": 0.17025711759924889,
+          "samples_s": [
+            0.17128525907173753,
+            0.17025711759924889,
+            0.1692569819279015
+          ]
+        },
+        "serialized_bytes": [
+          2496,
+          2496,
+          2496
+        ]
+      }
+    },
+    "10000": {
+      "arrow": {
+        "update": {
+          "median_s": 0.10157533548772335,
+          "samples_s": [
+            0.10114991385489702,
+            0.10164425009861588,
+            0.10157533548772335
+          ]
+        },
+        "cdf": {
+          "median_s": 0.07303894683718681,
+          "samples_s": [
+            0.07378237182274461,
+            0.07303894683718681,
+            0.07298870990052819
+          ]
+        },
+        "combined": {
+          "median_s": 0.1746831969358027,
+          "samples_s": [
+            0.17493228567764163,
+            0.1746831969358027,
+            0.17456404538825154
+          ]
+        },
+        "serialized_bytes": [
+          1456,
+          1456,
+          1456
+        ]
+      },
+      "datasketches": {
+        "update": {
+          "median_s": 0.03770767152309418,
+          "samples_s": [
+            0.03767328942194581,
+            0.03778566652908921,
+            0.03770767152309418
+          ]
+        },
+        "cdf": {
+          "median_s": 0.12654258031398058,
+          "samples_s": [
+            0.12652629287913442,
+            0.12670175358653069,
+            0.12654258031398058
+          ]
+        },
+        "combined": {
+          "median_s": 0.16425025183707476,
+          "samples_s": [
+            0.16419958230108023,
+            0.1644874201156199,
+            0.16425025183707476
+          ]
+        },
+        "serialized_bytes": [
+          2560,
+          2560,
+          2560
+        ]
+      }
+    },
+    "100000": {
+      "arrow": {
+        "update": {
+          "median_s": 0.09277987433597445,
+          "samples_s": [
+            0.09277987433597445,
+            0.09276262484490871,
+            0.09288916550576687
+          ]
+        },
+        "cdf": {
+          "median_s": 0.0676463320851326,
+          "samples_s": [
+            0.06875933520495892,
+            0.0676463320851326,
+            0.06688654283061624
+          ]
+        },
+        "combined": {
+          "median_s": 0.1604089569300413,
+          "samples_s": [
+            0.16153920954093337,
+            0.1604089569300413,
+            0.1597757083363831
+          ]
+        },
+        "serialized_bytes": [
+          1424,
+          1424,
+          1424
+        ]
+      },
+      "datasketches": {
+        "update": {
+          "median_s": 0.03980808146297932,
+          "samples_s": [
+            0.04001312516629696,
+            0.039737959392368793,
+            0.03980808146297932
+          ]
+        },
+        "cdf": {
+          "median_s": 0.13462741812691092,
+          "samples_s": [
+            0.1356428344734013,
+            0.13462741812691092,
+            0.13461829256266356
+          ]
+        },
+        "combined": {
+          "median_s": 0.17442637402564287,
+          "samples_s": [
+            0.17565595963969827,
+            0.17436537751927972,
+            0.17442637402564287
+          ]
+        },
+        "serialized_bytes": [
+          2544,
+          2544,
+          2544
+        ]
+      }
+    }
+  },
+  "merge": {
+    "arrow": {
+      "build_shards": {
+        "median_s": 0.08803354343399405,
+        "samples_s": [
+          0.08856520988047123,
+          0.08756287302821875,
+          0.08803354343399405
+        ]
+      },
+      "merge_only": {
+        "median_s": 0.007640459109097719,
+        "samples_s": [
+          0.007762457709759474,
+          0.007616959046572447,
+          0.007640459109097719
+        ]
+      },
+      "serialized_bytes": [
+        1456,
+        1456,
+        1456
+      ]
+    },
+    "datasketches": {
+      "build_shards": {
+        "median_s": 0.039385709911584854,
+        "samples_s": [
+          0.039385709911584854,
+          0.03915754333138466,
+          0.03946237778291106
+        ]
+      },
+      "merge_only": {
+        "median_s": 0.00037233298644423485,
+        "samples_s": [
+          0.00037233298644423485,
+          0.00037508271634578705,
+          0.0003520003519952297
+        ]
+      },
+      "serialized_bytes": [
+        2256,
+        2256,
+        2256
+      ]
+    }
+  },
+  "query": {
+    "arrow": {
+      "1000": {
+        "cdf": {
+          "median_s": 0.0001060832291841507,
+          "samples_s": [
+            0.0002098330296576023,
+            0.0001060832291841507,
+            7.862458005547523e-05
+          ]
+        },
+        "inverse": {
+          "median_s": 7.375003769993782e-05,
+          "samples_s": [
+            0.00010591698810458183,
+            7.375003769993782e-05,
+            5.650008097290993e-05
+          ]
+        }
+      },
+      "10000": {
+        "cdf": {
+          "median_s": 0.0007050000131130219,
+          "samples_s": [
+            0.0007149158045649529,
+            0.0007050000131130219,
+            0.0006562923081219196
+          ]
+        },
+        "inverse": {
+          "median_s": 0.00043000001460313797,
+          "samples_s": [
+            0.00043000001460313797,
+            0.0004192083142697811,
+            0.00043354183435440063
+          ]
+        }
+      },
+      "100000": {
+        "cdf": {
+          "median_s": 0.006757374852895737,
+          "samples_s": [
+            0.006799541879445314,
+            0.006757374852895737,
+            0.006607249844819307
+          ]
+        },
+        "inverse": {
+          "median_s": 0.0038868747651576996,
+          "samples_s": [
+            0.003964124713093042,
+            0.003725416027009487,
+            0.0038868747651576996
+          ]
+        }
+      }
+    },
+    "datasketches": {
+      "1000": {
+        "cdf": {
+          "median_s": 0.00013112463057041168,
+          "samples_s": [
+            0.0002082502469420433,
+            0.00013112463057041168,
+            0.00011312495917081833
+          ]
+        },
+        "inverse": {
+          "median_s": 0.00019520893692970276,
+          "samples_s": [
+            0.0002120831049978733,
+            0.00018920795992016792,
+            0.00019520893692970276
+          ]
+        }
+      },
+      "10000": {
+        "cdf": {
+          "median_s": 0.0012214160524308681,
+          "samples_s": [
+            0.0012696660123765469,
+            0.0012214160524308681,
+            0.001187250018119812
+          ]
+        },
+        "inverse": {
+          "median_s": 0.0018749581649899483,
+          "samples_s": [
+            0.0018749581649899483,
+            0.0018202080391347408,
+            0.001878167036920786
+          ]
+        }
+      },
+      "100000": {
+        "cdf": {
+          "median_s": 0.013342750258743763,
+          "samples_s": [
+            0.013523499947041273,
+            0.013342750258743763,
+            0.013224707916378975
+          ]
+        },
+        "inverse": {
+          "median_s": 0.018047333229333162,
+          "samples_s": [
+            0.018047333229333162,
+            0.01790187507867813,
+            0.018310874700546265
+          ]
+        }
+      }
+    }
+  },
+  "accuracy": {
+    "uniform": {
+      "arrow": {
+        "median": {
+          "cdf_max_rank_error": 0.0005241516271147495,
+          "cdf_mean_rank_error": 0.0002134255602621908,
+          "cdf_tail_max_rank_error": 0.0004930671690345926,
+          "inverse_max_rank_error": 0.000530000000000001,
+          "inverse_mean_rank_error": 0.00022204798212221118,
+          "finite_queries": true,
+          "monotone_cdf": true,
+          "monotone_inverse": true,
+          "count": 1000000,
+          "serialized_bytes": 1472
+        },
+        "samples": [
+          {
+            "cdf_max_rank_error": 0.0005241516271147495,
+            "cdf_mean_rank_error": 0.0002134255602621908,
+            "cdf_tail_max_rank_error": 0.0004930671690345926,
+            "inverse_max_rank_error": 0.000530000000000001,
+            "inverse_mean_rank_error": 0.00022204798212221118,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": true,
+            "count": 1000000,
+            "serialized_bytes": 1472
+          },
+          {
+            "cdf_max_rank_error": 0.0005241516271147495,
+            "cdf_mean_rank_error": 0.0002134255602621908,
+            "cdf_tail_max_rank_error": 0.0004930671690345926,
+            "inverse_max_rank_error": 0.000530000000000001,
+            "inverse_mean_rank_error": 0.00022204798212221118,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": true,
+            "count": 1000000,
+            "serialized_bytes": 1472
+          },
+          {
+            "cdf_max_rank_error": 0.0005241516271147495,
+            "cdf_mean_rank_error": 0.0002134255602621908,
+            "cdf_tail_max_rank_error": 0.0004930671690345926,
+            "inverse_max_rank_error": 0.000530000000000001,
+            "inverse_mean_rank_error": 0.00022204798212221118,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": true,
+            "count": 1000000,
+            "serialized_bytes": 1472
+          }
+        ]
+      },
+      "datasketches": {
+        "median": {
+          "cdf_max_rank_error": 0.001226961667369908,
+          "cdf_mean_rank_error": 0.0003062341305892159,
+          "cdf_tail_max_rank_error": 8.34574894338358e-05,
+          "inverse_max_rank_error": 0.03742000000000001,
+          "inverse_mean_rank_error": 0.010335069853921111,
+          "finite_queries": true,
+          "monotone_cdf": true,
+          "monotone_inverse": false,
+          "count": 1000000,
+          "serialized_bytes": 2528
+        },
+        "samples": [
+          {
+            "cdf_max_rank_error": 0.001226961667369908,
+            "cdf_mean_rank_error": 0.0003062341305892159,
+            "cdf_tail_max_rank_error": 8.34574894338358e-05,
+            "inverse_max_rank_error": 0.03742000000000001,
+            "inverse_mean_rank_error": 0.010335069853921111,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": false,
+            "count": 1000000,
+            "serialized_bytes": 2528
+          },
+          {
+            "cdf_max_rank_error": 0.001226961667369908,
+            "cdf_mean_rank_error": 0.0003062341305892159,
+            "cdf_tail_max_rank_error": 8.34574894338358e-05,
+            "inverse_max_rank_error": 0.03742000000000001,
+            "inverse_mean_rank_error": 0.010335069853921111,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": false,
+            "count": 1000000,
+            "serialized_bytes": 2528
+          },
+          {
+            "cdf_max_rank_error": 0.001226961667369908,
+            "cdf_mean_rank_error": 0.0003062341305892159,
+            "cdf_tail_max_rank_error": 8.34574894338358e-05,
+            "inverse_max_rank_error": 0.03742000000000001,
+            "inverse_mean_rank_error": 0.010335069853921111,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": false,
+            "count": 1000000,
+            "serialized_bytes": 2528
+          }
+        ]
+      }
+    },
+    "normal": {
+      "arrow": {
+        "median": {
+          "cdf_max_rank_error": 0.004221449228421104,
+          "cdf_mean_rank_error": 0.00024501533442930755,
+          "cdf_tail_max_rank_error": 0.000566097473008972,
+          "inverse_max_rank_error": 0.004174999999999984,
+          "inverse_mean_rank_error": 0.00024020870936500023,
+          "finite_queries": true,
+          "monotone_cdf": true,
+          "monotone_inverse": true,
+          "count": 1000000,
+          "serialized_bytes": 1456
+        },
+        "samples": [
+          {
+            "cdf_max_rank_error": 0.004221449228421104,
+            "cdf_mean_rank_error": 0.00024501533442930755,
+            "cdf_tail_max_rank_error": 0.000566097473008972,
+            "inverse_max_rank_error": 0.004174999999999984,
+            "inverse_mean_rank_error": 0.00024020870936500023,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": true,
+            "count": 1000000,
+            "serialized_bytes": 1456
+          },
+          {
+            "cdf_max_rank_error": 0.004221449228421104,
+            "cdf_mean_rank_error": 0.00024501533442930755,
+            "cdf_tail_max_rank_error": 0.000566097473008972,
+            "inverse_max_rank_error": 0.004174999999999984,
+            "inverse_mean_rank_error": 0.00024020870936500023,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": true,
+            "count": 1000000,
+            "serialized_bytes": 1456
+          },
+          {
+            "cdf_max_rank_error": 0.004221449228421104,
+            "cdf_mean_rank_error": 0.00024501533442930755,
+            "cdf_tail_max_rank_error": 0.000566097473008972,
+            "inverse_max_rank_error": 0.004174999999999984,
+            "inverse_mean_rank_error": 0.00024020870936500023,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": true,
+            "count": 1000000,
+            "serialized_bytes": 1456
+          }
+        ]
+      },
+      "datasketches": {
+        "median": {
+          "cdf_max_rank_error": 0.001175895888219175,
+          "cdf_mean_rank_error": 0.00016580501010177642,
+          "cdf_tail_max_rank_error": 7.530481767015207e-05,
+          "inverse_max_rank_error": 0.03934699999999991,
+          "inverse_mean_rank_error": 0.010868109185828092,
+          "finite_queries": true,
+          "monotone_cdf": true,
+          "monotone_inverse": false,
+          "count": 1000000,
+          "serialized_bytes": 2560
+        },
+        "samples": [
+          {
+            "cdf_max_rank_error": 0.001175895888219175,
+            "cdf_mean_rank_error": 0.00016580501010177642,
+            "cdf_tail_max_rank_error": 7.530481767015207e-05,
+            "inverse_max_rank_error": 0.03934699999999991,
+            "inverse_mean_rank_error": 0.010868109185828092,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": false,
+            "count": 1000000,
+            "serialized_bytes": 2560
+          },
+          {
+            "cdf_max_rank_error": 0.001175895888219175,
+            "cdf_mean_rank_error": 0.00016580501010177642,
+            "cdf_tail_max_rank_error": 7.530481767015207e-05,
+            "inverse_max_rank_error": 0.03934699999999991,
+            "inverse_mean_rank_error": 0.010868109185828092,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": false,
+            "count": 1000000,
+            "serialized_bytes": 2560
+          },
+          {
+            "cdf_max_rank_error": 0.001175895888219175,
+            "cdf_mean_rank_error": 0.00016580501010177642,
+            "cdf_tail_max_rank_error": 7.530481767015207e-05,
+            "inverse_max_rank_error": 0.03934699999999991,
+            "inverse_mean_rank_error": 0.010868109185828092,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": false,
+            "count": 1000000,
+            "serialized_bytes": 2560
+          }
+        ]
+      }
+    },
+    "lognormal": {
+      "arrow": {
+        "median": {
+          "cdf_max_rank_error": 0.0015881235453102382,
+          "cdf_mean_rank_error": 0.0009238120655617327,
+          "cdf_tail_max_rank_error": 0.001106935053434288,
+          "inverse_max_rank_error": 0.0015920000000000378,
+          "inverse_mean_rank_error": 0.0009169876239275286,
+          "finite_queries": true,
+          "monotone_cdf": true,
+          "monotone_inverse": true,
+          "count": 1000000,
+          "serialized_bytes": 1456
+        },
+        "samples": [
+          {
+            "cdf_max_rank_error": 0.0015881235453102382,
+            "cdf_mean_rank_error": 0.0009238120655617327,
+            "cdf_tail_max_rank_error": 0.001106935053434288,
+            "inverse_max_rank_error": 0.0015920000000000378,
+            "inverse_mean_rank_error": 0.0009169876239275286,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": true,
+            "count": 1000000,
+            "serialized_bytes": 1456
+          },
+          {
+            "cdf_max_rank_error": 0.0015881235453102382,
+            "cdf_mean_rank_error": 0.0009238120655617327,
+            "cdf_tail_max_rank_error": 0.001106935053434288,
+            "inverse_max_rank_error": 0.0015920000000000378,
+            "inverse_mean_rank_error": 0.0009169876239275286,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": true,
+            "count": 1000000,
+            "serialized_bytes": 1456
+          },
+          {
+            "cdf_max_rank_error": 0.0015881235453102382,
+            "cdf_mean_rank_error": 0.0009238120655617327,
+            "cdf_tail_max_rank_error": 0.001106935053434288,
+            "inverse_max_rank_error": 0.0015920000000000378,
+            "inverse_mean_rank_error": 0.0009169876239275286,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": true,
+            "count": 1000000,
+            "serialized_bytes": 1456
+          }
+        ]
+      },
+      "datasketches": {
+        "median": {
+          "cdf_max_rank_error": 0.0025626920971926204,
+          "cdf_mean_rank_error": 0.0010173667737756293,
+          "cdf_tail_max_rank_error": 6.657314760616373e-05,
+          "inverse_max_rank_error": 0.04278000000000004,
+          "inverse_mean_rank_error": 0.011108307847487581,
+          "finite_queries": true,
+          "monotone_cdf": true,
+          "monotone_inverse": false,
+          "count": 1000000,
+          "serialized_bytes": 2576
+        },
+        "samples": [
+          {
+            "cdf_max_rank_error": 0.0025626920971926204,
+            "cdf_mean_rank_error": 0.0010173667737756293,
+            "cdf_tail_max_rank_error": 6.657314760616373e-05,
+            "inverse_max_rank_error": 0.04278000000000004,
+            "inverse_mean_rank_error": 0.011108307847487581,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": false,
+            "count": 1000000,
+            "serialized_bytes": 2576
+          },
+          {
+            "cdf_max_rank_error": 0.0025626920971926204,
+            "cdf_mean_rank_error": 0.0010173667737756293,
+            "cdf_tail_max_rank_error": 6.657314760616373e-05,
+            "inverse_max_rank_error": 0.04278000000000004,
+            "inverse_mean_rank_error": 0.011108307847487581,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": false,
+            "count": 1000000,
+            "serialized_bytes": 2576
+          },
+          {
+            "cdf_max_rank_error": 0.0025626920971926204,
+            "cdf_mean_rank_error": 0.0010173667737756293,
+            "cdf_tail_max_rank_error": 6.657314760616373e-05,
+            "inverse_max_rank_error": 0.04278000000000004,
+            "inverse_mean_rank_error": 0.011108307847487581,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": false,
+            "count": 1000000,
+            "serialized_bytes": 2576
+          }
+        ]
+      }
+    },
+    "duplicates": {
+      "arrow": {
+        "median": {
+          "cdf_max_rank_error": 0.0,
+          "cdf_mean_rank_error": 0.0,
+          "cdf_tail_max_rank_error": 0.0,
+          "inverse_max_rank_error": 0.0,
+          "inverse_mean_rank_error": 0.0,
+          "finite_queries": true,
+          "monotone_cdf": true,
+          "monotone_inverse": true,
+          "count": 1000000,
+          "serialized_bytes": 656
+        },
+        "samples": [
+          {
+            "cdf_max_rank_error": 0.0,
+            "cdf_mean_rank_error": 0.0,
+            "cdf_tail_max_rank_error": 0.0,
+            "inverse_max_rank_error": 0.0,
+            "inverse_mean_rank_error": 0.0,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": true,
+            "count": 1000000,
+            "serialized_bytes": 656
+          },
+          {
+            "cdf_max_rank_error": 0.0,
+            "cdf_mean_rank_error": 0.0,
+            "cdf_tail_max_rank_error": 0.0,
+            "inverse_max_rank_error": 0.0,
+            "inverse_mean_rank_error": 0.0,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": true,
+            "count": 1000000,
+            "serialized_bytes": 656
+          },
+          {
+            "cdf_max_rank_error": 0.0,
+            "cdf_mean_rank_error": 0.0,
+            "cdf_tail_max_rank_error": 0.0,
+            "inverse_max_rank_error": 0.0,
+            "inverse_mean_rank_error": 0.0,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": true,
+            "count": 1000000,
+            "serialized_bytes": 656
+          }
+        ]
+      },
+      "datasketches": {
+        "median": {
+          "cdf_max_rank_error": 0.02606149999999996,
+          "cdf_mean_rank_error": 0.013203249999999986,
+          "cdf_tail_max_rank_error": 0.0013225000000000042,
+          "inverse_max_rank_error": 0.058141,
+          "inverse_mean_rank_error": 0.002031554193615614,
+          "finite_queries": true,
+          "monotone_cdf": true,
+          "monotone_inverse": false,
+          "count": 1000000,
+          "serialized_bytes": 2160
+        },
+        "samples": [
+          {
+            "cdf_max_rank_error": 0.02606149999999996,
+            "cdf_mean_rank_error": 0.013203249999999986,
+            "cdf_tail_max_rank_error": 0.0013225000000000042,
+            "inverse_max_rank_error": 0.058141,
+            "inverse_mean_rank_error": 0.002031554193615614,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": false,
+            "count": 1000000,
+            "serialized_bytes": 2160
+          },
+          {
+            "cdf_max_rank_error": 0.02606149999999996,
+            "cdf_mean_rank_error": 0.013203249999999986,
+            "cdf_tail_max_rank_error": 0.0013225000000000042,
+            "inverse_max_rank_error": 0.058141,
+            "inverse_mean_rank_error": 0.002031554193615614,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": false,
+            "count": 1000000,
+            "serialized_bytes": 2160
+          },
+          {
+            "cdf_max_rank_error": 0.02606149999999996,
+            "cdf_mean_rank_error": 0.013203249999999986,
+            "cdf_tail_max_rank_error": 0.0013225000000000042,
+            "inverse_max_rank_error": 0.058141,
+            "inverse_mean_rank_error": 0.002031554193615614,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": false,
+            "count": 1000000,
+            "serialized_bytes": 2160
+          }
+        ]
+      }
+    },
+    "extremes": {
+      "arrow": {
+        "median": {
+          "cdf_max_rank_error": 0.3353344201054147,
+          "cdf_mean_rank_error": 0.0810403125687889,
+          "cdf_tail_max_rank_error": 0.007382861110206362,
+          "inverse_max_rank_error": 0.33545800000000003,
+          "inverse_mean_rank_error": 0.08098094970446808,
+          "finite_queries": true,
+          "monotone_cdf": true,
+          "monotone_inverse": true,
+          "count": 1000000,
+          "serialized_bytes": 1600
+        },
+        "samples": [
+          {
+            "cdf_max_rank_error": 0.3353344201054147,
+            "cdf_mean_rank_error": 0.0810403125687889,
+            "cdf_tail_max_rank_error": 0.007382861110206362,
+            "inverse_max_rank_error": 0.33545800000000003,
+            "inverse_mean_rank_error": 0.08098094970446808,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": true,
+            "count": 1000000,
+            "serialized_bytes": 1600
+          },
+          {
+            "cdf_max_rank_error": 0.3353344201054147,
+            "cdf_mean_rank_error": 0.0810403125687889,
+            "cdf_tail_max_rank_error": 0.007382861110206362,
+            "inverse_max_rank_error": 0.33545800000000003,
+            "inverse_mean_rank_error": 0.08098094970446808,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": true,
+            "count": 1000000,
+            "serialized_bytes": 1600
+          },
+          {
+            "cdf_max_rank_error": 0.3353344201054147,
+            "cdf_mean_rank_error": 0.0810403125687889,
+            "cdf_tail_max_rank_error": 0.007382861110206362,
+            "inverse_max_rank_error": 0.33545800000000003,
+            "inverse_mean_rank_error": 0.08098094970446808,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": true,
+            "count": 1000000,
+            "serialized_bytes": 1600
+          }
+        ]
+      },
+      "datasketches": {
+        "median": {
+          "cdf_max_rank_error": 0.3818456841551585,
+          "cdf_mean_rank_error": 0.1413664051599474,
+          "cdf_tail_max_rank_error": 0.0007603971978245028,
+          "inverse_max_rank_error": 0.38556999999999997,
+          "inverse_mean_rank_error": 0.14140462070956955,
+          "finite_queries": true,
+          "monotone_cdf": true,
+          "monotone_inverse": false,
+          "count": 1000000,
+          "serialized_bytes": 2400
+        },
+        "samples": [
+          {
+            "cdf_max_rank_error": 0.3818456841551585,
+            "cdf_mean_rank_error": 0.1413664051599474,
+            "cdf_tail_max_rank_error": 0.0007603971978245028,
+            "inverse_max_rank_error": 0.38556999999999997,
+            "inverse_mean_rank_error": 0.14140462070956955,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": false,
+            "count": 1000000,
+            "serialized_bytes": 2400
+          },
+          {
+            "cdf_max_rank_error": 0.3818456841551585,
+            "cdf_mean_rank_error": 0.1413664051599474,
+            "cdf_tail_max_rank_error": 0.0007603971978245028,
+            "inverse_max_rank_error": 0.38556999999999997,
+            "inverse_mean_rank_error": 0.14140462070956955,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": false,
+            "count": 1000000,
+            "serialized_bytes": 2400
+          },
+          {
+            "cdf_max_rank_error": 0.3818456841551585,
+            "cdf_mean_rank_error": 0.1413664051599474,
+            "cdf_tail_max_rank_error": 0.0007603971978245028,
+            "inverse_max_rank_error": 0.38556999999999997,
+            "inverse_mean_rank_error": 0.14140462070956955,
+            "finite_queries": true,
+            "monotone_cdf": true,
+            "monotone_inverse": false,
+            "count": 1000000,
+            "serialized_bytes": 2400
+          }
+        ]
+      }
+    }
+  },
+  "source_lines": {
+    "arrow": 207,
+    "datasketches": 72
+  }
+}

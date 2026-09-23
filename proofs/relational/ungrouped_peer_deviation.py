@@ -142,9 +142,7 @@ def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
         for row in rows
     ]
     output = model.predict(inputs).to_pylist()
-    return np.asarray(
-        [value["content"] for row in output for value in row["predictions"]["collection/items/deviation"]]
-    )
+    return np.asarray([value["content"] for row in output for value in row["predictions"]["/items/deviation"]])
 
 
 def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
@@ -214,7 +212,6 @@ def permute_items(rows: list[dict], seed: int) -> tuple[list[dict], np.ndarray]:
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
-        name="collection",
         d_model=48,
         n_layers=3,
         n_heads=4,

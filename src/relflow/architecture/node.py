@@ -29,6 +29,7 @@ class NodeModule(torch.nn.Module):
             self.embedder: EmbedderBase = extension.Embedder(schema=schema, address=address)
             if address in schema.objectives or address in schema.embed:
                 self.decoder: DecoderBase = extension.Decoder(schema=schema, address=address)
+                self.decoder.attach(self.embedder.context)
             if address in schema.objectives:
                 loss = extension.loss
                 if not callable(loss):

@@ -31,6 +31,7 @@ def test_registered_proofs_have_unique_standalone_scripts() -> None:
     assert not list((ROOT / "docs/proofs").glob("*/*.qmd")), "author proof pages in their experiment scripts"
 
     for identifier, entry in entries.items():
+        assert entry["historical"]["status"] in {"Passing", "Limited", "Partial"}, identifier
         path = ROOT / entry["script"]
         assert path.parent.parent == PROOFS and path.is_file(), path
         page = ROOT / entry["page"]
@@ -71,14 +72,19 @@ def test_experiments_keep_generation_and_modeling_in_their_own_script() -> None:
             or name == "proofs"
         ]
         assert not forbidden, f"{path}: keep the experiment self-contained: {forbidden}"
-        constructors = {
-            node.func.attr
-            for node in ast.walk(module)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id in relflow_names
-        }
+        constructors = set()
+        for node in ast.walk(module):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            constructor = node.func
+            if (
+                constructor.attr in {"xs", "sm", "md", "lg", "xl"}
+                and isinstance(constructor.value, ast.Attribute)
+                and constructor.value.attr == "Model"
+            ):
+                constructor = constructor.value
+            if isinstance(constructor.value, ast.Name) and constructor.value.id in relflow_names:
+                constructors.add(constructor.attr)
         assert {"Model", "SyntheticDataModule"} <= constructors, f"{path}: include the model and synthetic splits"
         assert any(isinstance(node, (ast.Yield, ast.YieldFrom)) for node in ast.walk(module)), (
             f"{path}: include the synthetic record generator"

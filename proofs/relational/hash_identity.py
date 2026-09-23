@@ -132,7 +132,7 @@ def normalized_rmse(model: rf.Model, records: list[dict]) -> float:
     actual = np.asarray([item["value"] for row in records for item in row["target"]])
     output = model.predict(records).to_pylist()
     predicted = np.asarray(
-        [coordinate["content"] for row in output for coordinate in row["predictions"]["association/target/value"]]
+        [coordinate["content"] for row in output for coordinate in row["predictions"]["/target/value"]]
     )
     return float(np.sqrt(np.mean(np.square(actual - predicted)) / np.mean(np.square(actual))))
 
@@ -192,7 +192,6 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     for route, reduction in (("compressed", rf.Attention()), ("preserved", None)):
         lit.seed_everything(seed, workers=True)
         model = rf.Model(
-            name="association",
             d_model=64,
             n_layers=2,
             n_heads=4,

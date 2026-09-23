@@ -27,7 +27,7 @@ from relflow.tensorfields.extensions.boolean import (
 from tests.arrow import batch as arrow_batch
 from tests.tensorfields.helpers import tensorize
 
-ADDRESS = "root/groups/items/enabled"
+ADDRESS = "/groups/items/enabled"
 
 
 def _schema(*, threshold: float | list[float] = 0.5, mask: bool | Mask = False) -> Schema:
@@ -35,7 +35,6 @@ def _schema(*, threshold: float | list[float] = 0.5, mask: bool | Mask = False) 
         {
             "d_model": 8,
             "fields": {
-                "name": "root",
                 "type": "branch",
                 "fields": [
                     {

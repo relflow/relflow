@@ -94,9 +94,9 @@ def test_schema_computes_effective_structural_branch_outputs() -> None:
     )
 
     assert schema.branch_outputs == {
-        "record/items/details": 4,
-        "record/items": 15,
-        "record": 2,
+        "/items/details": 4,
+        "/items": 15,
+        "/": 2,
     }
 
 
@@ -110,7 +110,7 @@ def test_schema_branch_outputs_excludes_inactive_subtrees() -> None:
         reduction=None,
     )
 
-    assert schema.branch_outputs == {"record/inactive": 0, "record": 1}
+    assert schema.branch_outputs == {"/inactive": 0, "/": 1}
 
 
 def test_attention_reduction_head_geometry_validates_after_binding() -> None:
@@ -136,4 +136,4 @@ def test_branch_output_width_cache_refreshes_after_schema_update() -> None:
     schema.update(rf.where("name") == "items", reduction=rf.Attention(n_outputs=2))
 
     assert schema.branch_outputs is not cached
-    assert schema.branch_outputs["record/items"] == 2
+    assert schema.branch_outputs["/items"] == 2

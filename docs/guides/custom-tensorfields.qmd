@@ -132,6 +132,13 @@ context and optional aligned sibling conditioning. Implement `decode(pooled)`
 to return a TensorDict of raw predictions. Pass `conditioned=False` to the base
 constructor to disable direct sibling conditioning.
 
+After constructing both modules, relflow calls
+`decoder.attach(embedder.context)`. Override `DecoderBase.attach(context)` when
+decoding needs the same live resource as encoding, such as a learned inverse
+transform. Keep persistent ownership in the embedder and retain a reference
+to its context in the decoder; checkpoint restoration then updates one
+authoritative resource.
+
 ### Observe and learn
 
 An embedder's `context` property exposes its worker-safe resource; it becomes
@@ -150,7 +157,8 @@ summary on the model side. The extension owns distributed reduction. With
 `loss(module, prediction, batch, strata)` requires annotated parameters. Use
 `batch.trainable` to select objectives and target state to determine where
 content is meaningful. `module.track((address, strata, metric, component), value=...)`
-records metrics; relflow applies the request's loss weight.
+records metrics using the [evaluation naming convention](evaluation.qmd#read-the-metrics);
+relflow applies the request's loss weight.
 
 `output(module, address)` returns a stable `pa.StructType` or None. relflow
 compiles it once, then passes that exact type to

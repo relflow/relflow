@@ -24,8 +24,8 @@ model = rf.Model(
     n_layers=2,
     n_heads=4,
     amount=rf.Number,
-    merchant=rf.Category(size=4096),
-    label=rf.Category(mask=True, size=2),
+    merchant=rf.Category,
+    label=rf.Category(mask=True),
 )
 ```
 
@@ -38,20 +38,19 @@ model = rf.Model(
     n_heads=4,
     line_items=rf.Branch(
         length=32,
-        sku=rf.Category(size=2048),
+        sku=rf.Category,
         quantity=rf.Number,
     ),
-    returned=rf.Category(mask=True, size=2),
+    returned=rf.Category(mask=True),
 )
 ```
 
-Root branch naming is passed to `Model(...)` with `name=...`. The
-generated root branch is always a singleton; use child `Branch(length=...)`
-for repeated data.
+The generated root is anonymous, has address `/`, and is always a singleton;
+use child `Branch(length=...)` for repeated data. All field addresses start
+with `/`, such as `/amount` or `/line_items/sku`.
 
 ```python
 model = rf.Model(
-    name="event",
     d_model=32,
     n_layers=1,
     n_heads=4,
@@ -63,13 +62,16 @@ model = rf.Model(
 ## Gotchas
 
 - Do not use a public `Struct(...)` constructor. Public examples should use `Model(...)` and `Branch(...)`.
-- `Model(..., name="customer")` names the generated root branch. Older examples may say `root=...`; update them.
+- `Model(...)` has no root-name option. `name=rf.Category` defines an ordinary
+  child field at `/name`; neither `name="customer"` nor `root="customer"` names the model.
 - Branch and leaf definitions have no `name` argument or positional arguments.
   Their parent supplies names through keywords, such as
   `amount=rf.Number` or `events=rf.Branch(...)`. Use a `fields` mapping for
   generated schemas or child names that collide with parent configuration:
   `rf.Branch(length=8, fields={"length": rf.Number})`.
   `model.extend(predicate, risk_score=rf.Number)` follows the same rule.
+- Use bare tensorfield classes such as `rf.Category` when no options are needed;
+  call them only to configure fields, such as `rf.Category(mask=True)`.
 - Tensorfield options must be declared fields; pass them directly or unpack a
   mapping with `**options`. Use `description` for notes, and declare extension
   options on `RequestBase` subclasses. Undeclared options are rejected.
@@ -254,10 +256,16 @@ application-supplied inputs. Use the shared Typst `node` and `tree` functions in
 contract in `docs/assets/typst/README.md`. Show field roles and repeated contexts,
 not parameter counts or hyperparameters. Keep learning-behavior checks in tests
 and proofs rather than extracting and executing documentation snippets.
+Give diagram roots descriptive labels such as `order`, `customer`, or `record`.
+These are illustrative labels, not model options or schema-address prefixes;
+the actual root remains anonymous at `rf.Address()`.
 
 Show observation and prediction examples as one YAML record, with repeated
 values nested beneath their field names. Keep Arrow and Polars data-module
 snippets to `model` and named splits unless the page explains another option.
+Use `rf.Address("transactions", "amount")` with one argument per child name
+for schema addresses in Python documentation examples; use `rf.Address()` for the root.
+Keep ordinary data keys, query strings, metric names, and serialized keys as strings.
 Give each concept one home and link to it. Verify claims against source code
 when editing a page; existing prose is not evidence. Use the current branding
 under `docs/assets/branding` and Typst diagrams for visual explanations.

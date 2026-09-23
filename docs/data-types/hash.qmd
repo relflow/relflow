@@ -2,7 +2,7 @@
 
 Use `Hash` when equality between identifiers matters, but their identities
 should not become a learned vocabulary. Use [Category](category.qmd) for
-bounded labels whose individual meaning should persist across observations.
+labels whose individual meaning should persist across observations.
 
 ```yaml
 account_id: account-17
@@ -17,8 +17,7 @@ fraud: false
 ```python
 import relflow as rf
 
-model = rf.Model(
-    d_model=64, n_layers=2, n_heads=4,
+model = rf.Model.sm(
     account_id=rf.Hash(n_hashes=4),
     transfers=rf.Branch(
         length=32,
@@ -64,6 +63,9 @@ Compare the [unseen-identity equality proof](../proofs/identity/unseen-identity-
 with the [sibling-collection overlap boundary](../proofs/relational/direct-sibling-hash-overlap.html).
 Their trees show why a working equality representation alone does not establish
 successful comparison across collections.
+The [retrieval capacity proof](../proofs/relational/retrieval-capacity.html)
+extends this evaluation to distractors, larger collections, and a separately
+trained two-hop task, with a separate result for each condition.
 
 ## Output
 

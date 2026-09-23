@@ -22,7 +22,7 @@ website:
     logo-alt: relflow
   sidebar:
     style: floating
-    search: true
+    search: false
     collapse-level: 99
     contents:
       - href: index.qmd
@@ -35,6 +35,8 @@ website:
         contents:
           - href: core-concepts/model-tree.qmd
             text: Structure And Context
+          - href: guides/model-templates.qmd
+            text: Model Templates
           - href: core-concepts/binding-data.qmd
             text: Binding Data
           - href: core-concepts/querypaths.qmd
@@ -61,10 +63,14 @@ website:
             text: Cluster
           - href: data-types/dateparts.qmd
             text: DateParts
+          - href: data-types/enum.qmd
+            text: Enum
           - href: data-types/hash.qmd
             text: Hash
           - href: data-types/number.qmd
             text: Number
+          - href: data-types/quantile.qmd
+            text: Quantile
           - href: data-types/set.qmd
             text: Set
           - href: data-types/text.qmd
@@ -110,6 +116,7 @@ website:
           - href: case-studies/customer-risk.qmd
             text: Customer Risk Example
   page-footer:
+    border: true
     left: Grantham Taylor
     right:
       - text: GitHub
@@ -126,6 +133,7 @@ website:
 format:
   html:
     css: assets/stylesheets/branding.css
+    include-in-header: assets/color-scheme.html
     include-after-body: assets/sidebar.html
     theme:
       light:

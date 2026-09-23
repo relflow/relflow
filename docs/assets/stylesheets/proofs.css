@@ -1,0 +1,102 @@
+#read-the-status table :is(th, td):first-child {
+  width: 1%;
+  white-space: nowrap;
+}
+
+#listing-proofs tbody tr {
+  cursor: pointer;
+}
+
+#listing-proofs tbody tr:is(:hover, :focus-within) > td {
+  --bs-table-color-state: var(--bs-table-hover-color);
+  --bs-table-bg-state: var(--bs-table-hover-bg);
+}
+
+#listing-proofs a.listing-title {
+  color: inherit;
+  text-decoration: none;
+}
+
+#listing-proofs a.listing-title:focus-visible {
+  outline: none;
+}
+
+#listing-proofs tbody tr:focus-within,
+#listing-proofs .table-responsive:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+
+.proof-status {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 6em;
+  padding: 0.2em 0.6em;
+  border: 1px solid currentColor;
+  border-radius: 0.4rem;
+  font-size: 0.85em;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.proof-status[data-proof-status="Passing"] {
+  color: #166534;
+  background-color: #dcfce7;
+}
+
+.proof-status[data-proof-status="Limited"] {
+  color: #92400e;
+  background-color: #fef3c7;
+}
+
+.proof-status[data-proof-status="Partial"] {
+  color: #1e40af;
+  background-color: #dbeafe;
+}
+
+.proof-status[data-proof-status="Failing"] {
+  color: #991b1b;
+  background-color: #fee2e2;
+}
+
+.proof-status[data-proof-status="Error"] {
+  color: #6b21a8;
+  background-color: #f3e8ff;
+}
+
+.proof-status[data-proof-status="Missing"] {
+  color: #475569;
+  background-color: #f1f5f9;
+}
+
+body.quarto-dark .proof-status[data-proof-status="Passing"] {
+  color: #86efac;
+  background-color: #143324;
+}
+
+body.quarto-dark .proof-status[data-proof-status="Limited"] {
+  color: #fcd34d;
+  background-color: #3b2c10;
+}
+
+body.quarto-dark .proof-status[data-proof-status="Partial"] {
+  color: #93c5fd;
+  background-color: #182e49;
+}
+
+body.quarto-dark .proof-status[data-proof-status="Failing"] {
+  color: #fca5a5;
+  background-color: #431e24;
+}
+
+body.quarto-dark .proof-status[data-proof-status="Error"] {
+  color: #f0abfc;
+  background-color: #3b2044;
+}
+
+body.quarto-dark .proof-status[data-proof-status="Missing"] {
+  color: #cbd5e1;
+  background-color: #29313d;
+}

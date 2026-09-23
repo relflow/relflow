@@ -9,6 +9,7 @@ import torch
 
 from relflow.architecture.node import NodeModule
 from relflow.data.datasets.base import EncodedInput
+from relflow.helpers.state import Rebuild, compatible
 from relflow.structs.enums import Strata
 from relflow.structs.experiment import Schema
 from relflow.structs.tree import Address, Node
@@ -73,6 +74,7 @@ class ModelGraph:
         module.schema.clear_tree_caches()
         was_training = module.training
         device = module.device
+        resources = dict(module.named_modules())
         previous = {
             name: value.detach().clone() if isinstance(value, torch.Tensor) else deepcopy(value)
             for name, value in module.state_dict().items()
@@ -80,22 +82,23 @@ class ModelGraph:
         ModelGraph.install(module)
         if isinstance(device, torch.device):
             module.to(device=device)
-        current = module.state_dict()
-        compatible = {}
-        for name, value in previous.items():
-            if name not in current:
+        retained = compatible(module.state_dict(), previous)
+        owned: list[str] = []
+        for name, resource in module.named_modules():
+            prefix = f"{name}." if name else ""
+            if any(prefix.startswith(parent) for parent in owned):
                 continue
-
-            current_value = current[name]
-            if isinstance(current_value, torch.Tensor) and isinstance(value, torch.Tensor):
-                if current_value.shape != value.shape:
-                    continue
-            elif type(current_value) is not type(value):
+            if name not in resources or not isinstance(cast(object, resource), Rebuild):
                 continue
+            state = cast(Rebuild, resource).rebuild_state(resources[name])
+            retained = {key: value for key, value in retained.items() if not key.startswith(prefix)}
+            retained.update(
+                (prefix + key, value.detach().clone() if isinstance(value, torch.Tensor) else deepcopy(value))
+                for key, value in state.items()
+            )
+            owned.append(prefix)
 
-            compatible[name] = value
-
-        module.load_state_dict(compatible, strict=False)
+        module.load_state_dict(retained, strict=False)
         module.train(was_training)
 
     @staticmethod

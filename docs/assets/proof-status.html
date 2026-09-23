@@ -1,0 +1,51 @@
+<script>
+  {
+    const listing = document.querySelector("#listing-proofs");
+
+    // Quarto initializes the listing first; keep every matching proof visible.
+    document.addEventListener("DOMContentLoaded", () => {
+      listing.querySelector(".listing-pagination")?.remove();
+      window["quarto-listings"]["listing-proofs"].show(1, Infinity);
+    });
+
+    // Contain wide rows without scrolling the filter and sort controls.
+    const table = listing.querySelector("table");
+    const viewport = document.createElement("div");
+    viewport.className = "table-responsive";
+    viewport.tabIndex = 0;
+    viewport.setAttribute("role", "region");
+    viewport.setAttribute("aria-label", "Proofs table");
+    table.before(viewport);
+    viewport.append(table);
+
+    const sort = listing.querySelector("#listing-proofs-sort");
+    for (const option of sort.querySelectorAll('option[value=""], option[value="index"]')) {
+      option.remove();
+    }
+    sort.value = "listing-id";
+
+    // Keep Quarto's plain status text intact for listing search and sorting.
+    for (const badge of listing.querySelectorAll(".listing-proof-status")) {
+      badge.classList.add("proof-status");
+      badge.dataset.proofStatus = badge.textContent.trim();
+    }
+
+    // Handle actual cell clicks; the title link remains the keyboard entry point.
+    const navigate = (event) => {
+      if (event.button !== 0 && event.button !== 1) return;
+      if (event.target.closest("a, button, input, select, textarea")) return;
+      if (window.getSelection()?.toString()) return;
+      const link = event.target.closest("tbody tr")?.querySelector("a.listing-title");
+      if (!link) return;
+
+      event.preventDefault();
+      if (event.ctrlKey || event.metaKey || event.button === 1) {
+        window.open(link.href, "_blank", "noopener");
+      } else {
+        link.click();
+      }
+    };
+    listing.addEventListener("click", navigate);
+    listing.addEventListener("auxclick", navigate);
+  }
+</script>

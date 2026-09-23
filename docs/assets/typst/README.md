@@ -42,8 +42,12 @@ node(label, kind: "field", type: none, detail: none, body: none, width: 120pt,
 ```
 
 `node` returns one diagram description. `tree(node(...))` draws it, including a
-single node when there are no children. Use the exact schema names for roots,
-branches, and leaves, preserving case and underscores as in the sample inputs.
+single node when there are no children. Give the root a descriptive label such
+as `order`, `customer`, or `record` to identify the observation. This label is
+illustrative only: it is not defined in `Model(...)` and is not an address prefix;
+the model root remains anonymous at `rf.Address()`.
+Use the exact schema names for branches and leaves, preserving case and
+underscores as in the sample inputs.
 Names render in monospace. For nodes with an explicit query, keep the schema
 name as the label and show the source path in `detail` or `body`.
 
@@ -107,9 +111,9 @@ same pipeline in a temporary directory.
 
 The project configures Typst Render with light/dark backgrounds. The extension
 compiles each diagram declaration to two SVGs and wraps them in Quarto's
-`light-content` and `dark-content` classes. This follows the site's manual theme
-toggle as well as its initial color-scheme selection; no extra diagram markup
-or JavaScript is needed.
+`light-content` and `dark-content` classes. This follows the site's automatic
+device color-scheme selection, including changes while the page is open; no
+extra diagram markup or JavaScript is needed.
 
 The dark variant uses a charcoal background, `#181c1b`. Typst Render passes
 that value through `sys.inputs["typst-render-background"]` to select the dark

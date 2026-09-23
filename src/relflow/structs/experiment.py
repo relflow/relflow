@@ -62,7 +62,11 @@ def bind_tree_field(name: str, value: TreeFieldInput) -> SchemaField:
     if isinstance(value, Branch):
         payload["fields"] = [bind_tree_field(cast(str, child.name), child) for child in value.fields]
     constructor = TENSORFIELDS[value.type].Request if type(value) is Leaf else type(value)
-    return constructor.model_validate(payload)
+    bound = constructor.model_validate(payload)
+    # Cloning retains materialized defaults (including extension factories),
+    # while preserving which options the reusable definition supplied.
+    object.__setattr__(bound, "__pydantic_fields_set__", value.model_fields_set | {"name"})
+    return bound
 
 
 def bind_fields(
@@ -105,21 +109,12 @@ class Schema(Node):
 
         values = dict(data)
 
-        def restore_policy(value: Mapping[str, Any]) -> Mask:
-            return Mask.model_validate(dict(value))
-
         def restore(node: Any) -> Any:
             if not isinstance(node, Mapping):
                 return node
             payload = dict(node)
             if "mask" in payload:
-                value = payload["mask"]
-                if isinstance(value, Mapping):
-                    payload["mask"] = restore_policy(value)
-                elif isinstance(value, (list, tuple)):
-                    payload["mask"] = tuple(
-                        restore_policy(policy) if isinstance(policy, Mapping) else policy for policy in value
-                    )
+                payload["mask"] = Mask.restore(payload["mask"])
             if isinstance(payload.get("fields"), (list, tuple)):
                 payload["fields"] = [restore(field) for field in payload["fields"]]
             return payload
@@ -136,7 +131,6 @@ class Schema(Node):
         n_layers: int,
         n_heads: int,
         fields: Mapping[str, TreeFieldInput] | None = None,
-        name: str = "record",
         query: str | None = None,
         description: str | None = None,
         embed: bool = False,
@@ -152,7 +146,6 @@ class Schema(Node):
             raise ValueError("from_tree requires at least one field")
         branch = Branch.model_validate(
             dict(
-                name=name,
                 query=query,
                 description=description,
                 embed=embed,
@@ -192,7 +185,15 @@ class Schema(Node):
         self.fields.length = 1
         self.fields.overflow = Overflow.error
         self.fields.parent = self
+        self.clear_tree_caches()
         self.post_bind_validate()
+
+    @pydantic.field_serializer("fields", mode="wrap")
+    def serialize_root(self, root: Branch, handler: pydantic.SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Only child nodes have parent-assigned names in a persisted schema."""
+        payload = handler(root)
+        payload.pop("name", None)
+        return payload
 
     @property
     def reconstruct(self) -> list[Address]:
@@ -337,8 +338,21 @@ class Schema(Node):
         }
 
     def post_bind_validate(self) -> None:
+        if self.fields.name is not None:
+            raise ValueError(
+                f"model root must be anonymous, got name {self.fields.name!r}; "
+                "rebuild the schema without a root name (named-root checkpoints are not supported)"
+            )
         for branch in self.branches.values():
             branch.post_bind_validate()
+            if branch.attention is not None and (
+                self.d_model % branch.n_heads != 0 or self.d_model // branch.n_heads < 2
+            ):
+                raise ValueError(
+                    f"branch '{branch.address}' encoder: d_model must be divisible by nhead "
+                    f"with at least two dimensions per head; got d_model={self.d_model}, "
+                    f"n_heads={branch.n_heads}; override d_model or this branch's n_heads"
+                )
             if branch.embed and self.branch_outputs[branch.address] == 0:
                 raise ValueError(
                     f"branch '{branch.address}' has embed=True but no active descendant output; "
@@ -346,14 +360,33 @@ class Schema(Node):
                 )
             if isinstance(branch.reduction, Attention):
                 n_heads = branch.reduction.n_heads or branch.n_heads
-                if self.d_model % n_heads != 0 or self.d_model // n_heads < 2:
+                minimum = 2 if branch.reduction.position else 1
+                if self.d_model % n_heads != 0 or self.d_model // n_heads < minimum:
                     raise ValueError(
                         f"branch '{branch.address}' Attention reduction requires n_heads to divide "
-                        "d_model with at least two dimensions per head"
+                        f"d_model with at least {minimum} dimensions per head; got d_model={self.d_model}, "
+                        f"n_heads={n_heads}, position={branch.reduction.position}; "
+                        "override d_model or the reduction's n_heads"
                     )
 
+        decoded = {*self.objectives, *self.embed}
         for request in self.requests.values():
             request.post_bind_validate()
+            if request.address not in decoded or request.pooling != "query":
+                continue
+            positional = (
+                any(length > 1 for length in request.shape)
+                if request.decoder_position is None
+                else request.decoder_position
+            )
+            minimum = 2 if positional else 1
+            if self.d_model % request.n_heads != 0 or self.d_model // request.n_heads < minimum:
+                raise ValueError(
+                    f"leaf '{request.address}' query decoder requires n_heads to divide d_model "
+                    f"with at least {minimum} dimensions per head; got d_model={self.d_model}, "
+                    f"n_heads={request.n_heads}, decoder_position={request.decoder_position}; "
+                    "override d_model or this leaf's n_heads"
+                )
 
         self.validate_capabilities()
 
@@ -576,8 +609,9 @@ class Schema(Node):
 
         remaining_branch_addresses = {address for address in self.branches if address not in removed_addresses}
         for address in remaining_branch_addresses:
-            prefix = f"{address}/"
-            if not any(str(request_address).startswith(prefix) for request_address in remaining_request_addresses):
+            if not any(
+                descendant.address in remaining_request_addresses for descendant in self.branches[address].descendants
+            ):
                 raise ValueError(f"delete would leave branch '{address}' without request descendants")
 
         for node in roots:

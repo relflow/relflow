@@ -183,7 +183,7 @@ def permute_items(observations: list[dict], *, seed: int) -> list[dict]:
 def prediction(model: rf.Model, observations: list[dict]) -> np.ndarray:
     inputs = [{"selected_group": row["selected_group"], "items": row["items"]} for row in observations]
     output = model.predict(inputs)["predictions"].to_pylist()
-    return np.asarray([row["request/answer"]["content"] for row in output], dtype=np.float64)
+    return np.asarray([row["/answer"]["content"] for row in output], dtype=np.float64)
 
 
 def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
@@ -247,7 +247,6 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     train = list(records(bags=512, seed=seed + 1))
     test = list(records(bags=256, seed=seed + 3))
     model = rf.Model(
-        name="request",
         d_model=48,
         n_layers=2,
         n_heads=4,
@@ -258,11 +257,11 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             length=ITEMS,
             n_layers=2,
             reduction=None,
-            group=rf.Category(size=len(GROUPS), p_unavailable=0.0),
+            group=rf.Category(p_unavailable=0.0),
             value=rf.Number,
             weight=rf.Number,
         ),
-        selected_group=rf.Category(size=len(GROUPS), p_unavailable=0.0),
+        selected_group=rf.Category(p_unavailable=0.0),
         answer=rf.Number(mask=True, objective="mse"),
     )
     datamodule = rf.SyntheticDataModule(

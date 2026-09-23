@@ -142,9 +142,7 @@ def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
         for row in rows
     ]
     output = model.predict(inputs).to_pylist()
-    return np.asarray(
-        [value["content"] for row in output for value in row["predictions"]["collection/items/deviation"]]
-    )
+    return np.asarray([value["content"] for row in output for value in row["predictions"]["/items/deviation"]])
 
 
 def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
@@ -217,7 +215,6 @@ def implied_deviation(rows: list[dict]) -> np.ndarray:
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
-        name="collection",
         d_model=48,
         n_layers=3,
         n_heads=4,
@@ -230,7 +227,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             n_layers=2,
             reduction=rf.Attention(n_outputs=1, n_layers=2),
             value=rf.Number,
-            group=rf.Category(size=len(GROUPS), p_unavailable=0.0),
+            group=rf.Category(p_unavailable=0.0),
             deviation=rf.Number(mask=True, objective="mse", n_linear=2),
         ),
     )
