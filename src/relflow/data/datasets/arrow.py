@@ -430,14 +430,14 @@ class ArrowDataset(IterableDataset[Encoded]):
         self.epoch_barrier = epoch_barrier
 
     def iteration(self) -> tuple[int, int, int]:
-        """Resolve one deterministic epoch and combined rank/worker identity."""
+        """Resolve one deterministic epoch and local worker identity."""
 
         worker = get_worker_info()
         if worker is None:
             epoch = self.epochs[self.strata] if self.strata == Strata.train else 0
             if self.strata == Strata.train:
                 self.epochs[self.strata] += 1
-            return epoch, self.distributed_rank, self.distributed_world_size
+            return epoch, 0, 1
 
         if worker.num_workers != self.workers:
             raise RuntimeError(f"expected {self.workers} Arrow workers, got {worker.num_workers}")
@@ -455,12 +455,10 @@ class ArrowDataset(IterableDataset[Encoded]):
         else:
             epoch = 0
 
-        consumer = self.distributed_rank * worker.num_workers + worker.id
-        consumers = self.distributed_world_size * worker.num_workers
-        return epoch, consumer, consumers
+        return epoch, worker.id, worker.num_workers
 
     def __iter__(self) -> Iterator[Encoded]:
-        epoch, consumer, consumers = self.iteration()
+        epoch, worker, workers = self.iteration()
         scanned: Iterable[pa.Table] = scan(self.source, schemas=self.schemas)
         batches: Iterable[pa.Table] = process(
             scanned,
@@ -500,11 +498,14 @@ class ArrowDataset(IterableDataset[Encoded]):
         distributed = distribute(
             batches,
             size=self.batch_size,
-            global_rank=consumer,
-            world_size=consumers,
+            global_rank=self.distributed_rank,
+            world_size=self.distributed_world_size,
             drop_last=self.drop_last,
         )
-        yield from self.encode(distributed, epoch=epoch)
+        # Only distributed ranks require equal steps. Local workers own complete
+        # rank batches, including a partial tail that would otherwise be lost.
+        assigned = (batch for index, batch in enumerate(distributed) if index % workers == worker)
+        yield from self.encode(assigned, epoch=epoch)
 
     def encode(self, batches: Iterable[pa.Table], *, epoch: int) -> Iterator[Encoded]:
         """Encode one consumer's final model batches."""
@@ -613,9 +614,10 @@ class ArrowDataModule(lit.LightningDataModule):
     ``RecordBatchReader`` or Arrow-unit iterable for every iteration.
 
     Arrow Datasets are scanned afresh for each iteration. Distributed ranks and
-    data workers replay the same global stream and receive disjoint rows from
-    equal global superbatches. File sources freeze their manifest before workers
-    start, then open independent Arrow readers in each consuming process.
+    data workers replay the same global stream. Ranks receive disjoint rows from
+    equal global superbatches; local workers take turns processing complete rank
+    batches. File sources freeze their manifest before workers start, then open
+    independent Arrow readers in each consuming process.
 
     Pass at least one of ``train``, ``validate``, ``test`` or ``predict``.
     Configuration accepts one value for every split or a mapping keyed by

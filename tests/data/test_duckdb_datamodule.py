@@ -235,6 +235,24 @@ def test_spawned_persistent_workers_restart_without_duplicate_rows(database: Pat
             loader._iterator._shutdown_workers()
 
 
+@pytest.mark.parametrize(("rows", "workers"), [(5, 2), (1, 3)])
+def test_spawned_prediction_workers_preserve_every_anchor(rows: int, workers: int):
+    data = rf.DuckDBDataModule(
+        model=model(),
+        predict="SELECT range AS id, range AS __row_position FROM range($rows) ORDER BY range",
+        parameters={"predict": {"rows": rows}},
+        num_workers=workers,
+        ingress_rows=3,
+        retain=("__row_position",),
+    )
+    loader = data.predict_dataloader()
+    loader.timeout = 30
+    batches = list(loader)
+
+    assert [value for batch in batches for value in batch.source["__row_position"].to_pylist()] == list(range(rows))
+    assert all(batch.retain == ("__row_position",) for batch in batches)
+
+
 @pytest.mark.parametrize(("config", "expected"), [(None, 1), ({"threads": 2}, 2)])
 def test_connection_configuration_controls_duckdb_execution(config, expected: int):
     data = rf.DuckDBDataModule(model=model(), validate="SELECT current_setting('threads') AS id", config=config)
