@@ -17,6 +17,7 @@ def test_common_resources_are_available_from_package_root():
     assert not hasattr(relflow, "Dataset")
     assert relflow.ArrowDataModule.__name__ == "ArrowDataModule"
     assert relflow.CustomDataModule.__name__ == "CustomDataModule"
+    assert relflow.DuckDBDataModule.__name__ == "DuckDBDataModule"
     assert relflow.PolarsDataModule.__name__ == "PolarsDataModule"
     assert not hasattr(relflow, "StreamingDataModule")
     assert relflow.SyntheticDataModule.__name__ == "SyntheticDataModule"
@@ -85,6 +86,7 @@ def test_data_module_constructor_annotations_resolve_at_runtime():
     for module in (
         relflow.ArrowDataModule,
         relflow.CustomDataModule,
+        relflow.DuckDBDataModule,
         relflow.PolarsDataModule,
         relflow.SyntheticDataModule,
     ):

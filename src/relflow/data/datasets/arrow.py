@@ -545,7 +545,7 @@ def loader(
     multiprocessing_context: Any,
     epoch: Any = None,
 ) -> DataLoader[Encoded]:
-    """Build the sole Lightning DataLoader used by all four data modules."""
+    """Build the shared Lightning DataLoader used by every data module."""
 
     distributed_rank = rank()
     distributed_world_size = world_size()

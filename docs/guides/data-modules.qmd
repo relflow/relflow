@@ -73,6 +73,78 @@ data = rf.PolarsDataModule(
 It converts each frame to Arrow once and uses the same pipeline. Collect a
 `LazyFrame` explicitly before passing it in.
 
+## DuckDB
+
+Install `relflow[duckdb]` to use SQL queries as named splits. `DuckDBDataModule`
+opens an existing database file read-only and streams query results as Arrow
+batches through the same preprocessing and batching pipeline.
+
+Suppose your application maintains `warehouse/customers.duckdb` with a
+`customer_observations` table. Each row has the nested structure above, a unique
+`customer_id`, and a `dataset_split` column assigned by the application:
+
+```python
+observations = """
+    SELECT customer_id, country, purchases, churned
+    FROM customer_observations
+    WHERE dataset_split = $split
+    ORDER BY customer_id
+"""
+
+data = rf.DuckDBDataModule(
+    model=model,
+    database="warehouse/customers.duckdb",
+    train=observations,
+    validate=observations,
+    parameters={
+        "train": {"split": "train"},
+        "validate": {"split": "validate"},
+    },
+)
+```
+
+Each split accepts one `SELECT` statement, including a query beginning with
+`WITH`. Bind values through `parameters`, keyed by split: a mapping supplies
+named parameters such as `$split`; a sequence supplies positional `?`
+parameters. Parameters are bound by DuckDB rather than interpolated into SQL.
+
+Omitting `database` creates a fresh in-memory database for each scan. This is
+useful for queries that read files directly:
+
+```python
+data = rf.DuckDBDataModule(
+    model=model,
+    predict="""
+        SELECT customer_id, country, purchases
+        FROM read_parquet('warehouse/scoring/*.parquet')
+        ORDER BY customer_id
+    """,
+)
+```
+
+The module stores the database path, SQL, parameters, and connection settings.
+Each scan opens its own connection and Arrow reader in the consuming process,
+then closes both. Pass a database path or `":memory:"`; live connections,
+relations, and tables registered on another connection are not inputs. Nested
+lists and structs remain Arrow-backed, and an empty result retains its schema.
+Close writable connections to a database file before starting read-only scans.
+
+Workers and distributed ranks replay the full query, then the Arrow pipeline
+assigns disjoint model batches. Use a deterministic `ORDER BY` with a unique
+key and keep query results stable for the duration of each pass across workers
+and ranks. Data may change between passes if its Arrow schema stays stable.
+The module does not materialize a shared snapshot, and adding workers repeats
+database work.
+
+`ingress_rows` defaults to `4096` and controls the Arrow batch size requested
+from DuckDB; `model.batch_size` controls the final model batches. Each connection
+defaults to one DuckDB thread. Override connection settings with `config`, such
+as `config={"threads": 2}`. The usual `ArrowDataModule` options, including
+sampling, shuffling, retention, and workers, also apply. Partition-scoped
+[preprocessors](preprocessors.qmd) run on streamed Arrow batches converted to
+eager Polars frames; dataset-scoped preprocessing is unsupported for these
+restartable query sources.
+
 ## Splits and preparation
 
 The available splits are `train`, `validate`, `test`, and `predict`; supply at

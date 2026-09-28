@@ -39,6 +39,9 @@ typing = [
     "pyarrow-stubs>=20.0.0.20260819",
     "types-PyYAML>=6.0.12",
 ]
+duckdb = [
+    "duckdb>=1.5.0",
+]
 
 [dependency-groups]
 dev = [
@@ -54,6 +57,7 @@ dev = [
     "pyarrow-stubs>=20.0.0.20260819",
     "types-PyYAML>=6.0.12",
     "transformers>=4.55.0",
+    "duckdb>=1.5.0",
 ]
 
 [build-system]

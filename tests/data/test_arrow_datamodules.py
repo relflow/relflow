@@ -47,7 +47,7 @@ def collect(dataset: arrow.ArrowDataset, monkeypatch: pytest.MonkeyPatch) -> lis
     return [item.source for item in dataset]
 
 
-def test_public_surface_has_four_modules_and_no_source_specific_datasets():
+def test_public_surface_has_five_modules_and_no_source_specific_datasets():
     import relflow.data.datasets as datasets
 
     assert rf.ArrowDataModule is arrow.ArrowDataModule
@@ -58,6 +58,7 @@ def test_public_surface_has_four_modules_and_no_source_specific_datasets():
         "ArrowStream",
         "ArrowUnit",
         "CustomDataModule",
+        "DuckDBDataModule",
         "PolarsDataModule",
         "Retain",
         "StratumConfig",
