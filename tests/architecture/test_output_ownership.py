@@ -68,7 +68,7 @@ def test_branch_owns_outputs_from_reusable_custom_buffers(monkeypatch, mode, act
     schema = rf.Schema.from_tree(
         x=rf.Number(), d_model=8, n_heads=2, n_layers=1, dropout=0.0, reduction=rf.Attention() if pooled else None
     )
-    encoder = BranchEncoder(schema, "record").eval()
+    encoder = BranchEncoder(schema, "/").eval()
     producer = ReusableOutput((active_rows, 1 if pooled else 3, 8))
     if boundary == "compute":
         monkeypatch.setattr(encoder, "compute", producer.forward)
@@ -81,8 +81,8 @@ def test_branch_owns_outputs_from_reusable_custom_buffers(monkeypatch, mode, act
     parcel = Parcel(
         payload=torch.randn(2, 3, 8),
         present=torch.arange(2).unsqueeze(1).expand(2, 3) < active_rows,
-        origin="record/x",
-        destination="record",
+        origin="/x",
+        destination="/",
         batch_size=2,
     )
     original_payload = parcel.payload.clone()
@@ -97,7 +97,7 @@ def test_branch_owns_outputs_from_reusable_custom_buffers(monkeypatch, mode, act
 @pytest.mark.parametrize("active_rows", [2, 1, 0], ids=["complete", "partial", "empty"])
 def test_branch_presence_does_not_alias_compute_inputs(monkeypatch, active_rows):
     schema = rf.Schema.from_tree(x=rf.Number(), d_model=8, n_heads=2, n_layers=1, dropout=0.0, reduction=None)
-    encoder = BranchEncoder(schema, "record")
+    encoder = BranchEncoder(schema, "/")
     captured = []
 
     def compute(inputs, present):
@@ -109,8 +109,8 @@ def test_branch_presence_does_not_alias_compute_inputs(monkeypatch, active_rows)
     parcel = Parcel(
         payload=torch.randn(2, 3, 8),
         present=present,
-        origin="record/x",
-        destination="record",
+        origin="/x",
+        destination="/",
         batch_size=2,
     )
     original = present.clone()
@@ -133,14 +133,14 @@ def test_parameter_outputs_are_owned_without_detaching_gradients(monkeypatch, br
     present = torch.arange(2).unsqueeze(1).expand(2, 3) < active_rows
     if branch:
         schema = rf.Schema.from_tree(x=rf.Number(), d_model=8, n_heads=2, n_layers=1, dropout=0.0, reduction=None)
-        module = BranchEncoder(schema, "record")
+        module = BranchEncoder(schema, "/")
         module.register_parameter("result", torch.nn.Parameter(torch.randn(3, 8)))
         parameter = module.result
         parcel = Parcel(
             payload=memory,
             present=present,
-            origin="record/x",
-            destination="record",
+            origin="/x",
+            destination="/",
             batch_size=2,
         )
 
@@ -176,12 +176,12 @@ def test_custom_outputs_preserve_shape_and_dtype_contract(monkeypatch, branch, a
     present = torch.arange(2).unsqueeze(1).expand(2, 3) < active_rows
     if branch:
         schema = rf.Schema.from_tree(x=rf.Number(), d_model=8, n_heads=2, n_layers=1, dropout=0.0, reduction=None)
-        module = BranchEncoder(schema, "record")
+        module = BranchEncoder(schema, "/")
         parcel = Parcel(
             payload=memory,
             present=present,
-            origin="record/x",
-            destination="record",
+            origin="/x",
+            destination="/",
             batch_size=2,
         )
 
@@ -207,7 +207,7 @@ def test_custom_outputs_preserve_shape_and_dtype_contract(monkeypatch, branch, a
 @pytest.mark.parametrize("invalid", ["shape", "dtype"])
 def test_branch_rejects_custom_mutation_of_prepared_presence(monkeypatch, active_rows, invalid):
     schema = rf.Schema.from_tree(x=rf.Number(), d_model=8, n_heads=2, n_layers=1, dropout=0.0, reduction=None)
-    encoder = BranchEncoder(schema, "record")
+    encoder = BranchEncoder(schema, "/")
 
     def compute(inputs, present):
         if invalid == "shape":
@@ -221,8 +221,8 @@ def test_branch_rejects_custom_mutation_of_prepared_presence(monkeypatch, active
     parcel = Parcel(
         payload=torch.randn(2, 3, 8),
         present=present,
-        origin="record/x",
-        destination="record",
+        origin="/x",
+        destination="/",
         batch_size=2,
     )
     with pytest.raises(RuntimeError):

@@ -26,16 +26,16 @@ churned: false
 import relflow as rf
 
 model = rf.Model(
-    name="customer", d_model=128, n_layers=3, n_heads=8,
+    d_model=128, n_layers=3, n_heads=8,
     orders=rf.Branch(
         length=64,
         overflow="tail",
         embed=True,
         age_days=rf.Number,
-        channel=rf.Category(size=16),
+        channel=rf.Category,
         line_items=rf.Branch(
             length=16,
-            sku=rf.Category(size=8192),
+            sku=rf.Category,
             quantity=rf.Number,
             unit_price=rf.Number,
         ),

@@ -8,6 +8,8 @@ behind the common workflow; constructor options live with their owning type.
 | API | Purpose |
 | --- | --- |
 | `rf.Model(...)` | Build a Lightning module from named fields and branches. An existing `rf.Schema` is also accepted. |
+| `rf.Model.xs`, `.sm`, `.md`, `.lg`, `.xl` | Build from fields with capacity defaults for the root, child branches, and leaf decoders; explicit node settings take precedence. |
+| `rf.presets.factory` | Bind an immutable preset configuration to a typed classmethod on a `Model` subclass. |
 | `rf.Branch(...)` | Group child fields into a repeated local context. |
 | `rf.Attention`, `rf.Mean` | Choose the branch reduction; `reduction=None` preserves routed tokens. |
 | `rf.Mask`, `rf.Jitter` | Configure visibility/objectives and continuous input perturbation. |
@@ -15,6 +17,7 @@ behind the common workflow; constructor options live with their owning type.
 | `model.select`, `update`, `extend`, `delete`, `reset`, `override` | Inspect or change the schema. |
 
 See [Model Tree](../core-concepts/model-tree.qmd),
+[Size Presets](../core-concepts/model-tree.qmd#choose-a-size),
 [Data Types](../core-concepts/data-types.qmd), and
 [Schema Mutation](../guides/schema-mutation.qmd).
 

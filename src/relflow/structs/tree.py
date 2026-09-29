@@ -3,7 +3,7 @@
 import functools
 import io
 from abc import ABC
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self, TypeAlias, TypedDict, cast
 
 import pydantic
@@ -91,6 +91,17 @@ class Mask(pydantic.BaseModel):
             seen.add(policy)
             normalized.append(policy)
         return tuple(normalized)
+
+    @classmethod
+    def restore(cls, value: Any) -> Any:
+        """Restore serialized policies while retaining the constructor input contract."""
+        if isinstance(value, Mapping):
+            return cls.model_validate(dict(value))
+        if isinstance(value, (list, tuple)):
+            return tuple(
+                cls.model_validate(dict(policy)) if isinstance(policy, Mapping) else policy for policy in value
+            )
+        return value
 
 
 MaskInput: TypeAlias = Mask | float | bool | list[Mask] | tuple[Mask, ...]
@@ -190,18 +201,24 @@ class Selection(list, Renderable):
 
 
 class Address(str):
-    """Slash-delimited stable path to a schema node."""
+    """Absolute schema path from child names or a serialized path.
+
+    ``Address("items", "sku")`` is ``/items/sku``; ``Address()`` is the model
+    root ``/``. An explicit empty string denotes an unbound or metadata node.
+    """
 
     def __new__(cls, *parts: str) -> "Address":
+        if not all(isinstance(part, str) for part in parts):
+            raise TypeError("Address parts must be strings")
         if len(parts) == 0:
-            value = ""
+            value = "/"
         elif len(parts) == 1:
             value = parts[0]
         else:
-            value = "/".join(parts)
+            value = parts[0].rstrip("/") + "/" + "/".join(parts[1:])
 
-        if not isinstance(value, str):
-            raise TypeError("Address parts must be strings")
+        if value and not value.startswith("/"):
+            value = "/" + value
 
         return str.__new__(cls, value)
 
@@ -260,7 +277,9 @@ class Node(NodeMixin, Renderable, pydantic.BaseModel):
 
     @functools.cached_property
     def address(self) -> Address:
-        return Address(*(cast(str, node.name) for node in self.path[1:]))
+        if self.parent is None or self.root.type != "schema":
+            return Address("")
+        return Address(*(cast(str, node.name) for node in self.path[2:]))
 
     @functools.cached_property
     def heritage(self) -> list[Address]:

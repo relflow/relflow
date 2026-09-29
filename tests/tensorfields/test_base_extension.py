@@ -162,11 +162,11 @@ def test_extension_requires_reports_all_missing_imports_and_install_targets():
     )
     try:
         with pytest.raises(ModuleNotFoundError) as raised:
-            extension.require(address=Address("record/value"))
+            extension.require(address=Address("/value"))
 
         message = str(raised.value)
         assert raised.value.name == first
-        assert "record/value" in message
+        assert "/value" in message
         assert name in message
         assert first in message
         assert second in message
@@ -182,7 +182,7 @@ def test_extension_requires_accepts_imported_modules_without_specs(monkeypatch: 
     extension = Extension(name=name, types=(str,), requires={module: "example-loaded"})
     monkeypatch.setitem(sys.modules, module, marker)
     try:
-        extension.require(address=Address("record/value"))
+        extension.require(address=Address("/value"))
     finally:
         TENSORFIELDS.pop(name, None)
 
@@ -235,8 +235,8 @@ def test_custom_arrow_matcher_sees_extension_type_before_storage():
             datatype,
             pa.array([b"0123456789abcdef"], type=pa.binary(16)),
         )
-        assert extension.prepare(values, address=Address("record/value")) is values
-        prepared = bytes_extension.prepare(values, address=Address("record/value"))
+        assert extension.prepare(values, address=Address("/value")) is values
+        prepared = bytes_extension.prepare(values, address=Address("/value"))
         assert prepared.type == pa.binary(16)
         assert prepared.to_pylist() == [b"0123456789abcdef"]
     finally:
@@ -252,7 +252,7 @@ def test_extension_prepare_decodes_dictionary_wrappers_recursively():
     )
     values = pa.ListArray.from_arrays(pa.array([0, 2, 3]), dictionary)
     try:
-        prepared = extension.prepare(values, address=Address("record/value"))
+        prepared = extension.prepare(values, address=Address("/value"))
 
         assert prepared.type == pa.list_(pa.string())
         assert prepared.to_pylist() == [["A", "B"], ["A"]]
@@ -269,7 +269,7 @@ def test_extension_prepare_promotes_compatible_unions_recursively():
     )
     values = pa.ListArray.from_arrays(pa.array([0, 2, 3]), union)
     try:
-        prepared = extension.prepare(values, address=Address("record/value"))
+        prepared = extension.prepare(values, address=Address("/value"))
 
         assert prepared.type == pa.list_(pa.float64())
         assert prepared.to_pylist() == [[1.0, 2.5], [3.0]]
@@ -285,8 +285,8 @@ def test_extension_prepare_reports_unsafe_union_promotion_with_context():
         [pa.array([1], type=pa.int64()), pa.array([2**63], type=pa.uint64())],
     )
     try:
-        with pytest.raises(TypeError, match=f"extension '{extension.name}'.*record/value.*cannot safely normalize"):
-            extension.prepare(values, address=Address("record/value"))
+        with pytest.raises(TypeError, match=f"extension '{extension.name}'.*/value.*cannot safely normalize"):
+            extension.prepare(values, address=Address("/value"))
     finally:
         TENSORFIELDS.pop(extension.name, None)
 
@@ -371,7 +371,7 @@ def test_extension_registers_components_and_wraps_loss():
                 return value
 
         class DummyPrediction:
-            address = "root/field"
+            address = "/field"
 
         module = DummyModule()
         value = extension.loss(module, prediction=DummyPrediction(), batch=object(), strata=Strata.train)
@@ -404,7 +404,7 @@ def test_extension_observation_components_default_to_no_op():
         assert (
             extension.observe(
                 field=object(),
-                address=Address("record/value"),
+                address=Address("/value"),
                 schema=object(),
                 state=None,
                 learn=False,
@@ -415,7 +415,7 @@ def test_extension_observation_components_default_to_no_op():
             extension.learn(
                 module=object(),
                 observation=object(),
-                address=Address("record/value"),
+                address=Address("/value"),
                 strata=Strata.train,
             )
             is None

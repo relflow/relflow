@@ -32,7 +32,7 @@ def empty_path(kind, batch_size):
     present = torch.zeros(batch_size, 3, dtype=torch.bool)
     match kind:
         case "embedder":
-            module = model.nodes["record/value"].embedder
+            module = model.nodes["/value"].embedder
             field = Field()
             field.state = torch.full((batch_size, 3), Tokens.padded.value)
             field.present = present
@@ -44,7 +44,7 @@ def empty_path(kind, batch_size):
             expected_shape = (batch_size, 3, 8)
             parameters = tuple(module.parameters())
         case "decoder":
-            module = model.nodes["record/answer"].decoder
+            module = model.nodes["/answer"].decoder
 
             def invoke():
                 return module([], batch_size=batch_size, device=torch.device("cpu"), embed=True).payload[
@@ -56,12 +56,12 @@ def empty_path(kind, batch_size):
             # parameters have never participated in this backward path.
             parameters = tuple(module.pool.parameters())
         case "branch":
-            module = BranchEncoder(model.schema, "record")
+            module = BranchEncoder(model.schema, "/")
             parcel = Parcel(
                 payload=memory,
                 present=present,
-                origin="record/value",
-                destination="record",
+                origin="/value",
+                destination="/",
                 batch_size=batch_size,
             )
 

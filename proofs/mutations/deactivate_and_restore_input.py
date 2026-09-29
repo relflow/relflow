@@ -91,7 +91,7 @@ def prediction(model: rf.Model, rows: list[dict], *, include_b: bool = True, cor
         for row in inputs:
             row["y"] = 1000.0
     output = model.predict(inputs)["predictions"].to_pylist()
-    return np.asarray([row["record/y"]["content"] for row in output], dtype=np.float64)
+    return np.asarray([row["/y"]["content"] for row in output], dtype=np.float64)
 
 
 def errors(actual: np.ndarray, predicted: np.ndarray, baseline: float) -> dict:
@@ -201,7 +201,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     zero_filled = errors(actual, prediction(model, [{**row, "b": 0.0} for row in test]), baseline)
     schema = deepcopy(model.schema.model_dump())
     state = deepcopy(model.state_dict())
-    selected = rf.where("address") == "record/b"
+    selected = rf.where("address") == "/b"
     learned = source["nrmse"] < 0.25
     checks = {
         "Source learns both-input relationship below 0.25 nRMSE": learned,
@@ -222,7 +222,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         if inactive:
             omitted = prediction(model, test, include_b=False)
             flipped = prediction(model, changed)
-            checks[f"{label}: input is inactive"] = not model.schema.requests["record/b"].active
+            checks[f"{label}: input is inactive"] = not model.schema.requests["/b"].active
             checks[f"{label}: b values cannot affect predictions"] = bool(
                 np.allclose(values, omitted, rtol=1e-5, atol=tolerance)
                 and np.allclose(values, flipped, rtol=1e-5, atol=tolerance)
@@ -295,7 +295,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         "edits": edits,
         "test_rows": len(test),
         "optimizer_policy": "Fresh AdamW for source; no fitting inside updates or overrides",
-        "mutation": "update record/b active=False/True three times; override with normal and exceptional exits",
+        "mutation": "update /b active=False/True three times; override with normal and exceptional exits",
     }, checks
 
 

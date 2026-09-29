@@ -52,6 +52,19 @@ def modules(model: rf.Model, table: pa.Table, frame: pl.DataFrame) -> None:
     assert_type(data.dataloader("test", required=False), DataLoader[Encoded] | None)
     assert_type(data.train_dataloader(), DataLoader[Encoded] | None)
     rf.PolarsDataModule(model, train=frame, preprocessor=[increase])
+    queries = rf.DuckDBDataModule(
+        model,
+        database=Path("warehouse.duckdb"),
+        train="SELECT amount FROM observations WHERE amount > ? ORDER BY id",
+        validate="SELECT amount FROM observations WHERE amount > $minimum ORDER BY id",
+        parameters={"train": (0.0,), "validate": {"minimum": 0.0}},
+        config={"threads": 1},
+        ingress_rows=2048,
+        num_workers=workers,
+        preprocessor=increase,
+    )
+    assert_type(queries.model, rf.Model)
+    assert_type(queries.dataloader("train"), DataLoader[Encoded])
     writer = rf.Writer(Path("predictions"), postprocessor=prediction_columns)
     assert_type(writer.path, Path)
     assert_type(writer.close(), None)

@@ -10,7 +10,6 @@ def _payload() -> dict:
     return {
         "d_model": 16,
         "fields": {
-            "name": "root",
             "type": "branch",
             "description": "root branch docs",
             "dropout": 0.1,
@@ -54,13 +53,13 @@ def test_branch_rejects_children_that_are_not_definitions():
 def test_schema_derives_branches_requests_and_shapes():
     structure = Schema.model_validate(_payload())
 
-    assert "root" in structure.branches
-    assert "root/branch" in structure.branches
-    assert "root/branch/category_leaf" in structure.requests
-    assert structure.branches["root"].length == 1
-    assert structure.branches["root"].overflow == Overflow.error
-    assert structure.shapes["root/branch/category_leaf"] == (1, 4)
-    assert structure.overflows("root/branch/category_leaf") == (Overflow.error, Overflow.error, Overflow.head)
+    assert "/" in structure.branches
+    assert "/branch" in structure.branches
+    assert "/branch/category_leaf" in structure.requests
+    assert structure.branches["/"].length == 1
+    assert structure.branches["/"].overflow == Overflow.error
+    assert structure.shapes["/branch/category_leaf"] == (1, 4)
+    assert structure.overflows("/branch/category_leaf") == (Overflow.error, Overflow.error, Overflow.head)
 
 
 def test_branch_accepts_overflow_policy():
@@ -78,7 +77,6 @@ def test_schema_converts_leaf_instances_nested_in_branches():
     structure = Schema(
         d_model=16,
         fields={
-            "name": "root",
             "type": "branch",
             "fields": [
                 {"name": "branch", "type": "branch", "fields": [Category.model_validate({"name": "category_leaf"})]}
@@ -86,20 +84,20 @@ def test_schema_converts_leaf_instances_nested_in_branches():
         },
     )
 
-    request = structure.requests["root/branch/category_leaf"]
-    assert request.size == 1024
+    request = structure.requests["/branch/category_leaf"]
+    assert "size" not in request.model_dump()
 
 
 def test_schema_depthwise_contains_branch_levels():
     structure = Schema.model_validate(_payload())
-    assert structure.depthwise == [["root"], ["root/branch"]]
+    assert structure.depthwise == [["/"], ["/branch"]]
 
 
 def test_schema_string_representation_contains_tree_nodes():
     structure = Schema.model_validate(_payload())
     rendered = str(structure)
     assert "schema [schema]" in rendered
-    root_line = next(line for line in rendered.splitlines() if "root [root]" in line)
+    root_line = next(line for line in rendered.splitlines() if "`-- [root]" in line)
     assert "length=" not in root_line
     assert "overflow=" not in root_line
     assert "category_leaf [category]" in rendered
@@ -107,17 +105,17 @@ def test_schema_string_representation_contains_tree_nodes():
 
 def test_schema_preserves_field_and_branch_descriptions():
     structure = Schema.model_validate(_payload())
-    assert structure.branches["root"].description == "root branch docs"
-    assert structure.branches["root/branch"].description == "branch docs"
-    assert structure.requests["root/branch/category_leaf"].description == "category docs"
+    assert structure.branches["/"].description == "root branch docs"
+    assert structure.branches["/branch"].description == "branch docs"
+    assert structure.requests["/branch/category_leaf"].description == "category docs"
 
 
 def test_schema_uses_direct_branch_dropout():
     structure = Schema.model_validate(_payload())
 
-    assert structure.branches["root"].dropout == 0.1
-    assert structure.branches["root/branch"].dropout is None
-    assert structure.requests["root/branch/category_leaf"].dropout is None
+    assert structure.branches["/"].dropout == 0.1
+    assert structure.branches["/branch"].dropout is None
+    assert structure.requests["/branch/category_leaf"].dropout is None
 
 
 def test_schema_allows_missing_dropout():
@@ -125,8 +123,8 @@ def test_schema_allows_missing_dropout():
     payload["fields"].pop("dropout")
     structure = Schema.model_validate(payload)
 
-    assert structure.branches["root"].dropout is None
-    assert structure.branches["root/branch"].dropout is None
+    assert structure.branches["/"].dropout is None
+    assert structure.branches["/branch"].dropout is None
 
 
 def test_schema_preserves_direct_field_dropout():
@@ -135,7 +133,7 @@ def test_schema_preserves_direct_field_dropout():
 
     structure = Schema.model_validate(payload)
 
-    assert structure.requests["root/branch/category_leaf"].dropout == 0.4
+    assert structure.requests["/branch/category_leaf"].dropout == 0.4
 
 
 def test_schema_rejects_undeclared_branch_options():
@@ -150,8 +148,8 @@ def test_schema_allows_missing_mask():
     structure = Schema.model_validate(_payload())
 
     assert structure.fields.mask == ()
-    assert structure.branches["root/branch"].mask == ()
-    assert structure.requests["root/branch/category_leaf"].mask == ()
+    assert structure.branches["/branch"].mask == ()
+    assert structure.requests["/branch/category_leaf"].mask == ()
 
 
 def test_inactive_leaf_nodes_are_kept_in_tree_but_removed_from_runtime_maps():
@@ -164,9 +162,9 @@ def test_inactive_leaf_nodes_are_kept_in_tree_but_removed_from_runtime_maps():
     inactive = structure.select(lambda node: getattr(node, "name", None) == "category_leaf")[0]
 
     assert inactive.active is False
-    assert inactive.address == "root/branch/category_leaf"
-    assert "root/branch/category_leaf" in structure.requests
-    assert "root/branch/category_leaf" not in structure.active_requests
-    assert structure.shapes["root/branch/category_leaf"] == (1, 4)
+    assert inactive.address == "/branch/category_leaf"
+    assert "/branch/category_leaf" in structure.requests
+    assert "/branch/category_leaf" not in structure.active_requests
+    assert structure.shapes["/branch/category_leaf"] == (1, 4)
     assert structure.reconstruct == []
     assert structure.embed == []

@@ -31,11 +31,7 @@ following month. This is one illustrative record, not a training dataset.
 ```python
 import relflow as rf
 
-model = rf.Model(
-    name="customer",
-    d_model=128,
-    n_layers=3,
-    n_heads=8,
+model = rf.Model.md(
     batch_size=128,
     embed=True,
     tenure_days=rf.Number,
@@ -45,7 +41,7 @@ model = rf.Model(
         age_days=rf.Number,
         line_items=rf.Branch(
             length=16,
-            sku=rf.Category(size=8192),
+            sku=rf.Category,
             quantity=rf.Number,
         ),
     ),
@@ -72,13 +68,16 @@ model = rf.Model(
 )))
 ```
 
-Parent keywords name the fields. The root name, `customer`, prefixes output
-addresses; it does not add a wrapper around the input record.
+Parent keywords name the fields. The anonymous root has address `/`; child
+addresses start with `/`, without adding a wrapper around the input record.
+`Model.md(...)` supplies capacity defaults for the root, nested branches, and
+leaf decoders. See [Choose A Size](core-concepts/model-tree.qmd#choose-a-size)
+for the available configurations and overrides.
 
 `mask=True` keeps a target out of the encoder while retaining its value for
-supervised learning. `embed=True` exports the root representation; it adds no
-objective. `overflow="tail"` keeps recent orders only if the application has
-already sorted them oldest to newest. See [Model Tree](core-concepts/model-tree.qmd).
+supervised learning. `embed=True` exports the preset's four root vectors, each
+with 256 coordinates; it adds no objective. `overflow="tail"` keeps recent
+orders only if the application has already sorted them oldest to newest.
 
 ## Stream Parquet Datasets
 
@@ -116,6 +115,7 @@ relflow supplies the typed losses and metrics.
 ```python
 import lightning.pytorch as lit
 
+model.optimizer = rf.adamw(learning_rate=1e-3)
 checkpoint = rf.RollbackCheckpoint(monitor="loss/validate", mode="min")
 trainer = lit.Trainer(max_epochs=30, callbacks=[checkpoint])
 trainer.fit(model=model, datamodule=data)
@@ -151,7 +151,7 @@ predictions = ds.dataset("predictions", format="parquet")
 `return_predictions=False` keeps Lightning from accumulating results in memory.
 The output remains a file-backed Arrow dataset. Its `inputs` column retains
 `customer_id` for joining results, and its `predictions` column contains
-`customer/churned`, `customer/next_month_spend`, and the exported `customer`
+`/churned`, `/next_month_spend`, and the exported `/`
 embedding. See [Prediction Output](guides/prediction-output.qmd) for their shapes
 and [Batch Inference](guides/batch-inference.qmd) for output shards and distributed
 jobs. For small interactive requests, `restored.predict(request_table)` returns

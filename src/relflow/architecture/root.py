@@ -5,20 +5,23 @@ from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from functools import partialmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Protocol, Required, Self, TypedDict, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, Protocol, Required, Self, TypedDict, TypeVar, Unpack, cast, overload
 
 import lightning.pytorch as lit
 import pyarrow as pa
 import torch
 from beartype import beartype
+from beartype.roar import BeartypeCallHintParamViolation
 from lightning.pytorch import Callback
 from lightning.pytorch.utilities.types import LRSchedulerConfigType, OptimizerLRSchedulerConfig
 from rich.console import Console, ConsoleOptions
 from rich.text import Text
 from torchmetrics import Metric as TorchMetric
 
+from relflow import presets
 from relflow._version import __version__
-from relflow.architecture import compiler
+from relflow.architecture import compiler, template
+from relflow.architecture.binding import bind
 from relflow.architecture.checkpoint import CheckpointState, RollbackCheckpoint
 from relflow.architecture.contracts import ContractScheduler
 from relflow.architecture.graph import ModelGraph
@@ -114,8 +117,8 @@ class Model(lit.LightningModule, Renderable):
         import relflow as rf
 
         model = rf.Model(
-            segment=rf.Category(size=32),
-            label=rf.Category(mask=True, size=4),
+            segment=rf.Category(),
+            label=rf.Category(mask=True),
             d_model=16,
             n_layers=1,
             n_heads=4,
@@ -134,7 +137,6 @@ class Model(lit.LightningModule, Renderable):
         n_heads: int,
         batch_size: int = 1,
         fields: Mapping[str, TreeFieldInput] | None = None,
-        name: str = "record",
         query: str | None = None,
         description: str | None = None,
         embed: bool = False,
@@ -167,7 +169,6 @@ class Model(lit.LightningModule, Renderable):
         n_heads: int | None = None,
         batch_size: int = 1,
         fields: Mapping[str, TreeFieldInput] | None = None,
-        name: str = "record",
         query: str | None = None,
         description: str | None = None,
         embed: bool = False,
@@ -184,7 +185,8 @@ class Model(lit.LightningModule, Renderable):
         Provide ``d_model``, ``n_layers``, and ``n_heads`` with tree fields.
         Keyword field names bind their data keys; field classes such as
         ``rf.Number`` are instantiated with defaults. Child ``rf.Branch``
-        nodes describe repeated objects; the generated root is a singleton.
+        nodes describe repeated objects; the anonymous root is a singleton
+        at ``/``, with child addresses such as ``/amount`` and ``/items/sku``.
 
         ``mask=True`` makes a field a supervised target. ``embed=True`` emits
         its embedding during prediction. ``attention`` selects the root
@@ -219,7 +221,6 @@ class Model(lit.LightningModule, Renderable):
                 n_layers=cast(int, n_layers),
                 n_heads=cast(int, n_heads),
                 fields=fields,
-                name=name,
                 query=query,
                 description=description,
                 embed=embed,
@@ -238,6 +239,7 @@ class Model(lit.LightningModule, Renderable):
         # internal integer state-dict revision; preserve the existing artifact contract.
         self._version: str = __version__  # pyrefly: ignore[bad-override-mutable-attribute]
         self.schema: Schema = schema
+        self.preset: presets.Preset | None = None
         self.batch_size: int = batch_size
         self.optimizer: OptimizerConfig | None = optimizer
         self.scheduler: SchedulerConfig | None = scheduler
@@ -258,6 +260,27 @@ class Model(lit.LightningModule, Renderable):
             branches=len(self.schema.branches),
             embeds=len(self.schema.embed),
         ).info("initialized Model module")
+
+    xs = presets.factory(presets.XS)
+    sm = presets.factory(presets.SM)
+    md = presets.factory(presets.MD)
+    lg = presets.factory(presets.LG)
+    xl = presets.factory(presets.XL)
+
+    @classmethod
+    def from_yaml(cls, pathname: str | Path, /, **overrides: Unpack[template.Options]) -> Self:
+        """Construct a fresh model from a named YAML schema and its optional preset.
+
+        Explicit root and runtime overrides replace file values. Fields and the
+        built-in preset name come from the file. Loading retains ordinary schema
+        validation, registered datatype options, and subclass construction.
+        """
+        options, profile = template.read(pathname, overrides)
+        constructor = cls if profile is None else presets.factory(profile).__get__(None, cls)
+        try:
+            return constructor(**options)
+        except (TypeError, ValueError, BeartypeCallHintParamViolation) as error:
+            raise ValueError(f"model template {pathname}: {error}") from error
 
     @property
     def version(self) -> str:
@@ -485,22 +508,18 @@ class Model(lit.LightningModule, Renderable):
             )
 
     def track(self, names: tuple[str, ...], /, value: MetricValue) -> MetricValue:
-        """Log an epoch metric and return the original tensor or metric object."""
-
-        def groupname(names: tuple[str, ...]) -> str:
-            assert len(names) > 1
-
-            group, *keys = tuple(map(lambda x: x.replace("/", ".").lower(), names))
-            key = ".".join(list(keys))
-
-            return f"{group}/{key}"
+        """Log an epoch metric with a leading dot for address groups and return its value."""
+        assert len(names) > 1
+        group, *keys = names
+        group = ("." if group.startswith("/") else "") + group.strip("/").replace("/", ".")
+        key = ".".join(part.replace("/", ".").lower() for part in keys)
 
         # Scalar metrics are emitted from data-dependent branches, so DDP ranks cannot
         # safely synchronize every scalar log call as a collective. Stateful
         # TorchMetrics are updated/logged on every rank and can aggregate their state.
         stateful = isinstance(value, TorchMetric)
         self.log(
-            name=groupname(names),
+            name=f"{group}/{key}",
             value=value.detach() if isinstance(value, torch.Tensor) else value,
             on_step=False,
             on_epoch=True,
@@ -565,7 +584,7 @@ class Model(lit.LightningModule, Renderable):
         CheckpointState.dump(self, checkpoint)
 
     def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
-        CheckpointState.restore_version(self, checkpoint)
+        CheckpointState.restore_metadata(self, checkpoint)
 
     def restore_checkpoint_state(self, checkpoint: dict[str, Any]) -> None:
         """Restore this model in place from a `relflow` checkpoint dictionary."""
@@ -638,6 +657,22 @@ class Model(lit.LightningModule, Renderable):
             retain=retain,
         )
 
+    def on_before_batch_transfer(self, batch: Any, dataloader_idx: int) -> Any:
+        """Commit extension resources before DDP starts this batch's graph."""
+        if isinstance(batch, Encoded):
+            trainer = self.trainer
+            strata = (
+                Strata.train
+                if trainer.training
+                else Strata.validate
+                if trainer.validating or trainer.sanity_checking
+                else Strata.test
+                if trainer.testing
+                else Strata.predict
+            )
+            return bind(self, batch, strata)
+        return batch
+
     def transfer_batch_to_device(
         self,
         batch: Any,
@@ -652,6 +687,7 @@ class Model(lit.LightningModule, Renderable):
                 source=batch.source,
                 retain=batch.retain,
                 observations={address: value.to(device) for address, value in batch.observations.items()},
+                bindings=batch.bindings,
             )
         return super().transfer_batch_to_device(batch, device, dataloader_idx)
 

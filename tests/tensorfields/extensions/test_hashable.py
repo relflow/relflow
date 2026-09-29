@@ -18,7 +18,7 @@ from tests.arrow import batch as arrow_batch
 from tests.arrow import table
 from tests.tensorfields.helpers import tensorize
 
-ADDRESS = "root/items/identifier"
+ADDRESS = "/items/identifier"
 
 
 def _structure_payload(
@@ -42,7 +42,6 @@ def _structure_payload(
     return {
         "d_model": 16,
         "fields": {
-            "name": "root",
             "type": "branch",
             "dropout": 0.1,
             "fields": [
@@ -162,7 +161,7 @@ def test_hash_value_is_consistent_across_arrow_integer_widths():
         strata=Strata.test,
     )
 
-    assert torch.equal(inputs["record/narrow"].content, inputs["record/wide"].content)
+    assert torch.equal(inputs["/narrow"].content, inputs["/wide"].content)
 
 
 @pytest.mark.parametrize("value", [True, 1.0])
@@ -233,7 +232,7 @@ def test_hashable_rejects_arrow_struct_values():
     schema = Schema.model_validate(_structure_payload())
     values = [[[{"key": 1}, {"key": 2}]], [[{"key": 3}, {"key": 4}]]]
 
-    with pytest.raises(TypeError, match="root/items/identifier.*does not accept Arrow type"):
+    with pytest.raises(TypeError, match="/items/identifier.*does not accept Arrow type"):
         _new_tensorfield(values=values, schema=schema, strata=Strata.train)
 
 
@@ -380,7 +379,7 @@ def test_hashable_embedder_only_learns_state_embeddings():
         n_heads=2,
         batch_size=2,
     )
-    embedder = model.nodes["record/items/id"].embedder
+    embedder = model.nodes["/items/id"].embedder
 
     named_modules = dict(embedder.named_children())
 
@@ -417,7 +416,7 @@ def test_hashable_training_loss_covers_state_and_content_heads():
         n_heads=2,
         batch_size=2,
     )
-    address = "record/items/id"
+    address = "/items/id"
     inputs = model.encode(
         table(
             [
@@ -503,8 +502,8 @@ def _hashable_model(**kwargs) -> "rf.Model":
 
 def test_hashable_fields_keep_state_embeddings_and_decoders_local():
     model = _hashable_model(mask=True)
-    items = model.nodes["record/items/id"]
-    owner = model.nodes["record/owner"]
+    items = model.nodes["/items/id"]
+    owner = model.nodes["/owner"]
 
     assert items.embedder.state_embeddings is not owner.embedder.state_embeddings
     assert items.decoder.content_linear is not owner.decoder.content_linear
@@ -523,8 +522,8 @@ def test_hashable_gives_same_input_value_identical_raw_embeddings_across_fields(
         strata=Strata.train,
     )
 
-    items_projection = model.nodes["record/items/id"].embedder.embed(inputs["record/items/id"]).payload
-    owner_projection = model.nodes["record/owner"].embedder.embed(inputs["record/owner"]).payload
+    items_projection = model.nodes["/items/id"].embedder.embed(inputs["/items/id"]).payload
+    owner_projection = model.nodes["/owner"].embedder.embed(inputs["/owner"]).payload
 
     assert torch.allclose(items_projection[0, 0, 0], owner_projection[0, 0])
     assert torch.allclose(items_projection[1, 0, 0], owner_projection[1, 0])
@@ -563,8 +562,8 @@ def test_equal_values_stay_matched_within_each_rotating_batch(monkeypatch: pytes
     projections_by_batch: list[tuple[torch.Tensor, torch.Tensor]] = []
     for _ in range(3):
         inputs = model.encode(records, strata=Strata.train)
-        items_projection = model.nodes["record/items/id"].embedder.embed(inputs["record/items/id"]).payload
-        owner_projection = model.nodes["record/owner"].embedder.embed(inputs["record/owner"]).payload
+        items_projection = model.nodes["/items/id"].embedder.embed(inputs["/items/id"]).payload
+        owner_projection = model.nodes["/owner"].embedder.embed(inputs["/owner"]).payload
         projections_by_batch.append((items_projection[0, 0, 0].detach(), owner_projection[0, 0].detach()))
 
     for items_alice, owner_alice in projections_by_batch:
@@ -589,8 +588,8 @@ def test_inference_uses_stable_unsalted_hashes(strata: Strata, monkeypatch: pyte
     first = model.encode(records, strata=strata)
     second = model.encode(records, strata=strata)
 
-    assert torch.equal(first["record/items/id"].content, second["record/items/id"].content)
-    assert torch.equal(first["record/owner"].content, second["record/owner"].content)
+    assert torch.equal(first["/items/id"].content, second["/items/id"].content)
+    assert torch.equal(first["/owner"].content, second["/owner"].content)
 
 
 def test_hashable_does_not_register_a_salt_callback():

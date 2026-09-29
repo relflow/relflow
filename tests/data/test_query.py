@@ -191,7 +191,7 @@ def test_query_rejects_duplicate_map_keys():
     )
 
     with pytest.raises(ValueError, match="duplicate key 'country'"):
-        query(table, 'attributes["country"]', address="record/country")
+        query(table, 'attributes["country"]', address="/country")
 
 
 def test_bind_resolves_integer_brackets_from_parent_type():
@@ -206,14 +206,14 @@ def test_bind_resolves_integer_brackets_from_parent_type():
 def test_bind_reuses_the_plan_for_one_exact_arrow_schema():
     schema = pa.schema([pa.field("values", pa.list_(pa.int64()))])
 
-    assert bind("values[*]", schema, address="record/values") is bind("values[*]", schema, address="record/values")
+    assert bind("values[*]", schema, address="/values") is bind("values[*]", schema, address="/values")
 
 
 def test_bind_rejects_wrong_parent_type_with_address_context():
     schema = pa.schema([pa.field("value", pa.int64())])
 
-    with pytest.raises(ValueError, match="address 'record/value'.*expected a list"):
-        bind("value[*]", schema, address="record/value")
+    with pytest.raises(ValueError, match="address '/value'.*expected a list"):
+        bind("value[*]", schema, address="/value")
 
 
 def test_map_key_binding_is_exact():
@@ -232,7 +232,7 @@ def test_root_and_branch_queries_feed_coalesce_from_arrow():
         events=rf.Branch(
             query="events[-2:]",
             length=2,
-            sku=rf.Category(query="product.sku", size=8, p_unavailable=0.0),
+            sku=rf.Category(query="product.sku", p_unavailable=0.0),
             risk=rf.Number(query='metrics["risk score"]'),
         ),
         d_model=8,
@@ -265,11 +265,11 @@ def test_root_and_branch_queries_feed_coalesce_from_arrow():
     )
 
     fields = coalesce(table, model.schema, Strata.predict)
-    sku = fields[rf.Address("record/events/sku")].pristine
-    risk = fields[rf.Address("record/events/risk")].pristine
+    sku = fields[rf.Address("/events/sku")].pristine
+    risk = fields[rf.Address("/events/risk")].pristine
 
     assert model.schema.fields.query == "payload"
-    assert model.schema.branches[rf.Address("record/events")].query == "events[-2:]"
+    assert model.schema.branches[rf.Address("/events")].query == "events[-2:]"
     assert sku.dense.tolist() == [
         [[Tokens.valued.value, Tokens.valued.value]],
         [[Tokens.padded.value, Tokens.padded.value]],
@@ -291,7 +291,7 @@ def test_arrow_query_treats_mask_spelling_as_ordinary_content():
     )
     table = pa.table({"payload": pa.array([{"amount": "<MASK>"}, {"amount": None}])})
 
-    field = coalesce(table, model.schema, Strata.predict)["record/amount"].pristine
+    field = coalesce(table, model.schema, Strata.predict)["/amount"].pristine
 
     assert field.dense.tolist() == [[Tokens.valued.value], [Tokens.null.value]]
     assert field.values.to_pylist() == ["<MASK>"]

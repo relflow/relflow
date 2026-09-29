@@ -95,7 +95,7 @@ def test_saved_checkpoint_preserves_disabled_attention(tmp_path) -> None:
 def test_failed_in_place_state_restore_is_transactional() -> None:
     source = model()
     state_dict = dict(source.state_dict())
-    state_dict.pop("nodes.record.encoder.pool.mass_direction")
+    state_dict.pop("nodes./.encoder.pool.mass_direction")
     configured = target()
     before = snapshot(configured)
 

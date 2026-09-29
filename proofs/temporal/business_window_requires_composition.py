@@ -158,7 +158,6 @@ def records(*, start: date, weeks: int, rows: int, seed: int) -> Iterator[dict]:
 def fit(
     *,
     dateparts: Sequence[str],
-    classes: int,
     train: Callable[[], Iterator[dict]],
     validate: Callable[[], Iterator[dict]],
     epochs: int,
@@ -169,13 +168,12 @@ def fit(
     """Train on the selected calendar coordinates with the remaining schema fixed."""
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
-        name="calendar",
         d_model=64,
         n_layers=3,
         n_heads=4,
         batch_size=128,
         observed_at=rf.DateParts(dateparts=list(dateparts)),
-        target=rf.Category(mask=True, size=classes, p_unavailable=0.0),
+        target=rf.Category(mask=True, p_unavailable=0.0),
     )
     model.optimizer = lambda module: torch.optim.AdamW(module.parameters(), lr=3e-3)
     data = rf.SyntheticDataModule(model=model, train=train, validate=validate, seed=seed)
@@ -206,7 +204,7 @@ def accuracy(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator
         deterministic=True,
     )
     metrics = trainer.test(model=model, datamodule=data, verbose=False)[0]
-    return float(metrics["calendar.target/test.accuracy.content"])
+    return float(metrics[".target/test.accuracy.content"])
 
 
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
@@ -215,7 +213,6 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     test = partial(records, start=date(2025, 1, 6), weeks=52, rows=1024, seed=seed + 3)
     day_only = fit(
         dateparts=("day_of_week",),
-        classes=2,
         train=train,
         validate=validate,
         epochs=20,
@@ -226,7 +223,6 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     day_accuracy = accuracy(day_only, test, accelerator)
     hour_only = fit(
         dateparts=("hour_of_day",),
-        classes=2,
         train=train,
         validate=validate,
         epochs=20,
@@ -237,7 +233,6 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     hour_accuracy = accuracy(hour_only, test, accelerator)
     composed = fit(
         dateparts=("day_of_week", "hour_of_day"),
-        classes=2,
         train=train,
         validate=validate,
         epochs=20,

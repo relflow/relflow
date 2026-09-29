@@ -6,6 +6,7 @@ from relflow.tensorfields import base as base
 from relflow.tensorfields import extensions as extensions
 from relflow.tensorfields.base import (
     TENSORFIELDS,
+    BatchContext,
     Context,
     DecoderBase,
     EmbedderBase,
@@ -29,6 +30,7 @@ from relflow.tensorfields.output import (
 
 __all__ = [
     "TENSORFIELDS",
+    "BatchContext",
     "Context",
     "DecoderBase",
     "EmbedderBase",

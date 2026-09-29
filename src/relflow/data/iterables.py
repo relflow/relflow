@@ -17,7 +17,7 @@ from relflow.data.ragged import RaggedField, boolean, coalesce
 from relflow.structs.enums import Component, Strata, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.tree import Address
-from relflow.tensorfields.base import TENSORFIELDS, Context, TensorFieldBase
+from relflow.tensorfields.base import TENSORFIELDS, BatchContext, Context, TensorFieldBase
 
 
 def encode(
@@ -31,6 +31,7 @@ def encode(
 ) -> Encoded:
     out: dict[Address, TensorFieldBase] = {}
     observations: dict[Address, TensorDict] = {}
+    bindings: dict[Address, object] = {}
 
     salt = random.getrandbits(64) if strata in {Strata.train, Strata.validate} else 0
 
@@ -48,6 +49,11 @@ def encode(
             )
 
         values = pa.nulls(0) if projection.vacant else extension.prepare(pristine.values, address=address)
+        state = interprocess_encoding_context.get(address)
+        if isinstance(state, BatchContext):
+            if Component.bind not in extension.components:
+                raise RuntimeError(f"extension '{extension.name}' at '{address}' requires a bind component")
+            state, bindings[address] = state.batch(values)
         observation = None
         if strata == Strata.train and not projection.vacant:
             canonical = replace(pristine, values=values)
@@ -55,7 +61,7 @@ def encode(
                 field=canonical,
                 address=address,
                 schema=schema,
-                state=interprocess_encoding_context.get(address),
+                state=state,
                 learn=True,
             )
 
@@ -89,13 +95,13 @@ def encode(
             schema=schema,
             strata=strata,
             context=Context(
-                state=interprocess_encoding_context.get(address),
+                state=state,
                 salt=salt,
             ),
         )
 
     inputs = TensorDict(source=cast(Any, out))
-    return Encoded(tensors=inputs, source=batch, retain=retain, observations=observations)
+    return Encoded(tensors=inputs, source=batch, retain=retain, observations=observations, bindings=bindings)
 
 
 def mock(schema: Schema, batch_size: int) -> EncodedInput:

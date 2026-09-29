@@ -41,20 +41,15 @@ import lightning.pytorch as lit
 
 import relflow as rf
 
-model = rf.Model(
-    name="customer",
-    d_model=128,
-    n_layers=3,
-    n_heads=8,
+model = rf.Model.md(
     tenure_days=rf.Number,
-    region=rf.Category(size=64),
+    region=rf.Category,
     purchases=rf.Branch(
         length=64,
         overflow="tail",
         days_ago=rf.Number,
         amount=rf.Number(mask=rf.Mask(rate=0.15, reconstruct=True)),
         merchant=rf.Category(
-            size=256,
             mask=rf.Mask(rate=0.15, reconstruct=True),
         ),
     ),
@@ -84,6 +79,63 @@ validation and test, but are inactive during ordinary prediction. See
 The example saves the final model. Use the checkpoint selection described in
 [Training](lightning.qmd) to save the best validation state instead.
 
+## Evaluate Vocabulary Coverage
+
+For large-vocabulary reconstruction, report how many selected answers the
+model can express as well as how well it predicts them. For example, monitor
+`.purchases.merchant/validate.coverage.content` alongside
+`.purchases.merchant/validate.nll.content` and
+`.purchases.merchant/validate.accuracy.all`.
+The [Category metrics](../data-types/category.qmd#vocabulary-and-learning) and
+[Cluster metrics](../data-types/cluster.qmd#learning-and-inspection)
+define these denominators and count unavailable targets explicitly.
+
+An unknown Category or Cluster target contributes no label gradient. Forcing its
+prediction to be uniform over known labels would teach a different task, not
+recover the missing answer. With no known targets, conditional reconstruction
+quality is `NaN`; zero coverage means the validation objective is unmeasurable,
+not that the model reconstructed everything perfectly. Cluster balancing and
+adaptive-cluster updates also exclude unknown answers. Do not select a
+checkpoint from such a conditional score without checking coverage.
+
+Vocabulary growth can change the evaluated known-target population between
+epochs. NLL can increase when newly admitted, difficult labels join it even
+if predictions on the old labels improve. The summed validation loss is not a
+coverage-adjusted model-quality score. Keep a fixed validation source, monitor
+coverage, and compare known-target quality at comparable coverage. If necessary,
+retain a fixed cohort of training-established labels for an additional stable
+diagnostic; do not populate the model vocabulary from validation or test data.
+
+Random reconstruction masks introduce another source of variation. For a
+repeatable diagnostic, supply application-owned Boolean selection fields and
+use `Mask(query=..., reconstruct=True)`. This fixes selected coordinates;
+it does not freeze vocabulary growth or make unknown answers learnable.
+Keep any held-out calibration set separate from model selection, and evaluate
+downstream confidence separately for familiar and unseen input identities.
+
+[P062](../proofs/vocabulary/pretraining-coverage.py) isolates vocabulary
+coverage with fixed query-selected masks and checks that rebatching the same
+targets cannot change the reported counts or conditional scores.
+[P065](../proofs/vocabulary/cluster-pretraining-coverage.py) tests Cluster coverage.
+
+[P066](../proofs/vocabulary/rolling-input-admission.py) separately checks cold
+Category inputs across successive training cohorts. It currently exposes a
+remaining failure: admitting an input identity can change reconstruction NLL
+without an optimizer step, even at complete target coverage. Target coverage
+does not measure input familiarity. Keep input cohorts separate when assessing
+pretraining stability; fixed masks alone cannot remove this source of drift.
+Initialization alternatives that pass the admission check have failed other
+learning proofs and are not enabled in the model.
+
+[Set metrics](../data-types/set.qmd#vocabulary-and-learning) count positive
+memberships rather than scalar targets. A partial-OOV Set retains its known
+positive and negative supervision; dropping the whole set would discard valid
+evidence. An all-OOV set still supplies known negatives when annotations are
+complete. Report member coverage, complete-set coverage, exact-set accuracy,
+and micro F1 together. Empty sets are valued, complete annotations, although
+an all-empty evaluation has no positive-member denominator. These semantics
+are not appropriate for incompletely annotated labels without further masking.
+
 ## Adapt To A Labeled Task
 
 For fine-tuning, each customer record gains `churned: false` or `churned: true`,
@@ -98,11 +150,11 @@ add a supervised label:
 ```python
 finetuned = rf.Model.load("artifacts/customer-pretrained.rf")
 reconstructed_inputs = rf.where("address").is_in(
-    ["customer/purchases/amount", "customer/purchases/merchant"]
+    [rf.Address("purchases", "amount"), rf.Address("purchases", "merchant")]
 )
 finetuned.update(reconstructed_inputs, mask=False)
 finetuned.extend(
-    rf.where("address") == "customer",
+    rf.where("address") == rf.Address(),
     churned=rf.Boolean(mask=True),
 )
 ```
@@ -169,7 +221,7 @@ set `embed=True` on the desired root or branch, export
 separate downstream model on those vectors.
 
 At inference, omit `churned` from the input and read the prediction at
-`customer/churned`. See [Prediction Output](prediction-output.qmd).
+`/churned`. See [Prediction Output](prediction-output.qmd).
 
 ## Keep Auxiliary Objectives Deliberately
 
@@ -179,11 +231,11 @@ adapting the pretrained artifact. Replace the earlier
 
 ```python
 finetuned.update(
-    rf.where("address") == "customer/purchases/merchant",
+    rf.where("address") == rf.Address("purchases", "merchant"),
     mask=False,
 )
 finetuned.update(
-    rf.where("address") == "customer/purchases/amount",
+    rf.where("address") == rf.Address("purchases", "amount"),
     weight=0.1,
 )
 ```

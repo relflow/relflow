@@ -12,6 +12,7 @@ import pyarrow as pa
 import torch
 from tensordict import TensorDict
 
+from relflow.architecture.binding import bind
 from relflow.architecture.contracts import sanitize
 from relflow.architecture.encoder import BranchEncoder
 from relflow.architecture.node import NodeModule
@@ -570,6 +571,14 @@ class ModelRuntime:
         strata: Strata,
     ) -> Output | pa.Table | None:
         """Evaluate a loop batch, retaining Arrow sources for public predictions."""
+        if isinstance(batch, Encoded) and batch.bindings:
+            trainer = getattr(module, "_trainer", None)
+            if trainer is not None and trainer.world_size > 1:
+                raise RuntimeError(
+                    "distributed batches must resolve resource bindings before forward; "
+                    "retain Model.on_before_batch_transfer when customizing data-transfer hooks"
+                )
+            batch = bind(module, batch, strata)
         inputs = batch.tensors if isinstance(batch, Encoded) else batch
         if isinstance(batch, Encoded):
             ModelRuntime.learn(module, batch.observations, strata=strata)
@@ -716,7 +725,7 @@ class ModelRuntime:
             if source is None:
                 raise ValueError("preprocessor pipeline returned no observations")
 
-        return encode_batch(
+        encoded = encode_batch(
             batch=source,
             schema=module.schema,
             strata=strata,
@@ -724,6 +733,7 @@ class ModelRuntime:
             seed=seed,
             epoch=epoch,
         )
+        return bind(module, encoded, strata)
 
     @staticmethod
     def learn(

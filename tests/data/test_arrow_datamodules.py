@@ -47,7 +47,7 @@ def collect(dataset: arrow.ArrowDataset, monkeypatch: pytest.MonkeyPatch) -> lis
     return [item.source for item in dataset]
 
 
-def test_public_surface_has_four_modules_and_no_source_specific_datasets():
+def test_public_surface_has_five_modules_and_no_source_specific_datasets():
     import relflow.data.datasets as datasets
 
     assert rf.ArrowDataModule is arrow.ArrowDataModule
@@ -58,6 +58,7 @@ def test_public_surface_has_four_modules_and_no_source_specific_datasets():
         "ArrowStream",
         "ArrowUnit",
         "CustomDataModule",
+        "DuckDBDataModule",
         "PolarsDataModule",
         "Retain",
         "StratumConfig",
@@ -232,7 +233,7 @@ def test_distributed_ownership_is_independent_of_arrow_batch_boundaries():
 
 def test_arrow_dataset_uses_distributed_rank_and_world_size(monkeypatch: pytest.MonkeyPatch):
     configured = rf.Model(
-        id=rf.Category(size=32),
+        id=rf.Category(),
         d_model=8,
         n_layers=1,
         n_heads=4,
@@ -250,11 +251,11 @@ def test_arrow_dataset_uses_distributed_rank_and_world_size(monkeypatch: pytest.
     batches = collect(dataset, monkeypatch)
 
     assert [batch["id"].to_pylist() for batch in batches] == [["b", "d"]]
-    context = dataset.encoding_context[next(iter(dataset.encoding_context))]
-    assert context.global_rank == 1
+    assert dataset.distributed_rank == 1
+    assert dataset.distributed_world_size == 2
 
 
-def test_arrow_workers_combine_parent_rank_and_local_worker_identity(monkeypatch: pytest.MonkeyPatch):
+def test_arrow_workers_take_complete_batches_from_the_parent_rank(monkeypatch: pytest.MonkeyPatch):
     module = rf.ArrowDataModule(
         model=model(),
         validate=pa.table({"id": list(range(24))}),
@@ -268,7 +269,47 @@ def test_arrow_workers_combine_parent_rank_and_local_worker_identity(monkeypatch
 
     batches = collect(dataset, monkeypatch)
 
-    assert [batch["id"].to_pylist() for batch in batches] == [[4, 10], [16, 22]]
+    assert [batch["id"].to_pylist() for batch in batches] == [[5, 7], [17, 19]]
+
+
+@pytest.mark.parametrize(
+    ("rows", "workers", "drop_last", "expected"),
+    [(5, 2, False, list(range(5))), (1, 3, False, [0]), (5, 3, True, list(range(4)))],
+)
+def test_arrow_workers_preserve_single_rank_tail_rows(rows, workers, drop_last, expected, monkeypatch):
+    module = rf.ArrowDataModule(
+        model=model(),
+        predict=pa.table({"id": list(range(rows))}),
+        num_workers=workers,
+        drop_last=drop_last,
+    )
+    dataset = module.predict_dataloader().dataset
+    values = []
+    for worker in range(workers):
+        monkeypatch.setattr(arrow, "get_worker_info", lambda: SimpleNamespace(id=worker, num_workers=workers))
+        values.extend(value for batch in collect(dataset, monkeypatch) for value in batch["id"].to_pylist())
+
+    assert sorted(values) == expected
+
+
+@pytest.mark.parametrize("workers", [1, 3])
+def test_arrow_worker_count_preserves_distributed_rank_ownership_and_equal_tails(workers, monkeypatch):
+    module = rf.ArrowDataModule(
+        model=model(),
+        validate=pa.table({"id": list(range(23))}),
+        num_workers=workers,
+    )
+    monkeypatch.setattr(arrow, "world_size", lambda: 2)
+    for rank in range(2):
+        monkeypatch.setattr(arrow, "rank", lambda: rank)
+        dataset = module.val_dataloader().dataset
+        batches = []
+        for worker in range(workers):
+            monkeypatch.setattr(arrow, "get_worker_info", lambda: SimpleNamespace(id=worker, num_workers=workers))
+            batches.extend(collect(dataset, monkeypatch))
+
+        assert sorted(len(batch) for batch in batches) == [1, 2, 2, 2, 2, 2]
+        assert sorted(value for batch in batches for value in batch["id"].to_pylist()) == list(range(rank, 22, 2))
 
 
 def test_arrow_dataset_source_scans_through_the_shared_pipeline(monkeypatch: pytest.MonkeyPatch):

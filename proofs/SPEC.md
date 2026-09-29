@@ -97,7 +97,7 @@ Within that boundary, the public package should support these claims:
 
 | Capability | Modeling claim |
 | --- | --- |
-| Typed scalar context | Continuous, Boolean, and bounded categorical inputs can jointly predict typed targets. |
+| Typed scalar context | Continuous, Boolean, and categorical inputs can jointly predict typed targets. |
 | Value state | `valued`, `null`, `padded`, and `masked` are distinct signals; a real zero need not collapse into missingness. |
 | Repeated branches | Aligned child fields can interact at an item coordinate and repeated items can be summarized for an ancestor target. |
 | Conditional aggregation | A visible operation and optional item category can select a reduction over repeated numeric values. |
@@ -106,7 +106,9 @@ Within that boundary, the public package should support these claims:
 | Nested branches | Local relationships can be learned before their configured reduction routes a representation to a parent context. |
 | Entity-keyed transfer | A target item can retrieve information attached to the same logical entity in another branch, even when branch order differs. |
 | Set | Unordered membership and co-occurrence can predict outcomes, invariant to member order and duplicates. |
-| Category | Repeated labels in a bounded learned vocabulary can acquire persistent label-specific behavior. |
+| Category | Repeated labels in an automatically growing learned vocabulary can acquire persistent label-specific behavior. |
+| Enum | A declared, fixed set of labels can learn categorical relationships; declaring a class does not teach its relationship. |
+| Quantile | Training percentiles can support numeric regression in source units; the inverse transform remains bounded by learned support. |
 | Hash | Equality can generalize to identifiers never seen during training while equal tokens remain in one encoded context. |
 | DateParts | Recurring calendar phase can generalize across dates without treating absolute timestamp magnitude as the signal. |
 | DatePart composition | Multiple visible calendar coordinates can jointly identify periodic behavior that no one coordinate determines. |
@@ -204,6 +206,11 @@ it tests optimization state rather than generalization.
 
 - Exercise `rf.Model`, built-in public tensorfield constructors, and
   `rf.SyntheticDataModule` through a normal Lightning training loop.
+- Prefer `rf.Model.xs(...)` for small behavioral proofs whose architecture is
+  incidental. Keep explicit configurations when attention, reduction geometry,
+  or model capacity is an experimental control. Presets also fill omitted
+  branch and decoder options, so adopting one requires a new full run with
+  the existing data, budget, and gates; retain earlier evidence as history.
 - Use `lit.seed_everything(seed, workers=True)` and
   `Trainer(deterministic=True)`.
 - Prefer fixed optimizer steps. Fixed epochs are acceptable when complete data
@@ -268,6 +275,31 @@ epoch improve. Assert a terminal window or best validation checkpoint when
 optimization trajectories are expected to oscillate.
 
 ## Core Proof Matrix
+
+### Reusable relationship experiments
+
+P071–P078 implement the following bounded challenges. Each script owns its
+generator, fixed budget, gates, and matched controls. A capability gate that
+fails remains a recorded failure; these experiments do not redefine success
+as reproducing that failure. Initial three-seed CPU panels characterize the
+claims, while thresholds remain provisional until ten-seed calibration.
+
+| ID | Capability under test | Held-out condition and decisive control |
+| --- | --- | --- |
+| P071 | Compose familiar Enum group/operation instructions | Withhold entire request combinations; compare full-combination training and corrupted requests. |
+| P072 | Infer a fresh numerical rule from visible examples | Withhold an affine-parameter quadrant; compare swapped examples, query-only training, and a visible-example least-squares oracle. |
+| P073 | Export useful reconstruction-trained representations | Freeze the encoder and fit a small labeled probe; compare raw features, random initialization, and independently permuted training views. |
+| P074 | Combine noisy, incomplete measurements | Compare every visibility pattern with its analytical Gaussian oracle, including one unseen pattern and absent-all, nuisance, and corruption controls. |
+| P075 | Retrieve fresh identities with distractors and two hops | Score each collection size and hop count separately, with key corruption and record permutation; missing and duplicate matches are excluded explicitly. |
+| P076 | Detect cross-field inconsistency | Preserve every individual-field marginal when corrupting relationships; use clean-validation thresholds, rare valid tails, and shuffled training. |
+| P077 | Characterize Number/Quantile tradeoffs | Compare clean/contaminated rank and amount tasks, central/tail errors, and noisy-target objectives against analytical population optima. |
+| P078 | Recover meaningful latent regimes | Require partition ARI and independent regression skill; compare a no-regime process with exactly matched numerical marginals. |
+
+These bounded tasks do not establish general algorithms, exact joins,
+uncertainty calibration, semantic meaning of label strings, or transfer across
+arbitrary domains. Learning a new head or classifier on a familiar latent
+process is distinguished from transfer to unseen classes. Only the reporting
+and static rendering infrastructure is shared across scripts.
 
 ### Proof-harness calibration
 
@@ -1443,7 +1475,7 @@ below describe hypotheses, not existing catalog entries.
 | Ablate and restore | Override an input's activity, then delete it in a separate arm | Signal loss is visible; a non-training override restores behavior | Corrupt the signal while preserving the original answer |
 | Reset and relearn | Reset one output; separately reset a branch and its descendants | Selected knowledge is lost and can be relearned | No reset and complete model reset |
 | Increase branch capacity | Update `length` | Old-size behavior survives and new tail items become usable | Same retained prefix, different tails |
-| Resize a vocabulary | Update Category capacity | Existing identity knowledge and new-category learning are measured separately | Fresh larger vocabulary and unchanged-capacity model |
+| Grow a vocabulary | Introduce new training labels without editing the schema | Existing identity knowledge and new-category learning are measured separately | Fresh final-vocabulary model and old-label-only continuation |
 | Compose edits and reload | Extend, adapt, reject an invalid edit, save/load, continue | Mutation sequence and learned behavior survive serialization | In-memory continuation of the same edited checkpoint |
 
 ### Neutral rebuild
@@ -1616,21 +1648,24 @@ capacity-eight control and the existing cardinality proofs distinguish schema
 growth from ordinary length extrapolation. Increasing capacity is not itself
 evidence that the added range has been learned.
 
-### Resize a vocabulary
+### Grow a vocabulary
 
 Train a Category input to predict randomly assigned, balanced labels for its
-known identities. Use an initial capacity comfortably above the observed
-vocabulary, then increase capacity and introduce additional identities during
-adaptation. Keep old and new identities balanced in the held-out report.
+known identities, then introduce additional identities during adaptation.
+Storage grows automatically before forward; neither initial nor maximum
+vocabulary capacity is a schema option. Keep old and new identities balanced
+in the held-out report.
 
 Inspect the vocabulary mapping and embedding tensors immediately after the
-resize, then report old-identity accuracy, new-identity accuracy, and unavailable
-rates. The current rebuild skips tensors with changed shapes; it does not copy
-the old rows into a larger embedding table. Consequently, preservation of old
-accuracy is an open hypothesis, not an existing API guarantee. Record a rebuild
-rejection as an execution result, and never silently shrink or remap the data
-to make it succeed. Establishing lossless vocabulary growth may require a
-separate implementation change if this experiment exposes the gap.
+growth event, then report old-identity accuracy, new-identity accuracy, and
+unavailable rates. Growth must preserve old label IDs and parameter rows,
+partial gradients, counters, and optimizer history. Additional storage alone
+must not change the categorical objective or written probabilities; admitting
+new classes does change their normalization. Retention after further learning
+remains a measured outcome, not a consequence of copying old rows. Include
+mid-epoch and accumulation-window growth, worker prefetch, distributed ranks,
+and checkpoint restoration in the runtime checks. P057 and P059 cover admission
+order and continued learning; structural tests establish the state invariants.
 
 ### Compose edits and reload
 

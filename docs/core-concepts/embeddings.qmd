@@ -7,6 +7,9 @@ for downstream use. It does not create a learning objective.
 
 [Pretraining And Fine-Tuning](../guides/pretraining.qmd) shows how to transfer
 learned context from reconstruction to a labeled task.
+The [reconstruction transfer proof](../proofs/representation/reconstruction-transfer.html)
+evaluates frozen root embeddings with a small labeled probe, against raw
+features, an untrained encoder, and training on independently permuted views.
 
 ## Learn Without A Label
 
@@ -17,12 +20,11 @@ application supplies its own customer observations and training splits.
 import relflow as rf
 
 model = rf.Model(
-    name="customer",
     d_model=128,
     n_layers=3,
     n_heads=8,
     embed=True,
-    region=rf.Category(size=64),
+    region=rf.Category,
     purchases=rf.Branch(
         length=64,
         embed=True,
@@ -31,7 +33,6 @@ model = rf.Model(
         items=rf.Branch(
             length=24,
             product=rf.Category(
-                size=8192,
                 mask=rf.Mask(rate=0.10, reconstruct=True),
             ),
             quantity=rf.Number,
@@ -77,11 +78,11 @@ import pyarrow.compute as pc
 
 predictions = model.predict(observations)["predictions"]
 customer_embedding = pc.struct_field(
-    pc.struct_field(predictions, "customer"),
+    pc.struct_field(predictions, rf.Address()),
     "embedding",
 )
 purchase_history_embedding = pc.struct_field(
-    pc.struct_field(predictions, "customer/purchases"),
+    pc.struct_field(predictions, rf.Address("purchases")),
     "embedding",
 )
 ```

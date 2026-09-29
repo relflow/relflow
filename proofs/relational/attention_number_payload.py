@@ -127,7 +127,7 @@ def records(*, rows: int, seed: int, break_pairs: bool = False) -> Iterator[dict
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     output = model.predict([{"items": row["items"]} for row in rows]).to_pylist()
-    return np.asarray([row["predictions"]["retrieval/answer"]["content"] for row in output])
+    return np.asarray([row["predictions"]["/answer"]["content"] for row in output])
 
 
 def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
@@ -178,7 +178,6 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
-        name="retrieval",
         d_model=48,
         n_layers=1,
         n_heads=4,

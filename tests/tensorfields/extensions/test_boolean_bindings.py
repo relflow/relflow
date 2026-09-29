@@ -8,12 +8,11 @@ import relflow as rf
 from relflow.structs.enums import TensorKey
 from tests.arrow import table
 
-ADDRESS = rf.Address("record/flag")
+ADDRESS = rf.Address("/flag")
 
 
 def build() -> rf.Model:
     return rf.Model(
-        name="record",
         d_model=8,
         n_layers=1,
         n_heads=4,
@@ -58,14 +57,13 @@ def test_boolean_counts_validates_model_and_address() -> None:
     with pytest.raises(TypeError, match="must be a Model"):
         rf.Boolean.counts({}, ADDRESS)
     with pytest.raises(KeyError, match="missing"):
-        rf.Boolean.counts(model, "record/missing")
+        rf.Boolean.counts(model, "/missing")
 
     wrong_model = rf.Model(
-        name="record",
         d_model=8,
         n_layers=1,
         n_heads=4,
-        category=rf.Category(size=4),
+        category=rf.Category(),
     )
     with pytest.raises(TypeError, match="not a Boolean field"):
-        rf.Boolean.counts(wrong_model, "record/category")
+        rf.Boolean.counts(wrong_model, "/category")

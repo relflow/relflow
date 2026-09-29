@@ -140,7 +140,7 @@ def observe(
 
     if not learn:
         return None
-    values = pc.cast(field.values, pa.float64(), safe=True)
+    values = pc.cast(field.values, pa.float32(), safe=False)
     if isinstance(values, pa.ChunkedArray):
         values = values.combine_chunks()
     content = torch.from_numpy(values.to_numpy(zero_copy_only=False).copy())
@@ -218,19 +218,22 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         )
 
 
-def moments(values: torch.Tensor) -> torch.Tensor:
-    """Reduce finite numeric values to count, sum, and squared sum."""
+def moments(values: torch.Tensor) -> TensorDict:
+    """Summarize finite values with an exact count and centered float32 moments."""
 
-    finite = values.reshape(-1).to(dtype=torch.float64)
+    finite = values.reshape(-1).to(dtype=torch.float32)
     finite = finite.masked_select(torch.isfinite(finite))
-    if not finite.numel():
-        return torch.zeros(3, dtype=torch.float64, device=values.device)
-    return torch.stack(
-        (
-            finite.new_tensor(finite.numel()),
-            finite.sum(),
-            finite.square().sum(),
-        )
+    if finite.numel():
+        variance, mean = torch.var_mean(finite, correction=0)
+    else:
+        variance, mean = finite.new_zeros(()), finite.new_zeros(())
+    return TensorDict(
+        {
+            "count": torch.tensor(finite.numel(), dtype=torch.int64, device=values.device),
+            "mean": mean,
+            "var": variance,
+        },
+        batch_size=[],
     )
 
 
@@ -241,8 +244,8 @@ class GlobalOnlineNormalizer(torch.nn.Module):
         self.epsilon: float = epsilon
         self.alpha: float | None = alpha
 
-        self.register_buffer("mean", torch.zeros(1))
-        self.register_buffer("var", torch.ones(1))
+        self.register_buffer("mean", torch.zeros(1, dtype=torch.float32))
+        self.register_buffer("var", torch.ones(1, dtype=torch.float32))
         self.register_buffer("count", torch.zeros(1, dtype=torch.int64))
 
     @torch.no_grad()
@@ -250,34 +253,46 @@ class GlobalOnlineNormalizer(torch.nn.Module):
         self.merge(moments(values))
 
     @torch.no_grad()
-    def learn(self, observation: torch.Tensor) -> None:
+    def learn(self, observation: TensorDict) -> None:
         """Synchronize and apply one pristine numeric observation."""
 
-        if not isinstance(observation, torch.Tensor):
-            raise TypeError(f"normalizer observation must be a tensor, got {type(observation).__name__}")
-        if tuple(observation.shape) != (3,):
-            raise ValueError(f"normalizer observation must have shape (3,), got {tuple(observation.shape)}")
-        self.merge(all_reduce_sum(observation.to(device=self.mean.device, dtype=torch.float64).clone()))
+        if not isinstance(observation, TensorDict):
+            raise TypeError(f"normalizer observation must be a TensorDict, got {type(observation).__name__}")
+        observation = observation.to(device=self.mean.device)
+        local_count = cast(torch.Tensor, observation["count"])
+        local_mean = cast(torch.Tensor, observation["mean"])
+        local_var = cast(torch.Tensor, observation["var"])
+        count = all_reduce_sum(local_count.clone())
+        if not count:
+            return
+        weight = local_count.to(dtype=torch.float32) / count
+        mean = all_reduce_sum(local_mean * weight)
+        # Center on the shared mean before reducing variance. Raw squared sums
+        # lose small variances at large offsets in float32; empty ranks contribute zero.
+        delta = torch.where(local_count > 0, local_mean - mean, 0.0)
+        variance = all_reduce_sum((local_var + delta.square()) * weight)
+        self.merge(TensorDict({"count": count, "mean": mean, "var": variance}, batch_size=[]))
 
     @torch.no_grad()
-    def merge(self, observation: torch.Tensor) -> None:
-        """Merge count, sum, and squared sum into running statistics."""
+    def merge(self, observation: TensorDict) -> None:
+        """Merge centered moments into running statistics without retaining values."""
 
-        if tuple(observation.shape) != (3,):
-            raise ValueError(f"normalizer observation must have shape (3,), got {tuple(observation.shape)}")
-        if not torch.isfinite(observation).all():
+        count = cast(torch.Tensor, observation["count"])
+        mean = cast(torch.Tensor, observation["mean"])
+        variance = cast(torch.Tensor, observation["var"])
+        if not all(torch.isfinite(value).all() for value in (count, mean, variance)):
             raise ValueError("normalizer observation must contain only finite values")
-        if observation[0] < 0:
+        if count < 0:
             raise ValueError("normalizer observation count cannot be negative")
+        if variance < 0:
+            raise ValueError("normalizer observation variance cannot be negative")
 
-        batch_count = observation[0].to(device=self.count.device, dtype=self.count.dtype)
+        batch_count = count.to(device=self.count.device, dtype=self.count.dtype)
         if not batch_count:
             return
 
-        batch_mean = observation[1].div(observation[0]).to(device=self.mean.device, dtype=self.mean.dtype)
-        batch_var = (
-            observation[2].div(observation[0]).sub(observation[1].div(observation[0]).square()).clamp_min(0.0)
-        ).to(device=self.var.device, dtype=self.var.dtype)
+        batch_mean = mean.to(self.mean)
+        batch_var = variance.to(self.var)
 
         if self.alpha is not None:
             alpha: float = self.alpha
@@ -289,20 +304,12 @@ class GlobalOnlineNormalizer(torch.nn.Module):
 
             return
 
-        old_count = self.count
-        new_count = old_count + batch_count
-
+        new_count = self.count + batch_count
+        weight = batch_count.to(dtype=self.mean.dtype) / new_count
         delta = batch_mean - self.mean
-        # Merge sufficient statistics without retaining prior observations.
-        new_mean = self.mean + delta * (batch_count / new_count)
-
-        m_a = self.var * old_count
-        m_b = batch_var * batch_count
-        m_c = delta.pow(2) * old_count * batch_count / new_count
-        new_var = (m_a + m_b + m_c) / new_count
-
-        self.mean = new_mean
-        self.var = new_var
+        correction = delta * torch.sqrt((self.count.to(dtype=self.mean.dtype) / new_count) * weight)
+        self.mean = torch.lerp(self.mean, batch_mean, weight)
+        self.var = torch.lerp(self.var, batch_var, weight) + correction.square()
         self.count = new_count
 
     def forward(self, inputs: torch.Tensor, mask: torch.Tensor, update=True) -> torch.Tensor:
@@ -437,7 +444,7 @@ def learn(
         raise ValueError(f"number learner at '{address}' requires train strata, got {strata}")
     embedder: Embedder = cast(Embedder, module.nodes[address].embedder)
     embedder.counter.learn(cast(torch.Tensor, observation[TensorKey.state]))
-    embedder.normalizer.learn(cast(torch.Tensor, observation[TensorKey.content]))
+    embedder.normalizer.learn(cast(TensorDict, observation[TensorKey.content]))
 
 
 @number.register

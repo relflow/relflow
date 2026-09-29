@@ -19,15 +19,15 @@ def branch(*fields, attention="mha", dropout=0.0):
         dropout=dropout,
         reduction=None,
     )
-    return BranchEncoder(schema, "record").double()
+    return BranchEncoder(schema, "/").double()
 
 
 def parcel(values, present, name="value"):
     return Parcel(
         payload=values,
         present=present,
-        origin=f"record/{name}",
-        destination="record",
+        origin=f"/{name}",
+        destination="/",
         batch_size=values.shape[0],
     )
 

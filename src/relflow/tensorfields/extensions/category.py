@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import InitVar
+from functools import partial
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Unpack, cast
 
 import pyarrow as pa
@@ -12,7 +13,6 @@ from beartype import beartype
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
-from relflow.logging import logger
 from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
@@ -27,39 +27,42 @@ from relflow.tensorfields.base import (
 )
 from relflow.tensorfields.output import array, labels, struct, variable
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
-from relflow.tensorfields.shared.vocabulary import OnlineVocabularyModel, VocabularyState, VocabularySyncCallback
+from relflow.tensorfields.shared.reconstruction import Metrics, Reconstruction, Scores
+from relflow.tensorfields.shared.rows import Embedding, Linear
+from relflow.tensorfields.shared.vocabulary import (
+    INITIAL_CAPACITY,
+    OnlineVocabularyModel,
+    VocabularyBatch,
+    VocabularyState,
+    VocabularySyncCallback,
+)
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.datasets.base import InterprocessEncodingContext
+    from relflow.helpers.resize import Resize
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
 
 category: Extension = Extension(name="category", types=(bool, int, float, str, bytes))
-
-category.callback(VocabularySyncCallback, CounterUpdateCallback)
 
 
 @category.register
 class Request(RequestBase):
     """One scalar label represented by an online vocabulary.
 
-    ``size`` (also accepted as ``capacity``) limits learned labels. Training
-    grows the vocabulary; later stages reuse it. ``p_unavailable`` hides known
-    label content during training, while unknown labels remain valued inputs.
+    Training grows vocabulary storage automatically; later stages reuse it.
+    ``p_unavailable`` hides known
+    input label content during training without changing reconstruction targets,
+    while unknown labels remain valued inputs.
     ``topk`` adds accuracy metrics and prediction candidates; entries are
-    sorted and deduplicated, and must satisfy ``1 < k < size``.
+    sorted and deduplicated, and must exceed one. Candidates are limited to
+    the discovered vocabulary when fewer than ``k`` labels are known.
     ``mask=True`` declares a supervised classification target. Predictions
     select populated vocabulary labels and exclude the unavailable sentinel.
     """
 
-    model_config = pydantic.ConfigDict(populate_by_name=True, serialize_by_alias=True)
-
     type: Literal["category"] = "category"
-    capacity: Annotated[
-        int,
-        pydantic.Field(alias="size", serialization_alias="size", gt=0, default=1024),
-    ] = 1024
     p_unavailable: Annotated[float, pydantic.Field(ge=0.0, le=1.0, default=0.01)] = 0.01
     topk: list[int] | None = None
 
@@ -68,8 +71,6 @@ class Request(RequestBase):
         def __init__(
             self,
             *,
-            size: int = 1024,
-            capacity: int = ...,
             p_unavailable: float = 0.01,
             topk: list[int] | None = None,
             type: Literal["category"] = "category",
@@ -147,15 +148,6 @@ class Request(RequestBase):
         )
         return {label: int(count) for label, count in zip(vocabulary, counts, strict=True)}
 
-    @property
-    def size(self) -> int:
-        return self.capacity
-
-    @size.setter
-    def size(self, value: int) -> None:
-        self.capacity = value
-        self.model_fields_set.add("capacity")
-
     @pydantic.model_validator(mode="after")
     def check_topk(self):
         if self.topk is None:
@@ -172,9 +164,6 @@ class Request(RequestBase):
 
             if topk == 1:
                 raise ValueError("topk values must not be 1")
-
-            if topk >= self.size:
-                raise ValueError("topk values must be less than size")
 
         return self
 
@@ -199,7 +188,7 @@ def observe(
     return TensorDict(
         {
             TensorKey.state: tally(torch.from_numpy(field.dense.copy()), len(Tokens)),
-            TensorKey.content: tally(torch.from_numpy(indices.copy()), cast(Request, schema.requests[address]).size),
+            TensorKey.content: tally(torch.from_numpy(indices.copy()), state.size),
         },
         batch_size=[],
     )
@@ -251,33 +240,18 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         content = encode(input)
         target_content = encode(target)
 
-        if state is not None and len(state) > (size := cast(Request, schema.requests[address]).size):
-            logger.bind(
-                component="tensorfield",
-                field_type="category",
-                address=str(address),
-                vocabulary_size=len(state),
-                capacity=size,
-            ).warning("vocabulary exceeds configured capacity")
-
         state_tensor = torch.from_numpy(input.dense)
         target_state = torch.from_numpy(target.dense)
         if strata == Strata.train:
             p_unavailable: float = cast(Request, schema.requests[address]).p_unavailable
-            unavailable_index: int = cast(Request, schema.requests[address]).size
+            unavailable_index = -1
 
             if p_unavailable > 0.0:
-                # Unavailable content never appears naturally during training, because the
-                # train split is exactly where the vocabulary is built. We simulate a small
-                # amount of OOV behavior so the content objective does not reward any real
-                # class for valued inputs whose categorical content is unavailable.
-                def regularize(values: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
-                    known = state.eq(Tokens.valued.value) & values.ne(unavailable_index)
-                    selected = torch.rand_like(state, dtype=torch.float).lt(p_unavailable) & known
-                    return values.masked_fill(selected, unavailable_index)
-
-                content = regularize(content, state_tensor)
-                target_content = regularize(target_content, target_state)
+                # Train the unavailable-input fallback against the real answer.
+                # An input augmentation is not evidence that its target is unknown.
+                known = state_tensor.eq(Tokens.valued.value) & content.ne(unavailable_index)
+                selected = torch.rand_like(state_tensor, dtype=torch.float).lt(p_unavailable) & known
+                content = content.masked_fill(selected, unavailable_index)
 
         return cls(
             state=state_tensor,
@@ -303,12 +277,11 @@ class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 
-        request: Request = cast(Request, schema.requests[address])
+        request = schema.requests[address]
         self.origin: Address = address
         self.destination: Address = cast("Branch", request.parent).address
-        self.size: int = request.size
 
-        self.vocab: OnlineVocabularyModel = OnlineVocabularyModel(size=request.size)
+        self.vocab: OnlineVocabularyModel = OnlineVocabularyModel()
 
         self.embeddings = torch.nn.ModuleDict(
             {
@@ -316,18 +289,23 @@ class Embedder(EmbedderBase):
                     num_embeddings=len(Tokens),
                     embedding_dim=schema.d_model,
                 ),
-                TensorKey.content.name: torch.nn.Embedding(
-                    num_embeddings=self.size,
+                TensorKey.content.name: Embedding(
+                    num_embeddings=self.vocab.size,
                     embedding_dim=schema.d_model,
                 ),
             }
         )
+
         self.counters = torch.nn.ModuleDict(
             {
                 TensorKey.state.name: Counter(address=address, size=len(Tokens)),
-                TensorKey.content.name: Counter(address=address, size=request.size),
+                TensorKey.content.name: Counter(address=address, size=self.vocab.size),
             }
         )
+
+    @property
+    def size(self) -> int:
+        return self.vocab.size
 
     @beartype
     def forward(self, inputs: TensorInput) -> Parcel:
@@ -339,10 +317,10 @@ class Embedder(EmbedderBase):
         content = cast(torch.Tensor, inputs.content).reshape(-1)
         valued = state.eq(Tokens.valued.value)
 
-        if (valued & (content > self.size)).any():
+        if (valued & ((content < -1) | (content >= self.size))).any():
             raise ValueError(f"Token in address {self.origin} exceeds vocabulary size of {self.size}")
 
-        known = valued & content.lt(self.size)
+        known = valued & content.ge(0)
         safe_content = content.masked_fill(~known, 0)
         content_embedding = self.embeddings[TensorKey.content.name](safe_content) * known.unsqueeze(-1)
 
@@ -361,6 +339,39 @@ class Embedder(EmbedderBase):
     @property
     def context(self) -> VocabularyState:
         return self.vocab.state
+
+
+@category.register
+def bind(
+    module: Model,
+    field: TensorFieldBase,
+    observation: TensorDict | None,
+    binding: object,
+    *,
+    address: Address,
+    strata: Strata,
+    resize: Resize,
+) -> None:
+    """Admit labels before forward and translate prefetched scalar IDs."""
+    if not isinstance(binding, VocabularyBatch):
+        raise TypeError(f"category binding at '{address}' requires VocabularyBatch, got {type(binding).__name__}")
+    node = module.nodes[address]
+    embedder = cast(Embedder, node.embedder)
+    mapping, size = binding.resolve(embedder.vocab, learn=strata == Strata.train, device=module.device, resize=resize)
+    resize.embedding(cast(torch.nn.Embedding, embedder.embeddings[TensorKey.content.name]), size)
+    cast(Counter, embedder.counters[TensorKey.content.name]).resize(size, resize)
+    decoder = getattr(node, "decoder", None)
+    if decoder is not None:
+        resize.linear(decoder.linears[TensorKey.content.name], size)
+    field = cast(TensorField, field)
+    field.content = mapping.to(field.content.device)[field.content]
+    if TensorKey.content in field.targets:
+        values = cast(torch.Tensor, field.targets[TensorKey.content])
+        field.targets[TensorKey.content] = mapping.to(values.device)[values]
+    if observation is not None:
+        observation[TensorKey.content] = binding.counts(
+            cast(torch.Tensor, observation[TensorKey.content]), mapping, size
+        )
 
 
 @category.register
@@ -393,12 +404,13 @@ class Decoder(DecoderBase):
                     in_features=schema.d_model,
                     out_features=len(Tokens),
                 ),
-                TensorKey.content.name: torch.nn.Linear(
+                TensorKey.content.name: Linear(
                     in_features=schema.d_model,
-                    out_features=request.size,
+                    out_features=INITIAL_CAPACITY,
                 ),
             }
         )
+        self.metrics = Scores(address, partial(Reconstruction, cast(list[int], request.topk)))
 
     @beartype
     def decode(self, pooled: torch.Tensor) -> TensorDict:
@@ -430,7 +442,6 @@ def loss(
             torch.nn.functional.cross_entropy(
                 input=state_inputs,
                 target=state_targets,
-                weight=cast(Counter, embedder.counters[TensorKey.state.name]).weight,
                 reduction="none",
             )
             .masked_select(trainable)
@@ -448,63 +459,41 @@ def loss(
     )
 
     valued = trainable & state_targets.eq(Tokens.valued.value)
-    if not valued.any():
-        return loss
-
     content_inputs = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N, -1)
     content_targets = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(N)
-    n_content_tokens = content_inputs.shape[-1]
-    invalid = valued & content_targets.gt(n_content_tokens)
+    size = len(embedder.vocab.master)
+    invalid = valued & (content_targets.lt(-1) | content_targets.ge(size))
     if invalid.any():
         raise ValueError(f"Token in address {prediction.address} exceeds vocabulary size")
 
-    known = valued & content_targets.lt(n_content_tokens)
-    unavailable = valued & content_targets.eq(n_content_tokens)
-
+    known = valued & content_targets.ge(0)
     known_indices = known.nonzero(as_tuple=True)[0]
+    known_logits = content_inputs.index_select(0, known_indices)[:, :size].float()
+    known_targets = content_targets.index_select(0, known_indices)
+    # Unknown target identities supply no categorical supervision. In
+    # particular, they do not imply a uniform distribution over known labels.
+    # Spare storage is not a class and must not influence the objective.
+    known_losses = torch.nn.functional.cross_entropy(input=known_logits, target=known_targets, reduction="none")
+    objective = known_losses.sum()
+    decoder = cast(Decoder, module.nodes[prediction.address].decoder)
+    metric = cast(Reconstruction, decoder.metrics[f"{strata.value}_metrics"])
+    with torch.no_grad():
+        # Score the same populated candidates used by the prediction writer.
+        candidates = known_logits
+        correct = known.sum().new_zeros(())
+        nll = objective.detach()
+        topk = [correct.clone() for _ in metric.topk]
+        if size:
+            correct = candidates.argmax(dim=-1).eq(known_targets).sum()
+            topk = [
+                candidates.topk(k=min(k, size), dim=-1).indices.eq(known_targets.unsqueeze(-1)).any(dim=-1).sum()
+                for k in metric.topk
+            ]
+        metric.update(torch.stack((known.sum(), valued.sum(), correct, *topk)), torch.stack((objective, nll)))
+    return loss + objective / known.sum().clamp_min(1)
 
-    content_loss_sum = content_inputs.new_zeros(())
-    if known_indices.numel():
-        known_losses = torch.nn.functional.cross_entropy(
-            input=content_inputs.index_select(0, known_indices),
-            target=content_targets.index_select(0, known_indices),
-            weight=cast(Counter, embedder.counters[TensorKey.content.name]).weight,
-            reduction="none",
-        )
-        content_loss_sum = content_loss_sum + known_losses.sum()
 
-    if unavailable.any():
-        unavailable_losses = -torch.nn.functional.log_softmax(content_inputs[unavailable], dim=1).mean(dim=1)
-        content_loss_sum = content_loss_sum + unavailable_losses.sum()
-
-    content_loss = module.track(
-        (prediction.address, strata, Metric.loss, TensorKey.content),
-        value=content_loss_sum / valued.float().sum().clamp_min(1.0),
-    )
-    loss += content_loss
-
-    if not known_indices.numel():
-        return loss
-
-    for topk in cast(list[int], cast(Request, module.schema.requests[prediction.address]).topk):
-        module.track(
-            (prediction.address, strata, Metric.accuracy, f"top{topk}"),
-            value=(
-                content_inputs.topk(k=topk, dim=1)
-                .indices.eq(content_targets.unsqueeze(1))
-                .any(dim=1)
-                .index_select(0, known_indices)
-                .float()
-                .mean()
-            ),
-        )
-
-    module.track(
-        (prediction.address, strata, Metric.accuracy, TensorKey.content),
-        value=content_inputs.argmax(dim=1).eq(content_targets).index_select(0, known_indices).float().mean(),
-    )
-
-    return loss
+category.callback(VocabularySyncCallback, CounterUpdateCallback, Metrics)
 
 
 @category.register

@@ -7,7 +7,6 @@ def _structure_with_field(field: dict) -> dict:
     return {
         "d_model": 16,
         "fields": {
-            "name": "root",
             "type": "branch",
             "dropout": 0.1,
             "length": 2,
@@ -21,7 +20,6 @@ def test_category_topk_rejects_non_positive():
         {
             "name": "cat",
             "type": "category",
-            "size": 64,
             "topk": [0],
         }
     )
@@ -29,17 +27,15 @@ def test_category_topk_rejects_non_positive():
         Schema.model_validate(payload)
 
 
-def test_category_topk_rejects_values_at_or_above_vocab():
+def test_category_topk_is_independent_of_vocabulary_storage():
     payload = _structure_with_field(
         {
             "name": "cat",
             "type": "category",
-            "size": 8,
-            "topk": [8],
+            "topk": [10000, 8, 10000],
         }
     )
-    with pytest.raises(ValueError, match="topk values must be less than size"):
-        Schema.model_validate(payload)
+    assert Schema.model_validate(payload).requests["/cat"].topk == [8, 10000]
 
 
 def test_category_rejects_number_only_n_bands_option():
@@ -47,7 +43,6 @@ def test_category_rejects_number_only_n_bands_option():
         {
             "name": "cat",
             "type": "category",
-            "size": 64,
             "n_bands": 8,
         }
     )
@@ -121,7 +116,7 @@ def test_dateparts_normalizes_friendly_datepart_names():
         }
     )
     structure = Schema.model_validate(payload)
-    request = structure.requests["root/ts"]
+    request = structure.requests["/ts"]
 
     assert [datepart.value for datepart in request.dateparts] == [
         "day_of_week",
@@ -165,4 +160,4 @@ def test_dateparts_pattern_accepts_valid_format():
         }
     )
     structure = Schema.model_validate(payload)
-    assert "root/ts" in structure.requests
+    assert "/ts" in structure.requests

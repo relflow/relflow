@@ -1,66 +1,38 @@
 from types import SimpleNamespace
 
+import pyarrow as pa
+
 from relflow.tensorfields.shared.vocabulary import OnlineVocabularyModel, VocabularySyncCallback
 
 
-def test_vocabulary_sync_callback_gathers_rank_proposals(monkeypatch):
-    events = []
-    vocab = OnlineVocabularyModel(size=8)
-    vocab.load_snapshot(["ALPHA"])
-    vocab.proposals.append("BETA")
+def test_vocabulary_fit_start_matches_rank_zero_metadata(monkeypatch):
+    vocabulary = OnlineVocabularyModel(size=8)
+    vocabulary.load_snapshot(["local-label"])
+    module = SimpleNamespace(nodes={"/category": SimpleNamespace(embedder=SimpleNamespace(vocab=vocabulary))})
+    calls = []
 
-    class TrainerStub:
-        strategy = SimpleNamespace(barriers=[])
-
-        @property
-        def callback_metrics(self):
-            events.append("metrics")
-            return {}
-
-    trainer = TrainerStub()
-    trainer.strategy.barrier = lambda name: trainer.strategy.barriers.append(name)
-    module = SimpleNamespace(
-        nodes={
-            "root/category": SimpleNamespace(
-                embedder=SimpleNamespace(vocab=vocab),
-            ),
-        },
-    )
+    def broadcast(payload, src):
+        calls.append((payload, src))
+        return {"/category": ["rank-zero-label"]}
 
     monkeypatch.setattr("relflow.tensorfields.shared.vocabulary.is_distributed", lambda: True)
-    monkeypatch.setattr("relflow.tensorfields.shared.vocabulary.is_rank_zero", lambda: True)
-    monkeypatch.setattr(
-        "relflow.tensorfields.shared.vocabulary.all_gather_object",
-        lambda local: events.append("vocabulary") or [local, {"root/category": ["GAMMA"]}],
-    )
-    monkeypatch.setattr("relflow.tensorfields.shared.vocabulary.broadcast_object", lambda payload, src: payload)
+    monkeypatch.setattr("relflow.tensorfields.shared.vocabulary.broadcast_object", broadcast)
+    VocabularySyncCallback().on_fit_start(trainer=None, pl_module=module)
 
-    VocabularySyncCallback().on_train_epoch_end(trainer=trainer, pl_module=module)
-
-    assert vocab.snapshot() == ["ALPHA", "BETA", "GAMMA"]
-    assert list(vocab.proposals) == []
-    assert events == ["metrics", "vocabulary"]
-    assert trainer.strategy.barriers == ["vocabulary-sync-train_epoch_end"]
+    assert vocabulary.snapshot() == ["rank-zero-label"]
+    assert calls == [({"/category": ["local-label"]}, 0)]
 
 
-def test_vocabulary_sync_callback_merges_worker_proposals_without_ddp():
-    vocabulary = OnlineVocabularyModel(size=8)
+def test_prefetching_does_not_admit_labels_at_epoch_end():
+    vocabulary = OnlineVocabularyModel(size=1)
     vocabulary.load_snapshot(["ALPHA"])
-    vocabulary.share()
-    try:
-        worker = vocabulary.state
-        worker.configure_distributed(global_rank=1, world_size=2)
-        worker.reserve(["BETA"], learn=True)
-        assert vocabulary.snapshot() == ["ALPHA"]
-        assert list(vocabulary.proposals) == ["BETA"]
-        trainer = SimpleNamespace(callback_metrics={}, strategy=SimpleNamespace(barrier=lambda name: None))
-        module = SimpleNamespace(nodes={"root/category": SimpleNamespace(embedder=SimpleNamespace(vocab=vocabulary))})
+    local, binding = vocabulary.state.batch(pa.array(["BETA", "GAMMA", "BETA"]))
+    assert local.encode("BETA") == 0
+    assert local.encode("GAMMA") == 1
+    assert binding.labels.to_pylist() == ["BETA", "GAMMA"]
+    module = SimpleNamespace(nodes={"/category": SimpleNamespace(embedder=SimpleNamespace(vocab=vocabulary))})
 
-        VocabularySyncCallback().on_train_epoch_end(trainer=trainer, pl_module=module)
+    VocabularySyncCallback().on_train_epoch_end(trainer=None, pl_module=module)
 
-        assert vocabulary.snapshot() == ["ALPHA", "BETA"]
-        worker.refresh()
-        assert worker.encode("BETA") == 1
-        assert list(vocabulary.proposals) == []
-    finally:
-        vocabulary.freeze()
+    assert vocabulary.snapshot() == ["ALPHA"]
+    assert vocabulary.size == 1

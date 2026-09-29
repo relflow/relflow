@@ -129,7 +129,6 @@ def schema() -> Schema:
         {
             "d_model": 8,
             "fields": {
-                "name": "root",
                 "type": "branch",
                 "dropout": 0.1,
                 "length": 1,
@@ -138,7 +137,6 @@ def schema() -> Schema:
                         "name": "label",
                         "type": "category",
                         "embed": True,
-                        "size": 32,
                     }
                 ],
             },
@@ -197,9 +195,9 @@ def test_deployment_serves_embeddings_from_temporary_checkpoint(tmp_path: Path) 
         stop_process(process)
 
     assert status == 200
-    assert "root/label" in payload["predictions"]
+    assert "/label" in payload["predictions"]
 
-    embedding = payload["predictions"]["root/label"]["embedding"]
+    embedding = payload["predictions"]["/label"]["embedding"]
     assert len(embedding) == model_schema.d_model
     assert all(isinstance(value, float) for value in embedding)
 
@@ -221,8 +219,8 @@ def test_deployment_accepts_multiple_inputs_in_one_request(tmp_path: Path) -> No
     assert isinstance(payload, list)
     assert len(payload) == 2
     for item in payload:
-        assert "root/label" in item["predictions"]
-        embedding = item["predictions"]["root/label"]["embedding"]
+        assert "/label" in item["predictions"]
+        embedding = item["predictions"]["/label"]["embedding"]
         assert len(embedding) == model_schema.d_model
 
 
@@ -241,9 +239,6 @@ def test_deployment_accepts_unseen_category_values_at_runtime(tmp_path: Path) ->
         stop_process(process)
 
     assert status == 200
-    assert "root/label" in alpha_payload["predictions"]
-    assert "root/label" in gamma_payload["predictions"]
-    assert (
-        alpha_payload["predictions"]["root/label"]["embedding"]
-        != gamma_payload["predictions"]["root/label"]["embedding"]
-    )
+    assert "/label" in alpha_payload["predictions"]
+    assert "/label" in gamma_payload["predictions"]
+    assert alpha_payload["predictions"]["/label"]["embedding"] != gamma_payload["predictions"]["/label"]["embedding"]

@@ -18,6 +18,8 @@ from relflow.tensorfields.base import TENSORFIELDS
 
 RequestTypes: TypeAlias = Leaf
 
+OMITTED = object()
+
 
 class Branch(Node):
     """Repeated nested object group in a `relflow` schema.
@@ -53,11 +55,11 @@ class Branch(Node):
         embed: bool = False,
         length: int = 1,
         overflow: OverflowInput = Overflow.head,
-        attention: AttentionInput = AttentionMode.mha,
-        n_layers: int = 1,
-        n_heads: int = 4,
-        reduction: ReductionConfig | None = Attention(),
-        dropout: Rate | None = None,
+        attention: AttentionInput = cast(AttentionInput, OMITTED),
+        n_layers: int = cast(int, OMITTED),
+        n_heads: int = cast(int, OMITTED),
+        reduction: ReductionConfig | None = cast(ReductionConfig | None, OMITTED),
+        dropout: Rate | None = cast(Rate | None, OMITTED),
         mask: MaskInput = False,
         type: Literal["branch"] = "branch",
         **children: Branch | Leaf | builtins.type[Leaf],
@@ -79,7 +81,9 @@ class Branch(Node):
             mask=mask,
             type=type,
         )
-        super().__init__(**data)
+        # Pydantic owns ordinary defaults; omitted options remain available for
+        # a model preset to fill without replacing explicit defaults or None.
+        super().__init__(**{name: value for name, value in data.items() if value is not OMITTED})
 
     @pydantic.field_validator("mask", mode="before")
     @classmethod

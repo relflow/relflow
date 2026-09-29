@@ -156,8 +156,9 @@ def records(*, rows: int, seed: int, signal: bool) -> Iterator[dict]:
 # to rank positive examples above negative ones.
 #
 # Each model trains on 1,024 rows, validates on 512, and tests on 2,048. The
-# three splits use independent random streams. Both runs use 12 deterministic
-# epochs, so a difference in the information available explains the contrast.
+# three splits use independent random streams. Both runs use the `xs` preset
+# and 12 deterministic epochs, so a difference in the information available
+# explains the contrast.
 #
 # ## Training and evaluation
 
@@ -166,15 +167,11 @@ def records(*, rows: int, seed: int, signal: bool) -> Iterator[dict]:
 def fit(*, signal: bool, seed: int, steps: int | None, accelerator: str) -> float:
     """Fit one relationship and measure its held-out Boolean AUC."""
     lit.seed_everything(seed, workers=True)
-    model = rf.Model(
-        name="calibration",
-        d_model=24,
-        n_layers=1,
-        n_heads=4,
+    model = rf.Model.xs(
         batch_size=128,
         x=rf.Number,
-        segment=rf.Category(size=4, p_unavailable=0.0),
-        tags=rf.Set(size=6, p_unavailable=0.0),
+        segment=rf.Category(p_unavailable=0.0),
+        tags=rf.Set(p_unavailable=0.0),
         leak=rf.Boolean,
         target=rf.Boolean(mask=True),
     )
@@ -198,7 +195,7 @@ def fit(*, signal: bool, seed: int, steps: int | None, accelerator: str) -> floa
     )
     trainer.fit(model=model, datamodule=data)
     metrics = trainer.test(model=model, datamodule=data, verbose=False)[0]
-    return float(metrics["calibration.target/test.auc.content"])
+    return float(metrics[".target/test.auc.content"])
 
 
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:

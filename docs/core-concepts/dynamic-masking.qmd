@@ -7,6 +7,19 @@ self-supervised learning, input dropout, and ablation.
 For a complete workflow that changes these objectives between training stages,
 see [Pretraining And Fine-Tuning](../guides/pretraining.qmd).
 
+The [proof catalog](../proofs.qmd) includes dynamic-masking experiments P051–P054:
+sampled reconstruction, nested query selectors, branch ablation, and prefix-only
+sequence prediction. Their recorded results distinguish visibility guarantees
+from learned accuracy; the sequence experiment uses one prefix per observation,
+not a triangular attention mask.
+
+The [incomplete-evidence proof](../proofs/representation/incomplete-evidence.html)
+tests noisy sensor fusion and a missingness pattern excluded from fitting.
+The [contextual-consistency proof](../proofs/anomaly/contextual-consistency.html)
+uses hidden-field reconstruction errors to score broken relationships while
+preserving individual-field distributions. Both report controls and limits
+alongside the intended capability.
+
 ## Choose The Intended Effect
 
 | Goal | Field configuration |

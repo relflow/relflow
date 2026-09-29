@@ -131,7 +131,7 @@ def dispersion_records(*, rows: int, seed: int) -> Iterator[dict]:
 def prediction(model: rf.Model, observations: list[dict]) -> np.ndarray:
     inputs = [{"items": row["items"]} for row in observations]
     output = model.predict(inputs)["predictions"].to_pylist()
-    return np.asarray([row["record/variance"]["content"] for row in output], dtype=np.float64)
+    return np.asarray([row["/variance"]["content"] for row in output], dtype=np.float64)
 
 
 def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:

@@ -11,7 +11,6 @@ def _structure_payload() -> dict:
     return {
         "d_model": 16,
         "fields": {
-            "name": "root",
             "type": "branch",
             "dropout": 0.1,
             "fields": [
@@ -44,11 +43,11 @@ def test_schema_derives_effective_reconstruct_roles_from_masks():
 
     schema = Schema.model_validate(payload)
 
-    assert schema.reconstruct == ["root/items/identifier"]
-    assert schema.objectives == ["root/items/identifier"]
-    assert schema.decodes == ["root/items/identifier"]
-    assert schema.forward_for("train") == ["root/items/identifier"]
-    assert schema.forward_for("predict") == ["root/items/identifier"]
+    assert schema.reconstruct == ["/items/identifier"]
+    assert schema.objectives == ["/items/identifier"]
+    assert schema.decodes == ["/items/identifier"]
+    assert schema.forward_for("train") == ["/items/identifier"]
+    assert schema.forward_for("predict") == ["/items/identifier"]
 
 
 def test_schema_derives_embed_from_node_attribute():
@@ -57,7 +56,7 @@ def test_schema_derives_embed_from_node_attribute():
 
     schema = Schema.model_validate(payload)
 
-    assert schema.embed == ["root"]
+    assert schema.embed == ["/"]
 
 
 def test_schema_excludes_dynamic_reconstruct_from_prediction_decodes():
@@ -70,9 +69,9 @@ def test_schema_excludes_dynamic_reconstruct_from_prediction_decodes():
 
     schema = Schema.model_validate(payload)
 
-    assert schema.objectives == ["root/items/identifier"]
+    assert schema.objectives == ["/items/identifier"]
     assert schema.decodes == []
-    assert schema.forward_for("train") == ["root/items/identifier"]
+    assert schema.forward_for("train") == ["/items/identifier"]
     assert schema.forward_for("predict") == []
 
 
@@ -84,9 +83,9 @@ def test_schema_mask_round_trip_preserves_skip_policy():
     restored = Schema.model_validate(schema.model_dump(mode="python", round_trip=True))
 
     assert restored.fields.mask == schema.fields.mask
-    assert restored.reconstruct == ["root/items/identifier"]
+    assert restored.reconstruct == ["/items/identifier"]
 
     restored_json = Schema.model_validate_json(schema.model_dump_json())
 
     assert restored_json.fields.mask == schema.fields.mask
-    assert restored_json.reconstruct == ["root/items/identifier"]
+    assert restored_json.reconstruct == ["/items/identifier"]

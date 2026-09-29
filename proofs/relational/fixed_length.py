@@ -184,7 +184,7 @@ def scores(train: list[dict], test: list[dict], predicted: np.ndarray, keys: tup
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     inputs = [{key: value for key, value in row.items() if key != "answer"} for row in rows]
     output = model.predict(inputs).to_pylist()
-    return np.asarray([row["predictions"]["request/answer"]["content"] for row in output])
+    return np.asarray([row["predictions"]["/answer"]["content"] for row in output])
 
 
 def permute_items(rows: list[dict], seed: int) -> list[dict]:
@@ -243,7 +243,6 @@ def permute_items(rows: list[dict], seed: int) -> list[dict]:
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
-        name="request",
         d_model=64,
         n_layers=2,
         n_heads=4,
@@ -252,7 +251,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         optimizer=lambda module: torch.optim.Adam(module.parameters(), lr=0.001),
         items=rf.Branch(length=8, n_layers=2, reduction=rf.Attention(n_layers=2), value=rf.Number),
         answer=rf.Number(mask=True, objective="mse"),
-        operation=rf.Category(size=len(OPERATIONS), p_unavailable=0.0),
+        operation=rf.Category(p_unavailable=0.0),
     )
     data = rf.SyntheticDataModule(
         model=model,

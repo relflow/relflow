@@ -8,6 +8,7 @@ mutation predicates, and the `@preprocess` and `@postprocess` decorators.
 
 from typing import TYPE_CHECKING, Any
 
+from relflow import presets as presets
 from relflow._version import __version__
 from relflow.architecture.checkpoint import RollbackCheckpoint
 from relflow.architecture.mutations import MutationLockCallback, RuntimePlacementCallback
@@ -22,6 +23,7 @@ from relflow.data.datasets import (
     ArrowDataModule,
     ArrowInput,
     CustomDataModule,
+    DuckDBDataModule,
     PolarsDataModule,
     StratumConfig,
     SyntheticDataModule,
@@ -68,6 +70,7 @@ from relflow.structs.structure import Branch, Mask
 from relflow.structs.tree import Address, Leaf, MaskInput
 from relflow.tensorfields import (
     TENSORFIELDS,
+    BatchContext,
     Context,
     DecoderBase,
     EmbedderBase,
@@ -80,8 +83,10 @@ from relflow.tensorfields.extensions.boolean import Request as Boolean
 from relflow.tensorfields.extensions.category import Request as Category
 from relflow.tensorfields.extensions.cluster import Request as Cluster
 from relflow.tensorfields.extensions.dateparts import Request as DateParts
+from relflow.tensorfields.extensions.enum import Request as Enum
 from relflow.tensorfields.extensions.hashable import Request as Hash
 from relflow.tensorfields.extensions.number import Request as Number
+from relflow.tensorfields.extensions.quantile import Request as Quantile
 from relflow.tensorfields.extensions.set import Request as Set
 from relflow.tensorfields.extensions.text import Request as Text
 from relflow.tensorfields.extensions.vector import Request as Vector
@@ -135,6 +140,7 @@ __all__ = [
     "Accelerator",
     "Attention",
     "Branch",
+    "BatchContext",
     "Boolean",
     "AttentionMode",
     "AttentionInput",
@@ -145,7 +151,9 @@ __all__ = [
     "Component",
     "Context",
     "CustomDataModule",
+    "DuckDBDataModule",
     "DateParts",
+    "Enum",
     "DecoderBase",
     "Deployment",
     "EmbedderBase",
@@ -166,6 +174,7 @@ __all__ = [
     "NodePredicate",
     "NodeSelector",
     "Number",
+    "Quantile",
     "OptimizerConfig",
     "Overflow",
     "OverflowInput",
@@ -206,6 +215,7 @@ __all__ = [
     "predicate",
     "postprocess",
     "preprocess",
+    "presets",
     "where",
     "source",
 ]

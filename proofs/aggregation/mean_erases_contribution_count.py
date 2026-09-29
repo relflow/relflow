@@ -120,7 +120,7 @@ def repeated_contribution_records(*, rows: int, seed: int) -> Iterator[dict]:
 def prediction(model: rf.Model, observations: list[dict], target: str) -> np.ndarray:
     inputs = [{"items": row["items"]} for row in observations]
     output = model.predict(inputs)["predictions"].to_pylist()
-    return np.asarray([row[f"record/{target}"]["content"] for row in output], dtype=np.float64)
+    return np.asarray([row[f"/{target}"]["content"] for row in output], dtype=np.float64)
 
 
 def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:

@@ -70,7 +70,7 @@ def test_mask_configuration_matrix(
         strata=strata,
         seed=19,
         epoch=3,
-    )[rf.Address("record/value")]
+    )[rf.Address("/value")]
 
     active = strata == rf.Strata.train or (not dropout and (strata != rf.Strata.predict or rate is None))
     chosen = selected(field)
@@ -127,7 +127,7 @@ def test_arrow_preprocessor_selector_and_partial_binding():
         source,
         preprocess=prepare,
         strata="predict",
-    )[rf.Address("record/amount")]
+    )[rf.Address("/amount")]
 
     assert field.present[:, 0].tolist() == [True, False, True]
     assert field.state[:, 0].tolist() == [
@@ -159,7 +159,7 @@ def test_arrow_preprocessor_attaches_to_data_module():
     )
 
     encoded = next(iter(data.val_dataloader()))
-    field = encoded.tensors[rf.Address("record/amount")]
+    field = encoded.tensors[rf.Address("/amount")]
 
     assert field.present[:, 0].tolist() == [True, False, True]
 
@@ -188,8 +188,8 @@ def test_stratum_aware_selector():
     training = configured.encode(source, preprocess=prediction_policy, strata="train")
     prediction = configured.encode(source, preprocess=prediction_policy, strata="predict")
 
-    assert training[rf.Address("record/amount")].present[:, 0].tolist() == [True, True]
-    assert prediction[rf.Address("record/amount")].present[:, 0].tolist() == [False, True]
+    assert training[rf.Address("/amount")].present[:, 0].tolist() == [True, True]
+    assert prediction[rf.Address("/amount")].present[:, 0].tolist() == [False, True]
 
 
 EVENTS = pa.large_list(
@@ -235,14 +235,14 @@ def test_arrow_selector_is_atomic_for_a_branch():
                 skip=True,
                 dropout=False,
             ),
-            kind=rf.Category(size=8),
+            kind=rf.Category(),
             amount=rf.Number,
         ),
     )
 
     encoded = configured.encode(events(), preprocess=refunds, strata="predict")
-    amount = encoded[rf.Address("record/events/amount")]
-    kind = encoded[rf.Address("record/events/kind")]
+    amount = encoded[rf.Address("/events/amount")]
+    kind = encoded[rf.Address("/events/kind")]
 
     assert amount.present.tolist() == kind.present.tolist() == [[[True, False, True]]]
 
@@ -255,7 +255,6 @@ def test_shared_selector_can_drive_different_leaf_effects():
         events=rf.Branch(
             length=3,
             kind=rf.Category(
-                size=8,
                 mask=rf.Mask(query="mask_event", dropout=False),
             ),
             amount=rf.Number(
@@ -269,8 +268,8 @@ def test_shared_selector_can_drive_different_leaf_effects():
     )
 
     encoded = configured.encode(events(), preprocess=refunds, strata="predict")
-    amount = encoded[rf.Address("record/events/amount")]
-    kind = encoded[rf.Address("record/events/kind")]
+    amount = encoded[rf.Address("/events/amount")]
+    kind = encoded[rf.Address("/events/kind")]
 
     assert amount.present.tolist() == [[[True, False, True]]]
     assert kind.present.tolist() == [[[True, True, True]]]
@@ -305,7 +304,7 @@ def test_last_n_selector():
         events(),
         preprocess=recent,
         strata="predict",
-    )[rf.Address("record/events/amount")]
+    )[rf.Address("/events/amount")]
 
     assert field.present.tolist() == [[[True, False, False]]]
 
@@ -361,7 +360,7 @@ def test_exact_k_selector():
         source,
         preprocess=top_risk,
         strata="predict",
-    )[rf.Address("record/events/amount")]
+    )[rf.Address("/events/amount")]
 
     assert field.present.tolist() == [[[True, False, False]]]
 
@@ -399,7 +398,7 @@ def test_nested_selectors_preserve_all_null_schema(preprocess, datatype):
         source,
         preprocess=preprocess,
         strata="predict",
-    )[rf.Address("record/events/amount")]
+    )[rf.Address("/events/amount")]
 
     assert not field.present.any()
 
@@ -452,7 +451,7 @@ def test_observation_selector_broadcasts_into_nested_records():
         source,
         preprocess=broadcast,
         strata="predict",
-    )[rf.Address("record/events/amount")]
+    )[rf.Address("/events/amount")]
 
     assert field.present.tolist() == [
         [[False, False]],
@@ -466,7 +465,7 @@ def test_train_only_query_is_not_required_during_prediction():
     field = configured.encode(
         pa.table({"value": [1.0, 2.0]}),
         strata="predict",
-    )[rf.Address("record/value")]
+    )[rf.Address("/value")]
 
     assert field.state[:, 0].tolist() == [rf.Tokens.valued, rf.Tokens.valued]
 

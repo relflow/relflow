@@ -24,6 +24,78 @@ and Category top-k values enlarge the prediction payload. Selecting a larger
 batch can improve utilization but also changes updates per epoch; account for
 that when comparing training runs.
 
+## Let Lightning Select Training Hardware
+
+Use Lightning's `accelerator="auto"`, `devices="auto"`, and
+`precision="bf16-mixed"` for automatic hardware selection with BF16 autocast.
+Mixed precision keeps model parameters and Number normalization statistics in
+float32. BF16 requires backend, hardware, and operator support; it is an
+explicit precision choice, not an automatic fallback policy. Use
+`precision="32-true"` when BF16 is unsupported.
+
+On a single-device machine, add Lightning's native `BatchSizeFinder` to tune
+`model.batch_size` before training. `ArrowDataModule.batch_size` reads and
+writes that same value, and rebuilt loaders use the selected size:
+
+```python
+import lightning.pytorch as lit
+from lightning.pytorch.callbacks import BatchSizeFinder
+import relflow as rf
+
+model.optimizer = rf.adamw(learning_rate=1e-3, fused=None)
+datamodule = rf.ArrowDataModule(
+    model=model,
+    train=train_table,
+    validate=validation_table,
+)
+finder = BatchSizeFinder(mode="binsearch", steps_per_trial=3, max_val=64)
+trainer = lit.Trainer(
+    accelerator="auto",
+    devices="auto",
+    precision="bf16-mixed",
+    callbacks=[finder],
+    max_epochs=20,
+)
+trainer.fit(model, datamodule=datamodule)
+```
+
+`model`, `train_table`, and `validation_table` are application-supplied.
+`fused=None` delegates AdamW implementation selection to Torch, including on
+MPS. The finder restores its temporary checkpoint before the real fit;
+`finder.optimal_batch_size` reports its selected size.
+
+The finder does not support distributed strategies. On a multi-GPU machine,
+`devices="auto"` normally selects all visible GPUs, so tune on one device
+first with Lightning's `Tuner` (which uses `BatchSizeFinder` internally),
+then train with automatic device count and no finder callback:
+
+```python
+from lightning.pytorch.tuner import Tuner
+
+tuning = lit.Trainer(accelerator="auto", devices=1, precision="bf16-mixed")
+Tuner(tuning).scale_batch_size(
+    model, datamodule=datamodule, mode="binsearch", max_val=64,
+)
+trainer = lit.Trainer(
+    accelerator="auto", devices="auto", precision="bf16-mixed", max_epochs=20,
+)
+trainer.fit(model, datamodule=datamodule)
+```
+
+Keep a conservative cap and supply enough representative records to fill the
+candidate batches, including dense histories and participating targets.
+Lightning's finder is a short capacity heuristic, not a throughput benchmark
+or a guarantee for unseen records, later vocabulary growth, or DDP overhead.
+Its `margin` reduces the selected batch in binsearch mode; it is not a GPU
+memory reservation. Lightning temporarily disables callbacks during its probes,
+so extension callbacks that allocate additional state still need a real-fit
+smoke test. A cap reached during the search is not necessarily itself probed.
+
+Retune when HPO changes model shape, context lengths, precision, or optimizer.
+The nominal effective batch is `model.batch_size * trainer.num_devices *
+trainer.accumulate_grad_batches` on one node; set accumulation explicitly when
+comparing trials, and account for incomplete final accumulation windows.
+
 ## Feed The Device
 
 `model.batch_size` controls encoded model batches. Loader settings belong on

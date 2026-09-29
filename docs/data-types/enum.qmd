@@ -1,0 +1,109 @@
+# Enum
+
+Use `Enum` for one label from a fixed set declared in the schema: an order
+status, delivery method, or support outcome. Every declared label is available
+to the model immediately. Use [Category](category.qmd) when training data should
+introduce labels over time.
+
+```yaml
+customer_tier: gold
+orders:
+  - amount: 86.50
+    delivery_method: express
+  - amount: 24.00
+    delivery_method: standard
+next_order_status: delivered
+```
+
+```python
+import relflow as rf
+
+model = rf.Model.sm(
+    customer_tier=rf.Enum(values=("bronze", "silver", "gold")),
+    orders=rf.Branch(
+        length=32,
+        overflow="tail",
+        amount=rf.Number,
+        delivery_method=rf.Enum(values=("standard", "express", "pickup")),
+    ),
+    next_order_status=rf.Enum(
+        values=("delivered", "cancelled", "returned"),
+        topk=[2],
+        mask=True,
+    ),
+)
+```
+
+## Input and options
+
+`values` is a required, nonempty tuple of unique labels. Use one exact built-in
+Python type throughout the tuple: `bool`, `int`, `float`, `str`, or `bytes`.
+Mixed types, null labels, NaN, and infinity are rejected. For example,
+`values=(1, 2, 3)` declares integer labels; floating-point inputs must not be
+used in their place. Arrow widths may differ within the declared type family.
+
+Null inputs are separate [value states](../core-concepts/data-types.qmd#value-state),
+not members of `values`. An input outside the declared set raises an error in
+training, validation, test, and prediction, including when the field is hidden
+by a mask. Use a [preprocessor](../guides/preprocessors.qmd) to normalize
+application-specific spellings or map unmatched inputs to a fallback label
+that you include in `values`.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `values` | Required | Nonempty tuple of unique labels of one built-in type; tuple order defines their internal indices. |
+| `p_unavailable` | `0.01` | Training probability of replacing known valued input content with unavailable content. Reconstruction targets remain unchanged. |
+| `topk` | `[]` | Sorted, unique integer accuracy cutoffs greater than one; also controls prediction candidates. Each cutoff is capped by the declared label count. |
+
+See [shared leaf options](../core-concepts/data-types.qmd#shared-leaf-options)
+for reconstruction, masking, and embedding configuration. Since `values` is
+required, construct each field with `rf.Enum(values=(...))`.
+
+## Fixed vocabulary and learning
+
+Declaration order fixes the embedding and decoder rows. Training updates their
+weights and records label counts without adding or reordering labels. All
+declared labels participate in reconstruction and prediction from the start,
+including labels that have not appeared in training.
+
+```python
+labels = rf.Enum.vocabulary(model, rf.Address("next_order_status"))
+counts = rf.Enum.counts(model, rf.Address("next_order_status"))
+```
+
+`vocabulary` returns the declared tuple. It also accepts a preprocessor's
+`encoding_context` in place of `model`. `counts` returns pristine valued
+training exposures per declared label, including zero for unseen labels and
+excluding nulls and padding. Repeated epochs count again; counts synchronize
+across DDP ranks at epoch end. Evaluation and prediction do not update them.
+
+Checkpoints preserve the declaration, learned weights, and counts. Rebuilding
+the model with the same declaration preserves its field state. Changing
+`values` with `model.update(...)`, including changing their order, resets that
+field's embedding, decoder, and counts.
+
+Reconstruction uses unweighted state and categorical cross entropy. It shares
+the [Category metrics](category.qmd#vocabulary-and-learning), with every valid
+valued target inside the declared vocabulary.
+
+## Prediction
+
+`content` contains `value`, `probability`, and `topk`. Probabilities are
+normalized over all declared labels. The candidate list has up to `max(topk)`
+entries, capped by the declared label count, and is empty when no cutoffs are
+configured. Labels are written as Arrow `large_string`, including when input
+labels are numeric or Boolean.
+
+A declared label may receive a prediction before it has training examples;
+membership in the schema does not establish prediction quality. With only one
+declared label, its conditional probability is one. Read content probabilities
+alongside `state` and `inferred` in the
+[prediction envelope](../guides/prediction-output.qmd).
+
+The [fixed-class proof](../proofs/enum/fixed-class-learning.html) compares
+informative and shuffled context. The
+[withheld-class proof](../proofs/enum/declared-without-examples.html) follows a
+declared class before and after it receives training examples.
+The [held-out instruction proof](../proofs/composition/held-out-requests.html)
+tests whether familiar group and operation labels compose in combinations
+excluded from training.

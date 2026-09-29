@@ -44,7 +44,7 @@ def test_predict_returns_canonical_arrow_table_with_retained_inputs():
     assert len(result) == 2
     assert result["inputs"].combine_chunks().type == pa.struct([("request_id", pa.string())])
     prediction_type = result["predictions"].combine_chunks().type
-    assert prediction_type.get_field_index("record/label") == 0
+    assert prediction_type.get_field_index("/label") == 0
     assert result["inputs"].to_pylist() == [{"request_id": "a"}, {"request_id": "b"}]
 
 
@@ -77,10 +77,10 @@ def test_training_dataloader_carries_pristine_observations_into_step():
 
     batch = next(iter(data.train_dataloader()))
     assert isinstance(batch, Encoded)
-    assert rf.Number.normalization(configured, "record/value")["count"] == 0
+    assert rf.Number.normalization(configured, "/value")["count"] == 0
 
     result = configured.training_step(batch, 0)
-    statistics = rf.Number.normalization(configured, "record/value")
+    statistics = rf.Number.normalization(configured, "/value")
 
     assert result is not None
     assert statistics["count"] == 2
@@ -138,7 +138,7 @@ def test_typed_empty_prediction_compiles_the_exact_output_schema_without_forward
     assert result["inputs"].type == pa.struct([pa.field("request_id", pa.large_string())])
     predictions = result["predictions"].type
     assert pa.types.is_struct(predictions)
-    assert predictions.get_field_index("record/label") == 0
+    assert predictions.get_field_index("/label") == 0
 
 
 def test_preprocessor_may_filter_every_prediction_row_without_erasing_schema():
@@ -154,7 +154,7 @@ def test_preprocessor_may_filter_every_prediction_row_without_erasing_schema():
 
     assert len(result) == 0
     assert result["inputs"].type == pa.struct([pa.field("request_id", pa.large_string())])
-    assert result["predictions"].type.get_field_index("record/label") == 0
+    assert result["predictions"].type.get_field_index("/label") == 0
 
 
 def test_predict_preserves_nested_model_axes_as_fixed_lists():
@@ -168,18 +168,18 @@ def test_predict_preserves_nested_model_axes_as_fixed_lists():
 
     result = configured.predict(source)
     predictions = result["predictions"].combine_chunks()
-    field = predictions.type.field("record/items/label")
+    field = predictions.type.field("/items/label")
 
     assert pa.types.is_fixed_size_list(field.type)
     assert field.type.list_size == 3
-    assert all(len(row["record/items/label"]) == 3 for row in predictions.to_pylist())
+    assert all(len(row["/items/label"]) == 3 for row in predictions.to_pylist())
 
 
 def test_embedding_only_address_has_no_state_or_inferred_fields():
     configured = model(embed=True)
 
     result = configured.predict(pa.table({"value": [1.0]}))
-    root = result["predictions"].combine_chunks().type.field("record").type
+    root = result["predictions"].combine_chunks().type.field("/").type
 
     assert [field.name for field in root] == ["embedding"]
     assert root.field("embedding").type == pa.list_(pa.float32(), 8)
@@ -196,7 +196,7 @@ def test_root_embedding_exposes_each_configured_reduction_output():
     )
 
     result = configured.predict(pa.table({"value": [1.0, 2.0]}))
-    root = result["predictions"].combine_chunks().type.field("record").type
+    root = result["predictions"].combine_chunks().type.field("/").type
 
     assert pa.types.is_fixed_size_list(root)
     assert root.list_size == 3
@@ -216,7 +216,7 @@ def test_none_reduction_root_embedding_exposes_every_input_token():
     )
 
     result = configured.predict(pa.table({"first": [1.0], "second": [2.0]}))
-    root = result["predictions"].combine_chunks().type.field("record").type
+    root = result["predictions"].combine_chunks().type.field("/").type
 
     assert pa.types.is_fixed_size_list(root)
     assert root.list_size == 2
@@ -243,7 +243,7 @@ def test_nested_branch_embedding_preserves_parent_and_reduction_axes():
     )
 
     result = configured.predict(source)
-    children = result["predictions"].combine_chunks().type.field("record/parents/children").type
+    children = result["predictions"].combine_chunks().type.field("/parents/children").type
 
     assert pa.types.is_fixed_size_list(children)
     assert children.list_size == 3
@@ -407,12 +407,12 @@ def test_write_rejects_an_ordinary_unplanned_forward_address():
     predictions = configured(encoded.tensors, strata=Strata.predict)
     target = predictions[0]
     extra = Prediction(
-        address=Address("record/value"),
+        address=Address("/value"),
         payload=target.payload.clone(),
         batch_size=target.batch_size,
     )
 
-    with pytest.raises(ValueError, match="unplanned prediction address.*record/value"):
+    with pytest.raises(ValueError, match="unplanned prediction address.*/value"):
         configured.write([*predictions, extra], source=encoded.source)
 
 
@@ -425,7 +425,7 @@ def test_output_plan_rejects_runtime_embedding_width_drift():
         strata=Strata.predict,
     )
     predictions = configured(encoded.tensors, strata=Strata.predict)
-    root = next(prediction for prediction in predictions if prediction.address == Address("record"))
+    root = next(prediction for prediction in predictions if prediction.address == Address("/"))
     root.payload[TensorKey.embedding] = root.payload[TensorKey.embedding][..., :-1]
 
     with pytest.raises(ValueError, match="must end with model width 8"):

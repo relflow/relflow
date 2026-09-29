@@ -20,11 +20,11 @@ Rules for adding helpers here:
    `share()` method on each context resource.
 
 3. Use narrow optional protocols for cross-layer behavior.
-   Encoding context resources may expose small, generic lifecycle methods:
-   `configure_distributed(...)` for rank/worker identity and `share()` for
-   opt-in multiprocessing-safe storage. Those names should mean the same thing
-   for any future helper that implements them. Extension-specific operations
-   belong in the helper module or its callback, not in data/root code.
+   `BatchContext.batch(...)` isolates worker encoding from live model resources;
+   the extension's registered `bind` component resolves that batch before forward.
+   Contexts may expose `share()` for opt-in multiprocessing-safe storage.
+   Extension-specific operations belong in the helper module or its registered
+   component, not in data/root code.
 
 4. Keep multiprocessing lazy and loop-scoped.
    Helper construction must be cheap and local. Creating a `Model` with a
@@ -39,11 +39,11 @@ Rules for adding helpers here:
    local, frozen/read-optimized helper state unless a training loop explicitly
    opts into shared mutable state.
 
-6. Put extension-specific synchronization in callbacks.
-   If a helper needs distributed synchronization, implement it in a callback
-   owned by the helper module. The callback may inspect concrete helper types
-   because it is part of that helper's implementation. Data modules and the root
-   model should only attach callbacks through the tensorfield extension registry.
+6. Keep synchronization extension-owned.
+   Batch admission belongs in the extension's `bind` component; loop-level
+   synchronization belongs in callbacks registered by the extension. Both may
+   inspect concrete helper types. Data modules and the root model only invoke
+   generic protocols and attach callbacks through the extension registry.
 
 7. Avoid generic registries for one-off behavior.
    Add a shared abstraction only when multiple tensorfields can use it or when
@@ -52,7 +52,7 @@ Rules for adding helpers here:
 
 8. Make serialization explicit.
    Helper state that affects inference must be included in the owning module's
-   checkpoint state. Nonpersistent process resources, worker proposals, locks,
+   checkpoint state. Nonpersistent process resources, batch dictionaries, locks,
    and cached snapshots should be rebuilt or discarded on load.
 
 9. Test the boundary, not only the behavior.

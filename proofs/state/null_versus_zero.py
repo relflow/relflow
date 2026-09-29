@@ -118,7 +118,7 @@ def score(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator: s
         deterministic=True,
     )
     metrics = trainer.test(model=model, datamodule=data, verbose=False)[0]
-    return float(metrics["state.target/test.auc.content"]), float(metrics["state.target/test.accuracy@0.5.content"])
+    return float(metrics[".target/test.auc.content"]), float(metrics[".target/test.accuracy@0.5.content"])
 
 
 # %% [markdown]
@@ -150,8 +150,8 @@ def score(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator: s
 # zero in the signal model's test set, while retaining the original labels.
 # Both should remove the useful information.
 #
-# The paired runs use 1,024 training, 512 validation, and 2,048 test rows from
-# independent streams, with eight deterministic epochs.
+# The paired runs use the `xs` preset with 1,024 training, 512 validation, and
+# 2,048 test rows from independent streams, with eight deterministic epochs.
 #
 # ## Training and evaluation
 
@@ -159,11 +159,7 @@ def score(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator: s
 # %%
 def fit(*, signal: bool, seed: int, steps: int | None, accelerator: str) -> rf.Model:
     lit.seed_everything(seed, workers=True)
-    model = rf.Model(
-        name="state",
-        d_model=16,
-        n_layers=1,
-        n_heads=4,
+    model = rf.Model.xs(
         batch_size=128,
         measurement=rf.Number,
         target=rf.Boolean(mask=True),

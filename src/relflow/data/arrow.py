@@ -89,6 +89,7 @@ class Encoded:
     source: pa.Table
     retain: tuple[str, ...] | Literal["*"] = ()
     observations: Mapping[Address, TensorDict] = field(default_factory=dict)
+    bindings: Mapping[Address, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.tensors, TensorDict):
@@ -107,6 +108,11 @@ class Encoded:
                 )
             normalized[Address(address)] = observation
         object.__setattr__(self, "observations", normalized)
+        if not isinstance(self.bindings, Mapping):
+            raise TypeError(f"Encoded bindings must be a mapping, got {type(self.bindings).__name__}")
+        if any(not isinstance(address, str) or not address for address in self.bindings):
+            raise TypeError("Encoded binding addresses must be non-empty strings")
+        object.__setattr__(self, "bindings", {Address(address): value for address, value in self.bindings.items()})
         if self.retain != "*" and (
             not isinstance(self.retain, tuple)
             or any(not isinstance(name, str) or not name for name in self.retain)
@@ -122,6 +128,7 @@ class Encoded:
             source=self.source,
             retain=self.retain,
             observations={address: value.pin_memory() for address, value in self.observations.items()},
+            bindings=self.bindings,
         )
 
 

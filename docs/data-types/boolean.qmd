@@ -13,8 +13,7 @@ converted: true
 ```python
 import relflow as rf
 
-model = rf.Model(
-    d_model=64, n_layers=2, n_heads=4,
+model = rf.Model.sm(
     events=rf.Branch(length=32, succeeded=rf.Boolean),
     converted=rf.Boolean(mask=True, threshold=[0.5, 0.8]),
 )
@@ -49,7 +48,7 @@ shared `state` and `inferred` members in the
 For an application-supplied trained `model`:
 
 ```python
-counts = rf.Boolean.counts(model, "record/converted")
+counts = rf.Boolean.counts(model, rf.Address("converted"))
 ```
 
 Counts include pristine valued training presentations, even when masked, and

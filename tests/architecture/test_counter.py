@@ -122,15 +122,15 @@ def test_counter_update_callback_syncs_counters_in_deterministic_order(monkeypat
 
     module = SimpleNamespace(
         nodes={
-            Address("root", "z"): SimpleNamespace(
-                embedder=SimpleNamespace(counter=named("root/z/counter")),
+            Address("/", "z"): SimpleNamespace(
+                embedder=SimpleNamespace(counter=named("/z/counter")),
             ),
-            Address("root", "a"): SimpleNamespace(
+            Address("/", "a"): SimpleNamespace(
                 embedder=SimpleNamespace(
                     counters=torch.nn.ModuleDict(
                         {
-                            "state": named("root/a/state"),
-                            "content": named("root/a/content"),
+                            "state": named("/a/state"),
+                            "content": named("/a/content"),
                         }
                     )
                 ),
@@ -141,15 +141,15 @@ def test_counter_update_callback_syncs_counters_in_deterministic_order(monkeypat
 
     CounterUpdateCallback().on_train_epoch_end(trainer=None, pl_module=module)
 
-    assert calls == ["root/a/content", "root/a/state", "root/z/counter"]
+    assert calls == ["/a/content", "/a/state", "/z/counter"]
 
 
 def test_counter_update_callback_finishes_epoch_metrics_before_distributed_sync(monkeypatch):
     events = []
-    counter = Counter(address=Address("root/value"), size=2)
+    counter = Counter(address=Address("/value"), size=2)
     module = SimpleNamespace(
         nodes={
-            Address("root", "value"): SimpleNamespace(
+            Address("/", "value"): SimpleNamespace(
                 embedder=SimpleNamespace(counter=counter),
             ),
         }

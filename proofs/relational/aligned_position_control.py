@@ -130,7 +130,7 @@ def normalized_rmse(model: rf.Model, records: list[dict]) -> float:
     output = model.predict(records).to_pylist()
     actual, predicted = [], []
     for row, result in zip(records, output, strict=True):
-        for item, coordinate in zip(row["memory"], result["predictions"]["association/memory/value"], strict=True):
+        for item, coordinate in zip(row["memory"], result["predictions"]["/memory/value"], strict=True):
             if item["is_query"]:
                 actual.append(item["value"])
                 predicted.append(coordinate["content"])
@@ -184,7 +184,6 @@ def normalized_rmse(model: rf.Model, records: list[dict]) -> float:
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
-        name="association",
         d_model=64,
         n_layers=2,
         n_heads=4,
@@ -196,7 +195,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             n_layers=2,
             reduction=rf.Attention(),
             entity_id=rf.Hash(n_hashes=4, n_bands=8),
-            role=rf.Category(size=2, p_unavailable=0.0),
+            role=rf.Category(p_unavailable=0.0),
             is_query=rf.Boolean,
             value=rf.Number(mask=rf.Mask(query="is_query", dropout=False, reconstruct=True), objective="mse"),
         ),

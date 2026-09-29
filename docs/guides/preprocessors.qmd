@@ -53,16 +53,12 @@ parties:
 Define the model against this processed shape:
 
 ```python
-model = rf.Model(
-    name="transfer",
-    d_model=64,
-    n_layers=2,
-    n_heads=4,
+model = rf.Model.sm(
     parties=rf.Branch(
         length=2,
         overflow="error",
         account=rf.Hash,
-        role=rf.Category(size=2),
+        role=rf.Category,
     ),
     amount=rf.Number,
     flagged=rf.Boolean(mask=True),

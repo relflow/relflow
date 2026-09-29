@@ -24,16 +24,12 @@ payload:
 ```python
 import relflow as rf
 
-model = rf.Model(
-    name="order",
+model = rf.Model.sm(
     query="payload",
-    d_model=64,
-    n_layers=2,
-    n_heads=4,
     items=rf.Branch(
         query="items[-32:]",
         length=32,
-        sku=rf.Category(query="product.sku", size=4096),
+        sku=rf.Category(query="product.sku"),
         quantity=rf.Number(query="qty"),
     ),
     returned=rf.Boolean(query="outcome", mask=True),

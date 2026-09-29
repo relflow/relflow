@@ -85,6 +85,10 @@ relflow version. State includes field-owned buffers such as vocabularies and
 normalizers. `load` constructs the model on CPU. Move it to the intended device
 for direct inference; Lightning owns placement when using its loops.
 
+Schemas now use an anonymous root at `/` and slash-prefixed child addresses.
+Artifacts from the former named-root format are not compatible and are rejected
+on load. New artifacts omit the root name and preserve child names as before.
+
 A `Model.save` artifact does not contain optimizer or scheduler state, Trainer
 progress, data sources, or processor configuration. Supply those explicitly
 when fitting a loaded model. Compilation is transient and must be requested

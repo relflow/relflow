@@ -107,7 +107,7 @@ def prediction(model: rf.Model, rows: list[dict], *, include_b: bool = True, cor
         for row in inputs:
             row["y"] = 1000.0
     output = model.predict(inputs)["predictions"].to_pylist()
-    return np.asarray([row["record/y"]["content"] for row in output], dtype=np.float64)
+    return np.asarray([row["/y"]["content"] for row in output], dtype=np.float64)
 
 
 def scores(rows: list[dict], predicted: np.ndarray, mean: float) -> dict:
@@ -253,14 +253,14 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     initial = scores(test, reference, mean)
     learned = initial["nrmse"] < 0.25
     state = deepcopy(source.state_dict())
-    selected_state = deepcopy(source.nodes["record/b"].state_dict())
-    normalization = rf.Number.normalization(source, "record/b")
+    selected_state = deepcopy(source.nodes["/b"].state_dict())
+    normalization = rf.Number.normalization(source, "/b")
     checks = {
         "Source learns both-input relationship below 0.25 nRMSE": learned,
         "Source optimizer covers current parameters": source_fit["optimizer_covers_current_parameters"],
     }
     arms = {}
-    selected = rf.where("address") == "record/b"
+    selected = rf.where("address") == "/b"
     flipped = [{**row, "b": -row["b"]} for row in test]
 
     with TemporaryDirectory(prefix="relflow-mutation-") as directory:
@@ -277,15 +277,14 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
                 model.delete(selected)
                 deleted_schema = model.schema.model_dump()
                 current = model.state_dict()
-                removed = [name for name in state if name.startswith("nodes.record/b.")]
+                removed = [name for name in state if name.startswith("nodes./b.")]
                 changes = [
                     name
                     for name, value in state.items()
-                    if not name.startswith("nodes.record/b.")
-                    and (name not in current or not equal(value, current[name]))
+                    if not name.startswith("nodes./b.") and (name not in current or not equal(value, current[name]))
                 ]
                 checks["Deletion removes b from schema and runtime"] = (
-                    "record/b" not in model.schema.requests and "record/b" not in model.nodes
+                    "/b" not in model.schema.requests and "/b" not in model.nodes
                 )
                 checks["Deletion removes the selected state entries"] = bool(removed) and all(
                     name not in current for name in removed
@@ -329,7 +328,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
                 "after": final,
                 **fitting,
                 "updated_parameter_count": len(updated),
-                "pooling_capacity": model.nodes["record"].encoder.pool.mass_capacity,
+                "pooling_capacity": model.nodes["/"].encoder.pool.mass_capacity,
             }
             checks[f"{arm}: optimizer covers current parameters"] = fitting["optimizer_covers_current_parameters"]
             checks[f"{arm}: parameters actually learn"] = bool(updated)
@@ -356,7 +355,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
                 checks["Deleted checkpoint preserves schema and learned state"] = (
                     loaded.schema.model_dump() == model.schema.model_dump()
                     and equal(model.state_dict(), loaded.state_dict())
-                    and "record/b" not in loaded.nodes
+                    and "/b" not in loaded.nodes
                 )
                 checks["Deleted checkpoint preserves adapted predictions"] = bool(
                     np.allclose(after, prediction(loaded, test), rtol=1e-5, atol=tolerance)
@@ -365,14 +364,14 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         readded = rf.Model.load(checkpoint).to(source.device).eval()
         readded.delete(selected)
         lit.seed_everything(seed + 300, workers=True)
-        readded.extend(rf.where("address") == "record", b=rf.Number)
-        fresh_normalization = rf.Number.normalization(readded, "record/b")
+        readded.extend(rf.where("address") == "/", b=rf.Number)
+        fresh_normalization = rf.Number.normalization(readded, "/b")
         checks["Re-adding the same name does not restore its learned state"] = not equal(
-            selected_state, readded.nodes["record/b"].state_dict()
+            selected_state, readded.nodes["/b"].state_dict()
         )
         fresh = build().to(source.device)
         checks["Re-added input has fresh normalization"] = (
-            fresh_normalization == rf.Number.normalization(fresh, "record/b") and fresh_normalization != normalization
+            fresh_normalization == rf.Number.normalization(fresh, "/b") and fresh_normalization != normalization
         )
         readdition = {
             "scores": scores(test, prediction(readded, test), mean),
@@ -391,7 +390,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         "readdition": readdition,
         "test_rows": len(test),
         "optimizer_policy": "New AdamW factory and Trainer per phase; matched adaptation data and updates",
-        "mutation": "delete record/b; inactive control updates active=False; separate source fork deletes and re-adds b",
+        "mutation": "delete /b; inactive control updates active=False; separate source fork deletes and re-adds b",
     }, checks
 
 

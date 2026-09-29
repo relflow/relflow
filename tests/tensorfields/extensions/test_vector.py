@@ -18,7 +18,7 @@ from relflow.tensorfields.extensions.vector import output as output_type
 from tests.arrow import batch as arrow_batch
 from tests.tensorfields.helpers import tensorize
 
-ADDRESS = "root/items/embedding"
+ADDRESS = "/items/embedding"
 
 
 def structure_payload(
@@ -40,7 +40,6 @@ def structure_payload(
     return {
         "d_model": 16,
         "fields": {
-            "name": "root",
             "type": "branch",
             "dropout": 0.1,
             "fields": [
@@ -369,7 +368,7 @@ def test_vector_unused_target_omission_preserves_training(monkeypatch: pytest.Mo
             ]
         )
         batch = ModelRuntime.prepare(model, source, preprocess=(), strata=Strata.train, seed=2718)
-        field = batch.tensors["record/embedding"]
+        field = batch.tensors["/embedding"]
         assert field.targets.is_empty()
         if padded_targets:
             # Reconstruct the previous unused payload without changing model input.
@@ -380,7 +379,7 @@ def test_vector_unused_target_omission_preserves_training(monkeypatch: pytest.Mo
                 },
                 batch_size=field.state.shape,
             )
-        embedding = model.nodes["record/embedding"].embedder.embed(field).payload.detach().clone()
+        embedding = model.nodes["/embedding"].embedder.embed(field).payload.detach().clone()
         optimizer = adamw(1e-3)(model)
         loss = model.training_step(batch, batch_idx=0)["loss"]
         loss.backward()

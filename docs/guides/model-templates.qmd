@@ -1,0 +1,154 @@
+---
+title: Model Templates
+---
+
+`rf.Model.from_yaml(path)` builds a fresh model from a YAML architecture
+template. Use a template to keep the schema and its options in a reviewable
+configuration file, while the application supplies data and training behavior.
+
+## Define A Template
+
+For example, `flight-model.yaml` describes origin and destination inputs and
+the attributes of an observed booking:
+
+```yaml
+preset: sm
+embed: true
+reduction:
+  type: attention
+  n_outputs: 1
+
+fields:
+  origin:
+    type: category
+  destination:
+    type: category
+  booking:
+    type: branch
+    length: 1
+    mask: true
+    fields:
+      carrier:
+        type: category
+        pooling: mean
+      fare:
+        type: number
+        objective: mse
+        pooling: mean
+      lead_days:
+        type: quantile
+        pooling: mean
+```
+
+Load the file from Python:
+
+```python
+from pathlib import Path
+
+import relflow as rf
+
+model = rf.Model.from_yaml(Path("flight-model.yaml"))
+model.optimizer = rf.adamw(learning_rate=1e-3)
+```
+
+Each `fields` mapping assigns names to its children, just as Python keyword
+arguments do. Every child has an explicit lowercase `type`, including
+`type: branch` for nested collections. Field options use the same names as
+their Python counterparts. The root remains anonymous at `rf.Address()`;
+the fare field has address `rf.Address("booking", "fare")`.
+
+Here, `mask: true` hides booking attributes from the encoder and makes them
+reconstruction targets. `embed: true` exports the root representation, and
+the reduction selects one root vector. A branch still reads a collection,
+including when `length: 1`; this template describes one booking per
+observation, not generation of an arbitrary-length booking history. See
+[Binding Data](../core-concepts/binding-data.qmd) and
+[Embeddings](../core-concepts/embeddings.qmd).
+
+## Defaults And Overrides
+
+The optional `preset` selects `xs`, `sm`, `md`, `lg`, or `xl`, with the same
+defaults as the [size factories](../core-concepts/model-tree.qmd#choose-a-size).
+The `preset` entry is file-only and accepts these five bundled names.
+Without a preset, supply the required `d_model`, `n_layers`, and `n_heads` as
+top-level options in the file or the Python call. For example, an explicit
+configuration can replace the `preset` entry with:
+
+```yaml
+d_model: 128
+n_layers: 2
+n_heads: 4
+```
+
+Python keyword arguments override the file's root or runtime options:
+
+```python
+model = rf.Model.from_yaml(
+    "flight-model.yaml",
+    n_layers=3,
+    batch_size=256,
+    optimizer=rf.adamw(learning_rate=1e-3),
+)
+```
+
+The precedence is Python overrides, then explicit file options, then preset
+defaults. A root override applies only to the root; it does not rewrite
+options on child branches or leaves. Define children in the file's `fields`
+mapping; the loader does not accept Python field overrides.
+
+Each supplied option replaces that whole option. For example,
+`reduction: {type: attention, n_outputs: 1}` creates an attention reduction
+with one output and its ordinary remaining defaults. It does not recursively
+merge with the preset reduction. Likewise, a Python `reduction=rf.Mean()`
+replaces the reduction declared in the file.
+
+Omitting an option allows defaults to apply. An explicit `null` is preserved:
+`attention: null` disables encoder attention, while `reduction: null` retains
+routed child slots. These retain the same meaning as Python `None`; see
+[Branch](../data-types/branch.qmd).
+
+## Structured Options
+
+Nested option mappings use existing configuration fields. For example, an
+explicit masking policy can be written as:
+
+```yaml
+mask:
+  rate: 0.15
+  reconstruct: true
+```
+
+A `mask` may also be a list of policy mappings. Boolean and floating-point
+masking shorthands retain their Python meanings. See
+[Masking And Objectives](../core-concepts/dynamic-masking.qmd) for the policies
+and their interactions.
+
+Declare an `Enum` vocabulary with a YAML sequence:
+
+```yaml
+type: enum
+values: [economy, premium_economy, business, first]
+```
+
+The same uniqueness and scalar-type validation applies as for
+[Enum](../data-types/enum.qmd). YAML uses PyYAML's scalar conventions: quote
+strings such as `"NO"`, `"on"`, or `"2026-09-22"` when they should remain
+labels rather than booleans or dates. YAML aliases may reuse field definitions.
+Undeclared options and duplicate mapping keys are rejected, including attempts
+to override a key introduced by YAML merge syntax (`<<`).
+
+Custom `type` names resolve against the live tensorfield registry. Import the
+application's extension module before loading a template that uses it; the
+file does not import Python code. Declared extension options use the same
+validation as built-in fields. See
+[Custom Tensorfields](custom-tensorfields.qmd).
+
+## Architecture And Training State
+
+A template creates a new architecture with fresh model state. It does not
+restore trained parameters, category vocabularies, or quantile normalization
+state. Use [checkpoint loading](lightning.qmd) to resume a trained model.
+
+Supply optimizer and scheduler configurations through Python, not YAML. Data
+sources, preprocessors, and the training loop also remain application code;
+see [Data Modules](data-modules.qmd) and [Preprocessing](preprocessors.qmd).
