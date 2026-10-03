@@ -70,6 +70,21 @@ Trainer. relflow installs its own required callbacks automatically. Compile
 selected model regions before the loop with `model.compile()` if desired;
 [Performance](performance.qmd) describes exactly what this compiles.
 
+## Local Distributed Training
+
+For CPU distributed training on one Mac, if Gloo aborts with
+`uv_accept: invalid argument`, select the loopback interface before launching
+your training script:
+
+```bash
+GLOO_SOCKET_IFNAME=lo0 uv run python train.py
+```
+
+This keeps communication between local ranks on macOS's loopback interface.
+For training across machines, select a network interface reachable from every
+rank. PyTorch documents this setting under
+[Gloo network interface configuration](https://docs.pytorch.org/docs/stable/distributed.html#choosing-the-network-interface-to-use).
+
 ## Save And Load
 
 Use a relflow artifact to retain the schema and learned model state:

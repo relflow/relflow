@@ -21,6 +21,12 @@ Run the smallest relevant test subset while developing. Before publishing a
 branch, run the complete checks above and `make render` when documentation or a
 public contract changed.
 
+Distributed tests launch every rank on the same machine. On macOS, the test
+suite defaults `GLOO_SOCKET_IFNAME` to the loopback interface `lo0` so Gloo does
+not select the hostname's network interface. An explicitly configured
+`GLOO_SOCKET_IFNAME` takes precedence. For application configuration, see
+[local distributed training](docs/guides/lightning.qmd#local-distributed-training).
+
 ## Editor And Type Checking
 
 Pyrefly checks `src/relflow` and the static examples in `tests/typing` using
