@@ -1,0 +1,33 @@
+#quarto-document-content .table-responsive {
+  max-width: 100%;
+  margin-bottom: 1rem;
+}
+
+#quarto-document-content .table-responsive > table {
+  margin-bottom: 0;
+}
+
+#quarto-document-content .table-responsive:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+
+#quarto-document-content .math.display {
+  display: block;
+  overflow-x: auto;
+}
+
+#quarto-document-content .math.display mjx-container {
+  /* Keep the left edge of a wide, centered equation inside its scroll area. */
+  min-width: min-content;
+}
+
+#quarto-document-content :not(pre) > code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+#quarto-document-content table code {
+  white-space: pre-wrap;
+  overflow-wrap: normal;
+}

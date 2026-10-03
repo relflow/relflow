@@ -132,7 +132,9 @@ website:
 
 format:
   html:
-    css: assets/stylesheets/branding.css
+    css:
+      - assets/stylesheets/branding.css
+      - assets/stylesheets/layout.css
     include-in-header: assets/color-scheme.html
     include-after-body: assets/sidebar.html
     theme:
@@ -154,6 +156,9 @@ execute:
 
 filters:
   - typst-render
+  - path: assets/filters/tables.lua
+    # Include evidence tables inserted by proof shortcodes.
+    at: post-quarto
 
 extensions:
   typst-render:
