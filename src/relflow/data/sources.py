@@ -6,10 +6,10 @@ import fnmatch
 import os
 import posixpath
 import re
-from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass, field, fields
+from collections.abc import Callable, Generator, Iterator, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any, TypeAlias, cast
+from typing import TypeAlias, cast
 from urllib.parse import unquote
 
 import pyarrow as pa
@@ -87,7 +87,7 @@ class Manifest:
 
 @dataclass(slots=True)
 class Source:
-    """A restartable file source whose live Arrow resources stay process-local."""
+    """A restartable file description; live Arrow resources belong to each scan."""
 
     locations: tuple[str, ...]
     explicit: bool
@@ -99,90 +99,88 @@ class Source:
     partition_base_dir: str | None
     context: str = "file"
     manifest: Manifest | None = field(default=None, init=False, repr=False)
-    dataset: ds.FileSystemDataset | None = field(default=None, init=False, repr=False)
-    process: int | None = field(default=None, init=False, repr=False)
 
     @property
     def label(self) -> str:
         return f"{self.context} source {self.locations!r}"
 
-    def __getstate__(self) -> dict[str, Any]:
-        return {item.name: getattr(self, item.name) for item in fields(self) if item.init or item.name == "manifest"}
-
-    def __setstate__(self, state: dict[str, Any]) -> None:
-        for name, value in state.items():
-            setattr(self, name, value)
-        self.dataset = None
-        self.process = None
-
     def connect(self) -> tuple[fs.FileSystem, tuple[str, ...]]:
         """Open the configured filesystem and resolve all paths in its namespace."""
 
-        filesystem = None
-        if isinstance(self.filesystem, str):
-            filesystem, base = fs.FileSystem.from_uri(self.filesystem)
-            if base and base != "/":
-                filesystem = fs.SubTreeFileSystem(base, filesystem)
-        elif self.filesystem is not None:
-            filesystem = self.filesystem()
-            if not isinstance(filesystem, fs.FileSystem):
-                raise TypeError(f"{self.label}: filesystem factory must return a pyarrow FileSystem")
+        filesystem = owner = current = None
+        try:
+            if isinstance(self.filesystem, str):
+                filesystem, base = fs.FileSystem.from_uri(self.filesystem)
+                if base and base != "/":
+                    filesystem = fs.SubTreeFileSystem(base, filesystem)
+            elif self.filesystem is not None:
+                filesystem = self.filesystem()
+                if not isinstance(filesystem, fs.FileSystem):
+                    raise TypeError(f"{self.label}: filesystem factory must return a pyarrow FileSystem")
 
-        owner = None
-        paths = []
-        for location in self.locations:
-            current, path = resolve(location, filesystem)
-            if owner is not None and not current.equals(owner):
-                raise ValueError(f"{self.label}: all files must use the same filesystem")
-            owner = current
-            paths.append(path)
-        assert owner is not None
-        return owner, tuple(paths)
+            paths = []
+            for location in self.locations:
+                current, path = resolve(location, filesystem)
+                if owner is not None and not current.equals(owner):
+                    raise ValueError(f"{self.label}: all files must use the same filesystem")
+                owner = current
+                paths.append(path)
+            assert owner is not None
+            return owner, tuple(paths)
+        finally:
+            filesystem = owner = current = None
 
     def select(self) -> tuple[fs.FileSystem, tuple[File, ...], str]:
         """Deterministically select existing files within one filesystem."""
 
-        filesystem, paths = self.connect()
-        selected: dict[str, File] = {}
-        roots = []
-        for path in paths:
-            magic = re.search(r"[*?\[]", path) if not self.explicit else None
-            if magic:
-                root = posixpath.dirname(path[: magic.start()]) or "."
-                candidates = filesystem.get_file_info(fs.FileSelector(root, recursive=True))
-            else:
-                info = filesystem.get_file_info(path)
-                if info.type == fs.FileType.Directory and not self.explicit:
-                    root = path
-                    candidates = filesystem.get_file_info(fs.FileSelector(path, recursive=True))
-                elif info.type == fs.FileType.File:
-                    root = posixpath.dirname(path)
-                    candidates = [info]
+        filesystem = None
+        try:
+            filesystem, paths = self.connect()
+            selected: dict[str, File] = {}
+            roots = []
+            for path in paths:
+                magic = re.search(r"[*?\[]", path) if not self.explicit else None
+                if magic:
+                    root = posixpath.dirname(path[: magic.start()]) or "."
+                    candidates = filesystem.get_file_info(fs.FileSelector(root, recursive=True))
                 else:
-                    raise FileNotFoundError(
-                        f"{self.label}: expected an existing {'file' if self.explicit else 'file or directory'} at {path!r}"
-                    )
-            roots.append(root)
-            for info in candidates:
-                if info.type != fs.FileType.File:
-                    continue
-                relative = posixpath.relpath(info.path, root)
-                if any(part.startswith((".", "_")) for part in PurePosixPath(relative).parts):
-                    continue
-                normalized = posixpath.normpath(info.path)
-                if magic and not matches(normalized, posixpath.normpath(path)):
-                    continue
-                if self.match is not None and not self.match.fullmatch(PurePosixPath(info.path).name):
-                    continue
-                selected[normalized] = File(normalized, info.size, info.mtime_ns)
-        if not selected:
-            raise FileNotFoundError(f"{self.label}: no files selected; check the path, glob, and match pattern")
-        base = self.partition_base_dir if self.partition_base_dir is not None else posixpath.commonpath(roots)
-        return filesystem, tuple(selected[path] for path in sorted(selected)), base
+                    info = filesystem.get_file_info(path)
+                    if info.type == fs.FileType.Directory and not self.explicit:
+                        root = path
+                        candidates = filesystem.get_file_info(fs.FileSelector(path, recursive=True))
+                    elif info.type == fs.FileType.File:
+                        root = posixpath.dirname(path)
+                        candidates = [info]
+                    else:
+                        raise FileNotFoundError(
+                            f"{self.label}: expected an existing {'file' if self.explicit else 'file or directory'} at {path!r}"
+                        )
+                roots.append(root)
+                for info in candidates:
+                    if info.type != fs.FileType.File:
+                        continue
+                    relative = posixpath.relpath(info.path, root)
+                    if any(part.startswith((".", "_")) for part in PurePosixPath(relative).parts):
+                        continue
+                    normalized = posixpath.normpath(info.path)
+                    if magic and not matches(normalized, posixpath.normpath(path)):
+                        continue
+                    if self.match is not None and not self.match.fullmatch(PurePosixPath(info.path).name):
+                        continue
+                    selected[normalized] = File(normalized, info.size, info.mtime_ns)
+            if not selected:
+                raise FileNotFoundError(f"{self.label}: no files selected; check the path, glob, and match pattern")
+            base = self.partition_base_dir if self.partition_base_dir is not None else posixpath.commonpath(roots)
+            return filesystem, tuple(selected[path] for path in sorted(selected)), base
+        finally:
+            filesystem = None
 
     def discover(self) -> Manifest:
         """Freeze selection and validate each file before sharing its scan schema."""
 
+        filesystem = None
+        dataset = None
+        fragment = None
         try:
             filesystem, files, base = self.select()
             format = self.format
@@ -218,30 +216,35 @@ class Source:
                     if missing:
                         raise TypeError(f"{self.label}: {fragment.path!r} is missing declared fields {sorted(missing)}")
             return Manifest(files, dataset.format, dataset.schema, base)
-        except (pa.ArrowException, OSError) as error:
-            raise type(error)(f"{self.label}: {error}") from error
+        except Exception as error:
+            backend = filesystem.type_name if filesystem is not None else "unresolved"
+            error.add_note(f"While discovering {self.label} through filesystem {backend}.")
+            if isinstance(error, (pa.ArrowException, OSError)):
+                raise type(error)(f"{self.label}: {error}") from error
+            raise
+        finally:
+            # Retained exception tracebacks must not extend client lifetimes.
+            fragment = dataset = filesystem = None
 
     def __call__(self) -> Iterator[pa.RecordBatch]:
         if self.manifest is None:
             self.manifest = self.discover()
         manifest = self.manifest
-        # A source may have been used before a fork; never reuse its native state.
-        if self.process != os.getpid():
-            self.dataset = None
+        filesystem = None
+        dataset = None
+        batches = None
         try:
-            if self.dataset is None:
-                filesystem, _ = self.connect()
-                self.dataset = ds.dataset(
-                    [item.path for item in manifest.files],
-                    filesystem=filesystem,
-                    format=manifest.format,
-                    schema=manifest.schema,
-                    partitioning=self.partitioning,
-                    partition_base_dir=manifest.partition_base_dir,
-                    exclude_invalid_files=False,
-                )
-                self.process = os.getpid()
-            current = self.dataset.filesystem.get_file_info([item.path for item in manifest.files])
+            filesystem, _ = self.connect()
+            dataset = ds.dataset(
+                [item.path for item in manifest.files],
+                filesystem=filesystem,
+                format=manifest.format,
+                schema=manifest.schema,
+                partitioning=self.partitioning,
+                partition_base_dir=manifest.partition_base_dir,
+                exclude_invalid_files=False,
+            )
+            current = filesystem.get_file_info([item.path for item in manifest.files])
             for expected, actual in zip(manifest.files, current, strict=True):
                 if actual.type != fs.FileType.File or (actual.size, actual.mtime_ns) != (
                     expected.size,
@@ -251,16 +254,30 @@ class Source:
                         f"{self.label}: selected file {expected.path!r} changed; create a new source for the new snapshot"
                     )
             emitted = False
-            with self.dataset.scanner().to_reader() as reader:
-                for batch in reader:
+            # Direct iteration avoids RecordBatchReader's native wait when
+            # JSON scans need Python filesystem callbacks.
+            batches = dataset.scanner().to_batches()
+            try:
+                for batch in batches:
                     emitted = True
                     yield batch
+            finally:
+                if isinstance(batches, Generator):
+                    batches.close()
             if not emitted:
                 yield pa.RecordBatch.from_arrays(
                     [pa.array([], type=item.type) for item in manifest.schema], schema=manifest.schema
                 )
-        except (pa.ArrowException, OSError) as error:
-            raise type(error)(f"{self.label}: {error}") from error
+        except Exception as error:
+            backend = filesystem.type_name if filesystem is not None else "unresolved"
+            error.add_note(f"While scanning {self.label} through filesystem {backend}.")
+            if isinstance(error, (pa.ArrowException, OSError)):
+                raise type(error)(f"{self.label}: {error}") from error
+            raise
+        finally:
+            # Arrow's S3 finalizer is process-wide. Release this scan's clients
+            # before interpreter exit, even when its traceback remains alive.
+            batches = dataset = filesystem = None
 
 
 def source(

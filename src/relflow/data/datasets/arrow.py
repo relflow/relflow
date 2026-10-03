@@ -138,8 +138,11 @@ def scan(source: ArrowSource | ArrowStream, *, schemas: Schemas | None = None) -
         yield current
         return
 
+    declared = None
     if isinstance(source, ds.Dataset):
-        stream = source.scanner().to_reader()
+        declared = source.schema
+        # RecordBatchReader can block JSON scans through Python filesystems.
+        stream = source.scanner().to_batches()
     elif isinstance(source, pa.RecordBatchReader):
         stream = source
     elif callable(source):
@@ -156,7 +159,7 @@ def scan(source: ArrowSource | ArrowStream, *, schemas: Schemas | None = None) -
 
     iterator = iter(stream)
     try:
-        declared = stream.schema if isinstance(stream, pa.RecordBatchReader) else None
+        declared = stream.schema if isinstance(stream, pa.RecordBatchReader) else declared
         if declared is not None:
             lock(schemas, "source", declared, context="Arrow source schema changed")
 
@@ -460,52 +463,58 @@ class ArrowDataset(IterableDataset[Encoded]):
     def __iter__(self) -> Iterator[Encoded]:
         epoch, worker, workers = self.iteration()
         scanned: Iterable[pa.Table] = scan(self.source, schemas=self.schemas)
-        batches: Iterable[pa.Table] = process(
-            scanned,
-            preprocessor=self.preprocessors,
-            strata=self.strata,
-            schema=self.schema,
-            encoding_context=self.encoding_context,
-            schemas=self.schemas,
-        )
-        batches = sample(
-            batches,
-            rate=self.sample_rate,
-            random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="sample"),
-        )
+        try:
+            batches: Iterable[pa.Table] = process(
+                scanned,
+                preprocessor=self.preprocessors,
+                strata=self.strata,
+                schema=self.schema,
+                encoding_context=self.encoding_context,
+                schemas=self.schemas,
+            )
+            batches = sample(
+                batches,
+                rate=self.sample_rate,
+                random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="sample"),
+            )
 
-        if isinstance(self.source, (pa.Table, pa.RecordBatch)):
-            materialized = merge(batches)
-            batches = () if materialized is None else (materialized,)
-            if self.shuffle_data and materialized is not None:
-                materialized = arrange(
-                    materialized,
-                    random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="shuffle"),
-                )
-                batches = (materialized,)
-            batches = limit(batches, size=self.epoch_size)
-        else:
-            if callable(self.source):
+            if isinstance(self.source, (pa.Table, pa.RecordBatch)):
+                materialized = merge(batches)
+                batches = () if materialized is None else (materialized,)
+                if self.shuffle_data and materialized is not None:
+                    materialized = arrange(
+                        materialized,
+                        random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="shuffle"),
+                    )
+                    batches = (materialized,)
                 batches = limit(batches, size=self.epoch_size)
-            if self.shuffle_data:
-                batches = shuffle(
-                    batches,
-                    rows=self.shuffle_rows,
-                    random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="shuffle"),
-                )
-            batches = limit(batches, size=self.epoch_size)
+            else:
+                if callable(self.source):
+                    batches = limit(batches, size=self.epoch_size)
+                if self.shuffle_data:
+                    batches = shuffle(
+                        batches,
+                        rows=self.shuffle_rows,
+                        random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="shuffle"),
+                    )
+                batches = limit(batches, size=self.epoch_size)
 
-        distributed = distribute(
-            batches,
-            size=self.batch_size,
-            global_rank=self.distributed_rank,
-            world_size=self.distributed_world_size,
-            drop_last=self.drop_last,
-        )
-        # Only distributed ranks require equal steps. Local workers own complete
-        # rank batches, including a partial tail that would otherwise be lost.
-        assigned = (batch for index, batch in enumerate(distributed) if index % workers == worker)
-        yield from self.encode(assigned, epoch=epoch)
+            distributed = distribute(
+                batches,
+                size=self.batch_size,
+                global_rank=self.distributed_rank,
+                world_size=self.distributed_world_size,
+                drop_last=self.drop_last,
+            )
+            # Only distributed ranks require equal steps. Local workers own complete
+            # rank batches, including a partial tail that would otherwise be lost.
+            assigned = (batch for index, batch in enumerate(distributed) if index % workers == worker)
+            yield from self.encode(assigned, epoch=epoch)
+        finally:
+            # Downstream failures and epoch limits must release suspended scans,
+            # even when callers keep the loader or exception traceback alive.
+            if isinstance(scanned, Generator):
+                scanned.close()
 
     def encode(self, batches: Iterable[pa.Table], *, epoch: int) -> Iterator[Encoded]:
         """Encode one consumer's final model batches."""

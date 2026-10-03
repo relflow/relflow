@@ -58,6 +58,23 @@ data = rf.ArrowDataModule(
 configuration when needed. Keep nested structs and lists in their Arrow form.
 Use an explicit schema when values are empty, entirely null, or ambiguous.
 
+File sources freeze the selected file paths, schema, sizes, and modification
+times, then create a fresh filesystem and dataset for each scan. Exhausting or
+closing the scan releases its readers and clients; the source and data module
+retain only the description and manifest between passes. Storage failures keep
+their original cause and include the discovery or scan stage in the traceback.
+The data pipeline also closes suspended scans when preprocessing fails or an
+`epoch_size` limit ends the iteration.
+
+This matters for native S3: Arrow's process-wide shutdown callback can block
+while native clients remain alive, as described in an
+[upstream report](https://github.com/apache/arrow/issues/50188). RelFlow releases
+its scan resources before interpreter shutdown and continues to use native
+PyArrow S3 without another transport dependency. Application-owned datasets,
+filesystems, and unfinished iterators have their own lifetimes; close active
+iterators when stopping a scan early. The change does not establish that every
+native Arrow shutdown hang has the same cause or replace runtime supervision.
+
 ## Polars
 
 Use `PolarsDataModule` for in-memory eager frames:
