@@ -26,7 +26,7 @@ dependencies = [
 [project.optional-dependencies]
 torchjd = [
     "torch>=2.9",
-    "torchjd[quadprog_projector]>=0.17.0,<0.18",
+    "torchjd[quadprog_projector]@git+https://github.com/Reid-Taylor/TorchJD.git@feature/dynamic_gradient_stacking",
 ]
 serving = [
     "fastapi>=0.124.0",

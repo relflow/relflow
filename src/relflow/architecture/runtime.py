@@ -50,6 +50,7 @@ RESERVED = frozenset({TensorKey.state.name, TensorKey.inferred.name, TensorKey.e
 
 class Output(TypedDict):
     loss: NotRequired[torch.Tensor]
+    combined: NotRequired[bool]
 
 
 @dataclass(frozen=True, slots=True)
@@ -605,7 +606,8 @@ class ModelRuntime:
             ordered = [
                 task_losses.get(address, zero) for address in execution(module).objectives if address in participating
             ]
-            return Output(loss=combine(module, ordered, anchor))
+            combine(module, ordered, anchor)
+            return Output(combined=True)
         if not losses:
             suffix = "anchored zero loss" if strata == Strata.train else "zero loss"
             logger.bind(

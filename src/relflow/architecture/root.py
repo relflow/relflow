@@ -178,6 +178,7 @@ class Model(lit.LightningModule, Renderable):
         self._contract_scheduler: ContractScheduler = ContractScheduler()
         self.output_plans: dict[Any, Any] = {}
         self.execution_plan: ExecutionPlan | None = None
+        self.incidence = None # noqa
 
         ModelGraph.install(self)
 

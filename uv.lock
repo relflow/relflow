@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -185,7 +185,7 @@ name = "cffi"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycparser", marker = "implementation_name != 'PyPy'" },
+    { name = "pycparser" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/eb/56/b1ba7935a17738ae8453301356628e8147c79dbb825bcbc73dc7401f9846/cffi-2.0.0.tar.gz", hash = "sha256:44d1b5909021139fe36001ae048dbdde8214afa20200eda0f64c068cac5d5529", size = 523588, upload-time = "2025-09-08T23:24:04.541Z" }
 wheels = [
@@ -312,34 +312,34 @@ wheels = [
 
 [package.optional-dependencies]
 cudart = [
-    { name = "nvidia-cuda-runtime", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cuda-runtime" },
 ]
 cufft = [
-    { name = "nvidia-cufft", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cufft" },
 ]
 cufile = [
-    { name = "nvidia-cufile", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cufile" },
 ]
 cupti = [
-    { name = "nvidia-cuda-cupti", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cuda-cupti" },
 ]
 curand = [
-    { name = "nvidia-curand", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-curand" },
 ]
 cusolver = [
-    { name = "nvidia-cusolver", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cusolver" },
 ]
 cusparse = [
-    { name = "nvidia-cusparse", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cusparse" },
 ]
 nvjitlink = [
-    { name = "nvidia-nvjitlink", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-nvjitlink" },
 ]
 nvrtc = [
-    { name = "nvidia-cuda-nvrtc", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cuda-nvrtc" },
 ]
 nvtx = [
-    { name = "nvidia-nvtx", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-nvtx" },
 ]
 
 [[package]]
@@ -2058,7 +2058,7 @@ requires-dist = [
     { name = "tensordict", specifier = ">=0.10.0" },
     { name = "torch", specifier = ">=2.7.1" },
     { name = "torch", marker = "extra == 'torchjd'", specifier = ">=2.9" },
-    { name = "torchjd", extras = ["quadprog-projector"], marker = "extra == 'torchjd'", specifier = ">=0.17.0,<0.18" },
+    { name = "torchjd", extras = ["quadprog-projector"], marker = "extra == 'torchjd'", git = "https://github.com/Reid-Taylor/TorchJD.git?rev=feature%2Fdynamic_gradient_stacking" },
     { name = "torchmetrics", specifier = ">=1.9.0" },
     { name = "transformers", marker = "extra == 'text'", specifier = ">=4.55.0" },
     { name = "uvicorn", marker = "extra == 'serving'", specifier = ">=0.38.0" },
@@ -2369,14 +2369,10 @@ wheels = [
 
 [[package]]
 name = "torchjd"
-version = "0.17.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.15.0"
+source = { git = "https://github.com/Reid-Taylor/TorchJD.git?rev=feature%2Fdynamic_gradient_stacking#df0d4b0174b821a6d921584710b57c8c4078b5c6" }
 dependencies = [
     { name = "torch" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/95/55/65da8bed91f7af89a51ee5e17fc413edebee4d380fd67d0612c5f24edecd/torchjd-0.17.0.tar.gz", hash = "sha256:577a965ef59c557a6ac48ca6d8638e0fd6f201abec31bfeb99dae6c66cc0883e", size = 89345, upload-time = "2026-06-24T19:44:37.645Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c0/32/ed11bcd77fcba173cd632b03372aea208a6dd1f634830ecd8d53ab861264/torchjd-0.17.0-py3-none-any.whl", hash = "sha256:5a330e3d6c553a2de1e36a8ea9eaf4b9914a76fad15b8913a6817cdca0159b77", size = 118192, upload-time = "2026-06-24T19:44:36.604Z" },
 ]
 
 [package.optional-dependencies]
