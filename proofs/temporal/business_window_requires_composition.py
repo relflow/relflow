@@ -1,38 +1,88 @@
 # %% [markdown]
 # ---
-# title: Combining Weekday and Hour
+# title: Are both weekday and hour needed?
 # categories:
 # - Calendar reasoning
 # proof-id: P042
-# description: Weekday and hour together identify a business window that neither coordinate
-#   resolves alone.
+# description: Predict whether a time lies in a weekday business-hours window.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Weekday only
+#   metric:
+#   - day_only_accuracy
+#   format: percent
+# - label: Hour only
+#   metric:
+#   - hour_only_accuracy
+#   format: percent
+# - label: Both
+#   metric:
+#   - composed_accuracy
+#   format: percent
 # ---
 #
-# A business window depends on both the day and the time: weekday evenings
-# and weekend mornings are closed, even though each shares one coordinate
-# with an open observation.
+# ## Example
+#
+# ```yaml
+# observed_at: 2025-01-06T09:00:00
+# target: open
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-temporal-business-window-requires-composition
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with calendar, observed_at, target. Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("calendar", kind: "root", children: (
+#   node("observed_at", type: "DateParts", width: 150pt,),
+#   node("target", kind: "target", type: "Category", detail: "open or closed",),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Train with only weekday, only hour, and both together. Each single coordinate leaves ambiguous cases.
+#
+# ## Result
 #
 # {{< proof P042 status >}}
 #
-# ## Insights
+# Combining the coordinates resolves this constructed task. Holidays, time zones, and daylight-saving rules are not covered.
 #
-# **Weekday and hour together identify a business window that neither coordinate resolves alone.** A weekday
-# evening and a weekend morning each share one coordinate with an open observation, so either
-# single-coordinate representation loses a necessary distinction.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The combined representation distinguishes the labels more accurately than either weekday or hour alone.
-# The weekday fit does not reach all the skill available from its marginal signal; these are observed fits,
-# not three equally optimized solutions.
+# {{< proof P042 evidence >}}
 #
-# This supports learned coordinate composition in the constructed calendar. It does not cover holidays,
-# timezones, or daylight-saving rules. Derive fixed business logic exactly in preprocessing when learning an
-# approximation is unnecessary.
+# ### Run this experiment
 #
-# ## Setup
+# {{< proof P042 script >}}
+#
+# ### How it works
+#
+# Half the observations are weekdays during 09:00–16:00. A quarter are
+# weekdays outside those hours, and a quarter are weekends during those hours.
+# Neither coordinate alone identifies every label; a combined representation
+# can distinguish the open window from both kinds of near miss.
+#
+# Three otherwise matched models expose `day_of_week`, `hour_of_day`, or both.
+# They train for 20 deterministic epochs. Training, validation, and test
+# use 1,024, 512, and 1,024 observations from separate periods beginning in
+# 2017, 2021, and 2025.
+#
+# ### Remaining work
+#
+# Repeat all three fits over three core seeds and at least ten calibration
+# seeds. Extend to further coordinate combinations and characterize timezone
+# and daylight-saving preprocessing independently of this naive-calendar test.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P042: combine weekday and hour to identify an open business window.
@@ -54,46 +104,7 @@ import relflow as rf
 
 PROOF_ID = "P042"
 
-# %% [markdown]
-# ## Examples
-#
-# The rule is open on weekdays from 09:00 through 16:00. Each displayed target
-# is supervision hidden from the encoded inputs.
-#
-# ### Weekday during business hours
-#
-# ```yaml
-# observed_at: 2025-01-06T09:00:00
-# target: open
-# ```
-#
-# Monday at 09:00 satisfies both conditions.
-#
-# ### Weekday outside business hours
-#
-# ```yaml
-# observed_at: 2025-01-06T20:00:00
-# target: closed
-# ```
-#
-# The weekday is unchanged, but the hour changes the answer. A weekday-only
-# representation cannot distinguish this near miss from the first record.
-#
-# ### Weekend during business hours
-#
-# ```yaml
-# observed_at: 2025-01-11T09:00:00
-# target: closed
-# ```
-#
-# Saturday shares the first record's hour. An hour-only representation loses
-# this distinction, while the two-coordinate representation contains both
-# pieces needed to identify the open window.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, start: date, weeks: int, rows: int, seed: int) -> Iterator[dict]:
     """Yield balanced open windows and two single-coordinate near misses."""
     if start.weekday() != 0:
@@ -121,40 +132,6 @@ def records(*, start: date, weeks: int, rows: int, seed: int) -> Iterator[dict]:
         yield observations[index]
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-temporal-business-window-requires-composition
-# //| fig-cap: "The combined route exposes weekday and hour together. Each control keeps only one coordinate; all hide the target."
-# //| fig-alt: "Calendar contains DateParts observed at with weekday and hour together, compared with separate weekday-only and hour-only controls, and a Category open-or-closed target always hidden from input."
-# #tree(node("calendar", kind: "root", children: (
-#   node("observed_at", type: "DateParts", width: 150pt, body: [
-#     - *Combined:* weekday + hour
-#     - *Controls:* weekday or hour alone
-#   ]),
-#   node("target", kind: "target", type: "Category", detail: "open or closed", body: [
-#     - *Input:* always hidden
-#   ]),
-# )))
-# ```
-#
-# ## How it works
-#
-# Half the observations are weekdays during 09:00–16:00. A quarter are
-# weekdays outside those hours, and a quarter are weekends during those hours.
-# Neither coordinate alone identifies every label; a combined representation
-# can distinguish the open window from both kinds of near miss.
-#
-# Three otherwise matched models expose `day_of_week`, `hour_of_day`, or both.
-# They train for 20 deterministic epochs. Training, validation, and test
-# use 1,024, 512, and 1,024 observations from separate periods beginning in
-# 2017, 2021, and 2025.
-#
-# ## Training and evaluation
-
-
-# %%
 def fit(
     *,
     dateparts: Sequence[str],
@@ -255,21 +232,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P042 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat all three fits over three core seeds and at least ten calibration
-# seeds. Extend to further coordinate combinations and characterize timezone
-# and daylight-saving preprocessing independently of this naive-calendar test.
-#
-# ## Reproduce
-#
-# {{< proof P042 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=59)
+
+# %% [markdown]
+# </details>

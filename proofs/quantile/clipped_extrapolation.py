@@ -1,29 +1,106 @@
 # %% [markdown]
 # ---
-# title: Quantile Predictions Saturate at Learned Support
-# categories: [Quantile]
+# title: What happens beyond the learned percentile range?
+# categories:
+# - Quantile
 # proof-id: P068
-# description: A Quantile model can learn an in-range relationship while accepting out-of-range numbers whose predictions remain bounded by the training distribution.
+# description: Train a Quantile relationship within a bounded amount range, then supply much smaller and
+#   larger amounts.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: In-range error, original units
+#   metric:
+#   - in_range_rmse
+#   format: number
+# - label: Below-range error, original units
+#   metric:
+#   - below
+#   - rmse
+#   format: number
+# - label: Above-range error, original units
+#   metric:
+#   - above
+#   - rmse
+#   format: number
 # ---
+#
+# ## Example
+#
+# ```yaml
+# amount: 20.0
+# cost: 180.5
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-quantile-clipped-extrapolation
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with order, amount, cost. Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("order", kind: "root", children: (
+#   node("amount", type: "Quantile", detail: "In-range or shifted input"),
+#   node("cost", kind: "target", type: "Quantile", detail: "Bounded learned support"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare in-range error with each outer range. Check whether distinct amounts in a tail receive the same prediction.
+#
+# ## Result
 #
 # {{< proof P068 status >}}
 #
-# ## Insights
+# Outside the learned support, percentile inputs and outputs hit their boundaries. Tail predictions become constant; accepting a number does not guarantee extrapolation.
 #
-# Accepting a finite numeric input does not establish numerical extrapolation.
-# Quantile represents values below or above its training support by the same
-# tail percentiles. A Quantile target also inverts only into its learned
-# support. This proof pairs a learned in-range relationship with out-of-range
-# observations and measures the unavoidable error of that output boundary.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Across ten CPU seeds, in-range RMSE was 2.78–5.94% of the constant-baseline
-# RMSE. Out-of-range RMSE rose to 83.59–85.78 source units, and predictions
-# were constant within each tail. Every limitation gate passed on those seeds
-# and in a separate RTX 3090 run; the proof remains marked Limited.
+# {{< proof P068 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< proof P068 script >}}
+#
+# ### Synthetic process and paired observations
+#
+# Each independent row has `amount ~ Uniform(10, 30)` and
+# `cost = 100 + 4 * amount + Uniform(-1, 1)`. Only amount is visible; the
+# conditional mean is identifiable, with noise RMSE `1 / sqrt(3)`. There are
+# no identities or shared row-level latent variables across splits.
+#
+# ### Training, metric, and boundary gates
+#
+# Use 4,096 training rows, 1,024 validation rows, and 2,048 independently
+# generated test rows per evaluation condition. The in-range and shifted
+# tests share latent draws only with each other. Train `xs` for 400 AdamW
+# updates at learning rate 0.002 and batch size 128. Use the fixed final
+# update, with percentile MSE and default digest compression.
+#
+# Predeclare in-range normalized RMSE below 0.20 against the training-mean
+# baseline, and shuffled-input normalized RMSE above 0.90. For each shifted
+# test, compute the best possible bounded output separately for every target:
+# `clip(cost, learned_minimum, learned_maximum)`. Its RMSE is an exact lower
+# bound for every predictor confined to that support, even one with an oracle
+# target. The learned predictor must stay within support and incur at least
+# that lower-bound error. Same-tail inputs must produce the same percentile
+# and predictions within 0.00001 source units, with mean predictions within
+# 15% of the support width of the corresponding endpoint. This gate records
+# expected saturation as successful evidence of a limitation.
+#
+# ### Remaining work
+#
+# The ten-seed calibration retained the predeclared gates and fixed training
+# budget. This proof establishes the boundary of this Quantile schema, not the
+# extrapolation ability of Number or models with additional informative fields.
+# Accepting an out-of-support value gives no OOD warning or calibrated uncertainty.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P068: distinguish learned in-range prediction from bounded Quantile extrapolation."""
@@ -44,52 +121,7 @@ BATCH_SIZE = 128
 TRAIN_ROWS = 4096
 TEST_ROWS = 2048
 
-# %% [markdown]
-# ## Synthetic process and paired observations
-#
-# Each independent row has `amount ~ Uniform(10, 30)` and
-# `cost = 100 + 4 * amount + Uniform(-1, 1)`. Only amount is visible; the
-# conditional mean is identifiable, with noise RMSE `1 / sqrt(3)`. There are
-# no identities or shared row-level latent variables across splits.
-#
-# ```yaml
-# amount: 20.0
-# cost: 180.5
-# ```
-#
-# The cost is 180 plus one possible noise realization of 0.5. Evaluation also
-# makes paired rows at `amount - 30` and `amount + 30`, retaining that noise:
-#
-# ```yaml
-# amount: 50.0
-# cost: 300.5
-# ```
-#
-# Its correct target is outside the training target support, roughly 139 to
-# 221. It remains a valid numeric input. All amounts above the observed
-# training maximum nevertheless map to percentile 1; the model cannot
-# distinguish how far above the maximum they lie.
-#
-# ```yaml
-# amount: -10.0
-# cost: 60.5
-# ```
-#
-# The corresponding lower shift preserves the same noise but places the
-# correct cost below the learned support. Both tails are evaluated separately.
-#
-# ```{typst}
-# //| label: fig-proof-quantile-clipped-extrapolation
-# //| fig-cap: "The same numeric schema accepts shifted inputs while its learned percentile support stays fixed."
-# //| fig-alt: "An order contains visible Quantile amount and hidden Quantile cost, with evaluation values outside the training ranges."
-# #tree(node("order", kind: "root", children: (
-#   node("amount", type: "Quantile", detail: "In-range or shifted input"),
-#   node("cost", kind: "target", type: "Quantile", detail: "Bounded learned support"),
-# )))
-# ```
 
-
-# %%
 def records(*, rows: int, seed: int, shift: float = 0.0) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     amount = rng.uniform(10.0, 30.0, rows) + shift
@@ -114,28 +146,6 @@ def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["/cost"]["content"] for row in predictions], dtype=np.float64)
 
 
-# %% [markdown]
-# ## Training, metric, and boundary gates
-#
-# Use 4,096 training rows, 1,024 validation rows, and 2,048 independently
-# generated test rows per evaluation condition. The in-range and shifted
-# tests share latent draws only with each other. Train `xs` for 400 AdamW
-# updates at learning rate 0.002 and batch size 128. Use the fixed final
-# update, with percentile MSE and default digest compression.
-#
-# Predeclare in-range normalized RMSE below 0.20 against the training-mean
-# baseline, and shuffled-input normalized RMSE above 0.90. For each shifted
-# test, compute the best possible bounded output separately for every target:
-# `clip(cost, learned_minimum, learned_maximum)`. Its RMSE is an exact lower
-# bound for every predictor confined to that support, even one with an oracle
-# target. The learned predictor must stay within support and incur at least
-# that lower-bound error. Same-tail inputs must produce the same percentile
-# and predictions within 0.00001 source units, with mean predictions within
-# 15% of the support width of the corresponding endpoint. This gate records
-# expected saturation as successful evidence of a limitation.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -236,22 +246,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P068 evidence >}}
-#
-# ## Remaining work
-#
-# The ten-seed calibration retained the predeclared gates and fixed training
-# budget. This proof establishes the boundary of this Quantile schema, not the
-# extrapolation ability of Number or models with additional informative fields.
-# Accepting an out-of-support value gives no OOD warning or calibrated uncertainty.
-#
-# ## Reproduce
-#
-# {{< proof P068 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=6801)
+
+# %% [markdown]
+# </details>

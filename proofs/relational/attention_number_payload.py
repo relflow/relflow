@@ -1,39 +1,89 @@
 # %% [markdown]
 # ---
-# title: Retrieve Through Learned Summaries
+# title: Can a summary retain the winning item’s value?
 # categories:
 # - Argmax retrieval
 # proof-id: P022
-# description: Preserve enough score and payload association in learned summaries to
-#   retrieve the winner.
+# description: Predict the value attached to the highest-scoring candidate after compressing the candidates
+#   into learned summaries.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Correct pairs
+#   metric:
+#   - intact_nrmse
+#   format: error
+# - label: Broken pairs
+#   metric:
+#   - broken_nrmse
+#   format: error
 # ---
 #
-# Can a learned summary retain the association between the highest score and its
-# payload? This repeats the three-candidate retrieval problem through attention
-# reductions instead of retaining every encoded slot.
+# ## Example
+#
+# ```yaml
+# items:
+#   - {score: -0.4, payload: 2.0}
+#   - {score: 1.7, payload: -3.0}
+#   - {score: 0.2, payload: 5.0}
+# answer: -3.0
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-attention-number-payload
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with retrieval, items, score, payload, answer. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("retrieval", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("score", type: "Number"),
+#     node("payload", type: "Number"),
+#   )),
+#   node("answer", kind: "target", type: "Number", width: 150pt,),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Shuffle values between candidates while keeping the original answer. Scores and values individually stay the same.
+#
+# ## Result
 #
 # {{< proof P022 status >}}
 #
-# ## Insights
+# The tested summaries retain useful score–value relationships. Exact retrieval, larger lists, and speed or memory savings are not established.
 #
-# **A compressed summary can preserve enough information to retrieve the value attached to the highest
-# score.** The summary slots do not represent
-# named candidates. The item branch reduces first, so requesting several root
-# outputs cannot recreate information that the earlier summary failed to retain.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The payload-rotation control removes accuracy while preserving score and
-# payload marginals. That supports relational information surviving the tested
-# route, rather than success from collection statistics alone. The retained-token
-# route records better accuracy on the matched task, but this comparison supplies
-# no speed or memory measurements. Treat summary width as task-specific capacity;
-# longer collections, other payload types, and exact retrieval remain separate
-# questions.
+# {{< proof P022 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P022 script >}}
+#
+# ### How it works
+#
+# Item encoding can bind the score and payload before reduction. The learned
+# summaries must retain enough of those associations for the root decoder to
+# recover the winning payload. Rotating payloads while retaining the original
+# answer tests whether success depends on that binding rather than statistics
+# of the collection.
+#
+# ### Remaining work
+#
+# Calibrate across three core seeds and ten calibration seeds. Sweep reduction
+# width and candidate count before treating summary capacity as established;
+# argmin, category payloads, and group-filtered retrieval remain unimplemented.
+# The [pass-through proof](pass-through-number-payload.html) provides the simpler
+# route comparison. Use exact preprocessing when retrieval must be exact.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Retrieve the payload paired with the largest of three scores.
@@ -60,54 +110,7 @@ import relflow as rf
 PROOF_ID = "P022"
 LENGTH = 3
 
-# %% [markdown]
-# ## Examples
-#
-# ### The middle item wins
-#
-# ```yaml
-# items:
-#   - {score: -0.4, payload: 2.0}
-#   - {score: 1.7, payload: -3.0}
-#   - {score: 0.2, payload: 5.0}
-# answer: -3.0
-# ```
-#
-# The answer is excluded from embedding by `mask=True` and omitted at prediction.
-# All candidate scores and payloads are visible.
-#
-# ### A different item wins
-#
-# ```yaml
-# items:
-#   - {score: -0.4, payload: 2.0}
-#   - {score: 0.2, payload: -3.0}
-#   - {score: 1.7, payload: 5.0}
-# answer: 5.0
-# ```
-#
-# The third item now has the highest score, so the correct target changes to 5.
-# These labels illustrate the selection rule; they are not model predictions.
-#
-# ### Break the score–payload pairing
-#
-# ```yaml
-# items:
-#   - {score: -0.4, payload: 5.0}
-#   - {score: 1.7, payload: 2.0}
-#   - {score: 0.2, payload: -3.0}
-# answer: -3.0
-# ```
-#
-# This is the first record with its payloads rotated. The control deliberately
-# retains the original target, −3, although the visible winning payload is now 2.
-# Worse error against that retained target shows that the original pairing
-# mattered.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, rows: int, seed: int, break_pairs: bool = False) -> Iterator[dict]:
     """Rotate only visible payloads for the control, retaining original answers."""
     rng = np.random.default_rng(seed)
@@ -134,47 +137,6 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-attention-number-payload
-# //| fig-cap: "The item branch learns one summary, then the root learns three summaries. These outputs are not named candidate slots."
-# //| fig-alt: "Retrieval has three repeated score/payload items and a masked Number answer. The item branch has one learned attention summary and the root has three."
-# #tree(node("retrieval", kind: "root", width: 150pt, body: [
-#   - *Reduction:* `Attention`
-#   - *Learned summaries:* 3
-# ], children: (
-#   node("items", kind: "branch", repeated: true, width: 150pt, body: [
-#     - *Capacity:* 3 items
-#     - *Reduction:* `Attention`
-#     - *Learned summaries:* 1
-#   ], children: (
-#     node("score", type: "Number"),
-#     node("payload", type: "Number"),
-#   )),
-#   node("answer", kind: "target", type: "Number", width: 150pt, body: [
-#     - *Input:* always hidden
-#   ]),
-# )))
-# ```
-#
-# The item branch uses `rf.Attention()` and the root uses
-# `rf.Attention(n_outputs=3)`. These outputs are learned joint summaries;
-# output position does not declare a particular candidate's identity.
-#
-# ## How it works
-#
-# Item encoding can bind the score and payload before reduction. The learned
-# summaries must retain enough of those associations for the root decoder to
-# recover the winning payload. Rotating payloads while retaining the original
-# answer tests whether success depends on that binding rather than statistics
-# of the collection.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -231,23 +193,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P022 evidence >}}
-#
-# ## Remaining work
-#
-# Calibrate across three core seeds and ten calibration seeds. Sweep reduction
-# width and candidate count before treating summary capacity as established;
-# argmin, category payloads, and group-filtered retrieval remain unimplemented.
-# The [pass-through proof](pass-through-number-payload.html) provides the simpler
-# route comparison. Use exact preprocessing when retrieval must be exact.
-#
-# ## Reproduce
-#
-# {{< proof P022 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=23)
+
+# %% [markdown]
+# </details>

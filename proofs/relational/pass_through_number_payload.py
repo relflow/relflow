@@ -1,39 +1,87 @@
 # %% [markdown]
 # ---
-# title: Retrieve the Winning Payload
+# title: Can it return the winning item’s value?
 # categories:
 # - Argmax retrieval
 # proof-id: P023
-# description: Retrieve the number paired with the highest score while preserving every
-#   candidate.
+# description: Predict the value attached to the highest score while retaining the encoded candidates.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Correct pairs
+#   metric:
+#   - intact_nrmse
+#   format: error
+# - label: Broken pairs
+#   metric:
+#   - broken_nrmse
+#   format: error
 # ---
 #
-# The model must find the highest-scoring item and return that item's payload.
-# Scores and payloads are independently generated, so predicting a collection
-# average cannot establish the required pairing.
+# ## Example
+#
+# ```yaml
+# items:
+#   - {score: -0.4, payload: 2.0}
+#   - {score: 1.7, payload: -3.0}
+#   - {score: 0.2, payload: 5.0}
+# answer: -3.0
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-pass-through-number-payload
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with retrieval, items, score, payload, answer. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("retrieval", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("score", type: "Number"),
+#     node("payload", type: "Number"),
+#   )),
+#   node("answer", kind: "target", type: "Number", width: 150pt,),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Shuffle values between candidates while keeping the original answer.
+#
+# ## Result
 #
 # {{< proof P023 status >}}
 #
-# ## Insights
+# Keeping the pairs together supports the learned selection. This test uses three candidates and does not guarantee exact selection.
 #
-# **The model learns which payload belongs to the highest score, rather than
-# merely predicting a statistic of the whole collection.** All candidate scores
-# and payloads are visible, and their shared item coordinates preserve the
-# pairing. The root answer is hidden; its scalar decoder uses the retained
-# encoded evidence to produce one Number.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Rotating payloads preserves both marginal distributions but breaks the original
-# answer's association with its score. The resulting loss of accuracy supports
-# use of that pairing. It does not establish exact argmax computation or behavior
-# beyond the tested three candidates. Preserve candidate evidence when diagnosing
-# similar learned retrieval tasks; compute a known selection rule directly when
-# its result must be exact.
+# {{< proof P023 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P023 script >}}
+#
+# ### How it works
+#
+# The shared item coordinate binds each score to its payload. Retained item
+# context lets the decoder learn selection by score followed by value retrieval.
+# The paired control rotates only payloads while keeping scores and original
+# answers. Both marginal distributions remain intact; the winning association
+# does not.
+#
+# ### Remaining work
+#
+# Repeat across three core seeds and ten calibration seeds, then vary candidate
+# count, selection rule, and payload type. This establishes a three-candidate
+# learning behavior; exact application retrieval belongs in preprocessing.
+# Compare the [attention route](attention-number-payload.html).
+#
+# ### Complete experiment code
+#
 
 # %%
 """Retrieve an argmax payload while preserving every candidate token.
@@ -60,54 +108,7 @@ import relflow as rf
 PROOF_ID = "P023"
 LENGTH = 3
 
-# %% [markdown]
-# ## Examples
-#
-# ### The middle item wins
-#
-# ```yaml
-# items:
-#   - {score: -0.4, payload: 2.0}
-#   - {score: 1.7, payload: -3.0}
-#   - {score: 0.2, payload: 5.0}
-# answer: -3.0
-# ```
-#
-# `answer` is training supervision, excluded by `mask=True` and removed from
-# prediction requests. The payload itself stays visible.
-#
-# ### A different item wins
-#
-# ```yaml
-# items:
-#   - {score: -0.4, payload: 2.0}
-#   - {score: 0.2, payload: -3.0}
-#   - {score: 1.7, payload: 5.0}
-# answer: 5.0
-# ```
-#
-# The third item now has the highest score, so the correct target changes to 5.
-# These labels illustrate the selection rule; they are not model predictions.
-#
-# ### Break the score–payload pairing
-#
-# ```yaml
-# items:
-#   - {score: -0.4, payload: 5.0}
-#   - {score: 1.7, payload: 2.0}
-#   - {score: 0.2, payload: -3.0}
-# answer: -3.0
-# ```
-#
-# This is the first record with its payloads rotated. The control deliberately
-# retains the original target, −3, although the visible winning payload is now 2.
-# Worse error against that retained target shows that the original pairing
-# mattered.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, rows: int, seed: int, break_pairs: bool = False) -> Iterator[dict]:
     """Rotate only visible payloads for the control, retaining original answers."""
     rng = np.random.default_rng(seed)
@@ -134,44 +135,6 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-pass-through-number-payload
-# //| fig-cap: "Three score/payload candidates remain available through both item and root reductions; the scalar answer is masked."
-# //| fig-alt: "Retrieval has three repeated score/payload items and a masked Number answer. Both branch and root keep all tokens."
-# #tree(node("retrieval", kind: "root", width: 150pt, body: [
-#   - *Reduction:* Keep all tokens
-# ], children: (
-#   node("items", kind: "branch", repeated: true, width: 150pt, body: [
-#     - *Capacity:* 3 items
-#     - *Reduction:* Keep all tokens
-#   ], children: (
-#     node("score", type: "Number"),
-#     node("payload", type: "Number"),
-#   )),
-#   node("answer", kind: "target", type: "Number", width: 150pt, body: [
-#     - *Input:* always hidden
-#   ]),
-# )))
-# ```
-#
-# Both the item branch and root use `reduction=None`, keeping encoded candidate
-# slots available to the answer decoder.
-#
-# ## How it works
-#
-# The shared item coordinate binds each score to its payload. Retained item
-# context lets the decoder learn selection by score followed by value retrieval.
-# The paired control rotates only payloads while keeping scores and original
-# answers. Both marginal distributions remain intact; the winning association
-# does not.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -228,22 +191,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P023 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat across three core seeds and ten calibration seeds, then vary candidate
-# count, selection rule, and payload type. This establishes a three-candidate
-# learning behavior; exact application retrieval belongs in preprocessing.
-# Compare the [attention route](attention-number-payload.html).
-#
-# ## Reproduce
-#
-# {{< proof P023 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=23)
+
+# %% [markdown]
+# </details>

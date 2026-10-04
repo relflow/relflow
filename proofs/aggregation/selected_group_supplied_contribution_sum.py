@@ -1,32 +1,102 @@
 # %% [markdown]
 # ---
-# title: Selecting and summing supplied contributions
+# title: Can it total prepared contributions for one group?
 # categories:
 # - Grouped weighted aggregation
 # proof-id: P011
-# description: Test group selection and summation without also requiring the model to
-#   learn multiplication.
+# description: Supply already calculated contributions and ask for the total belonging to one group.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Correct groups
+#   metric:
+#   - intact
+#   - nrmse
+#   format: error
+# - label: Changed groups
+#   metric:
+#   - corrupted
+#   - nrmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# selected_group: A
+# items:
+#   - {group: B, contribution: 0.4}
+#   - {group: A, contribution: 0.6}
+#   - {group: C, contribution: -0.2}
+#   - {group: A, contribution: -0.1}
+#   - {group: B, contribution: 0.3}
+#   - {group: C, contribution: 0.8}
+# answer: 0.5
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-selected-group-supplied-contribution-sum
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with request, selected_group, items, group, contribution, answer. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("request", kind: "root", width: 120pt, children: (
+#   node("selected_group", type: "Category"),
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("group", type: "Category"),
+#     node("contribution", type: "Number"),
+#   )),
+#   node("answer", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Reuse a list with different group requests, then shuffle item group labels while keeping the original answers.
+#
+# ## Result
 #
 # {{< proof P011 status >}}
 #
-# ## Insights
+# The model uses group membership to select contributions. Because the products are supplied, this does not test learned multiplication.
 #
-# **The model can select and sum a requested group’s supplied contributions.** Each bag is reused with
-# different requests, and rotating item group labels breaks accuracy against the original answer. That makes
-# the association between groups and contributions relevant, rather than allowing one answer for the whole
-# bag.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The products are already present, so this case tests selection and reduction without establishing learned
-# multiplication. Compare it with the raw-pair proof when diagnosing a difficult schema. The two routes
-# expose different numbers of input fields, so their scores are not a matched comparison of model capacity.
-# Missing groups and new category labels also remain outside this case.
+# {{< proof P011 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P011 script >}}
+#
+# ### How it works
+#
+# Every item receives a precomputed value–weight product. Its group stays
+# beside that contribution in the repeated branch. `reduction=None` preserves
+# these coordinates, and root `rf.Attention` combines them with a visible group
+# request. Every six-item bag appears once for each of A, B, and C.
+#
+# Rotating labels A → B → C → A changes which contributions answer the request
+# while retaining all label counts and numerical values. The control keeps the
+# original answer, so a group-sensitive model should score worse. Permuting
+# complete items should leave predictions stable. The
+# [raw-pair proof](selected-group-raw-weighted-sum.html) adds the multiplication
+# requirement that this diagnostic deliberately supplies.
+#
+# ### Remaining work
+#
+# Repeat across seeds and vary group counts independently of bag size.
+# Absent groups and held-out labels need separate checks. Passing this control
+# supports selection and reduction, not learned multiplication.
+#
+# The family’s promotion target is at least three core seeds and ten lightweight
+# calibration seeds.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Supplied products isolate category selection and fixed-width summation.
@@ -52,65 +122,7 @@ GROUPS = ("A", "B", "C")
 ITEMS_PER_GROUP = 2
 ITEMS = len(GROUPS) * ITEMS_PER_GROUP
 
-# %% [markdown]
-# ## Examples
-#
-# Targets use `mask=True`; the labels below are supervision hidden from the encoder.
-#
-# ### Select supplied A contributions
-#
-# ```yaml
-# selected_group: A
-# items:
-#   - {group: B, contribution: 0.4}
-#   - {group: A, contribution: 0.6}
-#   - {group: C, contribution: -0.2}
-#   - {group: A, contribution: -0.1}
-#   - {group: B, contribution: 0.3}
-#   - {group: C, contribution: 0.8}
-# answer: 0.5
-# ```
-#
-# The A contributions sum to 0.5; multiplication has already happened upstream.
-#
-# ### Change only the request
-#
-# ```yaml
-# selected_group: B
-# items:
-#   - {group: B, contribution: 0.4}
-#   - {group: A, contribution: 0.6}
-#   - {group: C, contribution: -0.2}
-#   - {group: A, contribution: -0.1}
-#   - {group: B, contribution: 0.3}
-#   - {group: C, contribution: 0.8}
-# answer: 0.7
-# ```
-#
-# Selecting B from exactly the same items changes the answer to 0.7.
-#
-# ### Rotate group labels
-#
-# ```yaml
-# selected_group: A
-# items:
-#   - {group: C, contribution: 0.4}
-#   - {group: B, contribution: 0.6}
-#   - {group: A, contribution: -0.2}
-#   - {group: B, contribution: -0.1}
-#   - {group: C, contribution: 0.3}
-#   - {group: A, contribution: 0.8}
-# answer: 0.5  # Retained original label
-# ```
-#
-# Rotating A → B → C → A makes the visible A items sum to 0.6. The negative
-# control retains the original 0.5 target to check whether the model follows
-# the changed group association.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, bags: int, seed: int) -> Iterator[dict]:
     """Draw interleaved groups and emit one request for every selected group."""
     rng = np.random.default_rng(seed)
@@ -177,48 +189,6 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline_rmse, "nrmse": measured / baseline_rmse}
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-selected-group-supplied-contribution-sum
-# //| fig-cap: "Group and contribution tokens are preserved; root Attention produces six outputs conditioned by the visible group request."
-# //| fig-alt: "Request contains repeated items with group, contribution inputs, visible selected group, and hidden answer targets. Root reduction: Attention, 6 output tokens. Item reduction: Keep all tokens; capacity 6; branch attention MHA."
-# #tree(node("request", kind: "root", width: 150pt, body: [
-#     - *Reduction:* Attention
-#     - *Outputs:* 6 tokens
-#   ], children: (
-#   node("selected_group", type: "Category"),
-#   node("items", kind: "branch", repeated: true, width: 155pt, body: [
-#       - *Reduction:* Keep all tokens
-#       - *Branch attention:* MHA
-#       - *Capacity:* 6 items
-#     ], children: (
-#     node("group", type: "Category"),
-#     node("contribution", type: "Number"),
-#   )),
-#   node("answer", kind: "target", type: "Number"),
-# )))
-# ```
-#
-# ## How it works
-#
-# Every item receives a precomputed value–weight product. Its group stays
-# beside that contribution in the repeated branch. `reduction=None` preserves
-# these coordinates, and root `rf.Attention` combines them with a visible group
-# request. Every six-item bag appears once for each of A, B, and C.
-#
-# Rotating labels A → B → C → A changes which contributions answer the request
-# while retaining all label counts and numerical values. The control keeps the
-# original answer, so a group-sensitive model should score worse. Permuting
-# complete items should leave predictions stable. The
-# [raw-pair proof](selected-group-raw-weighted-sum.html) adds the multiplication
-# requirement that this diagnostic deliberately supplies.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -287,24 +257,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P011 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat across seeds and vary group counts independently of bag size.
-# Absent groups and held-out labels need separate checks. Passing this control
-# supports selection and reduction, not learned multiplication.
-#
-# The family’s promotion target is at least three core seeds and ten lightweight
-# calibration seeds.
-#
-# ## Reproduce
-#
-# {{< proof P011 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=3600)
+
+# %% [markdown]
+# </details>

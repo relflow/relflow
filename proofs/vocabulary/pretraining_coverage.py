@@ -1,27 +1,87 @@
 # %% [markdown]
 # ---
-# title: Pretraining Coverage and Reconstruction
-# categories: [Vocabulary]
+# title: Does reconstruction accuracy include unfamiliar answers?
+# categories:
+# - Vocabulary
 # proof-id: P062
-# description: Unknown reconstruction targets must affect coverage without inventing uniform-label supervision or hiding denominator changes.
+# description: Hide a categorical answer and reconstruct it from numeric context, while varying how many
+#   test answers belong to the learned vocabulary.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Known-answer accuracy, low coverage
+#   metric:
+#   - known_102
+#   - accuracy.content
+#   format: percent
+# - label: Answers covered
+#   metric:
+#   - known_102
+#   - coverage.content
+#   format: percent
+# - label: All-answer accuracy
+#   metric:
+#   - known_102
+#   - accuracy.all
+#   format: percent
 # ---
+#
+# ## Example
+#
+# ```yaml
+# x: 2.0
+# code: class-2
+# hide: true
+# ```
+#
+# code is hidden wherever hide is true. Unknown code names cannot be emitted by the learned output vocabulary.
+#
+# ```{typst}
+# //| label: fig-proof-pretraining-coverage
+# //| fig-cap: "Selector notes identify hidden values. hide chooses which code answers are hidden."
+# //| fig-alt: "Model tree with record, x, code. Selector notes identify hidden values. hide chooses which code answers are hidden."
+# #tree(node("record", kind: "root", children: (
+#   node("x", type: "Number", detail: "Class coordinate"),
+#   node("code", type: "Category", detail: "Reconstruct where hide is true"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare known-answer accuracy, vocabulary coverage, and accuracy over all selected answers.
+#
+# ## Result
 #
 # {{< proof P062 status >}}
 #
-# ## Insights
+# Known-only accuracy stays high even as coverage falls. Excluding unfamiliar answers from the content score does not mean they were recovered.
 #
-# A pretraining validation score combines two questions: could this vocabulary
-# express the target, and did context recover it? Separating those questions
-# prevents 90% unavailable targets from masquerading as either good accuracy
-# or a demand for uniform predictions. Unknown answers remain impossible to
-# name; excluding their undefined categorical loss is not a modeling success.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Evaluation uses fixed query-selected masks. A second independent random
-# mask would otherwise confound vocabulary coverage with mask sampling noise.
+# {{< proof P062 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< proof P062 script >}}
+#
+# ### Training and controls
+#
+# Train for 400 updates on 8,192 rows; storage grows to admit all eight labels.
+# Evaluation selects exactly 1,024 of 2,048 independent records. Compare the
+# original set with copies retaining 50%, 10%, or 0% of selected target names.
+# All copies preserve the exact visible inputs and query-selected masks.
+#
+# Repeat the 10%-coverage case with unknown targets grouped into separate
+# batches. Count-weighted epoch metrics must agree despite all-OOV batches.
+# Scores with no known targets must be undefined, not zero reconstruction
+# error. Naive accuracy over all selected valued targets counts OOV as wrong.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P062: report stable reconstruction quality alongside pretraining coverage."""
@@ -39,49 +99,7 @@ PROOF_ID = "P062"
 BUDGET = 400
 LABELS = tuple(f"class-{index}" for index in range(8))
 
-# %% [markdown]
-# ## Examples
-#
-# ```yaml
-# x: 2.0
-# code: class-2
-# hide: true
-# ```
-#
-# This selected known target can be reconstructed from its numerical context.
-#
-# ```yaml
-# x: 2.0
-# code: novel-2
-# hide: true
-# ```
-#
-# Replacing only the hidden answer leaves identical visible evidence. The
-# closed vocabulary cannot name that answer or infer that its spelling changed.
-#
-# ```yaml
-# x: 2.0
-# code: novel-2
-# hide: false
-# ```
-#
-# Unselected inputs do not enter reconstruction metrics. In particular,
-# coverage means coverage of selected valued targets, not every source value.
-#
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-pretraining-coverage
-# //| fig-cap: "A fixed source query selects reconstruction coordinates, while Number context predicts the familiar classes."
-# //| fig-alt: "A root contains Number x and Category code reconstructed where the source hide flag is true."
-# #tree(node("record", kind: "root", children: (
-#   node("x", type: "Number", detail: "Class coordinate"),
-#   node("code", type: "Category", detail: "Reconstruct where hide is true"),
-# )))
-# ```
 
-
-# %%
 def records(*, rows: int, seed: int) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     for index, label in enumerate(rng.integers(0, len(LABELS), rows)):
@@ -109,21 +127,6 @@ def evaluate(trainer: lit.Trainer, model: rf.Model, rows: list[dict]) -> dict[st
     return {name.removeprefix(prefix): float(value) for name, value in result.items() if name.startswith(prefix)}
 
 
-# %% [markdown]
-# ## Training and controls
-#
-# Train for 400 updates on 8,192 rows; storage grows to admit all eight labels.
-# Evaluation selects exactly 1,024 of 2,048 independent records. Compare the
-# original set with copies retaining 50%, 10%, or 0% of selected target names.
-# All copies preserve the exact visible inputs and query-selected masks.
-#
-# Repeat the 10%-coverage case with unknown targets grouped into separate
-# batches. Count-weighted epoch metrics must agree despite all-OOV batches.
-# Scores with no known targets must be undefined, not zero reconstruction
-# error. Naive accuracy over all selected valued targets counts OOV as wrong.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -204,21 +207,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence and remaining work
-#
-# {{< proof P062 evidence >}}
-#
-# This fixed-vocabulary experiment isolates coverage and aggregation. A growing
-# training vocabulary still changes the covered validation population. Delayed
-# worker admission, evolving class difficulty, and stochastic evaluation masks
-# need separate diagnostics; these scores do not make all validation loss
-# trajectories comparable or identify unknown labels from hidden answers.
-#
-# ## Reproduce
-#
-# {{< proof P062 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=7621)
+
+# %% [markdown]
+# </details>

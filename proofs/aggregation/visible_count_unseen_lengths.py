@@ -1,32 +1,98 @@
 # %% [markdown]
 # ---
-# title: Extending a visible-count sum
+# title: Does the count help with longer lists?
 # categories:
 # - Cardinality generalization
 # proof-id: P005
-# description: Test whether a model trained on smaller visible counts can extend the
-#   learned amount-times-count relationship.
+# description: Give the model both a repeated amount and its count, then test larger counts absent from
+#   training.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Larger counts
+#   metric:
+#   - unseen_score
+#   - nrmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# item_count: 8
+# items:
+#   - {amount: 0.5}
+#   - {amount: 0.5}
+#   - {amount: 0.5}
+#   - {amount: 0.5}
+#   - {amount: 0.5}
+#   - {amount: 0.5}
+#   - {amount: 0.5}
+#   - {amount: 0.5}
+# total: 4.0
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-visible-count-unseen-lengths
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with record, item_count, items, amount, total. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("record", kind: "root", width: 120pt, children: (
+#   node("item_count", type: "Number"),
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("amount", type: "Number"),
+#   )),
+#   node("total", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Repeat the list and double the visible count. The expected total doubles too.
+#
+# ## Result
 #
 # {{< proof P005 status >}}
 #
-# ## Insights
+# The model extends the amount-times-count relationship to these larger counts. The count is supplied, so this does not show that it learned to count items.
 #
-# **Supplying count lets this model extend its learned total to counts absent from training.** Mean carries
-# the repeated amount, while the visible count carries multiplicity. Doubling both the bag and its count
-# checks whether predictions respond approximately like a product.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# This separates numerical extrapolation from structural counting: the model is told how many items exist.
-# It therefore answers a different question from the Attention proof without a count field. The result
-# supports a limited extension of the amount-times-count relationship, using bags whose values are identical
-# within each record. It does not establish wider mixed-value sums or reliable behavior at arbitrarily large
-# counts.
+# {{< proof P005 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P005 script >}}
+#
+# ### How it works
+#
+# The schema matches the [in-range count control](visible-count-sum.html).
+# A Mean item branch has no item attention; its equal-valued bags supply content
+# but lose multiplicity. The root receives `item_count` as an ordinary Number.
+#
+# Training counts are one through six. The test uses seven through ten, so
+# accuracy measures count extrapolation. A separate complete-bag duplication
+# intervention also doubles the visible count and requires approximately doubled
+# predictions. It checks whether the learned relationship respects scaling,
+# within a fixed branch capacity of twelve.
+#
+# ### Remaining work
+#
+# Repeat across seeds and broaden the input distributions beyond repeated
+# values. This proof establishes a route with an explicitly supplied count;
+# [Attention without a count field](attention-sum-unseen-lengths.html) covers the
+# separate structural-cardinality claim.
+#
+# The family’s promotion target is at least three core seeds and ten lightweight
+# calibration seeds.
+#
+# ### Complete experiment code
+#
 
 # %%
 """The explicit-count control should extrapolate more cleanly than hidden count.
@@ -51,67 +117,7 @@ PROOF_ID = "P005"
 TRAIN_MAX = 6
 CAPACITY = 12
 
-# %% [markdown]
-# ## Examples
-#
-# Targets use `mask=True`; the labels below are supervision hidden from the encoder.
-#
-# ### A count absent from training
-#
-# ```yaml
-# item_count: 8
-# items:
-#   - {amount: 0.5}
-#   - {amount: 0.5}
-#   - {amount: 0.5}
-#   - {amount: 0.5}
-#   - {amount: 0.5}
-#   - {amount: 0.5}
-#   - {amount: 0.5}
-#   - {amount: 0.5}
-# total: 4.0
-# ```
-#
-# Eight copies of 0.5 require 4.0. The count is visible, but eight was never
-# a training cardinality.
-#
-# ### A count within the training range
-#
-# ```yaml
-# item_count: 4
-# items:
-#   - {amount: 0.25}
-#   - {amount: 0.25}
-#   - {amount: 0.25}
-#   - {amount: 0.25}
-# total: 1.0
-# ```
-#
-# This four-item bag supplies the starting point for a duplication probe.
-#
-# ### Double the bag and its count
-#
-# ```yaml
-# item_count: 8
-# items:
-#   - {amount: 0.25}
-#   - {amount: 0.25}
-#   - {amount: 0.25}
-#   - {amount: 0.25}
-#   - {amount: 0.25}
-#   - {amount: 0.25}
-#   - {amount: 0.25}
-#   - {amount: 0.25}
-# total: 2.0
-# ```
-#
-# The Mean summary stays the same, while `item_count` changes from four to
-# eight and the correct total doubles from 1.0 to 2.0.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def random_records(*, rows: int, seed: int, minimum: int = 1, maximum: int = TRAIN_MAX) -> Iterator[dict]:
     """Draw variable-length numerical bags and their mean and sum."""
     if not 1 <= minimum <= maximum <= CAPACITY:
@@ -159,44 +165,6 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-visible-count-unseen-lengths
-# //| fig-cap: "The branch uses Mean without item attention; a visible count distinguishes repeated amounts at unseen lengths."
-# //| fig-alt: "Record contains repeated items with amount inputs, visible item count, and hidden total targets. Root reduction: Attention. Item reduction: Mean; capacity 12; branch attention Off."
-# #tree(node("record", kind: "root", width: 150pt, body: [
-#     - *Reduction:* Attention
-#   ], children: (
-#   node("item_count", type: "Number"),
-#   node("items", kind: "branch", repeated: true, width: 155pt, body: [
-#       - *Reduction:* Mean
-#       - *Branch attention:* Off
-#       - *Capacity:* 12 items
-#     ], children: (
-#     node("amount", type: "Number"),
-#   )),
-#   node("total", kind: "target", type: "Number"),
-# )))
-# ```
-#
-# ## How it works
-#
-# The schema matches the [in-range count control](visible-count-sum.html).
-# A Mean item branch has no item attention; its equal-valued bags supply content
-# but lose multiplicity. The root receives `item_count` as an ordinary Number.
-#
-# Training counts are one through six. The test uses seven through ten, so
-# accuracy measures count extrapolation. A separate complete-bag duplication
-# intervention also doubles the visible count and requires approximately doubled
-# predictions. It checks whether the learned relationship respects scaling,
-# within a fixed branch capacity of twelve.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -251,25 +219,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P005 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat across seeds and broaden the input distributions beyond repeated
-# values. This proof establishes a route with an explicitly supplied count;
-# [Attention without a count field](attention-sum-unseen-lengths.html) covers the
-# separate structural-cardinality claim.
-#
-# The family’s promotion target is at least three core seeds and ten lightweight
-# calibration seeds.
-#
-# ## Reproduce
-#
-# {{< proof P005 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=3621)
+
+# %% [markdown]
+# </details>

@@ -1,39 +1,86 @@
 # %% [markdown]
 # ---
-# title: Copying by Position
+# title: Could it be copying by position instead of ID?
 # categories:
 # - Associative recall
 # proof-id: P024
-# description: An aligned copying control shows why correct answers alone do not demonstrate
-#   identity lookup.
+# description: Place source values and questions in matching positions, then ask the model to copy the values.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Matching IDs
+#   metric:
+#   - intact_nrmse
+#   format: error
+# - label: Changed IDs
+#   metric:
+#   - broken_nrmse
+#   format: error
 # ---
 #
-# Matching source and query positions lets a model copy values without using
-# identity. This deliberately easy control checks that positional copying can
-# survive even when query keys become wrong.
+# ## Example
+#
+# ```yaml
+# memory:
+#   - {role: source, is_query: false, entity_id: K1, value: 0.4}
+#   - {role: source, is_query: false, entity_id: K2, value: -0.8}
+#   - {role: query, is_query: true, entity_id: K1, value: 0.4}
+#   - {role: query, is_query: true, entity_id: K2, value: -0.8}
+# ```
+#
+# Source values are visible. Query values are the hidden answers, selected by is_query.
+#
+# ```{typst}
+# //| label: fig-proof-aligned-position-control
+# //| fig-cap: "Selector notes identify hidden values. Source values are visible; query values are hidden."
+# //| fig-alt: "Model tree with association, memory, entity_id, role, is_query, value. Selector notes identify hidden values. Source values are visible; query values are hidden."
+# #tree(node("association", kind: "root", width: 120pt, children: (
+#   node("memory", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("entity_id", type: "Hash"),
+#     node("role", type: "Category"),
+#     node("is_query", type: "Boolean"),
+#     node("value", type: "Number", width: 155pt, detail: "Source visible; query hidden"),
+#   )),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Change question IDs while leaving their positions and answers fixed. If accuracy survives, matching IDs were unnecessary.
+#
+# ## Result
 #
 # {{< proof P024 status >}}
 #
-# ## Insights
+# Accuracy survives the changed IDs. Success on aligned records can therefore hide a positional shortcut.
 #
-# **A model can copy the right value using position while ignoring matching identities.** Aligned source and
-# query positions give the
-# model another way to recover every target. Rotating query keys while retaining
-# target positions leaves accuracy high, so this control does not establish
-# identity-based recall.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Repeated decoder queries retain positional information. Although branch and
-# root reductions are compressed, decoder memory also includes the target
-# value field's own parcel, which still contains visible source values. Success
-# therefore does not show that one summary preserves all source information.
-# Keep this control beside shuffled-key recall: their different responses to
-# broken keys distinguish copying by position from using identity.
+# {{< proof P024 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P024 script >}}
+#
+# ### How it works
+#
+# The decoder has positional information, so it can learn to copy the first
+# source to the first query and the second source to the second query. Rotating
+# query identities leaves these target positions unchanged. A model following
+# position should therefore remain accurate after this intervention.
+#
+# ### Remaining work
+#
+# Repeat seed calibration and retain this control alongside identity proofs.
+# Its successful predictions cannot establish unseen-key lookup: the required
+# information is already available through a fixed position relationship.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Show why aligned copying is insufficient evidence of identity lookup.
@@ -60,53 +107,7 @@ import relflow as rf
 PROOF_ID = "P024"
 PAIR_COUNT = 2
 
-# %% [markdown]
-# ## Examples
-#
-# ### Aligned source and query halves
-#
-# ```yaml
-# memory:
-#   - {role: source, is_query: false, entity_id: K1, value: 0.4}
-#   - {role: source, is_query: false, entity_id: K2, value: -0.8}
-#   - {role: query, is_query: true, entity_id: K1, value: 0.4}
-#   - {role: query, is_query: true, entity_id: K2, value: -0.8}
-# ```
-#
-# The final two values are supervision hidden by the Boolean mask. The query
-# half uses the same relative order as the source half.
-#
-# ### Reorder both halves together
-#
-# ```yaml
-# memory:
-#   - {role: source, is_query: false, entity_id: K2, value: -0.8}
-#   - {role: source, is_query: false, entity_id: K1, value: 0.4}
-#   - {role: query, is_query: true, entity_id: K2, value: -0.8}
-#   - {role: query, is_query: true, entity_id: K1, value: 0.4}
-# ```
-#
-# Both halves now put K2 first. The correct query targets reverse with them, but
-# copying by relative position still solves the example without comparing keys.
-#
-# ### Change keys without changing target positions
-#
-# ```yaml
-# memory:
-#   - {role: source, is_query: false, entity_id: K1, value: 0.4}
-#   - {role: source, is_query: false, entity_id: K2, value: -0.8}
-#   - {role: query, is_query: true, entity_id: K2, value: 0.4}
-#   - {role: query, is_query: true, entity_id: K1, value: -0.8}
-# ```
-#
-# This control retains the first example's query values while rotating query
-# keys. The targets intentionally disagree with identity lookup. A positional
-# copier still matches them; the test requires that accuracy remain high.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, rows: int, seed: int, namespace: str, broken_identity: bool = False) -> Iterator[dict]:
     """Generate unseen, observation-local key/value associations."""
     rng = np.random.default_rng(seed)
@@ -138,49 +139,6 @@ def normalized_rmse(model: rf.Model, records: list[dict]) -> float:
     return float(np.sqrt(np.mean(np.square(np.asarray(predicted) - actual)) / np.mean(np.square(actual))))
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-aligned-position-control
-# //| fig-cap: "Aligned source and query records use attention summaries; visible source-value memory also reaches the decoder. Only query values are masked."
-# //| fig-alt: "Association contains four source/query memory records with Hash identity, Category role, Boolean is-query, and Number value. The value mask reads is_query, preserving source values and hiding query targets. Root and branch each use one attention summary."
-# #tree(node("association", kind: "root", width: 150pt, body: [
-#   - *Reduction:* `Attention`
-#   - *Learned summaries:* 1
-# ], children: (
-#   node("memory", kind: "branch", repeated: true, width: 150pt, body: [
-#     - *Capacity:* 4 items
-#     - *Reduction:* `Attention`
-#     - *Learned summaries:* 1
-#   ], children: (
-#     node("entity_id", type: "Hash"),
-#     node("role", type: "Category"),
-#     node("is_query", type: "Boolean"),
-#     node("value", type: "Number", width: 150pt, body: [
-#       - *Mask query:* `is_query`
-#       - *Sources:* Visible input
-#       - *Queries:* Hidden targets
-#     ]),
-#   )),
-# )))
-# ```
-#
-# The branch and root use `rf.Attention()`. The value field uses
-# `rf.Mask(query="is_query", dropout=False, reconstruct=True)`; source values
-# remain input while query values supply reconstruction targets.
-#
-# ## How it works
-#
-# The decoder has positional information, so it can learn to copy the first
-# source to the first query and the second source to the second query. Rotating
-# query identities leaves these target positions unchanged. A model following
-# position should therefore remain accurate after this intervention.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -235,21 +193,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P024 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat seed calibration and retain this control alongside identity proofs.
-# Its successful predictions cannot establish unseen-key lookup: the required
-# information is already available through a fixed position relationship.
-#
-# ## Reproduce
-#
-# {{< proof P024 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=17)
+
+# %% [markdown]
+# </details>

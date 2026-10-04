@@ -1,39 +1,91 @@
 # %% [markdown]
 # ---
-# title: Compare Each Item with Its Group
+# title: Can it compare an item with its own group?
 # categories:
 # - Peer-relative inference
 # proof-id: P032
-# description: Select same-group peers and route their mean back to each item's deviation
-#   target.
+# description: Predict how far each value lies above or below the average of its group.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Correct groups
+#   metric:
+#   - intact_nrmse
+#   format: error
+# - label: Changed groups
+#   metric:
+#   - corrupted_nrmse
+#   format: error
 # ---
 #
-# Each item should receive its value minus the mean of its own group. Groups
-# are interleaved, their locations vary independently, and no input supplies
-# their means. The model must use membership as well as raw values.
+# ## Example
+#
+# ```yaml
+# items:
+#   - {group: A, value: 2.0, deviation: -1.0}
+#   - {group: B, value: 1.0, deviation: 1.0}
+#   - {group: C, value: -3.0, deviation: -1.0}
+#   - {group: A, value: 4.0, deviation: 1.0}
+#   - {group: C, value: -1.0, deviation: 1.0}
+#   - {group: B, value: -1.0, deviation: -1.0}
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-grouped-peer-deviation
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with collection, items, value, group, deviation. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("collection", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("value", type: "Number"),
+#     node("group", type: "Category"),
+#     node("deviation", kind: "target", type: "Number", width: 150pt,),
+#   )),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Change group labels while retaining original answers. Separately shift all values in a group equally; differences from its average should stay fixed.
+#
+# ## Result
 #
 # {{< proof P032 status >}}
 #
-# ## Insights
+# The model uses the correct peers and approximately preserves equal group shifts. Every group contains two items, making this simpler than general group averaging.
 #
-# **The model uses an item’s group to compare its value with the right peers.** Rotating labels preserves
-# value and label
-# marginals while retaining original targets, and accuracy deteriorates.
-# Independent group translations and whole-item permutations preserve the true
-# relationship and pass their respective controls.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The repeated decoder can combine retained collection evidence with its own
-# aligned group and value. That provides a route for membership-dependent peer
-# context without a supplied mean. However, every group has exactly two members,
-# where deviation is half the difference between their values. This is narrower
-# than arbitrary group averaging. Approximate invariance, broader cardinalities,
-# and missing membership still need separate evidence.
+# {{< proof P032 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P032 script >}}
+#
+# ### How it works
+#
+# Same-coordinate encoding binds membership to value, and the repeated decoder
+# can use its own group/value context to select peers. Rotating labels preserves
+# all values, group counts, and original targets while breaking membership.
+# The separately recomputed oracle measures intervention strength. Independently
+# shifting each group's values preserves its deviations. Permuting complete items should
+# permute the outputs with them.
+#
+# ### Remaining work
+#
+# Repeat three core seeds and ten calibration seeds. Vary group cardinalities,
+# test missing membership and singleton groups, and extend targets to ranks or
+# leave-one-out means. Current permutation gates allow approximate behavior.
+# The [one-summary variant](single-query-preserves-group-membership.html) tests
+# whether a narrower collection route retains enough context.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Infer each item's value minus the mean of its own interleaved group.
@@ -61,61 +113,7 @@ PROOF_ID = "P032"
 ITEMS = 6
 GROUPS = ("A", "B", "C")
 
-# %% [markdown]
-# ## Examples
-#
-# ### Use the mean of the matching group
-#
-# ```yaml
-# items:
-#   - {group: A, value: 2.0, deviation: -1.0}
-#   - {group: B, value: 1.0, deviation: 1.0}
-#   - {group: C, value: -3.0, deviation: -1.0}
-#   - {group: A, value: 4.0, deviation: 1.0}
-#   - {group: C, value: -1.0, deviation: 1.0}
-#   - {group: B, value: -1.0, deviation: -1.0}
-# ```
-#
-# The group means are A: 3, B: 0, and C: −2. Deviations are supervision hidden
-# by `mask=True` and removed at prediction.
-#
-# ### Translate groups independently
-#
-# ```yaml
-# items:
-#   - {group: A, value: 3.0, deviation: -1.0}
-#   - {group: B, value: 0.5, deviation: 1.0}
-#   - {group: C, value: -1.0, deviation: -1.0}
-#   - {group: A, value: 5.0, deviation: 1.0}
-#   - {group: C, value: 1.0, deviation: 1.0}
-#   - {group: B, value: -1.5, deviation: -1.0}
-# ```
-#
-# A moves by +1, B by −0.5, and C by +2. Their means move by the same amounts,
-# so every original deviation target remains correct. The test applies this
-# kind of independent group translation.
-#
-# ### Rotate group labels while retaining targets
-#
-# ```yaml
-# items:
-#   - {group: B, value: 2.0, deviation: -1.0}
-#   - {group: C, value: 1.0, deviation: 1.0}
-#   - {group: A, value: -3.0, deviation: -1.0}
-#   - {group: C, value: 4.0, deviation: 1.0}
-#   - {group: B, value: -1.0, deviation: 1.0}
-#   - {group: A, value: -1.0, deviation: -1.0}
-# ```
-#
-# This applies the test's one-position label rotation to the first record.
-# The retained targets intentionally describe its original grouping. Under the
-# new labels, the first item's deviation would be 1.5 rather than −1. Error
-# against the old targets should rise when prediction depends on membership.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, rows: int, seed: int) -> Iterator[dict]:
     """Generate randomly interleaved, exactly centered two-member groups."""
     rng = np.random.default_rng(seed)
@@ -191,45 +189,6 @@ def permute_items(rows: list[dict], seed: int) -> tuple[list[dict], np.ndarray]:
     return result, np.asarray(flattened)
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-grouped-peer-deviation
-# //| fig-cap: "Both branch and root keep all tokens. The group and value stay aligned with each masked deviation."
-# //| fig-alt: "Collection contains six repeated items with value and group inputs and a masked Number deviation. The root keeps all tokens. The item branch also keeps all tokens."
-# #tree(node("collection", kind: "root", width: 150pt, body: [
-#   - *Reduction:* Keep all tokens
-# ], children: (
-#   node("items", kind: "branch", repeated: true, width: 150pt, body: [
-#     - *Capacity:* 6 items
-#     - *Reduction:* Keep all tokens
-#   ], children: (
-#     node("value", type: "Number"),
-#     node("group", type: "Category"),
-#     node("deviation", kind: "target", type: "Number", width: 150pt, body: [
-#       - *Input:* always hidden
-#     ]),
-#   )),
-# )))
-# ```
-#
-# The branch and root use `reduction=None`, retaining the item evidence available
-# to each coordinate-conditioned decoder query.
-#
-# ## How it works
-#
-# Same-coordinate encoding binds membership to value, and the repeated decoder
-# can use its own group/value context to select peers. Rotating labels preserves
-# all values, group counts, and original targets while breaking membership.
-# The separately recomputed oracle measures intervention strength. Independently
-# shifting each group's values preserves its deviations. Permuting complete items should
-# permute the outputs with them.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -308,23 +267,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P032 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat three core seeds and ten calibration seeds. Vary group cardinalities,
-# test missing membership and singleton groups, and extend targets to ranks or
-# leave-one-out means. Current permutation gates allow approximate behavior.
-# The [one-summary variant](single-query-preserves-group-membership.html) tests
-# whether a narrower collection route retains enough context.
-#
-# ## Reproduce
-#
-# {{< proof P032 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=3720)
+
+# %% [markdown]
+# </details>

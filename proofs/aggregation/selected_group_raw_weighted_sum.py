@@ -1,32 +1,109 @@
 # %% [markdown]
 # ---
-# title: Weighted sums for a requested group
+# title: Can it total weighted values for one group?
 # categories:
 # - Grouped weighted aggregation
 # proof-id: P010
-# description: Select an interleaved category, bind its item values and weights, and
-#   predict that group’s weighted sum.
+# description: Ask for a group’s total after multiplying each of its values by its own weight.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Correct data
+#   metric:
+#   - intact
+#   - nrmse
+#   format: error
+# - label: Swapped weights
+#   metric:
+#   - pairing
+#   - nrmse
+#   format: error
+# - label: Changed groups
+#   metric:
+#   - labels
+#   - nrmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# selected_group: A
+# items:
+#   - {group: B, value: 0.3, weight: 0.4}
+#   - {group: A, value: 0.8, weight: 0.5}
+#   - {group: C, value: -0.5, weight: 1.4}
+#   - {group: A, value: -0.4, weight: 1.25}
+#   - {group: B, value: -0.2, weight: 0.9}
+#   - {group: C, value: 0.7, weight: 0.3}
+# answer: -0.1
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-selected-group-raw-weighted-sum
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with request, selected_group, items, group, value, weight, answer. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("request", kind: "root", width: 120pt, children: (
+#   node("selected_group", type: "Category"),
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("group", type: "Category"),
+#     node("value", type: "Number"),
+#     node("weight", type: "Number"),
+#   )),
+#   node("answer", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Change the requested group. Then separately shuffle group labels and swap weights, retaining the original answers.
+#
+# ## Result
 #
 # {{< proof P010 status >}}
 #
-# ## Insights
+# The model uses both membership and value–weight pairing. The groups are familiar and equally sized; unfamiliar or missing groups are not tested.
 #
-# **The model can select a requested group and learn its weighted total from raw values and weights.** The
-# same bag appears with different requested groups, so bag content alone cannot determine the answer.
-# Rotating group labels tests selection; swapping weights within each group separately tests the
-# value–weight relationship. Both controls remove accuracy against retained original labels.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Keeping group, value, and weight together preserves the relationships the answer needs. The
-# supplied-contribution control helps separate multiplication from selection and reduction. The result is
-# still narrow: groups are familiar and equally populated. Unseen labels, absent groups, and varying group
-# sizes are additional tasks, not consequences of this pass.
+# {{< proof P010 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P010 script >}}
+#
+# ### How it works
+#
+# Each bag contains two items from each of A, B, and C. The generator emits
+# the same bag once per requested group, so the bag alone cannot determine the
+# answer. `reduction=None` preserves the item branch’s encoded coordinates;
+# root `rf.Attention` combines them with the visible `selected_group` request.
+#
+# Rotating item group labels tests group selection. Swapping weights within each
+# group independently tests value–weight binding while preserving per-group
+# marginals. Both corruptions keep original labels and must worsen error.
+# Reordering complete items should preserve predictions. The
+# [supplied-product control](selected-group-supplied-contribution-sum.html)
+# separates multiplication from selection and reduction.
+#
+# ### Remaining work
+#
+# Repeat all gates across seeds, then vary group sizes and test an absent
+# requested group. Unseen labels, simultaneous requests, weight scaling, and
+# selected-group weighted means remain open. These scores are not a
+# capacity-matched comparison with the supplied-product control.
+#
+# The family’s promotion target is at least three core seeds and ten lightweight
+# calibration seeds.
+#
+# ### Complete experiment code
+#
 
 # %%
 """The natural schema should learn a selected group's weighted sum.
@@ -52,66 +129,7 @@ GROUPS = ("A", "B", "C")
 ITEMS_PER_GROUP = 2
 ITEMS = len(GROUPS) * ITEMS_PER_GROUP
 
-# %% [markdown]
-# ## Examples
-#
-# Targets use `mask=True`; the labels below are supervision hidden from the encoder.
-#
-# ### Request group A
-#
-# ```yaml
-# selected_group: A
-# items:
-#   - {group: B, value: 0.3, weight: 0.4}
-#   - {group: A, value: 0.8, weight: 0.5}
-#   - {group: C, value: -0.5, weight: 1.4}
-#   - {group: A, value: -0.4, weight: 1.25}
-#   - {group: B, value: -0.2, weight: 0.9}
-#   - {group: C, value: 0.7, weight: 0.3}
-# answer: -0.1
-# ```
-#
-# Only the two A items contribute: 0.4 − 0.5 = −0.1.
-#
-# ### Request another group from the same bag
-#
-# ```yaml
-# selected_group: B
-# items:
-#   - {group: B, value: 0.3, weight: 0.4}
-#   - {group: A, value: 0.8, weight: 0.5}
-#   - {group: C, value: -0.5, weight: 1.4}
-#   - {group: A, value: -0.4, weight: 1.25}
-#   - {group: B, value: -0.2, weight: 0.9}
-#   - {group: C, value: 0.7, weight: 0.3}
-# answer: -0.06
-# ```
-#
-# The unchanged bag now answers for B: 0.12 − 0.18 = −0.06. The request is
-# necessary because each training bag appears once for every group.
-#
-# ### Swap weights within each group
-#
-# ```yaml
-# selected_group: A
-# items:
-#   - {group: B, value: 0.3, weight: 0.9}
-#   - {group: A, value: 0.8, weight: 1.25}
-#   - {group: C, value: -0.5, weight: 0.3}
-#   - {group: A, value: -0.4, weight: 0.5}
-#   - {group: B, value: -0.2, weight: 0.4}
-#   - {group: C, value: 0.7, weight: 1.4}
-# answer: -0.1  # Retained original label
-# ```
-#
-# The A pairs now imply 0.8. This control deliberately retains −0.1 as the
-# original target; every group keeps its values, weights, and membership counts,
-# but the local pairings change.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, bags: int, seed: int) -> Iterator[dict]:
     """Draw interleaved groups and emit one request for every selected group."""
     rng = np.random.default_rng(seed)
@@ -198,49 +216,6 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline_rmse, "nrmse": measured / baseline_rmse}
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-selected-group-raw-weighted-sum
-# //| fig-cap: "The item branch keeps all tokens; root Attention compresses them into six outputs for the selected-group answer."
-# //| fig-alt: "Request contains repeated items with group, value, weight inputs, visible selected group, and hidden answer targets. Root reduction: Attention, 6 output tokens. Item reduction: Keep all tokens; capacity 6; branch attention MHA."
-# #tree(node("request", kind: "root", width: 150pt, body: [
-#     - *Reduction:* Attention
-#     - *Outputs:* 6 tokens
-#   ], children: (
-#   node("selected_group", type: "Category"),
-#   node("items", kind: "branch", repeated: true, width: 155pt, body: [
-#       - *Reduction:* Keep all tokens
-#       - *Branch attention:* MHA
-#       - *Capacity:* 6 items
-#     ], children: (
-#     node("group", type: "Category"),
-#     node("value", type: "Number"),
-#     node("weight", type: "Number"),
-#   )),
-#   node("answer", kind: "target", type: "Number"),
-# )))
-# ```
-#
-# ## How it works
-#
-# Each bag contains two items from each of A, B, and C. The generator emits
-# the same bag once per requested group, so the bag alone cannot determine the
-# answer. `reduction=None` preserves the item branch’s encoded coordinates;
-# root `rf.Attention` combines them with the visible `selected_group` request.
-#
-# Rotating item group labels tests group selection. Swapping weights within each
-# group independently tests value–weight binding while preserving per-group
-# marginals. Both corruptions keep original labels and must worsen error.
-# Reordering complete items should preserve predictions. The
-# [supplied-product control](selected-group-supplied-contribution-sum.html)
-# separates multiplication from selection and reduction.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -316,25 +291,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P010 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat all gates across seeds, then vary group sizes and test an absent
-# requested group. Unseen labels, simultaneous requests, weight scaling, and
-# selected-group weighted means remain open. These scores are not a
-# capacity-matched comparison with the supplied-product control.
-#
-# The family’s promotion target is at least three core seeds and ten lightweight
-# calibration seeds.
-#
-# ## Reproduce
-#
-# {{< proof P010 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=3605)
+
+# %% [markdown]
+# </details>

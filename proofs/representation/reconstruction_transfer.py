@@ -1,35 +1,109 @@
 # %% [markdown]
 # ---
-# title: Transferring reconstruction embeddings to a small-label task
-# categories: [Representation]
+# title: Do reconstruction embeddings help a new small-label task?
+# categories:
+# - Representation
 # proof-id: P073
-# description: Test whether masked reconstruction makes exported root embeddings useful for a new classifier with few labels.
+# description: Learn to reconstruct three noisy views of a hidden class, then freeze the encoder and classify
+#   using eight labeled examples per class.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Reconstruction embedding
+#   metric:
+#   - arms
+#   - reconstruction
+#   - accuracy
+#   format: percent
+# - label: Untrained encoder
+#   metric:
+#   - arms
+#   - untrained
+#   - accuracy
+#   format: percent
+# - label: Raw features
+#   metric:
+#   - raw_accuracy
+#   format: percent
 # ---
+#
+# ## Example
+#
+# ```yaml
+# first: arch
+# second: bay
+# geometry: [-0.8, -1.2, 0.4, -1.0, 0.3, 1.5, -0.7, 0.9, 0.2, -0.8, 0.6, 1.4, -0.2, 0.5, -1.1, 0.7]
+# ```
+#
+# The hidden class is used only for the later classifier. During reconstruction, parts of the three visible views are sampled for hiding.
+#
+# ```{typst}
+# //| label: fig-proof-reconstruction-transfer
+# //| fig-cap: "Selector notes identify hidden values. Each view is sometimes hidden; the downstream class is absent."
+# //| fig-alt: "Model tree with record, first, second, geometry. Selector notes identify hidden values. Each view is sometimes hidden; the downstream class is absent."
+# #tree(node("record", kind: "root", body: [Export frozen embedding], children: (
+#   node("first", type: "Enum", body: [Noisy synonym; sampled reconstruction]),
+#   node("second", type: "Enum", body: [Independent noisy synonym]),
+#   node("geometry", type: "Vector", body: [Two signal and fourteen noise coordinates]),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Use the same simple classifier on raw features, an untrained encoder, and an encoder trained with the views shuffled independently.
+#
+# ## Result
 #
 # {{< proof P073 status >}}
 #
-# ## Insights
+# Only two of three seeds pass every check. Reconstruction can help, but raw features are stronger in two seeds; exporting an embedding alone does not make it useful.
 #
-# Reconstruction can reward a shared signal across independently noisy views.
-# The downstream class never enters the schema or reconstruction loss. A frozen
-# encoder is evaluated by the same small nearest-centroid classifier used for
-# raw features and encoder controls. This tests a bounded transfer hypothesis;
-# setting `embed=True` alone does not establish useful representation learning.
-# Raw features can already expose this synthetic signal, so outperforming that
-# baseline is measured rather than assumed.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Two of three CPU runs met every gate. Reconstruction embeddings scored
-# 59.38–82.76% accuracy, versus 65.04–66.99% for the untrained encoder and
-# 34.57–53.22% after training with independently permuted views. Reconstruction
-# beat the permuted control in every seed, but seed 7301 fell below both the
-# 70% accuracy gate and its untrained encoder. Raw features scored 82.18–85.16%:
-# reconstruction exceeded them in only one seed, by 0.24 percentage points.
-# These runs show that shared reconstruction signal can help, while the
-# exported geometry and small-label transfer remain sensitive to the seed.
+# {{< proof P073 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< proof P073 script >}}
+#
+# ### Process and observability
+#
+# Independent records have balanced hidden classes `c` in `{0,1,2,3}`. Each
+# Enum view chooses one of two synonyms for `c`, with a 25% chance of replacing
+# it by an independently drawn class. The Vector view has the class's corner
+# of a square in its first two coordinates, plus Gaussian noise of standard
+# deviation 0.8. Its other 14 coordinates are independent noise of standard
+# deviation 2. Each view is imperfect; their common predictive component is c.
+#
+# ### Training and predeclared measurements
+#
+# Two identically initialized xs models receive 600 AdamW updates at learning
+# rate 0.002, batch size 64: ordinary or independently permuted views. Each
+# field is sampled for reconstruction with probability 0.35. The untrained
+# control has the same initialization. Declared Enum vocabularies and unscaled
+# Vectors make all three usable without training-dependent preprocessing.
+#
+# Training/validation/test streams contain 4,096/512/2,048 rows. A fourth
+# independent stream supplies exactly eight labeled examples per class. Each
+# encoder is frozen before exporting representations. The same Euclidean
+# nearest-centroid rule probes each encoder. Raw features concatenate two
+# one-hot codes and the full Vector; only this raw baseline is standardized,
+# using unlabeled training means and scales. Nothing is fit on test records.
+#
+# Provisional gates require reconstruction-trained accuracy at least 0.70 and
+# advantages of at least 0.05 over both encoder controls. Beating raw features
+# is diagnostic. Mean accuracy across 32 shuffled probe-label assignments
+# should score below 0.35; one tiny probe can accidentally align with a class.
+# Frozen exports
+# must be finite, unit-normalized, and leave all parameters unchanged. These
+# gates can fail: failure limits the transfer claim without changing the task.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P073: frozen, reconstruction-only embeddings with small-label controls."""
@@ -53,52 +127,7 @@ LABELS_PER_CLASS = 8
 CODES = ("arch", "bay", "cove", "dune", "elm", "ford", "glen", "hill")
 CENTERS = np.asarray([[-1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0, 1.0]])
 
-# %% [markdown]
-# ## Process and observability
-#
-# Independent records have balanced hidden classes `c` in `{0,1,2,3}`. Each
-# Enum view chooses one of two synonyms for `c`, with a 25% chance of replacing
-# it by an independently drawn class. The Vector view has the class's corner
-# of a square in its first two coordinates, plus Gaussian noise of standard
-# deviation 0.8. Its other 14 coordinates are independent noise of standard
-# deviation 2. Each view is imperfect; their common predictive component is c.
-#
-# ```yaml
-# first: arch
-# second: bay
-# geometry: [-0.8, -1.2, 0.4, -1.0, 0.3, 1.5, -0.7, 0.9, 0.2, -0.8, 0.6, 1.4, -0.2, 0.5, -1.1, 0.7]
-# ```
-#
-# Both codes support class zero. A noisy replacement can disagree:
-#
-# ```yaml
-# first: glen
-# second: bay
-# geometry: [-0.8, -1.2, 0.4, -1.0, 0.3, 1.5, -0.7, 0.9, 0.2, -0.8, 0.6, 1.4, -0.2, 0.5, -1.1, 0.7]
-# ```
-#
-# The negative training control independently permutes each complete view
-# between records. All marginals survive, but their common cause is removed:
-#
-# ```yaml
-# first: glen
-# second: cove
-# geometry: [-0.8, -1.2, 0.4, -1.0, 0.3, 1.5, -0.7, 0.9, 0.2, -0.8, 0.6, 1.4, -0.2, 0.5, -1.1, 0.7]
-# ```
-#
-# ```{typst}
-# //| label: fig-proof-reconstruction-transfer
-# //| fig-cap: "Three noisy views reconstruct one another; the exported root supports a separate frozen probe."
-# //| fig-alt: "Record exports a root embedding and contains two Enum fields and a sixteen-dimensional Vector, each with a sampled reconstruction mask. The downstream class is absent from the schema."
-# #tree(node("record", kind: "root", body: [Export frozen embedding], children: (
-#   node("first", type: "Enum", body: [Noisy synonym; sampled reconstruction]),
-#   node("second", type: "Enum", body: [Independent noisy synonym]),
-#   node("geometry", type: "Vector", body: [Two signal and fourteen noise coordinates]),
-# )))
-# ```
 
-
-# %%
 def sample(*, rows: int, seed: int, permuted: bool = False) -> tuple[list[dict], np.ndarray]:
     rng = np.random.default_rng(seed)
     labels = np.resize(np.arange(4), rows)
@@ -158,32 +187,6 @@ def classify(reference: np.ndarray, labels: np.ndarray, queries: np.ndarray) -> 
     return np.square(queries[:, None, :] - centroids[None, :, :]).sum(axis=-1).argmin(axis=1)
 
 
-# %% [markdown]
-# ## Training and predeclared measurements
-#
-# Two identically initialized xs models receive 600 AdamW updates at learning
-# rate 0.002, batch size 64: ordinary or independently permuted views. Each
-# field is sampled for reconstruction with probability 0.35. The untrained
-# control has the same initialization. Declared Enum vocabularies and unscaled
-# Vectors make all three usable without training-dependent preprocessing.
-#
-# Training/validation/test streams contain 4,096/512/2,048 rows. A fourth
-# independent stream supplies exactly eight labeled examples per class. Each
-# encoder is frozen before exporting representations. The same Euclidean
-# nearest-centroid rule probes each encoder. Raw features concatenate two
-# one-hot codes and the full Vector; only this raw baseline is standardized,
-# using unlabeled training means and scales. Nothing is fit on test records.
-#
-# Provisional gates require reconstruction-trained accuracy at least 0.70 and
-# advantages of at least 0.05 over both encoder controls. Beating raw features
-# is diagnostic. Mean accuracy across 32 shuffled probe-label assignments
-# should score below 0.35; one tiny probe can accidentally align with a class.
-# Frozen exports
-# must be finite, unit-normalized, and leave all parameters unchanged. These
-# gates can fail: failure limits the transfer claim without changing the task.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     train, _ = sample(rows=TRAIN_ROWS, seed=seed * 100 + 1)
     reference, reference_labels = sample(rows=4 * LABELS_PER_CLASS, seed=seed * 100 + 3)
@@ -268,24 +271,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence and limits
-#
-# {{< proof P073 evidence >}}
-#
-# The labels describe the same latent process that generated pretraining
-# records, and all splits share that process. This does not establish transfer
-# to new domains, general semantic embeddings, or a universal advantage over
-# supervised learning. A nearest-centroid failure can reflect representation
-# geometry as well as information loss. Gates are fixed before initial runs.
-# The three-seed panel does not justify a reliable advantage over either raw
-# features or the untrained encoder. Gates remain provisional pending ten
-# seeds; failed runs are retained with the original budget and thresholds.
-#
-# ## Reproduce
-#
-# {{< proof P073 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=7301)
+
+# %% [markdown]
+# </details>

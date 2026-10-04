@@ -1,32 +1,100 @@
 # %% [markdown]
 # ---
-# title: Detecting Contextual Inconsistency
-# categories: [Reconstruction]
+# title: Can it spot an ordinary value in the wrong context?
+# categories:
+# - Reconstruction
 # proof-id: P076
-# description: Hidden-field reconstruction separates inconsistent records from normal records with identical individual-field distributions.
-# execute: {enabled: false, eval: false}
+# description: Learn to reconstruct a numeric answer from its context. Use a large reconstruction error
+#   as a warning that the value does not fit.
+# execute:
+#   enabled: false
+#   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Learned context
+#   metric:
+#   - informative
+#   - anomaly_auc
+#   format: auc
+# - label: Shuffled training
+#   metric:
+#   - shuffled_training
+#   - anomaly_auc
+#   format: auc
+# - label: False alarms on normal records
+#   metric:
+#   - informative
+#   - normal_false_positive_rate
+#   format: percent
 # ---
+#
+# ## Example
+#
+# ```yaml
+# group: amber
+# x: 1.0
+# y: 0.24
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-contextual-consistency
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with record, group, x, y. Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("record", kind: "root", children: (
+#   node("group", type: "Enum", detail: "Selects a relationship"),
+#   node("x", type: "Number", detail: "Visible measurement"),
+#   node("y", kind: "target", type: "Number", detail: "Hidden for scoring"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Shuffle answers among test records so their individual distribution stays unchanged. Compare with an independently shuffled-training model.
+#
+# ## Result
 #
 # {{< proof P076 status >}}
 #
-# ## Insights
+# All three seeds detect this constructed inconsistency. The warning score is not a calibrated anomaly probability, and rare valid values need their own false-alarm check.
 #
-# A reconstruction residual can identify an ordinary value in the wrong context.
-# This experiment permutes the numeric answer across otherwise unchanged test
-# records: every individual-field distribution remains exactly the same. The
-# anomaly label is never a training target. An independently shuffled training
-# arm checks whether learning the relationship is necessary.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The score is an absolute residual, not a calibrated probability or a general
-# anomaly detector. A threshold selected on clean validation records controls
-# the experiment's nominal false-positive rate; rare but valid tail records
-# receive their own held-out false-positive measurement.
+# {{< proof P076 evidence >}}
 #
-# All three initial CPU seeds met every gate. Contextual AUROC was
-# 0.961–0.962, versus 0.501–0.513 after shuffled training and exactly 0.5
-# for the marginal baseline. Detection recall was 89.6–90.6%; normal false
-# positives were 4.2–5.2% and valid-tail false positives 3.5–6.1%.
+# ### Run this experiment
+#
+# {{< proof P076 script >}}
+#
+# ### Process, examples, and observability
+#
+# Draw a balanced group and `x ~ Uniform(-2, 2)`. Set
+# `y = slope[group] * x + offset[group] + Normal(0, 0.1)`. The model observes
+# only group and x when reconstructing y. Slopes and offsets are evaluator
+# constants, never model inputs. Each split has its own random stream, with
+# run seeds spaced by 100 before assigning stream offsets.
+#
+# Actual test anomalies permute y between records, preserving its entire distribution. Valid-tail tests restrict absolute x to [1.8, 2], within training support.
+#
+# ### Training, scoring, and gates
+#
+# Fit informative and shuffled-y models from the same initialization for 500
+# AdamW updates each, batch size 128 and learning rate 0.002. Use 4,096 training
+# rows, 2,048 clean validation rows, and separate 2,048-row test and tail sets.
+# Select each model's residual threshold at the clean validation 95th percentile.
+# No test observations choose that threshold or a checkpoint.
+#
+# Predeclared capability gates require informative test nRMSE below 0.20,
+# anomaly AUROC at least 0.90, detection recall at least 0.75, normal false
+# positives at most 0.10, and tail false positives at most 0.15. Shuffled
+# training must leave AUROC at most 0.65. A univariate y-deviation baseline
+# scores exactly 0.5 AUROC because its two score distributions are identical.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P076: detect broken cross-field relationships using hidden-field reconstruction."""
@@ -49,55 +117,7 @@ OFFSETS = np.array([-0.5, 0.5, -0.3, 0.3])
 TRAIN_ROWS = 4096
 TEST_ROWS = 2048
 
-# %% [markdown]
-# ## Process, examples, and observability
-#
-# Draw a balanced group and `x ~ Uniform(-2, 2)`. Set
-# `y = slope[group] * x + offset[group] + Normal(0, 0.1)`. The model observes
-# only group and x when reconstructing y. Slopes and offsets are evaluator
-# constants, never model inputs. Each split has its own random stream, with
-# run seeds spaced by 100 before assigning stream offsets.
-#
-# ```yaml
-# group: amber
-# x: 1.0
-# y: 0.24
-# ```
-#
-# The conditional mean is 0.2, so this small residual is ordinary.
-#
-# ```yaml
-# group: amber
-# x: 1.0
-# y: -1.8
-# ```
-#
-# A value borrowed from another record can be individually plausible but
-# inconsistent here. Actual test anomalies use a permutation, preserving y's
-# entire empirical marginal distribution rather than inserting large values.
-#
-# ```yaml
-# group: amber
-# x: 1.95
-# y: 0.90
-# ```
-#
-# This is a rare but valid tail record: its expected y is 0.865. Tail tests
-# restrict absolute x to [1.8, 2], which is still inside training support.
-#
-# ```{typst}
-# //| label: fig-proof-contextual-consistency
-# //| fig-cap: "Visible group and x reconstruct y; the supplied y is used only to score the residual."
-# //| fig-alt: "A record contains visible Enum group, Number x, and hidden Number y."
-# #tree(node("record", kind: "root", children: (
-#   node("group", type: "Enum", detail: "Selects a relationship"),
-#   node("x", type: "Number", detail: "Visible measurement"),
-#   node("y", kind: "target", type: "Number", detail: "Hidden for scoring"),
-# )))
-# ```
 
-
-# %%
 def records(*, rows: int, seed: int, shuffled: bool = False, tail: bool = False) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     group = np.resize(np.arange(len(GROUPS)), rows)
@@ -137,23 +157,6 @@ def auc(normal: np.ndarray, anomalous: np.ndarray) -> float:
     return float(np.mean((left + right) / (2 * len(normal))))
 
 
-# %% [markdown]
-# ## Training, scoring, and gates
-#
-# Fit informative and shuffled-y models from the same initialization for 500
-# AdamW updates each, batch size 128 and learning rate 0.002. Use 4,096 training
-# rows, 2,048 clean validation rows, and separate 2,048-row test and tail sets.
-# Select each model's residual threshold at the clean validation 95th percentile.
-# No test observations choose that threshold or a checkpoint.
-#
-# Predeclared capability gates require informative test nRMSE below 0.20,
-# anomaly AUROC at least 0.90, detection recall at least 0.75, normal false
-# positives at most 0.10, and tail false positives at most 0.15. Shuffled
-# training must leave AUROC at most 0.65. A univariate y-deviation baseline
-# scores exactly 0.5 AUROC because its two score distributions are identical.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     stream = seed * 100
     validation = list(records(rows=2048, seed=stream + 2))
@@ -227,21 +230,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence and limits
-#
-# {{< proof P076 evidence >}}
-#
-# Three CPU seeds support this bounded task; the original gates and budgets
-# are unchanged and remain provisional until a ten-seed panel is recorded. This is
-# one hidden-field consistency score for familiar groups and a stationary
-# noise distribution. It does not establish unknown-anomaly recall, semantic
-# interpretation of groups, calibrated risk, or a deployment threshold.
-#
-# ## Reproduce
-#
-# {{< proof P076 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=7601)
+
+# %% [markdown]
+# </details>

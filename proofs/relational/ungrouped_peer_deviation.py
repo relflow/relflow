@@ -1,38 +1,88 @@
 # %% [markdown]
 # ---
-# title: Compare Each Item with Its Peers
+# title: Can it infer an average and compare each item?
 # categories:
 # - Peer-relative inference
 # proof-id: P035
-# description: Infer each item's deviation from the collection mean using only raw values.
+# description: Predict each item’s difference from the list average without supplying that average.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Original lists
+#   metric:
+#   - intact_nrmse
+#   format: error
+# - label: Shifted lists
+#   metric:
+#   - translated_nrmse
+#   format: error
 # ---
 #
-# Every item should receive its own value minus the mean of the collection.
-# The mean is absent from the input, so the model must combine peer information
-# and use it when decoding each original coordinate.
+# ## Example
+#
+# ```yaml
+# items:
+#   - {value: 1.5, deviation: -1.0}
+#   - {value: 1.9, deviation: -0.6}
+#   - {value: 2.3, deviation: -0.2}
+#   - {value: 2.7, deviation: 0.2}
+#   - {value: 3.1, deviation: 0.6}
+#   - {value: 3.5, deviation: 1.0}
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-ungrouped-peer-deviation
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with collection, items, value, deviation. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("collection", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("value", type: "Number"),
+#     node("deviation", kind: "target", type: "Number", width: 150pt,),
+#   )),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Shift the whole list equally: differences should stay fixed. Reorder items: predictions should move with their items.
+#
+# ## Result
 #
 # {{< proof P035 status >}}
 #
-# ## Insights
+# The model approximately combines list information with each item’s value. This result covers six-item lists, rather than arbitrary lengths or exact arithmetic.
 #
-# **The model can compare each value with the collection’s average without being given that average.**
-# Independently varying collection locations
-# make an item's raw value alone a poor predictor. One learned branch summary
-# works together with each repeated target's aligned visible value; the summary
-# is not the decoder's only source of information.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Common translations preserve the correct deviations, while complete-item
-# permutations should move predictions with their items. Both controls pass,
-# although error increases after translation and permutation drift is nonzero.
-# The result supports approximate aggregation and routing for six-item
-# collections. It does not establish exact set equivariance, variable-length
-# behavior, or peer selection by category.
+# {{< proof P035 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P035 script >}}
+#
+# ### How it works
+#
+# The learned summary can provide collection context to a decoder conditioned
+# on each item's visible value. Wide random shifts between rows make an item's
+# value alone a poor predictor of its deviation. Adding one constant to all six
+# values preserves every target, and permuting whole items should reorder the
+# predictions in exactly the same way.
+#
+# ### Remaining work
+#
+# Repeat three core seeds and ten calibration seeds. Test varying cardinality,
+# empty collections, and missing values, and tighten the equivariance contract.
+# The [grouped case](grouped-peer-deviation.html) adds membership selection;
+# the [supplied-mean control](supplied-peer-mean-control.html) removes aggregation.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Infer every item's deviation from the mean of six raw peer values.
@@ -59,60 +109,7 @@ import relflow as rf
 PROOF_ID = "P035"
 ITEMS = 6
 
-# %% [markdown]
-# ## Examples
-#
-# ### Infer the missing collection mean
-#
-# ```yaml
-# items:
-#   - {value: 1.5, deviation: -1.0}
-#   - {value: 1.9, deviation: -0.6}
-#   - {value: 2.3, deviation: -0.2}
-#   - {value: 2.7, deviation: 0.2}
-#   - {value: 3.1, deviation: 0.6}
-#   - {value: 3.5, deviation: 1.0}
-# ```
-#
-# The mean is 2.5. `deviation` is supervision hidden by `mask=True` and omitted
-# from prediction requests; no input field supplies the mean.
-#
-# ### Translate every value together
-#
-# ```yaml
-# items:
-#   - {value: 2.5, deviation: -1.0}
-#   - {value: 2.9, deviation: -0.6}
-#   - {value: 3.3, deviation: -0.2}
-#   - {value: 3.7, deviation: 0.2}
-#   - {value: 4.1, deviation: 0.6}
-#   - {value: 4.5, deviation: 1.0}
-# ```
-#
-# Adding 1 to every value moves the mean to 3.5. The first example's deviation
-# targets remain correct. This illustrates the common-translation intervention.
-#
-# ### Reorder complete item records
-#
-# ```yaml
-# items:
-#   - {value: 3.5, deviation: 1.0}
-#   - {value: 3.1, deviation: 0.6}
-#   - {value: 2.7, deviation: 0.2}
-#   - {value: 2.3, deviation: -0.2}
-#   - {value: 1.9, deviation: -0.6}
-#   - {value: 1.5, deviation: -1.0}
-# ```
-#
-# Reversing the first collection preserves its mean. The targets move with their
-# items, and predictions should follow the same order. These are mathematically
-# correct targets; the proof measures how closely learned predictions respect
-# this relationship.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, rows: int, seed: int) -> Iterator[dict]:
     """Generate collections with independent locations and centered residuals."""
     rng = np.random.default_rng(seed)
@@ -170,45 +167,6 @@ def permute_items(rows: list[dict], seed: int) -> tuple[list[dict], np.ndarray]:
     return result, np.asarray(flattened)
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-ungrouped-peer-deviation
-# //| fig-cap: "The item branch learns one summary and the root keeps its routed output. Each masked deviation also has its own visible value as query context."
-# //| fig-alt: "Collection contains six repeated items with value inputs and a masked Number deviation. The root keeps all tokens. The item branch learns one attention summary; aligned visible siblings also condition each target."
-# #tree(node("collection", kind: "root", width: 150pt, body: [
-#   - *Reduction:* Keep all tokens
-# ], children: (
-#   node("items", kind: "branch", repeated: true, width: 150pt, body: [
-#     - *Capacity:* 6 items
-#     - *Reduction:* `Attention`
-#     - *Learned summaries:* 1
-#   ], children: (
-#     node("value", type: "Number"),
-#     node("deviation", kind: "target", type: "Number", width: 150pt, body: [
-#       - *Input:* always hidden
-#     ]),
-#   )),
-# )))
-# ```
-#
-# The item branch uses `rf.Attention(n_outputs=1, n_layers=2)` and the root uses
-# `reduction=None`. Each repeated target also has its aligned visible value as
-# query context.
-#
-# ## How it works
-#
-# The learned summary can provide collection context to a decoder conditioned
-# on each item's visible value. Wide random shifts between rows make an item's
-# value alone a poor predictor of its deviation. Adding one constant to all six
-# values preserves every target, and permuting whole items should reorder the
-# predictions in exactly the same way.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -279,22 +237,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P035 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat three core seeds and ten calibration seeds. Test varying cardinality,
-# empty collections, and missing values, and tighten the equivariance contract.
-# The [grouped case](grouped-peer-deviation.html) adds membership selection;
-# the [supplied-mean control](supplied-peer-mean-control.html) removes aggregation.
-#
-# ## Reproduce
-#
-# {{< proof P035 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=3710)
+
+# %% [markdown]
+# </details>

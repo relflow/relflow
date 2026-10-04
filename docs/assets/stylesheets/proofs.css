@@ -1,8 +1,3 @@
-#read-the-status table :is(th, td):first-child {
-  width: 1%;
-  white-space: nowrap;
-}
-
 #listing-proofs tbody tr {
   cursor: pointer;
 }

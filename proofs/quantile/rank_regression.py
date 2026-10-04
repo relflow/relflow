@@ -1,28 +1,100 @@
 # %% [markdown]
 # ---
-# title: Regression Through Percentiles
-# categories: [Quantile]
+# title: Can percentile-based predictions return useful original values?
+# categories:
+# - Quantile
 # proof-id: P067
-# description: A percentile representation learns a monotone relationship on skewed numbers and writes predictions in the original numeric units.
+# description: Represent amounts and costs by their positions in the training distribution, then convert
+#   predicted costs back to their original units.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Original amounts
+#   metric:
+#   - normalized_rmse
+#   format: error
+# - label: Shuffled amounts
+#   metric:
+#   - shuffled_normalized_rmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# amount: 100.0
+# cost: 506.0
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-quantile-rank-regression
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with order, amount, cost. Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("order", kind: "root", children: (
+#   node("amount", type: "Quantile", detail: "Skewed numeric input"),
+#   node("cost", kind: "target", type: "Quantile", detail: "Original-unit prediction"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Score new records in source units and shuffle amounts while retaining their original costs. Check that evaluation does not change the learned distributions.
+#
+# ## Result
 #
 # {{< proof P067 status >}}
 #
-# ## Insights
+# The learned relationship remains useful after conversion back. Shuffling removes accuracy; this does not establish behavior beyond the learned numerical range.
 #
-# A learned percentile relationship should remain useful after its inverse
-# transform. This proof measures errors in the source units on independent
-# observations, with an input shuffle that destroys the predictive relationship.
-# Distribution state may learn consumed training values, including hidden
-# targets; validation and prediction must preserve that state.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Across ten CPU seeds, source-unit RMSE was 2.36–6.64% of the constant-baseline
-# RMSE (median 3.58%). Shuffling raised that ratio to 137.30–143.20%.
-# All gates passed in those runs and a separate RTX 3090 run.
+# {{< proof P067 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< proof P067 script >}}
+#
+# ### Synthetic process and observability
+#
+# Draw an independent latent `u ~ Uniform(0, 1)` for each row, then set
+# `amount = 50 * (exp(3u) - 1)` and
+# `cost = 200 + 3 * amount + Normal(0, 10)`. The positive amounts are skewed;
+# the model sees only amount, never the generating `u`. Cost is always hidden
+# from embedding. Its conditional mean and median coincide, and the known
+# source-unit noise RMSE is 10. A random row split is appropriate because rows
+# are independent and contain no persistent identities.
+#
+# ### Training and controls
+#
+# Train the `xs` preset for 400 AdamW updates, batch size 128 and learning rate
+# 0.002, using 4,096 training rows and 1,024 independently seeded validation
+# rows. Validation does not select a checkpoint: evaluation uses the fixed
+# final update. Test 2,048 new rows once. Both inputs and targets use the
+# default digest compression; the target objective is percentile MSE.
+#
+# The predeclared gate is original-unit RMSE divided by the
+# training-mean baseline RMSE below 0.25. Shuffling the visible input must give
+# normalized RMSE above 0.90 and more than three times the intended error.
+# The primary prediction receives only amount; a separate target-tampering
+# check verifies the mask. Require finite predictions, exactly 128 digest
+# observations per update, frozen evaluation state, and checkpoint prediction
+# stability within 0.0001 source units. Counts include repeated training epochs.
+#
+# ### Remaining work
+#
+# The ten-seed calibration retained the predeclared gates and fixed training
+# budget. The task tests one smooth relationship with moderate skew. It
+# does not establish calibrated intervals, arbitrary tail accuracy, drift
+# adaptation, or extrapolation beyond the fitted target distribution.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P067: learn a skewed numeric relationship through Quantile representations."""
@@ -45,52 +117,7 @@ BATCH_SIZE = 128
 TRAIN_ROWS = 4096
 TEST_ROWS = 2048
 
-# %% [markdown]
-# ## Synthetic process and observability
-#
-# Draw an independent latent `u ~ Uniform(0, 1)` for each row, then set
-# `amount = 50 * (exp(3u) - 1)` and
-# `cost = 200 + 3 * amount + Normal(0, 10)`. The positive amounts are skewed;
-# the model sees only amount, never the generating `u`. Cost is always hidden
-# from embedding. Its conditional mean and median coincide, and the known
-# source-unit noise RMSE is 10. A random row split is appropriate because rows
-# are independent and contain no persistent identities.
-#
-# ```yaml
-# amount: 100.0
-# cost: 506.0
-# ```
-#
-# The expected cost is 500; 6 is one possible noise realization.
-#
-# ```yaml
-# amount: 700.0
-# cost: 506.0
-# ```
-#
-# This matched shuffled-input control retains the answer but attaches an
-# unrelated observed amount. Its marginal amount distribution is unchanged.
-#
-# ```yaml
-# amount: 700.0
-# cost: 2308.0
-# ```
-#
-# A correctly paired high-amount record instead has expected cost 2300.
-# Scoring in source units makes that distinction visible after inversion.
-#
-# ```{typst}
-# //| label: fig-proof-quantile-rank-regression
-# //| fig-cap: "A visible skewed amount predicts a hidden cost; both use training percentiles."
-# //| fig-alt: "An order has visible Quantile amount and hidden Quantile cost, returned in original units."
-# #tree(node("order", kind: "root", children: (
-#   node("amount", type: "Quantile", detail: "Skewed numeric input"),
-#   node("cost", kind: "target", type: "Quantile", detail: "Original-unit prediction"),
-# )))
-# ```
 
-
-# %%
 def records(*, rows: int, seed: int) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     amount = 50.0 * np.expm1(3.0 * rng.uniform(0.0, 1.0, rows))
@@ -114,25 +141,6 @@ def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["/cost"]["content"] for row in predictions], dtype=np.float64)
 
 
-# %% [markdown]
-# ## Training and controls
-#
-# Train the `xs` preset for 400 AdamW updates, batch size 128 and learning rate
-# 0.002, using 4,096 training rows and 1,024 independently seeded validation
-# rows. Validation does not select a checkpoint: evaluation uses the fixed
-# final update. Test 2,048 new rows once. Both inputs and targets use the
-# default digest compression; the target objective is percentile MSE.
-#
-# The predeclared gate is original-unit RMSE divided by the
-# training-mean baseline RMSE below 0.25. Shuffling the visible input must give
-# normalized RMSE above 0.90 and more than three times the intended error.
-# The primary prediction receives only amount; a separate target-tampering
-# check verifies the mask. Require finite predictions, exactly 128 digest
-# observations per update, frozen evaluation state, and checkpoint prediction
-# stability within 0.0001 source units. Counts include repeated training epochs.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -214,22 +222,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P067 evidence >}}
-#
-# ## Remaining work
-#
-# The ten-seed calibration retained the predeclared gates and fixed training
-# budget. The task tests one smooth relationship with moderate skew. It
-# does not establish calibrated intervals, arbitrary tail accuracy, drift
-# adaptation, or extrapolation beyond the fitted target distribution.
-#
-# ## Reproduce
-#
-# {{< proof P067 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=6701)
+
+# %% [markdown]
+# </details>

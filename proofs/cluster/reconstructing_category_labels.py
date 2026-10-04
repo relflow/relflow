@@ -1,39 +1,90 @@
 # %% [markdown]
 # ---
-# title: Cluster Commitment with Stable Labels
+# title: Do stable labels produce the right groups?
 # categories:
 # - Clustering
 # proof-id: P020
-# description: Repeated identities and a reconstruction objective can move adaptive
-#   cluster commitment toward the generating group count.
+# description: Repeated identities carry stable labels. Ask the Cluster field to reconstruct identities
+#   while predicting their labels.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Groups at the final epoch
+#   metric:
+#   - final_committed
+#   - -1
+#   format: number
 # ---
 #
-# Repeated merchant identities each have a stable label drawn from five groups.
-# The model predicts that label while also reconstructing masked identity
-# representations. The experiment checks how many clusters become committed
-# and how broadly they are used.
+# ## Example
+#
+# ```yaml
+# merchant_id: c0-id3
+# label: L0
+# ```
+#
+# The label is hidden; identities are sometimes hidden for reconstruction during training.
+#
+# ```{typst}
+# //| label: fig-proof-cluster-reconstructing-category-labels
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with event, merchant_id, label. Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("event", kind: "root", children: (
+#   node("merchant_id", type: "Cluster", width: 150pt,),
+#   node("label", kind: "target", type: "Category",),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare learned group count and usage with the five hidden label groups.
+#
+# ## Result
 #
 # {{< proof P020 status >}}
 #
-# ## Insights
+# The model reaches roughly five groups, but count and usage do not measure whether grouping is correct. Reused validation records also leave independent predictive quality untested.
 #
-# **The right number of clusters does not mean the right identities were grouped together.** Repeated
-# identities provide consistent label evidence, and the Cluster reconstruction loss updates usage and
-# commitment.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The recorded run ends near five groups. However, committed count is derived by rounding and clamping usage
-# perplexity: these are coupled diagnostics, not independent confirmations of recovery. Incorrect groups can
-# satisfy both gates.
+# {{< proof P020 evidence >}}
 #
-# Training and validation reuse observations, with no held-out skill or assignment-agreement requirement.
-# Treat this as evidence about mechanism activation. Demonstrating useful clustering still requires
-# independent predictions, partition recovery, and controls without genuine generating groups.
+# ### Run this experiment
 #
-# ## Setup
+# {{< proof P020 script >}}
+#
+# ### How it works
+#
+# The merchant field uses
+# `rf.Cluster(mask=rf.Mask(rate=0.5, reconstruct=True), ...)`. Its reconstruction
+# loss updates adaptive usage and commitment state. Repetition lets evidence
+# accumulate for an identity. `label=rf.Category(mask=True, ...)` supplies the
+# supervised task without exposing its answer as an input.
+#
+# Assignments belong to stable identities. Row-varying sibling context does not
+# directly condition the Cluster reconstruction query. The
+# [plain-input control](plain-input-is-dormant.html) shows what happens when the
+# Cluster reconstruction objective is absent.
+#
+# The model trains for 30 deterministic epochs. A callback inspects internal
+# Cluster state at each epoch; the gates examine its final five entries.
+#
+# ### Remaining work
+#
+# Use independent observations for each split, add held-out downstream skill
+# against a marginal baseline, and require adjusted Rand index (ARI) ≥ 0.80
+# for partition recovery. Add unique-identity and no-regime controls. Replace
+# internal-state inspection with a public diagnostic when available.
+#
+# The family requires three passing core seeds and at least ten calibration
+# seeds before its terminal-window thresholds can be promoted.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P020: track adaptive clusters across five repeated-identity labels.
@@ -55,48 +106,7 @@ from relflow.tensorfields.extensions.cluster import Embedder
 
 PROOF_ID = "P020"
 
-# %% [markdown]
-# ## Examples
-#
-# Each generating identity appears 20 times with a stable hidden `label`.
-# The Cluster field is an input with a reconstructing mask; its displayed
-# identity is not always visible during training.
-#
-# ### One identity in the first group
-#
-# ```yaml
-# merchant_id: c0-id3
-# label: L0
-# ```
-#
-# Repeated observations give this identity consistent evidence for label `L0`.
-#
-# ### A peer identity in the same group
-#
-# ```yaml
-# merchant_id: c0-id9
-# label: L0
-# ```
-#
-# The identifier differs, but the behavior matches. These two identities belong
-# together in the generator's partition.
-#
-# ### A different group
-#
-# ```yaml
-# merchant_id: c4-id8
-# label: L4
-# ```
-#
-# This identity belongs to a different generating group. The five groups have
-# ten identities each, for 1,000 total observations. Their label relationship
-# is ground truth; the present proof checks cluster count and usage, not whether
-# these particular identities received the correct learned assignments.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(seed: int) -> Iterator[dict]:
     """Repeat each of 50 identities twenty times with one stable regime label."""
     rows = [
@@ -135,44 +145,6 @@ class Trajectory(lit.Callback):
         )
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-cluster-reconstructing-category-labels
-# //| fig-cap: "Merchant ID uses a 50% training mask with reconstruction enabled. Its label is always hidden from model inputs."
-# //| fig-alt: "Event contains a Cluster merchant ID with 50% training masking and reconstruction enabled, and a Category label target always hidden from input."
-# #tree(node("event", kind: "root", children: (
-#   node("merchant_id", type: "Cluster", width: 150pt, body: [
-#     - *Mask:* 50% in training
-#     - *Reconstruct:* enabled
-#   ]),
-#   node("label", kind: "target", type: "Category", body: [
-#     - *Input:* always hidden
-#   ]),
-# )))
-# ```
-#
-# ## How it works
-#
-# The merchant field uses
-# `rf.Cluster(mask=rf.Mask(rate=0.5, reconstruct=True), ...)`. Its reconstruction
-# loss updates adaptive usage and commitment state. Repetition lets evidence
-# accumulate for an identity. `label=rf.Category(mask=True, ...)` supplies the
-# supervised task without exposing its answer as an input.
-#
-# Assignments belong to stable identities. Row-varying sibling context does not
-# directly condition the Cluster reconstruction query. The
-# [plain-input control](plain-input-is-dormant.html) shows what happens when the
-# Cluster reconstruction objective is absent.
-#
-# The model trains for 30 deterministic epochs. A callback inspects internal
-# Cluster state at each epoch; the gates examine its final five entries.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -215,25 +187,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P020 evidence >}}
-#
-# ## Remaining work
-#
-# Use independent observations for each split, add held-out downstream skill
-# against a marginal baseline, and require adjusted Rand index (ARI) ≥ 0.80
-# for partition recovery. Add unique-identity and no-regime controls. Replace
-# internal-state inspection with a public diagnostic when available.
-#
-# The family requires three passing core seeds and at least ten calibration
-# seeds before its terminal-window thresholds can be promoted.
-#
-# ## Reproduce
-#
-# {{< proof P020 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=0)
+
+# %% [markdown]
+# </details>

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import shutil
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,9 @@ def clean(root: Path) -> None:
             raise ValueError(f"Cannot clean proof page outside docs/proofs/<family>/: {page}")
     for page in pages:
         page.unlink(missing_ok=True)
+        page.with_suffix(".quarto_ipynb").unlink(missing_ok=True)
+        for temporary in page.parent.glob(f"{page.stem}.quarto_ipynb_*"):
+            temporary.unlink()
     for name in ("_generated", "__pycache__"):
         path = docs / name
         if path.exists():
@@ -59,6 +63,54 @@ def value(item: Any) -> str:
     if isinstance(item, dict):
         return "; ".join(f"{key}: {value(part)}" for key, part in item.items())
     return str(item).replace("|", "\\|").replace("\n", " ")
+
+
+def readout(header: dict[str, Any], run: dict[str, Any] | None) -> str:
+    """Present a few authored comparisons directly from the recorded metrics."""
+    rows = []
+    formats = set()
+    for selection in header.get("proof-readout", []):
+        label = selection["label"]
+        path = selection["metric"]
+        style = selection["format"]
+        if not isinstance(path, list) or not path or style not in {"number", "percent", "error", "auc"}:
+            raise ValueError(f"{header['proof-id']}: readout {label!r} requires a metric path and supported format")
+        measured = run.get("metrics", {}) if run else {}
+        try:
+            for part in path:
+                measured = measured[part]
+        except (KeyError, IndexError, TypeError):
+            displayed = "Not recorded in this run"
+        else:
+            if isinstance(measured, bool) or not isinstance(measured, (int, float)):
+                raise ValueError(
+                    f"{header['proof-id']}: readout {label!r} requires a numerical metric, got {measured!r}"
+                )
+            if not math.isfinite(measured):
+                displayed = "Not available"
+            elif style == "error":
+                displayed = f"{measured * 100:.1f}% of baseline error"
+            elif style == "percent":
+                displayed = f"{measured * 100:.1f}%"
+            elif style == "auc":
+                displayed = f"{measured:.4f}"
+            else:
+                displayed = f"{measured:.4g}"
+        rows.append(f"| {value(label)} | {displayed} |")
+        formats.add(style)
+    if not rows or run is None:
+        return ""
+    sections = ["| Comparison | Latest measurement |\n| --- | --- |\n" + "\n".join(rows)]
+    if "error" in formats:
+        sections.append(
+            "Baseline error compares prediction error with a constant guess. "
+            "100% matches that guess; lower is better. Details specify the baseline and root-mean-square error calculation."
+        )
+    if "auc" in formats:
+        sections.append(
+            "These are AUC ranking scores: 0.5 is chance and 1 is perfect separation. They are not percentages of correct answers."
+        )
+    return "\n\n".join(sections) + "\n"
 
 
 def evidence(entry: dict[str, Any]) -> str:
@@ -99,6 +151,17 @@ def evidence(entry: dict[str, Any]) -> str:
             f"The latest smoke run used seed {smoke['seed']} and a {smoke['steps_override']}-step cap "
             f"per training stage. Execution {'failed' if smoke['outcome'] == 'error' else 'completed'}; "
             "a shortened run does not establish learning capability or change the proof status."
+        )
+    full = [record for record in runs if record["mode"] == "full"]
+    if len(full) > 1:
+        sections.append(
+            "### Full run history\n\nRuns may include earlier source versions. Repeating a seed is not an independent seed check.\n\n"
+            "| Seed | Outcome | Recorded | Code fingerprint |\n| --- | --- | --- | --- |\n"
+            + "\n".join(
+                f"| {record['seed']} | {record['outcome'].replace('_', ' ')} | {record['started_at']} | "
+                f"{record.get('provenance', {}).get('code_sha256', 'Not recorded')} |"
+                for record in full
+            )
         )
     sections.append("[Recorded results](../_generated/results.yaml).")
     return "\n\n".join(sections) + "\n"
@@ -147,14 +210,23 @@ def render(root: Path) -> None:
             title = f"Latest full run · {state}"
             met = sum(run.get("checks", {}).values())
             total = len(run.get("checks", {}))
-            summary = (
-                f"Seed {run['seed']} on `{run['accelerator']}`: {met} of {total} behavioral checks met. "
-                "See the measurements below."
-            )
+            summary = f"Seed {run['seed']} on `{run['accelerator']}`: {met} of {total} test checks met."
             if run["outcome"] == "error":
                 summary = "The latest full experiment encountered an execution error. See the recorded error below."
             elif run["outcome"] == "not_met":
-                summary += " See the failed checks and their interpretation below."
+                summary += " The experiment did not meet every criterion."
+            elif state == "Limited":
+                summary += " This experiment demonstrates a limitation."
+            elif state == "Partial":
+                summary += " The broader claim remains incomplete."
+            full = [record for record in entry["runs"] if record["mode"] == "full"]
+            if len(full) > 1:
+                passed = sum(record["outcome"] == "met" for record in full)
+                seeds = len({record["seed"] for record in full})
+                summary += (
+                    f" History: {passed} of {len(full)} full runs met every check, across {seeds} distinct seeds. "
+                    "History can include earlier source versions."
+                )
             recorded_hash = run.get("provenance", {}).get("code_sha256")
             if recorded_hash and recorded_hash != fingerprint(code):
                 summary += (
@@ -163,7 +235,8 @@ def render(root: Path) -> None:
         kind = "warning" if state in {"Failing", "Error", "Limited"} else "note"
         write(
             output / f"{identifier}-status.md",
-            f'::: {{.callout-{kind} title="{identifier} · {title}"}}\n{summary}\n:::\n',
+            f'::: {{.proof-result .proof-result-{kind} role="note"}}\n'
+            f"**{identifier} · {title}**\n\n{summary}\n:::\n\n" + readout(header, run),
         )
         write(output / f"{identifier}-evidence.md", evidence(entry))
         write(

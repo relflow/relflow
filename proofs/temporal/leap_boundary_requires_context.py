@@ -1,36 +1,85 @@
 # %% [markdown]
 # ---
-# title: Resolving the Leap-Day Boundary
+# title: Can day 60 reveal the month in a leap year?
 # categories:
 # - Calendar reasoning
 # proof-id: P043
-# description: Day-of-year alone cannot distinguish leap-day February from non-leap
-#   March at ordinal day 60.
+# description: Distinguish February 29 from March 1 when both can be day 60 of a year.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Day number only
+#   metric:
+#   - day_only_accuracy
+#   format: percent
+# - label: Week-of-month added
+#   metric:
+#   - with_week_of_month_accuracy
+#   format: percent
 # ---
 #
-# Ordinal day 60 can mean February 29 or March 1. This proof creates a balanced
-# collision, then adds a calendar coordinate that separates the two cases.
+# ## Example
+#
+# ```yaml
+# observed_at: 2024-02-29
+# target: February
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-temporal-leap-boundary-requires-context
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with calendar, observed_at, target. Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("calendar", kind: "root", children: (
+#   node("observed_at", type: "DateParts", width: 150pt,),
+#   node("target", kind: "target", type: "Category", detail: "month",),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare day-of-year alone with a model that also receives week-of-month.
+#
+# ## Result
 #
 # {{< proof P043 status >}}
 #
-# ## Insights
+# Day number alone cannot separate identical inputs with different answers. The added coordinate resolves these cases; general leap-year reasoning is not tested.
 #
-# **Day 60 can be February 29 or March 1, so its number alone cannot identify the month.** With balanced
-# labels and only day-of-year visible, the model has no information that can resolve the two answers.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The day-only route stays at chance, while adding week-of-month separates the dates and resolves the
-# ambiguity. The models use different training budgets, but additional optimization alone cannot resolve
-# identical inputs with conflicting labels. This is a representation boundary with a positive control.
+# {{< proof P043 evidence >}}
 #
-# Supply the needed coordinate or calculate exact calendar results in preprocessing. Success with
-# week-of-month does not establish general leap-year reasoning, timezone semantics, or reliability for every
-# alternative coordinate choice.
+# ### Run this experiment
 #
-# ## Setup
+# {{< proof P043 script >}}
+#
+# ### How it works
+#
+# The ambiguous variant exposes only `day_of_year`. Every input coordinate
+# is identical, with half the labels February and half March, so optimal
+# accuracy is 0.50. The positive variant also exposes `week_of_month`.
+#
+# The train, validation, and test year ranges are 1901–1950, 1951–2000, and
+# 2001–2050, with 512, 128, and 256 rows respectively. The ambiguous model
+# trains for ten deterministic epochs; the identified model trains for 20.
+# The experiment isolates available information but does not match the two
+# training budgets.
+#
+# ### Remaining work
+#
+# Repeat the gates over three core seeds and at least ten calibration seeds.
+# Investigate why adding the finer `day_of_month` coordinate optimizes less
+# reliably than `week_of_month`. Test application policies that map leap dates
+# onto a canonical non-leap calendar separately.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P043: distinguish February 29 from March 1 at ordinal day sixty.
@@ -53,48 +102,7 @@ import relflow as rf
 
 PROOF_ID = "P043"
 
-# %% [markdown]
-# ## Examples
-#
-# The hidden Category target distinguishes February from March. The ambiguous
-# model exposes only `day_of_year`; the positive control also exposes
-# `week_of_month`.
-#
-# ### Day 60 in a leap year
-#
-# ```yaml
-# observed_at: 2024-02-29
-# target: February
-# ```
-#
-# Leap day is ordinal 60 and belongs to the fifth week-of-month bin.
-#
-# ### Day 60 in a non-leap year
-#
-# ```yaml
-# observed_at: 2023-03-01
-# target: March
-# ```
-#
-# This date has the same ordinal but a different month. Its week-of-month bin
-# is the first, giving the positive control a visible distinction.
-#
-# ### The boundary in another leap year
-#
-# ```yaml
-# observed_at: 2028-02-29
-# target: February
-# ```
-#
-# The ambiguity recurs in another held-out year. Ordinal 60 alone still cannot
-# select the label; adding week-of-month again separates this fifth-week date
-# from a first-week March 1. These labels are calendar ground truth, not
-# individual predictions from the recorded model.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, years: Sequence[int], rows: int) -> Iterator[dict]:
     """Yield balanced leap-day and ordinary March-boundary observations."""
     leap = [date(year, 2, 29) for year in years if calendar.isleap(year)]
@@ -108,40 +116,6 @@ def records(*, years: Sequence[int], rows: int) -> Iterator[dict]:
         yield {"observed_at": ordinary[index % len(ordinary)], "target": "March"}
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-temporal-leap-boundary-requires-context
-# //| fig-cap: "The primary route exposes only day-of-year. The positive control adds week-of-month; the month target stays hidden."
-# //| fig-alt: "Calendar contains DateParts observed at with only day-of-year in the primary route and added week-of-month in the positive control, plus a Category month target always hidden from input."
-# #tree(node("calendar", kind: "root", children: (
-#   node("observed_at", type: "DateParts", width: 150pt, body: [
-#     - *Primary:* day of year only
-#     - *Control:* add week of month
-#   ]),
-#   node("target", kind: "target", type: "Category", detail: "month", body: [
-#     - *Input:* always hidden
-#   ]),
-# )))
-# ```
-#
-# ## How it works
-#
-# The ambiguous variant exposes only `day_of_year`. Every input coordinate
-# is identical, with half the labels February and half March, so optimal
-# accuracy is 0.50. The positive variant also exposes `week_of_month`.
-#
-# The train, validation, and test year ranges are 1901–1950, 1951–2000, and
-# 2001–2050, with 512, 128, and 256 rows respectively. The ambiguous model
-# trains for ten deterministic epochs; the identified model trains for 20.
-# The experiment isolates available information but does not match the two
-# training budgets.
-#
-# ## Training and evaluation
-
-
-# %%
 def fit(
     *,
     dateparts: Sequence[str],
@@ -230,22 +204,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P043 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat the gates over three core seeds and at least ten calibration seeds.
-# Investigate why adding the finer `day_of_month` coordinate optimizes less
-# reliably than `week_of_month`. Test application policies that map leap dates
-# onto a canonical non-leap calendar separately.
-#
-# ## Reproduce
-#
-# {{< proof P043 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=53)
+
+# %% [markdown]
+# </details>

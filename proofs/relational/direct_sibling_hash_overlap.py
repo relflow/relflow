@@ -1,39 +1,96 @@
 # %% [markdown]
 # ---
-# title: The Collection Overlap Boundary
+# title: Can it find a shared ID across two lists?
 # categories:
 # - Collection overlap
 # proof-id: P028
-# description: Document the current failure to infer overlap between two natural sibling
-#   collections of unseen identities.
+# description: Predict whether two lists have any ID in common, using IDs absent from training.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Original lists
+#   metric:
+#   - intact_auc
+#   format: auc
+# - label: Match removed
+#   metric:
+#   - broken_auc
+#   format: auc
 # ---
 #
-# Two collections overlap if any identity appears on both sides. The natural
-# sibling-branch model currently remains near chance on this task, even when
-# every identity token is retained.
+# ## Example
+#
+# ```yaml
+# left:
+#   - {entity_id: fox}
+#   - {entity_id: owl}
+#   - {entity_id: lynx}
+# right:
+#   - {entity_id: yak}
+#   - {entity_id: owl}
+# has_overlap: true
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-direct-sibling-hash-overlap
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with overlap, left, entity_id, right, entity_id, has_overlap. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("overlap", kind: "root", width: 120pt, children: (
+#   node("left", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("entity_id", type: "Hash"),
+#   )),
+#   node("right", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("entity_id", type: "Hash"),
+#   )),
+#   node("has_overlap", kind: "target", type: "Boolean", width: 150pt,),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Rename and reorder IDs without changing overlap, then remove the shared member. A useful predictor should notice the removal.
+#
+# ## Result
 #
 # {{< proof P028 status >}}
 #
-# ## Insights
+# This model stays near chance and barely responds to removing the match. The result describes this setup and budget, rather than proving that overlap can never be learned.
 #
-# **Retaining every identity token does not make the current model reliably
-# detect overlap between two collections.** The scalar target must discover a
-# match anywhere across both sides, which is a different demand from a repeated
-# target carrying its own visible query identity. The passing flat equality
-# control shows that unseen Hash comparison itself can work.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# This proof deliberately passes when predictions remain near chance and barely
-# respond to removing the shared member. Low drift under renaming and permutation
-# is not useful invariance by itself: an uninformative predictor can also stay
-# stable. The result describes the tested architecture and budget, not an
-# impossibility theorem. Compute overlap directly when an application requires
-# it today.
+# {{< proof P028 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P028 script >}}
+#
+# ### How it works
+#
+# Positive rows share exactly one identity; negative rows share none. Labels are
+# balanced, identities are fresh per row and split, and independent side lengths
+# range from two to five. Order, length, and vocabulary frequency cannot identify
+# the label. Renaming identities consistently and permuting each side preserves
+# the relation; removing the shared right member destroys it.
+#
+# The [flat equality control](flat-unseen-hash-equality-control.html) succeeds,
+# localizing the observed gap beyond the primitive unseen-identity comparison.
+#
+# ### Remaining work
+#
+# Repeat across more seeds and larger training budgets, then evaluate bounded
+# set-comparison designs with accuracy, intervention, and invariance gates.
+# This result characterizes the tested schema and budget, not an impossibility
+# result for transformers. Compute deterministic overlap in a preprocessor or
+# the application when it is needed today.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Measure the unresolved overlap boundary between two sibling collections.
@@ -62,63 +119,7 @@ PROOF_ID = "P028"
 MIN_LENGTH = 2
 MAX_LENGTH = 5
 
-# %% [markdown]
-# ## Examples
-#
-# ### One identity is shared
-#
-# ```yaml
-# left:
-#   - {entity_id: fox}
-#   - {entity_id: owl}
-#   - {entity_id: lynx}
-# right:
-#   - {entity_id: yak}
-#   - {entity_id: owl}
-# has_overlap: true
-# ```
-#
-# The shared identity is `owl`. `has_overlap` is supervision hidden by
-# `mask=True`. The example states the true answer, not a successful prediction.
-#
-# ### No identity is shared
-#
-# ```yaml
-# left:
-#   - {entity_id: fox}
-#   - {entity_id: owl}
-#   - {entity_id: lynx}
-# right:
-#   - {entity_id: yak}
-#   - {entity_id: eel}
-# has_overlap: false
-# ```
-#
-# The right side now shares no identity with the left, so the correct label is
-# false. The unchanged side lengths cannot distinguish this case from the first.
-#
-# ### Remove an overlap but retain its old label
-#
-# ```yaml
-# left:
-#   - {entity_id: fox}
-#   - {entity_id: owl}
-#   - {entity_id: lynx}
-# right:
-#   - {entity_id: yak}
-#   - {entity_id: broken-000000-1}
-# has_overlap: true
-# ```
-#
-# The corruption replaces the first record's shared right member with a fresh
-# identity. Its retained label is intentionally true even though actual overlap
-# is now false. A successful detector should lower its positive probability;
-# the current limitation proof instead records almost no response.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, rows: int, seed: int, namespace: str) -> Iterator[dict]:
     """Generate balanced, variable-width sibling collections with zero/one overlap."""
     if rows <= 0 or rows % 2:
@@ -206,52 +207,6 @@ def probabilities(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["predictions"]["/has_overlap"]["content"]["probability"] for row in output])
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-direct-sibling-hash-overlap
-# //| fig-cap: "Both sibling collections and the root keep all tokens, but the masked scalar target still does not reliably learn collection overlap in this proof."
-# //| fig-alt: "Overlap has left and right Hash-identity branches, each with capacity five, and a masked Boolean target. Both branches and root keep all tokens; this remains the recorded unsupported collection-comparison route."
-# #tree(node("overlap", kind: "root", width: 150pt, body: [
-#   - *Reduction:* Keep all tokens
-# ], children: (
-#   node("left", kind: "branch", repeated: true, width: 150pt, body: [
-#     - *Capacity:* 5 items
-#     - *Reduction:* Keep all tokens
-#   ], children: (
-#     node("entity_id", type: "Hash"),
-#   )),
-#   node("right", kind: "branch", repeated: true, width: 150pt, body: [
-#     - *Capacity:* 5 items
-#     - *Reduction:* Keep all tokens
-#   ], children: (
-#     node("entity_id", type: "Hash"),
-#   )),
-#   node("has_overlap", kind: "target", type: "Boolean", width: 150pt, body: [
-#     - *Input:* always hidden
-#   ]),
-# )))
-# ```
-#
-# The root and both branches use `reduction=None`. Retaining tokens by itself
-# does not guarantee that a scalar decoder learns every cross-collection match.
-#
-# ## How it works
-#
-# Positive rows share exactly one identity; negative rows share none. Labels are
-# balanced, identities are fresh per row and split, and independent side lengths
-# range from two to five. Order, length, and vocabulary frequency cannot identify
-# the label. Renaming identities consistently and permuting each side preserves
-# the relation; removing the shared right member destroys it.
-#
-# The [flat equality control](flat-unseen-hash-equality-control.html) succeeds,
-# localizing the observed gap beyond the primitive unseen-identity comparison.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -336,23 +291,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P028 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat across more seeds and larger training budgets, then evaluate bounded
-# set-comparison designs with accuracy, intervention, and invariance gates.
-# This result characterizes the tested schema and budget, not an impossibility
-# result for transformers. Compute deterministic overlap in a preprocessor or
-# the application when it is needed today.
-#
-# ## Reproduce
-#
-# {{< proof P028 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=3711)
+
+# %% [markdown]
+# </details>

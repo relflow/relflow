@@ -1,32 +1,78 @@
 # %% [markdown]
 # ---
-# title: Deactivate a Learned Input and Restore Its Contribution
+# title: Can an input be disabled and restored?
 # categories:
 # - Mutation ablation
 # proof-id: P049
-# description: Remove an informative input with active=False, measure lost information, and restore trained predictions through updates and temporary overrides.
-# execute: {enabled: false, eval: false}
+# description: Train on y = a + b, temporarily disable b, then enable it again.
+# execute:
+#   enabled: false
+#   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Original model
+#   metric:
+#   - source
+#   - nrmse
+#   format: error
+# - label: Best prediction using only a
+#   metric:
+#   - controls
+#   - only_a_oracle
+#   - nrmse
+#   format: error
 # ---
 #
-# A node that starts inactive cannot demonstrate the loss of learned behavior.
-# This experiment first learns to use both inputs, then disables one of them.
+# ## Example
+#
+# ```yaml
+# a: 0.5
+# b: 0.75
+# y: 1.25
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-mutations-deactivate-input
+# //| fig-alt: "Model tree with record, a, b, y. Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("record", kind: "root", children: (
+#   node("a", type: "Number", body: [Always active]),
+#   node("b", type: "Number", body: [Active → inactive → active]),
+#   node("y", type: "Number", kind: "target", body: [Always hidden]),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Check repeated edits, temporary overrides, and a saved inactive model. No training occurs while b is disabled.
+#
+# ## Result
 #
 # {{< proof P049 status >}}
 #
-# ## Insights
+# Disabling b removes useful information; enabling it restores the trained predictions. This tests an input field, rather than disabling a learned output decoder.
 #
-# **Deactivation removes the input's contribution while retaining the state
-# needed to reactivate it.** The full runs show increased prediction error while
-# the input is inactive and exact restoration afterward, through repeated
-# updates, normal and exceptional override exits, and an inactive checkpoint
-# that is loaded and reactivated.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The selected node is a pure Number input. No optimization occurs while it is
-# inactive. The claim does not cover trained output heads whose decoders are
-# removed by deactivation, or state changes made inside an override.
+# {{< proof P049 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P049 script >}}
+#
+# ### Remaining work
+#
+# Three GPU seeds support this case. Calibrate numerical gates on ten independent
+# seeds. Deactivating output heads and branches that produce context requires
+# separate experiments. Training inside an override does not have checkpoint
+# rollback semantics and is not covered here.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P049: remove and restore an informative input without further training."""
@@ -46,38 +92,7 @@ import relflow as rf
 
 PROOF_ID = "P049"
 
-# %% [markdown]
-# ## Examples
-#
-# Independently draw `a` and `b` uniformly from [−1, 1], with hidden `y = a + b`.
-#
-# ```yaml
-# a: 0.5
-# b: 0.75
-# y: 1.25
-# ```
-#
-# Holding `a` fixed and changing `b` changes the required answer:
-#
-# ```yaml
-# a: 0.5
-# b: -0.75
-# y: -0.25
-# ```
-#
-# After deactivating `b`, these records become indistinguishable to the model.
-# A remaining-input prediction can use only `a`, including on records like:
-#
-# ```yaml
-# a: -0.5
-# b: 0.75
-# y: 0.25
-# ```
-#
-# ## Data and comparisons
 
-
-# %%
 def records(*, rows: int, seed: int) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     for _ in range(rows):
@@ -118,39 +133,6 @@ def equal(first, second) -> bool:
     return type(first) is type(second) and first == second
 
 
-# %% [markdown]
-# ## Before, during, and after deactivation
-#
-# ```{typst}
-# //| label: fig-proof-mutations-deactivate-input
-# //| fig-alt: "Record reads Number a and Number b to predict hidden Number y. The b input is deactivated and later reactivated with its trained state retained."
-# //| fig-cap: "Disabling b removes information. Reactivation restores the trained function using both inputs."
-# #tree(node("record", kind: "root", children: (
-#   node("a", type: "Number", body: [Always active]),
-#   node("b", type: "Number", body: [Active → inactive → active]),
-#   node("y", type: "Number", kind: "target", body: [Always hidden]),
-# )))
-# ```
-#
-# Train for 512 updates on 2,048 records, validate on 512, and evaluate on an
-# independent panel of 2,048 records. nRMSE divides prediction RMSE by the error
-# of a constant fitted to the training targets. The source gate is below 0.25.
-#
-# Without `b`, the conditional mean is `a`. Relative to a baseline using the
-# population mean, its nRMSE is `1/sqrt(2)`; the experiment also records its
-# actual error on the held-out panel. Removal
-# must raise nRMSE by more than 0.35 and reach at least 90% of that measured
-# information-limit error. No claim requires an unadapted model to attain the
-# best prediction from the remaining input.
-#
-# Restoration uses `rtol=1e-5` and `atol=1e-6` times training target SD. A shuffled
-# `b` control establishes that the trained model uses the selected input.
-# Supplying, omitting, or changing `b` while inactive must give the same output.
-#
-# ## Training, deactivation, and restoration
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     budget = 512 if steps is None else min(steps, 512)
@@ -299,22 +281,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P049 evidence >}}
-#
-# ## Remaining work
-#
-# Three GPU seeds support this case. Calibrate numerical gates on ten independent
-# seeds. Deactivating output heads and branches that produce context requires
-# separate experiments. Training inside an override does not have checkpoint
-# rollback semantics and is not covered here.
-#
-# ## Reproduce
-#
-# {{< proof P049 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=4901)
+
+# %% [markdown]
+# </details>

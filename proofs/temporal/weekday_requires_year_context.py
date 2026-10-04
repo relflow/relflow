@@ -1,36 +1,88 @@
 # %% [markdown]
 # ---
-# title: Day-of-Year Cannot Identify Weekday
+# title: Can day-of-year alone identify the weekday?
 # categories:
 # - Calendar reasoning
 # proof-id: P045
-# description: Removing year and weekday information makes weekday ambiguous even when
-#   the original input was a complete date.
+# description: Predict weekday from the day number while deliberately balancing different years across all
+#   seven weekday answers.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Day number only
+#   metric:
+#   - day_only_accuracy
+#   format: percent
+# - label: Weekday supplied
+#   metric:
+#   - with_weekday_accuracy
+#   format: percent
 # ---
 #
-# The same day-of-year falls on different weekdays in different years. Once
-# DateParts exposes only that ordinal coordinate, the original date cannot
-# resolve the ambiguity for the model.
+# ## Example
+#
+# ```yaml
+# observed_at: 2001-01-01
+# target: Monday
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-temporal-weekday-requires-year-context
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with calendar, observed_at, target. Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("calendar", kind: "root", children: (
+#   node("observed_at", type: "DateParts", width: 150pt,),
+#   node("target", kind: "target", type: "Category", detail: "weekday",),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare day number alone with a model that also receives the weekday coordinate.
+#
+# ## Result
 #
 # {{< proof P045 status >}}
 #
-# ## Insights
+# The day-only model stays near one-in-seven chance. A source timestamp only helps through the coordinates exposed to the model.
 #
-# **The same day number can fall on different weekdays in different years.** Every represented ordinal is
-# balanced across all seven labels, making identical visible inputs require different answers.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The day-only route stays near the one-seventh chance boundary. Adding `day_of_week` makes the labels
-# directly distinguishable. This control does not test learning weekday arithmetic from a year coordinate.
+# {{< proof P045 evidence >}}
 #
-# Select DateParts coordinates according to what the target requires. A complete source timestamp does not
-# mean all its information reaches the model. The passing test confirms an expected limitation and a
-# successful added-coordinate control, not universal failure or general calendar reasoning.
+# ### Run this experiment
 #
-# ## Setup
+# {{< proof P045 script >}}
+#
+# ### How it works
+#
+# The generator balances all seven weekday labels at every sampled ordinal
+# day. With `dateparts=["day_of_year"]`, identical visible inputs therefore
+# need seven different answers. The best accuracy is one seventh.
+#
+# The positive control uses
+# `dateparts=["day_of_year", "day_of_week"]`, which supplies the missing
+# distinction directly. This control tests a visible weekday coordinate;
+# it does **not** test learning weekday arithmetic from a year coordinate.
+#
+# Training uses candidate dates from 1901–1935, validation from 1951–1985,
+# and testing from 2001–2035, excluding leap years. Both models train for
+# 14 deterministic epochs.
+#
+# ### Remaining work
+#
+# Repeat the positive and ambiguity gates over three core seeds and at least
+# ten calibration seeds. Broaden the family's coordinate-composition targets
+# while keeping balanced collisions that make information loss observable.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P045: expose the weekday information erased by day-of-year alone.
@@ -52,47 +104,7 @@ import relflow as rf
 
 PROOF_ID = "P045"
 
-# %% [markdown]
-# ## Examples
-#
-# These records all expose the same ordinal day when configured with
-# `dateparts=["day_of_year"]`. Their Category targets remain hidden.
-#
-# ### January 1 on a Monday
-#
-# ```yaml
-# observed_at: 2001-01-01
-# target: Monday
-# ```
-#
-# The visible day-of-year coordinate is 1.
-#
-# ### The same ordinal on a Tuesday
-#
-# ```yaml
-# observed_at: 2002-01-01
-# target: Tuesday
-# ```
-#
-# The encoded ordinal has not changed, but the correct answer has. A complete
-# source date cannot help once its distinguishing coordinates are omitted.
-#
-# ### Restoring the weekday coordinate
-#
-# ```yaml
-# observed_at: 2003-01-01
-# target: Wednesday
-# ```
-#
-# This third date has ordinal 1 as well. The positive control changes the
-# configuration to `dateparts=["day_of_year", "day_of_week"]`, so each of
-# these records now supplies its distinguishing weekday directly. It does
-# not add another field to the observation or infer weekday from year.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, years: Sequence[int], ordinal_step: int = 5) -> Iterator[dict]:
     """Yield every weekday at each sampled non-leap ordinal day."""
     candidates: dict[tuple[int, int], date] = {}
@@ -112,43 +124,6 @@ def records(*, years: Sequence[int], ordinal_step: int = 5) -> Iterator[dict]:
             yield {"observed_at": candidates[key], "target": calendar.day_name[weekday]}
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-temporal-weekday-requires-year-context
-# //| fig-cap: "The primary route exposes only day-of-year. The positive control adds day-of-week; both keep the weekday target hidden."
-# //| fig-alt: "Calendar contains DateParts observed at with only day-of-year in the primary route and added day-of-week in the positive control, plus a Category weekday target always hidden from input."
-# #tree(node("calendar", kind: "root", children: (
-#   node("observed_at", type: "DateParts", width: 150pt, body: [
-#     - *Primary:* day of year only
-#     - *Control:* add day of week
-#   ]),
-#   node("target", kind: "target", type: "Category", detail: "weekday", body: [
-#     - *Input:* always hidden
-#   ]),
-# )))
-# ```
-#
-# ## How it works
-#
-# The generator balances all seven weekday labels at every sampled ordinal
-# day. With `dateparts=["day_of_year"]`, identical visible inputs therefore
-# need seven different answers. The best accuracy is one seventh.
-#
-# The positive control uses
-# `dateparts=["day_of_year", "day_of_week"]`, which supplies the missing
-# distinction directly. This control tests a visible weekday coordinate;
-# it does **not** test learning weekday arithmetic from a year coordinate.
-#
-# Training uses candidate dates from 1901–1935, validation from 1951–1985,
-# and testing from 2001–2035, excluding leap years. Both models train for
-# 14 deterministic epochs.
-#
-# ## Training and evaluation
-
-
-# %%
 def fit(
     *,
     dateparts: Sequence[str],
@@ -237,21 +212,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P045 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat the positive and ambiguity gates over three core seeds and at least
-# ten calibration seeds. Broaden the family's coordinate-composition targets
-# while keeping balanced collisions that make information loss observable.
-#
-# ## Reproduce
-#
-# {{< proof P045 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=47)
+
+# %% [markdown]
+# </details>

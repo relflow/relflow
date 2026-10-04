@@ -1,32 +1,103 @@
 # %% [markdown]
 # ---
-# title: Covariance from aligned pairs
+# title: Can it learn how two measurements vary together?
 # categories:
 # - Distribution statistics
 # proof-id: P006
-# description: Learn a centered cross-moment from sibling values whose item-level pairing
-#   carries the answer.
+# description: 'Predict covariance: whether paired measurements tend to rise together or move in opposite
+#   directions.'
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Correct pairs
+#   metric:
+#   - intact
+#   - nrmse
+#   format: error
+# - label: Broken pairs
+#   metric:
+#   - corrupted
+#   - nrmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# items:
+#   - {x: -1, y: -1.4}
+#   - {x: 1, y: 0.2}
+#   - {x: -1, y: -0.2}
+#   - {x: 1, y: 1.4}
+#   - {x: -1, y: -1.4}
+#   - {x: 1, y: 0.2}
+#   - {x: -1, y: -0.2}
+#   - {x: 1, y: 1.4}
+# covariance: 0.8
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-aligned-pair-covariance
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with record, items, x, y, covariance. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("record", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("x", type: "Number"),
+#     node("y", type: "Number"),
+#   )),
+#   node("covariance", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare correct pairs with pairs whose second measurements are shuffled, keeping the original answers. The separate values stay the same.
+#
+# ## Result
 #
 # {{< proof P006 status >}}
 #
-# ## Insights
+# Accuracy depends on keeping each pair together. This tests covariance, not correlation, which also accounts for each measurement’s spread.
 #
-# **Covariance depends on which X belongs with which Y, not just the two value distributions.** Circularly
-# shifting only Y preserves both marginal sets of numbers but breaks accuracy against the original
-# covariance labels. That is evidence that the model uses item-level pairing.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Keep aligned fields on the same repeated item so their relationship remains available before aggregation.
-# The supplied-cross-product control helps distinguish that interaction from the final averaging step. This
-# proof supports learned population covariance in its tested setting; it does not establish Pearson
-# correlation, which also requires normalization by both spreads. Complete-pair permutation and varying
-# collection lengths remain separate checks.
+# {{< proof P006 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P006 script >}}
+#
+# ### How it works
+#
+# The repeated branch keeps `x` and `y` together and uses `reduction=None`
+# to preserve their encoded coordinates. Learned root attention can combine that
+# evidence before scalar decoding. Independent locations, scales, and a random
+# correlation coefficient prevent either marginal alone from supplying covariance.
+#
+# The negative control circularly shifts only `y`, preserving the exact values in
+# both fields but breaking their alignment. Labels stay unchanged, so error must
+# increase when the model responds to the changed pairs. The target is population
+# covariance, the mean centered product; Pearson correlation is not tested here.
+# [Supplied cross-deviations](supplied-cross-deviations.html) isolate its reduction.
+#
+# ### Remaining work
+#
+# Repeat across seeds and check complete-pair permutation. Variable lengths,
+# missing values, zero variance, and correlation normalization remain separate
+# questions. Coordinate-mixing ablations would distinguish which mechanisms are
+# necessary for the observed result.
+#
+# The family’s promotion target is at least three core seeds and ten lightweight
+# calibration seeds.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Aligned sibling fields should support covariance.
@@ -50,68 +121,7 @@ import relflow as rf
 PROOF_ID = "P006"
 ITEMS = 8
 
-# %% [markdown]
-# ## Examples
-#
-# Targets use `mask=True`; the labels below are supervision hidden from the encoder.
-#
-# ### Positive aligned covariance
-#
-# ```yaml
-# items:
-#   - {x: -1, y: -1.4}
-#   - {x: 1, y: 0.2}
-#   - {x: -1, y: -0.2}
-#   - {x: 1, y: 1.4}
-#   - {x: -1, y: -1.4}
-#   - {x: 1, y: 0.2}
-#   - {x: -1, y: -0.2}
-#   - {x: 1, y: 1.4}
-# covariance: 0.8
-# ```
-#
-# Both fields have mean zero, and their mean centered product is 0.8.
-#
-# ### Reverse the relationship
-#
-# ```yaml
-# items:
-#   - {x: -1, y: 1.4}
-#   - {x: 1, y: -0.2}
-#   - {x: -1, y: 0.2}
-#   - {x: 1, y: -1.4}
-#   - {x: -1, y: 1.4}
-#   - {x: 1, y: -0.2}
-#   - {x: -1, y: 0.2}
-#   - {x: 1, y: -1.4}
-# covariance: -0.8
-# ```
-#
-# Negating Y changes the population covariance to −0.8.
-#
-# ### Shift only Y
-#
-# ```yaml
-# items:
-#   - {x: -1, y: 1.4}
-#   - {x: 1, y: -1.4}
-#   - {x: -1, y: 0.2}
-#   - {x: 1, y: -0.2}
-#   - {x: -1, y: 1.4}
-#   - {x: 1, y: -1.4}
-#   - {x: -1, y: 0.2}
-#   - {x: 1, y: -0.2}
-# covariance: 0.8  # Retained original label
-# ```
-#
-# A one-position circular shift preserves both marginal value sets but makes
-# the visible covariance −0.8. The corruption retains the original 0.8 target
-# to test whether predictions depend on pair alignment.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def covariance_records(*, rows: int, seed: int) -> Iterator[dict]:
     """Draw paired fields with controlled means, scales, and covariance."""
     rng = np.random.default_rng(seed)
@@ -172,45 +182,6 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-aligned-pair-covariance
-# //| fig-cap: "Item attention mixes aligned X and Y fields while the branch keeps every token for learned covariance decoding."
-# //| fig-alt: "Record contains repeated items with x, y inputs, and hidden covariance targets. Root reduction: Attention. Item reduction: Keep all tokens; capacity 8; branch attention MHA."
-# #tree(node("record", kind: "root", width: 150pt, body: [
-#     - *Reduction:* Attention
-#   ], children: (
-#   node("items", kind: "branch", repeated: true, width: 155pt, body: [
-#       - *Reduction:* Keep all tokens
-#       - *Branch attention:* MHA
-#       - *Capacity:* 8 items
-#     ], children: (
-#     node("x", type: "Number"),
-#     node("y", type: "Number"),
-#   )),
-#   node("covariance", kind: "target", type: "Number"),
-# )))
-# ```
-#
-# ## How it works
-#
-# The repeated branch keeps `x` and `y` together and uses `reduction=None`
-# to preserve their encoded coordinates. Learned root attention can combine that
-# evidence before scalar decoding. Independent locations, scales, and a random
-# correlation coefficient prevent either marginal alone from supplying covariance.
-#
-# The negative control circularly shifts only `y`, preserving the exact values in
-# both fields but breaking their alignment. Labels stay unchanged, so error must
-# increase when the model responds to the changed pairs. The target is population
-# covariance, the mean centered product; Pearson correlation is not tested here.
-# [Supplied cross-deviations](supplied-cross-deviations.html) isolate its reduction.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -273,25 +244,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P006 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat across seeds and check complete-pair permutation. Variable lengths,
-# missing values, zero variance, and correlation normalization remain separate
-# questions. Coordinate-mixing ablations would distinguish which mechanisms are
-# necessary for the observed result.
-#
-# The family’s promotion target is at least three core seeds and ten lightweight
-# calibration seeds.
-#
-# ## Reproduce
-#
-# {{< proof P006 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=3508)
+
+# %% [markdown]
+# </details>

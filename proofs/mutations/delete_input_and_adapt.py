@@ -1,33 +1,87 @@
 # %% [markdown]
 # ---
-# title: Delete a Learned Input and Adapt to the Remaining Information
+# title: Can a model adapt after losing an input?
 # categories:
 # - Mutation ablation
 # proof-id: P050
-# description: Delete an informative Number input, compare adaptation with inactive, scratch, and unchanged controls, and distinguish re-adding a node from checkpoint restoration.
-# execute: {enabled: false, eval: false}
+# description: Delete b from a model trained on y = a + b, then continue training with only a.
+# execute:
+#   enabled: false
+#   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: After deletion and adaptation
+#   metric:
+#   - arms
+#   - deleted
+#   - after
+#   - nrmse
+#   format: error
+# - label: Best prediction using only a
+#   metric:
+#   - only_a_oracle
+#   - nrmse
+#   format: error
+# - label: Both inputs retained
+#   metric:
+#   - arms
+#   - continuation
+#   - after
+#   - nrmse
+#   format: error
 # ---
 #
-# Deleting an informative node should remove its state and its contribution.
-# Further training can exploit the remaining input, but cannot reconstruct
-# independent information that the schema no longer receives.
+# ## Example
+#
+# ```yaml
+# a: 0.5
+# b: 0.75
+# y: 1.25
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-mutations-delete-input
+# //| fig-alt: "Model tree with record, a, b, y. Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("record", kind: "root", children: (
+#   node("a", type: "Number", body: [Retained input]),
+#   node("b", type: "Number", body: [Deleted before adaptation]),
+#   node("y", type: "Number", kind: "target", body: [Always hidden; still a + b]),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare deletion, deactivation, a fresh model with only a, and an unchanged model. Each receives the same additional training budget.
+#
+# ## Result
 #
 # {{< proof P050 status >}}
 #
-# ## Insights
+# The edited model approaches the best remaining-information prediction, a. Re-adding the name creates fresh state; it does not restore what was deleted.
 #
-# **After deleting b from a learned y = a + b task, adaptation approaches
-# the conditional mean a.** The full runs approach the measured information
-# limit, with similar results from inactive and scratch controls. An unchanged
-# continuation retains substantially better accuracy because it still sees b.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Deactivation and scratch models provide controls with the same information.
-# Every arm receives the same additional training examples and update budget.
-# Re-adding the deleted name is checked separately for fresh node state;
-# loading the source checkpoint is the control for restoring the trained model.
+# {{< proof P050 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P050 script >}}
+#
+# ### Remaining work
+#
+# Three GPU seeds support this case. Calibrate gates on ten independent seeds.
+# Deleting a branch subtree or a learned output requires separate experiments.
+# Re-adding `b` appends it after `y`, and also initializes fresh state; its
+# prediction difference cannot be attributed solely to either change.
+# Relearning after re-addition and transfer advantages are not established.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P050: delete an informative input and learn within the reduced information limit."""
@@ -47,42 +101,7 @@ import relflow as rf
 
 PROOF_ID = "P050"
 
-# %% [markdown]
-# ## Examples
-#
-# Independently draw `a` and `b` uniformly from [−1, 1]. The target is always
-# `y = a + b`, including after `b` is removed from the model schema.
-#
-# ```yaml
-# a: 0.5
-# b: 0.75
-# y: 1.25
-# ```
-#
-# The same `a` can accompany another correct target:
-#
-# ```yaml
-# a: 0.5
-# b: -0.75
-# y: -0.25
-# ```
-#
-# Deletion leaves enough information for a conditional mean that varies with
-# `a`, rather than a constant prediction:
-#
-# ```yaml
-# a: -0.5
-# b: 0.75
-# y: 0.25
-# ```
-#
-# The removed source key remains in the synthetic rows as a control. Its
-# presence or value must have no effect once the schema stops reading it.
-#
-# ## Data, fitting, and comparisons
 
-
-# %%
 def records(*, rows: int, seed: int) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     for _ in range(rows):
@@ -196,48 +215,6 @@ def fit(model: rf.Model, *, seed: int, split: int, rows: int, budget: int, accel
     }
 
 
-# %% [markdown]
-# ## Before and after deletion
-#
-# ```{typst}
-# //| label: fig-proof-mutations-delete-input
-# //| fig-alt: "The source record reads a and b to predict hidden y. Deleting b leaves Number a and hidden Number y; the training labels still depend on both original values."
-# //| fig-cap: "The target stays fixed while the schema loses access to b."
-# #tree(node("record", kind: "root", children: (
-#   node("a", type: "Number", body: [Retained input]),
-#   node("b", type: "Number", body: [Deleted before adaptation]),
-#   node("y", type: "Number", kind: "target", body: [Always hidden; still a + b]),
-# )))
-# ```
-#
-# Source training uses 2,048 rows and 512 updates. All adaptation arms use the
-# same independent 4,096-row split, batch sequence, and 256-update budget.
-# Each phase has 512 validation records; all arms share 2,048 independent test
-# records. Curves record validation steps 0, 32, 128, and the final update.
-# No test result selects a checkpoint or budget.
-#
-# Test nRMSE divides prediction RMSE by the error of the source-training mean.
-# Validation curves use each phase's training mean. The full-information gate
-# is below 0.25. The best prediction from the remaining input is `a`: relative
-# to a baseline using the population mean, its nRMSE is `1/sqrt(2)`. Its actual
-# held-out error is also recorded.
-#
-# Immediately after deletion, nRMSE must increase by more than 0.35 and reach
-# at least 90% of the oracle error. After adaptation, restricted models must
-# finish between oracle nRMSE − 0.05 and oracle nRMSE + 0.10, with prediction
-# distance from `a` below 0.20 baseline RMSE. This excludes a constant predictor
-# and a claim to recover the missing independent `b`. These are provisional
-# gates, with tolerance for finite test samples.
-#
-# Deletion and inactivity both change visible context and pooling capacity;
-# equality with the source is not expected. Their immediate predictions should
-# agree with each other for this schema. Checkpoint and omission comparisons
-# use `rtol=1e-5` and `atol=1e-6` times source-training target SD.
-#
-# ## Training, deletion, and adaptation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     source_budget = 512 if steps is None else min(steps, 512)
     adapt_budget = 256 if steps is None else min(steps, 256)
@@ -394,23 +371,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P050 evidence >}}
-#
-# ## Remaining work
-#
-# Three GPU seeds support this case. Calibrate gates on ten independent seeds.
-# Deleting a branch subtree or a learned output requires separate experiments.
-# Re-adding `b` appends it after `y`, and also initializes fresh state; its
-# prediction difference cannot be attributed solely to either change.
-# Relearning after re-addition and transfer advantages are not established.
-#
-# ## Reproduce
-#
-# {{< proof P050 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=5001)
+
+# %% [markdown]
+# </details>

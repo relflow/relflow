@@ -1,39 +1,96 @@
 # %% [markdown]
 # ---
-# title: Transfer Values by an Unseen Identity
+# title: Can new IDs connect two lists?
 # categories:
 # - Sibling entity transfer
 # proof-id: P037
-# description: Route random source values to sibling targets using fresh Hash identities.
+# description: Transfer values between separately ordered lists using IDs that were absent from training.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Items retained
+#   metric:
+#   - preserved_nrmse
+#   format: error
+# - label: Compressed route
+#   metric:
+#   - compressed_nrmse
+#   format: error
+# - label: Changed IDs, items retained
+#   metric:
+#   - preserved_broken_nrmse
+#   format: error
 # ---
 #
-# Fresh identifiers link two independently ordered branches. The model must
-# retrieve each target's matching source value without relying on a persistent
-# vocabulary, a population average, or shared position.
+# ## Example
+#
+# ```yaml
+# source:
+#   - {entity_id: row-42-K1, value: 0.7}
+#   - {entity_id: row-42-K2, value: -0.2}
+# target:
+#   - {entity_id: row-42-K2, value: -0.2}
+#   - {entity_id: row-42-K1, value: 0.7}
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-hash-identity
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with association, source, entity_id, value, target, entity_id, value. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("association", kind: "root", width: 120pt, children: (
+#   node("source", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("entity_id", type: "Hash"),
+#     node("value", type: "Number"),
+#   )),
+#   node("target", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("entity_id", type: "Hash"),
+#     node("value", kind: "target", type: "Number", width: 150pt,),
+#   )),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare keeping encoded items with compressing them. Change target IDs while retaining original answers.
+#
+# ## Result
 #
 # {{< proof P037 status >}}
 #
-# ## Insights
+# Keeping items works better here, and changed IDs break the lookup. This small learned example does not guarantee an exact join or define missing and duplicate-ID behavior.
 #
-# **Fresh identities can connect source values to targets in another branch
-# without a learned identity vocabulary.** Shared Hash encoding preserves
-# within-batch equality. Coordinate-local encoding binds each source key to its
-# value, and visible target keys can condition repeated queries over source
-# context carried through the root.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Independent branch orders remove reliable positional copying. Rotating only
-# target keys while retaining target values breaks accuracy, showing that the
-# association matters. Retaining tokens also outperforms the tested compressed
-# route, unlike the small persistent-Category control. This is evidence for two
-# entities under one protocol, not an exact join or unlimited memory. Missing
-# sources, duplicate identities, and collisions require explicit conventions
-# and further tests.
+# {{< proof P037 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P037 script >}}
+#
+# ### How it works
+#
+# Hash preserves equality within an encoded batch without a learned vocabulary.
+# Coordinate-local mixing binds source identity to value, and retained source
+# context remains available to queries conditioned on visible target identities.
+# The key-rotation control leaves target values and source records unchanged
+# while breaking the intended match.
+#
+# ### Remaining work
+#
+# Repeat three core seeds and ten calibration seeds, then sweep 2, 4, 8, and 16
+# entities. Add explicit permutation/equivariance tests, absent sources, duplicate
+# keys, padding, and Hash collisions. The [Category control](category-identity.html)
+# uses recurring identities and succeeds under the tested compression. Exact
+# production retrieval can use a preprocessing join.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Transfer values between sibling branches using fresh Hash identities.
@@ -60,58 +117,7 @@ import relflow as rf
 PROOF_ID = "P037"
 PAIR_COUNT = 2
 
-# %% [markdown]
-# ## Examples
-#
-# ### Match identities that appear in both branches
-#
-# ```yaml
-# source:
-#   - {entity_id: row-42-K1, value: 0.7}
-#   - {entity_id: row-42-K2, value: -0.2}
-# target:
-#   - {entity_id: row-42-K2, value: -0.2}
-#   - {entity_id: row-42-K1, value: 0.7}
-# ```
-#
-# Target values are supervision hidden by `mask=True`. Every row has new
-# identities, and train, validation, and test use disjoint key namespaces.
-# Target identities and source records remain visible.
-#
-# ### A new row brings unseen keys
-#
-# ```yaml
-# source:
-#   - {entity_id: row-99-P, value: 0.1}
-#   - {entity_id: row-99-Q, value: -0.9}
-# target:
-#   - {entity_id: row-99-Q, value: -0.9}
-#   - {entity_id: row-99-P, value: 0.1}
-# ```
-#
-# The identifiers and source values are new, but the equality relationship is
-# the same. Correct hidden targets follow their matching source values without
-# requiring either identifier to belong to a persistent learned vocabulary.
-#
-# ### Keep target values but rotate their keys
-#
-# ```yaml
-# source:
-#   - {entity_id: row-42-K1, value: 0.7}
-#   - {entity_id: row-42-K2, value: -0.2}
-# target:
-#   - {entity_id: row-42-K1, value: -0.2}
-#   - {entity_id: row-42-K2, value: 0.7}
-# ```
-#
-# This intervention starts from the first example. The target labels deliberately
-# retain the original values even though the keys now select the other source.
-# A rise in error against those retained labels tests dependence on identity.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, rows: int, seed: int, namespace: str, broken_identity: bool = False) -> Iterator[dict]:
     """Generate observation-local key/value associations in sibling branches."""
     rng = np.random.default_rng(seed)
@@ -137,53 +143,6 @@ def normalized_rmse(model: rf.Model, records: list[dict]) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted)) / np.mean(np.square(actual))))
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-hash-identity
-# //| fig-cap: "Two separately trained models share this schema. Retained and compressed labels describe alternative reductions at the root and both branches; target values are masked."
-# //| fig-alt: "Association has two source and two target records using Hash identities. Source values are visible and target values are masked. At the root and each branch, the retained model keeps all tokens and the compressed model uses one attention summary."
-# #tree(node("association", kind: "root", width: 150pt, body: [
-#   - *Retained:* Keep all tokens
-#   - *Compressed:* Attention · 1 summary
-# ], children: (
-#   node("source", kind: "branch", repeated: true, width: 150pt, body: [
-#     - *Capacity:* 2 items
-#     - *Retained:* Keep all tokens
-#     - *Compressed:* Attention · 1 summary
-#   ], children: (
-#     node("entity_id", type: "Hash"),
-#     node("value", type: "Number"),
-#   )),
-#   node("target", kind: "branch", repeated: true, width: 150pt, body: [
-#     - *Capacity:* 2 items
-#     - *Retained:* Keep all tokens
-#     - *Compressed:* Attention · 1 summary
-#   ], children: (
-#     node("entity_id", type: "Hash"),
-#     node("value", kind: "target", type: "Number", width: 150pt, body: [
-#       - *Input:* always hidden
-#     ]),
-#   )),
-# )))
-# ```
-#
-# The retained route uses `reduction=None` at both branches and root. A matched
-# control replaces those reductions with `rf.Attention()`.
-#
-# ## How it works
-#
-# Hash preserves equality within an encoded batch without a learned vocabulary.
-# Coordinate-local mixing binds source identity to value, and retained source
-# context remains available to queries conditioned on visible target identities.
-# The key-rotation control leaves target values and source records unchanged
-# while breaking the intended match.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     test = list(records(rows=1024, seed=seed + 3, namespace="test"))
     broken = list(records(rows=1024, seed=seed + 3, namespace="test", broken_identity=True))
@@ -247,23 +206,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P037 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat three core seeds and ten calibration seeds, then sweep 2, 4, 8, and 16
-# entities. Add explicit permutation/equivariance tests, absent sources, duplicate
-# keys, padding, and Hash collisions. The [Category control](category-identity.html)
-# uses recurring identities and succeeds under the tested compression. Exact
-# production retrieval can use a preprocessing join.
-#
-# ## Reproduce
-#
-# {{< proof P037 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=17)
+
+# %% [markdown]
+# </details>

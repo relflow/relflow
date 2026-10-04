@@ -31,3 +31,34 @@
   white-space: pre-wrap;
   overflow-wrap: normal;
 }
+
+#quarto-document-content .proof-diagram {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+#quarto-document-content .proof-diagram:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+
+@media (max-width: 767.98px) {
+  #quarto-document-content .proof-diagram {
+    text-align: left;
+  }
+
+  #quarto-document-content .proof-diagram > img {
+    max-width: none;
+  }
+}
+
+#quarto-document-content .proof-result {
+  border-left: 3px solid var(--bs-border-color);
+  padding-left: 1rem;
+  margin-bottom: 1rem;
+}
+
+#quarto-document-content .proof-result-warning {
+  border-color: var(--bs-warning);
+}

@@ -1,38 +1,90 @@
 # %% [markdown]
 # ---
-# title: Learn an Added Target Without Losing Existing Tasks
+# title: What happens when a new prediction target is added?
 # categories:
 # - Mutation adaptation
 # proof-id: P047
-# description: Extend a trained model with a hidden numerical target, then compare adaptation with continuation and fresh final-schema controls.
-# execute: {enabled: false, eval: false}
+# description: Add hidden target w to a model already trained to predict u and v from a and b.
+# execute:
+#   enabled: false
+#   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: New target before training
+#   metric:
+#   - arms
+#   - extended
+#   - before
+#   - w
+#   - nrmse
+#   format: error
+# - label: New target after training
+#   metric:
+#   - arms
+#   - extended
+#   - after
+#   - w
+#   - nrmse
+#   format: error
 # ---
 #
-# A useful schema extension must participate in learning. This experiment
-# starts with two learned outputs, adds a third, and measures all three before
-# and after adaptation with a fresh optimizer.
+# ## Example
+#
+# ```yaml
+# a: 0.5
+# b: 0.25
+# u: 1.0
+# v: 0.75
+# w: 1.75
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-mutations-add-target
+# //| fig-alt: "Model tree with record, a, b, u, v, w. Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("record", kind: "root", children: (
+#   node("a", type: "Number"),
+#   node("b", type: "Number"),
+#   node("u", type: "Number", kind: "target", body: [Existing, always hidden]),
+#   node("v", type: "Number", kind: "target", body: [Existing, always hidden]),
+#   node("w", type: "Number", kind: "target", body: [Added, always hidden]),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Measure old predictions immediately after the edit and after more training. Keep old targets supervised, and compare unchanged and fresh-model controls.
+#
+# ## Result
 #
 # {{< proof P047 status >}}
 #
-# ## Insights
+# Adding w shifts old predictions before training, so the preservation check fails. After training, all three tasks learn. This does not establish retention without old labels.
 #
-# **The new hidden target learns, but extension shifts the old predictions
-# before training.** Existing state entries survive exactly. The root pool's
-# capacity nevertheless grows from four to five, changing the scale of its
-# additive evidence. A diagnostic that restores only the old capacity restores
-# the old predictions. The strict immediate-preservation gate remains failed.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# After adaptation, all three targets meet the learning gate in the recorded
-# runs. Both old targets remain supervised: this is retention with rehearsal,
-# not protection against forgetting without labels.
+# {{< proof P047 evidence >}}
 #
-# Separate controls continue the unchanged source model and train the final
-# schema from scratch. The experiment reports their errors without requiring
-# transfer to beat scratch training. Mutation correctness does not imply a
-# pretraining advantage.
+# ### Run this experiment
 #
-# ## Setup
+# {{< proof P047 script >}}
+#
+# ### Remaining work
+#
+# Three GPU seeds reproduce the retention failure and successful adaptation.
+# Calibrate the provisional 0.25 nRMSE gate on ten separate seeds.
+# Adding visible context, targets in repeated branches, and
+# adaptation without old labels remain separate claims. These linear targets
+# measure a simple useful extension, not transfer to a new data distribution.
+# The failed preservation gate identifies a further design question: should
+# permanently hidden outputs change the capacity used to scale visible evidence?
+#
+# ### Complete experiment code
+#
 
 # %%
 """P047: add a hidden regression target to a trained model and adapt."""
@@ -53,46 +105,7 @@ import relflow as rf
 PROOF_ID = "P047"
 TARGETS = ("u", "v", "w")
 
-# %% [markdown]
-# ## Examples
-#
-# Independently draw `a` and `b` uniformly from [−1, 1]. The source learns
-# `u = a + 2b` and `v = 2a − b`. The extension adds `w = 3a + b`.
-# All three answers are hidden from the encoder.
-# The new task is the sum of the original tasks; their labels are never inputs.
-#
-# ```yaml
-# a: 0.5
-# b: 0.25
-# u: 1.0
-# v: 0.75
-# w: 1.75
-# ```
-#
-# Changing only `b` affects all outputs, with a different coefficient:
-#
-# ```yaml
-# a: 0.5
-# b: -0.25
-# u: 0.0
-# v: 1.25
-# w: 1.25
-# ```
-#
-# Neither input alone determines a target:
-#
-# ```yaml
-# a: -0.5
-# b: 0.25
-# u: 0.0
-# v: -1.25
-# w: -1.25
-# ```
-#
-# ## Data, models, and controls
 
-
-# %%
 def records(*, rows: int, seed: int) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     for _ in range(rows):
@@ -216,44 +229,6 @@ def fit(model: rf.Model, *, seed: int, split: int, budget: int, accelerator: str
     }
 
 
-# %% [markdown]
-# ## Before and after extension
-#
-# ```{typst}
-# //| label: fig-proof-mutations-add-target
-# //| fig-alt: "Record reads a and b to predict hidden u and v. Extending the root adds hidden Number w while retaining the original inputs and targets."
-# //| fig-cap: "The extension adds one supervised output; visible information stays fixed."
-# #tree(node("record", kind: "root", children: (
-#   node("a", type: "Number"),
-#   node("b", type: "Number"),
-#   node("u", type: "Number", kind: "target", body: [Existing, always hidden]),
-#   node("v", type: "Number", kind: "target", body: [Existing, always hidden]),
-#   node("w", type: "Number", kind: "target", body: [Added, always hidden]),
-# )))
-# ```
-#
-# Source training uses 2,048 rows and 512 updates. Adaptation uses a separate
-# 2,048-row split and 256 updates. Each phase has 512 independent validation
-# rows. All arms share a fixed, independent 1,024-row test panel.
-#
-# The two scratch controls use the adaptation split for 256 or 768 updates.
-# The latter matches the warm model's total update count, not its exposure to
-# two distinct training sets. Scratch heads are independently initialized.
-# Validation curves record steps 0, 32, 128, and the final update; no test
-# observation selects a checkpoint, training budget, or acceptance threshold.
-# Test nRMSE divides RMSE by the error of predicting the source-training target
-# mean. Validation curves use each phase's training mean. The provisional
-# learning gate is 0.25. Strict retention uses `rtol=1e-5` and `atol=1e-6` times
-# source-training target SD.
-#
-# A diagnostic temporarily holds the root pool's internal `mass_capacity` at
-# its source value. It isolates the effect of the scaling change and is restored
-# before adaptation or saving. It is not a proposed public mutation workflow.
-#
-# ## Training, extension, and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     source_budget = 512 if steps is None else min(steps, 512)
     adapt_budget = 256 if steps is None else min(steps, 256)
@@ -385,30 +360,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# Early pilots used a different field order in the scratch controls. Their
-# measurements remain in the raw history under the earlier code fingerprints.
-# The current experiment explicitly checks that both scratch schemas, including
-# field order, match the extended model before interpreting their results.
-#
-# {{< proof P047 evidence >}}
-#
-# ## Remaining work
-#
-# Three GPU seeds reproduce the retention failure and successful adaptation.
-# Calibrate the provisional 0.25 nRMSE gate on ten separate seeds.
-# Adding visible context, targets in repeated branches, and
-# adaptation without old labels remain separate claims. These linear targets
-# measure a simple useful extension, not transfer to a new data distribution.
-# The failed preservation gate identifies a further design question: should
-# permanently hidden outputs change the capacity used to scale visible evidence?
-#
-# ## Reproduce
-#
-# {{< proof P047 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=4701)
+
+# %% [markdown]
+# </details>

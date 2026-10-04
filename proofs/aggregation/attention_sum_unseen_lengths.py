@@ -1,32 +1,100 @@
 # %% [markdown]
 # ---
-# title: Sums beyond trained collection lengths
+# title: Can it add longer lists than it saw in training?
 # categories:
 # - Cardinality generalization
 # proof-id: P002
-# description: Test whether a learned sum extends from shorter training bags to unseen
-#   lengths and responds to duplication.
+# description: Train on short lists, then ask for totals of longer lists.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Familiar lengths
+#   metric:
+#   - in_range_score
+#   - nrmse
+#   format: error
+# - label: Longer lists
+#   metric:
+#   - unseen_score
+#   - nrmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# items:
+#   - {amount: 0.5}
+#   - {amount: 0.5}
+#   - {amount: 0.5}
+#   - {amount: 0.5}
+#   - {amount: 0.5}
+#   - {amount: 0.5}
+#   - {amount: 0.5}
+#   - {amount: 0.5}
+# total: 4.0
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-attention-sum-unseen-lengths
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with record, items, amount, total. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("record", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("amount", type: "Number"),
+#   )),
+#   node("total", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare familiar and unfamiliar lengths. Also repeat a whole list: its total should double.
+#
+# ## Result
 #
 # {{< proof P002 status >}}
 #
-# ## Insights
+# The learned total extends to the tested longer lists. This does not establish exact addition or unlimited length.
 #
-# **The learned sum extends beyond trained collection lengths and responds approximately to duplication.**
-# Longer held-out bags test length extrapolation. Duplicating complete bags checks that predictions roughly
-# double, while equal-value probes isolate the need to distinguish different repetition counts.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Spare branch capacity only permits longer inputs; it does not establish their meaning. These behavioral
-# checks provide the evidence that the model uses accumulated mass. The equal-value probes themselves use
-# familiar lengths, so they complement rather than replace the unseen-length test. The result supports a
-# bounded extension beyond training, not arbitrary-length or exact summation; missing values and nested
-# totals require separate checks.
+# {{< proof P002 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P002 script >}}
+#
+# ### How it works
+#
+# The schema matches the [in-range sum](attention-sum-in-range.html):
+# learned `rf.Attention` reductions receive raw amounts without a supplied count.
+# Training lengths are one through six, while the unseen test set uses seven
+# through ten. Branch capacity is twelve, allowing these inputs without overflow.
+#
+# A second intervention duplicates complete bags of at most five items and checks
+# that predictions approximately double. Equal-value probes at lengths one,
+# three, and six isolate sensitivity to multiplicity. The capacity bound permits
+# these shapes; the accuracy and intervention gates establish the learned behavior.
+#
+# ### Remaining work
+#
+# Repeat the gates across seeds, capacities, and nested branches. Heavy tails,
+# high duplication, empty collections, missing values, and overflow semantics need
+# separate coverage. The doubling gate allows approximation error; it is not an
+# exact-sum contract.
+#
+# The family’s promotion target is at least three core seeds and ten lightweight
+# calibration seeds.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Characterize sum extrapolation beyond every trained collection length.
@@ -51,58 +119,7 @@ PROOF_ID = "P002"
 TRAIN_MAX = 6
 CAPACITY = 12
 
-# %% [markdown]
-# ## Examples
-#
-# Targets use `mask=True`; the labels below are supervision hidden from the encoder.
-#
-# ### An unseen length
-#
-# ```yaml
-# items:
-#   - {amount: 0.5}
-#   - {amount: 0.5}
-#   - {amount: 0.5}
-#   - {amount: 0.5}
-#   - {amount: 0.5}
-#   - {amount: 0.5}
-#   - {amount: 0.5}
-#   - {amount: 0.5}
-# total: 4.0
-# ```
-#
-# Eight items require a total of 4.0, although training bags contain at most six.
-#
-# ### Start a duplication probe
-#
-# ```yaml
-# items:
-#   - {amount: 0.3}
-#   - {amount: -0.1}
-# total: 0.2
-# ```
-#
-# This shorter bag sums to 0.2 and fits inside the trained length range.
-#
-# ### Duplicate the complete bag
-#
-# ```yaml
-# items:
-#   - {amount: 0.3}
-#   - {amount: -0.1}
-#   - {amount: 0.3}
-#   - {amount: -0.1}
-# total: 0.4
-# ```
-#
-# The empirical distribution is unchanged, but the total doubles to 0.4. The
-# proof compares predictions before and after duplication, in addition to its
-# separate unseen-length accuracy gate.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def random_records(*, rows: int, seed: int, minimum: int = 1, maximum: int = TRAIN_MAX) -> Iterator[dict]:
     """Draw variable-length numerical bags and their mean and sum."""
     if not 1 <= minimum <= maximum <= CAPACITY:
@@ -159,43 +176,6 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-attention-sum-unseen-lengths
-# //| fig-cap: "A twelve-item capacity leaves room for longer test bags while the item reduction still produces one Attention output."
-# //| fig-alt: "Record contains repeated items with amount inputs, and hidden total targets. Root reduction: Attention. Item reduction: Attention (1 token); capacity 12; branch attention MHA."
-# #tree(node("record", kind: "root", width: 150pt, body: [
-#     - *Reduction:* Attention
-#   ], children: (
-#   node("items", kind: "branch", repeated: true, width: 155pt, body: [
-#       - *Reduction:* Attention (1 token)
-#       - *Branch attention:* MHA
-#       - *Capacity:* 12 items
-#     ], children: (
-#     node("amount", type: "Number"),
-#   )),
-#   node("total", kind: "target", type: "Number"),
-# )))
-# ```
-#
-# ## How it works
-#
-# The schema matches the [in-range sum](attention-sum-in-range.html):
-# learned `rf.Attention` reductions receive raw amounts without a supplied count.
-# Training lengths are one through six, while the unseen test set uses seven
-# through ten. Branch capacity is twelve, allowing these inputs without overflow.
-#
-# A second intervention duplicates complete bags of at most five items and checks
-# that predictions approximately double. Equal-value probes at lengths one,
-# three, and six isolate sensitivity to multiplicity. The capacity bound permits
-# these shapes; the accuracy and intervention gates establish the learned behavior.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -272,25 +252,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P002 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat the gates across seeds, capacities, and nested branches. Heavy tails,
-# high duplication, empty collections, missing values, and overflow semantics need
-# separate coverage. The doubling gate allows approximation error; it is not an
-# exact-sum contract.
-#
-# The family’s promotion target is at least three core seeds and ten lightweight
-# calibration seeds.
-#
-# ## Reproduce
-#
-# {{< proof P002 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=3615)
+
+# %% [markdown]
+# </details>

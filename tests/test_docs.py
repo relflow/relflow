@@ -184,7 +184,7 @@ def test_datatype_references_cover_public_options_and_states() -> None:
     assert all(mode.value in branch for mode in rf.AttentionMode)
 
 
-def test_every_registered_proof_contains_illustrations_and_authored_insights() -> None:
+def test_every_registered_proof_has_a_small_readable_overview() -> None:
     entries = yaml.safe_load((ROOT / "proofs/results.yaml").read_text())["proofs"]
     documented: Counter[str] = Counter()
     for entry in entries.values():
@@ -207,12 +207,20 @@ def test_every_registered_proof_contains_illustrations_and_authored_insights() -
         assert sections == expected, f"{page}: render recorded evidence and reproduction commands for {identifier}"
         assert entry["historical"]["insights"].strip(), f"{identifier}: missing recorded interpretation"
         assert entry["historical"]["evidence"].strip(), f"{identifier}: missing historical evidence"
-        insights = re.search(r"^## Insights\n(.*?)(?=^## |\Z)", text, flags=re.MULTILINE | re.DOTALL)
-        assert insights and insights[1].strip(), f"{page}: explain the core insight in the authored script"
-        assert "{{<" not in insights[1], f"{page}: insights belong beside the experiment code"
+        overview, details = text.split('<details class="proof-details">', maxsplit=1)
+        assert "<summary>Experiment details and code</summary>" in details, page
+        assert f"{{{{< proof {identifier} evidence >}}}}" in details, page
+        assert f"{{{{< proof {identifier} script >}}}}" in details, page
+        assert metadata["toc"] is False, f"{page}: optional details must not fill the contents menu"
+        assert re.findall(r"^## (.+)$", overview, flags=re.MULTILINE) == ["Example", "Comparison", "Result"], page
+        result = overview.split("## Result\n", maxsplit=1)[1]
+        insight = re.sub(r"\{\{<.*?>\}\}", "", result).strip()
+        assert insight, f"{page}: interpret the result and name its limits in the authored script"
+        assert 1 <= len(metadata["proof-readout"]) <= 3, f"{page}: keep the result comparison small"
         assert "```{typst}" in text and "#tree(" in text, f"{page}: missing model tree"
         assert "//| fig-alt:" in text, f"{page}: missing tree description"
-        assert len(re.findall(r"^```yaml\s*$", text, flags=re.MULTILINE)) >= 3, f"{page}: show three example records"
+        assert len(re.findall(r"^```yaml\s*$", text, flags=re.MULTILINE)) == 1, f"{page}: show one example record"
+        assert "#tree(" not in details, f"{page}: keep one diagram beside the example"
 
     assert set(documented) == set(entries), (
         f"proofs missing documentation: {sorted(entries.keys() - documented.keys())}"

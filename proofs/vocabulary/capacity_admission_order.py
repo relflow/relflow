@@ -1,27 +1,103 @@
 # %% [markdown]
 # ---
-# title: Vocabulary growth preserves labels across admission orders
-# categories: [Vocabulary and OOV]
+# title: Does label encounter order limit vocabulary coverage?
+# categories:
+# - Vocabulary and OOV
 # proof-id: P057
-# description: Compare rare-first and common-first admission with automatic storage growth; both arms must admit all labels and learn their effects.
+# description: Train on common and rare labels, changing which labels appear first.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Common-label coverage, rare first
+#   metric:
+#   - arms
+#   - rare_first
+#   - common_coverage
+#   format: percent
+# - label: Common-label coverage, common first
+#   metric:
+#   - arms
+#   - common_first
+#   - common_coverage
+#   format: percent
 # ---
+#
+# ## Example
+#
+# ```yaml
+# code: rare-left
+# target: -1.0
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-capacity-admission-order
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with record, code, target. Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("record", kind: "root", children: (
+#   node("code", type: "Category", body: [Growing vocabulary with stable IDs]),
+#   node("target", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare rare-first and common-first training. Check that all observed labels are admitted and that common-label distinctions learn.
+#
+# ## Result
 #
 # {{< proof P057 status >}}
 #
-# ## Insights
+# Storage grows and retains earlier labels in both orders. This single-consumer experiment does not test distributed encounter order.
 #
-# Vocabulary storage is managed internally. Training admits every observed
-# label and grows storage when needed, preserving earlier IDs. Encounter order
-# changes which labels receive the first IDs; it does not exclude later labels.
-# This proof requires equal coverage and learned common-label distinctions from
-# both encounter orders, without specifying a vocabulary size.
-# It exercises one consumer with shuffling disabled, not distributed ordering.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# ## Setup
+# {{< proof P057 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< proof P057 script >}}
+#
+# ### Data and model
+#
+# A training pass has 4,096 rows: one of each rare label and 4,094 balanced
+# common labels. The target is the label's effect plus Gaussian noise with SD
+# 0.02. For common-first, move the first cold and hot observations to the front
+# without duplicating, deleting, or otherwise changing any record.
+# Validation uses 512 independent observations. Test generation uses 2,050
+# independent observations and scores only its 2,048 common-label rows.
+#
+# ### Training and controls
+#
+# Each arm uses the same seed and 300 AdamW updates at learning rate 0.002,
+# with `shuffle=False`, `num_workers=0`, and one device. Every arm must admit
+# all four labels, retain the first two IDs, have common-label coverage of one,
+# and achieve nRMSE below 0.15. Swapping cold and hot must change predictions
+# by more than 1.5 on average, demonstrating use of their distinct identities.
+# Both arms must grow to hold all four labels.
+#
+# ### Scope of evidence
+#
+# Earlier fixed-capacity runs used different gates. Assess this revision using
+# a full run whose source fingerprint matches the current script; earlier
+# scores do not establish its autoscaling behavior.
+#
+#
+#
+# This checks one-device admission and common-label learning. The singleton
+# rare labels establish admission and ID order, not reliable rare-label
+# predictions. It does not establish worker/DDP ordering or optimizer-state
+# preservation after growth later in training. Dedicated runtime tests cover
+# those invariants separately, including two-rank DDP, persistent workers,
+# gradient accumulation, and checkpoint resume.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P057: vocabulary growth retains admission order and learnable distinctions."""
@@ -40,51 +116,7 @@ PROOF_ID = "P057"
 BUDGET = 300
 EFFECTS = {"rare-left": -1.0, "rare-right": 1.0, "cold": -1.0, "hot": 1.0}
 
-# %% [markdown]
-# ## Data and model
-#
-# A training pass has 4,096 rows: one of each rare label and 4,094 balanced
-# common labels. The target is the label's effect plus Gaussian noise with SD
-# 0.02. For common-first, move the first cold and hot observations to the front
-# without duplicating, deleting, or otherwise changing any record.
-# Validation uses 512 independent observations. Test generation uses 2,050
-# independent observations and scores only its 2,048 common-label rows.
-#
-# ```yaml
-# code: rare-left
-# target: -1.0
-# ```
-#
-# Together with rare-right, this singleton takes the first two IDs in the
-# rare-first arms. Those IDs must survive admission of the common labels.
-#
-# ```yaml
-# code: cold
-# target: -1.0
-# ```
-#
-# Cold must obtain its own identity regardless of which labels arrive first.
-#
-# ```yaml
-# code: hot
-# target: 1.0
-# ```
-#
-# Every arm must distinguish cold from hot. A constant prediction over their
-# balanced mixture is approximately zero and supplies the error baseline.
-#
-# ```{typst}
-# //| label: fig-proof-capacity-admission-order
-# //| fig-cap: "Category identity distinguishes the signed target across encounter orders with automatic growth."
-# //| fig-alt: "Record has Category code and hidden Number target. Each arm admits all four labels; the arms differ in encounter order, with the same observations and update budget."
-# #tree(node("record", kind: "root", children: (
-#   node("code", type: "Category", body: [Growing vocabulary with stable IDs]),
-#   node("target", kind: "target", type: "Number"),
-# )))
-# ```
 
-
-# %%
 def records(*, rows: int, seed: int, common_first: bool = False) -> Iterator[dict]:
     if rows < 4:
         raise ValueError("capacity proof requires at least four observations")
@@ -122,18 +154,6 @@ def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["/target"]["content"] for row in output], dtype=np.float64)
 
 
-# %% [markdown]
-# ## Training and controls
-#
-# Each arm uses the same seed and 300 AdamW updates at learning rate 0.002,
-# with `shuffle=False`, `num_workers=0`, and one device. Every arm must admit
-# all four labels, retain the first two IDs, have common-label coverage of one,
-# and achieve nRMSE below 0.15. Swapping cold and hot must change predictions
-# by more than 1.5 on average, demonstrating use of their distinct identities.
-# Both arms must grow to hold all four labels.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     test = [row for row in records(rows=2050, seed=seed + 3) if row["code"] in {"cold", "hot"}]
     train = [row for row in records(rows=4096, seed=seed + 1) if row["code"] in {"cold", "hot"}]
@@ -197,26 +217,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Scope of evidence
-#
-# Earlier fixed-capacity runs used different gates. Assess this revision using
-# a full run whose source fingerprint matches the current script; earlier
-# scores do not establish its autoscaling behavior.
-#
-# {{< proof P057 evidence >}}
-#
-# This checks one-device admission and common-label learning. The singleton
-# rare labels establish admission and ID order, not reliable rare-label
-# predictions. It does not establish worker/DDP ordering or optimizer-state
-# preservation after growth later in training. Dedicated runtime tests cover
-# those invariants separately, including two-rank DDP, persistent workers,
-# gradient accumulation, and checkpoint resume.
-#
-# ## Reproduce
-#
-# {{< proof P057 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=5701)
+
+# %% [markdown]
+# </details>

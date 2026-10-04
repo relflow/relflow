@@ -1,27 +1,93 @@
 # %% [markdown]
 # ---
-# title: High accuracy can hide unknown target labels
-# categories: [Vocabulary and OOV]
+# title: Can perfect accuracy hide answers it cannot name?
+# categories:
+# - Vocabulary and OOV
 # proof-id: P056
-# description: Contrast known-only content accuracy with target coverage, all-row accuracy, and confidence on output-vocabulary OOV labels.
+# description: Ask a Category output to predict a mix of familiar and unfamiliar target labels.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Known-label accuracy
+#   metric:
+#   - known_accuracy
+#   format: percent
+# - label: All-row accuracy
+#   metric:
+#   - all_row_accuracy
+#   format: percent
+# - label: Answers covered
+#   metric:
+#   - coverage
+#   format: percent
 # ---
+#
+# ## Example
+#
+# ```yaml
+# x: 0.7
+# hint: novel-negative
+# label: positive
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-unknown-target-coverage
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with record, x, hint, label. Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("record", kind: "root", children: (
+#   node("x", type: "Number"),
+#   node("hint", type: "Category", body: [All four strings; independent]),
+#   node("label", kind: "target", type: "Category", body: [Only two populated labels]),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare accuracy on known labels with accuracy over every row, and count how many answers the vocabulary can represent.
+#
+# ## Result
 #
 # {{< proof P056 status >}}
 #
-# ## Insights
+# Known-only accuracy can look perfect while half the answers are impossible to emit. Report coverage and all-row accuracy alongside it; confidence need not warn about the missing labels.
 #
-# A closed-vocabulary Category head cannot emit labels absent from that field's
-# mapping, even when another field has seen the same strings. Unknown targets
-# are excluded from built-in content accuracy. Confidence is renormalized over
-# populated output labels and need not fall when the correct answer is outside
-# them. Report coverage and all-row accuracy beside the known-only metric.
-# This deliberately demonstrates a limitation, not an unknown-label detector.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# ## Setup
+# {{< proof P056 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< proof P056 script >}}
+#
+# ### Data and model
+#
+# Training labels are negative or positive according to the sign of x, with
+# `abs(x) ~ Uniform(0.2, 1)`. The independent hint takes all four strings,
+# including names never used as training targets. Splits have 4,096 training,
+# 512 validation, and 2,048 test rows, with exactly balanced signs. On half of
+# test rows, rename the target to its novel counterpart without changing x.
+# The output vocabulary automatically stores its two discovered training labels.
+#
+# ### Training and controls
+#
+# The model uses the [xs preset](../../core-concepts/model-tree.qmd#choose-a-size).
+#
+# Fit for 350 AdamW updates at learning rate 0.002. Require at least 0.95
+# known-only accuracy, exactly 50% output-label coverage, and zero accuracy on
+# OOV targets. All-row accuracy must therefore be at most 0.5. Unknown targets
+# should still attract confident known-label predictions on these deliberately
+# unchanged inputs. Permuting x must reduce known-label accuracy toward chance.
+# Call the actual test loop to compare its content metric with external scoring.
+# Vocabularies, counts, and numerical normalization must stay frozen throughout.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P056: a learned classifier exposes the difference between accuracy and vocabulary coverage."""
@@ -40,55 +106,7 @@ PROOF_ID = "P056"
 BUDGET = 350
 LABELS = ("negative", "positive", "novel-negative", "novel-positive")
 
-# %% [markdown]
-# ## Data and model
-#
-# Training labels are negative or positive according to the sign of x, with
-# `abs(x) ~ Uniform(0.2, 1)`. The independent hint takes all four strings,
-# including names never used as training targets. Splits have 4,096 training,
-# 512 validation, and 2,048 test rows, with exactly balanced signs. On half of
-# test rows, rename the target to its novel counterpart without changing x.
-# The output vocabulary automatically stores its two discovered training labels.
-#
-# ```yaml
-# x: 0.7
-# hint: novel-negative
-# label: positive
-# ```
-#
-# The hint is independent; x identifies the known training class.
-#
-# ```yaml
-# x: 0.7
-# hint: novel-negative
-# label: novel-positive
-# ```
-#
-# The same input now has an answer the output vocabulary cannot name. This is
-# an explicit label-space shift, not an inferable distinction in the input.
-#
-# ```yaml
-# x: -0.7
-# hint: novel-positive
-# label: novel-negative
-# ```
-#
-# Seeing novel-negative in the hint field's training vocabulary does not give
-# that label a slot in the output head.
-#
-# ```{typst}
-# //| label: fig-proof-unknown-target-coverage
-# //| fig-cap: "Input and output Category fields own separate vocabularies."
-# //| fig-alt: "Record has Number x, independent Category hint that sees four labels, and a hidden Category label that trains on only two of them."
-# #tree(node("record", kind: "root", children: (
-#   node("x", type: "Number"),
-#   node("hint", type: "Category", body: [All four strings; independent]),
-#   node("label", kind: "target", type: "Category", body: [Only two populated labels]),
-# )))
-# ```
 
-
-# %%
 def records(*, rows: int, seed: int, shifted: bool = False) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     signs = np.arange(rows) % 2
@@ -109,21 +127,6 @@ def build() -> rf.Model:
     )
 
 
-# %% [markdown]
-# ## Training and controls
-#
-# The model uses the [xs preset](../../core-concepts/model-tree.qmd#choose-a-size).
-#
-# Fit for 350 AdamW updates at learning rate 0.002. Require at least 0.95
-# known-only accuracy, exactly 50% output-label coverage, and zero accuracy on
-# OOV targets. All-row accuracy must therefore be at most 0.5. Unknown targets
-# should still attract confident known-label predictions on these deliberately
-# unchanged inputs. Permuting x must reduce known-label accuracy toward chance.
-# Call the actual test loop to compare its content metric with external scoring.
-# Vocabularies, counts, and numerical normalization must stay frozen throughout.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -211,19 +214,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }
 
 
-# %% [markdown]
-# ## Evidence and remaining work
-#
-# {{< proof P056 evidence >}}
-#
-# This is a deliberate limitation with provisional gates, not a calibration
-# benchmark. It does not claim that confidence detects novel targets. Cluster
-# also filters unknown labels from content accuracy, but needs its own experiment.
-#
-# ## Reproduce
-#
-# {{< proof P056 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=5601)
+
+# %% [markdown]
+# </details>

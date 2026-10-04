@@ -124,7 +124,8 @@ def test_statuses_match_catalog_callouts_legend_and_colors(
     assert next(row for row in catalog if row["id"] == "P001")["proof-status"] == expected
     notice = (root / "docs/proofs/_generated/P001-status.md").read_text()
     title = f"Latest full run · {expected}" if outcome is not None else expected
-    assert f'::: {{.callout-{kind} title="P001 · {title}"}}' in notice
+    assert f'::: {{.proof-result .proof-result-{kind} role="note"}}' in notice
+    assert f"**P001 · {title}**" in notice
     legend = (ROOT / "docs/proofs.qmd").read_text()
     assert f'[{expected}]{{.proof-status data-proof-status="{expected}"}}' in legend
     styles = (ROOT / "docs/assets/stylesheets/proofs.css").read_text()
@@ -285,7 +286,7 @@ def test_docs_refresh_from_yaml_and_embed_scripts_without_executing(
         "P001": "Failing",
         "P002": "Missing",
     }
-    assert "0 of 1 behavioral checks met" in (generated / "P001-status.md").read_text()
+    assert "0 of 1 test checks met" in (generated / "P001-status.md").read_text()
     assert "| held_out_rmse | 0.875 |" in (generated / "P001-evidence.md").read_text()
 
     reporting.save("P001", result(seed=29), source)
@@ -359,6 +360,9 @@ def test_docs_cleanup_preserves_authored_sources_results_and_published_files(
     script = (root / "proofs/signal.py").read_bytes()
     renderer.render(root)
     (docs / "_generated/P001-insights.md").write_text("Obsolete fragment\n")
+    (docs / "family/signal.quarto_ipynb").write_text("Temporary notebook\n")
+    (docs / "family/signal.quarto_ipynb_1").write_text("Temporary notebook cell\n")
+    (docs / "family/signal.quarto_ipynb_2").write_text("Temporary notebook cell\n")
 
     renderer.clean(root)
     renderer.clean(root)
@@ -455,3 +459,69 @@ def test_changed_script_warns_without_rewriting_recorded_results(
     assert "experiment_size = 2048" in (generated / "P001.py").read_text()
     assert source.read_bytes() == before
     assert not (root / "executed").exists()
+
+
+def test_readout_uses_explicit_paths_and_explains_scores(evidence: tuple[ModuleType, ModuleType, Path]) -> None:
+    _, renderer, _ = evidence
+    header = {
+        "proof-id": "P001",
+        "proof-readout": [
+            {"label": "Prediction error", "metric": ["arm", "nrmse"], "format": "error"},
+            {"label": "Correct answers", "metric": ["accuracy"], "format": "percent"},
+            {"label": "Matching IDs", "metric": ["auc"], "format": "auc"},
+            {"label": "Last count", "metric": ["counts", -1], "format": "number"},
+        ],
+    }
+    run = result()
+    run["metrics"] = {"arm": {"nrmse": 0.025}, "accuracy": 0.75, "auc": 0.9998, "counts": [2, 5]}
+    text = renderer.readout(header, run)
+    assert "| Prediction error | 2.5% of baseline error |" in text
+    assert "| Correct answers | 75.0% |" in text
+    assert "| Matching IDs | 0.9998 |" in text
+    assert "| Last count | 5 |" in text
+    assert "100% matches that guess; lower is better" in text
+    assert "not percentages of correct answers" in text
+    assert renderer.readout(header, None) == ""
+    run["metrics"] = {"auc": float("nan")}
+    text = renderer.readout(header, run)
+    assert "| Prediction error | Not recorded in this run |" in text
+    assert "| Matching IDs | Not available |" in text
+
+
+@pytest.mark.parametrize("measured", [True, "0.125", {"nrmse": 0.125}])
+def test_readout_rejects_non_numerical_selections(
+    evidence: tuple[ModuleType, ModuleType, Path], measured: object
+) -> None:
+    _, renderer, _ = evidence
+    header = {"proof-id": "P001", "proof-readout": [{"label": "Error", "metric": ["score"], "format": "error"}]}
+    with pytest.raises(ValueError, match="P001: readout 'Error' requires a numerical metric"):
+        renderer.readout(header, {"metrics": {"score": measured}})
+
+
+def test_overview_retains_mixed_history_and_ignores_smoke_metrics(
+    evidence: tuple[ModuleType, ModuleType, Path],
+) -> None:
+    reporting, renderer, root = evidence
+    source = root / "proofs/results.yaml"
+    script = root / "proofs/signal.py"
+    script.write_text(
+        script.read_text().replace(
+            "# description: signal",
+            "# proof-readout:\n# - label: Prediction error\n#   metric: [held_out_rmse]\n#   format: number\n# description: signal",
+        )
+    )
+    reporting.save("P001", result(seed=7, outcome="not_met"), source)
+    reporting.save("P001", result(seed=11), source)
+    smoke = result(seed=11, mode="smoke")
+    smoke["metrics"]["held_out_rmse"] = 999
+    reporting.save("P001", smoke, source)
+    before = source.read_bytes()
+    renderer.render(root)
+    generated = root / "docs/proofs/_generated"
+    text = (generated / "P001-status.md").read_text()
+    assert "History: 1 of 2 full runs met every check, across 2 distinct seeds" in text
+    assert "| Prediction error | 0.125 |" in text and "999" not in text
+    history = (generated / "P001-evidence.md").read_text()
+    assert "| 7 | not met |" in history and "| 11 | met |" in history
+    assert "Repeating a seed is not an independent seed check" in history
+    assert source.read_bytes() == before

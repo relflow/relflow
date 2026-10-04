@@ -1,34 +1,112 @@
 # %% [markdown]
 # ---
-# title: Percentiles, Magnitudes, and Noisy Targets
-# categories: [Quantile]
+# title: Should a number be represented by size or percentile?
+# categories:
+# - Quantile
 # proof-id: P077
-# description: Compare Number and Quantile under rank and magnitude tasks, contaminated inputs, and skewed conditional target distributions.
-# execute: {enabled: false, eval: false}
+# description: Compare Number and Quantile on rank and amount tasks, with clean training and rare corrupt
+#   measurements.
+# execute:
+#   enabled: false
+#   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Corrupt training, Number
+#   metric:
+#   - input_tasks
+#   - amount_number_contaminated
+#   - normalized_rmse
+#   format: error
+# - label: Corrupt training, Quantile
+#   metric:
+#   - input_tasks
+#   - amount_quantile_contaminated
+#   - normalized_rmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# x: 1.0
+# rank: lower
+# amount: 0.24
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-numeric-tradeoffs
+# //| fig-cap: "Amber cards are hidden prediction targets. Separate models predict rank or amount."
+# //| fig-alt: "Model tree with measurement, x, target. Amber cards are hidden prediction targets. Separate models predict rank or amount."
+# #tree(node("measurement", kind: "root", children: (
+#   node("x", type: "Number / Quantile", detail: "Matched input choice"),
+#   node("target", kind: "target", type: "Enum / Number", detail: "Separate task models"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Measure overall and tail errors separately. Also compare noisy output targets learned in original units versus percentile units.
+#
+# ## Result
 #
 # {{< proof P077 status >}}
 #
-# ## Insights
+# Neither representation wins every comparison. Percentiles can reduce some contamination effects while worsening tail error; changing output units can also change which answer the loss prefers.
 #
-# Bounded percentile coordinates may help when rare corrupt measurements distort
-# numerical scale, but the benefit must be measured separately from tail errors.
-# This matched experiment compares input representations on a threshold task
-# and a source-unit regression task, under clean and contaminated training.
-# It does not require either representation to win every comparison.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# A second experiment separates output semantics: percentile MSE targets the
-# conditional mean percentile, whose inverse generally differs from the
-# conditional source-unit mean. On continuous distributions, percentile MAE
-# and source-unit MAE instead share the conditional median as their optimum.
+# {{< proof P077 evidence >}}
 #
-# All three initial CPU seeds met the gates. Clean amount regression favored
-# Number (nRMSE 0.038–0.048) over Quantile (0.066–0.089). Under contamination,
-# Quantile had lower overall error in two seeds but higher tail error in two;
-# neither representation was uniformly better. Both learned the rank threshold.
-# The noisy-target MSE predictions separated by 23.0–40.2% of the source means
-# on average, confirming a learned distinction between the two objectives.
+# ### Run this experiment
+#
+# {{< proof P077 script >}}
+#
+# ### Input representation experiment
+#
+# Draw `u ~ Uniform(0, 1)` and `x = exp(4u) - 1`. The hidden rank label is
+# `upper` when u exceeds 0.5. The numeric target is `0.2*x + Normal(0, 0.1)`.
+# Only x is visible, and each task gets its own model. In the contaminated arm,
+# multiply 2% of training x values by 100 while retaining their original
+# targets. This models input measurement errors, not a change in the true rule.
+# Validation and testing stay clean, with paired observations across all arms.
+#
+# Test rows with u > 0.95 receive separate tail metrics.
+#
+# ### Noisy-target experiment and analytical baselines
+#
+# Three equally likely Enum groups generate `target = exp(mu[group] + 0.8*z)`,
+# with z standard normal and mu equal to -0.5, 0, or 0.5. Neither z nor mu is a
+# model input. The source-unit mean is `exp(mu + 0.8**2/2)` and the median is
+# `exp(mu)`. The population CDF F is the equal mixture of these three lognormal
+# distributions. For percentile MSE, the optimum is `F^-1(E[F(target)|group])`.
+# The expectation has an analytical normal-CDF expression; bisection computes
+# its inverse. These evaluator-only oracles never fit a test distribution.
+#
+# Four matched models compare Number/Quantile targets under MSE/MAE. Report
+# source-unit MAE/RMSE, percentile MAE/MSE, and distance to the corresponding
+# population optimum. Quantile learns an approximate empirical training CDF,
+# so the population optimum is a reference rather than an exact sketch optimum.
+#
+# Every arm has 8,192 training rows, 1,024 validation rows, 400 AdamW updates
+# at learning rate 0.002, and batch size 128. Evaluation uses 4,096 fresh rows.
+# Architecture width and optimizer budget match; datatype parameter counts may
+# differ. Training, validation, and testing use seed*100 plus distinct offsets.
+#
+# Gates are fixed before execution: clean rank accuracy >=0.90; clean amount
+# nRMSE <=0.35; input shuffling leaves rank accuracy <=0.60 and amount nRMSE
+# >=0.90. Each noisy-target model must approach its own optimum with mean
+# relative error <=0.25. Contamination comparisons and tail differences are
+# diagnostics, not gates requiring Quantile superiority.
+# The learned Number-MSE predictions must exceed Quantile-MSE by an average
+# of at least 10% of the conditional source means, establishing a behavioral
+# distinction in addition to the analytical one.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P077: compare numerical representations and the quantities their objectives estimate."""
@@ -52,52 +130,7 @@ GROUPS = ("amber", "birch", "cove")
 LOCATIONS = np.array([-0.5, 0.0, 0.5])
 SIGMA = 0.8
 
-# %% [markdown]
-# ## Input representation experiment
-#
-# Draw `u ~ Uniform(0, 1)` and `x = exp(4u) - 1`. The hidden rank label is
-# `upper` when u exceeds 0.5. The numeric target is `0.2*x + Normal(0, 0.1)`.
-# Only x is visible, and each task gets its own model. In the contaminated arm,
-# multiply 2% of training x values by 100 while retaining their original
-# targets. This models input measurement errors, not a change in the true rule.
-# Validation and testing stay clean, with paired observations across all arms.
-#
-# ```yaml
-# x: 1.0
-# rank: lower
-# amount: 0.24
-# ```
-#
-# ```yaml
-# x: 100.0
-# rank: lower
-# amount: 0.24
-# ```
-#
-# The second record illustrates corrupted training input. The label and amount
-# still describe the original x=1 observation.
-#
-# ```yaml
-# x: 50.0
-# rank: upper
-# amount: 10.03
-# ```
-#
-# This is a valid high-value observation. Test rows with u>0.95 receive separate
-# tail metrics, so an average improvement cannot conceal harm in that region.
-#
-# ```{typst}
-# //| label: fig-proof-numeric-tradeoffs
-# //| fig-cap: "Each matched model observes the same x through Number or Quantile and predicts one hidden task."
-# //| fig-alt: "A measurement contains visible numerical x and one hidden rank Enum or amount Number target."
-# #tree(node("measurement", kind: "root", children: (
-#   node("x", type: "Number / Quantile", detail: "Matched input choice"),
-#   node("target", kind: "target", type: "Enum / Number", detail: "Separate task models"),
-# )))
-# ```
 
-
-# %%
 def records(*, rows: int, seed: int, contaminated: bool = False) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     u = rng.uniform(0, 1, rows)
@@ -199,38 +232,6 @@ def optima() -> dict[str, np.ndarray]:
     }
 
 
-# %% [markdown]
-# ## Noisy-target experiment and analytical baselines
-#
-# Three equally likely Enum groups generate `target = exp(mu[group] + 0.8*z)`,
-# with z standard normal and mu equal to -0.5, 0, or 0.5. Neither z nor mu is a
-# model input. The source-unit mean is `exp(mu + 0.8**2/2)` and the median is
-# `exp(mu)`. The population CDF F is the equal mixture of these three lognormal
-# distributions. For percentile MSE, the optimum is `F^-1(E[F(target)|group])`.
-# The expectation has an analytical normal-CDF expression; bisection computes
-# its inverse. These evaluator-only oracles never fit a test distribution.
-#
-# Four matched models compare Number/Quantile targets under MSE/MAE. Report
-# source-unit MAE/RMSE, percentile MAE/MSE, and distance to the corresponding
-# population optimum. Quantile learns an approximate empirical training CDF,
-# so the population optimum is a reference rather than an exact sketch optimum.
-#
-# Every arm has 8,192 training rows, 1,024 validation rows, 400 AdamW updates
-# at learning rate 0.002, and batch size 128. Evaluation uses 4,096 fresh rows.
-# Architecture width and optimizer budget match; datatype parameter counts may
-# differ. Training, validation, and testing use seed*100 plus distinct offsets.
-#
-# Gates are fixed before execution: clean rank accuracy >=0.90; clean amount
-# nRMSE <=0.35; input shuffling leaves rank accuracy <=0.60 and amount nRMSE
-# >=0.90. Each noisy-target model must approach its own optimum with mean
-# relative error <=0.25. Contamination comparisons and tail differences are
-# diagnostics, not gates requiring Quantile superiority.
-# The learned Number-MSE predictions must exceed Quantile-MSE by an average
-# of at least 10% of the conditional source means, establishing a behavioral
-# distinction in addition to the analytical one.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     stream = seed * 100
     test = list(records(rows=TEST_ROWS, seed=stream + 3))
@@ -344,22 +345,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence and limits
-#
-# {{< proof P077 evidence >}}
-#
-# Three CPU seeds are recorded with the original budgets and gates. Thresholds
-# remain provisional pending ten seeds. This measures one skewed input
-# distribution, one measurement-error mechanism, and one conditional target
-# family. It does not establish invariance of frozen models to unit changes,
-# universal outlier robustness, distribution-shift adaptation, or uncertainty
-# calibration. Compression and tail sample size also limit percentile accuracy.
-#
-# ## Reproduce
-#
-# {{< proof P077 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=7701)
+
+# %% [markdown]
+# </details>

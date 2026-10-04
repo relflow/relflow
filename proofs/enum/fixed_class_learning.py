@@ -1,30 +1,103 @@
 # %% [markdown]
 # ---
-# title: Learning a closed set of classes
-# categories: [Enum]
+# title: Can it learn classes declared in advance?
+# categories:
+# - Enum
 # proof-id: P069
-# description: Declared Enum inputs predict a hidden Enum target while shuffled context removes the signal.
+# description: Declare the allowed input and output classes with Enum, then learn which output belongs to
+#   each visible combination.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Informative training
+#   metric:
+#   - informative
+#   - accuracy
+#   format: percent
+# - label: Shuffled training and test
+#   metric:
+#   - shuffled_control
+#   - shuffled_test_accuracy
+#   format: percent
 # ---
+#
+# ## Example
+#
+# ```yaml
+# route: bay
+# channel: store
+# label: green
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-enum-fixed-class-learning
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with record, route, channel, label. Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("record", kind: "root", children: (
+#   node("route", type: "Enum", body: [Eight declared routes]),
+#   node("channel", type: "Enum", body: [Two declared channels]),
+#   node("label", kind: "target", type: "Enum", body: [Four declared answers]),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare informative training with shuffled evidence, and check that fitting and save/load preserve class order and size.
+#
+# ## Result
 #
 # {{< proof P069 status >}}
 #
-# ## Insights
+# The declared classes support reliable learning in this small task. This covers new records of familiar combinations, rather than new identities or meanings inferred from label names.
 #
-# A fixed declaration supplies stable class IDs and a complete output head.
-# Learning still has to associate visible evidence with each answer. This proof
-# trains an Enum-to-Enum classifier, compares it with shuffled evidence, and
-# checks that fitting and checkpoint restoration never grow or reorder classes.
-# The claim concerns new records drawn from familiar declared combinations,
-# rather than unseen identities or semantic interpretation of label strings.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Across ten CPU seeds, informative accuracy was 100%; the shuffled-training
-# control scored 23.68–25.00% on independently shuffled test rows, around the
-# 25% chance baseline. All gates passed on those seeds and in a separate
-# RTX 3090 run, with the original gates and training budget unchanged.
+# {{< proof P069 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< proof P069 script >}}
+#
+# ### Data and observability
+#
+# Draw balanced route/channel combinations, then set the label index to
+# `(route_index + 2 * channel_index) % 4`. All 16 visible combinations appear
+# equally often. Their opaque names carry no built-in meaning. Independent row
+# streams supply 4,096 training, 512 validation, and 2,048 test records.
+# Repeated combinations are intentional: this tests learning a closed finite
+# relationship, not generalization to combinations absent during fitting.
+#
+# The route and channel jointly identify the hidden answer. The negative
+# control permutes whole visible contexts between rows while leaving targets
+# in place, preserving all input and target marginals but removing their link.
+# A constant-label baseline scores exactly 0.25 on the balanced test set.
+#
+# ### Training and gates
+#
+# Both models use the `xs` preset and 300 AdamW updates at learning rate 0.002,
+# batch size 64, one device, and no loader workers. Their parameter initialization
+# and source rows are paired; only the context permutation differs. Input
+# unavailability augmentation is disabled to isolate the information control.
+# No checkpoint or hyperparameter is selected from the test split.
+#
+# Predeclared gates require at least 0.95 held-out accuracy with real context,
+# at most 0.35 on independently shuffled test context for both trained models,
+# and a 0.55 gap between informative accuracy and the matched shuffled control.
+# The shuffled-trained model's informative-test accuracy is diagnostic: with
+# only 16 distinct contexts, accidental agreement with the finite mapping need
+# not concentrate around chance merely because test rows repeat those contexts.
+# Declaration order, allocated rows, and evaluation-frozen exposure counts are
+# separate mechanical gates. A checkpoint must preserve those invariants and
+# held-out probabilities.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P069: learn a finite Enum relationship without changing declared class storage."""
@@ -47,56 +120,7 @@ ROUTES = ("arch", "bay", "cove", "dune", "elm", "ford", "glen", "hill")
 CHANNELS = ("web", "store")
 LABELS = ("amber", "blue", "coral", "green")
 
-# %% [markdown]
-# ## Data and observability
-#
-# Draw balanced route/channel combinations, then set the label index to
-# `(route_index + 2 * channel_index) % 4`. All 16 visible combinations appear
-# equally often. Their opaque names carry no built-in meaning. Independent row
-# streams supply 4,096 training, 512 validation, and 2,048 test records.
-# Repeated combinations are intentional: this tests learning a closed finite
-# relationship, not generalization to combinations absent during fitting.
-#
-# ```yaml
-# route: bay
-# channel: store
-# label: green
-# ```
-#
-# Keeping the route and changing the channel changes the required label:
-#
-# ```yaml
-# route: bay
-# channel: web
-# label: blue
-# ```
-#
-# A shuffled control can instead pair the original answer with another context:
-#
-# ```yaml
-# route: arch
-# channel: web
-# label: green
-# ```
-#
-# The route and channel jointly identify the hidden answer. The negative
-# control permutes whole visible contexts between rows while leaving targets
-# in place, preserving all input and target marginals but removing their link.
-# A constant-label baseline scores exactly 0.25 on the balanced test set.
-#
-# ```{typst}
-# //| label: fig-proof-enum-fixed-class-learning
-# //| fig-cap: "Two declared input vocabularies identify a hidden four-class answer."
-# //| fig-alt: "Record contains Enum route with eight values, Enum channel with two values, and a hidden Enum label with four values."
-# #tree(node("record", kind: "root", children: (
-#   node("route", type: "Enum", body: [Eight declared routes]),
-#   node("channel", type: "Enum", body: [Two declared channels]),
-#   node("label", kind: "target", type: "Enum", body: [Four declared answers]),
-# )))
-# ```
 
-
-# %%
 def records(*, rows: int, seed: int, shuffled: bool = False) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     combinations = np.resize(np.arange(len(ROUTES) * len(CHANNELS)), rows)
@@ -142,27 +166,6 @@ def accuracy(output: list[dict], rows: list[dict]) -> float:
     return float(np.mean([value["value"] == row["label"] for value, row in zip(output, rows, strict=True)]))
 
 
-# %% [markdown]
-# ## Training and gates
-#
-# Both models use the `xs` preset and 300 AdamW updates at learning rate 0.002,
-# batch size 64, one device, and no loader workers. Their parameter initialization
-# and source rows are paired; only the context permutation differs. Input
-# unavailability augmentation is disabled to isolate the information control.
-# No checkpoint or hyperparameter is selected from the test split.
-#
-# Predeclared gates require at least 0.95 held-out accuracy with real context,
-# at most 0.35 on independently shuffled test context for both trained models,
-# and a 0.55 gap between informative accuracy and the matched shuffled control.
-# The shuffled-trained model's informative-test accuracy is diagnostic: with
-# only 16 distinct contexts, accidental agreement with the finite mapping need
-# not concentrate around chance merely because test rows repeat those contexts.
-# Declaration order, allocated rows, and evaluation-frozen exposure counts are
-# separate mechanical gates. A checkpoint must preserve those invariants and
-# held-out probabilities.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     test = list(records(rows=2048, seed=seed + 3))
     shuffled_test = list(records(rows=2048, seed=seed + 3, shuffled=True))
@@ -232,19 +235,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence and remaining work
-#
-# {{< proof P069 evidence >}}
-#
-# This finite task does not establish robustness to undeclared input values,
-# which Enum rejects, or transfer to new combinations and labels. It also does
-# not establish probability calibration or synchronization across distributed ranks.
-#
-# ## Reproduce
-#
-# {{< proof P069 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=6901)
+
+# %% [markdown]
+# </details>

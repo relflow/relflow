@@ -156,6 +156,8 @@ execute:
 
 filters:
   - typst-render
+  - path: assets/filters/proof-diagrams.lua
+    at: post-quarto
   - path: assets/filters/tables.lua
     # Include evidence tables inserted by proof shortcodes.
     at: post-quarto

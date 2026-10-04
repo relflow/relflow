@@ -1,33 +1,90 @@
 # %% [markdown]
 # ---
-# title: Sums within the trained length range
+# title: Can the model add a list of numbers?
 # categories:
 # - Cardinality generalization
 # proof-id: P001
-# description: Learn a total from independent item values when collection lengths vary
-#   within the training range.
+# description: Predict the total of a list whose length varies within the range used in training.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: New lists
+#   metric:
+#   - measured
+#   - nrmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# items:
+#   - {amount: 0.5}
+#   - {amount: -0.2}
+#   - {amount: 0.9}
+# total: 1.2
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-attention-sum-in-range
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with record, items, amount, total. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("record", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("amount", type: "Number"),
+#   )),
+#   node("total", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Test on fresh lists, then reorder the same items. Reordering should preserve the total.
+#
+# ## Result
 #
 # {{< proof P001 status >}}
 #
-# ## Insights
+# The model learns an approximate total in this range. Longer lists need a separate test.
 #
-# **Attention can learn totals across varying collection lengths without a supplied count field.**
-# Independent signed amounts prevent count alone from predicting the answer. The reduction retains additive
-# evidence and present-token count alongside its learned summary, providing a route for both content and
-# multiplicity to survive.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The held-out accuracy and item-permutation controls support this route within the trained length range.
-# They do not establish a general sum rule: a model could still learn relationships specialized to familiar
-# lengths. The unseen-length proof separately checks longer bags and duplication. Treat this case as
-# evidence for ordinary interpolation, rather than a guarantee that every accepted input shape will be
-# handled accurately.
+# {{< proof P001 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P001 script >}}
+#
+# ### How it works
+#
+# Training, validation, and test records contain one through six independent
+# amounts drawn from −1 to 1. Both the repeated item branch and root use learned
+# `rf.Attention` reductions. There is no visible count input.
+#
+# Attention’s reduction retains aggregate evidence and present-token count as
+# well as its normalized learned summary. These representations offer a route to
+# predicting sums with changing length. Independent values prevent count alone
+# from solving the task; a complete-item permutation checks approximate order
+# stability. [Unseen-length tests](attention-sum-unseen-lengths.html) separately
+# check whether the learned behavior extends beyond interpolation.
+#
+# ### Remaining work
+#
+# Repeat across seeds and change capacities, widths, and nested placement.
+# This in-range result alone establishes neither arbitrary-length generalization
+# nor an exact arithmetic sum; empty and missing-item cases need separate checks.
+#
+# The family’s promotion target is at least three core seeds and ten lightweight
+# calibration seeds.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Learned Attention can interpolate a sum over seen cardinalities.
@@ -52,53 +109,7 @@ PROOF_ID = "P001"
 TRAIN_MAX = 6
 CAPACITY = 12
 
-# %% [markdown]
-# ## Examples
-#
-# Targets use `mask=True`; the labels below are supervision hidden from the encoder.
-#
-# ### Sum a short bag
-#
-# ```yaml
-# items:
-#   - {amount: 0.5}
-#   - {amount: -0.2}
-#   - {amount: 0.9}
-# total: 1.2
-# ```
-#
-# Independent positive and negative amounts combine into a total of 1.2.
-#
-# ### A contrasting signed bag
-#
-# ```yaml
-# items:
-#   - {amount: -0.5}
-#   - {amount: 0.2}
-#   - {amount: -0.9}
-# total: -1.2
-# ```
-#
-# These amounts instead sum to −1.2. The number of items alone cannot
-# determine either answer.
-#
-# ### Reorder complete items
-#
-# ```yaml
-# items:
-#   - {amount: 0.9}
-#   - {amount: 0.5}
-#   - {amount: -0.2}
-# total: 1.2
-# ```
-#
-# This is the first bag in a different order. Its label stays 1.2, and the
-# permutation gate checks that predictions remain approximately unchanged.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def random_records(*, rows: int, seed: int, minimum: int = 1, maximum: int = TRAIN_MAX) -> Iterator[dict]:
     """Draw variable-length numerical bags and their mean and sum."""
     if not 1 <= minimum <= maximum <= CAPACITY:
@@ -143,44 +154,6 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-attention-sum-in-range
-# //| fig-cap: "A single Attention output summarizes a branch with capacity twelve; training and this test use shorter bags."
-# //| fig-alt: "Record contains repeated items with amount inputs, and hidden total targets. Root reduction: Attention. Item reduction: Attention (1 token); capacity 12; branch attention MHA."
-# #tree(node("record", kind: "root", width: 150pt, body: [
-#     - *Reduction:* Attention
-#   ], children: (
-#   node("items", kind: "branch", repeated: true, width: 155pt, body: [
-#       - *Reduction:* Attention (1 token)
-#       - *Branch attention:* MHA
-#       - *Capacity:* 12 items
-#     ], children: (
-#     node("amount", type: "Number"),
-#   )),
-#   node("total", kind: "target", type: "Number"),
-# )))
-# ```
-#
-# ## How it works
-#
-# Training, validation, and test records contain one through six independent
-# amounts drawn from −1 to 1. Both the repeated item branch and root use learned
-# `rf.Attention` reductions. There is no visible count input.
-#
-# Attention’s reduction retains aggregate evidence and present-token count as
-# well as its normalized learned summary. These representations offer a route to
-# predicting sums with changing length. Independent values prevent count alone
-# from solving the task; a complete-item permutation checks approximate order
-# stability. [Unseen-length tests](attention-sum-unseen-lengths.html) separately
-# check whether the learned behavior extends beyond interpolation.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -232,24 +205,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P001 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat across seeds and change capacities, widths, and nested placement.
-# This in-range result alone establishes neither arbitrary-length generalization
-# nor an exact arithmetic sum; empty and missing-item cases need separate checks.
-#
-# The family’s promotion target is at least three core seeds and ten lightweight
-# calibration seeds.
-#
-# ## Reproduce
-#
-# {{< proof P001 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=3609)
+
+# %% [markdown]
+# </details>

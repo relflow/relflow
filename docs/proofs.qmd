@@ -1,6 +1,7 @@
 ---
+engine: markdown
 title: Proofs
-description: What relflow has learned in controlled experiments, and where information is lost.
+description: Small experiments about what a model can learn and where it loses information.
 format:
   html:
     css: assets/stylesheets/proofs.css
@@ -14,86 +15,53 @@ listing:
   field-links: [title]
   field-display-names:
     id: ID
-    title: Proof
-    categories: Family
-    proof-status: Status
+    title: Question
+    categories: Topic
+    proof-status: Result
   sort: id
   filter-ui: [id, title, categories, proof-status]
   sort-ui: [id, title, categories, proof-status]
   categories: false
 ---
 
-Can a model find a matching identity, recover a hidden subtotal, or preserve
-enough information through a nested summary? These experiments isolate one
-relationship at a time. Controls remove the signal, change the pairing, or
-deliberately discard information so that a useful prediction has a clear
-explanation.
+These are small learning experiments, each asking one question. Open a page
+for an example, a comparison, and the recorded result. Details and runnable
+code are available in a foldout.
 
-Each scenario opens with a short **Insights** summary: what the proof shows,
-why it matters, and where the conclusion stops. A model tree, contrasting
-records, and expandable code sections explain the experiment together. Each
-page comes from the same Python file you can download and run. The collection
-includes retention, adaptation, reset,
-deactivation, and deletion after schema mutations.
+Start with [adding six numbers](proofs/structure/attention-learns-fixed-width-sum.html),
+[matching unfamiliar IDs](proofs/identity/unseen-identity-equality.html), or
+[distinguishing missing values from zero](proofs/state/null-versus-zero.html).
 
-The capability experiments P071–P078 test unfamiliar instruction combinations,
-[rules inferred from examples](proofs/composition/context-examples.html),
-frozen representation transfer, incomplete evidence, larger and two-hop
-relations, contextual inconsistency, numerical representation tradeoffs,
-and hidden-group recovery. Their controls distinguish a successful local task
-from broader reuse of a learned relationship.
 
-## Read The Status
-
-Statuses summarize recorded evidence in `proofs/results.yaml`. Each experiment
-has a stable ID, such as `P014`, independent of its title or script name. Some experiments
-are designed to confirm a limitation, such as losing count when averaging
-identical values. Their expected outcome is useful evidence about model design.
-Each page provides commands to reproduce the experiment.
-Acceptance thresholds are labeled as gates. Each page shows the latest full
-run's measurements, with behavioral checks collapsed by default. Expand them
-to inspect the individual criteria. Short smoke runs never replace full
-experiment results.
-
-| Status | What the evidence establishes |
-| --- | --- |
-| [Passing]{.proof-status data-proof-status="Passing"} | The reported experiment clears its gates, usually for one deterministic seed. The result is provisional: broader stability or generalization remains to be established. |
-| [Limited]{.proof-status data-proof-status="Limited"} | The experiment successfully reproduces an expected loss of information or unsuccessful modeling route. Its checks are met when that limitation appears; this is not a failed experiment. |
-| [Partial]{.proof-status data-proof-status="Partial"} | Some behavior is supported, while a broader claim remains untested or inconsistent across recorded conditions and seeds. |
-| [Failing]{.proof-status data-proof-status="Failing"} | The latest full run completed but did not meet every stated behavioral criterion. |
-| [Error]{.proof-status data-proof-status="Error"} | The latest full run could not complete. Its error is recorded separately from model quality. |
-| [Missing]{.proof-status data-proof-status="Missing"} | No full experiment run has been recorded. |
-
-These are empirical checks of learned behavior. Training speed and memory use
-require separate measurements. Learned arithmetic is approximate; use exact
-[preprocessing](guides/preprocessors.qmd) for fixed business rules that must
-be exact.
-
-## Explore The Proofs
-
-Sort by **ID**, **Proof**, **Family**, or **Status**, using the column headings or the
-order menu. Filter by an ID, task, family, or status, then select any part of a
-proof's row to explore its insights, examples, and evidence.
+Search by question, topic, result, or ID, such as `P021`.
 
 ::: {#proofs}
 :::
 
-## What Strengthens A Result
+<details>
+<summary>How to read the results</summary>
 
-The shared protocol calls for three paired data/model seeds before promoting
-a core claim, plus at least ten seeds to calibrate a new threshold. Held-out
-splits, matched baselines, and controls must continue to support the claimed
-relationship. Each page identifies the additional work for that scenario.
+These are experiments on synthetic data, not mathematical proofs or guarantees
+for your dataset. A successful run can be provisional. Some experiments are
+designed to demonstrate a limitation. Short execution checks, called smoke
+runs, do not replace full learning results.
 
-Regression errors are generally reported as **nRMSE**: model RMSE divided by
-the RMSE of a baseline that predicts the training mean. Lower is better;
-`1` matches that baseline. Other baselines, such as an oracle with information
-removed, are identified on the relevant page. Classification pages report
-accuracy or ROC AUC, together with the appropriate chance or corruption control.
+| Result | Meaning |
+| --- | --- |
+| [Passing]{.proof-status data-proof-status="Passing"} | The latest full run meets its stated checks. |
+| [Limited]{.proof-status data-proof-status="Limited"} | The experiment reproduces an expected limitation. |
+| [Partial]{.proof-status data-proof-status="Partial"} | Part of the broader claim remains untested or inconsistent. |
+| [Failing]{.proof-status data-proof-status="Failing"} | The latest full run misses at least one required check. |
+| [Error]{.proof-status data-proof-status="Error"} | The latest full run could not complete. |
+| [Missing]{.proof-status data-proof-status="Missing"} | No full run has been recorded. |
 
-Run `uv run python proofs/run.py --list` to list proof IDs, or
-`uv run python proofs/run.py P014 --accelerator gpu` to run one on a GPU.
-Each script uses seeded synthetic records and records its metrics, controls,
-seed, environment, and source fingerprint. `make proofs` runs all scripts serially.
+Each page shows selected measurements from its latest full run. Its history
+can include repeated seeds and earlier source versions; the foldout and
+[complete results](proofs/_generated/results.yaml) retain that context.
+Experiments with more seeds provide stronger evidence about repeatability.
 
-[Complete results](proofs/_generated/results.yaml)
+Learned arithmetic is approximate. Use
+[preprocessing](guides/preprocessors.qmd) for business rules that require exact results.
+Each page includes its reproduction command and a downloadable script.
+
+</details>

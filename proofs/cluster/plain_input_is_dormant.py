@@ -1,37 +1,91 @@
 # %% [markdown]
 # ---
-# title: A Plain Cluster Input Stays Dormant
+# title: Does a Cluster input group itself automatically?
 # categories:
 # - Clustering
 # proof-id: P019
-# description: Supervision on a sibling field does not engage adaptive Cluster commitment
-#   without a Cluster reconstruction objective.
+# description: Use a Cluster field only as an input beside a hidden prediction target.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Groups at the final epoch
+#   metric:
+#   - committed
+#   - -1
+#   format: number
+# - label: Grouping activity at the final epoch
+#   metric:
+#   - adherence
+#   - -1
+#   format: number
 # ---
 #
-# Adding a Cluster field as an input does not automatically train its adaptive
-# commitment mechanism. This control keeps the repeated identities and stable
-# labels, but removes reconstruction from the Cluster field.
+# ## Example
+#
+# ```yaml
+# merchant_id: c2-id7
+# label: L2
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-cluster-plain-input-is-dormant
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with event, merchant_id, label. Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("event", kind: "root", children: (
+#   node("merchant_id", type: "Cluster", width: 150pt,),
+#   node("label", kind: "target", type: "Category",),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Observe its adaptive grouping state before and after training, without asking the Cluster field to reconstruct itself.
+#
+# ## Result
 #
 # {{< proof P019 status >}}
 #
-# ## Insights
+# Its grouping state stays dormant in this setup. Add a reconstructing mask when adaptive grouping is intended; then test whether the groups are useful.
 #
-# **A prediction target beside a Cluster field does not activate that field’s adaptive grouping.** The
-# identities repeat and carry stable labels, but the Cluster field is only an input.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The expected result is unchanged committed count and zero adherence, as checked by this experiment. This
-# does not mean every parameter or the label decoder is frozen: the checks concern these specific
-# adaptive-state diagnostics. No label-prediction score is established here.
+# {{< proof P019 evidence >}}
 #
-# When adaptive grouping is intended, add a reconstructing mask to the Cluster field before changing
-# capacity or training longer. Then check predictive usefulness and assignment quality separately; merely
-# activating commitment does not establish either.
+# ### Run this experiment
 #
-# ## Setup
+# {{< proof P019 script >}}
+#
+# ### How it works
+#
+# Cluster's reconstruction loss updates its adaptive usage and commitment state.
+# Training only the sibling label objective does not invoke that loss. The
+# absence of a Cluster reconstruction objective therefore leaves the measured
+# commitment mechanism inactive even though the identity recurs.
+#
+# This model uses 1,000 observations: five label groups, ten identities per group,
+# and 20 observations per identity. It trains for five deterministic epochs,
+# reusing the same table for validation. A callback inspects the committed count
+# and adherence at each epoch.
+#
+# To engage the mechanism, the paired
+# [reconstructing-label experiment](reconstructing-category-labels.html) adds
+# `rf.Mask(rate=0.5, reconstruct=True)` to the Cluster field.
+#
+# ### Remaining work
+#
+# Repeat this negative control alongside the positive variants across three
+# core seeds. The broader family still needs independent held-out observations,
+# partition recovery, and unique-identity and no-regime controls. Its count
+# thresholds also need at least ten calibration seeds.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P019: show that a plain-input Cluster keeps its adaptive state dormant.
@@ -52,48 +106,7 @@ from relflow.tensorfields.extensions.cluster import Embedder
 
 PROOF_ID = "P019"
 
-# %% [markdown]
-# ## Examples
-#
-# All these identities recur in the generated training table. The label is
-# hidden with `mask=True`, but the Cluster input has no reconstructing mask.
-#
-# ### Repeated identity with a stable label
-#
-# ```yaml
-# merchant_id: c2-id7
-# label: L2
-# ```
-#
-# This record appears 20 times. Repetition alone does not invoke the Cluster
-# reconstruction loss.
-#
-# ### Another identity with the same behavior
-#
-# ```yaml
-# merchant_id: c2-id3
-# label: L2
-# ```
-#
-# The generator places this identity in the same group. Predicting the sibling
-# label still does not engage adaptive Cluster commitment.
-#
-# ### An identity from another group
-#
-# ```yaml
-# merchant_id: c4-id8
-# label: L4
-# ```
-#
-# The data contains a real contrast between groups; it is not a one-label
-# process. Even so, the expected diagnostic is unchanged commitment and zero
-# adherence. No label-prediction score or recovered assignment for these
-# individual records is asserted.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(seed: int) -> Iterator[dict]:
     """Repeat each of 50 identities twenty times with one stable regime label."""
     rows = [
@@ -132,44 +145,6 @@ class Trajectory(lit.Callback):
         )
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-cluster-plain-input-is-dormant
-# //| fig-cap: "Merchant ID has no reconstruction objective. Only the label is a hidden prediction target."
-# //| fig-alt: "Event contains a plain Cluster merchant ID input with reconstruction disabled, and a Category label target always hidden from input."
-# #tree(node("event", kind: "root", children: (
-#   node("merchant_id", type: "Cluster", width: 150pt, body: [
-#     - *Role:* plain input
-#     - *Reconstruct:* disabled
-#   ]),
-#   node("label", kind: "target", type: "Category", body: [
-#     - *Input:* always hidden
-#   ]),
-# )))
-# ```
-#
-# ## How it works
-#
-# Cluster's reconstruction loss updates its adaptive usage and commitment state.
-# Training only the sibling label objective does not invoke that loss. The
-# absence of a Cluster reconstruction objective therefore leaves the measured
-# commitment mechanism inactive even though the identity recurs.
-#
-# This model uses 1,000 observations: five label groups, ten identities per group,
-# and 20 observations per identity. It trains for five deterministic epochs,
-# reusing the same table for validation. A callback inspects the committed count
-# and adherence at each epoch.
-#
-# To engage the mechanism, the paired
-# [reconstructing-label experiment](reconstructing-category-labels.html) adds
-# `rf.Mask(rate=0.5, reconstruct=True)` to the Cluster field.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -205,22 +180,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P019 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat this negative control alongside the positive variants across three
-# core seeds. The broader family still needs independent held-out observations,
-# partition recovery, and unique-identity and no-regime controls. Its count
-# thresholds also need at least ten calibration seeds.
-#
-# ## Reproduce
-#
-# {{< proof P019 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=0)
+
+# %% [markdown]
+# </details>

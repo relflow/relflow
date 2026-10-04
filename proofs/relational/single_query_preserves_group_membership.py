@@ -1,39 +1,90 @@
 # %% [markdown]
 # ---
-# title: Share One Summary Across Grouped Targets
+# title: Can one summary support comparisons within groups?
 # categories:
 # - Peer-relative inference
 # proof-id: P033
-# description: Recover grouped deviations from one learned collection summary plus aligned
-#   item context.
+# description: Compress a list into one summary, then predict each item’s difference from its group average.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Correct groups
+#   metric:
+#   - intact_nrmse
+#   format: error
+# - label: Changed groups
+#   metric:
+#   - corrupted_nrmse
+#   format: error
 # ---
 #
-# This repeats grouped peer deviation with one learned branch output. The shared
-# summary carries collection context while each target still receives its own
-# visible group and value as query context.
+# ## Example
+#
+# ```yaml
+# items:
+#   - {group: A, value: 2.0, deviation: -1.0}
+#   - {group: B, value: 1.0, deviation: 1.0}
+#   - {group: C, value: -3.0, deviation: -1.0}
+#   - {group: A, value: 4.0, deviation: 1.0}
+#   - {group: C, value: -1.0, deviation: 1.0}
+#   - {group: B, value: -1.0, deviation: -1.0}
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-single-query-preserves-group-membership
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with collection, items, value, group, deviation. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("collection", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("value", type: "Number"),
+#     node("group", type: "Category"),
+#     node("deviation", kind: "target", type: "Number", width: 150pt,),
+#   )),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Change group labels while retaining original answers. Each decoder still receives its own item’s group and value.
+#
+# ## Result
 #
 # {{< proof P033 status >}}
 #
-# ## Insights
+# The summary and local item information together support the task. This does not show that one summary preserves every detail of an arbitrary list.
 #
-# **A single collection summary can support per-item predictions when the decoder also sees each item’s
-# group and value.** The result is not
-# evidence that one vector losslessly stores an arbitrary collection or that
-# all useful information passes through that vector alone.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Corrupting group labels while retaining original targets removes accuracy,
-# supporting use of the membership relationship in this compressed route.
-# Translation and permutation controls from the retained-token case have not
-# been repeated here. This model also trains for more steps than that case, so
-# the recorded accuracy comparison is not an efficiency comparison. Validate
-# summary capacity for the actual target and collection sizes before generalizing
-# from these three two-member groups.
+# {{< proof P033 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P033 script >}}
+#
+# ### How it works
+#
+# Coordinate-local encoding first mixes each item's group and value. A learned
+# summary can then retain peer context used by separate, coordinate-conditioned
+# target queries. Label corruption changes peer membership while retaining the
+# original targets and the value and label marginals. The resulting loss of
+# accuracy tests whether that membership survived in the information available
+# to the decoder.
+#
+# ### Remaining work
+#
+# Repeat seed calibration and add translation and complete-item permutation
+# controls to this compressed case. Sweep group sizes, simultaneous targets,
+# and summary width before generalizing its capacity. A smaller representation
+# alone does not establish a speed or memory improvement.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Infer grouped deviations using one learned collection summary.
@@ -62,61 +113,7 @@ PROOF_ID = "P033"
 ITEMS = 6
 GROUPS = ("A", "B", "C")
 
-# %% [markdown]
-# ## Examples
-#
-# ### Decode each group's original deviations
-#
-# ```yaml
-# items:
-#   - {group: A, value: 2.0, deviation: -1.0}
-#   - {group: B, value: 1.0, deviation: 1.0}
-#   - {group: C, value: -3.0, deviation: -1.0}
-#   - {group: A, value: 4.0, deviation: 1.0}
-#   - {group: C, value: -1.0, deviation: 1.0}
-#   - {group: B, value: -1.0, deviation: -1.0}
-# ```
-#
-# Each deviation is its value minus the mean of values sharing its group. The
-# target is masked by `mask=True` during training and omitted at prediction.
-#
-# ### Different values require different deviations
-#
-# ```yaml
-# items:
-#   - {group: A, value: -0.5, deviation: -0.5}
-#   - {group: B, value: 2.5, deviation: 0.5}
-#   - {group: C, value: -2.0, deviation: -0.5}
-#   - {group: A, value: 0.5, deviation: 0.5}
-#   - {group: C, value: -1.0, deviation: 0.5}
-#   - {group: B, value: 1.5, deviation: -0.5}
-# ```
-#
-# The means are now A: 0, B: 2, and C: −1.5. These are correctly labeled
-# examples of the same task with a smaller within-group spread. The single
-# summary must support these changed targets alongside each item's local context.
-#
-# ### Remove the original membership relationship
-#
-# ```yaml
-# items:
-#   - {group: B, value: 2.0, deviation: -1.0}
-#   - {group: C, value: 1.0, deviation: 1.0}
-#   - {group: A, value: -3.0, deviation: -1.0}
-#   - {group: C, value: 4.0, deviation: 1.0}
-#   - {group: B, value: -1.0, deviation: 1.0}
-#   - {group: A, value: -1.0, deviation: -1.0}
-# ```
-#
-# The first example's labels rotate by one position, but values and deviation
-# targets stay fixed. The targets therefore no longer describe the visible
-# grouping. The retained corruption control checks that this change removes
-# accuracy; it does not require reproducing those now-inconsistent targets.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, rows: int, seed: int) -> Iterator[dict]:
     """Generate randomly interleaved, exactly centered two-member groups."""
     rng = np.random.default_rng(seed)
@@ -171,47 +168,6 @@ def implied_deviation(rows: list[dict]) -> np.ndarray:
     return np.asarray(values)
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-single-query-preserves-group-membership
-# //| fig-cap: "One learned item summary supplies shared context, while each target retains its aligned visible group and value. The root keeps its routed tokens."
-# //| fig-alt: "Collection contains six repeated items with value and group inputs and a masked Number deviation. The root keeps all tokens. The item branch learns one attention summary; aligned visible siblings also condition each target."
-# #tree(node("collection", kind: "root", width: 150pt, body: [
-#   - *Reduction:* Keep all tokens
-# ], children: (
-#   node("items", kind: "branch", repeated: true, width: 150pt, body: [
-#     - *Capacity:* 6 items
-#     - *Reduction:* `Attention`
-#     - *Learned summaries:* 1
-#   ], children: (
-#     node("value", type: "Number"),
-#     node("group", type: "Category"),
-#     node("deviation", kind: "target", type: "Number", width: 150pt, body: [
-#       - *Input:* always hidden
-#     ]),
-#   )),
-# )))
-# ```
-#
-# The branch uses `rf.Attention(n_outputs=1, n_layers=2)` and the root uses
-# `reduction=None`. The tree matches the [retained-token case](grouped-peer-deviation.html);
-# the reduction route is the difference.
-#
-# ## How it works
-#
-# Coordinate-local encoding first mixes each item's group and value. A learned
-# summary can then retain peer context used by separate, coordinate-conditioned
-# target queries. Label corruption changes peer membership while retaining the
-# original targets and the value and label marginals. The resulting loss of
-# accuracy tests whether that membership survived in the information available
-# to the decoder.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -275,22 +231,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P033 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat seed calibration and add translation and complete-item permutation
-# controls to this compressed case. Sweep group sizes, simultaneous targets,
-# and summary width before generalizing its capacity. A smaller representation
-# alone does not establish a speed or memory improvement.
-#
-# ## Reproduce
-#
-# {{< proof P033 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=3720)
+
+# %% [markdown]
+# </details>

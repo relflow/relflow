@@ -1,32 +1,100 @@
 # %% [markdown]
 # ---
-# title: Weighted sums from raw pairs
+# title: Does each value keep its own weight?
 # categories:
 # - Weighted aggregation
 # proof-id: P014
-# description: Learn each item’s value–weight relationship, then sum the contributions
-#   across the collection.
+# description: Predict a weighted total from values and weights stored together on each item.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Correct pairs
+#   metric:
+#   - intact
+#   - nrmse
+#   format: error
+# - label: Swapped weights
+#   metric:
+#   - corrupted
+#   - nrmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# items:
+#   - {value: 0.8, weight: 0.5}
+#   - {value: -0.4, weight: 1.0}
+#   - {value: 0.2, weight: 1.4}
+#   - {value: 0.5, weight: 0.2}
+#   - {value: -0.5, weight: 0.4}
+#   - {value: 0.9, weight: 0.3}
+# weighted_sum: 0.45
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-raw-value-weight-sum
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with record, items, value, weight, weighted_sum. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("record", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("value", type: "Number"),
+#     node("weight", type: "Number"),
+#   )),
+#   node("weighted_sum", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Swap weights between items while retaining the original total. Also reorder whole items and scale all weights together.
+#
+# ## Result
 #
 # {{< proof P014 status >}}
 #
-# ## Insights
+# The model uses the pairing: swapping weights worsens accuracy. This is approximate learned arithmetic on fixed-length lists.
 #
-# **The model uses the weight attached to each value, rather than only the collection’s separate values and
-# weights.** Swapping weights between items preserves both sets of numbers but worsens predictions against
-# the original labels. Reordering complete items leaves predictions approximately stable, while scaling all
-# weights changes the answer proportionally.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Keeping related fields on the same item gives the model a route to learn their interaction before
-# aggregation. The supplied-product control helps isolate that interaction when diagnosing a failure. This
-# proof supports the raw paired schema for its fixed collection length; it does not establish
-# variable-length totals, negative-weight behavior, or exact multiplication.
+# {{< proof P014 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P014 script >}}
+#
+# ### How it works
+#
+# The item branch and root use learned `rf.Attention` reductions. Each of
+# six items contains independently sampled values and positive weights. The model
+# receives no product field: it must learn enough about the sibling relationship
+# to predict `sum(value * weight)`.
+#
+# Swapping weights between items preserves both marginal distributions while
+# breaking their pairing. Scoring these changed inputs against the original labels
+# must worsen error. Reordering complete items should leave the answer stable;
+# scaling every weight by 0.75 should scale the prediction by the same factor.
+# The [supplied-contribution control](supplied-contribution-sum.html) isolates the
+# summation part of this task.
+#
+# ### Remaining work
+#
+# Repeat the pairing and scaling controls across seeds. Variable-length sum
+# duplication, unseen lengths, and zero, negative, missing, or extreme weights
+# remain unestablished for this particular weighted-sum schema.
+#
+# The family’s promotion target is at least three core seeds and ten lightweight
+# calibration seeds.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Raw sibling value and weight fields should support a weighted sum.
@@ -50,62 +118,7 @@ import relflow as rf
 PROOF_ID = "P014"
 ITEMS = 6
 
-# %% [markdown]
-# ## Examples
-#
-# Targets use `mask=True`; the labels below are supervision hidden from the encoder.
-#
-# ### Combine each pair
-#
-# ```yaml
-# items:
-#   - {value: 0.8, weight: 0.5}
-#   - {value: -0.4, weight: 1.0}
-#   - {value: 0.2, weight: 1.4}
-#   - {value: 0.5, weight: 0.2}
-#   - {value: -0.5, weight: 0.4}
-#   - {value: 0.9, weight: 0.3}
-# weighted_sum: 0.45
-# ```
-#
-# Each product uses the value and weight from the same item; their sum is 0.45.
-#
-# ### Scale every weight
-#
-# ```yaml
-# items:
-#   - {value: 0.8, weight: 0.375}
-#   - {value: -0.4, weight: 0.75}
-#   - {value: 0.2, weight: 1.05}
-#   - {value: 0.5, weight: 0.15}
-#   - {value: -0.5, weight: 0.3}
-#   - {value: 0.9, weight: 0.225}
-# weighted_sum: 0.3375
-# ```
-#
-# Scaling all weights by 0.75 changes the correct sum from 0.45 to 0.3375.
-#
-# ### Break the pairing
-#
-# ```yaml
-# items:
-#   - {value: 0.8, weight: 1.0}
-#   - {value: -0.4, weight: 0.5}
-#   - {value: 0.2, weight: 1.4}
-#   - {value: 0.5, weight: 0.2}
-#   - {value: -0.5, weight: 0.4}
-#   - {value: 0.9, weight: 0.3}
-# weighted_sum: 0.45  # Retained original label
-# ```
-#
-# Only the first two weights are swapped. The visible pairs now imply 1.05,
-# but this corruption retains the original 0.45 target. A model following the
-# pairs should move away from that retained label.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def weighted_records(*, rows: int, length: int, seed: int) -> Iterator[dict]:
     """Draw random value/weight pairs and expose raw fields or their products."""
     rng = np.random.default_rng(seed)
@@ -183,45 +196,6 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline_rmse, "nrmse": measured / baseline_rmse}
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-raw-value-weight-sum
-# //| fig-cap: "Learned Attention reduces six item pairs before the hidden weighted sum is decoded."
-# //| fig-alt: "Record contains repeated items with value, weight inputs, and hidden weighted sum targets. Root reduction: Attention. Item reduction: Attention; capacity 6."
-# #tree(node("record", kind: "root", width: 150pt, body: [
-#     - *Reduction:* Attention
-#   ], children: (
-#   node("items", kind: "branch", repeated: true, width: 155pt, body: [
-#       - *Reduction:* Attention
-#       - *Capacity:* 6 items
-#     ], children: (
-#     node("value", type: "Number"),
-#     node("weight", type: "Number"),
-#   )),
-#   node("weighted_sum", kind: "target", type: "Number"),
-# )))
-# ```
-#
-# ## How it works
-#
-# The item branch and root use learned `rf.Attention` reductions. Each of
-# six items contains independently sampled values and positive weights. The model
-# receives no product field: it must learn enough about the sibling relationship
-# to predict `sum(value * weight)`.
-#
-# Swapping weights between items preserves both marginal distributions while
-# breaking their pairing. Scoring these changed inputs against the original labels
-# must worsen error. Reordering complete items should leave the answer stable;
-# scaling every weight by 0.75 should scale the prediction by the same factor.
-# The [supplied-contribution control](supplied-contribution-sum.html) isolates the
-# summation part of this task.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -290,24 +264,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P014 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat the pairing and scaling controls across seeds. Variable-length sum
-# duplication, unseen lengths, and zero, negative, missing, or extreme weights
-# remain unestablished for this particular weighted-sum schema.
-#
-# The family’s promotion target is at least three core seeds and ten lightweight
-# calibration seeds.
-#
-# ## Reproduce
-#
-# {{< proof P014 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=3304)
+
+# %% [markdown]
+# </details>

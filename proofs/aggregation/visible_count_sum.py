@@ -1,31 +1,96 @@
 # %% [markdown]
 # ---
-# title: Restoring sums with a visible count
+# title: Can a visible count help recover a total?
 # categories:
 # - Cardinality generalization
 # proof-id: P004
-# description: Expose the count that a Mean branch discards and test whether the root
-#   learns to combine it with item content.
+# description: Every item has the same amount. Give the model the item count as an extra input and ask for
+#   the total.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Total prediction
+#   metric:
+#   - measured
+#   - nrmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# item_count: 6
+# items:
+#   - {amount: 0.7}
+#   - {amount: 0.7}
+#   - {amount: 0.7}
+#   - {amount: 0.7}
+#   - {amount: 0.7}
+#   - {amount: 0.7}
+# total: 4.2
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-visible-count-sum
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with record, item_count, items, amount, total. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("record", kind: "root", width: 120pt, children: (
+#   node("item_count", type: "Number"),
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("amount", type: "Number"),
+#   )),
+#   node("total", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Keep the amount fixed while changing the count. The answers must differ even though an average-only branch sees the same value.
+#
+# ## Result
 #
 # {{< proof P004 status >}}
 #
-# ## Insights
+# The extra count supplies information the average loses. This test uses repeated equal amounts, rather than arbitrary mixed lists.
 #
-# **Providing an item count lets the model distinguish totals that an average alone cannot.** Every item in
-# a record repeats the same amount, so the branch summary stays unchanged when only the number of copies
-# changes. The ordinary root count field supplies the missing factor needed for a total.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The matched probes require different predictions for the same repeated value at different counts. This
-# isolates learning the amount-times-count relationship from recovering multiplicity through the collection
-# itself. It is a useful diagnostic when a reduction appears to lose mass. The proof covers repeated-value
-# bags and familiar counts; it does not establish sums over arbitrary mixed-value collections.
+# {{< proof P004 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P004 script >}}
+#
+# ### How it works
+#
+# Every item in a record repeats one random amount. The branch uses
+# `attention=None` and `rf.Mean()`, so its summary does not change with repetition
+# count. A visible root `item_count` supplies the missing factor, and learned root
+# attention combines both inputs to predict their product.
+#
+# Train and test lengths are one through six. Matched probes repeat 0.7 once or
+# six times, requiring totals 0.7 and 4.2. Their predictions must separate by more
+# than 2.5 and stay close to those targets. This isolates learning from a supplied
+# count; [the count-free Attention proof](attention-sum-in-range.html) tests
+# structural recovery of multiplicity.
+#
+# ### Remaining work
+#
+# Repeat across seeds and test nonidentical bags, missing items, and nested
+# collections. [Unseen visible counts](visible-count-unseen-lengths.html) have a
+# separate proof; this case checks only the trained count range.
+#
+# The family’s promotion target is at least three core seeds and ten lightweight
+# calibration seeds.
+#
+# ### Complete experiment code
+#
 
 # %%
 """A visible item count diagnoses cardinality lost by Mean.
@@ -49,57 +114,7 @@ PROOF_ID = "P004"
 TRAIN_MAX = 6
 CAPACITY = 12
 
-# %% [markdown]
-# ## Examples
-#
-# Targets use `mask=True`; the labels below are supervision hidden from the encoder.
-#
-# ### Six repetitions
-#
-# ```yaml
-# item_count: 6
-# items:
-#   - {amount: 0.7}
-#   - {amount: 0.7}
-#   - {amount: 0.7}
-#   - {amount: 0.7}
-#   - {amount: 0.7}
-#   - {amount: 0.7}
-# total: 4.2
-# ```
-#
-# The visible count supplies the factor needed to turn 0.7 into a total of 4.2.
-#
-# ### One repetition with the same branch summary
-#
-# ```yaml
-# item_count: 1
-# items:
-#   - {amount: 0.7}
-# total: 0.7
-# ```
-#
-# This matched probe has the same encoded Mean content as the six-copy record.
-# Only the visible count distinguishes its total of 0.7.
-#
-# ### A different amount and count
-#
-# ```yaml
-# item_count: 3
-# items:
-#   - {amount: -0.4}
-#   - {amount: -0.4}
-#   - {amount: -0.4}
-# total: -1.2
-# ```
-#
-# Three repetitions of −0.4 require −1.2. Both the repeated value and the
-# visible count vary across the generated records.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def random_records(*, rows: int, seed: int, minimum: int = 1, maximum: int = TRAIN_MAX) -> Iterator[dict]:
     """Draw variable-length numerical bags and their mean and sum."""
     if not 1 <= minimum <= maximum <= CAPACITY:
@@ -147,45 +162,6 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-visible-count-sum
-# //| fig-cap: "Mean with item attention off removes multiplicity; a visible root count supplies the missing factor."
-# //| fig-alt: "Record contains repeated items with amount inputs, visible item count, and hidden total targets. Root reduction: Attention. Item reduction: Mean; capacity 12; branch attention Off."
-# #tree(node("record", kind: "root", width: 150pt, body: [
-#     - *Reduction:* Attention
-#   ], children: (
-#   node("item_count", type: "Number"),
-#   node("items", kind: "branch", repeated: true, width: 155pt, body: [
-#       - *Reduction:* Mean
-#       - *Branch attention:* Off
-#       - *Capacity:* 12 items
-#     ], children: (
-#     node("amount", type: "Number"),
-#   )),
-#   node("total", kind: "target", type: "Number"),
-# )))
-# ```
-#
-# ## How it works
-#
-# Every item in a record repeats one random amount. The branch uses
-# `attention=None` and `rf.Mean()`, so its summary does not change with repetition
-# count. A visible root `item_count` supplies the missing factor, and learned root
-# attention combines both inputs to predict their product.
-#
-# Train and test lengths are one through six. Matched probes repeat 0.7 once or
-# six times, requiring totals 0.7 and 4.2. Their predictions must separate by more
-# than 2.5 and stay close to those targets. This isolates learning from a supplied
-# count; [the count-free Attention proof](attention-sum-in-range.html) tests
-# structural recovery of multiplicity.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -244,24 +220,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P004 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat across seeds and test nonidentical bags, missing items, and nested
-# collections. [Unseen visible counts](visible-count-unseen-lengths.html) have a
-# separate proof; this case checks only the trained count range.
-#
-# The family’s promotion target is at least three core seeds and ten lightweight
-# calibration seeds.
-#
-# ## Reproduce
-#
-# {{< proof P004 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=3605)
+
+# %% [markdown]
+# </details>

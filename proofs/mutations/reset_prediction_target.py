@@ -1,32 +1,93 @@
 # %% [markdown]
 # ---
-# title: Reset One Learned Target and Teach It Again
+# title: Can one prediction target be reset and relearned?
 # categories:
 # - Mutation reset
 # proof-id: P048
-# description: Reset one hidden regression head, verify immediate loss is localized, and compare relearning against unchanged and complete-reset controls.
-# execute: {enabled: false, eval: false}
+# description: Reset the learned predictor for u while preserving its sibling target v.
+# execute:
+#   enabled: false
+#   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Reset target, before retraining
+#   metric:
+#   - arms
+#   - selective_reset
+#   - before
+#   - u
+#   - nrmse
+#   format: error
+# - label: Sibling immediately after reset
+#   metric:
+#   - arms
+#   - selective_reset
+#   - before
+#   - v
+#   - nrmse
+#   format: error
+# - label: Reset target, after retraining
+#   metric:
+#   - arms
+#   - selective_reset
+#   - after
+#   - u
+#   - nrmse
+#   format: error
 # ---
 #
-# Reset should erase selected learned state. This experiment asks whether the
-# loss is visible in predictions, whether an unselected hidden target survives,
-# and whether the selected target can learn again.
+# ## Example
+#
+# ```yaml
+# a: 0.5
+# b: 0.25
+# u: 1.0
+# v: 0.75
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-mutations-reset-target
+# //| fig-alt: "Model tree with record, a, b, u, v. Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("record", kind: "root", children: (
+#   node("a", type: "Number"),
+#   node("b", type: "Number"),
+#   node("u", type: "Number", kind: "target", body: [Reset, then relearned]),
+#   node("v", type: "Number", kind: "target", body: [Unselected, always hidden]),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Measure both immediately after reset and after further training on both targets. Compare unchanged and completely reset models.
+#
+# ## Result
 #
 # {{< proof P048 status >}}
 #
-# ## Insights
+# The selected target loses its learned prediction and then relearns; its sibling survives the reset. Resetting a shared branch is a different case.
 #
-# **Reset erases one hidden head's learned prediction while its sibling
-# retains it.** The full runs show localized changes to state and held-out
-# behavior, followed by successful relearning of the selected target.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Both targets remain supervised during adaptation. An unchanged continuation
-# and a complete reset use the same adaptation examples and update budget.
-# Their scores provide context without assuming selective reset must learn
-# faster. Branch resets can affect shared context and need a separate proof.
+# {{< proof P048 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P048 script >}}
+#
+# ### Remaining work
+#
+# Three GPU seeds support this case; calibrate gates on ten separate seeds. Resetting a
+# context-producing branch, resetting descendants, and relearning without
+# sibling labels require their own experiments. Localized loss here depends
+# on the selected field being hidden from the shared context.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P048: localize loss of learned behavior after reset and demonstrate relearning."""
@@ -47,41 +108,7 @@ import relflow as rf
 PROOF_ID = "P048"
 TARGETS = ("u", "v")
 
-# %% [markdown]
-# ## Examples
-#
-# Draw independent `a` and `b` uniformly from [−1, 1]. Both targets are hidden:
-# `u = a + 2b`, and `v = 2a − b`.
-#
-# ```yaml
-# a: 0.5
-# b: 0.25
-# u: 1.0
-# v: 0.75
-# ```
-#
-# Holding `a` fixed while changing `b` changes both answers:
-#
-# ```yaml
-# a: 0.5
-# b: -0.25
-# u: 0.0
-# v: 1.25
-# ```
-#
-# Holding `b` fixed does not determine either answer:
-#
-# ```yaml
-# a: -0.5
-# b: 0.25
-# u: 0.0
-# v: -1.25
-# ```
-#
-# ## Data and comparisons
 
-
-# %%
 def records(*, rows: int, seed: int) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     for _ in range(rows):
@@ -189,37 +216,6 @@ def fit(model: rf.Model, *, seed: int, split: int, budget: int, accelerator: str
     }
 
 
-# %% [markdown]
-# ## Scope of the reset
-#
-# ```{typst}
-# //| label: fig-proof-mutations-reset-target
-# //| fig-alt: "Record reads a and b to predict hidden u and v. Only the runtime node for u is reset. The root, inputs, and v retain their trained state."
-# //| fig-cap: "Reset replaces the selected target's runtime state; its schema and task stay fixed."
-# #tree(node("record", kind: "root", children: (
-#   node("a", type: "Number"),
-#   node("b", type: "Number"),
-#   node("u", type: "Number", kind: "target", body: [Reset, then relearned]),
-#   node("v", type: "Number", kind: "target", body: [Unselected, always hidden]),
-# )))
-# ```
-#
-# Source training uses 2,048 records and 512 updates. Adaptation uses 2,048
-# independently drawn records and 256 updates. The phases each have 512
-# validation records. A separate, fixed panel of 1,024 records measures
-# immediate loss, retention, and final skill for every arm.
-#
-# Validation curves record steps 0, 32, 128, and the final update. All arms
-# restart AdamW and rehearse both targets. No test result selects a checkpoint.
-# Test nRMSE divides RMSE by the error of predicting the source-training target
-# mean. Validation curves use each phase's training mean. The provisional
-# learning gate is 0.25; loss of skill requires nRMSE above 0.8 and three times
-# source error. Strict retention uses `rtol=1e-5` and `atol=1e-6` times training SD.
-#
-# ## Training, reset, and relearning
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     source_budget = 512 if steps is None else min(steps, 512)
     adapt_budget = 256 if steps is None else min(steps, 256)
@@ -328,22 +324,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P048 evidence >}}
-#
-# ## Remaining work
-#
-# Three GPU seeds support this case; calibrate gates on ten separate seeds. Resetting a
-# context-producing branch, resetting descendants, and relearning without
-# sibling labels require their own experiments. Localized loss here depends
-# on the selected field being hidden from the shared context.
-#
-# ## Reproduce
-#
-# {{< proof P048 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=4801)
+
+# %% [markdown]
+# </details>

@@ -1,37 +1,88 @@
 # %% [markdown]
 # ---
-# title: Null Is Not Zero
+# title: Can it distinguish missing values from zero?
 # categories:
 # - Value state
 # proof-id: P038
-# description: Number validity can carry predictive information even when every present
-#   value is zero.
+# description: Predict a label from whether a number is missing, even though every present number is zero.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Nulls preserved
+#   metric:
+#   - state_accuracy
+#   format: percent
+# - label: Nulls filled with zero
+#   metric:
+#   - prefilled_accuracy
+#   format: percent
 # ---
 #
-# A missing measurement and a real zero can mean different things. This proof
-# isolates that distinction: every present number is zero, and missingness
-# alone determines the Boolean target.
+# ## Example
+#
+# ```yaml
+# measurement: null
+# target: true
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-state-null-versus-zero
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with state, measurement, target. Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("state", kind: "root", children: (
+#   node("measurement", type: "Number", width: 150pt,),
+#   node("target", kind: "target", type: "Boolean",),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare informative missingness with unrelated missingness. Then replace all nulls with zeros while retaining the original answers.
+#
+# ## Result
 #
 # {{< proof P038 status >}}
 #
-# ## Insights
+# The model can use the difference between missing and zero. Filling nulls with zeros erases that signal; whether missingness helps in real data depends on the application.
 #
-# **A null and a real zero carry different information, even when every present number is zero.** Number
-# encodes value state separately from continuous content, giving the model a route to recognize missingness.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The recorded signal model clears both AUC and accuracy gates. Independent validity stays at chance, and
-# replacing nulls with zeros destroys the signal while retaining the original labels. The latter creates
-# identical inputs that require different answers.
+# {{< proof P038 evidence >}}
 #
-# Preserve nulls when that distinction matters. Imputation can erase useful information before training
-# begins. This proof establishes the representation's capability; it does not show that missingness is
-# predictive in every application or cover every kind of absent data.
+# ### Run this experiment
 #
-# ## Setup
+# {{< proof P038 script >}}
+#
+# ### How it works
+#
+# relflow represents a Number's state separately from its continuous content.
+# The model can therefore distinguish an Arrow null from a valued zero without
+# any variation among the actual numbers.
+#
+# Two controls probe this explanation. A separate training run makes validity
+# independent of the label. An inference intervention replaces every null with
+# zero in the signal model's test set, while retaining the original labels.
+# Both should remove the useful information.
+#
+# The paired runs use the `xs` preset with 1,024 training, 512 validation, and
+# 2,048 test rows from independent streams, with eight deterministic epochs.
+#
+# ### Remaining work
+#
+# Measure all three variants over three paired core seeds and at least ten
+# calibration seeds. Retain both controls when checking stability and selecting
+# the final chance bands.
+#
+# For the representation contract, see [Data Types](../../core-concepts/data-types.qmd).
+#
+# ### Complete experiment code
+#
 
 # %%
 """P038: distinguish an explicit null from a real numeric zero.
@@ -52,47 +103,7 @@ import relflow as rf
 
 PROOF_ID = "P038"
 
-# %% [markdown]
-# ## Examples
-#
-# The signal process labels missing measurements `true` and present zeros
-# `false`. The Boolean target supplies supervision without being embedded.
-#
-# ### Missing measurement
-#
-# ```yaml
-# measurement: null
-# target: true
-# ```
-#
-# The null state is the entire useful signal; no numeric content is available.
-#
-# ### A real zero
-#
-# ```yaml
-# measurement: 0.0
-# target: false
-# ```
-#
-# A valued zero has a different state from null, even though every present
-# number in this experiment has the same value.
-#
-# ### Null filled with zero
-#
-# ```yaml
-# measurement: 0.0
-# target: true
-# ```
-#
-# The inference intervention transforms the first record into this one while
-# retaining its original label. It now looks identical to the second record
-# but requires a different answer. The expected result is loss of predictive
-# information, not learning a second rule for zero.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, rows: int, seed: int, signal: bool, fill_nulls: bool = False) -> Iterator[dict]:
     """Yield zero-valued measurements with predictive or independent nulls."""
     rng = np.random.default_rng(seed)
@@ -121,42 +132,6 @@ def score(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator: s
     return float(metrics[".target/test.auc.content"]), float(metrics[".target/test.accuracy@0.5.content"])
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-state-null-versus-zero
-# //| fig-cap: "Number state distinguishes null from valued zero; the Boolean answer is always hidden from input."
-# //| fig-alt: "State contains a Number measurement that is null or a valued zero, and a Boolean target always hidden from input."
-# #tree(node("state", kind: "root", children: (
-#   node("measurement", type: "Number", width: 150pt, body: [
-#     - *State:* null or valued
-#     - *Present values:* zero
-#   ]),
-#   node("target", kind: "target", type: "Boolean", body: [
-#     - *Input:* always hidden
-#   ]),
-# )))
-# ```
-#
-# ## How it works
-#
-# relflow represents a Number's state separately from its continuous content.
-# The model can therefore distinguish an Arrow null from a valued zero without
-# any variation among the actual numbers.
-#
-# Two controls probe this explanation. A separate training run makes validity
-# independent of the label. An inference intervention replaces every null with
-# zero in the signal model's test set, while retaining the original labels.
-# Both should remove the useful information.
-#
-# The paired runs use the `xs` preset with 1,024 training, 512 validation, and
-# 2,048 test rows from independent streams, with eight deterministic epochs.
-#
-# ## Training and evaluation
-
-
-# %%
 def fit(*, signal: bool, seed: int, steps: int | None, accelerator: str) -> rf.Model:
     lit.seed_everything(seed, workers=True)
     model = rf.Model.xs(
@@ -216,23 +191,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P038 evidence >}}
-#
-# ## Remaining work
-#
-# Measure all three variants over three paired core seeds and at least ten
-# calibration seeds. Retain both controls when checking stability and selecting
-# the final chance bands.
-#
-# For the representation contract, see [Data Types](../../core-concepts/data-types.qmd).
-#
-# ## Reproduce
-#
-# {{< proof P038 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=11)
+
+# %% [markdown]
+# </details>

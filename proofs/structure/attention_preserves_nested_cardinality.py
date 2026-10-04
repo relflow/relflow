@@ -1,39 +1,103 @@
 # %% [markdown]
 # ---
-# title: Preserving Counts Across a Hierarchy
+# title: Does the grouping of values matter?
 # categories:
 # - Hierarchical statistics
 # proof-id: P040
-# description: Attention reductions can preserve enough local cardinality to predict
-#   the largest session total from nested transactions.
+# description: Predict the largest session total when the same six amounts are divided into different sessions.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Model error
+#   metric:
+#   - test_rmse
+#   format: number
+# - label: Error after discarding grouping
+#   metric:
+#   - flat_oracle_rmse
+#   format: number
 # ---
 #
-# Six equal amounts can form three equal sessions or one large session between
-# two small ones. Their global total stays the same, but their largest session
-# total changes. This proof asks the hierarchy to preserve that distinction.
+# ## Example
+#
+# ```yaml
+# sessions:
+#   - transactions:
+#       - amount: 0.5
+#   - transactions:
+#       - amount: 0.5
+#       - amount: 0.5
+#       - amount: 0.5
+#       - amount: 0.5
+#   - transactions:
+#       - amount: 0.5
+# global_total: 3.0
+# largest_session_total: 2.0
+# ```
+#
+# largest_session_total is hidden. global_total is an explanatory value, not a model input.
+#
+# ```{typst}
+# //| label: fig-proof-structure-attention-preserves-nested-cardinality
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with record, sessions, transactions, amount, largest_session_total. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("record", kind: "root", width: 120pt, children: (
+#   node("sessions", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("transactions", kind: "branch", repeated: true, width: 120pt, children: (
+#       node("amount", type: "Number"),
+#     )),
+#   )),
+#   node("largest_session_total", width: 180pt, kind: "target", type: "Number",),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Pair records with identical flat values but different grouping. Compare with the best prediction available after discarding that grouping.
+#
+# ## Result
 #
 # {{< proof P040 status >}}
 #
-# ## Insights
+# The model retains useful information about the hierarchy. Only two arrangements of equal amounts are tested; general nested arithmetic remains a larger task.
 #
-# **How values are grouped can change the answer even when the values themselves stay the same.** The
-# matched observations contain the same six amounts but divide them into different session sizes, changing
-# the largest session total.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Attention reduction includes an additive sum and count contribution alongside normalized attention. The
-# model beats the best flattened-information prediction and recovers much of the true difference between the
-# paired observations. The difference metric uses absolute magnitudes; the separate RMSE gate checks
-# closeness to actual targets.
+# {{< proof P040 evidence >}}
 #
-# This supports the tested route through two partitions of equal values. It does not establish exact nested
-# arithmetic or arbitrary capacity. Varying amounts within sessions and testing more partitions remain
-# necessary extensions.
+# ### Run this experiment
 #
-# ## Setup
+# {{< proof P040 script >}}
+#
+# ### How it works
+#
+# The session, transaction, and root contexts all use Attention reduction.
+# The reducer adds a projected sum and an explicit count contribution alongside
+# normalized attention. This additional path lets equal tokens carry different
+# mass when their repetition count changes.
+#
+# Each pair uses the same six amounts, with session sizes `(2, 2, 2)` versus
+# `(1, 4, 1)`. The amount varies between pairs. The model trains on 128 pairs,
+# validates on 32, and tests on 64 independently generated pairs, after 80
+# deterministic steps.
+#
+# The comparison oracle sees only flattened values. It must predict the same
+# answer for both members of a pair; their target average is its optimal
+# squared-error prediction. Beating it requires retaining session structure.
+#
+# ### Remaining work
+#
+# Add nested global totals and largest-session averages. Vary amounts within
+# sessions, test more partitions, and vary Attention output counts and nested
+# capacities. Repeat the nested gates over three paired core seeds and at least
+# ten calibration seeds without weakening either threshold.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P040: retain local counts before selecting the largest session total.
@@ -55,76 +119,7 @@ import relflow as rf
 
 PROOF_ID = "P040"
 
-# %% [markdown]
-# ## Examples
-#
-# `largest_session_total` is a hidden Number target. The generator also includes
-# `global_total`, but this model does not define or use that field.
-#
-# ### One large session
-#
-# ```yaml
-# sessions:
-#   - transactions:
-#       - amount: 0.5
-#   - transactions:
-#       - amount: 0.5
-#       - amount: 0.5
-#       - amount: 0.5
-#       - amount: 0.5
-#   - transactions:
-#       - amount: 0.5
-# global_total: 3.0
-# largest_session_total: 2.0
-# ```
-#
-# The middle session contains four amounts and has the largest subtotal.
-#
-# ### The same amounts in equal sessions
-#
-# ```yaml
-# sessions:
-#   - transactions:
-#       - amount: 0.5
-#       - amount: 0.5
-#   - transactions:
-#       - amount: 0.5
-#       - amount: 0.5
-#   - transactions:
-#       - amount: 0.5
-#       - amount: 0.5
-# global_total: 3.0
-# largest_session_total: 1.0
-# ```
-#
-# Flattening either record gives the same six values. Only the session
-# boundaries explain why this target is half the first record's target.
-#
-# ### The uneven partition at a larger scale
-#
-# ```yaml
-# sessions:
-#   - transactions:
-#       - amount: 1.0
-#   - transactions:
-#       - amount: 1.0
-#       - amount: 1.0
-#       - amount: 1.0
-#       - amount: 1.0
-#   - transactions:
-#       - amount: 1.0
-# global_total: 6.0
-# largest_session_total: 4.0
-# ```
-#
-# The generator varies the common amount between pairs. The correct target
-# must reflect both value and local count. The displayed totals are exact
-# ground truth; the reported learned recovery is approximate.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, pairs: int, seed: int) -> Iterator[dict]:
     """Yield adjacent regroupings of the same six equal transaction values."""
     rng = np.random.default_rng(seed)
@@ -149,56 +144,6 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-structure-attention-preserves-nested-cardinality
-# //| fig-cap: "Root, sessions, and transactions each use one-output Attention reduction. Local capacities preserve the tested groupings; the largest total is hidden."
-# //| fig-alt: "Record uses one-output Attention and contains up to three sessions, each containing up to four transactions with Number amounts; both repeated levels also use one-output Attention, and the Number largest session total target is always hidden from input."
-# #tree(node("record", kind: "root", width: 150pt, body: [
-#   - *Reduction:* Attention
-#   - *Outputs:* 1
-# ], children: (
-#   node("sessions", kind: "branch", repeated: true, width: 150pt, body: [
-#     - *Reduction:* Attention
-#     - *Outputs:* 1
-#     - *Capacity:* 3 sessions
-#   ], children: (
-#     node("transactions", kind: "branch", repeated: true, width: 150pt, body: [
-#       - *Reduction:* Attention
-#       - *Outputs:* 1
-#       - *Capacity:* 4 items
-#     ], children: (
-#       node("amount", type: "Number"),
-#     )),
-#   )),
-#   node("largest_session_total", width: 180pt, kind: "target", type: "Number", body: [
-#     - *Input:* always hidden
-#   ]),
-# )))
-# ```
-#
-# ## How it works
-#
-# The session, transaction, and root contexts all use Attention reduction.
-# The reducer adds a projected sum and an explicit count contribution alongside
-# normalized attention. This additional path lets equal tokens carry different
-# mass when their repetition count changes.
-#
-# Each pair uses the same six amounts, with session sizes `(2, 2, 2)` versus
-# `(1, 4, 1)`. The amount varies between pairs. The model trains on 128 pairs,
-# validates on 32, and tests on 64 independently generated pairs, after 80
-# deterministic steps.
-#
-# The comparison oracle sees only flattened values. It must predict the same
-# answer for both members of a pair; their target average is its optimal
-# squared-error prediction. Beating it requires retaining session structure.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     data_seed = (seed - 2601) % (2**32)
@@ -259,22 +204,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P040 evidence >}}
-#
-# ## Remaining work
-#
-# Add nested global totals and largest-session averages. Vary amounts within
-# sessions, test more partitions, and vary Attention output counts and nested
-# capacities. Repeat the nested gates over three paired core seeds and at least
-# ten calibration seeds without weakening either threshold.
-#
-# ## Reproduce
-#
-# {{< proof P040 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=2601)
+
+# %% [markdown]
+# </details>

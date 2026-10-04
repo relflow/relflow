@@ -1,38 +1,92 @@
 # %% [markdown]
 # ---
-# title: Cluster Commitment with Hidden Regimes
+# title: Do five clusters mean five behaviors were found?
 # categories:
 # - Clustering
 # proof-id: P018
-# description: Adaptive cluster state can settle near five generating regression regimes
-#   without explicit group labels.
+# description: Repeated identities follow five hidden numerical rules. Watch how the Cluster field groups
+#   them during training.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Groups at the final epoch
+#   metric:
+#   - final_committed
+#   - -1
+#   format: number
 # ---
 #
-# Each repeated identity follows one of five hidden relationships between `x`
-# and `y`. The model receives no group label. This experiment asks whether
-# adaptive Cluster state settles near the generating number of regimes.
+# ## Example
+#
+# ```yaml
+# id: id-0007
+# x: 0.0
+# y: 10.0
+# ```
+#
+# The numeric answer is hidden. Identity reconstruction activates grouping; the generating rule is not a model input.
+#
+# ```{typst}
+# //| label: fig-proof-cluster-hidden-regression-regimes
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with obs, id, x, y. Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("obs", kind: "root", children: (
+#   node("id", type: "Cluster", width: 150pt,),
+#   node("x", type: "Number"),
+#   node("y", kind: "target", type: "Number",),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare the number and usage of learned groups with the five generating rules.
+#
+# ## Result
 #
 # {{< proof P018 status >}}
 #
-# ## Insights
+# The number settles near five, but that does not show the correct identities share a group. Training and validation reuse the same records; independent prediction and grouping quality remain untested.
 #
-# **Settling near five clusters does not yet show that the model discovered the five generating functions.**
-# Repeated identities follow stable regimes while their numeric inputs vary; reconstruction engages adaptive
-# Cluster state alongside the supervised numeric task.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The recorded gates inspect terminal count and usage. Count is calculated from usage perplexity, so those
-# diagnostics are coupled. Neither tells us whether identities share the correct regime or whether
-# predictions work on independent observations.
+# {{< proof P018 evidence >}}
 #
-# The current train and validation tables are identical. Evaluate held-out regression and assignment
-# agreement before treating this as regime discovery. The existing result supports adaptive-state behavior,
-# with the harder behavioral claim still open.
+# ### Run this experiment
 #
-# ## Setup
+# {{< proof P018 script >}}
+#
+# ### How it works
+#
+# The generator supplies 100 identities with 30 observations each. Its five
+# regimes are `sin(x) + 10`, `cos(x) + 4`, `-2`, `0.5x - 8`, and `-0.3x - 14`,
+# with small additive noise. The repeated identity lets the model associate
+# behavior across changing `x` values.
+#
+# The ID field uses `rf.Mask(rate=0.5, reconstruct=True)` to engage the Cluster
+# reconstruction loss. The numeric objective adds pressure to explain `y`.
+# Cluster assignments belong to identities; row-varying `x` does not directly
+# condition the query that reconstructs the identity itself.
+#
+# The model trains for 30 deterministic epochs. Training and validation
+# currently use the same 3,000 observations. An internal-state callback measures
+# the final five epochs.
+#
+# ### Remaining work
+#
+# Create independent train, validation, and test observations. Measure held-out
+# regression against a marginal baseline and require permutation-invariant
+# partition recovery with ARI ≥ 0.80. Add unique-identity and no-regime controls,
+# and replace internal instrumentation with a public diagnostic when available.
+#
+# Repeat all behavioral and partition gates across three core seeds and at least
+# ten calibration seeds before promoting this proof.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P018: track adaptive clusters across five hidden regression regimes.
@@ -55,51 +109,7 @@ from relflow.tensorfields.extensions.cluster import Embedder
 
 PROOF_ID = "P018"
 
-# %% [markdown]
-# ## Examples
-#
-# These are idealized values before observation noise, with illustrative regime
-# assignments. The seeded generator assigns regimes randomly; these ID-to-regime
-# choices are not reported measurements. `y` is always hidden from embedding.
-#
-# ### One identity at the start of its curve
-#
-# ```yaml
-# id: id-0007
-# x: 0.0
-# y: 10.0
-# ```
-#
-# An identity assigned to `sin(x) + 10` has a noiseless target of 10 here.
-#
-# ### The same identity at another input
-#
-# ```yaml
-# id: id-0007
-# x: 1.5707963267948966
-# y: 11.0
-# ```
-#
-# At approximately π/2, the same regime gives 11. Its target varies with `x`,
-# but its generating group stays fixed.
-#
-# ### Another regime at the same input
-#
-# ```yaml
-# id: id-0042
-# x: 1.5707963267948966
-# y: -2.0
-# ```
-#
-# An identity assigned to the constant `-2` regime gives a different answer for
-# the same `x`. Repeated identity evidence can distinguish these processes.
-# The examples describe the generating functions, not verified learned
-# assignments or held-out predictions.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(seed: int) -> Iterator[dict]:
     """Repeat 100 identities thirty times across five hidden regression regimes."""
     rng = np.random.default_rng(seed)
@@ -147,45 +157,6 @@ class Trajectory(lit.Callback):
         )
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-cluster-hidden-regression-regimes
-# //| fig-cap: "The ID uses a 50% training mask with reconstruction enabled. The supervised y target is always hidden from input."
-# //| fig-alt: "Observation contains a Cluster ID input with 50% training masking and reconstruction enabled, a Number x input, and a Number y target always hidden from input."
-# #tree(node("obs", kind: "root", children: (
-#   node("id", type: "Cluster", width: 150pt, body: [
-#     - *Mask:* 50% in training
-#     - *Reconstruct:* enabled
-#   ]),
-#   node("x", type: "Number"),
-#   node("y", kind: "target", type: "Number", body: [
-#     - *Input:* always hidden
-#   ]),
-# )))
-# ```
-#
-# ## How it works
-#
-# The generator supplies 100 identities with 30 observations each. Its five
-# regimes are `sin(x) + 10`, `cos(x) + 4`, `-2`, `0.5x - 8`, and `-0.3x - 14`,
-# with small additive noise. The repeated identity lets the model associate
-# behavior across changing `x` values.
-#
-# The ID field uses `rf.Mask(rate=0.5, reconstruct=True)` to engage the Cluster
-# reconstruction loss. The numeric objective adds pressure to explain `y`.
-# Cluster assignments belong to identities; row-varying `x` does not directly
-# condition the query that reconstructs the identity itself.
-#
-# The model trains for 30 deterministic epochs. Training and validation
-# currently use the same 3,000 observations. An internal-state callback measures
-# the final five epochs.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -229,25 +200,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P018 evidence >}}
-#
-# ## Remaining work
-#
-# Create independent train, validation, and test observations. Measure held-out
-# regression against a marginal baseline and require permutation-invariant
-# partition recovery with ARI ≥ 0.80. Add unique-identity and no-regime controls,
-# and replace internal instrumentation with a public diagnostic when available.
-#
-# Repeat all behavioral and partition gates across three core seeds and at least
-# ten calibration seeds before promoting this proof.
-#
-# ## Reproduce
-#
-# {{< proof P018 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=0)
+
+# %% [markdown]
+# </details>

@@ -1,54 +1,75 @@
 # %% [markdown]
 # ---
-# title: Learning an unavailable Set fallback
-# categories: [Vocabulary]
+# title: Can it distinguish an unknown set from an empty set?
+# categories:
+# - Vocabulary
 # proof-id: P064
-# description: Simulated input unavailability should teach a nonempty unknown-set fallback without inventing member identities.
+# description: Predict whether a set is nonempty, including sets whose member names were absent from training.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Unknown-input error, fallback trained
+#   metric:
+#   - augmented_unknown
+#   format: number
+# - label: Unknown-input error, fallback untrained
+#   metric:
+#   - control_unknown
+#   format: number
 # ---
 #
-# {{< proof P064 status >}}
-#
-# ## Insights
-#
-# A Set can learn that unavailable membership differs from genuinely empty
-# membership. Half the rows are empty; the others contain one of 32 equally
-# likely labels. The Number target is one for nonempty sets and zero otherwise.
-# Train with and without input unavailability. The latter is a matched negative
-# control: a never-trained, neutral fallback should still predict empty.
-#
-# Independent row splits test known labels; disjoint spellings test all-OOV
-# inputs. No identity-dependent target is recoverable in this experiment.
+# ## Example
 #
 # ```yaml
 # tags: [tag-12]
 # nonempty: 1.0
 # ```
 #
-# ```yaml
-# tags: [novel-12, novel-12]
-# nonempty: 1.0
-# ```
-#
-# Duplicates must not alter the unavailable-member count or prediction.
-#
-# ```yaml
-# tags: []
-# nonempty: 0.0
-# ```
+# The answer is shown here for explanation; it is hidden from the model when scored.
 #
 # ```{typst}
 # //| label: fig-proof-set-unavailable-fallback
-# //| fig-cap: "An unavailable-member signal preserves nonempty versus empty."
-# //| fig-alt: "A root contains Set tags and hidden Number nonempty."
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with record, tags, nonempty. Amber cards are hidden prediction targets. Other fields provide the input."
 # #tree(node("record", kind: "root", children: (
 #   node("tags", type: "Set", detail: "Known or unavailable membership"),
 #   node("nonempty", kind: "target", type: "Number"),
 # )))
 # ```
+#
+# ## Comparison
+#
+# Compare training with input members sometimes made unavailable against training that never exposes this condition. Repeat unknown members to check duplicates.
+#
+# ## Result
+#
+# {{< proof P064 status >}}
+#
+# The trained fallback distinguishes unknown nonempty input from empty input. It preserves the presence of members, rather than learning their individual meanings.
+#
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
+#
+# {{< proof P064 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< proof P064 script >}}
+#
+# ### Training and controls
+#
+# Each arm trains for 400 AdamW updates on 8,192 rows, with 512 independent
+# validation rows. Evaluate 2,048 known and disjoint-label rows. The constant
+# 0.5 predictor has RMSE 0.5. Both arms must learn familiar sets (RMSE < 0.10).
+# Only the augmented arm must transfer to unknown sets (RMSE < 0.10); its
+# gain over the untrained-fallback control must exceed 0.40 RMSE. Duplicate
+# and unknown-spelling changes must leave predictions unchanged.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P064: input corruption teaches an unavailable Set representation."""
@@ -93,18 +114,6 @@ def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     )
 
 
-# %% [markdown]
-# ## Training and controls
-#
-# Each arm trains for 400 AdamW updates on 8,192 rows, with 512 independent
-# validation rows. Evaluate 2,048 known and disjoint-label rows. The constant
-# 0.5 predictor has RMSE 0.5. Both arms must learn familiar sets (RMSE < 0.10).
-# Only the augmented arm must transfer to unknown sets (RMSE < 0.10); its
-# gain over the untrained-fallback control must exceed 0.40 RMSE. Duplicate
-# and unknown-spelling changes must leave predictions unchanged.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     metrics, checks = {"constant_rmse": 0.5}, {}
     for probability in (0.0, 0.5):
@@ -151,19 +160,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence and limitations
-#
-# {{< proof P064 evidence >}}
-#
-# The learned signal says only that some members are unavailable. It cannot
-# distinguish their identities, guarantee calibration after population shifts,
-# or recover unknown output labels. Gates are provisional.
-#
-# ## Reproduce
-#
-# {{< proof P064 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=7641)
+
+# %% [markdown]
+# </details>

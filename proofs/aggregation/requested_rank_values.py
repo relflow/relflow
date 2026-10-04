@@ -1,32 +1,107 @@
 # %% [markdown]
 # ---
-# title: Requesting a value by rank
+# title: Can it find a requested value in an unsorted list?
 # categories:
 # - Order statistics
 # proof-id: P012
-# description: Use one model to recover minimum, quartiles, median, and maximum from
-#   an unsorted numerical bag.
+# description: Ask for the smallest, largest, middle, or quarter-position value without sorting the input
+#   first.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: All requests
+#   metric:
+#   - intact
+#   - nrmse
+#   format: error
+# - label: Changed requests
+#   metric:
+#   - cycled
+#   - nrmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# rank: median
+# items:
+#   - {value: 0.4}
+#   - {value: 0.1}
+#   - {value: 0.9}
+#   - {value: 0.3}
+#   - {value: 0.7}
+#   - {value: 0.2}
+#   - {value: 0.8}
+#   - {value: 0.6}
+#   - {value: 0.5}
+# answer: 0.5
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-requested-rank-values
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with request, rank, items, value, answer. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("request", kind: "root", width: 120pt, children: (
+#   node("rank", type: "Category"),
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("value", type: "Number"),
+#   )),
+#   node("answer", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Give the same list different requests. Hide or change the requests while keeping the original answers to check that the request matters.
+#
+# ## Result
 #
 # {{< proof P012 status >}}
 #
-# ## Insights
+# The model learns all five tested requests. These lists have an odd length; other lengths and rules for interpolating between values need separate tests.
 #
-# **The model can use a request to pick the minimum, maximum, median, or a quartile from an unsorted
-# collection.** Each bag appears with every request, so a bag-only answer cannot solve the task. Hiding rank
-# collapses those predictions, while cycling rank labels destroys accuracy against the original targets.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Preserving encoded item coordinates leaves evidence available for request-conditioned decoding; it does
-# not itself perform sorting. Separate gates for every rank and data shape prevent good minimum or maximum
-# predictions from hiding failed quartiles. The tested quantiles select observed values from an odd-length
-# bag. Even lengths, interpolation conventions, empty collections, and much larger bags are additional
-# questions.
+# {{< proof P012 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P012 script >}}
+#
+# ### How it works
+#
+# Both root and item branch use `reduction=None` to preserve encoded
+# coordinates. A visible Category request chooses among `minimum`, `q25`,
+# `median`, `q75`, and `maximum`. For nine values these are sorted positions
+# 1, 3, 5, 7, and 9: no interpolated quantile is required, and ties retain their
+# observed value.
+#
+# Each bag appears with all five requests in the same split. Symmetric, skewed,
+# and duplicate-bearing bags vary in location and scale. Reordering complete
+# items should retain predictions. Hiding rank makes the five requests identical
+# and must collapse their predictions; cycling rank labels while keeping targets
+# must remove request-conditioned accuracy. Endpoint success alone cannot satisfy
+# the separate interior-rank gates.
+#
+# ### Remaining work
+#
+# Repeat the complete gate across seeds. Variable and even lengths need
+# explicit quantile semantics; nulls, empty bags, all-equal values, heavy tails,
+# and magnitude extrapolation need new cases. Permutation stability here is
+# measured approximately, not guaranteed by every part of the architecture.
+#
+# The family’s promotion target is at least three core seeds and ten lightweight
+# calibration seeds.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Request five order statistics from one randomly ordered numeric bag.
@@ -53,75 +128,7 @@ RANKS = ("minimum", "q25", "median", "q75", "maximum")
 RANK_INDEX = dict(zip(RANKS, (0, 2, 4, 6, 8), strict=True))
 SHAPES = ("symmetric", "left_skewed", "right_skewed", "duplicates")
 
-# %% [markdown]
-# ## Examples
-#
-# Targets use `mask=True`; the labels below are supervision hidden from the encoder.
-#
-# ### Request the median
-#
-# ```yaml
-# rank: median
-# items:
-#   - {value: 0.4}
-#   - {value: 0.1}
-#   - {value: 0.9}
-#   - {value: 0.3}
-#   - {value: 0.7}
-#   - {value: 0.2}
-#   - {value: 0.8}
-#   - {value: 0.6}
-#   - {value: 0.5}
-# answer: 0.5
-# ```
-#
-# The fifth sorted value is 0.5, even though the input bag is unsorted.
-#
-# ### Request the lower quartile
-#
-# ```yaml
-# rank: q25
-# items:
-#   - {value: 0.4}
-#   - {value: 0.1}
-#   - {value: 0.9}
-#   - {value: 0.3}
-#   - {value: 0.7}
-#   - {value: 0.2}
-#   - {value: 0.8}
-#   - {value: 0.6}
-#   - {value: 0.5}
-# answer: 0.3
-# ```
-#
-# For this nine-value convention, Q25 is the third sorted value: 0.3. The
-# items are unchanged; only the visible rank request differs.
-#
-# ### Cycle the request but retain its label
-#
-# ```yaml
-# rank: q75
-# items:
-#   - {value: 0.4}
-#   - {value: 0.1}
-#   - {value: 0.9}
-#   - {value: 0.3}
-#   - {value: 0.7}
-#   - {value: 0.2}
-#   - {value: 0.8}
-#   - {value: 0.6}
-#   - {value: 0.5}
-# answer: 0.5  # Retained original label
-# ```
-#
-# Cycling the median request to Q75 makes the correct requested value 0.7.
-# This corruption deliberately keeps the original median label of 0.5. A
-# request-sensitive model should then score worse against that retained target.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def values(rng: np.random.Generator, shape: str) -> np.ndarray:
     """Draw one independently located and scaled bag with a declared shape."""
     match shape:
@@ -235,48 +242,6 @@ def overall_score(*, train: list[dict], test: list[dict], predicted: np.ndarray)
     return {"rmse": measured_rmse, "baseline_rmse": baseline_rmse, "nrmse": measured_rmse / baseline_rmse}
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-requested-rank-values
-# //| fig-cap: "Both root and item branch keep all tokens with branch attention enabled; the visible rank selects among nine raw values."
-# //| fig-alt: "Request contains repeated items with value inputs, visible rank, and hidden answer targets. Root reduction: Keep all tokens. Item reduction: Keep all tokens; capacity 9; branch attention MHA."
-# #tree(node("request", kind: "root", width: 150pt, body: [
-#     - *Reduction:* Keep all tokens
-#     - *Branch attention:* MHA
-#   ], children: (
-#   node("rank", type: "Category"),
-#   node("items", kind: "branch", repeated: true, width: 155pt, body: [
-#       - *Reduction:* Keep all tokens
-#       - *Branch attention:* MHA
-#       - *Capacity:* 9 items
-#     ], children: (
-#     node("value", type: "Number"),
-#   )),
-#   node("answer", kind: "target", type: "Number"),
-# )))
-# ```
-#
-# ## How it works
-#
-# Both root and item branch use `reduction=None` to preserve encoded
-# coordinates. A visible Category request chooses among `minimum`, `q25`,
-# `median`, `q75`, and `maximum`. For nine values these are sorted positions
-# 1, 3, 5, 7, and 9: no interpolated quantile is required, and ties retain their
-# observed value.
-#
-# Each bag appears with all five requests in the same split. Symmetric, skewed,
-# and duplicate-bearing bags vary in location and scale. Reordering complete
-# items should retain predictions. Hiding rank makes the five requests identical
-# and must collapse their predictions; cycling rank labels while keeping targets
-# must remove request-conditioned accuracy. Endpoint success alone cannot satisfy
-# the separate interior-rank gates.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     train = list(records(bags=1024, seed=seed + 1))
@@ -381,25 +346,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P012 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat the complete gate across seeds. Variable and even lengths need
-# explicit quantile semantics; nulls, empty bags, all-equal values, heavy tails,
-# and magnitude extrapolation need new cases. Permutation stability here is
-# measured approximately, not guaranteed by every part of the architecture.
-#
-# The family’s promotion target is at least three core seeds and ten lightweight
-# calibration seeds.
-#
-# ## Reproduce
-#
-# {{< proof P012 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=3700)
+
+# %% [markdown]
+# </details>

@@ -1,31 +1,106 @@
 # %% [markdown]
 # ---
-# title: When Mean loses contribution count
+# title: Can an average reveal how many items there were?
 # categories:
 # - Weighted aggregation
 # proof-id: P013
-# description: Averaging identical encoded contributions removes the multiplicity needed
-#   to recover their sum.
+# description: Use an average-only branch, with item attention disabled, to predict both an average and
+#   a total.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Average prediction
+#   metric:
+#   - mean_score
+#   - nrmse
+#   format: error
+# - label: 'Predicted total, one copy (correct: 0.75)'
+#   metric:
+#   - paired_sum
+#   - 0
+#   format: number
+# - label: 'Predicted total, six copies (correct: 4.5)'
+#   metric:
+#   - paired_sum
+#   - 1
+#   format: number
 # ---
+#
+# ## Example
+#
+# ```yaml
+# items:
+#   - {contribution: 0.75}
+#   - {contribution: 0.75}
+#   - {contribution: 0.75}
+#   - {contribution: 0.75}
+#   - {contribution: 0.75}
+#   - {contribution: 0.75}
+# mean_contribution: 0.75
+# weighted_sum: 4.5
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-mean-erases-contribution-count
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with record, items, contribution, mean_contribution, weighted_sum. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("record", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("contribution", type: "Number"),
+#   )),
+#   node("mean_contribution", width: 150pt, kind: "target", type: "Number"),
+#   node("weighted_sum", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Repeat the same contribution different numbers of times. The average stays fixed while the correct total changes.
+#
+# ## Result
 #
 # {{< proof P013 status >}}
 #
-# ## Insights
+# The model learns the average but gives the same total for different counts. Preserve count information or supply it separately when the total matters.
 #
-# **This Mean configuration discards the count required to recover a sum.** With item attention disabled,
-# averaging identical encoded contributions produces the same summary for one copy or many. A larger decoder
-# cannot recover a distinction that no longer reaches it.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The model still learns the contribution average, showing that useful content survives. Its matching sum
-# predictions are the intended limitation, even though the correct totals differ. To predict variable-length
-# totals, preserve multiplicity through a suitable reduction or supply an explicit count. Mean remains
-# useful when repeating the whole collection should leave the desired answer unchanged.
+# {{< proof P013 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P013 script >}}
+#
+# ### How it works
+#
+# The item branch uses `attention=None` and `rf.Mean()`. Every item in a
+# record repeats the same randomly drawn contribution. Averaging its identical
+# encoded tokens produces the same representation for one repetition or six.
+# No later decoder can reconstruct the removed count from that representation.
+#
+# The model should learn the contribution average. A separate probe compares sum
+# predictions for one and six copies of 0.75: those predictions must agree,
+# although their correct sums are 0.75 and 4.5. The passing assertion therefore
+# demonstrates an information-loss boundary, not successful sum learning.
+#
+# ### Remaining work
+#
+# Check the numerical invariance across seeds. Count-preserving routes are
+# covered separately by [Attention sums](attention-sum-unseen-lengths.html) and
+# [visible count with Mean](visible-count-sum.html); neither changes what this
+# no-attention Mean configuration discards.
+#
+# The family’s promotion target is at least three core seeds and ten lightweight
+# calibration seeds.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Mean is a weighted-sum footgun when item cardinality varies.
@@ -48,62 +123,7 @@ import relflow as rf
 PROOF_ID = "P013"
 ITEMS = 6
 
-# %% [markdown]
-# ## Examples
-#
-# Targets use `mask=True`; the labels below are supervision hidden from the encoder.
-#
-# ### Six copies need a larger sum
-#
-# ```yaml
-# items:
-#   - {contribution: 0.75}
-#   - {contribution: 0.75}
-#   - {contribution: 0.75}
-#   - {contribution: 0.75}
-#   - {contribution: 0.75}
-#   - {contribution: 0.75}
-# mean_contribution: 0.75
-# weighted_sum: 4.5
-# ```
-#
-# The correct average is 0.75 and the correct sum is 4.5.
-#
-# ### One copy has the same Mean summary
-#
-# ```yaml
-# items:
-#   - {contribution: 0.75}
-# mean_contribution: 0.75
-# weighted_sum: 0.75
-# ```
-#
-# This is the matched count-erasure control. Its encoded Mean summary matches
-# the six-copy example, so the sum predictions agree even though their correct
-# labels differ. The proof does not record those individual predicted values.
-#
-# ### Change the contribution itself
-#
-# ```yaml
-# items:
-#   - {contribution: -0.25}
-#   - {contribution: -0.25}
-#   - {contribution: -0.25}
-#   - {contribution: -0.25}
-#   - {contribution: -0.25}
-#   - {contribution: -0.25}
-# mean_contribution: -0.25
-# weighted_sum: -1.5
-# ```
-#
-# Changing the repeated value gives Mean different content to encode. The
-# average target changes to −0.25, but multiplicity is still unavailable to the
-# sum decoder.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def repeated_contribution_records(*, rows: int, seed: int) -> Iterator[dict]:
     """Draw variable counts of repeated products for the Mean counterexample."""
     rng = np.random.default_rng(seed)
@@ -137,44 +157,6 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline_rmse, "nrmse": measured / baseline_rmse}
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-mean-erases-contribution-count
-# //| fig-cap: "Item attention is off and Mean removes contribution count; later root Attention cannot recover that lost distinction."
-# //| fig-alt: "Record contains repeated items with contribution inputs, and hidden mean contribution, weighted sum targets. Root reduction: Attention. Item reduction: Mean; capacity 6; branch attention Off."
-# #tree(node("record", kind: "root", width: 150pt, body: [
-#     - *Reduction:* Attention
-#   ], children: (
-#   node("items", kind: "branch", repeated: true, width: 155pt, body: [
-#       - *Reduction:* Mean
-#       - *Branch attention:* Off
-#       - *Capacity:* 6 items
-#     ], children: (
-#     node("contribution", type: "Number"),
-#   )),
-#   node("mean_contribution", width: 150pt, kind: "target", type: "Number"),
-#   node("weighted_sum", kind: "target", type: "Number"),
-# )))
-# ```
-#
-# ## How it works
-#
-# The item branch uses `attention=None` and `rf.Mean()`. Every item in a
-# record repeats the same randomly drawn contribution. Averaging its identical
-# encoded tokens produces the same representation for one repetition or six.
-# No later decoder can reconstruct the removed count from that representation.
-#
-# The model should learn the contribution average. A separate probe compares sum
-# predictions for one and six copies of 0.75: those predictions must agree,
-# although their correct sums are 0.75 and 4.5. The passing assertion therefore
-# demonstrates an information-loss boundary, not successful sum learning.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -224,25 +206,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P013 evidence >}}
-#
-# ## Remaining work
-#
-# Check the numerical invariance across seeds. Count-preserving routes are
-# covered separately by [Attention sums](attention-sum-unseen-lengths.html) and
-# [visible count with Mean](visible-count-sum.html); neither changes what this
-# no-attention Mean configuration discards.
-#
-# The family’s promotion target is at least three core seeds and ten lightweight
-# calibration seeds.
-#
-# ## Reproduce
-#
-# {{< proof P013 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=3309)
+
+# %% [markdown]
+# </details>

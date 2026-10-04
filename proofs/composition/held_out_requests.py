@@ -1,33 +1,117 @@
 # %% [markdown]
 # ---
-# title: Familiar Instructions in Unseen Combinations
-# categories: [Compositional generalization]
+# title: Can familiar instructions work in new combinations?
+# categories:
+# - Compositional generalization
 # proof-id: P071
-# description: Withhold group-operation pairs while retaining every individual instruction during training.
+# description: Train on group and operation requests, deliberately leaving out three combinations, such
+#   as coral’s maximum.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Withheld coral maximum, restricted training
+#   metric:
+#   - restricted
+#   - cells
+#   - coral/max
+#   - normalized_rmse
+#   format: error
+# - label: Same request, complete training
+#   metric:
+#   - complete
+#   - cells
+#   - coral/max
+#   - normalized_rmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# selected_group: amber
+# operation: mean
+# items:
+#   - {group: blue, value: -0.4}
+#   - {group: amber, value: 0.2}
+#   - {group: coral, value: 1.1}
+#   - {group: amber, value: 0.8}
+#   - {group: blue, value: 0.6}
+#   - {group: coral, value: 1.5}
+# answer: 0.51
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-held-out-requests
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with request, selected_group, operation, items, group, value, answer. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("request", kind: "root", children: (
+#   node("selected_group", type: "Enum"),
+#   node("operation", type: "Enum"),
+#   node("items", kind: "branch", repeated: true, children: (
+#     node("group", type: "Enum"), node("value", type: "Number"),
+#   )),
+#   node("answer", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Test the missing combinations and compare with a model trained on all combinations. Change either request to check that it matters.
+#
+# ## Result
 #
 # {{< proof P071 status >}}
 #
-# ## Insights
+# Only two of three seeds meet every check. Familiar requests learn, but one withheld combination can fail even when both instructions are used.
 #
-# A model can fit every observed request without learning a reusable operation.
-# This experiment withholds three group-operation combinations and measures
-# every request cell separately. A model trained on all combinations supplies
-# a positive control for ordinary task learnability. Corrupting either request
-# field tests whether predictions use both instructions.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Across three full CPU seeds, two met every gate. Complete-combination
-# training reached normalized RMSE 0.052–0.274 across all cells and seeds;
-# the restricted model reached 0.083–0.272 on observed cells. Withheld cells
-# ranged from 0.133 to 1.330: seed 7103 failed coral/max, performing worse than
-# its constant baseline despite fitting the observed requests. Both request
-# corruption controls met their gates on every seed. This supports using both
-# instructions, while reliable transfer to all unseen pairs remains unproven.
-# The original gates and budget are unchanged; thresholds remain provisional.
+# {{< proof P071 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< proof P071 script >}}
+#
+# ### Synthetic process and split
+#
+# Each fresh bag contains two numbers per group. Each group's center is drawn
+# independently from Uniform(-1.5, 1.5), with two independent Uniform(-0.8, 0.8)
+# deviations. The visible request selects one group's mean, minimum, or maximum.
+# Target noise is Normal(0, 0.02). Items are randomly interleaved in every row.
+# The model never receives group centers or the generator's selected values.
+#
+# Training excludes amber/mean, blue/min, and coral/max. Every group and every
+# operation still occurs in two observed combinations. Independently generated
+# bags supply 4,608 training rows, 576 validation rows, and 2,304 test rows;
+# test has 256 rows per cell. No bag is reused across splits or requests.
+# Validation for the restricted model also excludes withheld combinations.
+#
+# ### Training, controls, and gates
+#
+# Both arms use the xs preset, retaining all item-branch tokens, batch size 128,
+# and 600 AdamW updates at learning rate 0.002. Initialization is paired. The
+# complete arm has the same row count and update budget, spread over all nine
+# combinations. It is a task-learnability control, not a matched cell-frequency
+# control. No architecture, checkpoint, or threshold is chosen on test results.
+#
+# The positive control must reach normalized RMSE below 0.35 in every cell.
+# The restricted arm must reach 0.35 on every observed cell and 0.50 on every
+# withheld cell. Each denominator uses a training-only operation mean pooled
+# across exchangeable groups; no withheld target supplies a baseline estimate.
+# Group corruption must give overall normalized RMSE above 0.80 and exceed
+# intact error by 0.25. Operation corruption must add at least 0.10 to overall
+# normalized RMSE. Both control predictions are compared with the original
+# answers, so these controls measure reliance on the requests, not accuracy on
+# the altered instructions. Report their cell scores as well as aggregate gaps.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P071: test composition on group-operation pairs excluded from training."""
@@ -51,82 +135,7 @@ WITHHELD = tuple(zip(GROUPS, OPERATIONS, strict=True))
 TRAIN_ROWS = 4608
 TEST_ROWS = 2304
 
-# %% [markdown]
-# ## Synthetic process and split
-#
-# Each fresh bag contains two numbers per group. Each group's center is drawn
-# independently from Uniform(-1.5, 1.5), with two independent Uniform(-0.8, 0.8)
-# deviations. The visible request selects one group's mean, minimum, or maximum.
-# Target noise is Normal(0, 0.02). Items are randomly interleaved in every row.
-# The model never receives group centers or the generator's selected values.
-#
-# Training excludes amber/mean, blue/min, and coral/max. Every group and every
-# operation still occurs in two observed combinations. Independently generated
-# bags supply 4,608 training rows, 576 validation rows, and 2,304 test rows;
-# test has 256 rows per cell. No bag is reused across splits or requests.
-# Validation for the restricted model also excludes withheld combinations.
-#
-# ```yaml
-# selected_group: amber
-# operation: mean
-# items:
-#   - {group: blue, value: -0.4}
-#   - {group: amber, value: 0.2}
-#   - {group: coral, value: 1.1}
-#   - {group: amber, value: 0.8}
-#   - {group: blue, value: 0.6}
-#   - {group: coral, value: 1.5}
-# answer: 0.51
-# ```
-#
-# This withheld request has noiseless answer 0.5. The same instruction and
-# example values with a familiar operation instead give maximum 0.8:
-#
-# ```yaml
-# selected_group: amber
-# operation: max
-# items:
-#   - {group: blue, value: -0.4}
-#   - {group: amber, value: 0.2}
-#   - {group: coral, value: 1.1}
-#   - {group: amber, value: 0.8}
-#   - {group: blue, value: 0.6}
-#   - {group: coral, value: 1.5}
-# answer: 0.79
-# ```
-#
-# Changing the group to blue while retaining the first answer is a deliberately
-# incorrect request corruption; the correct blue mean would be 0.1:
-#
-# ```yaml
-# selected_group: blue
-# operation: mean
-# items:
-#   - {group: blue, value: -0.4}
-#   - {group: amber, value: 0.2}
-#   - {group: coral, value: 1.1}
-#   - {group: amber, value: 0.8}
-#   - {group: blue, value: 0.6}
-#   - {group: coral, value: 1.5}
-# answer: 0.51
-# ```
-#
-# ```{typst}
-# //| label: fig-proof-held-out-requests
-# //| fig-cap: "Familiar group and operation instructions request a statistic from six interleaved items."
-# //| fig-alt: "Request has Enum group and operation, a repeated branch containing group and Number value, and a hidden Number answer."
-# #tree(node("request", kind: "root", children: (
-#   node("selected_group", type: "Enum"),
-#   node("operation", type: "Enum"),
-#   node("items", kind: "branch", repeated: true, children: (
-#     node("group", type: "Enum"), node("value", type: "Number"),
-#   )),
-#   node("answer", kind: "target", type: "Number"),
-# )))
-# ```
 
-
-# %%
 def records(*, rows: int, seed: int, complete: bool = False) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     cells = CELLS if complete else tuple(cell for cell in CELLS if cell not in WITHHELD)
@@ -199,27 +208,6 @@ def scores(train: list[dict], test: list[dict], predicted: np.ndarray) -> dict:
     return result
 
 
-# %% [markdown]
-# ## Training, controls, and gates
-#
-# Both arms use the xs preset, retaining all item-branch tokens, batch size 128,
-# and 600 AdamW updates at learning rate 0.002. Initialization is paired. The
-# complete arm has the same row count and update budget, spread over all nine
-# combinations. It is a task-learnability control, not a matched cell-frequency
-# control. No architecture, checkpoint, or threshold is chosen on test results.
-#
-# The positive control must reach normalized RMSE below 0.35 in every cell.
-# The restricted arm must reach 0.35 on every observed cell and 0.50 on every
-# withheld cell. Each denominator uses a training-only operation mean pooled
-# across exchangeable groups; no withheld target supplies a baseline estimate.
-# Group corruption must give overall normalized RMSE above 0.80 and exceed
-# intact error by 0.25. Operation corruption must add at least 0.10 to overall
-# normalized RMSE. Both control predictions are compared with the original
-# answers, so these controls measure reliance on the requests, not accuracy on
-# the altered instructions. Report their cell scores as well as aggregate gaps.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     test = list(records(rows=TEST_ROWS, seed=seed * 100 + 3, complete=True))
     metrics = {"train_rows": TRAIN_ROWS, "test_rows": TEST_ROWS, "noise_rmse": 0.02}
@@ -278,22 +266,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence and limitations
-#
-# {{< proof P071 evidence >}}
-#
-# This is a finite compositional split with two items per group. It does not
-# establish arbitrary instructions, variable-length extrapolation, new group
-# meanings, or order invariance. Random interleaving discourages positional
-# shortcuts but does not constitute an exact permutation-invariance gate.
-# The three-seed panel exposes a seed-dependent failure on an unseen pair.
-# No ten-seed calibration has been run, so these thresholds remain provisional.
-#
-# ## Reproduce
-#
-# {{< proof P071 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=7101)
+
+# %% [markdown]
+# </details>

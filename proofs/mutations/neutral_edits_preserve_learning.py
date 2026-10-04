@@ -1,34 +1,80 @@
 # %% [markdown]
 # ---
-# title: Learned Predictions Survive Neutral Edits
+# title: Do harmless schema edits preserve predictions?
 # categories:
 # - Mutation retention
 # proof-id: P046
-# description: Metadata edits, an inactive field, and equivalent input rebinding should preserve a trained numerical and categorical relationship.
-# execute: {enabled: false, eval: false}
+# description: Train a useful predictor, then make edits that should not alter its visible information or
+#   learned state.
+# execute:
+#   enabled: false
+#   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Trained model
+#   metric:
+#   - source
+#   - nrmse
+#   format: error
+# - label: Completely reset
+#   metric:
+#   - controls
+#   - complete_reset
+#   - nrmse
+#   format: error
 # ---
 #
-# Rebuilding a model should preserve a learned function when the edit leaves
-# its information and computation equivalent. This experiment learns a number
-# plus a category-specific offset, then changes the schema without retraining.
+# ## Example
+#
+# ```yaml
+# x: 0.5
+# code: code-0
+# y: -0.25
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-mutations-neutral-edits
+# //| fig-alt: "Model tree with record, x, code, y, unused. Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("record", kind: "root", children: (
+#   node("x", type: "Number", body: [Source key becomes *renamed_x*]),
+#   node("code", type: "Category"),
+#   node("y", type: "Number", kind: "target", body: [Always hidden]),
+#   node("unused", type: "Number", body: [Added inactive, then deleted]),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Repeat metadata changes, inactive-field additions and deletions, equivalent input-key changes, and save/load. Compare with a complete reset.
+#
+# ## Result
 #
 # {{< proof P046 status >}}
 #
-# ## Insights
+# These edits preserve predictions; a reset loses the learned relationship. Changes to visible context or model size need separate checks.
 #
-# **The tested neutral edits preserve the learned relationship.** The full
-# runs retain predictions, category identities, and normalization state through
-# repeated rebuilding. A complete reset loses the learned skill, confirming
-# that the comparison is preserving a useful trained function.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# This experiment checks those properties after three repeated edit cycles,
-# an equivalent input-key change, a rejected duplicate field, and save/load.
-# A complete reset supplies a control that should lose the learned skill.
-# The recorded checks establish only these neutral edits, not arbitrary
-# renaming, tensor resizing, or changes to visible context.
+# {{< proof P046 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P046 script >}}
+#
+# ### Remaining work
+#
+# Three GPU seeds support these edits. Calibrate on ten separate seeds before
+# freezing numerical gates. Test inactive nested branches separately.
+# Renaming schema addresses and resizing learned tensors require separate
+# experiments; matching physical input values does not make those neutral edits.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P046: preserve a trained function across neutral public schema edits."""
@@ -49,38 +95,7 @@ import relflow as rf
 PROOF_ID = "P046"
 OFFSETS = (-0.75, -0.25, 0.25, 0.75)
 
-# %% [markdown]
-# ## Examples
-#
-# Category labels retain their meanings across edits. `y` is always hidden.
-#
-# ```yaml
-# x: 0.5
-# code: code-0
-# y: -0.25
-# ```
-#
-# The offset for `code-0` is −0.75. Changing the identity changes the answer:
-#
-# ```yaml
-# x: 0.5
-# code: code-3
-# y: 1.25
-# ```
-#
-# After rebinding the schema's `x` field to `renamed_x`, the same information
-# should produce the same first answer. The schema address remains `/x`.
-#
-# ```yaml
-# renamed_x: 0.5
-# code: code-0
-# y: -0.25
-# ```
-#
-# ## Data and comparisons
 
-
-# %%
 def records(*, rows: int, seed: int) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     for _ in range(rows):
@@ -118,34 +133,6 @@ def errors(actual: np.ndarray, predicted: np.ndarray, baseline: float) -> dict:
     return {"rmse": rmse, "baseline_rmse": baseline, "nrmse": rmse / baseline}
 
 
-# %% [markdown]
-# ## Before and after the edit
-#
-# ```{typst}
-# //| label: fig-proof-mutations-neutral-edits
-# //| fig-alt: "Record reads Number x and Category code to predict hidden Number y. An appended inactive Number unused supplies no information. Rebinding x changes its source key but keeps its schema name."
-# //| fig-cap: "The active learned task stays the same throughout the neutral edit cycle."
-# #tree(node("record", kind: "root", children: (
-#   node("x", type: "Number", body: [Source key becomes *renamed_x*]),
-#   node("code", type: "Category"),
-#   node("y", type: "Number", kind: "target", body: [Always hidden]),
-#   node("unused", type: "Number", body: [Added inactive, then deleted]),
-# )))
-# ```
-#
-# Train on 2,048 records, validate on 512, and evaluate on 1,024 independent
-# records. Category identities are shared across splits; numerical values are
-# freshly drawn. This is retention of known identities, not OOV generalization.
-# The [xs preset](../../core-concepts/model-tree.qmd#choose-a-size) trains for
-# 512 updates. Evaluation performs no more optimization.
-# nRMSE divides prediction RMSE by the error of a constant predictor fitted
-# to the source-training targets. The provisional learning gate is 0.25.
-# Prediction preservation uses `rtol=1e-5` and `atol=1e-6` times training target SD.
-#
-# ## Training, edits, and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     budget = 512 if steps is None else min(steps, 512)
@@ -256,22 +243,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P046 evidence >}}
-#
-# ## Remaining work
-#
-# Three GPU seeds support these edits. Calibrate on ten separate seeds before
-# freezing numerical gates. Test inactive nested branches separately.
-# Renaming schema addresses and resizing learned tensors require separate
-# experiments; matching physical input values does not make those neutral edits.
-#
-# ## Reproduce
-#
-# {{< proof P046 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=4601)
+
+# %% [markdown]
+# </details>

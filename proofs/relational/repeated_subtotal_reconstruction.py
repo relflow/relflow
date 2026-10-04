@@ -1,39 +1,88 @@
 # %% [markdown]
 # ---
-# title: Keep Each Subtotal with Its Item
+# title: Does each subtotal stay with its own item?
 # categories:
 # - Item alignment
 # proof-id: P030
-# description: Reconstruct each item's subtotal while preserving variable-length prediction
-#   geometry.
+# description: Predict quantity times price separately for every real item in an order.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Correct item answers
+#   metric:
+#   - aligned_nrmse
+#   format: error
+# - label: Shuffled item answers
+#   metric:
+#   - permuted_target_nrmse
+#   format: error
 # ---
 #
-# Each subtotal must use the quantity and price at its own item coordinate.
-# The proof combines learning this local relationship with checking that empty,
-# short, and full collections keep the correct prediction coordinates.
+# ## Example
+#
+# ```yaml
+# items:
+#   - {quantity: 1.5, unit_price: 1.2, subtotal: 1.8}
+#   - {quantity: 0.5, unit_price: -1.0, subtotal: -0.5}
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-repeated-subtotal-reconstruction
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with order, items, quantity, unit_price, subtotal. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("order", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("quantity", type: "Number"),
+#     node("unit_price", type: "Number"),
+#     node("subtotal", kind: "target", type: "Number", width: 150pt,),
+#   )),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Shuffle the expected subtotals between items while keeping visible inputs fixed. Also check empty orders and padded positions.
+#
+# ## Result
 #
 # {{< proof P030 status >}}
 #
-# ## Insights
+# Predictions follow the correct items, and padding is handled separately. The arithmetic is approximate and should not replace exact billing calculations.
 #
-# **The model learns each item's subtotal and keeps its prediction attached to
-# the correct coordinate.** Repeated decoder queries can use aligned quantity
-# and price inputs as well as ancestor context; they are not limited to one
-# identical root representation for every item.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Permuting only target subtotals leaves requests and predictions unchanged but
-# raises error against the altered labels. That isolates coordinate alignment.
-# Separate checks verify that real items are inferred and padded coordinates
-# are not, including empty orders. The arithmetic score is still aggregated over
-# lengths, so a weak individual length could be hidden. This establishes local
-# learned arithmetic and output geometry, not general cross-item reasoning or
-# exact billing calculations.
+# {{< proof P030 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P030 script >}}
+#
+# ### How it works
+#
+# Shared coordinates expose each target's own visible siblings to the decoder.
+# A paired control keeps every visible order unchanged but permutes target
+# subtotals between items. Predictions are therefore identical, while comparison
+# against the corrupted targets should become substantially worse.
+#
+# Lengths cycle from zero through five. The output uses five coordinates per
+# row; real items must be marked `inferred=True`, with every padded coordinate
+# marked `inferred=False`.
+#
+# ### Remaining work
+#
+# Report accuracy separately by nonempty length and repeat three paired core
+# seeds plus ten calibration seeds. The proof guide also flags a mismatch between
+# its exact-product generator and the noisy-product proposal; that broader noisy
+# task has not been established by this case.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Reconstruct quantity times unit price at each original item coordinate.
@@ -60,48 +109,7 @@ import relflow as rf
 PROOF_ID = "P030"
 LENGTH = 5
 
-# %% [markdown]
-# ## Examples
-#
-# ### Two items keep their own subtotals
-#
-# ```yaml
-# items:
-#   - {quantity: 1.5, unit_price: 1.2, subtotal: 1.8}
-#   - {quantity: 0.5, unit_price: -1.0, subtotal: -0.5}
-# ```
-#
-# Subtotals are supervision hidden by `mask=True` and removed before prediction.
-# The generator uses the exact product of quantity and unit price, with no
-# additional target noise.
-#
-# ### An empty order has no inferred subtotal
-#
-# ```yaml
-# items: []
-# ```
-#
-# This is a valid length-zero record in the proof. The fixed output schema still
-# has five subtotal coordinates, all marked `inferred=False`; there is no real
-# item for which a value should be inferred.
-#
-# ### Exchange the target subtotals
-#
-# ```yaml
-# items:
-#   - {quantity: 1.5, unit_price: 1.2, subtotal: -0.5}
-#   - {quantity: 0.5, unit_price: -1.0, subtotal: 1.8}
-# ```
-#
-# The control permutes only the first example's subtotals. These are deliberately
-# incorrect targets for the visible quantity/price pairs. The requests and model
-# predictions stay unchanged, so worse error against these labels demonstrates
-# that the intact result was tied to each item's coordinate.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, rows: int, seed: int, permute_targets: bool = False) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     target_rng = np.random.default_rng(seed + 10000)
@@ -135,50 +143,6 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-repeated-subtotal-reconstruction
-# //| fig-cap: "The branch supports up to five items with masked subtotals. Default attention summaries coexist with each target's aligned quantity and price context."
-# //| fig-alt: "Order contains up to five repeated items with quantity and unit-price Numbers and masked Number subtotals. The item branch and root each use one learned attention summary."
-# #tree(node("order", kind: "root", width: 150pt, body: [
-#   - *Reduction:* `Attention`
-#   - *Learned summaries:* 1
-# ], children: (
-#   node("items", kind: "branch", repeated: true, width: 150pt, body: [
-#     - *Capacity:* 5 items
-#     - *Reduction:* `Attention`
-#     - *Learned summaries:* 1
-#   ], children: (
-#     node("quantity", type: "Number"),
-#     node("unit_price", type: "Number"),
-#     node("subtotal", kind: "target", type: "Number", width: 150pt, body: [
-#       - *Input:* always hidden
-#     ]),
-#   )),
-# )))
-# ```
-#
-# The `xs` preset supplies one attention summary at both the root and branch.
-# The item encoder uses two layers. Related inputs and their target stay
-# together instead of being flattened into unrelated rows.
-#
-# ## How it works
-#
-# Shared coordinates expose each target's own visible siblings to the decoder.
-# A paired control keeps every visible order unchanged but permutes target
-# subtotals between items. Predictions are therefore identical, while comparison
-# against the corrupted targets should become substantially worse.
-#
-# Lengths cycle from zero through five. The output uses five coordinates per
-# row; real items must be marked `inferred=True`, with every padded coordinate
-# marked `inferred=False`.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model.xs(
@@ -236,22 +200,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P030 evidence >}}
-#
-# ## Remaining work
-#
-# Report accuracy separately by nonempty length and repeat three paired core
-# seeds plus ten calibration seeds. The proof guide also flags a mismatch between
-# its exact-product generator and the noisy-product proposal; that broader noisy
-# task has not been established by this case.
-#
-# ## Reproduce
-#
-# {{< proof P030 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=31)
+
+# %% [markdown]
+# </details>

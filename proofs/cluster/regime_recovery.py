@@ -1,32 +1,124 @@
 # %% [markdown]
 # ---
-# title: Recovering Hidden Behavioral Regimes
-# categories: [Clustering]
+# title: Can it discover hidden groups with different behaviors?
+# categories:
+# - Clustering
 # proof-id: P078
-# description: Measure assignment agreement and independent predictions rather than treating cluster count as recovery.
+# description: Repeated identities follow four hidden numerical rules. Ask the Cluster field to recover
+#   the groups while predicting new observations.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Stable hidden groups
+#   metric:
+#   - stable
+#   - normalized_rmse
+#   format: error
+# - label: No persistent groups
+#   metric:
+#   - no_regime
+#   - normalized_rmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# entity: entity-0017
+# x: 0.5
+# y: -6.27
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-cluster-regime-recovery
+# //| fig-cap: "Amber cards are hidden prediction targets. Identity is sometimes reconstructed; y is always hidden."
+# //| fig-alt: "Model tree with event, entity, x, y. Amber cards are hidden prediction targets. Identity is sometimes reconstructed; y is always hidden."
+# #tree(node("event", kind: "root", children: (
+#   node("entity", type: "Cluster", detail: "Repeated identity; 10% training mask"),
+#   node("x", type: "Number"),
+#   node("y", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Measure actual grouping agreement and held-out prediction, then shuffle identities and train a control with no persistent groups.
+#
+# ## Result
 #
 # {{< proof P078 status >}}
 #
-# ## Insights
+# All three seeds fail the recovery checks at this budget. Some identity information helps prediction, but producing several clusters does not show the right groups were discovered.
 #
-# **The three CPU seeds failed to recover the hidden regimes at this budget.**
-# Assignment ARI ranged from 0.074 to 0.227, below the required 0.80. Held-out
-# source-unit RMSE was 2.65–3.77, or 59.2–83.9% of the constant-baseline error,
-# above the 35% gate. All runs occupied seven clusters; that count does not
-# establish a correct partition of the four generating groups.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Shuffling test identities increased error to 106.7–114.9% of baseline, so
-# identity information was useful, but two seeds missed the required 0.40
-# normalized-error gap. The separately trained no-regime control stayed near
-# baseline (100.0–100.2%) with ARI between -0.005 and 0.040. Its matched numeric
-# observations rule out target marginal differences as the source of the gain.
-# These results show some identity-dependent prediction, while the proposed
-# regime-recovery capability remains unestablished under the original gates.
+# {{< proof P078 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< proof P078 script >}}
+#
+# ### Process, observability, and split unit
+#
+# Randomly assign 64 opaque identities to four balanced groups. Each identity
+# follows `y = intercept[group] + slope[group] * x + Normal(0, 0.1)`, with
+# `x ~ Uniform(-1, 1)`. Intercepts are `(-6, -2, 2, 6)` and slopes are
+# `(-0.6, 0.6, -0.6, 0.6)`. The partition stays fixed across independent train,
+# validation, and test observations. Neither the group nor its parameters are
+# schema fields. Repeated IDs supply behavioral evidence through the hidden
+# numeric target, and a reconstructing identity mask engages Cluster's head.
+#
+# The split unit is the observation of a known identity. This tests whether
+# repeated evidence reveals stable groups, not unseen-identity generalization.
+# Every split contains the same 64 identities with fresh x and noise samples.
+#
+# In the no-regime control, an independently permuted identity can accompany
+# any regime on each observation. Every numeric pair and the complete identity
+# frequency distribution are retained, but an ID no longer identifies a curve.
+# The conditional mean of the population remains zero for every x because the
+# four intercepts and slopes each average to zero.
+#
+# ### Model and predeclared gates
+#
+# Fit the same `xs` model from the same initialization for stable-regime and
+# no-regime data, each for 600 AdamW updates, batch 128, learning rate 0.003.
+# Use adaptive bounds 2 through 8; the true count four is not supplied. Each arm
+# receives 4,096 train, 1,024 validation, and 2,048 test rows. Validation is
+# independent and does not select checkpoints. The reconstruction mask hides
+# 10% of entity inputs during training; all entity inputs are visible at test.
+#
+# The fixed gates require ARI at least 0.80 and source-unit normalized RMSE at
+# most 0.35 for the stable arm. The separately trained no-regime control must
+# have ARI at most 0.15 against the now-irrelevant generating partition and
+# normalized RMSE at least 0.85. For a direct dependency check, shuffling stable
+# test IDs must give normalized RMSE at least 0.85 and increase it by at least
+# 0.40. Require finite metrics, full identity exposure, and frozen evaluation
+# assignments. The population conditional-mean oracle for the no-regime arm
+# has RMSE approximately 4.49; the informed regime oracle has noise RMSE 0.1.
+# Count and usage have no success gate.
+#
+# ### Remaining work
+#
+# The three-seed panel retained the original gates and 600-update budget. All
+# three runs failed both partition-recovery and prediction-quality gates; the
+# threshold is not redefined to make these outcomes pass. Diagnose optimization
+# and assignment behavior with training and validation data before proposing a
+# distinct follow-up experiment or a ten-seed promotion panel.
+#
+# This task has strongly separated intercepts; crossing curves, unbalanced
+# groups, unseen identities, and a benefit over a parameter-matched Category
+# model remain separate questions. No-regime assignments occupied seven or
+# eight clusters. Their low ARI measures a lack of recovered meaning; Cluster
+# did not automatically reject the spurious groups.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P078: require real partition recovery and held-out skill from Cluster."""
@@ -51,54 +143,7 @@ REGIME_COUNT = 4
 INTERCEPTS = np.asarray((-6.0, -2.0, 2.0, 6.0))
 SLOPES = np.asarray((-0.6, 0.6, -0.6, 0.6))
 
-# %% [markdown]
-# ## Process, observability, and split unit
-#
-# Randomly assign 64 opaque identities to four balanced groups. Each identity
-# follows `y = intercept[group] + slope[group] * x + Normal(0, 0.1)`, with
-# `x ~ Uniform(-1, 1)`. Intercepts are `(-6, -2, 2, 6)` and slopes are
-# `(-0.6, 0.6, -0.6, 0.6)`. The partition stays fixed across independent train,
-# validation, and test observations. Neither the group nor its parameters are
-# schema fields. Repeated IDs supply behavioral evidence through the hidden
-# numeric target, and a reconstructing identity mask engages Cluster's head.
-#
-# The split unit is the observation of a known identity. This tests whether
-# repeated evidence reveals stable groups, not unseen-identity generalization.
-# Every split contains the same 64 identities with fresh x and noise samples.
-#
-# ```yaml
-# entity: entity-0017
-# x: 0.5
-# y: -6.27
-# ```
-#
-# An illustrative first-regime observation has noiseless target -6.3; the
-# displayed deviation is one possible noise realization. IDs do not encode
-# regime membership; these examples use an illustrative partition.
-#
-# ```yaml
-# entity: entity-0042
-# x: 0.5
-# y: -6.32
-# ```
-#
-# A different identity in that same illustrative regime should be grouped with
-# the first one, even though no shared label appears in their record fields.
-#
-# ```yaml
-# entity: entity-0017
-# x: 0.5
-# y: 6.24
-# ```
-#
-# In the no-regime control, an independently permuted identity can accompany
-# any regime on each observation. Every numeric pair and the complete identity
-# frequency distribution are retained, but an ID no longer identifies a curve.
-# The conditional mean of the population remains zero for every x because the
-# four intercepts and slopes each average to zero.
 
-
-# %%
 def partition(seed: int) -> np.ndarray:
     """A balanced random mapping known only to the generator and evaluator."""
     groups = np.arange(ENTITY_COUNT) % REGIME_COUNT
@@ -178,39 +223,6 @@ def measure(model: rf.Model, rows: list[dict], training_mean: float, partition_s
     }
 
 
-# %% [markdown]
-# ## Model and predeclared gates
-#
-# ```{typst}
-# //| label: fig-proof-cluster-regime-recovery
-# //| fig-cap: "Identity assignments must capture stable curves while predicting new numeric observations."
-# //| fig-alt: "An event has a Cluster entity with a reconstructing 10 percent mask, a visible Number x, and hidden Number y. Hidden regimes are absent from the schema."
-# #tree(node("event", kind: "root", children: (
-#   node("entity", type: "Cluster", detail: "Repeated identity; 10% training mask"),
-#   node("x", type: "Number"),
-#   node("y", kind: "target", type: "Number"),
-# )))
-# ```
-#
-# Fit the same `xs` model from the same initialization for stable-regime and
-# no-regime data, each for 600 AdamW updates, batch 128, learning rate 0.003.
-# Use adaptive bounds 2 through 8; the true count four is not supplied. Each arm
-# receives 4,096 train, 1,024 validation, and 2,048 test rows. Validation is
-# independent and does not select checkpoints. The reconstruction mask hides
-# 10% of entity inputs during training; all entity inputs are visible at test.
-#
-# The fixed gates require ARI at least 0.80 and source-unit normalized RMSE at
-# most 0.35 for the stable arm. The separately trained no-regime control must
-# have ARI at most 0.15 against the now-irrelevant generating partition and
-# normalized RMSE at least 0.85. For a direct dependency check, shuffling stable
-# test IDs must give normalized RMSE at least 0.85 and increase it by at least
-# 0.40. Require finite metrics, full identity exposure, and frozen evaluation
-# assignments. The population conditional-mean oracle for the no-regime arm
-# has RMSE approximately 4.49; the informed regime oracle has noise RMSE 0.1.
-# Count and usage have no success gate.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     metrics, checks = {}, {}
     partition_seed = seed * 100
@@ -271,29 +283,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P078 evidence >}}
-#
-# ## Remaining work
-#
-# The three-seed panel retained the original gates and 600-update budget. All
-# three runs failed both partition-recovery and prediction-quality gates; the
-# threshold is not redefined to make these outcomes pass. Diagnose optimization
-# and assignment behavior with training and validation data before proposing a
-# distinct follow-up experiment or a ten-seed promotion panel.
-#
-# This task has strongly separated intercepts; crossing curves, unbalanced
-# groups, unseen identities, and a benefit over a parameter-matched Category
-# model remain separate questions. No-regime assignments occupied seven or
-# eight clusters. Their low ARI measures a lack of recovered meaning; Cluster
-# did not automatically reject the spurious groups.
-#
-# ## Reproduce
-#
-# {{< proof P078 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=7801)
+
+# %% [markdown]
+# </details>

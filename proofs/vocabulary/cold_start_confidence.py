@@ -1,28 +1,86 @@
 # %% [markdown]
 # ---
-# title: Cold-Start Confidence
-# categories: [Vocabulary]
+# title: How confident should it be about a new identity?
+# categories:
+# - Vocabulary
 # proof-id: P061
-# description: Unseen input identities should lose identity-specific information without losing decisive evidence from other fields.
+# description: Predict a yes/no outcome using a numeric signal and an identity-specific effect. New identities
+#   remove only the latter information.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Weak signal, new identity, 20% training rate
+#   metric:
+#   - '0.2'
+#   - novel
+#   - ambiguous_confidence
+#   format: percent
+# - label: Strong signal, new identity, 20% training rate
+#   metric:
+#   - '0.2'
+#   - novel
+#   - decisive_confidence
+#   format: percent
 # ---
+#
+# ## Example
+#
+# ```yaml
+# x: 0.0
+# entity: id-42
+# label: yes
+# ```
+#
+# The outcome is hidden and randomly sampled. Scores compare predicted probabilities with the generator’s known probabilities.
+#
+# ```{typst}
+# //| label: fig-proof-cold-start-confidence
+# //| fig-cap: "Amber cards are hidden prediction targets. The numeric signal remains available for unfamiliar identities."
+# //| fig-alt: "Model tree with record, x, entity, label. Amber cards are hidden prediction targets. The numeric signal remains available for unfamiliar identities."
+# #tree(node("record", kind: "root", children: (
+#   node("x", type: "Number", detail: "Generalizable evidence"),
+#   node("entity", type: "Category", detail: "Persistent identity"),
+#   node("label", kind: "target", type: "Category", detail: "Known yes/no labels"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare training with 1% or 20% of input identities made unavailable. Score new identities separately where the numeric signal is weak or strong.
+#
+# ## Result
 #
 # {{< proof P061 status >}}
 #
-# ## Insights
+# A new identity does not always imply a 50% prediction: strong remaining context can still justify confidence. Neither unavailability rate is claimed to be best for every dataset.
 #
-# OOV is not a reason to force every prediction toward 50%. When identity is
-# informative, its absence removes that information; strong numerical context
-# can still support confident predictions. This experiment knows both the
-# identity-conditional and identity-marginal probabilities, allowing direct
-# probability-error measurement without treating sampled outcomes as certainty.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Ordinary uniform input unavailability is compared at 1% and 20%. Neither
-# policy uses label frequencies or validation vocabulary. This is an empirical
-# fallback check, not a claim that 20% is optimal across datasets.
+# {{< proof P061 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< proof P061 script >}}
+#
+# ### Training and controls
+#
+# Use 32,768 training rows over 4,096 identities, automatically growing storage,
+# and 600 updates. Independent validation has 1,024 rows. Evaluation has 8,192
+# known-ID rows and 8,192 entity-disjoint rows, with identical visible x and
+# known yes/no output labels. The latent sign is only available to the evaluator.
+#
+# The 20% arm must beat the constant baseline, retain decisive confidence above
+# 0.9, and keep ambiguous new-ID confidence below 0.7. Record both arms without
+# demanding that one stochastic run of stronger masking always beats 1%.
+# A final admission-only probe measures the prediction change without learning;
+# this is a diagnostic limitation, not a promise that admission is safe.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P061: confidence with sparse known IDs, unknown IDs, and decisive context."""
@@ -41,50 +99,7 @@ PROOF_ID = "P061"
 BUDGET = 600
 ENTITIES = 4096
 
-# %% [markdown]
-# ## Examples
-#
-# ```yaml
-# x: 0.0
-# entity: id-42
-# label: yes
-# ```
-#
-# A familiar identity can have a persistent positive or negative effect.
-#
-# ```yaml
-# x: 0.0
-# entity: new-42
-# label: no
-# ```
-#
-# An unseen identity has no inferable sign: its identity-marginal probability
-# at x=0 is 0.5. The ID spelling conveys no semantics.
-#
-# ```yaml
-# x: 2.8
-# entity: new-42
-# label: yes
-# ```
-#
-# Large positive x supports high confidence even for a new identity. Blanket
-# OOV confidence suppression would be wrong here.
-#
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-cold-start-confidence
-# //| fig-cap: "Numerical evidence remains useful when categorical identity is unavailable."
-# //| fig-alt: "A root contains Number x, a large-vocabulary Category entity, and an always-hidden binary Category label."
-# #tree(node("record", kind: "root", children: (
-#   node("x", type: "Number", detail: "Generalizable evidence"),
-#   node("entity", type: "Category", detail: "Persistent identity"),
-#   node("label", kind: "target", type: "Category", detail: "Known yes/no labels"),
-# )))
-# ```
 
-
-# %%
 def records(*, rows: int, seed: int, novel: bool = False) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     identities = rng.integers(0, ENTITIES, rows)
@@ -139,22 +154,6 @@ def score(p: np.ndarray, rows: list[dict], novel: bool) -> dict[str, float]:
     }
 
 
-# %% [markdown]
-# ## Training and controls
-#
-# Use 32,768 training rows over 4,096 identities, automatically growing storage,
-# and 600 updates. Independent validation has 1,024 rows. Evaluation has 8,192
-# known-ID rows and 8,192 entity-disjoint rows, with identical visible x and
-# known yes/no output labels. The latent sign is only available to the evaluator.
-#
-# The 20% arm must beat the constant baseline, retain decisive confidence above
-# 0.9, and keep ambiguous new-ID confidence below 0.7. Record both arms without
-# demanding that one stochastic run of stronger masking always beats 1%.
-# A final admission-only probe measures the prediction change without learning;
-# this is a diagnostic limitation, not a promise that admission is safe.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     metrics, checks = {}, {}
     for unavailable in (0.01, 0.2):
@@ -211,24 +210,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence and remaining work
-#
-# {{< proof P061 evidence >}}
-#
-# Gates remain provisional. Uniform masking assumes that observed identity
-# effects represent the missing-identity population. Time drift, unseen groups
-# with different effects, and rare known-ID overfitting can violate this.
-# Newly admitted random embeddings still need training. This probe's training
-# encode also updates Number normalization, so admission drift is not isolated
-# to identity. P066 holds other input resources fixed and gates prediction and
-# reconstruction-NLL stability; the current implementation fails that gate.
-# No output-OOV detection or universal probability calibration is established.
-#
-# ## Reproduce
-#
-# {{< proof P061 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=7611)
+
+# %% [markdown]
+# </details>

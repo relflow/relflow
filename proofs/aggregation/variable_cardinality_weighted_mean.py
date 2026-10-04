@@ -1,32 +1,96 @@
 # %% [markdown]
 # ---
-# title: Weighted means across varying lengths
+# title: Can it learn a weighted average?
 # categories:
 # - Weighted aggregation
 # proof-id: P016
-# description: Learn a weighted mean from raw item pairs while preserving the identities
-#   of a normalized aggregate.
+# description: Predict an average in which each value contributes according to its own positive weight.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Correct pairs
+#   metric:
+#   - intact
+#   - nrmse
+#   format: error
+# - label: Swapped weights
+#   metric:
+#   - corrupted
+#   - nrmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# items:
+#   - {value: 0.8, weight: 0.5}
+#   - {value: -0.4, weight: 1.25}
+#   - {value: 0.2, weight: 2.0}
+# weighted_mean: 0.08
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-variable-cardinality-weighted-mean
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with record, items, value, weight, weighted_mean. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("record", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("value", type: "Number"),
+#     node("weight", type: "Number"),
+#   )),
+#   node("weighted_mean", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Reorder or repeat whole items, or scale all weights equally: the answer should stay fixed. Swapping weights between values should change it.
+#
+# ## Result
 #
 # {{< proof P016 status >}}
 #
-# ## Insights
+# The model uses relative weights and approximately preserves these equal-answer changes. Zero or negative weights and much longer lists are not covered.
 #
-# **The model responds to relative weights while keeping the same answer when all weights are scaled
-# together.** The model is reported to preserve its answer when complete items are reordered or duplicated,
-# and when all weights are scaled equally. Swapping weights between values instead removes accuracy against
-# the original labels.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Those controls distinguish useful invariance from simply ignoring the weights. Keep each weight beside its
-# value, and choose the target’s algebra deliberately: duplicating items preserves a weighted mean but
-# doubles a weighted sum. This proof covers positive weights and lengths within the trained range; a zero
-# denominator, signed weights, or substantially longer bags needs separate treatment.
+# {{< proof P016 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P016 script >}}
+#
+# ### How it works
+#
+# Learned `rf.Attention` reductions receive two through six item pairs.
+# The label is `sum(value * weight) / sum(weight)`. Values vary independently;
+# positive weights span 0.03 through 3.0 on a logarithmic scale, making an
+# unweighted average a poor shortcut.
+#
+# Complete-item permutation, scaling every weight by 0.75, and duplicating all
+# items should preserve the answer. Duplication is checked only for original
+# lengths two and three so the result stays within branch capacity. Permuting
+# weights alone must worsen error against unchanged labels: normalization does
+# not remove the need to bind each weight to its own value.
+#
+# ### Remaining work
+#
+# Repeat every identity across seeds. Zero or signed total weight, missing
+# weights, extreme magnitudes, and lengths outside the trained range still need
+# explicit semantics and checks.
+#
+# The family’s promotion target is at least three core seeds and ten lightweight
+# calibration seeds.
+#
+# ### Complete experiment code
+#
 
 # %%
 """A weighted mean should remain identifiable when collection length varies.
@@ -50,57 +114,7 @@ import relflow as rf
 PROOF_ID = "P016"
 ITEMS = 6
 
-# %% [markdown]
-# ## Examples
-#
-# Targets use `mask=True`; the labels below are supervision hidden from the encoder.
-#
-# ### Normalize by total weight
-#
-# ```yaml
-# items:
-#   - {value: 0.8, weight: 0.5}
-#   - {value: -0.4, weight: 1.25}
-#   - {value: 0.2, weight: 2.0}
-# weighted_mean: 0.08
-# ```
-#
-# The weighted sum is 0.3 and total weight is 3.75, giving a weighted mean of 0.08.
-#
-# ### Move weight to another value
-#
-# ```yaml
-# items:
-#   - {value: 0.8, weight: 1.25}
-#   - {value: -0.4, weight: 0.5}
-#   - {value: 0.2, weight: 2.0}
-# weighted_mean: 0.08  # Retained original label
-# ```
-#
-# Swapping the first two weights changes the mathematical answer to 0.32.
-# The corruption keeps 0.08 as its original target, so using the changed pairing
-# should worsen the measured error.
-#
-# ### Duplicate complete items
-#
-# ```yaml
-# items:
-#   - {value: 0.8, weight: 0.5}
-#   - {value: -0.4, weight: 1.25}
-#   - {value: 0.2, weight: 2.0}
-#   - {value: 0.8, weight: 0.5}
-#   - {value: -0.4, weight: 1.25}
-#   - {value: 0.2, weight: 2.0}
-# weighted_mean: 0.08
-# ```
-#
-# Doubling both weighted contribution and total weight keeps the answer at 0.08.
-# The six-item result stays within the proof’s branch capacity.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def variable_weighted_mean_records(*, rows: int, seed: int) -> Iterator[dict]:
     """Draw variable-width rows with broad positive weights."""
     rng = np.random.default_rng(seed)
@@ -188,44 +202,6 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline_rmse, "nrmse": measured / baseline_rmse}
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-variable-cardinality-weighted-mean
-# //| fig-cap: "Attention reduces raw pairs within a six-item capacity to predict a hidden weighted mean."
-# //| fig-alt: "Record contains repeated items with value, weight inputs, and hidden weighted mean targets. Root reduction: Attention. Item reduction: Attention; capacity 6."
-# #tree(node("record", kind: "root", width: 150pt, body: [
-#     - *Reduction:* Attention
-#   ], children: (
-#   node("items", kind: "branch", repeated: true, width: 155pt, body: [
-#       - *Reduction:* Attention
-#       - *Capacity:* 6 items
-#     ], children: (
-#     node("value", type: "Number"),
-#     node("weight", type: "Number"),
-#   )),
-#   node("weighted_mean", kind: "target", type: "Number"),
-# )))
-# ```
-#
-# ## How it works
-#
-# Learned `rf.Attention` reductions receive two through six item pairs.
-# The label is `sum(value * weight) / sum(weight)`. Values vary independently;
-# positive weights span 0.03 through 3.0 on a logarithmic scale, making an
-# unweighted average a poor shortcut.
-#
-# Complete-item permutation, scaling every weight by 0.75, and duplicating all
-# items should preserve the answer. Duplication is checked only for original
-# lengths two and three so the result stays within branch capacity. Permuting
-# weights alone must worsen error against unchanged labels: normalization does
-# not remove the need to bind each weight to its own value.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -295,24 +271,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P016 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat every identity across seeds. Zero or signed total weight, missing
-# weights, extreme magnitudes, and lengths outside the trained range still need
-# explicit semantics and checks.
-#
-# The family’s promotion target is at least three core seeds and ten lightweight
-# calibration seeds.
-#
-# ## Reproduce
-#
-# {{< proof P016 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=3313)
+
+# %% [markdown]
+# </details>

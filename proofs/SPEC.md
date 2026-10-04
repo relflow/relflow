@@ -1828,11 +1828,26 @@ Author prose in `# %% [markdown]` comment cells and Python in `# %%` code cells.
 The first Markdown cell contains the page metadata, including `proof-id`,
 `code-fold: true`, and `execute: {enabled: false, eval: false}`. Quarto's native
 script rendering needs no Jupyter environment. Both execution flags are also
-disabled globally. Four foldable code sections keep setup, data and controls,
-training and evaluation, and the reporting entrypoint beside their explanations.
+disabled globally.
 
-Include a schema-faithful Typst tree, contrasting YAML records, controls,
-current insights, and remaining work in that same script. The docs build stages
+Write for a reader with little modeling experience. Give each page a question
+title, a short purpose, one YAML record, one schema-faithful Typst tree, a plain
+comparison, and an interpretation with a concrete limit. Define unfamiliar
+terms when they are needed. Keep the visible explanation brief; parameter
+counts, training settings, raw metric dumps, and implementation mechanics
+belong in one closed **Experiment details and code** foldout. Set `toc: false`
+so optional technical headings do not fill the contents menu.
+
+Use `proof-readout` metadata to select one to three recorded measurements with
+readable labels. Each selection declares a `metric` path and a `format`:
+`number`, `percent` for fractions, `error` for constant-baseline error ratios,
+or `auc` for ranking scores. Never present AUC as classification accuracy.
+Values come from the latest full run, not authored prose or shortened smoke
+runs. Keep unsuccessful checks, source-version warnings, and mixed run history
+visible in the result. The foldout retains full measurements, checks, protocol,
+remaining work, reproduction commands, and complete experiment code.
+
+Keep the overview, optional explanation, and Python in that same script. The docs build stages
 ignored copies under `docs/proofs/<category>/<slug>.py`, preserving published
 URLs. Do not maintain a separate authored page. Shortcodes insert status,
 evidence, and reproduction commands with a script download.

@@ -1,37 +1,92 @@
 # %% [markdown]
 # ---
-# title: Learning a Fixed-Length Sum
+# title: Can it add six numbers?
 # categories:
 # - Hierarchical statistics
 # proof-id: P039
-# description: A learned Attention reduction can retain enough information to approximate
-#   the sum of six visible values.
+# description: Predict the total of six independently chosen amounts.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Total prediction
+#   metric:
+#   - test_nrmse
+#   format: error
 # ---
 #
-# Before testing a nested hierarchy, check whether the model can learn a sum
-# at one level. Every observation here contains six independently drawn
-# amounts, all of which contribute to the answer.
+# ## Example
+#
+# ```yaml
+# transactions:
+#   - amount: 0.8
+#   - amount: -0.4
+#   - amount: 0.2
+#   - amount: 0.5
+#   - amount: -0.5
+#   - amount: 0.9
+# global_total: 1.5
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-structure-attention-learns-fixed-width-sum
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with record, transactions, amount, global_total. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("record", kind: "root", width: 120pt, children: (
+#   node("transactions", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("amount", type: "Number"),
+#   )),
+#   node("global_total", kind: "target", type: "Number",),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare test error with a simple predictor that always returns the training-set average total.
+#
+# ## Result
 #
 # {{< proof P039 status >}}
 #
-# ## Insights
+# The model learns this small sum. This baseline does not test item reordering, varying lengths, deeper nesting, or exact addition.
 #
-# **The model can learn to approximately add six visible numbers.** All six independently drawn values are
-# visible, making this a useful positive control before testing more complicated nested statistics.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The accuracy check compares held-out error with a constant training-mean baseline. Meeting it demonstrates
-# substantially lower error, but this experiment does not include a prediction-level permutation control.
-# The task always contains six items.
+# {{< proof P039 evidence >}}
 #
-# Do not extend this result to variable cardinality, arbitrary hierarchy depth, or exact arithmetic. The
-# nested-cardinality case asks whether local structure survives successive reductions; this control only
-# establishes that the model can learn a numerical sum at one level.
+# ### Run this experiment
 #
-# ## Setup
+# {{< proof P039 script >}}
+#
+# ### How it works
+#
+# Both the transaction branch and the root use `rf.Attention` reduction.
+# The model must transform the visible amounts into a summary from which a
+# numerical decoder can approximate their sum. Fixed length makes this a
+# simpler control than inferring totals through several variable-size groups.
+#
+# Training, validation, and test draw 512, 128, and 256 independent observations.
+# Each amount is sampled uniformly from −1 to 1. After 400 deterministic
+# steps, the model predicts totals from the transaction inputs alone.
+#
+# ### Remaining work
+#
+# Add the nested, regrouping-invariant `global_total` case: the present control
+# has only one collection level. The family also calls for a
+# `largest_session_average` target, broader value patterns, multiple Attention
+# output counts, and nested capacity ranges, followed by repeated-seed gates.
+#
+# The [nested-cardinality proof](attention-preserves-nested-cardinality.html)
+# tests a statistic whose answer changes when those same amounts are regrouped.
+# Use [preprocessing](../../guides/preprocessors.qmd) when a sum must be exact.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P039: learn a fixed-width sum through Attention reduction.
@@ -52,65 +107,7 @@ import relflow as rf
 
 PROOF_ID = "P039"
 
-# %% [markdown]
-# ## Examples
-#
-# Each record contains exactly six visible amounts. `global_total` is their
-# mathematical sum, supplied as a hidden Number target rather than an input.
-#
-# ### Mixed signs with a positive total
-#
-# ```yaml
-# transactions:
-#   - amount: 0.8
-#   - amount: -0.4
-#   - amount: 0.2
-#   - amount: 0.5
-#   - amount: -0.5
-#   - amount: 0.9
-# global_total: 1.5
-# ```
-#
-# Positive and negative contributions must both reach the decoder.
-#
-# ### One contribution changes sign
-#
-# ```yaml
-# transactions:
-#   - amount: 0.8
-#   - amount: -0.4
-#   - amount: 0.2
-#   - amount: 0.5
-#   - amount: -0.5
-#   - amount: -0.9
-# global_total: -0.3
-# ```
-#
-# Flipping the final amount changes the total by −1.8. This illustrates the
-# sum rule; the executable proof scores independently generated records rather
-# than asserting this particular paired intervention.
-#
-# ### Cancellation without empty input
-#
-# ```yaml
-# transactions:
-#   - amount: 0.8
-#   - amount: -0.8
-#   - amount: 0.3
-#   - amount: -0.3
-#   - amount: -0.6
-#   - amount: 0.6
-# global_total: 0.0
-# ```
-#
-# A zero total can arise from six present, nonzero values. These exact answers
-# illustrate the target function; the learned model is assessed by aggregate
-# approximation error, not exact predictions on these examples.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, rows: int, seed: int) -> Iterator[dict]:
     """Yield six transactions and their total."""
     rng = np.random.default_rng(seed)
@@ -133,45 +130,6 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-structure-attention-learns-fixed-width-sum
-# //| fig-cap: "The transaction branch and root each reduce to one Attention output. Six visible values supply the hidden total target."
-# //| fig-alt: "Record and its repeated transactions each use Attention reduction with one output; the branch has capacity for six Number amounts, and the Number global total target is always hidden from input."
-# #tree(node("record", kind: "root", width: 150pt, body: [
-#   - *Reduction:* Attention
-#   - *Outputs:* 1
-# ], children: (
-#   node("transactions", kind: "branch", repeated: true, width: 150pt, body: [
-#     - *Reduction:* Attention
-#     - *Outputs:* 1
-#     - *Capacity:* 6 items
-#   ], children: (
-#     node("amount", type: "Number"),
-#   )),
-#   node("global_total", kind: "target", type: "Number", body: [
-#     - *Input:* always hidden
-#   ]),
-# )))
-# ```
-#
-# ## How it works
-#
-# Both the transaction branch and the root use `rf.Attention` reduction.
-# The model must transform the visible amounts into a summary from which a
-# numerical decoder can approximate their sum. Fixed length makes this a
-# simpler control than inferring totals through several variable-size groups.
-#
-# Training, validation, and test draw 512, 128, and 256 independent observations.
-# Each amount is sampled uniformly from −1 to 1. After 400 deterministic
-# steps, the model predicts totals from the transaction inputs alone.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     data_seed = (seed - 2600) % (2**32)
@@ -224,26 +182,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }, {"Test normalized RMSE is below 0.25": nrmse < 0.25}
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P039 evidence >}}
-#
-# ## Remaining work
-#
-# Add the nested, regrouping-invariant `global_total` case: the present control
-# has only one collection level. The family also calls for a
-# `largest_session_average` target, broader value patterns, multiple Attention
-# output counts, and nested capacity ranges, followed by repeated-seed gates.
-#
-# The [nested-cardinality proof](attention-preserves-nested-cardinality.html)
-# tests a statistic whose answer changes when those same amounts are regrouped.
-# Use [preprocessing](../../guides/preprocessors.qmd) when a sum must be exact.
-#
-# ## Reproduce
-#
-# {{< proof P039 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=2600)
+
+# %% [markdown]
+# </details>

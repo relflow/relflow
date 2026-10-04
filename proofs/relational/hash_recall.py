@@ -1,39 +1,90 @@
 # %% [markdown]
 # ---
-# title: Recall by an Unseen Key
+# title: Can it look up a value using a new ID?
 # categories:
 # - Associative recall
 # proof-id: P025
-# description: Retrieve a visible source value for a shuffled query sharing an unseen
-#   Hash identity.
+# description: Mix source values and questions in different positions. Use unfamiliar IDs to connect each
+#   question to its source.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Matching IDs
+#   metric:
+#   - intact_nrmse
+#   format: error
+# - label: Changed IDs
+#   metric:
+#   - broken_nrmse
+#   format: error
 # ---
 #
-# A query must recover the source value with its matching identity from one
-# shuffled memory branch. Every row has fresh values and identifiers; fixed
-# positions and persistent vocabulary memorization cannot determine the answer.
+# ## Example
+#
+# ```yaml
+# memory:
+#   - {role: source, is_query: false, entity_id: K1, value: 0.4}
+#   - {role: query, is_query: true, entity_id: K2, value: -0.8}
+#   - {role: source, is_query: false, entity_id: K2, value: -0.8}
+#   - {role: query, is_query: true, entity_id: K1, value: 0.4}
+# ```
+#
+# Source values are visible. Query values are hidden wherever is_query is true.
+#
+# ```{typst}
+# //| label: fig-proof-hash-recall
+# //| fig-cap: "Selector notes identify hidden values. Source values are visible; query values are hidden."
+# //| fig-alt: "Model tree with association, memory, entity_id, role, is_query, value. Selector notes identify hidden values. Source values are visible; query values are hidden."
+# #tree(node("association", kind: "root", width: 120pt, children: (
+#   node("memory", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("entity_id", type: "Hash"),
+#     node("role", type: "Category"),
+#     node("is_query", type: "Boolean"),
+#     node("value", type: "Number", width: 155pt, detail: "Source visible; query hidden"),
+#   )),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Change question IDs while retaining their original answers. This should break an ID-based lookup.
+#
+# ## Result
 #
 # {{< proof P025 status >}}
 #
-# ## Insights
+# The model uses matching IDs rather than a fixed position. Only two source values are tested; missing IDs and larger memories need separate checks.
 #
-# **The model recalls values for unseen keys, and breaking the key relationship
-# removes that skill.** Fresh values and independently shuffled records prevent
-# fixed positions or remembered answers from reliably solving the task. Hash
-# preserves equality without a learned vocabulary; the Boolean query mask hides
-# only query values, leaving source values visible.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The decoder can use both retained ancestor context and the value field's own
-# visible source parcel. Aligned identity and role fields condition each repeated
-# query. Rotating query keys while retaining original targets tests whether that
-# relationship matters. This supports learned recall for two pairs, not a
-# deterministic lookup guarantee. Larger memories, absent or duplicate keys,
-# and collisions remain untested.
+# {{< proof P025 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P025 script >}}
+#
+# ### How it works
+#
+# Coordinate-local encoding binds a source identity to its value. Visible fields
+# at each query coordinate condition its decoder query over retained memory.
+# Source and query orders are independently shuffled. Rotating only query keys
+# while retaining target values should destroy the original association.
+# The [aligned control](aligned-position-control.html) shows what happens when
+# position alone supplies an alternative answer path.
+#
+# ### Remaining work
+#
+# Calibrate across three core seeds and ten lightweight seeds. Test complete
+# record permutations, simultaneous key renaming, larger memories, absent or
+# duplicate keys, padding, and Hash collisions. Use an explicit application
+# lookup when the mapping must be exact.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Retrieve unseen keys from source/query records shuffled into one branch.
@@ -60,54 +111,7 @@ import relflow as rf
 PROOF_ID = "P025"
 PAIR_COUNT = 2
 
-# %% [markdown]
-# ## Examples
-#
-# ### Shuffled queries find their sources
-#
-# ```yaml
-# memory:
-#   - {role: source, is_query: false, entity_id: K1, value: 0.4}
-#   - {role: query, is_query: true, entity_id: K2, value: -0.8}
-#   - {role: source, is_query: false, entity_id: K2, value: -0.8}
-#   - {role: query, is_query: true, entity_id: K1, value: 0.4}
-# ```
-#
-# Query values are supervision hidden by `is_query`. Source values remain
-# visible, and train, validation, and test identities use disjoint namespaces.
-#
-# ### New values change the answers
-#
-# ```yaml
-# memory:
-#   - {role: query, is_query: true, entity_id: K2, value: -0.3}
-#   - {role: source, is_query: false, entity_id: K1, value: 0.9}
-#   - {role: query, is_query: true, entity_id: K1, value: 0.9}
-#   - {role: source, is_query: false, entity_id: K2, value: -0.3}
-# ```
-#
-# Queries are interleaved in another order, and source values have changed.
-# The correct hidden targets follow the matching source values, not a remembered
-# number for K1 or K2.
-#
-# ### Rotate only query identities
-#
-# ```yaml
-# memory:
-#   - {role: source, is_query: false, entity_id: K1, value: 0.4}
-#   - {role: query, is_query: true, entity_id: K1, value: -0.8}
-#   - {role: source, is_query: false, entity_id: K2, value: -0.8}
-#   - {role: query, is_query: true, entity_id: K2, value: 0.4}
-# ```
-#
-# The control keeps the first record's query targets but swaps the query keys.
-# Those retained targets are deliberately no longer the values of their visible
-# keys. A model using identity should lose accuracy against them.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, rows: int, seed: int, namespace: str, broken_identity: bool = False) -> Iterator[dict]:
     """Generate unseen, observation-local key/value associations."""
     rng = np.random.default_rng(seed)
@@ -140,48 +144,6 @@ def normalized_rmse(model: rf.Model, records: list[dict]) -> float:
     return float(np.sqrt(np.mean(np.square(np.asarray(predicted) - actual)) / np.mean(np.square(actual))))
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-hash-recall
-# //| fig-cap: "The root and shuffled memory branch keep all tokens. The Boolean mask hides query values while leaving source values visible."
-# //| fig-alt: "Association contains four source/query memory records with Hash identity, Category role, Boolean is-query, and Number value. The value mask reads is_query, preserving source values and hiding query targets. Root and branch keep all tokens."
-# #tree(node("association", kind: "root", width: 150pt, body: [
-#   - *Reduction:* Keep all tokens
-# ], children: (
-#   node("memory", kind: "branch", repeated: true, width: 150pt, body: [
-#     - *Capacity:* 4 items
-#     - *Reduction:* Keep all tokens
-#   ], children: (
-#     node("entity_id", type: "Hash"),
-#     node("role", type: "Category"),
-#     node("is_query", type: "Boolean"),
-#     node("value", type: "Number", width: 150pt, body: [
-#       - *Mask query:* `is_query`
-#       - *Sources:* Visible input
-#       - *Queries:* Hidden targets
-#     ]),
-#   )),
-# )))
-# ```
-#
-# Both branch and root use `reduction=None`. The value field uses
-# `rf.Mask(query="is_query", dropout=False, reconstruct=True)`.
-#
-# ## How it works
-#
-# Coordinate-local encoding binds a source identity to its value. Visible fields
-# at each query coordinate condition its decoder query over retained memory.
-# Source and query orders are independently shuffled. Rotating only query keys
-# while retaining target values should destroy the original association.
-# The [aligned control](aligned-position-control.html) shows what happens when
-# position alone supplies an alternative answer path.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -238,22 +200,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P025 evidence >}}
-#
-# ## Remaining work
-#
-# Calibrate across three core seeds and ten lightweight seeds. Test complete
-# record permutations, simultaneous key renaming, larger memories, absent or
-# duplicate keys, padding, and Hash collisions. Use an explicit application
-# lookup when the mapping must be exact.
-#
-# ## Reproduce
-#
-# {{< proof P025 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=17)
+
+# %% [markdown]
+# </details>

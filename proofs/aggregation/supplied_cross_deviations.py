@@ -1,32 +1,94 @@
 # %% [markdown]
 # ---
-# title: Averaging supplied centered products
+# title: Can it average prepared contributions to covariance?
 # categories:
 # - Distribution statistics
 # proof-id: P008
-# description: Isolate covariance reduction after the item-level centered products are
-#   already available.
+# description: Supply the centered products used to calculate covariance, then ask for their average.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Average prediction
+#   metric:
+#   - measured
+#   - nrmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# items:
+#   - {cross_deviation: 1.4}
+#   - {cross_deviation: 0.2}
+#   - {cross_deviation: 0.2}
+#   - {cross_deviation: 1.4}
+#   - {cross_deviation: 1.4}
+#   - {cross_deviation: 0.2}
+#   - {cross_deviation: 0.2}
+#   - {cross_deviation: 1.4}
+# covariance: 0.8
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-supplied-cross-deviations
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with record, items, cross_deviation, covariance. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("record", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("cross_deviation", type: "Number"),
+#   )),
+#   node("covariance", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare the prediction with the correct average on new records.
+#
+# ## Result
 #
 # {{< proof P008 status >}}
 #
-# ## Insights
+# The final averaging step works here. Centering and multiplication were already done by the data generator, so they were not learned in this test.
 #
-# **Once centered products are supplied, the model can learn their average as covariance.** The difficult
-# information about pairing and centering has already been calculated outside the model. Positive, negative,
-# and canceling contributions then share the same reduction task.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# This control helps localize a failure in raw-pair covariance. If supplied products are easy but raw pairs
-# are not, the missing behavior is more likely in the interaction than in final averaging. Passing here does
-# not demonstrate learned centering, multiplication, or sensitivity to raw X–Y pairing. The proof checks
-# numerical accuracy for its fixed collection length, without independently testing broader covariance
-# identities.
+# {{< proof P008 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P008 script >}}
+#
+# ### How it works
+#
+# The generator supplies `(x - mean(x)) * (y - mean(y))` for every item.
+# The model sees these eight centered products, not raw `x` and `y` values. The
+# item branch has `attention=None` and `rf.Mean()`, followed by learned root
+# attention and a covariance decoder.
+#
+# This tests whether an encoded average can be decoded into the population
+# cross-moment. It bypasses centering and pairwise multiplication. Compare it with
+# [aligned-pair covariance](aligned-pair-covariance.html) to localize a failure in
+# sibling interaction rather than in the final reduction.
+#
+# ### Remaining work
+#
+# Repeat across seeds and broaden lengths, missing-value behavior, and
+# outliers. This sufficient-statistic diagnostic should remain easier than the raw
+# pairing task; it cannot establish that the model learned the supplied operation.
+#
+# The family’s promotion target is at least three core seeds and ten lightweight
+# calibration seeds.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Supplied centered products isolate covariance reduction.
@@ -49,68 +111,7 @@ import relflow as rf
 PROOF_ID = "P008"
 ITEMS = 8
 
-# %% [markdown]
-# ## Examples
-#
-# Targets use `mask=True`; the labels below are supervision hidden from the encoder.
-#
-# ### Positive centered products
-#
-# ```yaml
-# items:
-#   - {cross_deviation: 1.4}
-#   - {cross_deviation: 0.2}
-#   - {cross_deviation: 0.2}
-#   - {cross_deviation: 1.4}
-#   - {cross_deviation: 1.4}
-#   - {cross_deviation: 0.2}
-#   - {cross_deviation: 0.2}
-#   - {cross_deviation: 1.4}
-# covariance: 0.8
-# ```
-#
-# The eight supplied products average to a population covariance of 0.8.
-#
-# ### Negative centered products
-#
-# ```yaml
-# items:
-#   - {cross_deviation: -1.4}
-#   - {cross_deviation: -0.2}
-#   - {cross_deviation: -0.2}
-#   - {cross_deviation: -1.4}
-#   - {cross_deviation: -1.4}
-#   - {cross_deviation: -0.2}
-#   - {cross_deviation: -0.2}
-#   - {cross_deviation: -1.4}
-# covariance: -0.8
-# ```
-#
-# A negative average requires a covariance of −0.8; this target retains its sign.
-#
-# ### Contributions that cancel
-#
-# ```yaml
-# items:
-#   - {cross_deviation: 1.4}
-#   - {cross_deviation: -0.2}
-#   - {cross_deviation: 0.2}
-#   - {cross_deviation: -1.4}
-#   - {cross_deviation: 1.4}
-#   - {cross_deviation: -0.2}
-#   - {cross_deviation: 0.2}
-#   - {cross_deviation: -1.4}
-# covariance: 0.0
-# ```
-#
-# These nonzero centered products average to zero. The model still receives
-# the sufficient statistic directly; none of these records demonstrates learned
-# centering or multiplication from raw pairs.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def covariance_records(*, rows: int, seed: int) -> Iterator[dict]:
     """Draw paired fields with controlled means, scales, and covariance."""
     rng = np.random.default_rng(seed)
@@ -168,43 +169,6 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-supplied-cross-deviations
-# //| fig-cap: "Mean averages eight supplied centered products without item attention before covariance is decoded."
-# //| fig-alt: "Record contains repeated items with cross deviation inputs, and hidden covariance targets. Root reduction: Attention. Item reduction: Mean; capacity 8; branch attention Off."
-# #tree(node("record", kind: "root", width: 150pt, body: [
-#     - *Reduction:* Attention
-#   ], children: (
-#   node("items", kind: "branch", repeated: true, width: 155pt, body: [
-#       - *Reduction:* Mean
-#       - *Branch attention:* Off
-#       - *Capacity:* 8 items
-#     ], children: (
-#     node("cross_deviation", type: "Number"),
-#   )),
-#   node("covariance", kind: "target", type: "Number"),
-# )))
-# ```
-#
-# ## How it works
-#
-# The generator supplies `(x - mean(x)) * (y - mean(y))` for every item.
-# The model sees these eight centered products, not raw `x` and `y` values. The
-# item branch has `attention=None` and `rf.Mean()`, followed by learned root
-# attention and a covariance decoder.
-#
-# This tests whether an encoded average can be decoded into the population
-# cross-moment. It bypasses centering and pairwise multiplication. Compare it with
-# [aligned-pair covariance](aligned-pair-covariance.html) to localize a failure in
-# sibling interaction rather than in the final reduction.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -247,24 +211,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P008 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat across seeds and broaden lengths, missing-value behavior, and
-# outliers. This sufficient-statistic diagnostic should remain easier than the raw
-# pairing task; it cannot establish that the model learned the supplied operation.
-#
-# The family’s promotion target is at least three core seeds and ten lightweight
-# calibration seeds.
-#
-# ## Reproduce
-#
-# {{< proof P008 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=3513)
+
+# %% [markdown]
+# </details>

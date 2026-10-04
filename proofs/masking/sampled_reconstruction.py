@@ -1,25 +1,93 @@
 # %% [markdown]
 # ---
-# title: Learning from sampled reconstruction masks
-# categories: [Dynamic masking]
+# title: Can hiding values teach a relationship in both directions?
+# categories:
+# - Dynamic masking
 # proof-id: P051
-# description: Learn both directions of a numerical relationship from sampled masks, then request deterministic reconstructions.
+# description: Sometimes hide x or y during training, then ask the model to recover the missing value from
+#   the other.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Recover y from x
+#   metric:
+#   - directions
+#   - y
+#   - nrmse
+#   format: error
+# - label: Recover x from y
+#   metric:
+#   - directions
+#   - x
+#   - nrmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# x: 0.4
+# y: 1.1
+# hide_x: false
+# hide_y: true
+# ```
+#
+# Values marked for reconstruction are hidden. During training, the selection is sampled separately for each field.
+#
+# ```{typst}
+# //| label: fig-proof-sampled-reconstruction
+# //| fig-cap: "Selector notes identify hidden values. Each field is sometimes hidden during training."
+# //| fig-alt: "Model tree with record, x, y. Selector notes identify hidden values. Each field is sometimes hidden during training."
+# #tree(node("record", kind: "root", children: (
+#   node("x", type: "Number", body: [35% sampled; query `hide_x`]),
+#   node("y", type: "Number", body: [35% sampled; query `hide_y`]),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Score both directions on new records. Shuffle the visible value, or hide both, to remove the needed information.
+#
+# ## Result
 #
 # {{< proof P051 status >}}
 #
-# ## Insights
+# The model learns both directions. When both values are hidden, the original answer cannot be identified; this is a small relationship test, not general imputation evidence.
 #
-# Sampled learned-mask reconstruction can learn a cross-field relationship in
-# either direction. This is a provisional synthetic learning check, not evidence
-# of general imputation quality. Both inputs sometimes disappear during training;
-# those observations cannot identify their original values.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# ## Setup
+# {{< proof P051 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< proof P051 script >}}
+#
+# ### Data and model
+#
+# Independent records draw `x ~ Uniform(-1, 1)` and set `y = 2*x + 0.3`.
+# Train, validation, and test contain 4,096, 512, and 2,048 independent rows.
+# Each field has a 35% sampled reconstruction policy and a Boolean query policy.
+# Query flags are false during fitting; inference turns on exactly one flag.
+# Neither flag is an embedded field. No separate supervised target is added.
+#
+# ### Training and controls
+#
+# The model uses the [xs preset](../../core-concepts/model-tree.qmd#choose-a-size).
+#
+# Fit for 400 AdamW updates at learning rate 0.002. Evaluate the final model;
+# no checkpoint or gate is selected using the test set. Each direction must
+# achieve nRMSE below 0.25 relative to its training-mean baseline. Shuffling the
+# remaining input, or hiding both fields, must give nRMSE above 0.85. Poisoning
+# only a hidden source value must leave predictions unchanged within 1e-5.
+# Mask diagnostics also check reproducibility, epoch variation, and the absence
+# of sampled reconstruction requests during ordinary prediction.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P051: sampled cross-field reconstruction with deterministic inference controls."""
@@ -37,56 +105,7 @@ import relflow as rf
 PROOF_ID = "P051"
 BUDGET = 400
 
-# %% [markdown]
-# ## Data and model
-#
-# Independent records draw `x ~ Uniform(-1, 1)` and set `y = 2*x + 0.3`.
-# Train, validation, and test contain 4,096, 512, and 2,048 independent rows.
-# Each field has a 35% sampled reconstruction policy and a Boolean query policy.
-# Query flags are false during fitting; inference turns on exactly one flag.
-# Neither flag is an embedded field. No separate supervised target is added.
-#
-# ```yaml
-# x: 0.4
-# y: 1.1
-# hide_x: false
-# hide_y: true
-# ```
-#
-# This requests `y` from visible `x`. Replacing the supplied hidden `y` must not
-# change its prediction. Swapping the flags requests the inverse relationship.
-#
-# ```yaml
-# x: 0.4
-# y: 1.1
-# hide_x: true
-# hide_y: false
-# ```
-#
-# Here visible `y` identifies the hidden `x`.
-#
-# ```yaml
-# x: 0.4
-# y: 1.1
-# hide_x: true
-# hide_y: true
-# ```
-#
-# With both values hidden, only their training distribution remains available.
-# The supplied values still serve as evaluation labels, not evidence.
-#
-# ```{typst}
-# //| label: fig-proof-sampled-reconstruction
-# //| fig-cap: "Both numerical fields learn from sampled masks; query flags request reconstruction later."
-# //| fig-alt: "Record has Number x and Number y, each sampled for reconstruction in training and selected by its own query flag at prediction."
-# #tree(node("record", kind: "root", children: (
-#   node("x", type: "Number", body: [35% sampled; query `hide_x`]),
-#   node("y", type: "Number", body: [35% sampled; query `hide_y`]),
-# )))
-# ```
 
-
-# %%
 def records(*, rows: int, seed: int) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     for value in rng.uniform(-1.0, 1.0, rows):
@@ -118,21 +137,6 @@ def error(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean((actual - predicted) ** 2)))
 
 
-# %% [markdown]
-# ## Training and controls
-#
-# The model uses the [xs preset](../../core-concepts/model-tree.qmd#choose-a-size).
-#
-# Fit for 400 AdamW updates at learning rate 0.002. Evaluate the final model;
-# no checkpoint or gate is selected using the test set. Each direction must
-# achieve nRMSE below 0.25 relative to its training-mean baseline. Shuffling the
-# remaining input, or hiding both fields, must give nRMSE above 0.85. Poisoning
-# only a hidden source value must leave predictions unchanged within 1e-5.
-# Mask diagnostics also check reproducibility, epoch variation, and the absence
-# of sampled reconstruction requests during ordinary prediction.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -199,19 +203,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence and remaining work
-#
-# {{< proof P051 evidence >}}
-#
-# Gates are provisional and specified before the initial full runs. Repeat across
-# seeds and noisy, nonlinear relationships before making a broader claim. This
-# proof uses learned masks; P052 separately exercises structural skipping.
-#
-# ## Reproduce
-#
-# {{< proof P051 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=5101)
+
+# %% [markdown]
+# </details>

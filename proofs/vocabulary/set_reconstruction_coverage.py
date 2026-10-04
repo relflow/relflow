@@ -1,60 +1,81 @@
 # %% [markdown]
 # ---
-# title: Set probabilities and partial-OOV supervision
-# categories: [Vocabulary]
+# title: Can it learn separate probabilities for Set members?
+# categories:
+# - Vocabulary
 # proof-id: P063
-# description: Input unavailability must preserve membership prevalence and expose unknown target coverage.
+# description: With no useful context, red appears in 90% of answer sets and blue in 20%. Predict each member’s
+#   probability.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Predicted red membership
+#   metric:
+#   - capacity_2
+#   - probabilities
+#   - red
+#   format: percent
+# - label: Predicted blue membership
+#   metric:
+#   - capacity_2
+#   - probabilities
+#   - blue
+#   format: percent
 # ---
 #
-# {{< proof P063 status >}}
-#
-# ## Insights
-#
-# With constant context, independently sampled memberships must recover their
-# population probabilities, not their dropout-thinned frequencies. Red occurs
-# with probability 0.9 and blue with probability 0.2. All annotations are
-# complete sets, so omitted known members are valid negatives even when other
-# members are unknown. This is not a partially annotated-label task.
-#
-# Split by independent rows. Force internal allocations of 2 and 512 as
-# experimental controls, not schema options, under identical seeds and 400
-# updates. `p_unavailable=1` must not erase the hidden answers.
-# The analytic oracle is (0.9, 0.2); the old target-corruption control predicts
-# neither member. This does not establish general OOD calibration.
+# ## Example
 #
 # ```yaml
 # x: 0.0
 # labels: [red, blue]
 # ```
 #
-# ```yaml
-# x: 0.0
-# labels: [red, novel]
-# ```
-#
-# The known red positive and blue negative remain supervised. Novel cannot be
-# named by the prediction head and must lower member coverage.
-#
-# ```yaml
-# x: 0.0
-# labels: []
-# ```
-#
-# Empty is a fully observed set with known negatives, not a missing annotation.
+# The answer is shown here for explanation; it is hidden from the model when scored.
 #
 # ```{typst}
 # //| label: fig-proof-set-reconstruction-coverage
-# //| fig-cap: "Constant context predicts independent membership prevalence."
-# //| fig-alt: "A root contains constant Number x and hidden Set labels."
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with record, x, labels. Amber cards are hidden prediction targets. Other fields provide the input."
 # #tree(node("record", kind: "root", children: (
 #   node("x", type: "Number", detail: "Constant"),
 #   node("labels", kind: "target", type: "Set", detail: "Independent memberships"),
 # )))
 # ```
+#
+# ## Comparison
+#
+# Compare internal output allocations and test sets that also contain unfamiliar members. Known positive and negative annotations remain usable.
+#
+# ## Result
+#
+# {{< proof P063 status >}}
+#
+# The member probabilities recover their population rates. Unknown members still reduce coverage and cannot be emitted; annotations here are complete sets, not partially supplied labels.
+#
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
+#
+# {{< proof P063 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< proof P063 script >}}
+#
+# ### Training and controls
+#
+# Each arm sees 32,768 training rows and 1,024 independent validation rows.
+# Evaluate written probabilities and expected Bernoulli log loss against the
+# oracle. Then replace validation with equal numbers of partial-OOV, all-OOV,
+# empty, known-only and null sets. Rebatch them in a different order. Member
+# coverage must be 1/2, complete-set coverage 1/2, and all epochs must count
+# exactly 256 known and 256 unknown positive memberships. Unused capacity
+# must not change the meaning of the reported membership loss.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P063: membership probability and coverage have explicit support."""
@@ -102,19 +123,6 @@ def build(size: int) -> rf.Model:
     return model
 
 
-# %% [markdown]
-# ## Training and controls
-#
-# Each arm sees 32,768 training rows and 1,024 independent validation rows.
-# Evaluate written probabilities and expected Bernoulli log loss against the
-# oracle. Then replace validation with equal numbers of partial-OOV, all-OOV,
-# empty, known-only and null sets. Rebatch them in a different order. Member
-# coverage must be 1/2, complete-set coverage 1/2, and all epochs must count
-# exactly 256 known and 256 unknown positive memberships. Unused capacity
-# must not change the meaning of the reported membership loss.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     metrics, checks = {}, {}
     prior = np.asarray([0.9, 0.2])
@@ -193,19 +201,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence and limitations
-#
-# {{< proof P063 evidence >}}
-#
-# Gates are provisional. A closed vocabulary still cannot emit novel labels.
-# Membership BCE assumes complete annotations; absent labels must not be
-# interpreted as negatives in an application with incomplete annotations.
-#
-# ## Reproduce
-#
-# {{< proof P063 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=7631)
+
+# %% [markdown]
+# </details>

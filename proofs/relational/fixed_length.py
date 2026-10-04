@@ -1,39 +1,94 @@
 # %% [markdown]
 # ---
-# title: Choose a Numeric Operation
+# title: Can an instruction change the calculation?
 # categories:
 # - Operation-conditioned reduction
 # proof-id: P031
-# description: Infer sum, mean, minimum, or maximum from the same collection and a visible
-#   request.
+# description: Ask for a list’s minimum, maximum, average, or total by changing a visible operation field.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Total, instruction visible
+#   metric:
+#   - intact/sum/nrmse
+#   format: error
+# - label: Total, instruction hidden
+#   metric:
+#   - hidden/sum/nrmse
+#   format: error
 # ---
 #
-# A visible operation tells the model which statistic to infer from eight
-# numbers. Each bag appears with four different answers, so the collection alone
-# cannot identify the requested answer.
+# ## Example
+#
+# ```yaml
+# bag: 0
+# items:
+#   - {value: 0.1}
+#   - {value: -0.1}
+#   - {value: 0.4}
+#   - {value: 0.2}
+#   - {value: 0.5}
+#   - {value: 0.0}
+#   - {value: -1.0}
+#   - {value: 1.2}
+# operation: max
+# answer: 1.2
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-fixed-length
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with request, items, value, answer, operation. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("request", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("value", type: "Number"),
+#   )),
+#   node("answer", kind: "target", type: "Number", width: 150pt,),
+#   node("operation", type: "Category"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Hide the operation while keeping the different answers. Also reorder items without changing the requested calculation.
+#
+# ## Result
 #
 # {{< proof P031 status >}}
 #
-# ## Insights
+# The operation matters: hiding it makes predictions collapse to the same answer. All lists have eight items, so new lengths remain untested.
 #
-# **The model changes its answer when the operation changes and approximately
-# preserves it when item order changes.** Hiding the operation makes the four
-# requests for a bag identical while their original labels remain different.
-# Their predictions collapse and lose skill, confirming that the request supplies
-# necessary information.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The operation is an ordinary Category that can condition the scalar decoder;
-# it does not select an exact Python arithmetic function. The permutation control
-# checks prediction drift as well as accuracy. However, all bags have eight
-# values, where sum is always eight times mean. Success therefore does not
-# establish cardinality-aware reduction at unseen lengths or exact numerical
-# invariance.
+# {{< proof P031 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P031 script >}}
+#
+# ### How it works
+#
+# The decoder must learn how the request changes the use of collection context.
+# Permuting complete items should preserve a statistic; hiding the operation
+# makes the four requests for a bag identical. Their predictions should then
+# collapse to one value and lose accuracy on the contradictory targets.
+#
+# ### Remaining work
+#
+# Evaluate every operation at lengths 4–16, then characterize degradation through
+# 32. If sum fails alone, a visible-count control can isolate lost cardinality.
+# Repeat three core seeds and ten calibration seeds before fixing the supported
+# range. Exact numerical reductions belong in preprocessing when exactness is
+# the application contract.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Learn four visibly requested reductions of the same eight-value bag.
@@ -60,75 +115,7 @@ import relflow as rf
 PROOF_ID = "P031"
 OPERATIONS = ("sum", "mean", "min", "max")
 
-# %% [markdown]
-# ## Examples
-#
-# ### Request the maximum
-#
-# ```yaml
-# bag: 0
-# items:
-#   - {value: 0.1}
-#   - {value: -0.1}
-#   - {value: 0.4}
-#   - {value: 0.2}
-#   - {value: 0.5}
-#   - {value: 0.0}
-#   - {value: -1.0}
-#   - {value: 1.2}
-# operation: max
-# answer: 1.2
-# ```
-#
-# `answer` is masked supervision and removed from prediction requests. `bag`
-# tracks related requests during evaluation and is excluded from the schema.
-#
-# ### The same bag has a different mean
-#
-# ```yaml
-# bag: 0
-# items:
-#   - {value: 0.1}
-#   - {value: -0.1}
-#   - {value: 0.4}
-#   - {value: 0.2}
-#   - {value: 0.5}
-#   - {value: 0.0}
-#   - {value: -1.0}
-#   - {value: 1.2}
-# operation: mean
-# answer: 0.1625
-# ```
-#
-# The values sum to 1.3, so their mean is 0.1625. The visible request is the only
-# difference that tells the model which of these two correct answers is wanted.
-#
-# ### Hide the requested operation
-#
-# ```yaml
-# bag: 0
-# items:
-#   - {value: 0.1}
-#   - {value: -0.1}
-#   - {value: 0.4}
-#   - {value: 0.2}
-#   - {value: 0.5}
-#   - {value: 0.0}
-#   - {value: -1.0}
-#   - {value: 1.2}
-# operation: null
-# answer: 1.2
-# ```
-#
-# The control replaces the operation with null while retaining the original
-# maximum target. The mean request becomes the same visible record but retains
-# 0.1625. Their predictions should coincide, since the information distinguishing
-# the requests has been removed.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def reduce(values: np.ndarray, operation: str) -> float:
     """Execute one synthetic reduction outside RelFlow."""
 
@@ -201,45 +188,6 @@ def permute_items(rows: list[dict], seed: int) -> list[dict]:
     return result
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-fixed-length
-# //| fig-cap: "Eight visible values and an operation request feed a masked scalar answer; the branch and root each learn one summary."
-# //| fig-alt: "Request has eight repeated Number values, a Category operation, and a masked Number answer. Both branch and root use one learned attention summary."
-# #tree(node("request", kind: "root", width: 150pt, body: [
-#   - *Reduction:* `Attention`
-#   - *Learned summaries:* 1
-# ], children: (
-#   node("items", kind: "branch", repeated: true, width: 150pt, body: [
-#     - *Capacity:* 8 items
-#     - *Reduction:* `Attention`
-#     - *Learned summaries:* 1
-#   ], children: (
-#     node("value", type: "Number"),
-#   )),
-#   node("answer", kind: "target", type: "Number", width: 150pt, body: [
-#     - *Input:* always hidden
-#   ]),
-#   node("operation", type: "Category"),
-# )))
-# ```
-#
-# The item branch and root both use attention reduction. The operation is a
-# normal input Category, not a runtime instruction selecting a Python function.
-#
-# ## How it works
-#
-# The decoder must learn how the request changes the use of collection context.
-# Permuting complete items should preserve a statistic; hiding the operation
-# makes the four requests for a bag identical. Their predictions should then
-# collapse to one value and lose accuracy on the contradictory targets.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -302,23 +250,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P031 evidence >}}
-#
-# ## Remaining work
-#
-# Evaluate every operation at lengths 4–16, then characterize degradation through
-# 32. If sum fails alone, a visible-count control can isolate lost cardinality.
-# Repeat three core seeds and ten calibration seeds before fixing the supported
-# range. Exact numerical reductions belong in preprocessing when exactness is
-# the application contract.
-#
-# ## Reproduce
-#
-# {{< proof P031 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=15)
+
+# %% [markdown]
+# </details>

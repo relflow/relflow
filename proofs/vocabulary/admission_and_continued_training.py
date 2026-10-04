@@ -1,26 +1,92 @@
 # %% [markdown]
 # ---
-# title: Admitting a label is not learning to predict it
-# categories: [Vocabulary and OOV]
+# title: Does adding a label teach the model to predict it?
+# categories:
+# - Vocabulary and OOV
 # proof-id: P059
-# description: Follow an output vocabulary through cold prediction, training, checkpoints, new-label admission, and continued fitting with rehearsal.
+# description: Introduce new output labels to a model trained on an earlier pair of classes.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: New labels, just admitted
+#   metric:
+#   - new_accuracy_immediately_after_admission
+#   format: percent
+# - label: New labels, after fitting
+#   metric:
+#   - final_new_accuracy
+#   format: percent
+# - label: Old labels, after fitting
+#   metric:
+#   - final_old_accuracy
+#   format: percent
 # ---
+#
+# ## Example
+#
+# ```yaml
+# x: -0.9
+# label: negative
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-vocabulary-admission-training
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with record, x, label. Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("record", kind: "root", children: (
+#   node("x", type: "Number", body: [Four separated numerical regions]),
+#   node("label", kind: "target", type: "Category", body: [Two labels, growing to four]),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Measure before admission, immediately after admission without training, and after continued fitting. Rehearse the old classes too.
+#
+# ## Result
 #
 # {{< proof P059 status >}}
 #
-# ## Insights
+# Admission creates storage; further training teaches the new distinctions. Old-label retention here depends on continued examples of the old classes.
 #
-# Prediction cannot teach a vocabulary. Training-time encoding can admit a
-# label through automatic storage growth without taking an optimizer step; admission
-# alone does not establish learned behavior. Check both mapping retention and
-# held-out accuracy after continued fitting. Rehearse original classes so that
-# old-task retention is an explicit part of the experiment.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# ## Setup
+# {{< proof P059 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< proof P059 script >}}
+#
+# ### Data and model
+#
+# Initially, x lies within 0.15 of -1 or +1 and predicts negative or positive.
+# New classes lie within 0.15 of -3 or +3. Each split balances its classes and
+# shuffles them with an independent local RNG. Each fitting phase uses 4,096
+# training and 512 validation rows; the old and new tests each use 1,024 rows.
+# Storage initially learns two output labels, then grows to hold four.
+#
+# ### Training and controls
+#
+# The model uses the [xs preset](../../core-concepts/model-tree.qmd#choose-a-size).
+#
+# Use 300 initial and 400 continuation AdamW updates at learning rate 0.002,
+# one device, and no loader workers. Require 0.95 accuracy on the initial task,
+# then on both old and new held-out classes after continued fitting. Chance is
+# 0.5 on each two-class test. Before admission, new-class accuracy is necessarily
+# zero. Validation, test, and prediction must not admit labels or change counts
+# or numerical moments. Explicit train encoding must append labels without
+# changing existing parameter rows; new rows, normalization, and count buffers may change.
+# Save/load must preserve labels, counts, and predictions in both phases.
+# Immediate accuracy after admission is diagnostic, not an acceptance gate.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P059: vocabulary persistence and new-label admission followed by measured learning."""
@@ -44,49 +110,7 @@ CONTINUATION = 400
 LABELS = ("negative", "positive", "far-negative", "far-positive")
 CENTERS = (-1.0, 1.0, -3.0, 3.0)
 
-# %% [markdown]
-# ## Data and model
-#
-# Initially, x lies within 0.15 of -1 or +1 and predicts negative or positive.
-# New classes lie within 0.15 of -3 or +3. Each split balances its classes and
-# shuffles them with an independent local RNG. Each fitting phase uses 4,096
-# training and 512 validation rows; the old and new tests each use 1,024 rows.
-# Storage initially learns two output labels, then grows to hold four.
-#
-# ```yaml
-# x: -0.9
-# label: negative
-# ```
-#
-# The initial task fills only part of the output vocabulary.
-#
-# ```yaml
-# x: -3.1
-# label: far-negative
-# ```
-#
-# Evaluation does not allocate a slot for this new answer.
-#
-# ```yaml
-# x: 3.1
-# label: far-positive
-# ```
-#
-# Explicit training encoding can admit both new labels. Continued fitting
-# then sees a balanced mixture of all four classes, including the old ones.
-#
-# ```{typst}
-# //| label: fig-proof-vocabulary-admission-training
-# //| fig-cap: "Output-vocabulary admission and optimizer learning are separate events."
-# //| fig-alt: "Record contains Number x and hidden Category label, whose vocabulary grows from two to four discovered labels during continued training."
-# #tree(node("record", kind: "root", children: (
-#   node("x", type: "Number", body: [Four separated numerical regions]),
-#   node("label", kind: "target", type: "Category", body: [Two labels, growing to four]),
-# )))
-# ```
 
-
-# %%
 def records(*, rows: int, seed: int, phase: str = "initial") -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     indices = {"initial": (0, 1), "new": (2, 3), "mixed": (0, 1, 2, 3)}[phase]
@@ -156,23 +180,6 @@ def roundtrip(model: rf.Model, rows: list[dict], path: Path) -> tuple[rf.Model, 
     return loaded, matches
 
 
-# %% [markdown]
-# ## Training and controls
-#
-# The model uses the [xs preset](../../core-concepts/model-tree.qmd#choose-a-size).
-#
-# Use 300 initial and 400 continuation AdamW updates at learning rate 0.002,
-# one device, and no loader workers. Require 0.95 accuracy on the initial task,
-# then on both old and new held-out classes after continued fitting. Chance is
-# 0.5 on each two-class test. Before admission, new-class accuracy is necessarily
-# zero. Validation, test, and prediction must not admit labels or change counts
-# or numerical moments. Explicit train encoding must append labels without
-# changing existing parameter rows; new rows, normalization, and count buffers may change.
-# Save/load must preserve labels, counts, and predictions in both phases.
-# Immediate accuracy after admission is diagnostic, not an acceptance gate.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -239,21 +246,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }, checks
 
 
-# %% [markdown]
-# ## Evidence and remaining work
-#
-# {{< proof P059 evidence >}}
-#
-# Gates are provisional. This exercises automatic growth of a trained head.
-# It does not claim retention without rehearsal,
-# optimal continual learning, or vocabulary synchronization across workers or
-# distributed ranks. Admission may change buffers and the output softmax
-# denominator, so preserved old rows do not imply unchanged predictions.
-#
-# ## Reproduce
-#
-# {{< proof P059 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=5901)
+
+# %% [markdown]
+# </details>

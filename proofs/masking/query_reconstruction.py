@@ -1,25 +1,89 @@
 # %% [markdown]
 # ---
-# title: Reconstructing selected nested values
-# categories: [Dynamic masking]
+# title: Can each item choose which value to hide?
+# categories:
+# - Dynamic masking
 # proof-id: P052
-# description: Boolean selectors hide and reconstruct individual repeated values without leaking their supplied labels.
+# description: Use an item’s selected flag to hide its value and predict it from x.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Correct visible x
+#   metric:
+#   - nrmse
+#   format: error
+# - label: Shuffled visible x
+#   metric:
+#   - corrupted_context_nrmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# items:
+#   - {x: 0.4, value: 1.1, selected: true}
+#   - {x: -0.2, value: -0.1, selected: false}
+# ```
+#
+# value is hidden and scored only where selected is true; the other item remains visible.
+#
+# ```{typst}
+# //| label: fig-proof-query-reconstruction
+# //| fig-cap: "Selector notes identify hidden values. selected chooses which item values are hidden."
+# //| fig-alt: "Model tree with record, items, x, value. Selector notes identify hidden values. selected chooses which item values are hidden."
+# #tree(node("record", kind: "root", children: (
+#   node("items", kind: "branch", repeated: true, children: (
+#     node("x", type: "Number"),
+#     node("value", type: "Number", body: [Skip and reconstruct when `selected`]),
+#   )),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Score only selected real items. Change their hidden values to check they cannot leak into predictions, and shuffle visible x to remove its signal.
+#
+# ## Result
 #
 # {{< proof P052 status >}}
 #
-# ## Insights
+# Per-item selection works, including padded positions. This tests aligned local reconstruction, rather than retrieval across unrelated lists.
 #
-# A Boolean query can choose different reconstruction coordinates in each bag.
-# Structural skipping must hide those source values while retaining labels for
-# learning. Scores use only requested, non-padding coordinates. This does not
-# test retrieval across unrelated branches or unseen schema lengths.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# ## Setup
+# {{< proof P052 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< proof P052 script >}}
+#
+# ### Data and model
+#
+# Each independent bag contains one to four items. Item-local `x` is uniform on
+# `[-1, 1]`, and `value = 2*x + 0.3`. Independent Boolean selectors hide roughly
+# half the values, with at least one selected per bag. Entire bags are split
+# into 2,048 training, 256 validation, and 1,024 test observations.
+#
+# ### Training and controls
+#
+# The [xs preset](../../core-concepts/model-tree.qmd#choose-a-size) supplies the
+# architecture defaults; the items branch keeps `reduction=None` to retain
+# its coordinate slots.
+#
+# Fit for 400 AdamW updates at learning rate 0.002. The primary gate is selected
+# coordinate nRMSE below 0.25, relative to the selected training-label mean.
+# Replacing visible `x` with independent samples must push nRMSE above 0.85.
+# Replacing only hidden `value` inputs must change predictions by less than
+# 1e-5. Encoded training masks and output `inferred` flags must exactly match
+# the selectors, including unselected and padded positions.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P052: query-selected reconstruction over variable-length repeated records."""
@@ -38,56 +102,7 @@ PROOF_ID = "P052"
 LENGTH = 4
 BUDGET = 400
 
-# %% [markdown]
-# ## Data and model
-#
-# Each independent bag contains one to four items. Item-local `x` is uniform on
-# `[-1, 1]`, and `value = 2*x + 0.3`. Independent Boolean selectors hide roughly
-# half the values, with at least one selected per bag. Entire bags are split
-# into 2,048 training, 256 validation, and 1,024 test observations.
-#
-# ```yaml
-# items:
-#   - {x: 0.4, value: 1.1, selected: true}
-#   - {x: -0.2, value: -0.1, selected: false}
-# ```
-#
-# The first `value` is hidden and reconstructed; the second is an ordinary input.
-# `selected` is policy metadata, not an embedded field. Padding is neither a
-# target nor an extra observation.
-#
-# ```yaml
-# items:
-#   - {x: 0.4, value: 1000.0, selected: true}
-#   - {x: -0.2, value: -0.1, selected: false}
-# ```
-#
-# Poisoning the first hidden source value must not change its prediction. The
-# evaluator retains the original label 1.1 rather than scoring against 1000.
-#
-# ```yaml
-# items:
-#   - {x: 0.4, value: 1.1, selected: false}
-#   - {x: -0.2, value: -0.1, selected: true}
-# ```
-#
-# Changing selectors changes the requested coordinate; it does not change the
-# schema or make padded positions into targets.
-#
-# ```{typst}
-# //| label: fig-proof-query-reconstruction
-# //| fig-cap: "Each item supplies visible x and a selectively hidden reconstruction target."
-# //| fig-alt: "Record has repeated items, each with Number x and Number value. Boolean selected controls structural skipping and reconstruction of value."
-# #tree(node("record", kind: "root", children: (
-#   node("items", kind: "branch", repeated: true, children: (
-#     node("x", type: "Number"),
-#     node("value", type: "Number", body: [Skip and reconstruct when `selected`]),
-#   )),
-# )))
-# ```
 
-
-# %%
 def records(*, rows: int, seed: int) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     for _ in range(rows):
@@ -122,22 +137,6 @@ def prediction(model: rf.Model, rows: list[dict]) -> tuple[np.ndarray, np.ndarra
     return content.reshape(len(rows), LENGTH), inferred.reshape(len(rows), LENGTH)
 
 
-# %% [markdown]
-# ## Training and controls
-#
-# The [xs preset](../../core-concepts/model-tree.qmd#choose-a-size) supplies the
-# architecture defaults; the items branch keeps `reduction=None` to retain
-# its coordinate slots.
-#
-# Fit for 400 AdamW updates at learning rate 0.002. The primary gate is selected
-# coordinate nRMSE below 0.25, relative to the selected training-label mean.
-# Replacing visible `x` with independent samples must push nRMSE above 0.85.
-# Replacing only hidden `value` inputs must change predictions by less than
-# 1e-5. Encoded training masks and output `inferred` flags must exactly match
-# the selectors, including unselected and padded positions.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -205,18 +204,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }
 
 
-# %% [markdown]
-# ## Evidence and remaining work
-#
-# {{< proof P052 evidence >}}
-#
-# Gates are provisional, declared before full runs. Repeat across seeds and
-# mixed datatypes before generalizing this item-local result.
-#
-# ## Reproduce
-#
-# {{< proof P052 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=5201)
+
+# %% [markdown]
+# </details>

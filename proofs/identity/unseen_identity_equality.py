@@ -1,38 +1,93 @@
 # %% [markdown]
 # ---
-# title: Equality for Unseen Identities
+# title: Can it recognize matching IDs it has never seen?
 # categories:
 # - Identity
 # proof-id: P021
-# description: Hash fields can support equality predictions for identities absent from
-#   training.
+# description: Ask whether two IDs are equal, using IDs absent from training.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Hash inputs
+#   metric:
+#   - hash_auc
+#   format: auc
+# - label: Unknown Category inputs
+#   metric:
+#   - category_oov_auc
+#   format: auc
+# - label: Shuffled answers
+#   metric:
+#   - shuffled_auc
+#   format: auc
 # ---
 #
-# Two identifiers can be equal even when neither appeared during training.
-# This proof asks a model to recognize that relationship across two Hash fields
-# on entirely new identity namespaces.
+# ## Example
+#
+# ```yaml
+# left_id: test-17
+# right_id: test-17
+# equal: true
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-identity-unseen-identity-equality
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with identity, left_id, right_id, equal. Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("identity", kind: "root", children: (
+#   node("left_id", type: "Hash", width: 150pt,),
+#   node("right_id", type: "Hash", width: 150pt,),
+#   node("equal", kind: "target", type: "Boolean",),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare Hash inputs with Category inputs that treat new IDs as unknown. Shuffle answers as a second check.
+#
+# ## Result
 #
 # {{< proof P021 status >}}
 #
-# ## Insights
+# Hash preserves a useful matching signal for new IDs. This test compares two IDs within one record; larger lookups and joins require their own evidence.
 #
-# **Hash can preserve equality across fields without learning each identifier in advance.** Compatible
-# batch-local representations let matching unseen strings supply a comparison signal to the shared model.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The recorded Hash model clears the held-out equality gate on a disjoint namespace. Shuffling labels
-# removes that advantage, while matched Category fields cannot reliably distinguish unseen strings after
-# their content becomes unavailable. The evidence below reports both the measured scores and their
-# acceptance gates.
+# {{< proof P021 evidence >}}
 #
-# Use Hash when observation-local equality matters more than persistent category semantics. This result does
-# not establish invertible identifiers, stable embeddings across separately encoded batches, or general
-# relational joins. Prediction stability under a shared identity renaming remains untested.
+# ### Run this experiment
 #
-# ## Setup
+# {{< proof P021 script >}}
+#
+# ### How it works
+#
+# [Hash](../../data-types/hash.qmd) preserves equality across fields within an
+# encoded batch. Its representation does not require a persistent entry for
+# each identifier, so new strings can still supply the comparison signal.
+#
+# The test trains both a Hash model and a matched Category model. Train,
+# validation, and test use disjoint `train-`, `validate-`, and `test-` namespaces.
+# The Category control encounters unknown content in both fields at test time.
+# A second control evaluates the trained Hash model after shuffling the test
+# labels, preserving identities while breaking their association with the answer.
+#
+# The protocol uses 4,096 training, 1,024 validation, and 4,096 test pairs, with
+# 20 deterministic epochs. Equal and unequal pairs are balanced.
+#
+# ### Remaining work
+#
+# Apply the same unseen-identity renaming to both fields and check whether
+# predictions remain stable. Repeat the three evaluations over three core
+# seeds and at least ten calibration seeds, keeping the Category boundary.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P021: infer equality between identities absent from the training vocabulary.
@@ -54,51 +109,7 @@ import relflow as rf
 
 PROOF_ID = "P021"
 
-# %% [markdown]
-# ## Examples
-#
-# All identifiers below belong to the test namespace, which is absent during
-# training. `equal` is a hidden Boolean target.
-#
-# ### Matching unseen identities
-#
-# ```yaml
-# left_id: test-17
-# right_id: test-17
-# equal: true
-# ```
-#
-# The two strings match. Compatible Hash representations preserve the equality
-# signal even without a learned vocabulary entry for `test-17`.
-#
-# ### Different unseen identities
-#
-# ```yaml
-# left_id: test-17
-# right_id: test-93
-# equal: false
-# ```
-#
-# Only the right identity changed. The model must distinguish equality from
-# the mere fact that both values are unfamiliar.
-#
-# ### A shuffled-label control
-#
-# ```yaml
-# left_id: test-17
-# right_id: test-17
-# equal: false
-# ```
-#
-# Shuffling held-out labels can produce this contradictory record. Its label
-# is deliberately no longer the true equality answer. The control should
-# return chance-level aggregate performance; one corrupted row alone is not
-# a performance measurement.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, rows: int, seed: int, namespace: str, shuffle_targets: bool = False) -> Iterator[dict]:
     """Yield balanced equal/unequal pairs from one identity namespace."""
     rng = np.random.default_rng(seed)
@@ -119,47 +130,6 @@ def records(*, rows: int, seed: int, namespace: str, shuffle_targets: bool = Fal
         }
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-identity-unseen-identity-equality
-# //| fig-cap: "Each identity uses four compatible hashes; the Category comparison replaces both inputs. The equality target stays hidden."
-# //| fig-alt: "Identity contains left ID and right ID inputs using four hashes each, replaced by Category fields in the comparison, and a Boolean equal target always hidden from input."
-# #tree(node("identity", kind: "root", children: (
-#   node("left_id", type: "Hash", width: 150pt, body: [
-#     - *Hashes:* 4
-#     - *Control:* Category
-#   ]),
-#   node("right_id", type: "Hash", width: 150pt, body: [
-#     - *Hashes:* 4
-#     - *Control:* Category
-#   ]),
-#   node("equal", kind: "target", type: "Boolean", body: [
-#     - *Input:* always hidden
-#   ]),
-# )))
-# ```
-#
-# ## How it works
-#
-# [Hash](../../data-types/hash.qmd) preserves equality across fields within an
-# encoded batch. Its representation does not require a persistent entry for
-# each identifier, so new strings can still supply the comparison signal.
-#
-# The test trains both a Hash model and a matched Category model. Train,
-# validation, and test use disjoint `train-`, `validate-`, and `test-` namespaces.
-# The Category control encounters unknown content in both fields at test time.
-# A second control evaluates the trained Hash model after shuffling the test
-# labels, preserving identities while breaking their association with the answer.
-#
-# The protocol uses 4,096 training, 1,024 validation, and 4,096 test pairs, with
-# 20 deterministic epochs. Equal and unequal pairs are balanced.
-#
-# ## Training and evaluation
-
-
-# %%
 def fit(*, identity: Literal["hash", "category"], seed: int, steps: int | None, accelerator: str) -> rf.Model:
     """Train one representation on the same identity pairs."""
     lit.seed_everything(seed, workers=True)
@@ -230,21 +200,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P021 evidence >}}
-#
-# ## Remaining work
-#
-# Apply the same unseen-identity renaming to both fields and check whether
-# predictions remain stable. Repeat the three evaluations over three core
-# seeds and at least ten calibration seeds, keeping the Category boundary.
-#
-# ## Reproduce
-#
-# {{< proof P021 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=29)
+
+# %% [markdown]
+# </details>

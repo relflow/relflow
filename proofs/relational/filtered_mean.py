@@ -1,38 +1,95 @@
 # %% [markdown]
 # ---
-# title: Average the Requested Group
+# title: Can it average only the requested group?
 # categories:
 # - Category-conditioned reduction
 # proof-id: P026
-# description: Select one interleaved group before averaging its values.
+# description: Ask for the average of one named group within a mixed list.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Group A, correct labels
+#   metric:
+#   - intact/A/nrmse
+#   format: error
+# - label: Group A, changed labels
+#   metric:
+#   - corrupted/A/nrmse
+#   format: error
 # ---
 #
-# The model receives an interleaved collection and a requested group. Its answer
-# should average only members of that group. This isolates category-based
-# selection before adding a choice of mathematical operation.
+# ## Example
+#
+# ```yaml
+# bag: 0
+# items:
+#   - {group: A, value: 1.0}
+#   - {group: B, value: -0.4}
+#   - {group: C, value: 0.5}
+#   - {group: A, value: 1.2}
+#   - {group: B, value: -0.2}
+#   - {group: C, value: 0.7}
+# selected_group: B
+# operation: mean
+# answer: -0.3
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-filtered-mean
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with request, items, value, group, answer, operation, selected_group. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("request", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("value", type: "Number"),
+#     node("group", type: "Category"),
+#   )),
+#   node("answer", kind: "target", type: "Number", width: 150pt,),
+#   node("operation", type: "Category"),
+#   node("selected_group", type: "Category"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Reuse the list with different group requests. Shuffle group labels while retaining the original answers.
+#
+# ## Result
 #
 # {{< proof P026 status >}}
 #
-# ## Insights
+# The model uses membership to choose the relevant values. Empty groups and unfamiliar group names are not tested.
 #
-# **The model uses group membership to select which values contribute to its
-# answer.** The same bag supplies separate requests for each group, while the
-# operation stays fixed at mean. Item coordinates keep group and value together;
-# the visible root request can condition how the decoder uses the learned
-# collection summary.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Shuffling only group labels preserves all values and category counts but makes
-# the retained original answers inconsistent with the new membership. Increased
-# error supports use of the group/value relationship. It does not establish an
-# exact filtering algorithm or behavior for absent groups and unknown categories.
-# This small task also shows that pass-through reduction is not required for
-# every learned group selection.
+# {{< proof P026 evidence >}}
 #
-# ## Setup
+# ### Run this experiment
+#
+# {{< proof P026 script >}}
+#
+# ### How it works
+#
+# Shared item coordinates let encoding bind each category to its value. The
+# visible root selection can condition which evidence the answer decoder uses.
+# Each underlying bag produces three requests, one per group. Corrupting only
+# item labels preserves their counts and all values while breaking membership.
+# The control therefore tests selection rather than aggregate statistics alone.
+#
+# ### Remaining work
+#
+# Repeat across three core seeds and ten calibration seeds. Add missing values,
+# absent groups, and variable group sizes. The next rung
+# [combines group selection with four operations](group-operation-composition.html).
+# For an exact business calculation, compute the filtered mean in preprocessing.
+#
+# ### Complete experiment code
+#
 
 # %%
 """Select the mean of one requested group from interleaved items.
@@ -60,72 +117,7 @@ PROOF_ID = "P026"
 OPERATIONS = ("sum", "mean", "min", "max")
 GROUPS = ("A", "B", "C")
 
-# %% [markdown]
-# ## Examples
-#
-# ### Select group B
-#
-# ```yaml
-# bag: 0
-# items:
-#   - {group: A, value: 1.0}
-#   - {group: B, value: -0.4}
-#   - {group: C, value: 0.5}
-#   - {group: A, value: 1.2}
-#   - {group: B, value: -0.2}
-#   - {group: C, value: 0.7}
-# selected_group: B
-# operation: mean
-# answer: -0.3
-# ```
-#
-# The mean of B's values is −0.3. `answer` is masked supervision and omitted
-# from prediction requests. `bag` identifies paired requests for evaluation;
-# it is not a model field.
-#
-# ### Select another group in the same bag
-#
-# ```yaml
-# bag: 0
-# items:
-#   - {group: A, value: 1.0}
-#   - {group: B, value: -0.4}
-#   - {group: C, value: 0.5}
-#   - {group: A, value: 1.2}
-#   - {group: B, value: -0.2}
-#   - {group: C, value: 0.7}
-# selected_group: A
-# operation: mean
-# answer: 1.1
-# ```
-#
-# Only the requested group changes. Its correct answer is now the mean of 1.0
-# and 1.2. Each training bag supplies a request for every group.
-#
-# ### Break group membership
-#
-# ```yaml
-# bag: 0
-# items:
-#   - {group: B, value: 1.0}
-#   - {group: A, value: -0.4}
-#   - {group: C, value: 0.5}
-#   - {group: B, value: 1.2}
-#   - {group: A, value: -0.2}
-#   - {group: C, value: 0.7}
-# selected_group: B
-# operation: mean
-# answer: -0.3
-# ```
-#
-# Permuting labels retains every value and label count. This control deliberately
-# keeps the first record's answer, −0.3, although B's visible mean is now 1.1.
-# Increased error against the retained target exposes reliance on membership.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, bags: int, items_per_group: int, seed: int) -> Iterator[dict]:
     """Generate the smallest group-filtering rung with one fixed reduction."""
     rng = np.random.default_rng(seed)
@@ -181,48 +173,6 @@ def corrupt_labels(rows: list[dict], seed: int) -> list[dict]:
     return result
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-filtered-mean
-# //| fig-cap: "The six-item branch and root each learn one attention summary. Visible group and operation requests condition the masked answer."
-# //| fig-alt: "Request has 6 grouped Number items, visible operation and selected-group Categories, and a masked Number answer. Branch and root each learn one attention summary."
-# #tree(node("request", kind: "root", width: 150pt, body: [
-#   - *Reduction:* `Attention`
-#   - *Learned summaries:* 1
-# ], children: (
-#   node("items", kind: "branch", repeated: true, width: 150pt, body: [
-#     - *Capacity:* 6 items
-#     - *Reduction:* `Attention`
-#     - *Learned summaries:* 1
-#   ], children: (
-#     node("value", type: "Number"),
-#     node("group", type: "Category"),
-#   )),
-#   node("answer", kind: "target", type: "Number", width: 150pt, body: [
-#     - *Input:* always hidden
-#   ]),
-#   node("operation", type: "Category"),
-#   node("selected_group", type: "Category"),
-# )))
-# ```
-#
-# This rung uses attention reduction on both branch and root. `operation` remains
-# a visible schema field but always equals `mean` in this experiment.
-#
-# ## How it works
-#
-# Shared item coordinates let encoding bind each category to its value. The
-# visible root selection can condition which evidence the answer decoder uses.
-# Each underlying bag produces three requests, one per group. Corrupting only
-# item labels preserves their counts and all values while breaking membership.
-# The control therefore tests selection rather than aggregate statistics alone.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -279,22 +229,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P026 evidence >}}
-#
-# ## Remaining work
-#
-# Repeat across three core seeds and ten calibration seeds. Add missing values,
-# absent groups, and variable group sizes. The next rung
-# [combines group selection with four operations](group-operation-composition.html).
-# For an exact business calculation, compute the filtered mean in preprocessing.
-#
-# ## Reproduce
-#
-# {{< proof P026 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=16)
+
+# %% [markdown]
+# </details>

@@ -1,27 +1,87 @@
 # %% [markdown]
 # ---
-# title: Cluster Pretraining Coverage
-# categories: [Vocabulary]
+# title: Can Cluster reconstruction hide missing coverage too?
+# categories:
+# - Vocabulary
 # proof-id: P065
-# description: Unknown reconstruction targets must affect coverage without inventing uniform-label supervision or hiding denominator changes.
+# description: Reconstruct a Cluster answer from a categorical cue while reducing the share of test identities
+#   seen in training.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Known-answer accuracy, low coverage
+#   metric:
+#   - known_102
+#   - accuracy.content
+#   format: percent
+# - label: Answers covered
+#   metric:
+#   - known_102
+#   - coverage.content
+#   format: percent
+# - label: All-answer accuracy
+#   metric:
+#   - known_102
+#   - accuracy.all
+#   format: percent
 # ---
+#
+# ## Example
+#
+# ```yaml
+# x: cue-2
+# code: class-2
+# hide: true
+# ```
+#
+# code is hidden wherever hide is true. Unfamiliar answer identities are counted in coverage separately.
+#
+# ```{typst}
+# //| label: fig-proof-cluster-pretraining-coverage
+# //| fig-cap: "Selector notes identify hidden values. hide chooses which code answers are hidden."
+# //| fig-alt: "Model tree with record, x, code. Selector notes identify hidden values. hide chooses which code answers are hidden."
+# #tree(node("record", kind: "root", children: (
+#   node("x", type: "Category", detail: "Familiar class cue"),
+#   node("code", type: "Cluster", detail: "Reconstruct where hide is true"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Measure known-answer accuracy and all-answer accuracy separately from vocabulary coverage.
+#
+# ## Result
 #
 # {{< proof P065 status >}}
 #
-# ## Insights
+# Coverage and recovery are different questions. The latest run also misses the required known-answer accuracy, so its reconstruction result remains incomplete.
 #
-# A pretraining validation score combines two questions: could this vocabulary
-# express the target, and did context recover it? Separating those questions
-# prevents 90% unavailable targets from masquerading as either good accuracy
-# or a demand for uniform predictions. Unknown answers remain impossible to
-# name; excluding their undefined categorical loss is not a modeling success.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Evaluation uses fixed query-selected masks. A second independent random
-# mask would otherwise confound vocabulary coverage with mask sampling noise.
+# {{< proof P065 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< proof P065 script >}}
+#
+# ### Training and controls
+#
+# Train for 800 updates on 8,192 rows; storage grows to admit all eight labels.
+# Evaluation selects exactly 1,024 of 2,048 independent records. Compare the
+# original set with copies retaining 50%, 10%, or 0% of selected target names.
+# All copies preserve the exact visible inputs and query-selected masks.
+#
+# Repeat the 10%-coverage case with unknown targets grouped into separate
+# batches. Count-weighted epoch metrics must agree despite all-OOV batches.
+# Scores with no known targets must be undefined, not zero reconstruction
+# error. Naive accuracy over all selected valued targets counts OOV as wrong.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P065: report stable reconstruction quality alongside pretraining coverage."""
@@ -39,49 +99,7 @@ PROOF_ID = "P065"
 BUDGET = 800
 LABELS = tuple(f"class-{index}" for index in range(8))
 
-# %% [markdown]
-# ## Examples
-#
-# ```yaml
-# x: cue-2
-# code: class-2
-# hide: true
-# ```
-#
-# The familiar categorical cue identifies this selected known target.
-#
-# ```yaml
-# x: cue-2
-# code: novel-2
-# hide: true
-# ```
-#
-# Replacing only the hidden answer leaves identical visible evidence. The
-# closed vocabulary cannot name that answer or infer that its spelling changed.
-#
-# ```yaml
-# x: cue-2
-# code: novel-2
-# hide: false
-# ```
-#
-# Unselected inputs do not enter reconstruction metrics. In particular,
-# coverage means coverage of selected valued targets, not every source value.
-#
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-pretraining-coverage
-# //| fig-cap: "A fixed source query selects reconstruction coordinates, while a familiar categorical cue identifies the answer."
-# //| fig-alt: "A root contains Category x and Cluster code reconstructed where the source hide flag is true."
-# #tree(node("record", kind: "root", children: (
-#   node("x", type: "Category", detail: "Familiar class cue"),
-#   node("code", type: "Cluster", detail: "Reconstruct where hide is true"),
-# )))
-# ```
 
-
-# %%
 def records(*, rows: int, seed: int) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     for index, label in enumerate(rng.integers(0, len(LABELS), rows)):
@@ -109,21 +127,6 @@ def evaluate(trainer: lit.Trainer, model: rf.Model, rows: list[dict]) -> dict[st
     return {name.removeprefix(prefix): float(value) for name, value in result.items() if name.startswith(prefix)}
 
 
-# %% [markdown]
-# ## Training and controls
-#
-# Train for 800 updates on 8,192 rows; storage grows to admit all eight labels.
-# Evaluation selects exactly 1,024 of 2,048 independent records. Compare the
-# original set with copies retaining 50%, 10%, or 0% of selected target names.
-# All copies preserve the exact visible inputs and query-selected masks.
-#
-# Repeat the 10%-coverage case with unknown targets grouped into separate
-# batches. Count-weighted epoch metrics must agree despite all-OOV batches.
-# Scores with no known targets must be undefined, not zero reconstruction
-# error. Naive accuracy over all selected valued targets counts OOV as wrong.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -205,37 +208,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence and remaining work
-#
-# {{< proof P065 evidence >}}
-#
-# Development runs passed the coverage and rebatching checks but failed the
-# 0.95 known-label accuracy gate. An earlier numerical-cue version and a
-# categorical-cue run extended to 4,000 updates also failed that gate. These
-# failures remain evidence, not a reason to lower the acceptance threshold.
-# Stable bookkeeping and log-space balancing do not establish reliable
-# eight-way label recovery through the latent cluster factorization.
-# The final panel (CPU default and GPU default/7701/7702) passed coverage
-# checks throughout, but only GPU seed 7702 met every learning gate.
-#
-# This fixed-vocabulary experiment isolates coverage and aggregation. Latent
-# cluster confidence is not label confidence. The auxiliary balance objective
-# still constrains cluster use; this proof does not establish calibration or
-# recovery of a latent partition. Input unavailability is deliberately 1.0:
-# it must not corrupt the query-selected reconstruction answers.
-#
-# All-OOV validation cannot supply label accuracy or label loss. Known targets
-# must remain learnable even though 1,016 allocated label rows are unused. A growing
-# training vocabulary still changes the covered validation population. Delayed
-# worker admission, evolving class difficulty, and stochastic evaluation masks
-# need separate diagnostics; these scores do not make all validation loss
-# trajectories comparable or identify unknown labels from hidden answers.
-#
-# ## Reproduce
-#
-# {{< proof P065 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=7651)
+
+# %% [markdown]
+# </details>

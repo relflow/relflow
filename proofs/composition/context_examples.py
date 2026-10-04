@@ -1,39 +1,128 @@
 # %% [markdown]
 # ---
-# title: Infer an Affine Rule From Context Examples
-# categories: [Learning from context]
+# title: Can it infer a new rule from examples in the record?
+# categories:
+# - Learning from context
 # proof-id: P072
-# description: A frozen model receives examples of a new per-record numerical rule and answers a fresh query.
+# description: Each record supplies four examples of a fresh straight-line rule and asks for the answer
+#   at a new input.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Familiar rules
+#   metric:
+#   - context
+#   - familiar
+#   - normalized_rmse
+#   format: error
+# - label: Excluded rules
+#   metric:
+#   - context
+#   - withheld
+#   - normalized_rmse
+#   format: error
+# - label: Excluded rules, direct line fit
+#   metric:
+#   - context
+#   - withheld
+#   - least_squares
+#   - normalized_rmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# examples:
+#   - {x: -1.0, y: -0.5}
+#   - {x: -0.3, y: 0.2}
+#   - {x: 0.3, y: 0.8}
+#   - {x: 1.0, y: 1.5}
+# query: 0.6
+# answer: 1.1
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-context-examples
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with task, examples, x, y, query, answer. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("task", kind: "root", children: (
+#   node("examples", kind: "branch", repeated: true, children: (
+#     node("x", type: "Number"), node("y", type: "Number"),
+#   )),
+#   node("query", type: "Number"),
+#   node("answer", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Swap the examples between records, remove them, and compare with fitting a line directly. Test a region of rules excluded from training.
+#
+# ## Result
 #
 # {{< proof P072 status >}}
 #
-# ## Insights
+# Examples help in familiar regions, but only one of three seeds passes every check. Reliable transfer to the excluded rule region remains unestablished.
 #
-# Every record defines a fresh rule using four input/output examples. The model
-# must infer its rule at prediction time with fixed weights. A held-out region
-# of task parameters distinguishes this from new rows of already sampled tasks;
-# context swapping and a separately trained query-only model test whether the
-# examples supply useful information. Least squares on the visible examples
-# establishes how much information is actually available.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# Across three full CPU seeds, familiar-quadrant normalized RMSE was
-# 0.039–0.066, versus 0.976–0.989 for query-only models and 1.372–1.399 after
-# swapping examples. Weights stayed fixed during prediction. The withheld
-# positive/positive quadrant was unstable: normalized RMSE ranged from 0.362
-# to 0.907, and only seed 7203 met every gate. Seeds 7201 and 7202 failed both
-# the withheld error threshold and the requirement to halve query-only error.
-# Visible-example least squares achieved source-unit RMSE 0.0114–0.0119 on
-# both splits, showing the required information was present in the examples.
+# {{< proof P072 evidence >}}
 #
-# These results support inference within familiar parts of a bounded affine
-# family, while reliable transfer to the excluded task region remains unproven.
-# They do not establish arbitrary program induction. The original gates and
-# training budget are unchanged, and thresholds remain provisional.
+# ### Run this experiment
+#
+# {{< proof P072 script >}}
+#
+# ### Rules, observations, and splits
+#
+# Independently for each record, sample slope magnitude Uniform(0.75, 1.75)
+# and intercept magnitude Uniform(0.25, 1). Training draws the three sign
+# combinations (-,-), (-,+), and (+,-). The entirely withheld quadrant (+,+)
+# is used only for testing. Thus each sign and each magnitude is familiar,
+# but their positive/positive combination is absent from training and validation.
+# Four example x values are jittered anchors around -1, -1/3, 1/3, and 1;
+# their y values equal `slope*x + intercept + Normal(0, 0.01)`.
+# Query x is Uniform(-0.8, 0.8), independently drawn; the hidden answer uses
+# the same rule and independent Normal(0, 0.01) noise. Neither slope nor
+# intercept is included in the observation. The query lies between examples.
+#
+# Independent streams supply 4,096 training rules, 512 validation rules,
+# 2,048 familiar-quadrant test rules, and 2,048 withheld-quadrant test rules.
+# No task or example is reused across splits. A continuous rule family avoids
+# a finite task lookup table, while the quadrant split supplies a concrete
+# extrapolation of task combinations rather than extrapolation of query range.
+#
+# ### Training and predeclared gates
+#
+# The context model and query-only model each receive 600 xs AdamW updates at
+# learning rate 0.002, batch size 128, with identical observations and seeds.
+# Removing the example branch reduces the control's parameters; it intentionally
+# measures what the query alone permits, rather than matching unused capacity.
+# The final update is evaluated once without checkpoint selection or adaptation.
+#
+# Normalize RMSE by the training-mean predictor evaluated on each test split.
+# Require context normalized RMSE below 0.35 on familiar quadrants and 0.40 on
+# the withheld quadrant. On familiar quadrants, context swapping must exceed
+# 0.80 and double the intact error, and the query-only model must exceed 0.75.
+# Both splits must improve on query-only error by at least a factor of two.
+# Least-squares RMSE must be below 0.03 in source units on both splits, confirming
+# observability independently of neural optimization. Swapping within the
+# withheld quadrant remains diagnostic: its slope and intercept signs are
+# constant, so such a swap leaves useful information intact.
+#
+# Snapshot every model parameter before prediction and require exact equality
+# afterward. This checks the limited no-weight-update claim, alongside finite
+# outputs. It does not describe a training-free system: meta-training on many
+# affine tasks is what may produce this behavior.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P072: infer a fresh bounded affine rule from noisy examples without weight updates."""
@@ -55,77 +144,7 @@ TRAIN_ROWS = 4096
 TEST_ROWS = 2048
 QUADRANTS = ((-1, -1), (-1, 1), (1, -1))
 
-# %% [markdown]
-# ## Rules, observations, and splits
-#
-# Independently for each record, sample slope magnitude Uniform(0.75, 1.75)
-# and intercept magnitude Uniform(0.25, 1). Training draws the three sign
-# combinations (-,-), (-,+), and (+,-). The entirely withheld quadrant (+,+)
-# is used only for testing. Thus each sign and each magnitude is familiar,
-# but their positive/positive combination is absent from training and validation.
-# Four example x values are jittered anchors around -1, -1/3, 1/3, and 1;
-# their y values equal `slope*x + intercept + Normal(0, 0.01)`.
-# Query x is Uniform(-0.8, 0.8), independently drawn; the hidden answer uses
-# the same rule and independent Normal(0, 0.01) noise. Neither slope nor
-# intercept is included in the observation. The query lies between examples.
-#
-# ```yaml
-# examples:
-#   - {x: -1.0, y: -0.5}
-#   - {x: -0.3, y: 0.2}
-#   - {x: 0.3, y: 0.8}
-#   - {x: 1.0, y: 1.5}
-# query: 0.6
-# answer: 1.1
-# ```
-#
-# These examples encode a withheld positive/positive rule, approximately
-# `y=x+0.5`. Another record gives a different answer for the identical query:
-#
-# ```yaml
-# examples:
-#   - {x: -1.0, y: 1.5}
-#   - {x: -0.3, y: 0.8}
-#   - {x: 0.3, y: 0.2}
-#   - {x: 1.0, y: -0.5}
-# query: 0.6
-# answer: -0.1
-# ```
-#
-# Swapping the context while keeping the first query and answer deliberately
-# breaks the per-record rule. The evaluation control has this form:
-#
-# ```yaml
-# examples:
-#   - {x: -1.0, y: 1.5}
-#   - {x: -0.3, y: 0.8}
-#   - {x: 0.3, y: 0.2}
-#   - {x: 1.0, y: -0.5}
-# query: 0.6
-# answer: 1.1
-# ```
-#
-# Independent streams supply 4,096 training rules, 512 validation rules,
-# 2,048 familiar-quadrant test rules, and 2,048 withheld-quadrant test rules.
-# No task or example is reused across splits. A continuous rule family avoids
-# a finite task lookup table, while the quadrant split supplies a concrete
-# extrapolation of task combinations rather than extrapolation of query range.
-#
-# ```{typst}
-# //| label: fig-proof-context-examples
-# //| fig-cap: "Four examples describe a fresh rule, and the query requests its answer."
-# //| fig-alt: "A task has four repeated examples containing Number x and y, a visible Number query, and a hidden Number answer."
-# #tree(node("task", kind: "root", children: (
-#   node("examples", kind: "branch", repeated: true, children: (
-#     node("x", type: "Number"), node("y", type: "Number"),
-#   )),
-#   node("query", type: "Number"),
-#   node("answer", kind: "target", type: "Number"),
-# )))
-# ```
 
-
-# %%
 def records(*, rows: int, seed: int, withheld: bool = False) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     signs = ((1, 1),) if withheld else QUADRANTS
@@ -187,32 +206,6 @@ def score(predicted: np.ndarray, rows: list[dict], training_mean: float) -> dict
     return {"rmse": rmse, "baseline_rmse": baseline, "normalized_rmse": rmse / baseline}
 
 
-# %% [markdown]
-# ## Training and predeclared gates
-#
-# The context model and query-only model each receive 600 xs AdamW updates at
-# learning rate 0.002, batch size 128, with identical observations and seeds.
-# Removing the example branch reduces the control's parameters; it intentionally
-# measures what the query alone permits, rather than matching unused capacity.
-# The final update is evaluated once without checkpoint selection or adaptation.
-#
-# Normalize RMSE by the training-mean predictor evaluated on each test split.
-# Require context normalized RMSE below 0.35 on familiar quadrants and 0.40 on
-# the withheld quadrant. On familiar quadrants, context swapping must exceed
-# 0.80 and double the intact error, and the query-only model must exceed 0.75.
-# Both splits must improve on query-only error by at least a factor of two.
-# Least-squares RMSE must be below 0.03 in source units on both splits, confirming
-# observability independently of neural optimization. Swapping within the
-# withheld quadrant remains diagnostic: its slope and intercept signs are
-# constant, so such a swap leaves useful information intact.
-#
-# Snapshot every model parameter before prediction and require exact equality
-# afterward. This checks the limited no-weight-update claim, alongside finite
-# outputs. It does not describe a training-free system: meta-training on many
-# affine tasks is what may produce this behavior.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     tests = {
         "familiar": list(records(rows=TEST_ROWS, seed=seed * 100 + 3)),
@@ -277,23 +270,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence and limitations
-#
-# {{< proof P072 evidence >}}
-#
-# The oracle is deliberately specific to affine rules; neural success would
-# establish bounded family inference, not discovery of arbitrary mathematical
-# structure. Four examples are always available, query values interpolate their
-# range, and the experiment does not establish adaptation to nonlinear rules,
-# examples with outliers, or longer reasoning chains. Three CPU seeds have
-# been measured; no ten-seed calibration has been run. The withheld-region
-# failures remain recorded under the original gates.
-#
-# ## Reproduce
-#
-# {{< proof P072 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=7201)
+
+# %% [markdown]
+# </details>

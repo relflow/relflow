@@ -1,39 +1,110 @@
 # %% [markdown]
 # ---
-# title: Combining noisy and incomplete evidence
-# categories: [Representation]
+# title: Can it combine noisy measurements with missing readings?
+# categories:
+# - Representation
 # proof-id: P074
-# description: Compare learned sensor fusion with the exact Gaussian conditional mean under familiar and unseen missingness patterns.
+# description: Predict a signal from three noisy sensors, sometimes hiding one or more readings. An extra
+#   sensor carries no useful information.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Error with all three sensors
+#   metric:
+#   - patterns
+#   - '111'
+#   - mse
+#   format: number
+# - label: Error with a corrupted sensor
+#   metric:
+#   - corrupted_first_sensor_mse
+#   format: number
 # ---
+#
+# ## Example
+#
+# ```yaml
+# first: 0.5
+# second: 1.1
+# third: -0.2
+# hide_first: false
+# hide_second: false
+# hide_third: false
+# nuisance: 1.4
+# target: 0.4
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-incomplete-evidence
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with record, first, second, third, nuisance, target. Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("record", kind: "root", children: (
+#   node("first", type: "Number", body: [Skip when `hide_first`]),
+#   node("second", type: "Number", body: [Skip when `hide_second`]),
+#   node("third", type: "Number", body: [Skip when `hide_third`]),
+#   node("nuisance", type: "Number", body: [Independent noise]),
+#   node("target", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare combined and single-sensor evidence, no evidence, an unseen visibility pattern, and a deliberately corrupted reading.
+#
+# ## Result
 #
 # {{< proof P074 status >}}
 #
-# ## Insights
+# Combining readings helps in all three seeds, but only one passes every check. Missing-evidence fallback remains inconsistent, and a corrupted visible sensor can sharply increase error.
 #
-# Several imperfect measurements can reduce expected prediction error even
-# when no individual reading determines the answer. This experiment compares
-# the learned prediction with the known conditional mean under every sensor
-# visibility pattern. One combination is absent during fitting. An irrelevant
-# sensor, no-evidence condition, and deliberately corrupted reading separate
-# evidence fusion from assumptions of universal robustness.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# One of three CPU seeds met every gate. Joint evidence reduced MSE by
-# 31.2–39.1% relative to the best single sensor in all three runs, and shuffling
-# nuisance readings changed predictions by RMS 0.042–0.077. The unseen pattern's
-# squared distance to the conditional mean ranged from 0.015 to 0.226: seed
-# 7403 missed its 0.15 gate and several familiar-pattern gates. Seeds 7401 and
-# 7403 also retained too much variation when every informative sensor was
-# hidden, with prediction standard deviations 0.117 and 0.118 against a 0.10
-# gate. Evidence fusion is useful here; reliable prior fallback and missingness
-# transfer are not established across seeds.
+# {{< proof P074 evidence >}}
 #
-# Corrupting a visible sensor raised MSE to 3.70–4.82, compared with 0.255–0.367
-# with intact joint evidence. Skipping that sensor exactly restored its paired
-# two-sensor prediction. Every hidden-value invariance check passed.
+# ### Run this experiment
+#
+# {{< proof P074 script >}}
+#
+# ### Process and information boundary
+#
+# Independently draw `z ~ Normal(0,1)` and three sensors `x_i = z + e_i`, with
+# independent Gaussian errors of standard deviations 0.8, 1.0, and 1.2. A
+# fourth, nuisance reading is independent `Normal(0,1)`. The target is z and is
+# always hidden. For any visible subset V, the exact conditional mean is
+# `sum(x_i / sigma_i**2) / (1 + sum(1 / sigma_i**2))`; its conditional variance
+# is `1 / (1 + sum(1 / sigma_i**2))`. With no sensors visible, the mean is zero.
+#
+# ### Training and predeclared measurements
+#
+# Train an xs model for 600 AdamW updates at learning rate 0.002, batch size
+# 64, with independent 4,096/512 training/validation rows. Missingness begins
+# with three independent Bernoulli(0.5) flags; fitting rejects only the pattern
+# with first and third visible and second hidden. This conditioning makes the
+# retained flags dependent on one another, but keeps them independent of every
+# numerical value. No selector is an embedded field.
+#
+# Apply all eight fixed patterns to the same 2,048 independent test records.
+# For each, record prediction MSE, empirical oracle MSE, and squared distance
+# to the conditional mean. Predeclared gates require mean-squared distance to
+# the oracle below 0.10 for seen patterns and below 0.15 for the unseen one.
+# Joint evidence must improve MSE by at least 15% over the best single sensor.
+# The no-evidence prediction must have absolute mean below 0.20 and standard
+# deviation below 0.10. Permuting nuisance readings must change predictions by
+# RMS less than 0.12. Hidden-value poisoning must have maximum effect <1e-5.
+#
+# Add six to the first visible sensor in a separate stress control. Its effect
+# is diagnostic: this model was not trained to identify corrupted sensors.
+# Hiding that same corrupted sensor must exactly recover its corresponding
+# two-sensor prediction. All comparisons use the final fixed-budget model.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P074: Gaussian evidence fusion, missingness transfer, and a known oracle."""
@@ -58,68 +129,7 @@ NOISE = np.asarray([0.8, 1.0, 1.2])
 UNSEEN = (False, True, False)
 PATTERNS = tuple(product((False, True), repeat=3))
 
-# %% [markdown]
-# ## Process and information boundary
-#
-# Independently draw `z ~ Normal(0,1)` and three sensors `x_i = z + e_i`, with
-# independent Gaussian errors of standard deviations 0.8, 1.0, and 1.2. A
-# fourth, nuisance reading is independent `Normal(0,1)`. The target is z and is
-# always hidden. For any visible subset V, the exact conditional mean is
-# `sum(x_i / sigma_i**2) / (1 + sum(1 / sigma_i**2))`; its conditional variance
-# is `1 / (1 + sum(1 / sigma_i**2))`. With no sensors visible, the mean is zero.
-#
-# ```yaml
-# first: 0.5
-# second: 1.1
-# third: -0.2
-# hide_first: false
-# hide_second: false
-# hide_third: false
-# nuisance: 1.4
-# target: 0.4
-# ```
-#
-# Hiding the middle sensor gives the combination withheld from training:
-#
-# ```yaml
-# first: 0.5
-# second: 1.1
-# third: -0.2
-# hide_first: false
-# hide_second: true
-# hide_third: false
-# nuisance: 1.4
-# target: 0.4
-# ```
-#
-# When all informative sources disappear, only the prior remains:
-#
-# ```yaml
-# first: 0.5
-# second: 1.1
-# third: -0.2
-# hide_first: true
-# hide_second: true
-# hide_third: true
-# nuisance: 1.4
-# target: 0.4
-# ```
-#
-# ```{typst}
-# //| label: fig-proof-incomplete-evidence
-# //| fig-cap: "Three independently noisy sensors can be skipped; an unrelated field remains visible."
-# //| fig-alt: "Record contains three Number sensors, each skipped by its own hide flag, a Number nuisance sensor, and an always-hidden Number target."
-# #tree(node("record", kind: "root", children: (
-#   node("first", type: "Number", body: [Skip when `hide_first`]),
-#   node("second", type: "Number", body: [Skip when `hide_second`]),
-#   node("third", type: "Number", body: [Skip when `hide_third`]),
-#   node("nuisance", type: "Number", body: [Independent noise]),
-#   node("target", kind: "target", type: "Number"),
-# )))
-# ```
 
-
-# %%
 def records(*, rows: int, seed: int, training: bool = False) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     target = rng.normal(size=rows)
@@ -168,32 +178,6 @@ def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["/target"]["content"] for row in output], dtype=np.float64)
 
 
-# %% [markdown]
-# ## Training and predeclared measurements
-#
-# Train an xs model for 600 AdamW updates at learning rate 0.002, batch size
-# 64, with independent 4,096/512 training/validation rows. Missingness begins
-# with three independent Bernoulli(0.5) flags; fitting rejects only the pattern
-# with first and third visible and second hidden. This conditioning makes the
-# retained flags dependent on one another, but keeps them independent of every
-# numerical value. No selector is an embedded field.
-#
-# Apply all eight fixed patterns to the same 2,048 independent test records.
-# For each, record prediction MSE, empirical oracle MSE, and squared distance
-# to the conditional mean. Predeclared gates require mean-squared distance to
-# the oracle below 0.10 for seen patterns and below 0.15 for the unseen one.
-# Joint evidence must improve MSE by at least 15% over the best single sensor.
-# The no-evidence prediction must have absolute mean below 0.20 and standard
-# deviation below 0.10. Permuting nuisance readings must change predictions by
-# RMS less than 0.12. Hidden-value poisoning must have maximum effect <1e-5.
-#
-# Add six to the first visible sensor in a separate stress control. Its effect
-# is diagnostic: this model was not trained to identify corrupted sensors.
-# Hiding that same corrupted sensor must exactly recover its corresponding
-# two-sensor prediction. All comparisons use the final fixed-budget model.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -292,24 +276,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence and limits
-#
-# {{< proof P074 evidence >}}
-#
-# The known Gaussian prior and stationary independent errors make this a
-# controlled denoising task. Missingness depends on neither the target nor
-# sensor values. Success does not establish handling of informative missingness,
-# reliability shifts, correlated errors, uncertainty calibration, or automatic
-# corruption detection. Failure on the unseen pattern is retained as evidence
-# of the learned missingness boundary. Gates precede the first full runs.
-# The three-seed panel retains its failures without adjusting thresholds or
-# budgets. Gates remain provisional pending ten seeds.
-#
-# ## Reproduce
-#
-# {{< proof P074 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=7401)
+
+# %% [markdown]
+# </details>

@@ -1,31 +1,108 @@
 # %% [markdown]
 # ---
-# title: Declaring a class does not teach its meaning
-# categories: [Enum]
+# title: Does declaring a class teach its meaning?
+# categories:
+# - Enum
 # proof-id: P070
-# description: A declared class has output support before receiving examples; continued fitting with rehearsal teaches its numerical region without growing the head.
+# description: Declare all four classes, but leave one out of initial training.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Withheld class, before examples
+#   metric:
+#   - initial_withheld
+#   - accuracy
+#   format: percent
+# - label: Withheld class, after examples
+#   metric:
+#   - final_withheld
+#   - accuracy
+#   format: percent
+# - label: Old classes, after continuation
+#   metric:
+#   - final_seen
+#   - accuracy
+#   format: percent
 # ---
+#
+# ## Example
+#
+# ```yaml
+# x: -0.94
+# label: blue
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-enum-declared-without-examples
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with record, x, label. Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("record", kind: "root", children: (
+#   node("x", type: "Number", body: [Four separated numerical regions]),
+#   node("label", kind: "target", type: "Enum", body: [Four fixed classes; one initially withheld]),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Measure the withheld class before and after continued fitting that includes it. Continue supplying old classes to check retention.
+#
+# ## Result
 #
 # {{< proof P070 status >}}
 #
-# ## Insights
+# A declared output slot alone supplies no reliable understanding. Examples teach the withheld class; the old classes are retained with rehearsal.
 #
-# Enum creates every declared class row immediately, including classes absent
-# from training. This is structural support, not semantic zero-shot learning.
-# The proof withholds one class, records its accuracy and probability without
-# assuming they must be zero, then measures learning and old-class retention
-# after balanced continued fitting. The declaration and head never change.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# All ten CPU seeds reached 100% on the seen classes initially and on both
-# populations after continued fitting. The withheld class scored 0% after
-# initial training, although untrained random models ranged from 0% to 100%
-# on that single-class population. Declaration alone therefore supplies no
-# reliable accuracy. All gates passed on those seeds and in a separate
-# RTX 3090 run, with the original gates and training budget unchanged.
+# {{< proof P070 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< proof P070 script >}}
+#
+# ### Data and observability
+#
+# A class index selects one of four separated numerical centers, and uniform
+# noise in `[-0.15, 0.15]` prevents exact repeated numerical observations. The
+# target is that region's opaque label. The initial stage includes the first
+# three classes; continuation rehearses them equally alongside the fourth.
+# Each phase uses 4,096 training and 512 validation rows with independent seeds.
+# Seen-class and withheld-class tests each contain 2,048 fresh observations.
+# Rows are the split unit. The finite, separated regions make the Bayes error
+# zero; no irreducible target noise is added to this controlled omission task.
+#
+# Continued fitting also rehearses this familiar region. Accuracy on both
+# familiar and withheld regions guards against simply always predicting green.
+#
+# ### Training and controls
+#
+# The `xs` model receives 300 initial updates and 300 continuation updates,
+# with a fresh AdamW optimizer at learning rate 0.002 for each fitting stage,
+# batch size 64, one device, and no loader workers. A paired model starts from
+# the same seed and sees all four classes during its own 300-update phase.
+# This control checks that the withheld region is learnable within one stage.
+# It matches the phase budget, rather than the cumulative 600-update budget.
+# No checkpoint or hyperparameter is selected using the test sets.
+#
+# Uniform guessing across the four-class head scores 0.25 on either population;
+# the three-class initial task also has a 1/3 majority baseline. A constant
+# prediction of the withheld label would score 1.0 on its isolated population
+# and 0.0 on the seen population, so both accuracies are essential gates.
+#
+# Predeclared gates require at least 0.95 initial seen accuracy, at least 0.95
+# on both populations after continuation, and at least 0.95 for both populations
+# in the all-classes-trained control. The initial withheld exposure must be zero;
+# continuation must make it positive. Head size, count-buffer size, and declaration
+# order remain fixed. Pre-continuation withheld accuracy has no acceptance gate.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P070: separate a declared Enum class from learning its relationship to context."""
@@ -47,56 +124,7 @@ BUDGET = 300
 LABELS = ("amber", "blue", "coral", "green")
 CENTERS = (-3.0, -1.0, 1.0, 3.0)
 
-# %% [markdown]
-# ## Data and observability
-#
-# A class index selects one of four separated numerical centers, and uniform
-# noise in `[-0.15, 0.15]` prevents exact repeated numerical observations. The
-# target is that region's opaque label. The initial stage includes the first
-# three classes; continuation rehearses them equally alongside the fourth.
-# Each phase uses 4,096 training and 512 validation rows with independent seeds.
-# Seen-class and withheld-class tests each contain 2,048 fresh observations.
-# Rows are the split unit. The finite, separated regions make the Bayes error
-# zero; no irreducible target noise is added to this controlled omission task.
-#
-# ```yaml
-# x: -0.94
-# label: blue
-# ```
-#
-# This is an initial-task example.
-#
-# ```yaml
-# x: 3.08
-# label: green
-# ```
-#
-# This region is withheld until continued fitting. `green` nevertheless appears
-# in the declaration, the output head, and every full-width candidate list from
-# the start. Its accuracy and probability before examples are diagnostics;
-# initialization or accidental extrapolation can produce either correct or
-# incorrect answers without teaching a general semantic relationship.
-#
-# ```yaml
-# x: 1.06
-# label: coral
-# ```
-#
-# Continued fitting also rehearses this familiar region. Accuracy on both
-# familiar and withheld regions guards against simply always predicting green.
-#
-# ```{typst}
-# //| label: fig-proof-enum-declared-without-examples
-# //| fig-cap: "Four output classes exist throughout, while training exposure grows from three regions to four."
-# //| fig-alt: "Record contains Number x with four separated regions and hidden Enum label with all four labels declared before training."
-# #tree(node("record", kind: "root", children: (
-#   node("x", type: "Number", body: [Four separated numerical regions]),
-#   node("label", kind: "target", type: "Enum", body: [Four fixed classes; one initially withheld]),
-# )))
-# ```
 
-
-# %%
 def records(*, rows: int, seed: int, phase: str = "initial") -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     indices = {"initial": (0, 1, 2), "withheld": (3,), "mixed": (0, 1, 2, 3)}[phase]
@@ -166,30 +194,6 @@ def measure(output: list[dict], rows: list[dict]) -> dict:
     }
 
 
-# %% [markdown]
-# ## Training and controls
-#
-# The `xs` model receives 300 initial updates and 300 continuation updates,
-# with a fresh AdamW optimizer at learning rate 0.002 for each fitting stage,
-# batch size 64, one device, and no loader workers. A paired model starts from
-# the same seed and sees all four classes during its own 300-update phase.
-# This control checks that the withheld region is learnable within one stage.
-# It matches the phase budget, rather than the cumulative 600-update budget.
-# No checkpoint or hyperparameter is selected using the test sets.
-#
-# Uniform guessing across the four-class head scores 0.25 on either population;
-# the three-class initial task also has a 1/3 majority baseline. A constant
-# prediction of the withheld label would score 1.0 on its isolated population
-# and 0.0 on the seen population, so both accuracies are essential gates.
-#
-# Predeclared gates require at least 0.95 initial seen accuracy, at least 0.95
-# on both populations after continuation, and at least 0.95 for both populations
-# in the all-classes-trained control. The initial withheld exposure must be zero;
-# continuation must make it positive. Head size, count-buffer size, and declaration
-# order remain fixed. Pre-continuation withheld accuracy has no acceptance gate.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     budget = BUDGET if steps is None else min(steps, BUDGET)
@@ -283,20 +287,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }, checks
 
 
-# %% [markdown]
-# ## Evidence and remaining work
-#
-# {{< proof P070 evidence >}}
-#
-# The ten-seed calibration is recorded with the retained thresholds. This proof
-# does not promise semantic zero-shot learning, retention without rehearsal,
-# open-world label admission, or calibrated probabilities for unobserved classes. The initial withheld
-# probability is reported as a diagnostic, not an uncertainty guarantee.
-#
-# ## Reproduce
-#
-# {{< proof P070 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=7001)
+
+# %% [markdown]
+# </details>

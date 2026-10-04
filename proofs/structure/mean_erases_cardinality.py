@@ -1,38 +1,101 @@
 # %% [markdown]
 # ---
-# title: An Average Does Not Preserve Count
+# title: Why can an average lose the total?
 # categories:
 # - Hierarchical statistics
 # proof-id: P041
-# description: Mean can preserve a scalar average while erasing the count of identical
-#   repeated tokens when branch attention is disabled.
+# description: Predict both average and total after an average-only branch with item attention disabled.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: Average prediction
+#   metric:
+#   - mean_nrmse
+#   format: error
+# - label: 'Predicted total, one copy (correct: 1.25)'
+#   metric:
+#   - paired_total_predictions
+#   - 0
+#   format: number
+# - label: 'Predicted total, six copies (correct: 7.5)'
+#   metric:
+#   - paired_total_predictions
+#   - 1
+#   format: number
 # ---
 #
-# One copy of a value and six copies have the same mean, but different totals.
-# This paired case tests whether a compact branch summary preserves the
-# information its parent actually needs.
+# ## Example
+#
+# ```yaml
+# transactions:
+#   - amount: 1.25
+# mean_amount: 1.25
+# global_total: 1.25
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-structure-mean-erases-cardinality
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with record, transactions, amount, mean_amount, global_total. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("record", kind: "root", children: (
+#   node("transactions", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("amount", type: "Number"),
+#   )),
+#   node("mean_amount", kind: "target", type: "Number",),
+#   node("global_total", kind: "target", type: "Number",),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare one amount with six copies of the same amount. Their averages match, but their totals differ.
+#
+# ## Result
 #
 # {{< proof P041 status >}}
 #
-# ## Insights
+# This summary loses the count: the model predicts the same total for both records. Choose a summary that retains count, or supply count explicitly.
 #
-# **With branch attention disabled, averaging identical encoded values erases how many copies were
-# present.** One amount and six copies yield the same branch summary, so a downstream decoder cannot recover
-# their different totals from that summary.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# The recorded model learns the average but produces identical total predictions for the explicit
-# one-versus-six pair. This is an expected information boundary, not simply insufficient training. Mean
-# reduces encoded tokens rather than calculating a raw numerical average directly.
+# {{< proof P041 evidence >}}
 #
-# Choose a summary that retains what the parent needs. The result specifically uses `attention=None`;
-# preceding attention can change the available information. Exact business totals belong in preprocessing,
-# while learned alternatives need their own behavioral checks.
+# ### Run this experiment
 #
-# ## Setup
+# {{< proof P041 script >}}
+#
+# ### How it works
+#
+# The transaction branch uses `attention=None, reduction=rf.Mean()`. Its
+# identical encoded amounts are averaged without preceding branch attention
+# introducing count or position information. The parent sees the same summary
+# for one and six repeats, so it cannot recover their different totals.
+#
+# The synthetic training process varies the number of repeated equal amounts
+# from one to six and varies the shared amount across observations. After 300
+# deterministic steps, evaluation checks the average on 512 held-out rows
+# and compares predictions for the explicit one-versus-six pair. Training and
+# validation contain 1,024 and 256 independently generated rows.
+#
+# ### Remaining work
+#
+# Broaden the value patterns and nested partitions. The family still needs a
+# nested `global_total` task and a `largest_session_average` target, then three
+# paired core seeds and at least ten calibration seeds for the learned gates.
+#
+# Use [preprocessing](../../guides/preprocessors.qmd) for exact business
+# arithmetic. For learned hierarchy compression, the
+# [nested Attention case](attention-preserves-nested-cardinality.html) tests a
+# route that retains cardinality information.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P041: learn an average while deliberately erasing repeated-value counts.
@@ -53,60 +116,7 @@ import relflow as rf
 
 PROOF_ID = "P041"
 
-# %% [markdown]
-# ## Examples
-#
-# Both answers are hidden Number targets. The branch uses `attention=None`
-# and `rf.Mean()`, so repeated identical amounts have the same reduced summary.
-#
-# ### One valued item
-#
-# ```yaml
-# transactions:
-#   - amount: 1.25
-# mean_amount: 1.25
-# global_total: 1.25
-# ```
-#
-# The average and total happen to be equal for a single item.
-#
-# ### Six copies of the same item
-#
-# ```yaml
-# transactions:
-#   - amount: 1.25
-#   - amount: 1.25
-#   - amount: 1.25
-#   - amount: 1.25
-#   - amount: 1.25
-#   - amount: 1.25
-# mean_amount: 1.25
-# global_total: 7.5
-# ```
-#
-# These are the different correct totals for the explicit one-versus-six
-# comparison. The controlled Mean route produces identical total predictions;
-# it does not recover both answers shown here.
-#
-# ### Another average with a different count
-#
-# ```yaml
-# transactions:
-#   - amount: 0.75
-#   - amount: 0.75
-#   - amount: 0.75
-# mean_amount: 0.75
-# global_total: 2.25
-# ```
-#
-# Changing the common amount changes the average and its encoded summary.
-# The held-out average task varies both this amount and the number of repeats,
-# while the count distinction remains unavailable in the isolated Mean route.
-#
-# ## Synthetic data and controls
 
-
-# %%
 def records(*, rows: int, seed: int) -> Iterator[dict]:
     """Yield variable-length bags of equal values with mean and sum targets."""
     rng = np.random.default_rng(seed)
@@ -131,47 +141,6 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
-# %% [markdown]
-# ## Model tree
-#
-# ```{typst}
-# //| label: fig-proof-structure-mean-erases-cardinality
-# //| fig-cap: "Transactions use Mean reduction with attention disabled and capacity for six items. Both numerical targets are hidden from input."
-# //| fig-alt: "Record contains repeated transactions with capacity six, Mean reduction and attention set to None, a Number amount input, and Number mean amount and global total targets always hidden from input."
-# #tree(node("record", kind: "root", children: (
-#   node("transactions", kind: "branch", repeated: true, width: 150pt, body: [
-#     - *Reduction:* Mean
-#     - *Attention:* `None`
-#     - *Capacity:* 6 items
-#   ], children: (
-#     node("amount", type: "Number"),
-#   )),
-#   node("mean_amount", kind: "target", type: "Number", body: [
-#     - *Input:* always hidden
-#   ]),
-#   node("global_total", kind: "target", type: "Number", body: [
-#     - *Input:* always hidden
-#   ]),
-# )))
-# ```
-#
-# ## How it works
-#
-# The transaction branch uses `attention=None, reduction=rf.Mean()`. Its
-# identical encoded amounts are averaged without preceding branch attention
-# introducing count or position information. The parent sees the same summary
-# for one and six repeats, so it cannot recover their different totals.
-#
-# The synthetic training process varies the number of repeated equal amounts
-# from one to six and varies the shared amount across observations. After 300
-# deterministic steps, evaluation checks the average on 512 held-out rows
-# and compares predictions for the explicit one-versus-six pair. Training and
-# validation contain 1,024 and 256 independently generated rows.
-#
-# ## Training and evaluation
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     data_seed = (seed - 2599) % (2**32)
@@ -225,26 +194,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }
 
 
-# %% [markdown]
-# ## Evidence
-#
-# {{< proof P041 evidence >}}
-#
-# ## Remaining work
-#
-# Broaden the value patterns and nested partitions. The family still needs a
-# nested `global_total` task and a `largest_session_average` target, then three
-# paired core seeds and at least ten calibration seeds for the learned gates.
-#
-# Use [preprocessing](../../guides/preprocessors.qmd) for exact business
-# arithmetic. For learned hierarchy compression, the
-# [nested Attention case](attention-preserves-nested-cardinality.html) tests a
-# route that retains cardinality information.
-#
-# ## Reproduce
-#
-# {{< proof P041 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=2599)
+
+# %% [markdown]
+# </details>

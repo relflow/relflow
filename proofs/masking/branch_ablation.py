@@ -1,25 +1,103 @@
 # %% [markdown]
 # ---
-# title: Recovering from dynamically hidden branches
-# categories: [Dynamic masking]
+# title: Can it recover when a whole branch is hidden?
+# categories:
+# - Dynamic masking
 # proof-id: P053
-# description: Learn from redundant views while branch and leaf skip policies remove different sources of evidence.
+# description: Provide two redundant measurements of the same signal and sometimes hide an entire branch.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
+# toc: false
+# proof-readout:
+# - label: First view hidden
+#   metric:
+#   - patterns
+#   - hiddenvisible
+#   - nrmse
+#   format: error
+# - label: Second view hidden
+#   metric:
+#   - patterns
+#   - visiblehidden
+#   - nrmse
+#   format: error
+# - label: Both views hidden
+#   metric:
+#   - patterns
+#   - hiddenhidden
+#   - nrmse
+#   format: error
 # ---
+#
+# ## Example
+#
+# ```yaml
+# views:
+#   - {reading: 0.4, backup: 0.9, hidden: true, hide_backup: false}
+#   - {reading: 0.4, backup: 0.9, hidden: false, hide_backup: true}
+# target: 0.4
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-proof-branch-ablation
+# //| fig-cap: "Amber cards are hidden prediction targets. hidden skips a whole view and its descendants."
+# //| fig-alt: "Model tree with record, views, reading, backup, target. Amber cards are hidden prediction targets. hidden skips a whole view and its descendants."
+# #tree(node("record", kind: "root", children: (
+#   node("views", kind: "branch", repeated: true, body: [Skip when `hidden`], children: (
+#     node("reading", type: "Number"),
+#     node("backup", type: "Number", body: [Also skip when `hide_backup`]),
+#   )),
+#   node("target", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Test each branch alone, both visible, and both hidden. Change hidden descendant values to check they cannot affect the answer.
+#
+# ## Result
 #
 # {{< proof P053 status >}}
 #
-# ## Insights
+# Either view supports prediction. When both are hidden, the model falls back near the constant baseline; the test shows redundancy, rather than causal attribution.
 #
-# A model trained under branch masking can use either of two redundant views.
-# An ancestor skip must hide every descendant, even when a child's selector is
-# false. With both views hidden, the target is unidentifiable. This is predictive
-# redundancy and ablation, not causal feature attribution.
+# <details class="proof-details">
+# <summary>Experiment details and code</summary>
 #
-# ## Setup
+# {{< proof P053 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< proof P053 script >}}
+#
+# ### Data and model
+#
+# Each independent record draws a latent `z ~ Uniform(-1, 1)`. Both views expose
+# `reading = z` and `backup = 2*z + 0.1`; the hidden target is `1.5*z - 0.2`.
+# The latent variable is never a separate input. Independent branch selectors
+# produce all four visibility patterns, independently of `z`. Leaf selectors
+# also hide each backup with probability 0.5. Train/validation/test use
+# 4,096/512/2,048 independent records.
+#
+# ### Training and controls
+#
+# The model uses the [xs preset](../../core-concepts/model-tree.qmd#choose-a-size).
+#
+# Fit for 500 AdamW updates at learning rate 0.002. On the same test observations,
+# set each of the four branch-mask patterns deterministically. At least one
+# visible view must give nRMSE below 0.30; no visible views must give nRMSE above
+# 0.85. Poison all skipped descendants and the supervised target: prediction
+# drift must stay below 1e-5. Permuting visible views between records must remove
+# accuracy. The encoded presence bits must equal the union of ancestor and
+# local skip selectors. Unselected backups are explicitly left visible when
+# their branch is available.
+#
+# ### Complete experiment code
+#
 
 # %%
 """P053: redundant-view learning under composed branch and leaf skip policies."""
@@ -37,60 +115,7 @@ import relflow as rf
 PROOF_ID = "P053"
 BUDGET = 500
 
-# %% [markdown]
-# ## Data and model
-#
-# Each independent record draws a latent `z ~ Uniform(-1, 1)`. Both views expose
-# `reading = z` and `backup = 2*z + 0.1`; the hidden target is `1.5*z - 0.2`.
-# The latent variable is never a separate input. Independent branch selectors
-# produce all four visibility patterns, independently of `z`. Leaf selectors
-# also hide each backup with probability 0.5. Train/validation/test use
-# 4,096/512/2,048 independent records.
-#
-# ```yaml
-# views:
-#   - {reading: 0.4, backup: 0.9, hidden: true, hide_backup: false}
-#   - {reading: 0.4, backup: 0.9, hidden: false, hide_backup: true}
-# target: 0.4
-# ```
-#
-# Only the second reading is visible. The first backup remains hidden despite
-# its false child selector, because its branch is skipped.
-#
-# ```yaml
-# views:
-#   - {reading: 0.4, backup: 0.9, hidden: false, hide_backup: false}
-#   - {reading: 1000.0, backup: -1000.0, hidden: true, hide_backup: false}
-# target: 0.4
-# ```
-#
-# The first view is sufficient. Arbitrary values in the skipped second view
-# must not affect the answer.
-#
-# ```yaml
-# views:
-#   - {reading: 0.4, backup: 0.9, hidden: true, hide_backup: false}
-#   - {reading: 0.4, backup: 0.9, hidden: true, hide_backup: false}
-# target: 0.4
-# ```
-#
-# Neither view is now available; the individual target cannot be identified.
-#
-# ```{typst}
-# //| label: fig-proof-branch-ablation
-# //| fig-cap: "Branch skips hide both descendant fields; a local skip can additionally hide backup."
-# //| fig-alt: "Record contains two repeated views with a branch hidden selector, Number reading, and Number backup with a local hide_backup selector, plus an always-hidden Number target."
-# #tree(node("record", kind: "root", children: (
-#   node("views", kind: "branch", repeated: true, body: [Skip when `hidden`], children: (
-#     node("reading", type: "Number"),
-#     node("backup", type: "Number", body: [Also skip when `hide_backup`]),
-#   )),
-#   node("target", kind: "target", type: "Number"),
-# )))
-# ```
 
-
-# %%
 def records(*, rows: int, seed: int) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     for _ in range(rows):
@@ -127,22 +152,6 @@ def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["/target"]["content"] for row in output], dtype=np.float64)
 
 
-# %% [markdown]
-# ## Training and controls
-#
-# The model uses the [xs preset](../../core-concepts/model-tree.qmd#choose-a-size).
-#
-# Fit for 500 AdamW updates at learning rate 0.002. On the same test observations,
-# set each of the four branch-mask patterns deterministically. At least one
-# visible view must give nRMSE below 0.30; no visible views must give nRMSE above
-# 0.85. Poison all skipped descendants and the supervised target: prediction
-# drift must stay below 1e-5. Permuting visible views between records must remove
-# accuracy. The encoded presence bits must equal the union of ancestor and
-# local skip selectors. Unselected backups are explicitly left visible when
-# their branch is available.
-
-
-# %%
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -227,19 +236,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
-# %% [markdown]
-# ## Evidence and remaining work
-#
-# {{< proof P053 evidence >}}
-#
-# Gates are provisional and precede the first full runs. Extend this deliberately
-# simple redundancy check to noisy views, unseen missingness patterns, and
-# additional seeds before claiming robust real-world missing-data behavior.
-#
-# ## Reproduce
-#
-# {{< proof P053 script >}}
-
-# %%
 if __name__ == "__main__":
     report(PROOF_ID, run, seed=5301)
+
+# %% [markdown]
+# </details>
