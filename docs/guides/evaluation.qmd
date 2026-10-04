@@ -15,16 +15,22 @@ With a trained model and a configured validation split:
 ```python
 import relflow as rf
 
-metrics = trainer.validate(model=model, datamodule=datamodule)
+metrics = model.validate(datamodule)
 validation_loss = metrics[0]["loss/validate"]
 ```
 
-relflow logs epoch-level metrics. Individual tensorfields determine which
-content metrics are available.
+relflow uses Lightning's native step and epoch logging. Attached loggers receive
+training step metrics every `log_every_n_steps` optimizer updates and aggregates
+at epoch end. Validation and test metrics summarize each pass. Individual
+tensorfields determine which
+content metrics are available. [Training And Checkpoints](lightning.qmd#report-progress-and-validate)
+explains how logging, validation, and checkpoint schedules are configured.
 
 | Metric | Interpretation |
 | --- | --- |
-| `loss/train`, `loss/validate`, `loss/test` | Sum of active leaf losses after each leaf's `weight` is applied. |
+| `loss/train_step` | Training loss from the latest batch: the sum of active leaf losses after each leaf's `weight` is applied. |
+| `loss/train_epoch` | Training loss averaged over the epoch; also available to callbacks as `loss/train`. |
+| `loss/validate`, `loss/test` | Aggregate reconstruction loss for each evaluation pass. |
 | `.returned/validate.loss.state` | Reconstruction loss for value state at `/returned`. |
 | `.returned/validate.loss.content` | Datatype-specific content loss at that address. |
 | `.returned/validate.auc.content` | Example Boolean content metric; availability depends on datatype. |

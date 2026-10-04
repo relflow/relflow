@@ -1,8 +1,8 @@
 # Training And Checkpoints
 
-`rf.Model` is a Lightning module. relflow supplies schema-based computation,
-losses, metrics, and tensorfield callbacks. Lightning controls the training
-loop, devices, precision, logging, and training checkpoints.
+`rf.Model` runs fitting, validation, testing, and batched prediction through
+Lightning internally. Pass a data module and configure execution on the model
+methods. Direct use of `lit.Trainer` remains available for framework tooling.
 
 To learn from unlabeled records and then adapt to a labeled task, follow
 [Pretraining And Fine-Tuning](pretraining.qmd).
@@ -11,28 +11,18 @@ To learn from unlabeled records and then adapt to a labeled task, follow
 
 Start with a constructed model and independent Arrow `train_table` and
 `validation_table` inputs. The model needs at least one reconstruction
-objective, such as `mask=True` on a label, and an optimizer before fitting.
+objective, such as `mask=True` on a label. An unconfigured optimizer defaults
+to AdamW with a learning rate of `1e-3`.
 
 ```python
-import lightning.pytorch as lit
-
 import relflow as rf
 
-model.optimizer = rf.adamw(learning_rate=1e-3)
 datamodule = rf.ArrowDataModule(
     model=model,
     train=train_table,
     validate=validation_table,
 )
-checkpoint = rf.RollbackCheckpoint(
-    dirpath="checkpoints",
-    monitor="loss/validate",
-    mode="min",
-    save_top_k=1,
-    save_last=True,
-)
-trainer = lit.Trainer(max_epochs=50, callbacks=[checkpoint])
-trainer.fit(model=model, datamodule=datamodule)
+model.fit(datamodule, max_epochs=50, checkpoint_dir="checkpoints/customer")
 ```
 
 For eager Polars frames, use `rf.PolarsDataModule(model=model,
@@ -45,19 +35,85 @@ parameters when Lightning configures optimization. `scheduler` accepts a
 scheduler, a Lightning scheduler configuration, or a factory receiving
 `(model, optimizer)`.
 
-`RollbackCheckpoint` restores the best saved **model state** when fitting ends.
-It requires full checkpoints and at least one saved checkpoint. Use Lightning's
-ordinary `ModelCheckpoint` if the in-memory model should stay at its final
-training state. Read [Evaluation](evaluation.qmd) before choosing a monitor.
+Early stopping and rollback are enabled by default. Both monitor `loss/validate`
+in `min` mode; patience is ten validation checks and `min_delta` is zero. Full
+best and last checkpoints are saved. Without `checkpoint_dir`, the run uses a
+unique directory under `default_root_dir/checkpoints`. Fitting restores the best
+model state, including schema, vocabularies, and normalizers, before returning
+the model. Read [Evaluation](evaluation.qmd) before choosing a monitor.
+
+Set `early_stopping=False` or `rollback=False` to disable either policy. Train-only
+fitting disables both or explicitly chooses a training monitor such as
+`loss/train`. Each policy also accepts a configured `rf.EarlyStopping` or
+`rf.RollbackCheckpoint` callback. Policy callbacks in `callbacks` replace their
+automatic defaults; other Lightning callbacks run alongside the built-ins.
+
+## Report Progress And Validate
+
+`Model.track` uses Lightning's native logging: training metrics are available
+per step and as epoch aggregates. `log_every_n_steps`, defaulting to 50, controls
+how often attached loggers receive step metrics. Step values describe the latest
+batch, rather than an average over that interval. With gradient accumulation,
+logging follows optimizer updates. Set `log_every_n_steps=0` to disable step
+emission while keeping epoch logging.
+
+Lightning appends `_step` and `_epoch` to training metric names in logger output,
+such as `loss/train_step` and `loss/train_epoch`. The unsuffixed `loss/train`
+remains available to callbacks; `loss/validate` remains the default checkpoint
+and early-stopping monitor. More frequent logging does not run validation, save
+checkpoints, change patience, or advance schedulers. See
+[Evaluation](evaluation.qmd) for metric definitions.
+
+```python
+model.fit(datamodule, logger=application_logger, log_every_n_steps=50)
+```
+
+For learning-rate logging, add Lightning's `LearningRateMonitor` to `callbacks`.
+
+Validation normally runs at the end of each epoch. To evaluate long training
+streams more frequently, supply an integer `val_check_interval` in **training
+batches**. With `check_val_every_n_epoch=None`, the interval continues across
+epoch boundaries:
+
+```python
+model.fit(
+    datamodule,
+    logger=application_logger,
+    log_every_n_steps=50,
+    val_check_interval=1_000,
+    check_val_every_n_epoch=None,
+)
+```
+
+Early stopping and best-checkpoint selection follow validation. Patience counts
+validation checks with no improvement, so increasing validation frequency can
+stop training sooner. Keep the held-out observations and masking policy
+consistent across checks. Checkpoint filenames include both epoch and optimizer
+step to distinguish evaluations within one epoch. Make sure a configured fit
+runs long enough to reach validation when its selection policies require it.
+
+All loops process their configured splits without automatic time or batch caps.
+Use explicit batch limits for smoke tests or deliberate sampling:
+
+```python
+model.fit(datamodule, max_epochs=1, limit_train_batches=10, limit_val_batches=2)
+model.validate(datamodule, limit_val_batches=100)
+model.test(datamodule, limit_test_batches=100)
+```
+
+Use integer batch counts for Arrow iterable loaders. Data-module sampling and
+`epoch_size` remain explicit data-selection choices. Lightning's `max_time` sets
+a budget for the whole fit. `fast_dev_run=True` skips automatic early stopping
+and rollback for Lightning's single-pass diagnostic run.
 
 ## Choose The Loop
 
 | Call | Required data split | Purpose |
 | --- | --- | --- |
-| `trainer.fit(...)` | `train`; optionally `validate` | Optimize, optionally validating each epoch. |
-| `trainer.validate(...)` | `validate` | Evaluate validation objectives. |
-| `trainer.test(...)` | `test` | Evaluate held-out objectives. |
-| `trainer.predict(...)` | `predict` | Produce predictions through Lightning. |
+| `model.fit(datamodule)` | `train` and, for the default policies, `validate` | Optimize and restore the best model. |
+| `model.validate(datamodule)` | `validate` | Return one metric dictionary per loader. |
+| `model.test(datamodule)` | `test` | Return held-out metrics per loader. |
+| `model.predict(datamodule=...)` | `predict` | Collect an Arrow table on one device or stream with a Writer. |
 
 Stages also control masking and field-owned learning, such as vocabulary and
 normalizer updates. Use the corresponding split rather than repurposing a
@@ -65,8 +121,13 @@ training loader for inference. For bounded requests, the separate
 `model.predict(observations)` convenience returns an Arrow table without a
 Trainer; see [Prediction Output](prediction-output.qmd).
 
-Set `accelerator`, `devices`, `precision`, and distributed `strategy` on the
-Trainer. relflow installs its own required callbacks automatically. Compile
+Hardware defaults to `accelerator="auto"`, `devices="auto"`, DDP for multiple
+devices or nodes, and BF16 mixed precision when all selected devices support it.
+Otherwise precision is FP32. Supply explicit `accelerator`, `devices`,
+`precision`, or `strategy` to override these choices. Other Trainer arguments
+pass through; `callbacks` works on all four loops. `batch_size` updates the one
+model-owned batch size. relflow installs its required callbacks automatically.
+Compile
 selected model regions before the loop with `model.compile()` if desired;
 [Performance](performance.qmd) describes exactly what this compiles.
 
@@ -111,25 +172,53 @@ again after loading.
 
 ## Resume Training
 
+The default rollback callback saves best and last full checkpoints at its
+validation/epoch checkpoints. The best model is selected for its validation
+score; the last checkpoint preserves the most recent state saved by that
+callback. For recovery between validation checks, attach a separate unmonitored
+checkpoint callback:
+
+```python
+from lightning.pytorch.callbacks import ModelCheckpoint
+
+recovery = ModelCheckpoint(
+    dirpath="checkpoints/recovery",
+    filename="step-{step}",
+    monitor=None,
+    every_n_train_steps=1_000,
+    save_top_k=1,
+    save_last=True,
+)
+model.fit(datamodule, callbacks=[recovery])
+```
+
+The recovery checkpoint contains optimizer and scheduler state. Its step
+schedule does not select the best model using a previous validation score;
+the built-in rollback callback continues to select from fresh validation checks.
+
 Use a full Lightning checkpoint to resume optimizer/scheduler state and loop
 progress. Recreate the runtime configuration and pass the checkpoint to `fit`:
 
 ```python
-resumed = rf.Model.load("checkpoints/last.ckpt")
+resumed = rf.Model.load("checkpoints/recovery/last.ckpt")
 resumed.optimizer = rf.adamw(learning_rate=1e-3)
 resume_data = rf.ArrowDataModule(
     model=resumed,
     train=train_table,
     validate=validation_table,
 )
-trainer = lit.Trainer(max_epochs=100)
-trainer.fit(
-    model=resumed,
-    datamodule=resume_data,
-    ckpt_path="checkpoints/last.ckpt",
+resumed.fit(
+    resume_data,
+    max_epochs=100,
+    ckpt_path="checkpoints/recovery/last.ckpt",
 )
 ```
 
 Recreate any scheduler and keep optimizer configuration consistent with the
 saved run. `rf.Model.load` restores model state; the `ckpt_path` argument is
 what tells Lightning to resume training state.
+
+Another `fit` call without `ckpt_path` starts a new optimizer run from the current
+model state. Use the best full checkpoint to continue with optimizer and
+scheduler state matching the restored best model. After rollback, construct a
+new optimizer instance or supply a factory; factories bind the current graph.

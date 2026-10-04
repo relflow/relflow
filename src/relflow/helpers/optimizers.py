@@ -1,6 +1,7 @@
 """Optimizer factories for relflow models."""
 
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import torch
@@ -49,38 +50,61 @@ def adamw(
 
     fragments = tuple(fragment.lower() for fragment in no_decay_name_fragments if fragment)
 
-    def build(module: torch.nn.Module) -> torch.optim.Optimizer:
-        decay_parameters: list[Parameter] = []
-        no_decay_parameters: list[Parameter] = []
+    return partial(
+        build,
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
+        betas=betas,
+        eps=eps,
+        fused=fused,
+        decay_bias=decay_bias,
+        decay_1d=decay_1d,
+        fragments=fragments,
+    )
 
-        for name, parameter in module.named_parameters():
-            if not parameter.requires_grad:
-                continue
 
-            if uses_weight_decay(
-                name,
-                parameter,
-                decay_bias=decay_bias,
-                decay_1d=decay_1d,
-                no_decay_name_fragments=fragments,
-            ):
-                decay_parameters.append(parameter)
-            else:
-                no_decay_parameters.append(parameter)
+def build(
+    module: torch.nn.Module,
+    *,
+    learning_rate: float,
+    weight_decay: float,
+    betas: tuple[float, float],
+    eps: float,
+    fused: bool | None,
+    decay_bias: bool,
+    decay_1d: bool,
+    fragments: tuple[str, ...],
+) -> torch.optim.Optimizer:
+    """Bind AdamW groups to the current graph; keep the factory spawn-picklable."""
+    decay_parameters: list[Parameter] = []
+    no_decay_parameters: list[Parameter] = []
 
-        parameter_groups: list[dict[str, Any]] = []
-        if decay_parameters:
-            parameter_groups.append({"params": decay_parameters, "weight_decay": weight_decay})
-        if no_decay_parameters:
-            parameter_groups.append({"params": no_decay_parameters, "weight_decay": 0.0})
+    for name, parameter in module.named_parameters():
+        if not parameter.requires_grad:
+            continue
 
-        return torch.optim.AdamW(
-            params=parameter_groups,
-            lr=learning_rate,
-            betas=betas,
-            eps=eps,
-            fused=fused,
-            weight_decay=weight_decay,
-        )
+        if uses_weight_decay(
+            name,
+            parameter,
+            decay_bias=decay_bias,
+            decay_1d=decay_1d,
+            no_decay_name_fragments=fragments,
+        ):
+            decay_parameters.append(parameter)
+        else:
+            no_decay_parameters.append(parameter)
 
-    return build
+    parameter_groups: list[dict[str, Any]] = []
+    if decay_parameters:
+        parameter_groups.append({"params": decay_parameters, "weight_decay": weight_decay})
+    if no_decay_parameters:
+        parameter_groups.append({"params": no_decay_parameters, "weight_decay": 0.0})
+
+    return torch.optim.AdamW(
+        params=parameter_groups,
+        lr=learning_rate,
+        betas=betas,
+        eps=eps,
+        fused=fused,
+        weight_decay=weight_decay,
+    )

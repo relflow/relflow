@@ -49,6 +49,7 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.OptimizerConfig is not None
     assert relflow.SchedulerConfig is not None
     assert relflow.RollbackCheckpoint.__name__ == "RollbackCheckpoint"
+    assert relflow.EarlyStopping.__name__ == "EarlyStopping"
     assert relflow.Writer.__name__ == "Writer"
     assert relflow.Postprocessor is not None
     assert not hasattr(relflow, "PostprocessorProvider")

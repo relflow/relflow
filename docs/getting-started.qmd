@@ -109,23 +109,18 @@ memory. See [Data Modules](guides/data-modules.qmd) for other sources and
 
 ## Train And Save
 
-Configure an optimizer before fitting. Lightning runs the training loop;
-relflow supplies the typed losses and metrics.
+Fit the data module. relflow configures Lightning, an AdamW optimizer, early
+stopping, and automatic restoration of the best validation checkpoint.
 
 ```python
-import lightning.pytorch as lit
-
-model.optimizer = rf.adamw(learning_rate=1e-3)
-checkpoint = rf.RollbackCheckpoint(monitor="loss/validate", mode="min")
-trainer = lit.Trainer(max_epochs=30, callbacks=[checkpoint])
-trainer.fit(model=model, datamodule=data)
+model.fit(data, max_epochs=30)
 
 model.save("customer.rf")
 restored = rf.Model.load("customer.rf")
 ```
 
-The callback restores the best validation checkpoint at fit end. See
-[Training](guides/lightning.qmd) for checkpoint and resume behavior.
+See [Training](guides/lightning.qmd) for hardware defaults, step logging,
+checkpointing, and resume behavior.
 
 ## Stream Predictions To Parquet
 
@@ -138,10 +133,10 @@ prediction_data = rf.ArrowDataModule(
     predict=ds.dataset("warehouse/requests", format="parquet"),
     retain=("customer_id",),
 )
-predictor = lit.Trainer(devices=1, callbacks=[rf.Writer("predictions")])
-predictor.predict(
-    model=restored,
+restored.predict(
     datamodule=prediction_data,
+    devices=1,
+    callbacks=[rf.Writer("predictions")],
     return_predictions=False,
 )
 

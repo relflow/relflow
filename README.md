@@ -75,28 +75,28 @@ The paths below are application-supplied Parquet datasets. Training and
 validation records include `returned`; request records omit it.
 
 ```python
-import lightning.pytorch as lit
 import pyarrow.dataset as ds
 
 train = ds.dataset("warehouse/train", format="parquet")
 validation = ds.dataset("warehouse/validation", format="parquet")
 requests = ds.dataset("warehouse/requests", format="parquet")
 
-model.optimizer = rf.adamw(learning_rate=1e-3)
 data = rf.ArrowDataModule(
     model=model, train=train, validate=validation, predict=requests
 )
-trainer = lit.Trainer(
-    max_epochs=30, devices=1, callbacks=[rf.Writer("predictions")]
+model.fit(data, max_epochs=30)
+model.predict(
+    datamodule=data, devices=1,
+    callbacks=[rf.Writer("predictions")], return_predictions=False,
 )
-trainer.fit(model=model, datamodule=data)
-trainer.predict(model=model, datamodule=data, return_predictions=False)
 
 predictions = ds.dataset("predictions", format="parquet")
 ```
 
-`ArrowDataModule` opens a fresh scan for each pass and prepares model batches
-as records arrive. `rf.Writer` writes prediction batches to
+`fit` supplies AdamW, early stopping, and restoration of the best validation
+checkpoint. Hardware, logging, and Lightning options can be supplied to the
+model methods. `ArrowDataModule` opens a fresh scan for each pass and prepares
+model batches as records arrive. `rf.Writer` writes prediction batches to
 `predictions/rank-0.parquet`; `return_predictions=False` avoids collecting
 all outputs in memory. Open the output as an Arrow dataset for further batch
 processing. Decoded values live under its `predictions` column at addresses

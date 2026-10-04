@@ -6,7 +6,6 @@ Use Lightning prediction with `rf.Writer` to write results directly to Parquet.
 This keeps large jobs from accumulating every prediction in memory.
 
 ```python
-import lightning.pytorch as lit
 import pyarrow.dataset as ds
 
 import relflow as rf
@@ -17,14 +16,21 @@ data = rf.ArrowDataModule(
     predict=ds.dataset("warehouse/requests", format="parquet"),
     retain=("request_id",),
 )
-trainer = lit.Trainer(callbacks=[rf.Writer("predictions")])
-trainer.predict(model=model, datamodule=data, return_predictions=False)
+model.predict(
+    datamodule=data,
+    callbacks=[rf.Writer("predictions")],
+    return_predictions=False,
+)
 ```
 
 Each rank writes `predictions/rank-{global_rank}.parquet`. The files contain
 the canonical `inputs` and `predictions` columns described in
 [Prediction Output](prediction-output.qmd). Retain a business key to join or
 sort distributed results downstream; relflow does not add row identity.
+
+To collect bounded batched output in memory, use
+`model.predict(datamodule=data, devices=1)`. This returns one Arrow table.
+Prediction has no automatic time limit.
 
 With multiple ranks or data workers, the loader trims the final group to divide
 evenly among consumers, so trailing rows can be omitted even with
