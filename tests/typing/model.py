@@ -43,6 +43,8 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
     assert_type(rf.Model.md(fields={"size": rf.Number}, scheduler=schedule), rf.Model)
     assert_type(Classifier.compact(amount=rf.Number, n_layers=2), Classifier)
     assert_type(model.track(("train", "loss"), loss), torch.Tensor)
+    assert_type(model.track(("throughput", "train"), loss, on_step=True, on_epoch=False), torch.Tensor)
+    assert_type(model.track(("loss", "train_epoch"), loss, on_step=False, on_epoch=True, logger=False), torch.Tensor)
     assert_type(model.encode(table), TensorDict)
     assert_type(rf.Enum.vocabulary(model, rf.Address("label")), tuple[bool | int | float | str | bytes, ...])
     assert_type(

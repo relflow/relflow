@@ -510,8 +510,17 @@ class Model(lit.LightningModule, Renderable):
                 "with mask=True or Mask(reconstruct=True) before fitting"
             )
 
-    def track(self, names: tuple[str, ...], /, value: MetricValue) -> MetricValue:
-        """Log native training-step and epoch metrics, prefixing address groups with a dot."""
+    def track(
+        self,
+        names: tuple[str, ...],
+        /,
+        value: MetricValue,
+        *,
+        on_step: bool | None = None,
+        on_epoch: bool | None = None,
+        logger: bool | None = None,
+    ) -> MetricValue:
+        """Log training steps or evaluation aggregates, using dotted address groups."""
         assert len(names) > 1
         group, *keys = names
         group = ("." if group.startswith("/") else "") + group.strip("/").replace("/", ".")
@@ -524,7 +533,9 @@ class Model(lit.LightningModule, Renderable):
         self.log(
             name=f"{group}/{key}",
             value=value.detach() if isinstance(value, torch.Tensor) else value,
-            on_epoch=True,
+            on_step=on_step,
+            on_epoch=not self.training if on_epoch is None else on_epoch,
+            logger=logger,
             sync_dist=True,
             rank_zero_only=not stateful,
             batch_size=self.batch_size,
@@ -602,16 +613,16 @@ class Model(lit.LightningModule, Renderable):
     ) -> Self:
         """Fit a data module and automatically restore its best saved model state.
 
-        Unspecified hardware uses all available devices, DDP for multiple
-        devices, and BF16 mixed precision where supported. Native training-step
+        Unspecified hardware uses all available devices, DDP with unused-parameter
+        detection across multiple devices or nodes, and BF16 mixed precision where supported. Native training-step
         metrics reach attached loggers every ``log_every_n_steps`` optimizer
-        updates (default 50); epoch aggregates remain available for monitors.
+        updates (default 50); training loss averages remain internal to callbacks.
         ``val_check_interval`` controls validation independently. Explicit
         Lightning batch limits can shorten a loop; no automatic limits apply.
 
         Early stopping and rollback accept booleans or configured callbacks.
         Their default monitor requires a validation split. Train-only fitting
-        can disable both policies or explicitly monitor ``loss/train``.
+        can disable both policies or explicitly monitor ``loss/train_epoch``.
         Full training continuation requires ``ckpt_path``; another ordinary
         call starts a new run from the current model state.
         """

@@ -479,7 +479,6 @@ def loss(
     # negative examples of future labels.
     objective = torch.nn.functional.binary_cross_entropy_with_logits(content_inputs, content_targets, reduction="sum")
     decoder = cast(Decoder, module.nodes[prediction.address].decoder)
-    metric = cast(Membership, decoder.metrics[f"{strata.value}_metrics"])
     with torch.no_grad():
         expected = content_targets.bool()
         predicted = content_inputs.ge(0)
@@ -498,7 +497,7 @@ def loss(
                 predicted.sum(),
             )
         )
-        metric.update(counts, objective.unsqueeze(0))
+        decoder.metrics.record(module, strata, counts, objective.unsqueeze(0))
     module.track(
         (prediction.address, strata, "vocabulary", "size"), value=state_inputs.new_tensor(size, dtype=torch.float32)
     )

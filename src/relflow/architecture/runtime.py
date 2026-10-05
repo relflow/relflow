@@ -664,6 +664,8 @@ class ModelRuntime:
             return Output(loss=anchor)
 
         loss = module.track((Metric.loss, strata), value=torch.stack(losses).sum() + anchor)
+        if strata == Strata.train:
+            module.track((Metric.loss, "train_epoch"), value=loss, on_step=False, on_epoch=True, logger=False)
         return Output(loss=loss)
 
     @staticmethod

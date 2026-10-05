@@ -213,7 +213,7 @@ def test_logging_cadence_keeps_validation_selection_and_recovery_independent(
     )
     assert model.trainer.global_step == 6
     with (Path(logger.log_dir) / "metrics.csv").open() as stream:
-        reports = [row for row in csv.DictReader(stream) if row["loss/train_step"]]
+        reports = [row for row in csv.DictReader(stream) if row["loss/train"]]
     assert [int(row["step"]) for row in reports] == list(range(report_interval - 1, 6, report_interval))
     assert scores.validation_sizes == [1, 1, 1]
     best = next(
@@ -236,8 +236,8 @@ def test_custom_policies_replace_defaults_and_train_only_requires_a_policy_choic
     data = rf.ArrowDataModule(model, train=table)
     with pytest.raises(ValueError, match="supply a validate split"):
         model.fit(data, max_epochs=1, **options)
-    stop = rf.EarlyStopping(monitor="loss/train", patience=2)
-    rollback = rf.RollbackCheckpoint(dirpath=tmp_path / "custom", monitor="loss/train", mode="min")
+    stop = rf.EarlyStopping(monitor="loss/train_epoch", patience=2)
+    rollback = rf.RollbackCheckpoint(dirpath=tmp_path / "custom", monitor="loss/train_epoch", mode="min")
     model.fit(data, early_stopping=stop, rollback=rollback, max_epochs=1, **options)
     assert [item for item in model.trainer.callbacks if isinstance(item, rf.EarlyStopping)] == [stop]
     assert [item for item in model.trainer.callbacks if isinstance(item, rf.RollbackCheckpoint)] == [rollback]
@@ -260,8 +260,9 @@ def test_input_ownership_and_option_conflicts_fail_before_execution(model, data,
         model.validate(data, invented_option=True, **options)
 
 
-def test_automatic_hardware_uses_ddp_and_checks_all_selected_gpu_capabilities(monkeypatch):
+def test_automatic_hardware_handles_unused_ddp_parameters_and_checks_all_selected_gpu_capabilities(monkeypatch):
     from lightning.pytorch.accelerators import CUDAAccelerator, MPSAccelerator
+    from lightning.pytorch.strategies import DDPStrategy
 
     monkeypatch.setattr(MPSAccelerator, "is_available", lambda: False)
     monkeypatch.setattr(CUDAAccelerator, "is_available", lambda: True)
@@ -270,15 +271,30 @@ def test_automatic_hardware_uses_ddp_and_checks_all_selected_gpu_capabilities(mo
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (8 if device.index == 0 else 7, 0))
     options = {}
     hardware(options)
-    assert options == {"accelerator": "cuda", "devices": 2, "strategy": "ddp", "precision": "32-true"}
+    assert options == {
+        "accelerator": "cuda",
+        "devices": 2,
+        "strategy": "ddp_find_unused_parameters_true",
+        "precision": "32-true",
+    }
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (8, 0))
     options = {}
     hardware(options)
     assert options["precision"] == "bf16-mixed"
+    options = {"devices": 1}
+    hardware(options)
+    assert options["strategy"] == "auto"
+    options = {"devices": 1, "num_nodes": 2, "strategy": "auto"}
+    hardware(options)
+    assert options["strategy"] == "ddp_find_unused_parameters_true"
     options = {"precision": "64-true", "strategy": "ddp_spawn"}
     hardware(options)
     assert options["precision"] == "64-true"
     assert options["strategy"] == "ddp_spawn"
+    strategy = DDPStrategy(find_unused_parameters=False)
+    options = {"strategy": strategy}
+    hardware(options)
+    assert options["strategy"] is strategy
 
 
 def test_resume_restores_optimizer_progress_from_a_full_checkpoint(model, data, options):
@@ -349,8 +365,9 @@ def test_distributed_logging_and_rollback_complete_on_every_rank(model, data, op
     assert ranks[0]["best"] == ranks[1]["best"]
     assert ranks[0]["normalizer"] == ranks[1]["normalizer"]
     with (tmp_path / "logs/lightning_logs/version_0/metrics.csv").open() as stream:
-        reports = [row for row in csv.DictReader(stream) if row["loss/train_step"]]
+        reports = [row for row in csv.DictReader(stream) if row["loss/train"]]
     assert [int(row["step"]) for row in reports] == [2, 5, 8, 11]
+    assert all(float(row["throughput/train"]) > 0.0 for row in reports)
 
 
 def test_explicit_precision_plugin_overrides_automatic_precision(model, data, options):

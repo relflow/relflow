@@ -1,4 +1,6 @@
-"""Explicit, extension-owned epoch statistics with identical DDP collectives."""
+"""Extension-owned batch scores and evaluation statistics with identical DDP collectives."""
+
+from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, cast
@@ -64,6 +66,15 @@ class Scores(torch.nn.ModuleDict):
         )
         self.address = address
 
+    def record(self, module: Model, strata: Strata, counts: torch.Tensor, sums: torch.Tensor) -> None:
+        """Log training batch scores while retaining pass totals for evaluation and callbacks."""
+        metric = cast(Totals, self[f"{strata.value}_metrics"])
+        if strata == Strata.train:
+            for name, value in metric(counts, sums).items():
+                module.track((self.address, strata, *name.split(".")), value=value.float())
+        else:
+            metric.update(counts, sums)
+
     def compute(self, strata: Strata) -> dict[str, torch.Tensor]:
         metric = cast(Totals, self[f"{strata.value}_metrics"])
         # Every rank participates, even if its extension loss was never called.
@@ -96,9 +107,6 @@ class Metrics(Callback):
 
     def on_test_epoch_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         self.reset(pl_module, Strata.test)
-
-    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        self.record(pl_module, Strata.train)
 
     def on_validation_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         self.record(pl_module, Strata.validate)

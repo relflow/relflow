@@ -325,10 +325,15 @@ def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: 
     metrics = tuple(decoder.content_metrics(strata))
     valued = trainable & state_targets.eq(Tokens.valued.value)
     if not valued.any():
-        # Every rank must log the same stateful metrics even when this rank's
-        # batch has no valued targets. The metrics remain unchanged here.
         for metric_name, metric in metrics:
-            module.track((address, strata, metric_name, TensorKey.content), value=metric)
+            if strata == Strata.train:
+                metric.reset()
+                module.track(
+                    (address, strata, metric_name, TensorKey.content), value=state_logits.new_full((), float("nan"))
+                )
+            else:
+                # Evaluation must register the same stateful metrics on every rank.
+                module.track((address, strata, metric_name, TensorKey.content), value=metric)
         return total
 
     logits = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(-1)[valued]
@@ -343,8 +348,12 @@ def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: 
 
     probabilities = logits.sigmoid()
     for metric_name, metric in metrics:
-        metric.update(probabilities, targets)
-        module.track((address, strata, metric_name, TensorKey.content), value=metric)
+        if strata == Strata.train:
+            metric.reset()
+            module.track((address, strata, metric_name, TensorKey.content), value=metric(probabilities, targets))
+        else:
+            metric.update(probabilities, targets)
+            module.track((address, strata, metric_name, TensorKey.content), value=metric)
     return total
 
 

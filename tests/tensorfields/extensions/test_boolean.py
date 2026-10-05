@@ -150,12 +150,13 @@ class _TrackingModule:
         return value
 
 
-def test_boolean_loss_tracks_binary_torchmetrics():
+@pytest.mark.parametrize("strata", [Strata.train, Strata.validate])
+def test_boolean_loss_tracks_batch_scores_for_training_and_stateful_evaluation_metrics(strata):
     schema = _schema(threshold=[0.25, 0.75], mask=True)
     field = _tensorfield(
         groups=[[[False, True]], [[True, False]]],
         schema=schema,
-        strata=Strata.train,
+        strata=strata,
     )
     module = _TrackingModule(schema, Embedder(schema, ADDRESS), Decoder(schema, ADDRESS))
     state_logits = torch.zeros(*field.state.shape, len(Tokens))
@@ -168,7 +169,7 @@ def test_boolean_loss_tracks_binary_torchmetrics():
         ),
     )
 
-    result = loss(module, prediction, field, Strata.train)
+    result = loss(module, prediction, field, strata)
 
     assert torch.isfinite(result)
     assert torch.equal(
@@ -193,8 +194,29 @@ def test_boolean_loss_tracks_binary_torchmetrics():
         ),
     }
     for metric_name in expected_names:
-        tracked = module.tracked[(ADDRESS, Strata.train, metric_name, TensorKey.content)]
-        assert isinstance(tracked, TorchMetric)
+        tracked = module.tracked[(ADDRESS, strata, metric_name, TensorKey.content)]
+        assert isinstance(tracked, torch.Tensor if strata == Strata.train else TorchMetric)
+
+
+def test_boolean_training_without_valued_targets_does_not_repeat_previous_batch_scores():
+    schema = _schema(mask=True)
+    module = _TrackingModule(schema, Embedder(schema, ADDRESS), Decoder(schema, ADDRESS))
+    for groups, missing in [([[[False, True]]], False), ([[[None]]], True)]:
+        field = _tensorfield(groups=groups, schema=schema, strata=Strata.train)
+        prediction = Prediction(
+            address=ADDRESS,
+            payload=TensorDict(
+                {
+                    TensorKey.state: torch.zeros(*field.state.shape, len(Tokens)),
+                    TensorKey.content: torch.zeros(*field.content.shape, 1),
+                },
+                batch_size=field.batch_size,
+            ),
+        )
+        assert torch.isfinite(loss(module, prediction, field, Strata.train))
+        for metric_name, _ in module.nodes[ADDRESS].decoder.content_metrics(Strata.train):
+            tracked = module.tracked[(ADDRESS, Strata.train, metric_name, TensorKey.content)]
+            assert torch.isnan(tracked) if missing else torch.isfinite(tracked)
 
 
 def test_boolean_embedder_has_state_and_content_counters():

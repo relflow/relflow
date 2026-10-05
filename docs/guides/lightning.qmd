@@ -44,23 +44,25 @@ the model. Read [Evaluation](evaluation.qmd) before choosing a monitor.
 
 Set `early_stopping=False` or `rollback=False` to disable either policy. Train-only
 fitting disables both or explicitly chooses a training monitor such as
-`loss/train`. Each policy also accepts a configured `rf.EarlyStopping` or
+`loss/train_epoch`. Each policy also accepts a configured `rf.EarlyStopping` or
 `rf.RollbackCheckpoint` callback. Policy callbacks in `callbacks` replace their
 automatic defaults; other Lightning callbacks run alongside the built-ins.
 
 ## Report Progress And Validate
 
-`Model.track` uses Lightning's native logging: training metrics are available
-per step and as epoch aggregates. `log_every_n_steps`, defaulting to 50, controls
+`Model.track` uses Lightning's native logging: training metrics are logged only
+per step. `log_every_n_steps`, defaulting to 50, controls
 how often attached loggers receive step metrics. Step values describe the latest
 batch, rather than an average over that interval. With gradient accumulation,
 logging follows optimizer updates. Set `log_every_n_steps=0` to disable step
-emission while keeping epoch logging.
+emission while retaining internal loss averages and validation/test metrics.
 
-Lightning appends `_step` and `_epoch` to training metric names in logger output,
-such as `loss/train_step` and `loss/train_epoch`. The unsuffixed `loss/train`
-remains available to callbacks; `loss/validate` remains the default checkpoint
-and early-stopping monitor. More frequent logging does not run validation, save
+Training metrics keep their names, such as `loss/train` and
+`.returned/train.loss.content`. The training loss average is available to
+callbacks as `loss/train_epoch` and is not sent to attached loggers. Validation
+and test retain pass aggregates; `loss/validate` remains the default checkpoint
+and early-stopping monitor. `Model.track(..., on_epoch=True)` explicitly opts
+into epoch logging for a custom metric. More frequent logging does not run validation, save
 checkpoints, change patience, or advance schedulers. See
 [Evaluation](evaluation.qmd) for metric definitions.
 
@@ -121,9 +123,11 @@ training loader for inference. For bounded requests, the separate
 `model.predict(observations)` convenience returns an Arrow table without a
 Trainer; see [Prediction Output](prediction-output.qmd).
 
-Hardware defaults to `accelerator="auto"`, `devices="auto"`, DDP for multiple
-devices or nodes, and BF16 mixed precision when all selected devices support it.
-Otherwise precision is FP32. Supply explicit `accelerator`, `devices`,
+Hardware defaults to `accelerator="auto"`, `devices="auto"`,
+`strategy="ddp_find_unused_parameters_true"` for multiple devices or nodes,
+and BF16 mixed precision when all selected devices support it. Otherwise
+precision is FP32. Unused-parameter detection supports parameters omitted from
+a batch's reconstruction objectives. Supply explicit `accelerator`, `devices`,
 `precision`, or `strategy` to override these choices. Other Trainer arguments
 pass through; `callbacks` works on all four loops. `batch_size` updates the one
 model-owned batch size. relflow installs its required callbacks automatically.

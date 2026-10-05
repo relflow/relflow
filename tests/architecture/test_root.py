@@ -596,6 +596,7 @@ def test_track_marks_metric_sync_handled_without_collective(monkeypatch) -> None
     assert calls[0]["value"].requires_grad is False
     assert calls[0]["sync_dist"] is True
     assert calls[0]["rank_zero_only"] is True
+    assert calls[0]["on_epoch"] is False
 
 
 def test_training_step_returns_only_loss_to_avoid_retaining_prediction_graphs(monkeypatch) -> None:

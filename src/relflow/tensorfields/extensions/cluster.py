@@ -752,12 +752,13 @@ def loss(
     vocab_logits = cluster_probs @ assign_weight[:vocab_size].float().T
     objective = torch.nn.functional.cross_entropy(vocab_logits, content_targets[known], reduction="sum")
     decoder = cast(Decoder, module.nodes[prediction.address].decoder)
-    metric = cast(Reconstruction, decoder.metrics[f"{strata.value}_metrics"])
     with torch.no_grad():
         correct = known.sum().new_zeros(())
         if vocab_size:
             correct = vocab_logits.argmax(dim=-1).eq(content_targets[known]).sum()
-        metric.update(torch.stack((known.sum(), valued.sum(), correct)), torch.stack((objective, objective)))
+        decoder.metrics.record(
+            module, strata, torch.stack((known.sum(), valued.sum(), correct)), torch.stack((objective, objective))
+        )
     loss = loss + objective / known.sum().clamp_min(1)
 
     if strata != Strata.train:

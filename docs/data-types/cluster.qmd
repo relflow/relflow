@@ -74,7 +74,7 @@ revival and merging. Known-input augmentation does not remove that target's
 supervision. The auxiliary `loss.cluster` still encourages balanced use of
 latent clusters; this is not a guarantee of calibrated label probabilities.
 
-Epoch metrics separate vocabulary coverage from reconstruction quality:
+Metrics separate vocabulary coverage from reconstruction quality:
 
 | Metric | Meaning |
 | --- | --- |
@@ -83,7 +83,8 @@ Epoch metrics separate vocabulary coverage from reconstruction quality:
 | `accuracy.content`, `nll.content`, `loss.content` | Known-label accuracy and unweighted cross entropy over populated labels. |
 | `accuracy.all` | Correct known predictions / all selected valued targets, counting unknown answers as incorrect. |
 
-Counts and sums aggregate across batches and DDP ranks. With no known targets,
+Training scores describe the latest batch; validation and test aggregate counts
+and sums across batches and DDP ranks. With no known targets,
 conditional reconstruction metrics are `NaN`; state supervision remains valid.
 `coverage.content` and the target counts replace the old training-only
 `cluster.sentinel_share` diagnostic. See

@@ -67,7 +67,8 @@ known positives and known negatives remain supervised even in a partial-OOV
 or all-OOV set. Unknown members cannot supply identity-specific positives.
 An empty set supplies known negatives; null is a separate state.
 
-Epoch metrics use summed counts, including under DDP, and a fixed `0.5` cutoff:
+Metrics use a fixed `0.5` cutoff. Training scores describe the latest batch;
+validation and test use summed counts across batches and DDP ranks:
 
 | Metric | Meaning |
 | --- | --- |

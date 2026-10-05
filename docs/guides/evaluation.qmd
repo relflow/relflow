@@ -19,22 +19,24 @@ metrics = model.validate(datamodule)
 validation_loss = metrics[0]["loss/validate"]
 ```
 
-relflow uses Lightning's native step and epoch logging. Attached loggers receive
-training step metrics every `log_every_n_steps` optimizer updates and aggregates
-at epoch end. Validation and test metrics summarize each pass. Individual
+relflow uses Lightning's native logging. Attached loggers receive training
+metrics only at the configured step cadence, every `log_every_n_steps` optimizer
+updates. Validation and test losses and content metrics summarize each pass.
+Throughput is logged per step. Individual
 tensorfields determine which
 content metrics are available. [Training And Checkpoints](lightning.qmd#report-progress-and-validate)
 explains how logging, validation, and checkpoint schedules are configured.
 
 | Metric | Interpretation |
 | --- | --- |
-| `loss/train_step` | Training loss from the latest batch: the sum of active leaf losses after each leaf's `weight` is applied. |
-| `loss/train_epoch` | Training loss averaged over the epoch; also available to callbacks as `loss/train`. |
+| `loss/train` | Training loss from the latest batch: the sum of active leaf losses after each leaf's `weight` is applied. |
+| `loss/train_epoch` | Internal training loss average for callbacks; not sent to attached loggers. |
 | `loss/validate`, `loss/test` | Aggregate reconstruction loss for each evaluation pass. |
 | `.returned/validate.loss.state` | Reconstruction loss for value state at `/returned`. |
 | `.returned/validate.loss.content` | Datatype-specific content loss at that address. |
 | `.returned/validate.auc.content` | Example Boolean content metric; availability depends on datatype. |
-| `throughput/train` | Estimated observations per second across the training epoch. |
+| `throughput/train` | Estimated observations per second per rank for the latest training batch, reported at the configured step logging cadence. |
+| `throughput/validate`, `throughput/test`, `throughput/predict` | Estimated observations per second per rank for each evaluation or prediction batch. |
 
 Metric names join schema-address components with periods, preserve case,
 and prefix the address group with a period before appending `/stage.metric.component`.

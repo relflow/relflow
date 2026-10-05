@@ -489,7 +489,9 @@ def loss(
                 candidates.topk(k=min(k, size), dim=-1).indices.eq(known_targets.unsqueeze(-1)).any(dim=-1).sum()
                 for k in metric.topk
             ]
-        metric.update(torch.stack((known.sum(), valued.sum(), correct, *topk)), torch.stack((objective, nll)))
+        decoder.metrics.record(
+            module, strata, torch.stack((known.sum(), valued.sum(), correct, *topk)), torch.stack((objective, nll))
+        )
     return loss + objective / known.sum().clamp_min(1)
 
 

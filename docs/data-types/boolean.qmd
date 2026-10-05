@@ -39,6 +39,8 @@ Reconstruction combines state cross entropy with frequency-weighted binary
 cross entropy for valued targets. relflow tracks AUC and decision accuracy,
 precision, recall, and specificity for each configured threshold; names include
 `accuracy@0.5` and `recall@0.8`.
+Training scores describe the latest batch; validation and test aggregate scores
+over the pass. See [Evaluation](../guides/evaluation.qmd) for logging cadence.
 
 Prediction `content.probability` is the probability of true. Thresholds affect
 metrics only; they never turn the output into a Boolean. Read it with the

@@ -57,7 +57,7 @@ storage does not contribute classes or gradients. Unavailable valued targets hav
 gradient: an unknown answer does not imply a uniform distribution over known
 answers. State supervision is retained.
 
-For each reconstruction objective, epoch metrics separate coverage from quality:
+For each reconstruction objective, metrics separate coverage from quality:
 
 | Metric suffix | Meaning |
 | --- | --- |
@@ -69,8 +69,9 @@ For each reconstruction objective, epoch metrics separate coverage from quality:
 | `loss.content` | Unweighted categorical training objective over populated labels, averaged over known targets; equal to `nll.content`. |
 
 Names include the field address and stage, for example
-`.merchant_category/validate.coverage.content`. Counts and sums aggregate
-across batches and ranks before division. With no known targets, conditional
+`.merchant_category/validate.coverage.content`. Training scores describe the
+latest batch; validation and test aggregate counts and sums across batches and
+ranks before division. With no known targets, conditional
 accuracy, NLL, and content loss are `NaN`, not zero; coverage and all-target
 accuracy are zero when selected valued targets exist. With no selected valued
 targets, coverage and all-target accuracy are also undefined.

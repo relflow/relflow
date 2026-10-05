@@ -398,7 +398,12 @@ def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: 
     with torch.no_grad():
         correct = content.argmax(-1).eq(targets).sum()
         topk = [content.topk(min(k, size), dim=-1).indices.eq(targets.unsqueeze(-1)).any(-1).sum() for k in metric.topk]
-        metric.update(torch.stack((valued.sum(), valued.sum(), correct, *topk)), torch.stack((objective, objective)))
+        decoder.metrics.record(
+            module,
+            strata,
+            torch.stack((valued.sum(), valued.sum(), correct, *topk)),
+            torch.stack((objective, objective)),
+        )
     return result + objective / valued.sum().clamp_min(1)
 
 

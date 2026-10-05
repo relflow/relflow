@@ -121,11 +121,16 @@ adding workers does not guarantee less source I/O. Keep Arrow/Polars
 transformations columnar instead of repeatedly converting observations to
 Python rows.
 
-The throughput callback estimates rate using completed batches multiplied by
-configured batch size. It is useful for comparisons with the same batch
-geometry, not exact row accounting for partial batches. Prediction throughput
-is retained by the callback and sent directly to the attached logger; it is
-not a `trainer.callback_metrics` result.
+The throughput callback estimates each batch's processing rate using configured
+batch size divided by elapsed time between Lightning's batch start and end hooks.
+It logs with `on_step=True, on_epoch=False`. `throughput/train` reaches attached
+loggers every `log_every_n_steps` optimizer updates; validation, test, and
+prediction throughput are reported per batch. With gradient accumulation, the
+training rate describes the latest microbatch. Timing excludes input loading
+and encoding before the batch start hook. Rates are per rank and are estimates
+rather than exact row accounting for partial batches. Compare runs with the
+same batch geometry. Prediction throughput is retained by the callback and
+sent directly to attached loggers; it is not a `trainer.callback_metrics` result.
 
 ## Use The AdamW Factory
 

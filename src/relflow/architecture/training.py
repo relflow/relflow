@@ -62,7 +62,9 @@ def hardware(options: dict[str, Any]) -> None:
     options["accelerator"] = accelerator
     options["devices"] = devices
     if options.get("strategy", "auto") == "auto":
-        options["strategy"] = "ddp" if len(selected) * options.get("num_nodes", 1) > 1 else "auto"
+        options["strategy"] = (
+            "ddp_find_unused_parameters_true" if len(selected) * options.get("num_nodes", 1) > 1 else "auto"
+        )
     if options.get("precision", "auto") != "auto":
         return
     plugins = options.get("plugins") or ()
