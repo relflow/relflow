@@ -13,7 +13,7 @@ from relflow.architecture.encoder import BranchEncoder
 from relflow.architecture.packed import customized
 from relflow.architecture.pool import CrossAttentionBlock, LearnedQueryCrossAttention
 
-__all__ = ["clear", "compile"]
+__all__ = ["canonical", "clear", "compile"]
 
 
 class Region[**P]:
@@ -73,6 +73,12 @@ class Region[**P]:
         return self.eager.__reduce__()
 
 
+def canonical(owner: BranchEncoder | LearnedQueryCrossAttention, method: object) -> bool:
+    """Whether a prepared region still calls its owner's original compute method."""
+    eager = method.eager if isinstance(method, Region) else method
+    return isinstance(eager, MethodType) and eager.__self__ is owner and eager.__func__ is type(owner).compute
+
+
 def clear(model: torch.nn.Module) -> None:
     """Restore eager methods still owned by RelFlow's compiler bindings."""
     for module in model.modules():
@@ -116,11 +122,7 @@ def compile(
         current = module.compute
         eager = current.eager if isinstance(current, Region) else current
         # Custom compute implementations retain their own execution contract.
-        if (
-            not isinstance(eager, MethodType)
-            or eager.__self__ is not module
-            or eager.__func__ is not type(module).compute
-        ):
+        if not canonical(module, current):
             continue
         local = current.local if isinstance(current, Region) else "compute" in module.__dict__
         region = Region(eager, local, backend=backend, dynamic=dynamic, options=settings.copy())

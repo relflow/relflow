@@ -15,6 +15,8 @@ from relflow.structs.tree import Address, Leaf, Node
 if TYPE_CHECKING:
     from relflow.structs.experiment import Schema
 
+FLASH_BATCH_MAX = 65535
+
 
 class RotaryTransformerEncoderLayer(torch.nn.Module):
     """Preserve absent coordinates through attention and feed-forward residuals."""
@@ -48,19 +50,22 @@ class RotaryTransformerEncoderLayer(torch.nn.Module):
             torch.nn.Dropout(p=dropout),
         )
 
-    def forward(self, inputs: torch.Tensor, present: torch.Tensor, *, packing: Packed | None = None) -> torch.Tensor:
+    def forward(
+        self, inputs: torch.Tensor, present: torch.Tensor | None, *, packing: Packed | None = None
+    ) -> torch.Tensor:
         if packing is not None:
             return block(self, inputs, packing)
-        if present.dtype != torch.bool or tuple(present.shape) != tuple(inputs.shape[:2]):
+        if present is not None and (present.dtype != torch.bool or tuple(present.shape) != tuple(inputs.shape[:2])):
             raise ValueError(
                 f"encoder presence must have bool shape {tuple(inputs.shape[:2])}, "
                 f"got {tuple(present.shape)} with dtype {present.dtype}"
             )
-        inputs = inputs.masked_fill(~present.unsqueeze(-1), 0.0)
+        if present is not None:
+            inputs = inputs.masked_fill(~present.unsqueeze(-1), 0.0)
         normed = self.attention_norm(inputs)
-        inputs = inputs + self.attention(normed, normed, normed, key_padding_mask=~present)
+        inputs = inputs + self.attention(normed, normed, normed, key_padding_mask=None if present is None else ~present)
         inputs = inputs + self.ffn(self.ffn_norm(inputs))
-        return inputs.masked_fill(~present.unsqueeze(-1), 0.0)
+        return inputs if present is None else inputs.masked_fill(~present.unsqueeze(-1), 0.0)
 
     if TYPE_CHECKING:
         __call__ = forward
@@ -145,6 +150,8 @@ class BranchEncoder(torch.nn.Module):
                 raise ValueError(f"unsupported branch reduction: {branch.reduction}")
 
     def forward(self, parcels: list[Parcel]) -> Parcel:
+        from relflow.architecture.compiler import canonical
+
         if not parcels:
             raise ValueError(f"branch encoder '{self.origin}' requires at least one child parcel")
 
@@ -184,12 +191,13 @@ class BranchEncoder(torch.nn.Module):
             selected = selected.masked_fill(~selected_present.unsqueeze(-1), 0.0)
             evidence = selected
 
-            if (
-                self.encoder
+            prepared = (
+                bool(self.encoder)
                 and not customized(self.encoder)
                 and not stochastic(cast(Iterable[RotaryTransformerEncoderLayer], self.encoder))
-                and not bool(selected_present.all())
-            ):
+            )
+            full = prepared and bool(selected_present.all())
+            if prepared and not full:
                 values, packing = pack(selected, selected_present)
                 values = self.compute(values, selected_present, packing=packing)
                 selected = unpack(
@@ -200,7 +208,15 @@ class BranchEncoder(torch.nn.Module):
                     cast(Iterable[RotaryTransformerEncoderLayer], self.encoder),
                 )
             else:
-                selected = self.compute(selected, selected_present)
+                # FlashAttention uses a CUDA grid dimension for sequence batches.
+                unmasked = (
+                    full
+                    and selected.is_cuda
+                    and selected.shape[0] <= FLASH_BATCH_MAX
+                    and type(self) is BranchEncoder
+                    and canonical(self, self.compute)
+                )
+                selected = self.compute(selected, None if unmasked else selected_present)
 
             match self.reduction:
                 case None:
@@ -260,8 +276,10 @@ class BranchEncoder(torch.nn.Module):
             batch_size=N,
         )
 
-    def compute(self, inputs: torch.Tensor, present: torch.Tensor, *, packing: Packed | None = None) -> torch.Tensor:
-        """Encode prepared sequences without routing or data-dependent selection."""
+    def compute(
+        self, inputs: torch.Tensor, present: torch.Tensor | None, *, packing: Packed | None = None
+    ) -> torch.Tensor:
+        """Encode prepared sequences; absent presence means every coordinate is live."""
         for layer in cast(Iterable[RotaryTransformerEncoderLayer], self.encoder):
             if packing is None:
                 inputs = layer(inputs, present=present)
@@ -292,18 +310,22 @@ class BranchEncoder(torch.nn.Module):
         channel_count = payload.shape[-1]
         inputs = payload.reshape(-1, field_count, channel_count)
         presence = present.reshape(-1, field_count)
-        if (
-            field_count
+        prepared = (
+            bool(field_count)
             and not customized((self.coordinate_encoder,))
             and not stochastic((self.coordinate_encoder,))
-            and not bool(presence.all())
-        ):
+        )
+        full = prepared and bool(presence.all())
+        if prepared and not full:
             values, packing = pack(inputs, presence)
             if packing.indices.numel():
                 values = self.coordinate_encoder(values, present=presence, packing=packing)
             mixed = unpack(values, packing, inputs, presence, (self.coordinate_encoder,))
         else:
-            mixed = self.coordinate_encoder(inputs, present=presence)
+            mixed = self.coordinate_encoder(
+                inputs,
+                present=None if full and inputs.is_cuda and 0 < inputs.shape[0] <= FLASH_BATCH_MAX else presence,
+            )
         mixed = mixed.reshape(payload.shape)
 
         contextualized = list(parcels)

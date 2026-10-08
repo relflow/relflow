@@ -19,6 +19,13 @@ customizations or active stochastic dropout. This is automatic; it does not
 require changing the input schema. Null and learned-mask coordinates remain
 present model inputs.
 
+On CUDA, eligible encoder sequences with every coordinate present omit padding
+masks, allowing PyTorch to select native FlashAttention. The same presence
+check chooses between this path and packing; no extra device synchronization is
+needed. Active stochastic dropout, custom implementations, and hooks retain
+their ordinary contracts. Oversized sequence batches retain masks to respect
+the native FlashAttention batch limit.
+
 Export only needed outputs. Root or branch embeddings, repeated leaf outputs,
 and Category top-k values enlarge the prediction payload. Selecting a larger
 batch can improve utilization but also changes updates per epoch; account for
