@@ -4,7 +4,7 @@ import numpy as np
 
 from explainer import *  # noqa: F403
 from videos.relflow.common import (
-    D, Mono, Plot, chip, label, mtex, note, real_tag, schematic_tag, show_chapter_card, tile,
+    D, Mono, Plot, chip, label, mtex, note, real_tag, schematic_tag, show_episode_card, tile,
 )
 
 FIELDS = [("sku", C.CATEGORY), ("quantity", C.NUMBER), ("price", C.NUMBER)]
@@ -18,7 +18,7 @@ def token(color, size=0.42, live=True) -> VGroup:
 
 class InsideABranch(VoiceoverScene):
     def construct(self):
-        show_chapter_card(self, 7, "Inside a branch")
+        show_episode_card(self)
         self.grid()
         self.coordinate()
         self.unroll()
@@ -38,7 +38,7 @@ class InsideABranch(VoiceoverScene):
         pad = Brace(VGroup(*rows[2][LIVE:]), DOWN, color=GREY_B)
         pad_l = label(r"padding", font_size=22, color=GREY_B).next_to(pad, DOWN, buff=0.1)
         with self.voiceover(
-            "We have tokens now: one vector per field, per slot. Let's step inside the line items branch, and see what "
+            "Every field has been embedded: one vector per field, per slot. Let's step inside a branch, an order's line items, and see what "
             "its encoder does with them. <bookmark mark='g'/> Arrange the tokens in a grid: one row per field, one "
             "column per slot. This order has five items, so the last three columns are padding."
         ) as vo:
@@ -248,7 +248,7 @@ class InsideABranch(VoiceoverScene):
             "a time. <bookmark mark='e'/> So S11 times four, next to S07 times one, comes back. Swap the quantities, "
             "and it doesn't. <bookmark mark='a'/> On new orders, the model is perfect: an AUC of one. "
             "<bookmark mark='s'/> Now take the same test orders and shuffle the quantities among each order's items. "
-            "Same SKUs, same quantities, wrong pairs. <bookmark mark='d'/> The AUC drops to 0.91. The model wasn't "
+            f"Same SKUs, same quantities, wrong pairs. <bookmark mark='d'/> The AUC drops to {res['misaligned']['auc']:.2f}. The model wasn't "
             "counting SKUs and quantities separately. It was reading them as pairs."
         ) as vo:
             vo.wait_until("t")

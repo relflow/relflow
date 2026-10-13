@@ -4,7 +4,7 @@ import numpy as np
 
 from explainer import *  # noqa: F403
 from videos.relflow.common import (
-    D, Mono, Plot, code, label, mtex, note, real_tag, show_chapter_card, tile,
+    D, Mono, Plot, code, label, mtex, note, real_tag, show_episode_card, tile,
 )
 
 SCHEMA_CODE = """
@@ -23,7 +23,7 @@ model = rf.Model(
 
 class RealRun(VoiceoverScene):
     def construct(self):
-        show_chapter_card(self, 12, "Watching it learn")
+        show_episode_card(self)
         self.r = D("returns")
         self.setup_()
         self.training()
@@ -43,7 +43,7 @@ class RealRun(VoiceoverScene):
             label(r"1 to 8 items each, random prices", font_size=24, color=GREY_B),
         ).arrange(DOWN, aligned_edge=LEFT, buff=0.15).to_corner(DR, buff=0.7)
         with self.voiceover(
-            "Let's finish by watching a real model learn. <bookmark mark='s'/> Here's the schema: orders with up to "
+            "Let's watch a real model learn. <bookmark mark='s'/> Here's the schema: orders with up to "
             "eight line items, each with a SKU, a quantity and a price, and one hidden Boolean: was the order returned? "
             "<bookmark mark='r'/> The rule, which the model never sees: an order comes back if it contains a fragile "
             "SKU, S03 or S11, bought three or more at a time."
@@ -80,11 +80,14 @@ class RealRun(VoiceoverScene):
         ).arrange(DOWN, aligned_edge=LEFT, buff=0.2).to_edge(RIGHT, buff=0.5)
         tag = real_tag(r"real training run, relflow 0.2.3 with Lightning, CPU only")
         assert r["epochs"][1]["auc"] > 0.999 and res["auc"] > 0.999
+        misses = round((1 - res["accuracy"]) * r["test_rows"])
         with self.voiceover(
             "We train on four thousand synthetic orders, on this machine's processor. <bookmark mark='t'/> The whole run "
             f"takes about {round(r['seconds'])} seconds. <bookmark mark='l'/> The loss falls fast, <bookmark mark='a'/> and by the end "
             "of the second epoch, validation AUC has reached one, and it stays there. On two thousand fresh test "
-            "orders, it doesn't miss a single one."
+            "orders, it ranks every returned order above every kept one. "
+            + ("And at a fifty percent threshold, it doesn't miss a single one." if misses == 0 else
+               f"At a fifty percent threshold, {misses} of them still land on the wrong side.")
         ) as vo:
             self.play(Create(pl), FadeIn(xt), FadeIn(yt), FadeIn(tag))
             vo.wait_until("t")
@@ -140,8 +143,15 @@ class RealRun(VoiceoverScene):
         mark = SurroundingRectangle(VGroup(v[0][0][0][0][hit0], v[0][0][1][0][hit0]), buff=0.05, color=YELLOW,
                                     stroke_width=3)
         hit1 = [i for i, it in enumerate(orders[1]["line_items"]) if it["sku"] in ("S03", "S11") and it["quantity"] >= 3][0]
-        mark1 = SurroundingRectangle(VGroup(v[1][0][0][0][hit1], v[1][0][1][0][hit1]), buff=0.05, color=YELLOW,
-                                     stroke_width=3)
+        w1 = np.array(weights[1])
+        item1 = [w1[h, hit1] + w1[h, 8 + hit1] + w1[h, 16 + hit1] for h in (0, 1)]
+        assert min(item1) > 0.9
+        sku_only = all(w1[h, hit1] > 0.9 for h in (0, 1))
+        second = ("the same two heads go straight to it." if sku_only else
+                  "the same two heads go straight to that item again, though one of them now reads its quantity "
+                  "token rather than its SKU.")
+        mark1 = SurroundingRectangle(VGroup(*[v[1][0][h][0][8 * f + hit1] for h in (0, 1) for f in range(3)]), buff=0.05,
+                                     color=YELLOW, stroke_width=3)
         legend = note(r"orange = attention weight, recomputed from the trained model's own projections;\\"
                       r"pink SKU = fragile and bought 3+;  yellow = fragile, bought once", font_size=20).to_edge(DOWN, buff=0.2)
         tag = VGroup()
@@ -151,7 +161,7 @@ class RealRun(VoiceoverScene):
             "fifth slot. <bookmark mark='h'/> Two of the four heads put essentially all of their weight on one single "
             "token: the SKU of exactly that item. And thanks to coordinate attention, that SKU token already knows its "
             "own quantity. <bookmark mark='b'/> Here's a second returned order, with the fragile item in the first "
-            "slot: the same two heads go straight to it."
+            f"slot: {second}"
         ) as vo:
             self.play(FadeIn(head), FadeIn(tag), FadeIn(legend))
             vo.wait_until("a")

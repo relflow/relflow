@@ -1,0 +1,116 @@
+{
+ "seconds": 28.647088766098022,
+ "train_rows": 6000,
+ "test_rows": 2000,
+ "watchlist_size": 8,
+ "stats": {
+  "accuracy": 0.9995,
+  "auc": 1.0,
+  "watched_payee_recall": 1.0,
+  "large_recall": 0.9811320754716981,
+  "watched_payer_flag_rate": 0.0,
+  "ordinary_flag_rate": 0.0
+ },
+ "source": {
+  "transfer_id": "transfer-20011",
+  "accounts": {
+   "payer": "account-330",
+   "payee": "account-004"
+  },
+  "amount_minor": 21636
+ },
+ "processed": {
+  "transfer_id": "transfer-20011",
+  "amount": 216.36,
+  "parties": [
+   {
+    "account": "account-330",
+    "role": "payer"
+   },
+   {
+    "account": "account-004",
+    "role": "payee"
+   }
+  ]
+ },
+ "requests": [
+  {
+   "transfer_id": "transfer-20000",
+   "accounts": {
+    "payer": "account-137",
+    "payee": "account-044"
+   },
+   "amount_minor": 5691
+  },
+  {
+   "transfer_id": "transfer-20011",
+   "accounts": {
+    "payer": "account-330",
+    "payee": "account-004"
+   },
+   "amount_minor": 21636
+  },
+  {
+   "transfer_id": "transfer-20018",
+   "accounts": {
+    "payer": "account-005",
+    "payee": "account-121"
+   },
+   "amount_minor": 18617
+  },
+  {
+   "transfer_id": "transfer-20074",
+   "accounts": {
+    "payer": "account-036",
+    "payee": "account-338"
+   },
+   "amount_minor": 511495
+  }
+ ],
+ "truth": [
+  false,
+  true,
+  false,
+  true
+ ],
+ "result": [
+  {
+   "transfer_id": "transfer-20000",
+   "flag_probability": 0.0016225376166403294,
+   "review": false
+  },
+  {
+   "transfer_id": "transfer-20011",
+   "flag_probability": 0.9988584518432617,
+   "review": true
+  },
+  {
+   "transfer_id": "transfer-20018",
+   "flag_probability": 0.001635332009755075,
+   "review": false
+  },
+  {
+   "transfer_id": "transfer-20074",
+   "flag_probability": 0.9989868998527527,
+   "review": true
+  }
+ ],
+ "envelope": {
+  "inputs": {
+   "transfer_id": "transfer-20011"
+  },
+  "flagged": {
+   "state": {
+    "valued": 0.9999740123748779,
+    "null": 5.73527086089598e-06,
+    "padded": 4.7747457756486256e-06,
+    "masked": 8.257994522864465e-06,
+    "other": 7.313345577131258e-06
+   },
+   "content": {
+    "probability": 0.9988584518432617
+   },
+   "inferred": true
+  }
+ }
+}

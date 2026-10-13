@@ -4,7 +4,7 @@ from collections import Counter
 
 from explainer import *  # noqa: F403
 from videos.relflow.common import (
-    D, Mono, label, logo, mtex, note, proof_tag, show_chapter_card, wordmark,
+    D, Mono, label, logo, mtex, note, proof_tag, show_episode_card, wordmark,
 )
 
 STATUS_COLOR = {"Passing": "#3FBF8F", "Limited": "#FFD166", "Partial": "#FF8FA3"}
@@ -12,7 +12,7 @@ STATUS_COLOR = {"Passing": "#3FBF8F", "Limited": "#FFD166", "Partial": "#FF8FA3"
 
 class Evidence(VoiceoverScene):
     def construct(self):
-        show_chapter_card(self, 13, "What the proofs show, and what they don't")
+        show_episode_card(self)
         self.p = D("proofs")
         self.catalog()
         self.highlights()
@@ -76,7 +76,7 @@ class Evidence(VoiceoverScene):
         assert abs(p40["recovered_pair_delta_fraction"] - 0.906) < 0.01
         assert abs(p76["informative"]["anomaly_auc"] - 0.962) < 0.01 and p76["marginal_auc"] == 0.5
         cards = VGroup(
-            VGroup(label(r"P040 \; counts survive a hierarchy", font_size=31, color=STATUS_COLOR["Passing"]),
+            VGroup(label(r"P040 \; counts survive nesting", font_size=31, color=STATUS_COLOR["Passing"]),
                    label(r"the same six amounts, grouped into different sessions:", font_size=27, color=GREY_A),
                    label(rf"{100 * p40['recovered_pair_delta_fraction']:.0f}\% of the true difference between paired records "
                          r"recovered", font_size=27)),
@@ -94,7 +94,7 @@ class Evidence(VoiceoverScene):
         cards.arrange(DOWN, aligned_edge=LEFT, buff=0.55).move_to(ORIGIN)
         tag = proof_tag(r"P040, P076, P044")
         with self.voiceover(
-            "A few highlights. <bookmark mark='a'/> Counts can survive a hierarchy: six equal amounts, grouped into "
+            "A few highlights. <bookmark mark='a'/> Counts can survive nesting: six equal amounts, grouped into "
             "sessions in different ways, and the model recovers ninety-one percent of the true difference between "
             "the groupings. <bookmark mark='b'/> Reconstruction can spot contradictions: records where every field "
             "looks normal on its own, but the combination is wrong, get flagged with an AUC of 0.96, where any single "
@@ -126,7 +126,7 @@ class Evidence(VoiceoverScene):
         tag = proof_tag(r"P028, P066, P071")
         with self.voiceover(
             "And the limits are recorded just as carefully. <bookmark mark='a'/> Comparing identities across two "
-            "collections that have each been summarized fails, as we saw. <bookmark mark='b'/> Admitting a brand-new "
+            "collections that have each been summarized fails, as the hashing episode showed. <bookmark mark='b'/> Admitting a brand-new "
             "label in the middle of training activates a random row, which can jolt predictions before it has learned "
             "anything, and the obvious fixes made other proofs worse, so they weren't adopted. <bookmark mark='c'/> And "
             "combining two familiar instructions in a pairing never seen in training works on some seeds, but not "

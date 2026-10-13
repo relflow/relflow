@@ -134,17 +134,20 @@ def fmt_int(n) -> str:
     return f"{int(round(n)):,}".replace(",", "{,}")
 
 
-def chapter_card(number: int, text: str, sub: str = "") -> VGroup:
-    num = label(rf"Chapter {number}", font_size=30, color=C.DIM)
+def episode_card(number: int, text: str) -> VGroup:
+    series = VGroup(wordmark(font_size=40, color=GREY_A), label(r"visualized", font_size=30, color=C.DIM))
+    series.arrange(RIGHT, buff=0.18, aligned_edge=DOWN)
+    num = label(rf"Episode {number}", font_size=30, color=C.DIM)
     t = label(text, font_size=56)
-    g = VGroup(num, t)
-    if sub:
-        g.add(label(sub, font_size=30, color=GREY_A))
-    return g.arrange(DOWN, buff=0.25)
+    return VGroup(series, num, t).arrange(DOWN, buff=0.28)
 
 
-def show_chapter_card(scene: Scene, number: int, text: str, sub: str = "", hold: float = 1.4):
-    card = chapter_card(number, text, sub)
+def show_episode_card(scene: Scene, hold: float = 1.4):
+    """The scene's episode number and title, from the manifest (each scene is one episode of the series)."""
+    from videos.relflow.manifest import episode
+
+    e = episode(type(scene).__name__)
+    card = episode_card(e["number"], e["title"])
     scene.play(FadeIn(card, shift=UP * 0.2), run_time=0.8)
     scene.wait(hold)
     scene.play(FadeOut(card, shift=UP * 0.2), run_time=0.6)
@@ -323,6 +326,8 @@ def code(src: str, font_size=22, style="one-dark", background=True) -> Code:
              paragraph_config={"font": MONO, "font_size": font_size, "line_spacing": 0.75},
              background_config={"stroke_color": GREY_D, "stroke_width": 1.2, "fill_color": "#161B24",
                                 "fill_opacity": 1, "corner_radius": 0.12, "buff": 0.25})
+    if c.width > MAX_TEXT_WIDTH - 0.2:  # long lines: shrink to the frame rather than run off it
+        c.width = MAX_TEXT_WIDTH - 0.2
     return c
 
 

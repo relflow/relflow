@@ -704,16 +704,574 @@ def proofs():
                         "status": p.get("historical", {}).get("status"),
                         "latest_full": runs[-1]["outcome"] if runs else None})
     pick = {pid: next(r for r in reversed(raw[pid]["runs"]) if r["mode"] == "full")["metrics"]
-            for pid in ("P001", "P002", "P021", "P028", "P038", "P040", "P041", "P044", "P066", "P076")}
+            for pid in ("P001", "P002", "P021", "P028", "P038", "P040", "P041", "P043", "P044", "P051", "P052",
+                        "P053", "P054", "P062", "P066", "P068", "P070", "P076", "P077")}
     save("proofs", {"catalog": catalog, "metrics": pick, "source": "relflow/proofs/results.yaml @ 5077716"})
 
 
+# ---------------------------------------------------------------------------
+# 11. The happy path: a schema, a data module, a fit
+# ---------------------------------------------------------------------------
+def happy():
+    import tempfile
+
+    import lightning.pytorch as lit
+    import pyarrow as pa
+    import relflow as rf
+    import torch
+
+    rng = np.random.default_rng(0)
+    train = pa.Table.from_pylist([order(rng) for _ in range(4096)])
+    validate = pa.Table.from_pylist([order(rng) for _ in range(512)])
+    test_rows = [order(rng) for _ in range(2048)]
+    test = pa.Table.from_pylist(test_rows)
+    torch.manual_seed(0)
+    schema = dict(line_items=rf.Branch(length=8, sku=rf.Category, quantity=rf.Number, price=rf.Number),
+                  returned=rf.Boolean(mask=True))
+    # The three lines, as the video shows them (Lightning picks the device; on this M1 that is set to the CPU,
+    # which is faster here than the GPU: see the benchmarks).
+    model = rf.Model.sm(**schema, batch_size=128, optimizer=rf.adamw(learning_rate=2e-3))
+    data = rf.ArrowDataModule(model=model, train=train, validate=validate, test=test)
+    epochs, batch_losses = [], []
+
+    class Track(lit.Callback):
+        def on_train_batch_end(self, tr, pl, outputs, batch, idx):
+            if outputs is not None:
+                batch_losses.append(float(outputs["loss"]))
+
+        def on_validation_epoch_end(self, tr, pl):
+            m = tr.callback_metrics
+            epochs.append({"epoch": len(epochs), "steps": len(batch_losses),
+                           "train_loss": float(np.mean(batch_losses[-32:])) if batch_losses else None,
+                           "validate_loss": float(m["loss/validate"]),
+                           "auc": float(m[".returned/validate.auc.content"])})
+
+    t = time.time()
+    fit = trainer(max_epochs=6, callbacks=[Track()])
+    fit.fit(model, datamodule=data)
+    seconds = time.time() - t
+    tested = trainer().test(model, datamodule=data, verbose=False)[0]
+    defaults = rf.Model.sm(**schema)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "orders.rf"
+        model.save(path)
+        size = path.stat().st_size
+        restored = rf.Model.load(path)
+    request = pa.Table.from_pylist([{"order_id": f"order-{i}", "line_items": r["line_items"]}
+                                    for i, r in enumerate(test_rows[:4])])
+    out = restored.predict(request, retain=("order_id",)).to_pylist()
+    rows = [{"order_id": o["inputs"]["order_id"], "returned": test_rows[i]["returned"],
+             "prediction": o["predictions"]["/returned"]} for i, o in enumerate(out)]
+    print(f"    {seconds:.0f} s, validation AUC {epochs[-1]['auc']:.3f}, test AUC {tested['.returned/test.auc.content']:.3f}")
+    save("happy", {
+        "params": params(model), "batch_size": model.batch_size, "preset": "sm", "seconds": seconds,
+        "train_rows": train.num_rows, "validate_rows": validate.num_rows, "test_rows": test.num_rows,
+        "steps": len(batch_losses), "epochs": epochs, "loss": batch_losses,
+        "test": {k: float(v) for k, v in tested.items() if k.startswith(".returned/test.") or k == "loss/test"},
+        "artifact_bytes": size, "predictions": rows,
+        "defaults": {"batch_size": defaults.batch_size, "optimizer_set": defaults.optimizer is not None},
+    })
+
+
+# ---------------------------------------------------------------------------
+# 12. More tensorfields: Quantile and Enum; DateParts, Vector and Text
+# ---------------------------------------------------------------------------
+def quantile_enum():
+    import pyarrow as pa
+    import relflow as rf
+    import torch
+
+    # Quantile vs Number on heavy-tailed amounts with eight huge outliers.
+    rng = np.random.default_rng(0)
+    amounts = rng.lognormal(3.5, 1.0, 4000)
+    amounts[rng.choice(4000, 8, replace=False)] *= 400
+    rows = [{"amount": float(a), "rank": float(a), "large": bool(a > 50)} for a in amounts]
+    torch.manual_seed(0)
+    model = rf.Model(d_model=32, n_layers=1, n_heads=4, batch_size=256, optimizer=rf.adamw(learning_rate=1e-3),
+                     amount=rf.Number, rank=rf.Quantile, large=rf.Boolean(mask=True))
+    table = pa.Table.from_pylist(rows)
+    trainer(max_epochs=1).fit(model, datamodule=rf.ArrowDataModule(model=model, train=table, validate=table.slice(0, 256)))
+    q = rf.Quantile.normalization(model, rf.Address("rank"))
+    n = rf.Number.normalization(model, rf.Address("amount"))
+    probe = np.geomspace(0.5, 60000, 160)
+    enc = model.encode(pa.Table.from_pylist([{"amount": float(p), "rank": float(p)} for p in probe]), strata="predict")
+    ranks = enc["/rank"].content.reshape(-1).numpy().astype(float)
+    standardized = (probe - n["mean"]) / n["std"]
+    assert np.all(np.diff(ranks) >= -1e-6)
+    marks = [5, 20, 33, 100, 1000, 50000]
+    enc = model.encode(pa.Table.from_pylist([{"amount": float(p), "rank": float(p)} for p in marks]), strata="predict")
+    mark_ranks = enc["/rank"].content.reshape(-1).tolist()
+    emb = model.nodes["/rank"].embedder
+    quantile = {
+        "values_sample": np.sort(amounts)[::8].tolist(), "count": int(q["count"]), "compression": int(q["compression"]),
+        "minimum": q["minimum"], "median": q["median"], "maximum": q["maximum"],
+        "number_mean": float(n["mean"]), "number_std": float(n["std"]),
+        "share_within_tenth_sd": float(np.mean(np.abs((amounts - n["mean"]) / n["std"]) < 0.1)),
+        "probe": probe.tolist(), "ranks": ranks.tolist(), "standardized": standardized.tolist(),
+        "marks": marks, "mark_ranks": mark_ranks, "mark_standardized": ((np.array(marks) - n["mean"]) / n["std"]).tolist(),
+        "frequencies": emb.frequencies.tolist(), "outliers": int(8),
+    }
+    print(f"    Number: mean {n['mean']:.1f} std {n['std']:.1f};  Quantile median {q['median']:.1f}")
+
+    # Enum vs Category: three declared tiers, only two of which appear while training.
+    rows = [{"tier": str(rng.choice(["bronze", "silver"])), "y": bool(rng.random() < 0.5)} for _ in range(512)]
+    torch.manual_seed(0)
+    model = rf.Model(d_model=32, n_layers=1, n_heads=4, batch_size=128, optimizer=rf.adamw(learning_rate=1e-3),
+                     tier=rf.Enum(values=("bronze", "silver", "gold")), tier_learned=rf.Category(query="tier"),
+                     y=rf.Boolean(mask=True))
+    table = pa.Table.from_pylist(rows)
+    trainer(max_epochs=1).fit(model, datamodule=rf.ArrowDataModule(model=model, train=table, validate=table.slice(0, 128)))
+    enum_rows = int(model.nodes["/tier"].embedder.embeddings["content"].num_embeddings)
+    cat_labels = list(rf.Category.vocabulary(model, rf.Address("tier_learned")))
+    error = None
+    try:
+        model.predict(pa.Table.from_pylist([{"tier": "platinum"}]))
+    except ValueError as e:
+        error = str(e)
+    assert error and "undeclared value 'platinum'" in error
+    enum = {"values": list(rf.Enum.vocabulary(model, rf.Address("tier"))),
+            "counts": rf.Enum.counts(model, rf.Address("tier")), "rows": enum_rows,
+            "category_labels": cat_labels, "error": error}
+    assert enum["counts"]["gold"] == 0 and enum_rows == 3
+    save("quantile_enum", {"quantile": quantile, "enum": enum})
+
+
+def time_vector_text():
+    import pyarrow as pa
+    import relflow as rf
+    import torch
+
+    stamps = ["2026-05-28T23:30:00", "2026-05-29T00:30:00", "2026-05-29T01:30:00", "2026-05-29T12:00:00"]
+    day = [f"2026-05-29T{h:02d}:15:00" for h in range(24)]
+    week = [f"2026-05-{d:02d}T09:00:00" for d in range(25, 32)]
+    model = rf.Model(d_model=32, n_layers=1, n_heads=4, batch_size=64,
+                     t=rf.DateParts(dateparts=["hour_of_day", "day_of_week"], pattern="%Y-%m-%dT%H:%M:%S"),
+                     y=rf.Boolean(mask=True))
+
+    def coords(values):
+        enc = model.encode(pa.Table.from_pylist([{"t": v} for v in values]), strata="predict")
+        return {str(k): v.reshape(len(values), 2).tolist() for k, v in enc["/t"].content.items()}
+
+    dateparts = {"stamps": stamps, "examples": coords(stamps), "day": day, "day_coords": coords(day)["hour_of_day"],
+                 "week": week, "week_coords": coords(week)["day_of_week"]}
+    a, b = np.array(dateparts["examples"]["hour_of_day"][0]), np.array(dateparts["examples"]["hour_of_day"][2])
+    dateparts["distance_2330_0130"] = float(np.linalg.norm(a - b))
+    dateparts["distance_0130_1200"] = float(np.linalg.norm(b - np.array(dateparts["examples"]["hour_of_day"][3])))
+
+    model = rf.Model(d_model=32, n_layers=1, n_heads=4, batch_size=8, embedding=rf.Vector(n_dim=4),
+                     y=rf.Boolean(mask=True))
+    enc = model.encode(pa.Table.from_pylist([{"embedding": [0.12, -0.03, 0.44, 0.08]}, {"embedding": None}]),
+                       strata="predict")
+    error = None
+    try:
+        model.encode(pa.Table.from_pylist([{"embedding": [0.12, -0.03, 0.44]}]), strata="predict")
+    except ValueError as e:
+        error = str(e)
+    linears = [m for m in model.nodes["/embedding"].embedder.modules() if isinstance(m, torch.nn.Linear)]
+    vector = {"shape": list(enc["/embedding"].content.shape), "states": enc["/embedding"].state.reshape(-1).tolist(),
+              "error": error, "projection": [linears[0].in_features, linears[0].out_features]}
+
+    messages = ["The international transfer has not arrived.", "My wire payment still hasn't shown up.",
+                "How do I change my password?", "The payment is awaiting review."]
+    model = rf.Model(d_model=64, n_layers=1, n_heads=4, batch_size=8, body=rf.Text(max_length=64, encoder_pooling="mean"),
+                     y=rf.Boolean(mask=True))
+    enc = model.encode(pa.Table.from_pylist([{"body": m} for m in messages]), strata="predict")
+    emb = model.nodes["/body"].embedder
+    with torch.inference_mode():
+        frozen = emb.encode(content=enc["/body"].content, state=enc["/body"].state).reshape(len(messages), -1)
+    unit = torch.nn.functional.normalize(frozen, dim=1)
+    sim = (unit @ unit.T).numpy()
+    ids = enc["/body"].content["input_ids"].reshape(len(messages), -1)
+    mask = enc["/body"].content["attention_mask"].reshape(len(messages), -1)
+    text = {"messages": messages, "model": emb.request.model, "hidden": int(frozen.shape[1]),
+            "tokens": mask.sum(1).tolist(), "max_length": int(ids.shape[1]), "similarity": sim.tolist(),
+            "projection": [int(emb.hidden_size), 64],
+            "frozen_params": int(sum(p.numel() for p in emb.__dict__["_cached_model"].module_for(torch.device("cpu")).parameters())),
+            "trainable_params": params(emb)}
+    print(f"    hour circle 23:30-01:30 {dateparts['distance_2330_0130']:.3f}; text sim(0,1) {sim[0, 1]:.3f} "
+          f"sim(0,2) {sim[0, 2]:.3f}")
+    save("time_vector_text", {"dateparts": dateparts, "vector": vector, "text": text})
+
+
+# ---------------------------------------------------------------------------
+# 13. Masks: what one batch looks like under each policy
+# ---------------------------------------------------------------------------
+def masks():
+    import pyarrow as pa
+    import relflow as rf
+
+    rng = np.random.default_rng(5)
+    rows = [order(rng) for _ in range(8)]
+    table = pa.Table.from_pylist(rows)
+    policies = {
+        "visible": dict(quantity=rf.Number),
+        "dropout": dict(quantity=rf.Number(mask=0.25)),
+        "skip": dict(quantity=rf.Number(mask=rf.Mask(rate=0.25, skip=True))),
+        "reconstruct": dict(quantity=rf.Number(mask=rf.Mask(rate=0.25, reconstruct=True))),
+        "target": dict(quantity=rf.Number(mask=True)),
+    }
+    out = {"lengths": [len(r["line_items"]) for r in rows]}
+    for name, fields in policies.items():
+        model = rf.Model(d_model=32, n_layers=1, n_heads=4, batch_size=8,
+                         line_items=rf.Branch(length=8, sku=rf.Category, price=rf.Number, **fields),
+                         returned=rf.Boolean(mask=True))
+        res = {}
+        for strata in ("train", "validate", "predict"):
+            enc = model.encode(table, strata=strata)
+            f = enc["/line_items/quantity"]
+            res[strata] = {"state": f.state.reshape(8, 8).tolist(), "present": f.present.reshape(8, 8).int().tolist(),
+                           "inferred": f.inferred.reshape(8, 8).int().tolist()}
+        out[name] = res
+    # A branch-level policy: one decision hides a whole line item (all of its fields).
+    model = rf.Model(d_model=32, n_layers=1, n_heads=4, batch_size=8,
+                     line_items=rf.Branch(length=8, mask=rf.Mask(rate=0.25, skip=True), sku=rf.Category,
+                                          quantity=rf.Number, price=rf.Number),
+                     returned=rf.Boolean(mask=True))
+    enc = model.encode(table, strata="train")
+    out["branch"] = {a: enc[a].present.reshape(8, 8).int().tolist()
+                     for a in ("/line_items/sku", "/line_items/quantity", "/line_items/price")}
+    assert out["branch"]["/line_items/sku"] == out["branch"]["/line_items/price"]
+    assert out["dropout"]["predict"]["state"] == out["visible"]["predict"]["state"]
+    save("masks", out)
+
+
+# ---------------------------------------------------------------------------
+# 14. Pretraining without labels, then fine-tuning with a few
+# ---------------------------------------------------------------------------
+GROUPS, PER_GROUP = 8, 25
+CATALOG = [f"{'ABCDEFGH'[g]}{i:02d}" for g in range(GROUPS) for i in range(PER_GROUP)]
+GROUP_PRICE = [25, 25, 60, 8, 12, 90, 40, 150]  # group A (the fragile one) shares its price level with group B
+
+
+def basket(rng, labeled=True):
+    """An order whose items mostly come from one product group; returned iff a group-A item has quantity >= 3."""
+    theme, n = int(rng.integers(GROUPS)), int(rng.integers(2, 9))
+    items = []
+    for _ in range(n):
+        g = theme if rng.random() < 0.8 else int(rng.integers(GROUPS))
+        items.append({"sku": CATALOG[g * PER_GROUP + int(rng.integers(PER_GROUP))], "quantity": int(rng.integers(1, 6)),
+                      "price": float(np.round(GROUP_PRICE[g] * rng.lognormal(0, 0.25), 2))})
+    row = {"line_items": items}
+    if labeled:
+        row["returned"] = any(it["sku"][0] == "A" and it["quantity"] >= 3 for it in items)
+    return row
+
+
+def pretraining():
+    import tempfile
+
+    import lightning.pytorch as lit
+    import pyarrow as pa
+    import relflow as rf
+    import torch
+
+    rng = np.random.default_rng(1)
+    unlabeled = [basket(rng, False) for _ in range(20000)]
+    unlabeled_val = [basket(rng, False) for _ in range(1000)]
+    test = [basket(rng) for _ in range(2000)]
+    y = [r["returned"] for r in test]
+    request = pa.Table.from_pylist([{"line_items": r["line_items"]} for r in test])
+
+    def branch(sku=False, price=False):
+        return rf.Branch(length=8, sku=rf.Category(mask=sku), quantity=rf.Number, price=rf.Number(mask=price))
+
+    sampled = rf.Mask(rate=0.15, reconstruct=True)
+    torch.manual_seed(0)
+    pre = rf.Model(d_model=64, n_layers=2, n_heads=4, batch_size=128, optimizer=rf.adamw(learning_rate=2e-3),
+                   line_items=branch(sampled, sampled))
+    curve = []
+
+    class Track(lit.Callback):
+        def on_validation_epoch_end(self, tr, pl):
+            m = tr.callback_metrics
+            curve.append({k: float(v) for k, v in m.items() if "validate" in k})
+
+    t = time.time()
+    trainer(max_epochs=6, callbacks=[Track()]).fit(pre, datamodule=rf.ArrowDataModule(
+        model=pre, train=pa.Table.from_pylist(unlabeled), validate=pa.Table.from_pylist(unlabeled_val)))
+    pre_seconds = time.time() - t
+
+    # What the SKU table learned without a single label: PCA of the embedding rows, colored by product group.
+    emb = pre.nodes["/line_items/sku"].embedder
+    vocab = list(rf.Category.vocabulary(pre, rf.Address("line_items", "sku")))
+    weight = emb.embeddings["content"].weight.detach().numpy()
+    assert weight.shape[0] >= len(vocab)
+    w = weight[: len(vocab)].astype(np.float64)
+    w = w - w.mean(0)
+    _, sv, vt = np.linalg.svd(w, full_matrices=False)
+    xy = w @ vt[:2].T
+    unit = w / np.linalg.norm(w, axis=1, keepdims=True)
+    groups = np.array([s[0] for s in vocab])
+    same = np.mean([np.mean(unit[groups == g] @ unit[groups == g].T) for g in "ABCDEFGH"])
+    cross = float(np.mean(unit @ unit.T))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "pretrained.rf"
+        pre.save(path)
+
+        def finetune(labeled, seed, pretrained):
+            torch.manual_seed(seed)
+            if pretrained:
+                m = rf.Model.load(path)
+                inputs = rf.where("address").is_in([rf.Address("line_items", "sku"), rf.Address("line_items", "price")])
+                m.update(inputs, mask=False)
+                m.extend(rf.where("address") == rf.Address(), returned=rf.Boolean(mask=True))
+            else:
+                m = rf.Model(d_model=64, n_layers=2, n_heads=4, batch_size=128, line_items=branch(),
+                             returned=rf.Boolean(mask=True))
+            m.batch_size = 32
+            m.optimizer = rf.adamw(learning_rate=1e-3)
+            table = pa.Table.from_pylist(labeled)
+            steps = 300
+            epochs = int(np.ceil(steps / np.ceil(len(labeled) / 32)))
+            trainer(max_steps=steps, max_epochs=epochs, limit_val_batches=0).fit(
+                m, datamodule=rf.ArrowDataModule(model=m, train=table, validate=table))
+            m.eval()
+            out = m.predict(request).to_pylist()
+            p = [o["predictions"]["/returned"]["content"]["probability"] for o in out]
+            seen = {it["sku"] for r in labeled for it in r["line_items"]}
+            return auc(y, p), len(seen)
+
+        budgets = [32, 64, 128, 256, 512, 1024]
+        results = {"scratch": {}, "pretrained": {}}
+        coverage = {}
+        for n in budgets:
+            for arm in ("scratch", "pretrained"):
+                runs = []
+                for seed in range(3):
+                    g = np.random.default_rng(100 + seed)
+                    score, seen = finetune([basket(g) for _ in range(n)], seed, arm == "pretrained")
+                    runs.append(score)
+                    coverage.setdefault(n, []).append(seen)
+                results[arm][n] = runs
+            print(f"    {n:5d} labels: scratch {np.mean(results['scratch'][n]):.3f}  "
+                  f"pretrained {np.mean(results['pretrained'][n]):.3f}")
+
+    save("pretraining", {
+        "catalog": len(CATALOG), "groups": GROUPS, "unlabeled_rows": len(unlabeled), "test_rows": len(test),
+        "positive_rate": float(np.mean(y)), "pretrain_seconds": pre_seconds, "pretrain_curve": curve,
+        "embedding": {"labels": vocab, "rows": np.round(weight[: len(vocab)], 5).tolist(), "xy": xy.tolist(),
+                      "explained": (sv[:2] ** 2 / (sv**2).sum()).tolist(),
+                      "same_group_cosine": float(same), "all_pairs_cosine": cross},
+        "budgets": budgets, "results": {a: {str(k): v for k, v in r.items()} for a, r in results.items()},
+        "skus_seen": {str(k): float(np.mean(v)) for k, v in coverage.items()},
+        "steps": 300, "seeds": 3,
+    })
+
+
+# ---------------------------------------------------------------------------
+# 15. Preprocessors and postprocessors around a real model
+# ---------------------------------------------------------------------------
+ACCOUNTS = [f"account-{i:03d}" for i in range(400)]
+WATCHLIST = ACCOUNTS[:8]
+
+
+def transfer(rng, i):
+    payer, payee = ACCOUNTS[int(rng.integers(400))], ACCOUNTS[int(rng.integers(400))]
+    if rng.random() < 0.08:
+        payee = WATCHLIST[int(rng.integers(len(WATCHLIST)))]
+    if rng.random() < 0.08:
+        payer = WATCHLIST[int(rng.integers(len(WATCHLIST)))]
+    amount_minor = int(rng.lognormal(10, 1.2))
+    return {"transfer_id": f"transfer-{i}", "accounts": {"payer": payer, "payee": payee}, "amount_minor": amount_minor,
+            "flagged": payee in WATCHLIST or amount_minor > 250_000}
+
+
+def processors():
+    import polars as pl
+    import pyarrow as pa
+    import relflow as rf
+    import torch
+
+    def reshape(frame: pl.DataFrame, *, scale: float = 100.0) -> pl.DataFrame:
+        accounts = pl.col("accounts")
+        return frame.with_columns(
+            amount=pl.col("amount_minor") / scale,
+            parties=pl.concat_list(
+                pl.struct(account=accounts.struct.field("payer"), role=pl.lit("payer")),
+                pl.struct(account=accounts.struct.field("payee"), role=pl.lit("payee")),
+            ),
+        ).drop("accounts", "amount_minor")
+
+    def review(frame: pl.DataFrame, *, threshold: float) -> pl.DataFrame:
+        flagged = pl.col("predictions").struct.field(rf.Address("flagged"))
+        probability = flagged.struct.field("content").struct.field("probability")
+        return frame.select(transfer_id=pl.col("inputs").struct.field("transfer_id"),
+                            flag_probability=probability, review=probability >= threshold)
+
+    prepare, decision = rf.preprocess(reshape), rf.postprocess(review)
+    rng = np.random.default_rng(0)
+    train = [transfer(rng, i) for i in range(6000)]
+    val = [transfer(rng, 10000 + i) for i in range(500)]
+    test = [transfer(rng, 20000 + i) for i in range(2000)]
+    torch.manual_seed(0)
+    model = rf.Model.sm(batch_size=128, optimizer=rf.adamw(learning_rate=2e-3),
+                        parties=rf.Branch(length=2, overflow="error", account=rf.Category, role=rf.Category),
+                        amount=rf.Number, flagged=rf.Boolean(mask=True))
+    data = rf.ArrowDataModule(model=model, train=pa.Table.from_pylist(train), validate=pa.Table.from_pylist(val),
+                              preprocessor=prepare.partial(scale=100.0))
+    t = time.time()
+    trainer(max_epochs=15).fit(model, datamodule=data)
+    seconds = time.time() - t
+
+    def strip(rows):
+        return pa.Table.from_pylist([{k: v for k, v in r.items() if k != "flagged"} for r in rows])
+
+    out = model.predict(strip(test), preprocess=prepare.partial(scale=100.0), retain=("transfer_id",),
+                        postprocess=decision.partial(threshold=0.5))
+    p = np.array(out["flag_probability"].to_pylist())
+    y = np.array([r["flagged"] for r in test])
+    watched_payee = np.array([r["accounts"]["payee"] in WATCHLIST for r in test])
+    large = np.array([r["amount_minor"] > 250_000 for r in test])
+    watched_payer = np.array([r["accounts"]["payer"] in WATCHLIST and r["accounts"]["payee"] not in WATCHLIST
+                              for r in test]) & ~large
+    stats = {"accuracy": float(np.mean((p >= 0.5) == y)), "auc": auc(y, p),
+             "watched_payee_recall": float(np.mean(p[watched_payee] >= 0.5)),
+             "large_recall": float(np.mean(p[large & ~watched_payee] >= 0.5)),
+             "watched_payer_flag_rate": float(np.mean(p[watched_payer] >= 0.5)),
+             "ordinary_flag_rate": float(np.mean(p[~y & ~watched_payer] >= 0.5))}
+
+    # Four requests worth showing: an ordinary transfer, a watched payee, a watched payer, a large amount.
+    def pick(cond):
+        return next(r for r in test if cond(r))
+
+    shown = [pick(lambda r: not r["flagged"] and r["accounts"]["payer"] not in WATCHLIST and r["amount_minor"] < 20000),
+             pick(lambda r: r["accounts"]["payee"] in WATCHLIST and r["amount_minor"] < 50000),
+             pick(lambda r: r["accounts"]["payer"] in WATCHLIST and not r["flagged"]),
+             pick(lambda r: r["amount_minor"] > 250_000 and r["accounts"]["payee"] not in WATCHLIST)]
+    processed = reshape(pl.from_arrow(strip(shown[1:2])), scale=100.0).to_dicts()[0]
+    result = model.predict(strip(shown), preprocess=prepare.partial(scale=100.0), retain=("transfer_id",),
+                           postprocess=decision.partial(threshold=0.5)).to_pylist()
+    raw = model.predict(strip(shown[1:2]), preprocess=prepare.partial(scale=100.0), retain=("transfer_id",)).to_pylist()[0]
+    print(f"    {seconds:.0f} s; accuracy {stats['accuracy']:.4f}; watched payer flagged {stats['watched_payer_flag_rate']:.3f}")
+    save("processors", {"seconds": seconds, "train_rows": len(train), "test_rows": len(test),
+                        "watchlist_size": len(WATCHLIST), "stats": stats,
+                        "source": {k: v for k, v in shown[1].items() if k != "flagged"}, "processed": processed,
+                        "requests": [{k: v for k, v in r.items() if k != "flagged"} for r in shown],
+                        "truth": [r["flagged"] for r in shown], "result": result,
+                        "envelope": {"inputs": raw["inputs"], "flagged": raw["predictions"]["/flagged"]}})
+
+
+# ---------------------------------------------------------------------------
+# 16. Benchmarks: time and memory for each preset, and for longer contexts
+# ---------------------------------------------------------------------------
+BENCH_BATCH, BENCH_STEPS, BENCH_WARMUP = 64, 12, 3
+
+
+def bench_customer(rng, length):
+    orders = []
+    for _ in range(min(length, int(rng.poisson(10)))):
+        items = [{"sku": f"P{int(rng.integers(500)):03d}", "quantity": int(rng.integers(1, 5))}
+                 for _ in range(int(rng.integers(1, 7)))]
+        orders.append({"age_days": int(rng.integers(1, 365)), "line_items": items})
+    return {"tenure_days": int(rng.integers(30, 2000)), "orders": orders, "churned": bool(rng.random() < 0.2),
+            "next_month_spend": float(np.round(rng.lognormal(4, 1), 2))}
+
+
+def bench_one(preset: str, length: int, mode: str, device: str) -> dict:
+    """One configuration, measured in its own process (peak memory is per process)."""
+    import resource
+
+    import lightning.pytorch as lit
+    import pyarrow as pa
+    import relflow as rf
+    import torch
+
+    def rss_mib():
+        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return peak / 2**20 if sys.platform == "darwin" else peak / 2**10
+
+    torch.manual_seed(0)
+    rng = np.random.default_rng(0)
+    table = pa.Table.from_pylist([bench_customer(rng, length) for _ in range(BENCH_BATCH * (BENCH_STEPS + 1))])
+    baseline = rss_mib()
+    model = getattr(rf.Model, preset)(
+        batch_size=BENCH_BATCH, optimizer=rf.adamw(learning_rate=1e-3, fused=None),
+        tenure_days=rf.Number,
+        orders=rf.Branch(length=length, overflow="tail", age_days=rf.Number,
+                         line_items=rf.Branch(length=16, sku=rf.Category, quantity=rf.Number)),
+        churned=rf.Boolean(mask=True), next_month_spend=rf.Number(mask=True))
+    out = {"preset": preset, "length": length, "mode": mode, "device": device, "batch": BENCH_BATCH,
+           "params": params(model), "baseline_mib": baseline}
+    sync = torch.mps.synchronize if device == "mps" else (lambda: None)
+    if mode == "train":
+        times = []
+
+        class Clock(lit.Callback):
+            def on_train_batch_start(self, *a):
+                sync()
+                self.t = time.perf_counter()
+
+            def on_train_batch_end(self, *a):
+                sync()
+                times.append(time.perf_counter() - self.t)
+
+        trainer(max_steps=BENCH_STEPS, limit_val_batches=0, callbacks=[Clock()], accelerator=device).fit(
+            model, datamodule=rf.ArrowDataModule(model=model, train=table, validate=table.slice(0, BENCH_BATCH)))
+        step = float(np.median(times[BENCH_WARMUP:]))
+    else:
+        model.eval()
+        if device == "mps":
+            model.to("mps")
+        request = table.drop_columns(["churned", "next_month_spend"])
+        model.predict(request.slice(0, BENCH_BATCH))
+        times = []
+        for i in range(1, BENCH_STEPS):
+            t = time.perf_counter()
+            model.predict(request.slice(i * BENCH_BATCH, BENCH_BATCH))
+            sync()
+            times.append(time.perf_counter() - t)
+        step = float(np.median(times))
+    out["ms_per_batch"] = 1000 * step
+    out["rows_per_s"] = BENCH_BATCH / step
+    out["peak_mib"] = rss_mib()
+    if device == "mps":
+        out["mps_driver_mib"] = torch.mps.driver_allocated_memory() / 2**20
+    return out
+
+
+def benchmarks():
+    import platform
+    import subprocess
+
+    import torch
+
+    def run(*cfg):
+        cmd = [sys.executable, "-m", "videos.relflow.compute", "_bench", *map(str, cfg)]
+        proc = subprocess.run(cmd, cwd=HERE.parents[1], capture_output=True, text=True)
+        line = next((ln for ln in proc.stdout.splitlines() if ln.startswith("RESULT ")), None)
+        if line is None:
+            raise RuntimeError(f"benchmark {cfg} failed:\n{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}")
+        r = json.loads(line[7:])
+        print(f"    {cfg}: {r['ms_per_batch']:.0f} ms/batch, {r['rows_per_s']:.0f} rows/s, peak {r['peak_mib']:.0f} MiB")
+        return r
+
+    presets = ["xs", "sm", "md", "lg", "xl"]
+    runs = [run(p, 64, mode, "cpu") for p in presets for mode in ("train", "predict")]
+    if torch.backends.mps.is_available():
+        runs += [run(p, 64, mode, "mps") for p in ("sm", "md", "xl") for mode in ("train", "predict")]
+    runs += [run("sm", n, "train", "cpu") for n in (16, 32, 128, 256)]
+    chip = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True, text=True).stdout.strip() \
+        if sys.platform == "darwin" else platform.processor()
+    memory = int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True).stdout) / 2**30 \
+        if sys.platform == "darwin" else None
+    save("benchmarks", {"machine": {"chip": chip, "memory_gib": memory, "threads": 4, "torch": torch.__version__,
+                                    "python": platform.python_version()},
+                        "batch": BENCH_BATCH, "steps": BENCH_STEPS, "warmup": BENCH_WARMUP, "runs": runs})
+
+
 EXPERIMENTS = {"schema": schema, "encode": encode, "number": number, "vocab": vocab, "hash": hashing,
-               "packing": packing, "counting": counting, "returns": returns, "rope": rope, "proofs": proofs}
+               "packing": packing, "counting": counting, "returns": returns, "rope": rope, "proofs": proofs,
+               "happy": happy, "quantile_enum": quantile_enum, "time_vector_text": time_vector_text, "masks": masks,
+               "pretraining": pretraining, "processors": processors, "benchmarks": benchmarks}
 
 
 def main():
     quiet()
+    if sys.argv[1:2] == ["_bench"]:  # one benchmark configuration, in a fresh process (see benchmarks())
+        preset, length, mode, device = sys.argv[2:6]
+        print("RESULT " + json.dumps(bench_one(preset, int(length), mode, device)), flush=True)
+        return
     names = sys.argv[1:] or list(EXPERIMENTS)
     for name in names:
         t = time.time()

@@ -4,20 +4,17 @@ import numpy as np
 
 from explainer import *  # noqa: F403
 from videos.relflow.common import (
-    D, Mono, Tree, chip, label, mtex, note, real_tag, schematic_tag, show_chapter_card, state_tile, tile,
+    D, Mono, Tree, chip, label, mtex, note, real_tag, schematic_tag, show_episode_card, state_tile, tile,
 )
 from videos.relflow.s01_hook import CUSTOMER_TREE
 
 
 class Decoders(VoiceoverScene):
     def construct(self):
-        show_chapter_card(self, 11, "Asking the tree a question")
+        show_episode_card(self)
         self.heritage()
         self.queries()
         self.heads()
-        self.masks()
-        self.determinism()
-        self.stages()
 
     # ------------------------------------------------------------------
     def heritage(self):
@@ -44,7 +41,8 @@ class Decoders(VoiceoverScene):
         VGroup(t1, t2).arrange(DOWN, aligned_edge=LEFT, buff=0.5).to_edge(RIGHT, buff=0.3)
         tag = real_tag(r"heritage paths read from \texttt{model.schema}")
         with self.voiceover(
-            "So far everything has flowed up the tree. Decoders read it back down. <bookmark mark='h'/> Each target's "
+            "In a relflow model, encoders carry information up the tree, from the leaves to the root. "
+            "Decoders read it back down. <bookmark mark='h'/> Each target's "
             "decoder looks at the representations along its own path to the root: its heritage. <bookmark mark='c'/> "
             "For churned, that's simply the root's four vectors. <bookmark mark='s'/> For a field deep in the tree, "
             "like a line item's SKU, it's the root, the order summaries, the item summaries of every order, and the "
@@ -146,120 +144,3 @@ class Decoders(VoiceoverScene):
             vo.wait_until("l")
             self.play(Write(loss), run_time=1.6)
         self.play(FadeOut(VGroup(pooled, pl, rows, arrows, loss)))
-
-    # ------------------------------------------------------------------
-    def masks(self):
-        rows = [
-            ("mask=True", r"a supervised target: never embedded, always reconstructed"),
-            ("mask=0.15", r"training-only dropout: 15\% hidden behind a learned mask token"),
-            ("mask=rf.Mask(rate=0.15, reconstruct=True)", r"self-supervised: reconstruct a sampled 15\%"),
-            ('mask=rf.Mask(query="hide_amount", ...)', r"the data decides, with a Boolean column"),
-            ("orders=rf.Branch(mask=rf.Mask(rate=0.1, skip=True))", r"one decision hides a whole subtree"),
-        ]
-        g = VGroup()
-        for i, (c_, t) in enumerate(rows):
-            y = 2.3 - 1.0 * i
-            g.add(VGroup(Mono(c_, font_size=21, color=C.MASKED).move_to([-6.6, y + 0.18, 0], aligned_edge=LEFT),
-                         label(t, font_size=24, color=GREY_A).move_to([-6.2, y - 0.22, 0], aligned_edge=LEFT)))
-        head = label(r"one mechanism, many uses: masks", font_size=30).to_edge(UP, buff=0.3)
-        with self.voiceover(
-            "Which coordinates get selected? That's the job of masks, one mechanism with several uses. "
-            "<bookmark mark='a'/> mask equals True makes a supervised target: the value is never embedded, and always "
-            "reconstructed. <bookmark mark='b'/> mask equals 0.15 is training-only dropout: fifteen percent of values "
-            "hide behind a learned mask token. <bookmark mark='c'/> A Mask with a rate and reconstruct equals True is "
-            "self-supervised learning: hide a sample, and learn to predict it from the rest. <bookmark mark='d'/> A "
-            "Mask with a query lets a Boolean column in the data decide, <bookmark mark='e'/> and a mask on a branch "
-            "makes one decision for its entire subtree."
-        ) as vo:
-            self.play(FadeIn(head))
-            for mark, r in zip("abcde", g):
-                vo.wait_until(mark)
-                self.play(FadeIn(r, shift=RIGHT * 0.1))
-        self.play(FadeOut(VGroup(head, g)))
-
-    # ------------------------------------------------------------------
-    def determinism(self):
-        m = D("encode")["masking"]
-        present = np.array(m["present"])
-        ep = {k: np.array(v) for k, v in m["epochs"].items()}
-        assert (ep["train0"] <= present).all()
-
-        def grid(sel, title_):
-            cells = VGroup()
-            for i in range(12):
-                for j in range(16):
-                    if not present[i, j]:
-                        cells.add(Square(0.13, stroke_width=0, fill_color=C.PADDED, fill_opacity=0.25))
-                    elif sel[i, j]:
-                        cells.add(Square(0.13, stroke_width=0, fill_color=C.MASKED, fill_opacity=1))
-                    else:
-                        cells.add(Square(0.13, stroke_width=0, fill_color=C.VALUED, fill_opacity=0.55))
-            cells.arrange_in_grid(12, 16, buff=0.025)
-            t = label(title_, font_size=20, color=GREY_A).next_to(cells, UP, buff=0.12)
-            return VGroup(cells, t)
-
-        grids = VGroup(grid(ep["train0"], r"train, epoch 0"), grid(ep["train0"], r"train, epoch 0 again"),
-                       grid(ep["train1"], r"train, epoch 1"), grid(ep["validate5"], r"validation, epoch 5"))
-        grids.arrange(RIGHT, buff=0.45).move_to(DOWN * 0.3)
-        f = mtex(r"\text{score} = \text{rng}\big(\,\mathrm{SHA256}(\text{seed},\ \text{stage},\ \text{epoch},\ "
-                 r"\text{address},\ \text{policy})\big)", font_size=30).to_edge(UP, buff=0.5)
-        same = label(r"identical", font_size=24, color=C.VALUED).next_to(VGroup(grids[0], grids[1]), DOWN, buff=0.3)
-        val = label(r"validation always uses epoch 0:\\comparable across epochs", font_size=22, color=GREY_A)
-        val.next_to(grids[3], DOWN, buff=0.3)
-        tag = real_tag(r"real selections at a 15\% rate, relflow's masking code")
-        with self.voiceover(
-            "Sampling is deterministic. <bookmark mark='f'/> Every coordinate gets a score from a random generator "
-            "seeded by a SHA-256 hash of the seed, the stage, the epoch, the field's address and the policy. "
-            "<bookmark mark='g'/> Here are real selections at a fifteen percent rate, on a batch of orders. "
-            "<bookmark mark='s'/> Epoch zero picks the same coordinates every time you run it. <bookmark mark='n'/> "
-            "Epoch one picks fresh ones. <bookmark mark='v'/> And validation always pretends it's epoch zero, so a "
-            "validation score means the same thing from one epoch to the next."
-        ) as vo:
-            vo.wait_until("f")
-            self.play(Write(f), run_time=1.5)
-            vo.wait_until("g")
-            self.play(FadeIn(grids[0]), FadeIn(tag))
-            vo.wait_until("s")
-            self.play(FadeIn(grids[1]), FadeIn(same))
-            vo.wait_until("n")
-            self.play(FadeIn(grids[2]))
-            vo.wait_until("v")
-            self.play(FadeIn(grids[3]), FadeIn(val))
-        self.play(FadeOut(VGroup(f, grids, same, val, tag)))
-
-    # ------------------------------------------------------------------
-    def stages(self):
-        head = VGroup(*[label(t, font_size=24, color=GREY_A) for t in (r"policy", r"train", r"validate / test",
-                                                                       r"predict")])
-        rows_ = [
-            (r"dropout (\texttt{mask=0.15})", r"on", r"off", r"off"),
-            (r"fixed target (\texttt{mask=True})", r"on", r"on", r"on"),
-            (r"sampled reconstruction", r"sampled", r"sampled, epoch 0", r"off"),
-        ]
-        cols_x = [-6.4, -0.6, 1.6, 4.6]
-        g = VGroup()
-        for c, x in zip(head, cols_x):
-            c.move_to([x, 1.8, 0], aligned_edge=LEFT)
-        g.add(head)
-        for i, r in enumerate(rows_):
-            row = VGroup()
-            for k, (t, x) in enumerate(zip(r, cols_x)):
-                col = WHITE if k == 0 else (C.VALUED if t.startswith("on") or t.startswith("sampled") else GREY_B)
-                row.add(label(t, font_size=26, color=col).move_to([x, 0.9 - 0.75 * i, 0], aligned_edge=LEFT))
-            g.add(row)
-        line = Line([-6.5, 1.45, 0], [6.6, 1.45, 0], color=GREY_D, stroke_width=1.5)
-        foot = label(r"a sampled reconstruction trains its decoder, but asks for no predictions when serving",
-                     font_size=24, color=GREY_A).to_edge(DOWN, buff=0.9)
-        with self.voiceover(
-            "And the stages differ. <bookmark mark='d'/> Dropout only acts during training. <bookmark mark='t'/> A fixed "
-            "target is hidden everywhere: that's what makes it a prediction. <bookmark mark='s'/> And a sampled "
-            "reconstruction trains its decoder, and is measured during validation, but asks for no predictions when "
-            "the model is serving."
-        ) as vo:
-            self.play(FadeIn(head), Create(line))
-            for mark, r in zip("dts", g[1:]):
-                vo.wait_until(mark)
-                self.play(FadeIn(r, shift=RIGHT * 0.1))
-            self.play(FadeIn(foot))
-        self.wait(0.4)
-        self.play(FadeOut(VGroup(g, line, foot)))

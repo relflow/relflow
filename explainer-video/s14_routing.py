@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from explainer import *  # noqa: F403
 from videos.relflow.common import (
-    D, Mono, label, mtex, note, real_tag, show_chapter_card, tile,
+    D, Mono, label, mtex, note, real_tag, show_episode_card, tile,
 )
 
 
@@ -18,7 +18,7 @@ def tiles(n, color, size=0.2, gap=0.04, fill=0.85, direction=RIGHT, dashed=False
 
 class Routing(VoiceoverScene):
     def construct(self):
-        show_chapter_card(self, 10, "Climbing the tree")
+        show_episode_card(self)
         nodes = {n["address"]: n for n in D("schema")["customer"]["nodes"]}
         li, od, rt = nodes["/orders/line_items"], nodes["/orders"], nodes["/"]
         assert li["input_width"] == 32 and li["outputs"] == 4
@@ -48,7 +48,8 @@ class Routing(VoiceoverScene):
         shape = mtex(r"B \times 64 \times 32 \times 256 \;\to\; B \times 64 \times 4 \times 256", font_size=28, color=GREY_A)
         shape.to_corner(DR, buff=0.4).shift(UP * 0.2)
         with self.voiceover(
-            "Now let's run the whole customer model and follow the shapes, from the leaves up. <bookmark mark='l'/> "
+            "Let's run a whole model, the customer model with its orders and line items, and follow the "
+            "shapes from the leaves up. <bookmark mark='l'/> "
             "Every field has been embedded into vectors of width 256. <bookmark mark='d'/> The deepest branch runs "
             "first. For each of a customer's 64 orders, the line items encoder sees 16 SKU slots and 16 quantity "
             "slots: 32 tokens. <bookmark mark='r'/> It encodes them, and reduces them to four summary vectors, the "

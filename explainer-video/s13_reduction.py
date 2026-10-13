@@ -4,14 +4,14 @@ import numpy as np
 
 from explainer import *  # noqa: F403
 from videos.relflow.common import (
-    D, Mono, Plot, chip, label, mtex, note, real_tag, schematic_tag, show_chapter_card, tile, vector_strip,
+    D, Mono, Plot, chip, label, mtex, note, real_tag, schematic_tag, show_episode_card, tile, vector_strip,
 )
-from videos.relflow.s08_branch import FIELDS
+from videos.relflow.s11_branch import FIELDS
 
 
 class Reduction(VoiceoverScene):
     def construct(self):
-        show_chapter_card(self, 9, "Why softmax can't count")
+        show_episode_card(self)
         self.c = D("counting")["arms"]
         self.learned_queries()
         self.average()
@@ -47,7 +47,8 @@ class Reduction(VoiceoverScene):
         k_l = note(r"(\texttt{n\_outputs} queries: 1 by default, 4 in the medium preset)", font_size=22).next_to(out, DOWN, buff=0.3)
         tag = schematic_tag(corner=UR)
         with self.voiceover(
-            "After its encoder, a branch still holds one token per field and slot: twenty-four of them, for our order. "
+            "After its encoder, a branch still holds one token per field and slot: twenty-four of them, for an order with "
+            "room for eight items of three fields each. "
             "<bookmark mark='p'/> The parent doesn't want twenty-four. It wants a summary. <bookmark mark='q'/> relflow's "
             "default reduction is cross-attention from learned queries: a few vectors, trained like any other weights, "
             "<bookmark mark='a'/> each of which asks the collection a question, <bookmark mark='o'/> and comes back "
@@ -151,8 +152,8 @@ class Reduction(VoiceoverScene):
             "amounts, between one and six of them, and the hidden target is their total. Branch attention is switched "
             "off, so only the reduction can do the counting. <bookmark mark='p'/> Then we ask each trained model about "
             "one copy of 1.25, two copies, and so on, up to ten. <bookmark mark='m'/> First, the plain average "
-            "reduction, rf dot Mean. It answers 4.39, every time. <bookmark mark='n'/> Next, attention, with two of "
-            "relflow's lanes removed. 4.22, every time. Both have learned to guess about three and a half times the "
+            f"reduction, rf dot Mean. It answers {pm[0]:.2f}, every time. <bookmark mark='n'/> Next, attention, with two of "
+            f"relflow's lanes removed. {pn[0]:.2f}, every time. Both have learned to guess about three and a half times the "
             "amount, the average count, because the count itself never reaches them."
         ) as vo:
             vo.wait_until("s")
@@ -225,9 +226,10 @@ class Reduction(VoiceoverScene):
         doc = label(r"relflow's docs: exact business totals\\belong in preprocessing", font_size=22, color=GREY_B)
         doc.next_to(flat, DOWN, buff=0.25).align_to(leg, LEFT)
         with self.voiceover(
-            "And with those lanes switched on, the same model counts. <bookmark mark='v'/> 1.26, 2.47, 3.70, all the "
-            "way to 7.44 for six copies: right on the line, across the whole range it was trained on. "
-            "<bookmark mark='r'/> Its typical error on new bags drops from about 1.7 to 0.07. <bookmark mark='f'/> "
+            f"And with those lanes switched on, the same model counts. <bookmark mark='v'/> {ys[0]:.2f}, {ys[1]:.2f}, "
+            f"{ys[2]:.2f}, all the way to {ys[5]:.2f} for six copies: right on the line, across the whole range it was "
+            f"trained on. <bookmark mark='r'/> Its typical error on new bags drops from about "
+            f"{self.c['mean']['seen']['rmse']:.1f} to {a['seen']['rmse']:.2f}. <bookmark mark='f'/> "
             "Past six copies, though, our model flattens out. relflow's own proof of this, P002, with a different "
             "setup, does stretch somewhat beyond its training lengths, and calls that a bounded extension, not exact "
             "arithmetic. <bookmark mark='d'/> The documentation says it plainly: if you need an exact business total, "

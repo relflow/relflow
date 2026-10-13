@@ -37,6 +37,23 @@ YAML = [
     ("next_month_spend: 75.0", "target"),
 ]
 
+SHAPES = [
+    ("a support ticket", [
+        ("subject: Delayed transfer", "field"), ("messages:", "branch"), ("  - author: customer", "field"),
+        ("    body: Not arrived", "field"), ("  - author: agent", "field"), ("    body: In review", "field"),
+        ("escalated: true", "target"),
+    ]),
+    ("a transfer", [
+        ("amount: 120.00", "field"), ("parties:", "branch"), ("  - account: acct-17", "field"),
+        ("    role: payer", "field"), ("  - account: acct-83", "field"), ("    role: payee", "field"),
+        ("flagged: false", "target"),
+    ]),
+    ("a sensor", [
+        ("site: north-7", "field"), ("readings:", "branch"), ("  - hour: 0", "field"), ("    temp_c: 4.1", "field"),
+        ("  - hour: 1", "field"), ("    temp_c: 3.8", "field"), ("fault: false", "target"),
+    ]),
+]
+
 CODE = """
 model = rf.Model.md(
     tenure_days=rf.Number,
@@ -55,12 +72,12 @@ model = rf.Model.md(
 """
 
 
-def yaml_block(font_size=24) -> VGroup:
-    """The record as YAML: keys colored by their role in the schema, indentation kept exactly."""
+def yaml_block(font_size=24, lines=YAML) -> VGroup:
+    """A record as YAML: keys colored by their role in the schema, indentation kept exactly."""
     col = {"field": C.RF_FIELD, "branch": C.RF_BRANCH, "target": C.RF_TARGET}
     char_w = Mono("M" * 20, font_size=font_size).width / 20
     rows = VGroup()
-    for text, kind in YAML:
+    for text, kind in lines:
         indent = len(text) - len(text.lstrip(" "))
         body = text.strip()
         parts = VGroup()
@@ -84,6 +101,7 @@ def yaml_block(font_size=24) -> VGroup:
 class Hook(VoiceoverScene):
     def construct(self):
         self.title()
+        self.shapes()
         self.record()
         self.flatten()
         self.schema()
@@ -95,17 +113,46 @@ class Hook(VoiceoverScene):
         mark = logo(2.2)
         word = wordmark(110)
         head = VGroup(mark, word).arrange(RIGHT, buff=0.5).move_to(UP * 0.5)
-        sub = label(r"How a nested schema becomes a transformer", font_size=38, color=GREY_A).next_to(head, DOWN, buff=0.6)
+        sub = label(r"A model factory for structured data", font_size=38, color=GREY_A).next_to(head, DOWN, buff=0.6)
         self.play(FadeIn(mark, scale=0.9), run_time=1.4)
         self.play(Write(word), run_time=1.4)
         self.play(FadeIn(sub, shift=UP * 0.15), run_time=1.0)
         self.wait(1.4)
         with self.voiceover(
-            "This is relflow, a Python library that builds PyTorch models straight from nested records. "
-            "In the next half hour, we'll take it apart, piece by piece, and watch every piece work."
+            "This is relflow: a model factory for structured data. You describe the shape of one record, and it "
+            "builds the PyTorch model that reads it. In this series, we'll take it apart, one short episode at a "
+            "time, and watch every piece work."
         ):
             pass
         self.play(FadeOut(VGroup(mark, word, sub), shift=UP * 0.2), run_time=0.8)
+
+    # ------------------------------------------------------------------
+    def shapes(self):
+        blocks = VGroup()
+        for name, lines in SHAPES:
+            y = yaml_block(20, lines)
+            cap = label(name, font_size=26, color=GREY_A).next_to(y, UP, buff=0.3).align_to(y, LEFT)
+            blocks.add(VGroup(cap, y))
+        blocks.arrange(RIGHT, buff=0.75, aligned_edge=UP).move_to(UP * 0.2)
+        lists = VGroup(*[SurroundingRectangle(VGroup(*b[1][2:6]), buff=0.08, color=C.RF_BRANCH, stroke_width=1.8,
+                                              corner_radius=0.06) for b in blocks])
+        answers = VGroup(*[SurroundingRectangle(b[1][6], buff=0.06, color=C.RF_TARGET, stroke_width=1.8,
+                                                corner_radius=0.06) for b in blocks])
+        with self.voiceover(
+            "Most data worth learning from has shape. <bookmark mark='a'/> A support ticket, with its thread of "
+            "messages. <bookmark mark='b'/> A transfer, between two parties. <bookmark mark='c'/> A sensor, with its "
+            "readings. <bookmark mark='l'/> Each is a record with a list inside it, <bookmark mark='q'/> and a value "
+            "we'd like to know."
+        ) as vo:
+            for mark, b in zip("abc", blocks):
+                vo.wait_until(mark)
+                self.play(FadeIn(b, shift=UP * 0.15, lag_ratio=0.05), run_time=0.9)
+            vo.wait_until("l")
+            self.play(LaggedStart(*[Create(r) for r in lists], lag_ratio=0.2), run_time=1.0)
+            vo.wait_until("q")
+            self.play(LaggedStart(*[Create(r) for r in answers], lag_ratio=0.2), run_time=1.0)
+        self.wait(0.4)
+        self.play(FadeOut(VGroup(blocks, lists, answers)), run_time=0.8)
 
     # ------------------------------------------------------------------
     def record(self):
@@ -123,7 +170,8 @@ class Hook(VoiceoverScene):
         t_targets = label(r"what happens next month:\\the answers we want to predict", font_size=28, color=C.RF_TARGET)
         t_targets.next_to(b_targets, RIGHT, buff=0.6)
         with self.voiceover(
-            "Here's one customer of an online store, written as YAML. <bookmark mark='t'/> They've been a customer for "
+            "We'll follow one example through the series: a customer of an online store, written as YAML. "
+            "<bookmark mark='t'/> They've been a customer for "
             "420 days. <bookmark mark='o'/> They've placed orders, and every order has its own list of line items: "
             "a product SKU, and how many were bought. <bookmark mark='a'/> The last two fields are what we'd like to "
             "predict: did this customer leave the next month, and how much did they spend?"
@@ -271,39 +319,41 @@ class Hook(VoiceoverScene):
                                  fill_color=col, fill_opacity=0.12)
             t = label(text, font_size=24).move_to(r)
             boxes.add(VGroup(r, t))
-        boxes.arrange(RIGHT, buff=0.38).move_to(UP * 0.4)
+        boxes.arrange(RIGHT, buff=0.38).move_to(UP * 1.2)
         arrows = VGroup(*[Arrow(a.get_right(), b.get_left(), buff=0.06, stroke_width=3, color=GREY_B,
                                 max_tip_length_to_length_ratio=0.4) for a, b in zip(boxes[:-1], boxes[1:])])
+        first = label(r"next: the whole thing in three lines of code", font_size=28, color=WHITE)
+        first.next_to(boxes, UP, buff=0.5)
         topics = VGroup(
-            label(r"ragged lists $\rightarrow$ rectangles", font_size=25, color=GREY_A),
-            label(r"null is not zero", font_size=25, color=GREY_A),
-            label(r"Fourier features, growing vocabularies, salted hashes", font_size=25, color=GREY_A),
-            label(r"packing: padding costs nothing", font_size=25, color=GREY_A),
-            label(r"why softmax can't count", font_size=25, color=GREY_A),
-            label(r"masks, decoders, and a real training run", font_size=25, color=GREY_A),
-        )
-        anchors = [boxes[1], boxes[1], boxes[2], boxes[3], boxes[4], boxes[5]]
-        for i, (t, a) in enumerate(zip(topics, anchors)):
-            t.next_to(boxes, DOWN, buff=0.45 + 0.46 * i).set_x(0)
+            label(r"records $\rightarrow$ rectangles \;$\cdot$\; null is not zero", font_size=25, color=GREY_A),
+            label(r"numbers, labels, identifiers, ranks, time, vectors, text", font_size=25, color=GREY_A),
+            label(r"inside a branch \;$\cdot$\; padding costs nothing \;$\cdot$\; why softmax can't count", font_size=25,
+                  color=GREY_A),
+            label(r"decoders \;$\cdot$\; masks \;$\cdot$\; learning without labels", font_size=25, color=GREY_A),
+            label(r"preprocessing \;$\cdot$\; a real run \;$\cdot$\; time and memory \;$\cdot$\; the proofs",
+                  font_size=25, color=GREY_A),
+        ).arrange(DOWN, buff=0.22).next_to(boxes, DOWN, buff=0.55)
         tag = real_tag()
         with self.voiceover(
-            "We'll follow one batch of records through that whole machine. <bookmark mark='a'/> How nested Arrow data "
-            "becomes rectangles of tensors, and why a null is not a zero. <bookmark mark='b'/> How a number becomes a "
-            "vector, how a vocabulary grows while it trains, and how a hash can learn equality without memorizing "
-            "names. <bookmark mark='c'/> What happens inside a branch, and why padding costs nothing. "
-            "<bookmark mark='d'/> Why softmax attention can't count, and the small trick relflow uses to fix that. "
-            "<bookmark mark='e'/> And finally, how a decoder asks the tree a question, and a real model learning to "
-            "answer it. <bookmark mark='f'/> Every grid, curve and number in this video comes from running relflow "
-            "itself, on the computer that rendered it."
+            "Each episode stands on its own, and together they follow one batch of records through that whole "
+            "machine. <bookmark mark='n'/> First, the short version: the whole thing in three lines of code. "
+            "<bookmark mark='a'/> Then the pieces. How nested Arrow data becomes rectangles of tensors, and why a null "
+            "is not a zero. <bookmark mark='b'/> How numbers, labels, identifiers, time and text each become vectors. "
+            "<bookmark mark='c'/> What happens inside a branch, why padding costs nothing, and why softmax attention "
+            "can't count. <bookmark mark='d'/> How a decoder asks the tree a question, how one mask mechanism makes "
+            "targets, dropout and pretraining, <bookmark mark='e'/> and what happens before and after the model, what "
+            "it costs in time and memory, and what relflow's own proofs show. <bookmark mark='f'/> Every grid, curve "
+            "and number in the series comes from running relflow itself, on the computer that rendered it."
         ) as vo:
             self.play(LaggedStart(*[FadeIn(b, shift=UP * 0.15) for b in boxes], lag_ratio=0.12),
                       LaggedStart(*[GrowArrow(a) for a in arrows], lag_ratio=0.12), run_time=2.0)
-            for mark, idx, box_idx in (("a", (0, 1), (0, 1)), ("b", (2,), (2,)), ("c", (3,), (3,)), ("d", (4,), (4,)),
-                                       ("e", (5,), (5,))):
+            vo.wait_until("n")
+            self.play(FadeIn(first, shift=UP * 0.1))
+            for mark, i, box_idx in (("a", 0, (0, 1)), ("b", 1, (2,)), ("c", 2, (3, 4)), ("d", 3, (5,)), ("e", 4, ())):
                 vo.wait_until(mark)
-                self.play(*[FadeIn(topics[i], shift=UP * 0.1) for i in idx],
+                self.play(FadeIn(topics[i], shift=UP * 0.1),
                           *[Indicate(boxes[j], color=WHITE, scale_factor=1.06) for j in box_idx], run_time=0.9)
             vo.wait_until("f")
             self.play(FadeIn(tag))
         self.wait(0.6)
-        self.play(FadeOut(VGroup(boxes, arrows, topics, tag)))
+        self.play(FadeOut(VGroup(boxes, arrows, first, topics, tag)))

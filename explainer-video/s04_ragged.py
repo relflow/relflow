@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from explainer import *  # noqa: F403
 from videos.relflow.common import (
-    D, Mono, label, mtex, note, real_tag, show_chapter_card, state_tile,
+    D, Mono, label, mtex, note, real_tag, show_episode_card, state_tile,
 )
 
 ORDER_HUES = ["#8ECAE6", "#F4A261", "#CDB4DB", "#90BE6D"]
@@ -31,7 +31,7 @@ def cell(text, color=C.ARROW_BUF, w=0.78, h=0.5, font_size=20, fill=0.12, text_c
 
 class RaggedToDense(VoiceoverScene):
     def construct(self):
-        show_chapter_card(self, 2, "From records to rectangles")
+        show_episode_card(self)
         e = D("encode")
         self.e = e
         self.records()
@@ -58,7 +58,7 @@ class RaggedToDense(VoiceoverScene):
         rows.arrange(DOWN, aligned_edge=LEFT, buff=0.22).to_corner(UL, buff=0.6)
         hint = note(r"each chip: SKU $\cdot$ quantity", font_size=22).next_to(rows, DOWN, buff=0.25).align_to(rows, LEFT)
         with self.voiceover(
-            "Let's follow a real batch. Here are four orders: two items, one item with a missing quantity, no items at "
+            "How does a batch of records become a tensor? Let's follow a real batch. Here are four orders: two items, one item with a missing quantity, no items at "
             "all, and five items."
         ):
             self.play(LaggedStart(*[FadeIn(r, shift=RIGHT * 0.15) for r in rows], lag_ratio=0.25), FadeIn(hint),

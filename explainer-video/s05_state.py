@@ -4,13 +4,13 @@ import numpy as np
 
 from explainer import *  # noqa: F403
 from videos.relflow.common import (
-    D, Mono, Plot, label, mtex, note, proof_tag, show_chapter_card, state_tile, tile, vector_strip,
+    D, Mono, Plot, label, mtex, note, proof_tag, show_episode_card, state_tile, tile, vector_strip,
 )
 
 
 class ValueState(VoiceoverScene):
     def construct(self):
-        show_chapter_card(self, 3, "Null is not zero")
+        show_episode_card(self)
         self.imputation()
         self.two_inputs()
         self.proof()

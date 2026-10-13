@@ -4,7 +4,7 @@ import numpy as np
 
 from explainer import *  # noqa: F403
 from videos.relflow.common import (
-    D, Mono, Plot, fmt_int, label, mtex, note, real_tag, show_chapter_card,
+    D, Mono, Plot, fmt_int, label, mtex, note, real_tag, show_episode_card,
 )
 
 
@@ -14,7 +14,7 @@ def sq(color, size=0.24, fill=0.9) -> Square:
 
 class Packing(VoiceoverScene):
     def construct(self):
-        show_chapter_card(self, 8, "Don't pay for padding")
+        show_episode_card(self)
         self.p = D("packing")
         self.dense()
         self.pack()
@@ -172,13 +172,16 @@ class Packing(VoiceoverScene):
         setup.next_to(leg, DOWN, buff=0.5).align_to(leg, LEFT)
         tag = real_tag(r"timed with relflow's own packing code on the computer that rendered this video")
         sp0 = t[0]["dense_ms"] / t[0]["packed_ms"]
-        assert 15 < sp0 < 20 and 1.8 < t[2]["dense_ms"] / t[2]["packed_ms"] < 2.5
+        sp1, sp2 = (t[i]["dense_ms"] / t[i]["packed_ms"] for i in (1, 2))
+        assert sp0 > sp1 > sp2 > 1.5
+        say = {2: "twice", 3: "three times"}
         with self.voiceover(
             "And it's fast. <bookmark mark='s'/> Here's relflow's own packing code, timed on this machine: two encoder "
             "layers over 256 rows, with room for 128 tokens each. <bookmark mark='a'/> When rows hold about four live "
-            "tokens on average, dense attention takes 248 milliseconds; packed, 14. Seventeen times faster. "
-            "<bookmark mark='b'/> At twelve tokens it's six times faster, <bookmark mark='c'/> and even at "
-            "thirty-two, a quarter full, packing halves the time."
+            f"tokens on average, dense attention takes {t[0]['dense_ms']:.0f} milliseconds; packed, "
+            f"{t[0]['packed_ms']:.0f}. {sp0:.0f} times faster. <bookmark mark='b'/> At twelve tokens it's "
+            f"{sp1:.0f} times faster, <bookmark mark='c'/> and even at thirty-two, a quarter full, packing is "
+            f"{say.get(round(sp2), f'{sp2:.1f} times')} as fast."
         ) as vo:
             vo.wait_until("s")
             self.play(Create(pl), FadeIn(yt), FadeIn(leg), FadeIn(setup), FadeIn(tag))

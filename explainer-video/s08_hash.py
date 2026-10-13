@@ -4,7 +4,7 @@ import numpy as np
 
 from explainer import *  # noqa: F403
 from videos.relflow.common import (
-    D, Mono, Plot, chip, label, mtex, note, proof_tag, real_tag, show_chapter_card, vector_strip,
+    D, Mono, Plot, chip, label, mtex, note, proof_tag, real_tag, show_episode_card, vector_strip,
 )
 
 
@@ -27,7 +27,7 @@ def sim_grid(sim, ids, cell=0.36, color=C.HASH) -> VGroup:
 
 class Hashing(VoiceoverScene):
     def construct(self):
-        show_chapter_card(self, 6, "Equality without identity")
+        show_episode_card(self)
         self.h = D("hash")
         self.problem()
         self.fingerprint()

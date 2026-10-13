@@ -4,7 +4,7 @@ import numpy as np
 
 from explainer import *  # noqa: F403
 from videos.relflow.common import (
-    D, Mono, Plot, chip, label, mtex, note, real_tag, schematic_tag, show_chapter_card, state_tile,
+    D, Mono, Plot, chip, label, mtex, note, real_tag, schematic_tag, show_episode_card, state_tile,
 )
 
 
@@ -20,7 +20,7 @@ def table_rows(n, filled, cell_w=1.7, cell_h=0.3, color=C.CATEGORY) -> VGroup:
 
 class Vocabulary(VoiceoverScene):
     def construct(self):
-        show_chapter_card(self, 5, "A vocabulary that grows while it trains")
+        show_episode_card(self)
         self.v = D("vocab")
         self.online()
         self.binding()
@@ -98,8 +98,8 @@ class Vocabulary(VoiceoverScene):
                     font_size=22).to_edge(DOWN, buff=0.35)
         with self.voiceover(
             "There's a subtlety. <bookmark mark='w'/> Batches are encoded in data-loader worker processes, and a worker "
-            "can't touch the model. So a worker numbers labels with a dictionary that's local to its own batch, like "
-            "the zero to four we saw earlier. <bookmark mark='m'/> Then, in the training process, just before the "
+            "can't touch the model. So a worker numbers labels with a dictionary that's local to its own batch: "
+            "zero, one, two, and so on. <bookmark mark='m'/> Then, in the training process, just before the "
             "forward pass, relflow binds those local numbers to the model's vocabulary, <bookmark mark='a'/> admits "
             "any new labels, <bookmark mark='r'/> and remaps the batch's tensors. <bookmark mark='d'/> With several "
             "GPUs, every rank gathers the batch's new labels in rank order, so all of them admit the same labels in "

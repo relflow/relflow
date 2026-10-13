@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from explainer import *  # noqa: F403
 from videos.relflow.common import (
-    D, Mono, Plot, Tree, chip, fmt_int, label, mtex, note, real_tag, show_chapter_card,
+    D, Mono, Plot, Tree, chip, fmt_int, label, mtex, note, real_tag, show_episode_card,
 )
 from videos.relflow.s01_hook import CUSTOMER_TREE
 
@@ -16,7 +16,7 @@ ADDRESSES = {
 
 class SchemaIsArchitecture(VoiceoverScene):
     def construct(self):
-        show_chapter_card(self, 1, "The schema is the architecture")
+        show_episode_card(self)
         self.addresses()
         self.shapes()
         self.modules()
@@ -39,7 +39,8 @@ class SchemaIsArchitecture(VoiceoverScene):
         sku = tree.cards["/orders/line_items/sku"]
         path_nodes = ["/", "/orders", "/orders/line_items", "/orders/line_items/sku"]
         with self.voiceover(
-            "Let's look closely at that tree. <bookmark mark='a'/> Every node has an address: a path that starts at "
+            "Here's the schema of a customer model: a customer with orders, each order with its line items, "
+            "and two values to predict. Let's look closely at that tree. <bookmark mark='a'/> Every node has an address: a path that starts at "
             "the root, which is written as a single slash. <bookmark mark='r'/> The root is anonymous, and it always "
             "holds exactly one observation. Anything repeated lives in a branch beneath it. <bookmark mark='p'/> "
             "So the SKU of a line item lives at slash orders, slash line items, slash SKU. <bookmark mark='u'/> "

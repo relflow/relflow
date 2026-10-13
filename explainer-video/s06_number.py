@@ -6,13 +6,13 @@ import numpy as np
 
 from explainer import *  # noqa: F403
 from videos.relflow.common import (
-    D, Mono, Plot, chip, label, mtex, note, real_tag, show_chapter_card, state_tile, vector_strip,
+    D, Mono, Plot, chip, label, mtex, note, real_tag, show_episode_card, state_tile, vector_strip,
 )
 
 
 class Numbers(VoiceoverScene):
     def construct(self):
-        show_chapter_card(self, 4, "How a number becomes a vector")
+        show_episode_card(self)
         self.n = D("number")
         self.standardize()
         self.fourier()
