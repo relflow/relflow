@@ -1,0 +1,782 @@
+{
+ "catalog": [
+  {
+   "id": "P001",
+   "family": "aggregation",
+   "name": "attention_sum_in_range",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P002",
+   "family": "aggregation",
+   "name": "attention_sum_unseen_lengths",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P003",
+   "family": "aggregation",
+   "name": "mean_duplicate_invariance",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P004",
+   "family": "aggregation",
+   "name": "visible_count_sum",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P005",
+   "family": "aggregation",
+   "name": "visible_count_unseen_lengths",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P006",
+   "family": "aggregation",
+   "name": "aligned_pair_covariance",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P007",
+   "family": "aggregation",
+   "name": "raw_value_variance",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P008",
+   "family": "aggregation",
+   "name": "supplied_cross_deviations",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P009",
+   "family": "aggregation",
+   "name": "supplied_squared_deviations",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P010",
+   "family": "aggregation",
+   "name": "selected_group_raw_weighted_sum",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P011",
+   "family": "aggregation",
+   "name": "selected_group_supplied_contribution_sum",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P012",
+   "family": "aggregation",
+   "name": "requested_rank_values",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P013",
+   "family": "aggregation",
+   "name": "mean_erases_contribution_count",
+   "status": "Limited",
+   "latest_full": "met"
+  },
+  {
+   "id": "P014",
+   "family": "aggregation",
+   "name": "raw_value_weight_sum",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P015",
+   "family": "aggregation",
+   "name": "supplied_contribution_sum",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P016",
+   "family": "aggregation",
+   "name": "variable_cardinality_weighted_mean",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P017",
+   "family": "calibration",
+   "name": "signal_vs_noise",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P018",
+   "family": "cluster",
+   "name": "hidden_regression_regimes",
+   "status": "Partial",
+   "latest_full": "met"
+  },
+  {
+   "id": "P019",
+   "family": "cluster",
+   "name": "plain_input_is_dormant",
+   "status": "Limited",
+   "latest_full": "met"
+  },
+  {
+   "id": "P020",
+   "family": "cluster",
+   "name": "reconstructing_category_labels",
+   "status": "Partial",
+   "latest_full": "met"
+  },
+  {
+   "id": "P021",
+   "family": "identity",
+   "name": "unseen_identity_equality",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P022",
+   "family": "relational",
+   "name": "attention_number_payload",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P023",
+   "family": "relational",
+   "name": "pass_through_number_payload",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P024",
+   "family": "relational",
+   "name": "aligned_position_control",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P025",
+   "family": "relational",
+   "name": "hash_recall",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P026",
+   "family": "relational",
+   "name": "filtered_mean",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P027",
+   "family": "relational",
+   "name": "group_operation_composition",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P028",
+   "family": "relational",
+   "name": "direct_sibling_hash_overlap",
+   "status": "Limited",
+   "latest_full": "met"
+  },
+  {
+   "id": "P029",
+   "family": "relational",
+   "name": "flat_unseen_hash_equality_control",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P030",
+   "family": "relational",
+   "name": "repeated_subtotal_reconstruction",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P031",
+   "family": "relational",
+   "name": "fixed_length",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P032",
+   "family": "relational",
+   "name": "grouped_peer_deviation",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P033",
+   "family": "relational",
+   "name": "single_query_preserves_group_membership",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P034",
+   "family": "relational",
+   "name": "supplied_peer_mean_control",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P035",
+   "family": "relational",
+   "name": "ungrouped_peer_deviation",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P036",
+   "family": "relational",
+   "name": "category_identity",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P037",
+   "family": "relational",
+   "name": "hash_identity",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P038",
+   "family": "state",
+   "name": "null_versus_zero",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P039",
+   "family": "structure",
+   "name": "attention_learns_fixed_width_sum",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P040",
+   "family": "structure",
+   "name": "attention_preserves_nested_cardinality",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P041",
+   "family": "structure",
+   "name": "mean_erases_cardinality",
+   "status": "Limited",
+   "latest_full": "met"
+  },
+  {
+   "id": "P042",
+   "family": "temporal",
+   "name": "business_window_requires_composition",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P043",
+   "family": "temporal",
+   "name": "leap_boundary_requires_context",
+   "status": "Limited",
+   "latest_full": "met"
+  },
+  {
+   "id": "P044",
+   "family": "temporal",
+   "name": "month_from_day_of_year",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P045",
+   "family": "temporal",
+   "name": "weekday_requires_year_context",
+   "status": "Limited",
+   "latest_full": "met"
+  },
+  {
+   "id": "P046",
+   "family": "mutations",
+   "name": "neutral_edits_preserve_learning",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P047",
+   "family": "mutations",
+   "name": "extend_prediction_target",
+   "status": "Passing",
+   "latest_full": "not_met"
+  },
+  {
+   "id": "P048",
+   "family": "mutations",
+   "name": "reset_prediction_target",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P049",
+   "family": "mutations",
+   "name": "deactivate_and_restore_input",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P050",
+   "family": "mutations",
+   "name": "delete_input_and_adapt",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P051",
+   "family": "masking",
+   "name": "sampled_reconstruction",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P052",
+   "family": "masking",
+   "name": "query_reconstruction",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P053",
+   "family": "masking",
+   "name": "branch_ablation",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P054",
+   "family": "masking",
+   "name": "prefix_generation",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P055",
+   "family": "vocabulary",
+   "name": "unknown_input_fallback",
+   "status": "Limited",
+   "latest_full": "met"
+  },
+  {
+   "id": "P056",
+   "family": "vocabulary",
+   "name": "unknown_target_coverage",
+   "status": "Limited",
+   "latest_full": "met"
+  },
+  {
+   "id": "P057",
+   "family": "vocabulary",
+   "name": "capacity_admission_order",
+   "status": "Limited",
+   "latest_full": "met"
+  },
+  {
+   "id": "P058",
+   "family": "vocabulary",
+   "name": "unknown_set_members",
+   "status": "Limited",
+   "latest_full": "met"
+  },
+  {
+   "id": "P059",
+   "family": "vocabulary",
+   "name": "admission_and_continued_training",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P060",
+   "family": "calibration",
+   "name": "categorical_prior",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P061",
+   "family": "vocabulary",
+   "name": "cold_start_confidence",
+   "status": "Limited",
+   "latest_full": "met"
+  },
+  {
+   "id": "P062",
+   "family": "vocabulary",
+   "name": "pretraining_coverage",
+   "status": "Limited",
+   "latest_full": "met"
+  },
+  {
+   "id": "P063",
+   "family": "vocabulary",
+   "name": "set_reconstruction_coverage",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P064",
+   "family": "vocabulary",
+   "name": "set_unavailable_fallback",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P065",
+   "family": "vocabulary",
+   "name": "cluster_pretraining_coverage",
+   "status": "Partial",
+   "latest_full": "not_met"
+  },
+  {
+   "id": "P066",
+   "family": "vocabulary",
+   "name": "rolling_input_admission",
+   "status": "Partial",
+   "latest_full": "not_met"
+  },
+  {
+   "id": "P067",
+   "family": "quantile",
+   "name": "rank_regression",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P068",
+   "family": "quantile",
+   "name": "clipped_extrapolation",
+   "status": "Limited",
+   "latest_full": "met"
+  },
+  {
+   "id": "P069",
+   "family": "enum",
+   "name": "fixed_class_learning",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P070",
+   "family": "enum",
+   "name": "declared_without_examples",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P071",
+   "family": "composition",
+   "name": "held_out_requests",
+   "status": "Partial",
+   "latest_full": "not_met"
+  },
+  {
+   "id": "P072",
+   "family": "composition",
+   "name": "context_examples",
+   "status": "Partial",
+   "latest_full": "met"
+  },
+  {
+   "id": "P073",
+   "family": "representation",
+   "name": "reconstruction_transfer",
+   "status": "Partial",
+   "latest_full": "met"
+  },
+  {
+   "id": "P074",
+   "family": "representation",
+   "name": "incomplete_evidence",
+   "status": "Partial",
+   "latest_full": "not_met"
+  },
+  {
+   "id": "P075",
+   "family": "relational",
+   "name": "retrieval_capacity",
+   "status": "Partial",
+   "latest_full": "not_met"
+  },
+  {
+   "id": "P076",
+   "family": "anomaly",
+   "name": "contextual_consistency",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P077",
+   "family": "quantile",
+   "name": "representation_tradeoffs",
+   "status": "Passing",
+   "latest_full": "met"
+  },
+  {
+   "id": "P078",
+   "family": "cluster",
+   "name": "regime_recovery",
+   "status": "Partial",
+   "latest_full": "not_met"
+  }
+ ],
+ "metrics": {
+  "P001": {
+   "measured": {
+    "rmse": 0.011440918430587489,
+    "baseline_rmse": 1.0961391615079292,
+    "nrmse": 0.010437468920322603
+   },
+   "permutation_drift": 0.0029657489343600614,
+   "steps": 1100
+  },
+  "P002": {
+   "in_range_score": {
+    "rmse": 0.01776947570306214,
+    "baseline_rmse": 1.0401230906449561,
+    "nrmse": 0.01708401232785218
+   },
+   "unseen_score": {
+    "rmse": 0.1318423008366465,
+    "baseline_rmse": 1.7874220810107455,
+    "nrmse": 0.07376114586326066
+   },
+   "duplication_error": 0.06995505807797699,
+   "probe_error": 0.048478743460122514,
+   "probe_target": [
+    0.65,
+    1.9500000000000002,
+    3.9000000000000004
+   ],
+   "probe_prediction": [
+    0.6695117950439453,
+    1.9607654809951782,
+    3.751617193222046
+   ],
+   "steps": 1100
+  },
+  "P021": {
+   "hash_auc": 0.9998767375946045,
+   "shuffled_auc": 0.49859464168548584,
+   "category_oov_auc": 0.5,
+   "auc_gap": 0.5012820959091187
+  },
+  "P028": {
+   "intact_auc": 0.47298240661621094,
+   "invariant_auc": 0.5077915191650391,
+   "broken_auc": 0.47818946838378906,
+   "invariant_drift": 0.001136141800088808,
+   "positive_break_drop": -2.6322610210627317e-05
+  },
+  "P038": {
+   "state_auc": 1.0,
+   "state_accuracy": 1.0,
+   "independent_auc": 0.50634765625,
+   "independent_accuracy": 0.5,
+   "prefilled_auc": 0.5,
+   "prefilled_accuracy": 0.5,
+   "auc_gap": 0.49365234375
+  },
+  "P040": {
+   "steps": 80,
+   "flat_oracle_rmse": 1.0647465517891985,
+   "test_rmse": 0.2992299183830936,
+   "predicted_pair_delta": 1.8223806042224169,
+   "true_pair_delta": 2.010377930933031,
+   "recovered_pair_delta_fraction": 0.9064865745798536
+  },
+  "P041": {
+   "steps": 300,
+   "mean_baseline_rmse": 0.2930153390602116,
+   "mean_rmse": 0.004598747738179377,
+   "mean_nrmse": 0.015694563134233674,
+   "paired_total_predictions": [
+    4.13906192779541,
+    4.139062881469727
+   ]
+  },
+  "P044": {
+   "periodic_accuracy": 0.915900707244873,
+   "permuted_accuracy": 0.10437091439962387,
+   "accuracy_gap": 0.8115297928452492
+  },
+  "P066": {
+   "0": {
+    "steps": 400,
+    "learned": {
+     "oracle_rmse": 0.13656405881148528,
+     "constant_rmse": 0.35653856748344714,
+     "nll": 0.41589828017369923,
+     "brier": 0.14082260257654633
+    },
+    "shuffled": {
+     "oracle_rmse": 0.40062065449888395,
+     "constant_rmse": 0.35653856748344714,
+     "nll": 0.8676093648951224,
+     "brier": 0.27307566110714176
+    }
+   },
+   "1": {
+    "cold": {
+     "oracle_rmse": 0.13964209985257442,
+     "constant_rmse": 0.1832768630837761,
+     "nll": 0.6774068949659726,
+     "brier": 0.24106549908281186
+    },
+    "admission_max_drift": 0.4904419779777527,
+    "admission_mean_drift": 0.21121416152163874,
+    "admitted": {
+     "oracle_rmse": 0.24645410013248095,
+     "constant_rmse": 0.1832768630837761,
+     "nll": 0.846043936773893,
+     "brier": 0.27531756359132475
+    },
+    "before_validation": {
+     "loss.state": 0.0,
+     "accuracy.state": 1.0,
+     "vocabulary.size": 2.0,
+     "targets.known": 4096.0,
+     "targets.unavailable": 0.0,
+     "coverage.content": 1.0,
+     "accuracy.content": 0.68603515625,
+     "accuracy.all": 0.68603515625,
+     "loss.content": 0.677406907081604,
+     "nll.content": 0.677406907081604
+    },
+    "after_validation": {
+     "loss.state": 3.912878128176089e-06,
+     "accuracy.state": 1.0,
+     "vocabulary.size": 2.0,
+     "targets.known": 4096.0,
+     "targets.unavailable": 0.0,
+     "coverage.content": 1.0,
+     "accuracy.content": 0.572509765625,
+     "accuracy.all": 0.572509765625,
+     "loss.content": 0.8460440039634705,
+     "nll.content": 0.8460440039634705
+    },
+    "steps": 400,
+    "learned": {
+     "oracle_rmse": 0.08655460079240573,
+     "constant_rmse": 0.3581464679001816,
+     "nll": 0.3736937394472698,
+     "brier": 0.12758427670433964
+    },
+    "shuffled": {
+     "oracle_rmse": 0.4251982503473697,
+     "constant_rmse": 0.3581464679001816,
+     "nll": 1.1435595678650448,
+     "brier": 0.3044089580391056
+    }
+   },
+   "2": {
+    "cold": {
+     "oracle_rmse": 0.06052924130707792,
+     "constant_rmse": 0.1832768630837761,
+     "nll": 0.6399479924355556,
+     "brier": 0.22348555118556657
+    },
+    "admission_max_drift": 0.6700282692909241,
+    "admission_mean_drift": 0.2535726512724068,
+    "admitted": {
+     "oracle_rmse": 0.26316693705009736,
+     "constant_rmse": 0.1832768630837761,
+     "nll": 0.9959116408034717,
+     "brier": 0.284861416205221
+    },
+    "before_validation": {
+     "loss.state": 0.0,
+     "accuracy.state": 1.0,
+     "vocabulary.size": 2.0,
+     "targets.known": 4096.0,
+     "targets.unavailable": 0.0,
+     "coverage.content": 1.0,
+     "accuracy.content": 0.6708984375,
+     "accuracy.all": 0.6708984375,
+     "loss.content": 0.6399480700492859,
+     "nll.content": 0.6399480700492859
+    },
+    "after_validation": {
+     "loss.state": 3.42129023920279e-05,
+     "accuracy.state": 1.0,
+     "vocabulary.size": 2.0,
+     "targets.known": 4096.0,
+     "targets.unavailable": 0.0,
+     "coverage.content": 1.0,
+     "accuracy.content": 0.60107421875,
+     "accuracy.all": 0.60107421875,
+     "loss.content": 0.995911717414856,
+     "nll.content": 0.9959116578102112
+    },
+    "steps": 400,
+    "learned": {
+     "oracle_rmse": 0.08975128114270696,
+     "constant_rmse": 0.3569987065711852,
+     "nll": 0.3850068581520488,
+     "brier": 0.12768272016381593
+    },
+    "shuffled": {
+     "oracle_rmse": 0.437739533059105,
+     "constant_rmse": 0.3569987065711852,
+     "nll": 1.2242108730520633,
+     "brier": 0.3206348276176417
+    }
+   }
+  },
+  "P076": {
+   "train_rows": 4096,
+   "test_rows_per_condition": 2048,
+   "marginal_auc": 0.5,
+   "informative": {
+    "steps": 500,
+    "validation_threshold": 0.21406374255390026,
+    "rmse": 0.1083642001743611,
+    "baseline_rmse": 1.2856158161439029,
+    "normalized_rmse": 0.08428972233663899,
+    "anomaly_auc": 0.962364912033081,
+    "detection_recall": 0.90625,
+    "normal_false_positive_rate": 0.05029296875,
+    "tail_false_positive_rate": 0.0537109375
+   },
+   "shuffled_training": {
+    "steps": 500,
+    "validation_threshold": 2.3904464770299727,
+    "rmse": 1.2842947119548402,
+    "baseline_rmse": 1.2856158161439029,
+    "normalized_rmse": 0.9989723958180406,
+    "anomaly_auc": 0.501659631729126,
+    "detection_recall": 0.0458984375,
+    "normal_false_positive_rate": 0.04443359375,
+    "tail_false_positive_rate": 0.29052734375
+   }
+  }
+ },
+ "source": "relflow/proofs/results.yaml @ 5077716"
+}

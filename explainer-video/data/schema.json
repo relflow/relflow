@@ -1,0 +1,239 @@
+{
+ "customer": {
+  "nodes": [
+   {
+    "address": "/",
+    "kind": "root",
+    "type": "branch",
+    "length": 1,
+    "outputs": 4,
+    "input_width": 7,
+    "n_layers": 3,
+    "params": {
+     "coordinate": 789760,
+     "sequence": 2369280,
+     "reduction": 1054464
+    }
+   },
+   {
+    "address": "/tenure_days",
+    "kind": "leaf",
+    "type": "number",
+    "shape": [
+     1
+    ],
+    "target": false,
+    "heritage": [
+     "/",
+     "/tenure_days"
+    ],
+    "params": {
+     "embedder": 8448
+    }
+   },
+   {
+    "address": "/orders",
+    "kind": "branch",
+    "type": "branch",
+    "length": 64,
+    "outputs": 4,
+    "input_width": 320,
+    "n_layers": 2,
+    "params": {
+     "coordinate": 0,
+     "sequence": 1579520,
+     "reduction": 1054464
+    }
+   },
+   {
+    "address": "/orders/age_days",
+    "kind": "leaf",
+    "type": "number",
+    "shape": [
+     1,
+     64
+    ],
+    "target": false,
+    "heritage": [
+     "/",
+     "/orders",
+     "/orders/age_days"
+    ],
+    "params": {
+     "embedder": 8448
+    }
+   },
+   {
+    "address": "/orders/line_items",
+    "kind": "branch",
+    "type": "branch",
+    "length": 16,
+    "outputs": 4,
+    "input_width": 32,
+    "n_layers": 2,
+    "params": {
+     "coordinate": 789760,
+     "sequence": 1579520,
+     "reduction": 1054464
+    }
+   },
+   {
+    "address": "/orders/line_items/sku",
+    "kind": "leaf",
+    "type": "category",
+    "shape": [
+     1,
+     64,
+     16
+    ],
+    "target": false,
+    "heritage": [
+     "/",
+     "/orders",
+     "/orders/line_items",
+     "/orders/line_items/sku"
+    ],
+    "params": {
+     "embedder": 1536
+    }
+   },
+   {
+    "address": "/orders/line_items/quantity",
+    "kind": "leaf",
+    "type": "number",
+    "shape": [
+     1,
+     64,
+     16
+    ],
+    "target": false,
+    "heritage": [
+     "/",
+     "/orders",
+     "/orders/line_items",
+     "/orders/line_items/quantity"
+    ],
+    "params": {
+     "embedder": 8448
+    }
+   },
+   {
+    "address": "/churned",
+    "kind": "leaf",
+    "type": "boolean",
+    "shape": [
+     1
+    ],
+    "target": true,
+    "heritage": [
+     "/",
+     "/churned"
+    ],
+    "params": {
+     "embedder": 1280,
+     "decoder": 924166
+    },
+    "decoder_context": [
+     "/tenure_days",
+     "/orders",
+     "/next_month_spend"
+    ],
+    "decoder_queries": 1
+   },
+   {
+    "address": "/next_month_spend",
+    "kind": "leaf",
+    "type": "number",
+    "shape": [
+     1
+    ],
+    "target": true,
+    "heritage": [
+     "/",
+     "/next_month_spend"
+    ],
+    "params": {
+     "embedder": 8448,
+     "decoder": 924166
+    },
+    "decoder_context": [
+     "/tenure_days",
+     "/orders",
+     "/churned"
+    ],
+    "decoder_queries": 1
+   }
+  ],
+  "total_params": 12156172,
+  "d_model": 256,
+  "depthwise": [
+   [
+    "/"
+   ],
+   [
+    "/orders"
+   ],
+   [
+    "/orders/line_items"
+   ]
+  ]
+ },
+ "order": {
+  "total_params": 372550,
+  "nodes": {
+   "/line_items/sku": 384,
+   "/line_items/quantity": 2112,
+   "/line_items/price": 2112,
+   "/returned": 59334,
+   "/": 154304,
+   "/line_items": 154304
+  }
+ },
+ "presets": [
+  {
+   "name": "xs",
+   "d_model": 64,
+   "root_layers": 1,
+   "branch_layers": 1,
+   "heads": 2,
+   "root_outputs": 1,
+   "branch_outputs": 1
+  },
+  {
+   "name": "sm",
+   "d_model": 128,
+   "root_layers": 2,
+   "branch_layers": 1,
+   "heads": 4,
+   "root_outputs": 2,
+   "branch_outputs": 2
+  },
+  {
+   "name": "md",
+   "d_model": 256,
+   "root_layers": 3,
+   "branch_layers": 2,
+   "heads": 8,
+   "root_outputs": 4,
+   "branch_outputs": 4
+  },
+  {
+   "name": "lg",
+   "d_model": 384,
+   "root_layers": 4,
+   "branch_layers": 2,
+   "heads": 8,
+   "root_outputs": 8,
+   "branch_outputs": 4
+  },
+  {
+   "name": "xl",
+   "d_model": 512,
+   "root_layers": 6,
+   "branch_layers": 3,
+   "heads": 8,
+   "root_outputs": 16,
+   "branch_outputs": 8
+  }
+ ]
+}
