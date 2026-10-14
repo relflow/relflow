@@ -27,7 +27,6 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
         n_heads=4,
         amount=rf.Number,
         label=rf.Category(mask=True),
-        optimizer=rf.adamw(1e-3),
     )
     assert_type(model.compile(encoders=True, pools=False), Classifier)
     assert_type(model.save("model.ckpt"), str)
@@ -63,6 +62,20 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
     assert_type(model.predict([{"amount": 1.0}]), pa.Table)
     data = rf.ArrowDataModule(model, train=table, validate=table, test=table, predict=table)
     assert_type(model.fit(data, log_every_n_steps=50), Classifier)
+    assert_type(
+        model.fit(
+            data,
+            learning_rate=1e-3,
+            weight_decay=0.02,
+            betas=(0.9, 0.95),
+            eps=1e-8,
+            fused=None,
+            decay_bias=False,
+            decay_1d=False,
+            no_decay_name_fragments=("norm",),
+        ),
+        Classifier,
+    )
     assert_type(model.validate(data), list[dict[str, float]])
     assert_type(model.test(data), list[dict[str, float]])
     assert_type(model.predict(datamodule=data, devices=1), pa.Table)
@@ -114,3 +127,27 @@ def custom_scheduler(schema: rf.Schema, optimizer: torch.optim.Optimizer) -> Non
 
 def lightning_scheduler(schema: rf.Schema, scheduler: LRSchedulerConfigType) -> rf.Model:
     return rf.Model(schema, scheduler=scheduler)
+
+
+def batches(model: Classifier, data: rf.ArrowDataModule, table: pa.Table, batch_size: int | None) -> None:
+    assert_type(model.batch_size, int)
+    model.batch_size = 32
+    assert_type(model.fit(data, batch_size=batch_size, learning_rate=1e-3), Classifier)
+    assert_type(model.validate(data, batch_size=batch_size), list[dict[str, float]])
+    assert_type(model.test(data, batch_size=batch_size), list[dict[str, float]])
+    assert_type(model.predict(table, batch_size=batch_size), pa.Table)
+    assert_type(model.predict([{"amount": 42.75}], batch_size=batch_size), pa.Table)
+    assert_type(model.predict(datamodule=data, batch_size=batch_size, devices=1), pa.Table)
+    assert_type(model.predict(data, batch_size=batch_size, return_predictions=True, devices=1), pa.Table)
+    assert_type(
+        model.predict(
+            datamodule=data,
+            batch_size=batch_size,
+            return_predictions=False,
+            callbacks=[rf.Writer("output")],
+        ),
+        None,
+    )
+    assert_type(
+        model.predict(data, batch_size=batch_size, return_predictions=False, callbacks=[rf.Writer("output")]), None
+    )

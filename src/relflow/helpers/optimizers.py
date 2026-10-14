@@ -40,7 +40,9 @@ def adamw(
     decay_1d: bool = False,
     no_decay_name_fragments: tuple[str, ...] = ("norm",),
 ) -> OptimizerFactory:
-    """Return an optimizer factory for ``Model(optimizer=adamw(...))``.
+    """Return a factory for custom training hooks or ``Model.fit(optimizer=...)``.
+
+    Ordinary fitting configures these options directly on ``Model.fit``.
 
     The factory collects trainable parameters when the model configures its
     optimizer. Biases, one-dimensional parameters, and names containing

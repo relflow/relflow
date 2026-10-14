@@ -4,6 +4,7 @@ from collections import Counter
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from functools import partialmethod
+from math import isfinite
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, Required, Self, TypedDict, TypeVar, Unpack, cast, overload
 
@@ -243,17 +244,18 @@ class Model(lit.LightningModule, Renderable):
             )
 
         super().__init__()
-        if batch_size <= 0:
-            raise ValueError("batch_size must be > 0")
 
         # Model provenance intentionally uses a string rather than nn.Module's
         # internal integer state-dict revision; preserve the existing artifact contract.
         self._version: str = __version__  # pyrefly: ignore[bad-override-mutable-attribute]
         self.schema: Schema = schema
         self.preset: presets.Preset | None = None
-        self.batch_size: int = batch_size
-        self.optimizer: OptimizerConfig | None = optimizer
-        self.scheduler: SchedulerConfig | None = scheduler
+        self.batch_size = batch_size
+        self.optimizer: OptimizerConfig | None
+        self.scheduler: SchedulerConfig | None
+        # Training recipes remain configuration even when their callables are Modules.
+        object.__setattr__(self, "optimizer", optimizer)
+        object.__setattr__(self, "scheduler", scheduler)
         self.locks: Counter[str | Strata] = Counter()
         self.nodes: torch.nn.ModuleDict = torch.nn.ModuleDict()
         self._schema_editor: SchemaEditor = SchemaEditor(self)
@@ -297,6 +299,17 @@ class Model(lit.LightningModule, Renderable):
     def version(self) -> str:
         """RelFlow version associated with this model's checkpoint provenance."""
         return self._version
+
+    @property
+    def batch_size(self) -> int:
+        """Current per-device batch size for model-owned data loaders."""
+        return self._batch_size
+
+    @batch_size.setter
+    def batch_size(self, value: int) -> None:
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise ValueError(f"model batch_size must be a positive integer, got {value!r}")
+        self._batch_size = value
 
     def reset_contracts(self) -> None:
         compiler.clear(self)
@@ -592,10 +605,24 @@ class Model(lit.LightningModule, Renderable):
         else:
             optimizer = self.optimizer(self)
 
+        optimized = {id(parameter) for group in optimizer.param_groups for parameter in group["params"]}
+        parameters = {id(parameter) for parameter in self.parameters()}
+        if not optimized <= parameters:
+            raise ValueError(
+                "optimizer references a previous or different model graph; "
+                "supply a factory that binds the current model.parameters()"
+            )
+
         scheduler = self.scheduler(self, optimizer) if callable(self.scheduler) else self.scheduler
 
         if scheduler is None:
             return optimizer
+
+        scheduled = scheduler.get("scheduler") if isinstance(scheduler, Mapping) else scheduler
+        if scheduled is not None and scheduled.optimizer is not optimizer:
+            raise ValueError(
+                "scheduler references a different optimizer; supply a factory receiving the current model and optimizer"
+            )
 
         # Lightning permits custom stateful schedulers with an overridden step
         # hook, although its return annotation lists only Torch schedulers.
@@ -605,9 +632,17 @@ class Model(lit.LightningModule, Renderable):
         self,
         datamodule: lit.LightningDataModule,
         *,
+        batch_size: int | None = None,
         optimizer: OptimizerConfig | None = None,
         scheduler: SchedulerConfig | None = None,
         learning_rate: float | None = None,
+        weight_decay: float | None = None,
+        betas: tuple[float, float] | None = None,
+        eps: float | None = None,
+        fused: bool | None = cast(bool | None, OMITTED),
+        decay_bias: bool | None = None,
+        decay_1d: bool | None = None,
+        no_decay_name_fragments: tuple[str, ...] | None = None,
         callbacks: Sequence[Callback] | None = None,
         early_stopping: bool | EarlyStopping = True,
         rollback: bool | RollbackCheckpoint = True,
@@ -627,16 +662,49 @@ class Model(lit.LightningModule, Renderable):
         updates (default 50); training loss averages remain internal to callbacks.
         ``val_check_interval`` controls validation independently. Explicit
         Lightning batch limits can shorten a loop; no automatic limits apply.
+        ``batch_size`` sets the current per-device size for model-owned data
+        loaders, including validation. Omission retains the current size.
 
         Early stopping and rollback accept booleans or configured callbacks.
         Their default monitor requires a validation split. Train-only fitting
         can disable both policies or explicitly monitor ``loss/train_epoch``.
         Full training continuation requires ``ckpt_path``; another ordinary
         call starts a new run from the current model state.
+
+        Configure AdamW directly with ``learning_rate``, ``weight_decay``,
+        ``betas``, ``eps``, and ``fused``. Defaults are 1e-3, 0.01,
+        (0.9, 0.95), 1e-8, and True. Biases, one-dimensional parameters,
+        and names containing "norm" receive no decay unless their policies
+        are overridden. Explicit ``fused=None`` lets Torch select its backend.
+
+        These options and ``scheduler`` belong to this run. The optimizer is
+        constructed from the current graph after device and checkpoint setup;
+        repeated calls can use different options after rollback or mutation.
+        An explicit optimizer configuration cannot be combined with AdamW
+        options. Model-level configurations remain defaults for advanced use.
         """
         selected = optimizer if optimizer is not None else self.optimizer
-        if learning_rate is not None and selected is not None:
-            raise ValueError("learning_rate conflicts with a configured optimizer; configure its factory instead")
+        adamw_options: dict[str, Any] = {
+            name: value
+            for name, value in {
+                "weight_decay": weight_decay,
+                "betas": betas,
+                "eps": eps,
+                "decay_bias": decay_bias,
+                "decay_1d": decay_1d,
+                "no_decay_name_fragments": no_decay_name_fragments,
+            }.items()
+            if value is not None
+        }
+        if fused is not OMITTED:
+            adamw_options["fused"] = fused
+        if selected is not None and (learning_rate is not None or adamw_options):
+            raise ValueError(
+                "AdamW options conflict with a configured optimizer; "
+                "supply options directly to fit without a separate optimizer, or configure its factory"
+            )
+        if learning_rate is not None and (not isfinite(learning_rate) or learning_rate <= 0):
+            raise ValueError(f"learning_rate must be finite and positive, got {learning_rate!r}")
         configured = training.policies(
             callbacks,
             early_stopping=early_stopping,
@@ -659,40 +727,42 @@ class Model(lit.LightningModule, Renderable):
             self,
             datamodule,
             strata=Strata.train,
+            batch_size=batch_size,
             callbacks=configured,
             options=trainer_options,
         )
-        if learning_rate is not None and learning_rate <= 0:
-            raise ValueError(f"learning_rate must be positive, got {learning_rate!r}")
-        if isinstance(selected, torch.optim.Optimizer):
-            optimized = {id(parameter) for group in selected.param_groups for parameter in group["params"]}
-            parameters = {id(parameter) for parameter in self.parameters()}
-            if not optimized <= parameters:
-                raise ValueError(
-                    "optimizer references a previous model graph; supply a factory or rebuild it from model.parameters()"
-                )
-        self.optimizer = (
-            selected if selected is not None else adamw(learning_rate=1e-3 if learning_rate is None else learning_rate)
+        previous_optimizer, previous_scheduler = self.optimizer, self.scheduler
+        object.__setattr__(
+            self,
+            "optimizer",
+            selected
+            if selected is not None
+            else adamw(learning_rate=1e-3 if learning_rate is None else learning_rate, **adamw_options),
         )
-        if scheduler is not None:
-            self.scheduler = scheduler
-        runner.fit(self, datamodule=datamodule, ckpt_path=ckpt_path)
+        object.__setattr__(self, "scheduler", scheduler if scheduler is not None else previous_scheduler)
+        try:
+            runner.fit(self, datamodule=datamodule, ckpt_path=ckpt_path)
+        finally:
+            object.__setattr__(self, "optimizer", previous_optimizer)
+            object.__setattr__(self, "scheduler", previous_scheduler)
         return self
 
     def validate(
         self,
         datamodule: lit.LightningDataModule,
         *,
+        batch_size: int | None = None,
         callbacks: Sequence[Callback] | None = None,
         ckpt_path: str | Path | None = None,
         verbose: bool = True,
         **trainer_options: Any,
     ) -> list[dict[str, float]]:
-        """Evaluate the validation split and return its aggregate metrics."""
+        """Evaluate validation metrics, optionally updating the per-device batch size."""
         runner = training.trainer(
             self,
             datamodule,
             strata=Strata.validate,
+            batch_size=batch_size,
             callbacks=callbacks,
             options=trainer_options,
         )
@@ -705,16 +775,18 @@ class Model(lit.LightningModule, Renderable):
         self,
         datamodule: lit.LightningDataModule,
         *,
+        batch_size: int | None = None,
         callbacks: Sequence[Callback] | None = None,
         ckpt_path: str | Path | None = None,
         verbose: bool = True,
         **trainer_options: Any,
     ) -> list[dict[str, float]]:
-        """Evaluate the test split and return its aggregate metrics."""
+        """Evaluate test metrics, optionally updating the per-device batch size."""
         runner = training.trainer(
             self,
             datamodule,
             strata=Strata.test,
+            batch_size=batch_size,
             callbacks=callbacks,
             options=trainer_options,
         )
@@ -779,6 +851,8 @@ class Model(lit.LightningModule, Renderable):
         preprocess: PreprocessorInput = (),
         postprocess: PostprocessorInput = (),
         retain: Retain = (),
+        *,
+        batch_size: int | None = None,
     ) -> pa.Table: ...
 
     @overload
@@ -786,6 +860,7 @@ class Model(lit.LightningModule, Renderable):
         self,
         *,
         datamodule: lit.LightningDataModule,
+        batch_size: int | None = None,
         callbacks: Sequence[Callback] | None = None,
         ckpt_path: str | Path | None = None,
         return_predictions: Literal[True] = True,
@@ -797,6 +872,7 @@ class Model(lit.LightningModule, Renderable):
         self,
         *,
         datamodule: lit.LightningDataModule,
+        batch_size: int | None = None,
         callbacks: Sequence[Callback] | None = None,
         ckpt_path: str | Path | None = None,
         return_predictions: Literal[False],
@@ -808,6 +884,7 @@ class Model(lit.LightningModule, Renderable):
         self,
         batch: lit.LightningDataModule,
         *,
+        batch_size: int | None = None,
         callbacks: Sequence[Callback] | None = None,
         ckpt_path: str | Path | None = None,
         return_predictions: Literal[True] = True,
@@ -819,6 +896,7 @@ class Model(lit.LightningModule, Renderable):
         self,
         batch: lit.LightningDataModule,
         *,
+        batch_size: int | None = None,
         callbacks: Sequence[Callback] | None = None,
         ckpt_path: str | Path | None = None,
         return_predictions: Literal[False],
@@ -834,6 +912,7 @@ class Model(lit.LightningModule, Renderable):
         retain: Retain = (),
         *,
         datamodule: lit.LightningDataModule | None = None,
+        batch_size: int | None = None,
         callbacks: Sequence[Callback] | None = None,
         ckpt_path: str | Path | None = None,
         return_predictions: bool = True,
@@ -848,8 +927,14 @@ class Model(lit.LightningModule, Renderable):
 
         Preprocessors run before encoding; postprocessors receive the final
         eager Polars frame and may reshape the output before conversion to Arrow.
+        For direct inputs, ``batch_size`` bounds each encoded and forwarded
+        batch after preprocessing. Postprocessing runs once on the combined
+        output. A supplied size also becomes the model's current batch size.
+        Omission processes the direct input as one batch.
 
         Data-module inference accepts Lightning callbacks and Trainer options.
+        ``batch_size`` updates the current per-device size for model-owned data
+        loaders; omission retains the current size.
         Configure preprocessing/retention on the data module and postprocessing
         on a Writer. Distributed prediction requires a prediction writer and
         ``return_predictions=False``; ``devices=1`` collects one Arrow table.
@@ -864,8 +949,10 @@ class Model(lit.LightningModule, Renderable):
                 raise TypeError("predict requires observations or a datamodule")
             if callbacks is not None or ckpt_path is not None or not return_predictions or trainer_options:
                 raise TypeError("callbacks, checkpoint loading, and Trainer options require predict(datamodule=...)")
+            if batch_size is not None:
+                self.batch_size = batch_size
             return ModelRuntime.predict(
-                self, batch=batch, preprocess=preprocess, postprocess=postprocess, retain=retain
+                self, batch=batch, preprocess=preprocess, postprocess=postprocess, retain=retain, batch_size=batch_size
             )
         if preprocess != () or postprocess != () or retain != ():
             raise TypeError(
@@ -879,6 +966,7 @@ class Model(lit.LightningModule, Renderable):
             self,
             datamodule,
             strata=Strata.predict,
+            batch_size=batch_size,
             callbacks=callbacks,
             options=trainer_options,
         )

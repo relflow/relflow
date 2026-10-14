@@ -117,7 +117,22 @@ model = rf.Model(
 
 ## Data And Training
 
-Configure `model.optimizer = rf.adamw(learning_rate=1e-3)` before fitting.
+Configure AdamW directly on `model.fit(...)`, such as
+`model.fit(datamodule, batch_size=128, learning_rate=1e-4, weight_decay=0.01, max_epochs=30)`.
+Omitted options use sensible defaults. Each fit starts a new optimizer run
+bound to the current parameters; use `ckpt_path` to resume full training state.
+Supply any scheduler for that run through `fit(scheduler=...)`. Keep
+`rf.adamw(...)` factories for custom optimizers and direct `lit.Trainer` setup;
+ordinary examples do not assign `model.optimizer` before calling `fit`.
+
+Set `batch_size` on `fit`, `validate`, `test`, or `predict` to update the model's
+current positive integer batch size. Arrow data modules read it when creating
+loaders; custom Lightning data modules own their loader behavior. The size is per
+device under DDP. Constructor `batch_size` remains the initial/checkpoint value
+and supports native Trainer and Tuner workflows. Direct
+`model.predict(inputs, batch_size=N)` preprocesses the full input once, chunks
+processed Arrow rows before encoding, and postprocesses the combined output
+once. Omitting the direct-prediction override preserves whole-input execution.
 
 Use `ArrowDataModule(...)` for canonical examples. Documentation uses static
 illustrations; use tiny data only in executable tests and proofs:

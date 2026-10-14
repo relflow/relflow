@@ -110,6 +110,7 @@ def trainer(
     strata: Strata,
     callbacks: Sequence[lit.Callback] | None,
     options: dict[str, Any],
+    batch_size: int | None = None,
 ) -> lit.Trainer:
     """Validate loop ownership and compose callbacks and framework settings."""
     if not isinstance(datamodule, lit.LightningDataModule):
@@ -121,10 +122,7 @@ def trainer(
             raise ValueError(f"{strata.value} requires a {strata.value} split in the data module")
         if strata == Strata.train and Strata.validate not in datamodule.sources:
             options.setdefault("limit_val_batches", 0)
-    batch_size = options.pop("batch_size", None)
     if batch_size is not None:
-        if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size <= 0:
-            raise ValueError(f"model batch_size must be a positive integer, got {batch_size!r}")
         model.batch_size = batch_size
     configured = list(callbacks or ())
     if not all(isinstance(callback, lit.Callback) for callback in configured):

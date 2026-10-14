@@ -8,6 +8,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 import torch
+from beartype.roar import BeartypeCallHintParamViolation
 
 import relflow as rf
 from relflow.architecture.training import hardware
@@ -250,7 +251,7 @@ def test_input_ownership_and_option_conflicts_fail_before_execution(model, data,
     with pytest.raises(TypeError, match="LightningDataModule"):
         model.validate(pa.table({"amount": [1.0]}), **options)
     model.optimizer = rf.adamw(1e-3)
-    with pytest.raises(ValueError, match="conflicts"):
+    with pytest.raises(ValueError, match="conflict"):
         model.fit(data, learning_rate=1e-2, **options)
     with pytest.raises(TypeError, match="not both"):
         model.predict(pa.table({"amount": [1.0]}), datamodule=data)
@@ -258,6 +259,216 @@ def test_input_ownership_and_option_conflicts_fail_before_execution(model, data,
         model.predict(datamodule=data, return_predictions=False, **options)
     with pytest.raises(TypeError):
         model.validate(data, invented_option=True, **options)
+
+
+def test_inline_adamw_retains_the_default_recipe(model, data, options):
+    model.fit(
+        data,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        early_stopping=False,
+        rollback=False,
+        **options,
+    )
+    optimizer = model.trainer.optimizers[0]
+    assert isinstance(optimizer, torch.optim.AdamW)
+    assert optimizer.defaults["lr"] == 1e-3
+    assert optimizer.defaults["weight_decay"] == 0.01
+    assert optimizer.defaults["betas"] == (0.9, 0.95)
+    assert optimizer.defaults["eps"] == 1e-8
+    assert optimizer.defaults["fused"] is True
+    assert model.optimizer is None
+    assert model.scheduler is None
+
+
+@pytest.mark.parametrize("fused", [None, False])
+@pytest.mark.parametrize("fragments", [("attention",), ()])
+def test_inline_adamw_options_control_the_live_optimizer(model, data, options, fused, fragments):
+    model.fit(
+        data,
+        learning_rate=0.003,
+        weight_decay=0.17,
+        betas=(0.8, 0.91),
+        eps=1e-6,
+        fused=fused,
+        decay_bias=True,
+        decay_1d=True,
+        no_decay_name_fragments=fragments,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        early_stopping=False,
+        rollback=False,
+        **options,
+    )
+    optimizer = model.trainer.optimizers[0]
+    assert optimizer.defaults["lr"] == 0.003
+    assert optimizer.defaults["weight_decay"] == 0.17
+    assert optimizer.defaults["betas"] == (0.8, 0.91)
+    assert optimizer.defaults["eps"] == 1e-6
+    assert optimizer.defaults["fused"] is fused
+    names = {id(parameter): name for name, parameter in model.named_parameters() if parameter.requires_grad}
+    optimized = {id(parameter) for group in optimizer.param_groups for parameter in group["params"]}
+    assert optimized == names.keys()
+    for group in optimizer.param_groups:
+        for parameter in group["params"]:
+            expected = 0.0 if any(fragment in names[id(parameter)].lower() for fragment in fragments) else 0.17
+            assert group["weight_decay"] == expected
+    assert optimizer.state
+    assert all(state["step"] == 1 for state in optimizer.state.values())
+    assert model.optimizer is None
+
+
+def test_a_new_fit_binds_the_live_graph_after_rollback_and_extension(model, data, options):
+    model.fit(
+        data,
+        learning_rate=1e-3,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        **options,
+    )
+    previous = model.trainer.optimizers[0]
+    model.extend(rf.where("address") == rf.Address(), id=rf.Number)
+    live = {id(parameter) for parameter in model.parameters() if parameter.requires_grad}
+    model.fit(
+        data,
+        learning_rate=2e-4,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        early_stopping=False,
+        rollback=False,
+        **options,
+    )
+    optimizer = model.trainer.optimizers[0]
+    assert optimizer is not previous
+    assert optimizer.defaults["lr"] == 2e-4
+    assert {id(parameter) for group in optimizer.param_groups for parameter in group["params"]} == live
+    assert optimizer.state
+    assert all(state["step"] == 1 for state in optimizer.state.values())
+    assert model.optimizer is None
+
+
+def test_a_fit_scheduler_does_not_leak_into_the_next_fit(model, data, options):
+    def schedule(module, optimizer):
+        return {"scheduler": torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.5), "interval": "step"}
+
+    model.fit(
+        data,
+        learning_rate=0.01,
+        scheduler=schedule,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        early_stopping=False,
+        rollback=False,
+        **options,
+    )
+    assert model.trainer.lr_scheduler_configs[0].scheduler.last_epoch == 1
+    assert model.trainer.optimizers[0].param_groups[0]["lr"] == pytest.approx(0.005)
+    assert model.scheduler is None
+    model.fit(
+        data,
+        learning_rate=0.003,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        early_stopping=False,
+        rollback=False,
+        **options,
+    )
+    assert model.trainer.lr_scheduler_configs == []
+    assert model.trainer.optimizers[0].param_groups[0]["lr"] == 0.003
+    assert model.optimizer is None
+    assert model.scheduler is None
+
+
+def test_failed_fit_restores_the_models_explicit_configuration(model, data, options):
+    previous_optimizer = rf.adamw(learning_rate=0.007)
+
+    def previous_scheduler(module, optimizer):
+        return torch.optim.lr_scheduler.StepLR(optimizer, step_size=1)
+
+    def broken_scheduler(module, optimizer):
+        raise RuntimeError("scheduler setup failed")
+
+    model.optimizer = previous_optimizer
+    model.scheduler = previous_scheduler
+    with pytest.raises(RuntimeError, match="scheduler setup failed"):
+        model.fit(
+            data,
+            optimizer=rf.adamw(learning_rate=0.002),
+            scheduler=broken_scheduler,
+            max_epochs=1,
+            limit_train_batches=1,
+            limit_val_batches=1,
+            early_stopping=False,
+            rollback=False,
+            **options,
+        )
+    assert model.optimizer is previous_optimizer
+    assert model.scheduler is previous_scheduler
+
+
+@pytest.mark.parametrize("configuration", ["argument", "model"])
+@pytest.mark.parametrize(
+    "inline",
+    [
+        {"learning_rate": 0.003},
+        {"weight_decay": 0.0},
+        {"betas": (0.8, 0.9)},
+        {"eps": 1e-6},
+        {"fused": None},
+        {"fused": False},
+        {"decay_bias": False},
+        {"decay_1d": False},
+        {"no_decay_name_fragments": ()},
+    ],
+)
+def test_custom_optimizer_configuration_rejects_inline_adamw_options(model, data, options, configuration, inline):
+    optimizer = rf.adamw(learning_rate=1e-3)
+    supplied = {"optimizer": optimizer} if configuration == "argument" else {}
+    if configuration == "model":
+        model.optimizer = optimizer
+    with pytest.raises(ValueError, match="conflict"):
+        model.fit(data, **supplied, **inline, **options)
+
+
+def test_an_optimizer_factory_cannot_return_parameters_from_a_previous_graph(model, data, options):
+    previous = rf.adamw(learning_rate=1e-3)(model)
+    model.update(rf.where("address") == rf.Address(), description="Rebuilt payment model")
+    with pytest.raises(ValueError, match="optimizer"):
+        model.fit(
+            data,
+            optimizer=lambda module: previous,
+            max_epochs=1,
+            limit_train_batches=1,
+            limit_val_batches=1,
+            early_stopping=False,
+            rollback=False,
+            **options,
+        )
+    assert model.optimizer is None
+
+
+def test_a_scheduler_factory_must_bind_the_optimizer_for_that_fit(model, data, options):
+    previous = rf.adamw(learning_rate=1e-3)(model)
+    scheduler = torch.optim.lr_scheduler.StepLR(previous, step_size=1)
+    with pytest.raises(ValueError, match="scheduler.*optimizer"):
+        model.fit(
+            data,
+            scheduler=lambda module, optimizer: {"scheduler": scheduler, "interval": "step"},
+            max_epochs=1,
+            limit_train_batches=1,
+            limit_val_batches=1,
+            early_stopping=False,
+            rollback=False,
+            **options,
+        )
+    assert model.optimizer is None
+    assert model.scheduler is None
 
 
 def test_automatic_hardware_handles_unused_ddp_parameters_and_checks_all_selected_gpu_capabilities(monkeypatch):
@@ -298,11 +509,26 @@ def test_automatic_hardware_handles_unused_ddp_parameters_and_checks_all_selecte
 
 
 def test_resume_restores_optimizer_progress_from_a_full_checkpoint(model, data, options):
-    model.fit(data, max_epochs=1, limit_train_batches=2, limit_val_batches=1, **options)
+    def schedule(module, optimizer):
+        return {"scheduler": torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.5), "interval": "step"}
+
+    model.fit(
+        data,
+        learning_rate=1e-3,
+        scheduler=schedule,
+        max_epochs=1,
+        limit_train_batches=2,
+        limit_val_batches=1,
+        **options,
+    )
     checkpoint = model.trainer.checkpoint_callback.last_model_path
+    assert torch.load(checkpoint, weights_only=False)["batch_size"] == 2
     model.fit(
         data,
         ckpt_path=checkpoint,
+        batch_size=3,
+        learning_rate=0.02,
+        scheduler=schedule,
         max_epochs=2,
         limit_train_batches=2,
         limit_val_batches=1,
@@ -311,8 +537,13 @@ def test_resume_restores_optimizer_progress_from_a_full_checkpoint(model, data, 
         **options,
     )
     assert model.trainer.global_step == 4
-    assert rf.Number.normalization(model, "/amount")["count"] == 8
+    assert rf.Number.normalization(model, "/amount")["count"] == 10
+    assert model.batch_size == data.batch_size == 3
     assert all(state["step"] == 4 for state in model.trainer.optimizers[0].state.values())
+    assert model.trainer.lr_scheduler_configs[0].scheduler.last_epoch == 4
+    assert model.trainer.optimizers[0].param_groups[0]["lr"] == pytest.approx(1e-3 * 0.5**4)
+    assert model.optimizer is None
+    assert model.scheduler is None
 
 
 @pytest.mark.parametrize("accelerator", ["cpu", "auto"])
@@ -385,3 +616,191 @@ def test_fast_dev_run_skips_automatic_selection_policies(model, data, options):
     assert not any(
         isinstance(callback, (rf.EarlyStopping, rf.RollbackCheckpoint)) for callback in model.trainer.callbacks
     )
+
+
+class ModuleOptimizer(torch.nn.Module):
+    """Keep a recipe buffer outside the model's learned architecture."""
+
+    def __init__(self, learning_rate):
+        super().__init__()
+        self.register_buffer("learning_rate", torch.tensor(learning_rate, dtype=torch.float64))
+
+    def forward(self, model):
+        return torch.optim.AdamW(model.parameters(), lr=float(self.learning_rate), fused=False)
+
+
+class ModuleScheduler(torch.nn.Module):
+    """Configure a scheduler without contributing buffers to the model."""
+
+    def __init__(self, gamma):
+        super().__init__()
+        self.register_buffer("gamma", torch.tensor(gamma, dtype=torch.float64))
+
+    def forward(self, model, optimizer):
+        return {
+            "scheduler": torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=float(self.gamma)),
+            "interval": "step",
+        }
+
+
+def test_module_factories_remain_outside_the_graph_across_fit_calls(model, data, options):
+    expected_state = set(model.state_dict())
+
+    class Ownership(lit.Callback):
+        def on_fit_start(self, trainer, pl_module):
+            assert "optimizer" not in pl_module._modules
+            assert "scheduler" not in pl_module._modules
+            assert set(pl_module.state_dict()) == expected_state
+
+    model.fit(
+        data,
+        optimizer=ModuleOptimizer(0.01),
+        scheduler=ModuleScheduler(0.5),
+        callbacks=[Ownership()],
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        early_stopping=False,
+        rollback=False,
+        **options,
+    )
+    previous = model.trainer.optimizers[0]
+    assert previous.param_groups[0]["lr"] == pytest.approx(0.005)
+    assert model.optimizer is None
+    assert model.scheduler is None
+    assert set(model.state_dict()) == expected_state
+    model.fit(
+        data,
+        learning_rate=0.003,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        early_stopping=False,
+        rollback=False,
+        **options,
+    )
+    assert model.trainer.optimizers[0] is not previous
+    assert model.trainer.optimizers[0].param_groups[0]["lr"] == 0.003
+    assert model.trainer.lr_scheduler_configs == []
+    assert model.optimizer is None
+    assert model.scheduler is None
+    assert "optimizer" not in model._modules
+    assert "scheduler" not in model._modules
+    assert set(model.state_dict()) == expected_state
+
+
+def test_constructor_module_factories_do_not_become_checkpointed_architecture(tmp_path):
+    optimizer = ModuleOptimizer(0.01)
+    scheduler = ModuleScheduler(0.5)
+    model = rf.Model(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        amount=rf.Number,
+        label=rf.Boolean(mask=True),
+        optimizer=optimizer,
+        scheduler=scheduler,
+    )
+    configured = model.configure_optimizers()
+    active = configured["optimizer"]
+    assert active.param_groups[0]["lr"] == 0.01
+    assert configured["lr_scheduler"]["scheduler"].optimizer is active
+    assert {id(parameter) for group in active.param_groups for parameter in group["params"]} == {
+        id(parameter) for parameter in model.parameters()
+    }
+    assert model.optimizer is optimizer
+    assert model.scheduler is scheduler
+    assert "optimizer" not in model._modules
+    assert "scheduler" not in model._modules
+    assert all(not key.startswith(("optimizer.", "scheduler.")) for key in model.state_dict())
+    checkpoint = model.save(tmp_path / "recipes.ckpt")
+    restored = rf.Model.load(checkpoint)
+    assert restored.optimizer is None
+    assert restored.scheduler is None
+    assert set(restored.state_dict()) == set(model.state_dict())
+
+
+def test_loop_batch_size_controls_each_arrow_split_and_retains_partial_batches(model, options):
+    class BatchRows(lit.Callback):
+        def __init__(self):
+            self.rows = {stage: [] for stage in ("train", "validate", "test", "predict")}
+
+        def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+            self.rows["train"].append(batch.source.num_rows)
+
+        def on_validation_batch_start(self, trainer, pl_module, batch, batch_idx, dataloader_idx=0):
+            self.rows["validate"].append(batch.source.num_rows)
+
+        def on_test_batch_start(self, trainer, pl_module, batch, batch_idx, dataloader_idx=0):
+            self.rows["test"].append(batch.source.num_rows)
+
+        def on_predict_batch_start(self, trainer, pl_module, batch, batch_idx, dataloader_idx=0):
+            self.rows["predict"].append(batch.source.num_rows)
+
+    identifiers = [f"payment-{index}" for index in range(7)]
+    table = pa.table(
+        {
+            "amount": [12.50, 42.75, 18.20, 65.00, 7.99, 120.00, 31.40],
+            "label": [False, True, False, False, True, False, True],
+            "payment_id": identifiers,
+        }
+    )
+    data = rf.ArrowDataModule(
+        model, train=table, validate=table, test=table, predict=table, shuffle=False, retain=("payment_id",)
+    )
+    callback = BatchRows()
+    model.fit(
+        data,
+        batch_size=3,
+        max_epochs=1,
+        early_stopping=False,
+        rollback=False,
+        callbacks=[callback],
+        **options,
+    )
+    assert callback.rows["train"] == [3, 3, 1]
+    assert callback.rows["validate"] == [3, 3, 1]
+    assert model.trainer.global_step == 3
+    assert data.batch_size == model.batch_size == 3
+
+    callback.rows["validate"].clear()
+    model.validate(data, batch_size=4, callbacks=[callback], verbose=False, **options)
+    assert callback.rows["validate"] == [4, 3]
+    assert data.batch_size == model.batch_size == 4
+    model.test(data, batch_size=5, callbacks=[callback], verbose=False, **options)
+    assert callback.rows["test"] == [5, 2]
+    assert data.batch_size == model.batch_size == 5
+    result = model.predict(datamodule=data, batch_size=6, callbacks=[callback], **options)
+    assert callback.rows["predict"] == [6, 1]
+    assert result["inputs"].combine_chunks().field("payment_id").to_pylist() == identifiers
+    assert result.num_rows == 7
+    assert data.batch_size == model.batch_size == 6
+
+    inherited = model.predict(data, batch_size=None, callbacks=[callback], **options)
+    assert callback.rows["predict"] == [6, 1, 6, 1]
+    assert inherited.equals(result)
+    callback.rows["validate"].clear()
+    model.validate(data, callbacks=[callback], verbose=False, **options)
+    assert callback.rows["validate"] == [6, 1]
+    assert data.batch_size == model.batch_size == 6
+
+
+@pytest.mark.parametrize("loop", ["fit", "validate", "test", "predict"])
+@pytest.mark.parametrize("batch_size", [True, False, 0, -3, 1.5, "4"])
+def test_public_loop_batch_size_rejects_invalid_overrides_without_changing_the_current_size(
+    model, data, options, loop, batch_size
+):
+    with pytest.raises(ValueError, match="batch_size.*positive integer"):
+        getattr(model, loop)(data, batch_size=batch_size, **options)
+    assert model.batch_size == data.batch_size == 2
+
+
+@pytest.mark.parametrize("entrypoint", ["constructor", "property"])
+@pytest.mark.parametrize("batch_size", [True, False, 0, -3, 1.5, "4", None])
+def test_model_batch_size_requires_a_positive_integer(model, entrypoint, batch_size):
+    with pytest.raises((ValueError, BeartypeCallHintParamViolation), match="batch_size"):
+        if entrypoint == "constructor":
+            rf.Model(model.schema, batch_size=batch_size)
+        else:
+            model.batch_size = batch_size
+    assert model.batch_size == 2

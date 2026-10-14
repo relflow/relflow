@@ -46,7 +46,6 @@ disputed: false
 import relflow as rf
 
 model = rf.Model.xs(
-    batch_size=128,
     amount=rf.Number,
     merchant=rf.Category,
     disputed=rf.Boolean(mask=True),
@@ -70,15 +69,16 @@ data = rf.ArrowDataModule(
     train=train_table,
     validate=validation_table,
 )
-model.optimizer = rf.adamw(learning_rate=1e-3)
-model.fit(data, max_epochs=30)
+model.fit(data, batch_size=128, learning_rate=1e-4, weight_decay=0.01, max_epochs=30)
 
-predictions = model.predict(request_table, retain=("payment_id",))
+predictions = model.predict(request_table, batch_size=256, retain=("payment_id",))
 model.save("artifacts/payment.rf")
 ```
 
 Fitting includes early stopping and restoration of the best validation model.
-Hardware, logging, and Lightning options can be supplied to the model methods.
+Configure AdamW directly on `fit`; each call starts with the current model
+parameters and fresh optimization state. Hardware, logging, and Lightning
+options can also be supplied to the model methods.
 Predictions are an Arrow table; decoded values appear under `predictions` at
 addresses such as `/disputed`. For larger file-backed jobs, use an Arrow data
 module with `rf.Writer` to stream predictions to Parquet.

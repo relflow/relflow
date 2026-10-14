@@ -95,6 +95,96 @@ def test_predict_adapts_a_small_python_record_sequence_once():
     assert len(result) == 2
 
 
+@pytest.mark.parametrize("kind", ["table", "record_batch", "mappings"])
+@pytest.mark.parametrize("batch_size,expected", [(None, [5]), (2, [2, 2, 1]), (3, [3, 2])])
+def test_predict_bounds_preparation_and_forward_without_reordering(
+    monkeypatch: pytest.MonkeyPatch, kind: str, batch_size: int | None, expected: list[int]
+):
+    configured = model()
+    source = pa.table({"request_id": ["a", "b", "c", "d", "e"], "value": [1.0, 2.0, 3.0, 4.0, 5.0]})
+    inputs = source if kind == "table" else source.to_batches()[0] if kind == "record_batch" else source.to_pylist()
+    prepare = ModelRuntime.prepare
+    prepared: list[int] = []
+    forwarded: list[int] = []
+
+    def record_prepare(module, batch, **options):
+        prepared.append(batch.num_rows)
+        return prepare(module, batch, **options)
+
+    def record_forward(module, args):
+        forwarded.append(args[0][Address("value")].state.shape[0])
+
+    monkeypatch.setattr(ModelRuntime, "prepare", staticmethod(record_prepare))
+    configured.register_forward_pre_hook(record_forward)
+
+    result = configured.predict(inputs, batch_size=batch_size, retain=("request_id",))
+
+    assert prepared == expected
+    assert forwarded == expected
+    assert configured.batch_size == (2 if batch_size is None else batch_size)
+    assert result["inputs"].to_pylist() == [{"request_id": name} for name in source["request_id"].to_pylist()]
+    assert result["predictions"].type.get_field_index("/label") == 0
+
+
+@pytest.mark.parametrize("batch_size", [0, -1, True, 1.5, "2"])
+def test_predict_rejects_invalid_batch_size_before_preprocessing_or_forward(batch_size):
+    configured = model()
+    calls: list[str] = []
+
+    @rf.preprocess
+    def prepare(frame: pl.DataFrame) -> pl.DataFrame:
+        calls.append("preprocess")
+        return frame
+
+    def record_forward(module, args):
+        calls.append("forward")
+
+    configured.register_forward_pre_hook(record_forward)
+    with pytest.raises(ValueError, match="batch_size must be a positive integer"):
+        configured.predict(pa.table({"value": [1.0]}), batch_size=batch_size, preprocess=prepare)
+
+    assert calls == []
+    assert configured.batch_size == 2
+
+
+def test_predict_batches_after_global_preprocessor_expansion_and_postprocesses_once(monkeypatch: pytest.MonkeyPatch):
+    configured = model()
+    calls = {"pre": 0, "post": 0}
+    prepared: list[int] = []
+    prepare = ModelRuntime.prepare
+
+    def record_prepare(module, batch, **options):
+        prepared.append(batch.num_rows)
+        return prepare(module, batch, **options)
+
+    @rf.preprocess(scope="dataset")
+    def expand(frame: pl.DataFrame) -> list[pl.DataFrame]:
+        calls["pre"] += 1
+        selected = frame.filter(pl.col("value") > 0).sort("value", descending=True)
+        return [selected, selected.with_columns(pl.col("request_id") + "-copy")]
+
+    @rf.postprocess
+    def enumerate_rows(frame: pl.DataFrame) -> pl.DataFrame:
+        calls["post"] += 1
+        return frame.select(request_id=pl.col("inputs").struct.field("request_id")).with_row_index("row")
+
+    monkeypatch.setattr(ModelRuntime, "prepare", staticmethod(record_prepare))
+    result = configured.predict(
+        pa.table({"request_id": ["a", "b", "c", "d"], "value": [0.0, 1.0, 2.0, 3.0]}),
+        batch_size=4,
+        preprocess=expand,
+        postprocess=enumerate_rows,
+        retain=("request_id",),
+    )
+
+    assert calls == {"pre": 1, "post": 1}
+    assert prepared == [4, 2]
+    assert result.to_pydict() == {
+        "row": [0, 1, 2, 3, 4, 5],
+        "request_id": ["d", "c", "b", "d-copy", "c-copy", "b-copy"],
+    }
+
+
 def test_predict_rejects_fieldless_mapping_rows():
     configured = rf.Model(
         label=rf.Boolean(mask=True),
@@ -124,7 +214,8 @@ def test_predict_requires_typed_arrow_for_an_empty_sequence():
         model().predict([])
 
 
-def test_typed_empty_prediction_compiles_the_exact_output_schema_without_forward():
+@pytest.mark.parametrize("batch_size", [None, 2])
+def test_typed_empty_prediction_compiles_the_exact_output_schema_without_forward(batch_size: int | None):
     source = pa.table(
         {
             "request_id": pa.array([], type=pa.large_string()),
@@ -132,7 +223,13 @@ def test_typed_empty_prediction_compiles_the_exact_output_schema_without_forward
         }
     )
 
-    result = model().predict(source, retain=("request_id",))
+    configured = model()
+
+    def reject_forward(module, args):
+        pytest.fail("typed empty observations must not enter forward")
+
+    configured.register_forward_pre_hook(reject_forward)
+    result = configured.predict(source, batch_size=batch_size, retain=("request_id",))
 
     assert len(result) == 0
     assert result["inputs"].type == pa.struct([pa.field("request_id", pa.large_string())])
@@ -141,17 +238,36 @@ def test_typed_empty_prediction_compiles_the_exact_output_schema_without_forward
     assert predictions.get_field_index("/label") == 0
 
 
-def test_preprocessor_may_filter_every_prediction_row_without_erasing_schema():
+@pytest.mark.parametrize("batch_size", [None, 2])
+def test_preprocessor_may_filter_every_prediction_row_without_erasing_schema(batch_size: int | None):
+    calls = {"pre": 0, "post": 0}
+
     @rf.preprocess
     def discard(frame: pl.DataFrame) -> pl.DataFrame:
+        calls["pre"] += 1
         return frame.filter(pl.lit(False))
 
-    result = model().predict(
+    @rf.postprocess
+    def finish(frame: pl.DataFrame) -> pl.DataFrame:
+        calls["post"] += 1
+        assert frame.height == 0
+        return frame
+
+    configured = model()
+
+    def reject_forward(module, args):
+        pytest.fail("filtered empty observations must not enter forward")
+
+    configured.register_forward_pre_hook(reject_forward)
+    result = configured.predict(
         pa.table({"request_id": ["a"], "value": [1.0]}),
+        batch_size=batch_size,
         preprocess=discard,
+        postprocess=finish,
         retain=("request_id",),
     )
 
+    assert calls == {"pre": 1, "post": 1}
     assert len(result) == 0
     assert result["inputs"].type == pa.struct([pa.field("request_id", pa.large_string())])
     assert result["predictions"].type.get_field_index("/label") == 0
@@ -172,6 +288,26 @@ def test_predict_preserves_nested_model_axes_as_fixed_lists():
 
     assert pa.types.is_fixed_size_list(field.type)
     assert field.type.list_size == 3
+    assert all(len(row["/items/label"]) == 3 for row in predictions.to_pylist())
+
+
+def test_predict_batches_nested_outputs_with_retained_row_identity():
+    configured = model(nested=True)
+    source = pa.Table.from_pylist(
+        [
+            {"request_id": "a", "items": [{"value": 1.0}, {"value": 2.0}]},
+            {"request_id": "b", "items": []},
+            {"request_id": "c", "items": [{"value": 3.0}]},
+            {"request_id": "d", "items": [{"value": 4.0}, {"value": 5.0}, {"value": 6.0}]},
+            {"request_id": "e", "items": [{"value": 7.0}]},
+        ]
+    )
+
+    result = configured.predict(source, batch_size=2, retain=("request_id",))
+    predictions = result["predictions"].combine_chunks()
+
+    assert result["inputs"].to_pylist() == [{"request_id": name} for name in ["a", "b", "c", "d", "e"]]
+    assert predictions.type.field("/items/label").type.list_size == 3
     assert all(len(row["/items/label"]) == 3 for row in predictions.to_pylist())
 
 
@@ -321,7 +457,8 @@ def test_predict_runs_postprocessors_in_order():
     assert result.to_pydict() == {"doubled": [2.0, 4.0]}
 
 
-def test_predict_snapshots_postprocessors_before_preprocessing():
+@pytest.mark.parametrize("batch_size", [None, 2])
+def test_predict_snapshots_postprocessors_before_preprocessing(batch_size: int | None):
     calls: list[str] = []
 
     @rf.postprocess
@@ -342,7 +479,8 @@ def test_predict_snapshots_postprocessors_before_preprocessing():
         return frame
 
     model().predict(
-        pa.table({"value": [1.0]}),
+        pa.table({"value": [1.0, 2.0, 3.0]}),
+        batch_size=batch_size,
         preprocess=mutate,
         postprocess=configured,
     )
@@ -360,6 +498,33 @@ def test_predict_restores_training_mode_after_inference():
     assert configured.training
 
 
+@pytest.mark.parametrize("training", [False, True])
+def test_predict_restores_mode_when_a_later_batch_fails(training: bool):
+    configured = model()
+    configured.train(training)
+    forwarded: list[int] = []
+    postprocessed: list[int] = []
+
+    def fail_later(module, args):
+        assert not module.training
+        forwarded.append(args[0][Address("value")].state.shape[0])
+        if len(forwarded) == 2:
+            raise RuntimeError("second prediction batch failed")
+
+    @rf.postprocess
+    def finish(frame: pl.DataFrame) -> pl.DataFrame:
+        postprocessed.append(frame.height)
+        return frame
+
+    configured.register_forward_pre_hook(fail_later)
+    with pytest.raises(RuntimeError, match="second prediction batch failed"):
+        configured.predict(pa.table({"value": [1.0, 2.0, 3.0, 4.0, 5.0]}), batch_size=2, postprocess=finish)
+
+    assert forwarded == [2, 2]
+    assert configured.training is training
+    assert postprocessed == []
+
+
 def test_predict_rejects_missing_or_duplicate_retain_columns():
     configured = model()
     source = pa.table({"value": [1.0]})
@@ -370,7 +535,10 @@ def test_predict_rejects_missing_or_duplicate_retain_columns():
         configured.predict(source, retain=("value", "value"))
 
 
-def test_output_plan_declares_once_and_passes_that_type_to_writer(monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.parametrize("batch_size,writes", [(None, 1), (2, 3)])
+def test_output_plan_declares_once_and_passes_that_type_to_writer(
+    monkeypatch: pytest.MonkeyPatch, batch_size: int | None, writes: int
+):
     extension = TENSORFIELDS["boolean"]
     declare = extension.output
     render = extension.write
@@ -391,9 +559,9 @@ def test_output_plan_declares_once_and_passes_that_type_to_writer(monkeypatch: p
     monkeypatch.setitem(extension.components, Component.output, output)
     monkeypatch.setitem(extension.components, Component.write, write)
 
-    model().predict(pa.table({"value": [1.0]}))
+    model().predict(pa.table({"value": [1.0, 2.0, 3.0, 4.0, 5.0]}), batch_size=batch_size)
 
-    assert calls == {"output": 1, "write": 1}
+    assert calls == {"output": 1, "write": writes}
 
 
 def test_write_rejects_an_ordinary_unplanned_forward_address():

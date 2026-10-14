@@ -171,6 +171,36 @@ def ingress(source: PredictionInput) -> pa.Table | pa.RecordBatch:
         raise TypeError(f"Python prediction observations are not Arrow-compatible: {error}") from error
 
 
+def observations(
+    module: Model,
+    batch: pa.Table | pa.RecordBatch,
+    *,
+    preprocess: PreprocessorInput,
+    strata: Strata,
+) -> pa.Table:
+    """Produce the canonical Arrow observations before encoding or batching."""
+
+    from relflow.data.datasets.arrow import convert, merge, process
+
+    source = convert(batch)
+    processors = Preprocessor.normalize(preprocess)
+    if not processors:
+        return source
+
+    source = merge(
+        process(
+            (source,),
+            preprocessor=processors,
+            strata=strata,
+            schema=module.schema,
+            encoding_context=module.interprocess_encoding_context,
+        )
+    )
+    if source is None:
+        raise ValueError("preprocessor pipeline returned no observations")
+    return source
+
+
 def retention(names: Retain) -> Retain:
     """Validate and normalize one retained-input selection."""
 
@@ -710,23 +740,7 @@ class ModelRuntime:
     ) -> Encoded:
         """Normalize Arrow input, preprocess it, and encode one table."""
 
-        from relflow.data.datasets.arrow import convert, merge, process
-
-        source = convert(batch)
-        processors = Preprocessor.normalize(preprocess)
-        if processors:
-            source = merge(
-                process(
-                    (source,),
-                    preprocessor=processors,
-                    strata=strata,
-                    schema=module.schema,
-                    encoding_context=module.interprocess_encoding_context,
-                )
-            )
-            if source is None:
-                raise ValueError("preprocessor pipeline returned no observations")
-
+        source = observations(module, batch, preprocess=preprocess, strata=strata)
         encoded = encode_batch(
             batch=source,
             schema=module.schema,
@@ -807,32 +821,45 @@ class ModelRuntime:
         preprocess: PreprocessorInput = (),
         postprocess: PostprocessorInput = (),
         retain: Retain = (),
+        *,
+        batch_size: int | None = None,
     ) -> pa.Table:
-        """Predict one Arrow input unit and return an Arrow table."""
+        """Preprocess once, predict bounded Arrow batches, and postprocess once."""
 
         postprocessors = Postprocessor.normalize(postprocess)
-        encoded = ModelRuntime.prepare(
+        source = observations(
             module,
             ingress(batch),
             preprocess=preprocess,
             strata=Strata.predict,
         )
-        source = encoded.source
-        inputs = encoded.tensors.to(module.device)
-        compiled = plan(module, retain, refresh=True)
-        raw: list[Prediction] = []
-        if source.num_rows:
-            was_training = module.training
-            module.eval()
-            try:
-                with torch.inference_mode():
-                    raw = module(inputs, strata=Strata.predict)
-            finally:
-                if was_training:
-                    module.train()
+        size = max(source.num_rows, 1) if batch_size is None else batch_size
+        written: list[pa.Table] = []
+        compiled: OutputPlan | None = None
+        for offset in range(0, max(source.num_rows, 1), size):
+            encoded = ModelRuntime.prepare(
+                module,
+                source.slice(offset, size),
+                preprocess=(),
+                strata=Strata.predict,
+            )
+            if compiled is None:
+                compiled = plan(module, retain, refresh=True)
+            raw: list[Prediction] = []
+            if encoded.source.num_rows:
+                was_training = module.training
+                module.eval()
+                try:
+                    with torch.inference_mode():
+                        raw = module(encoded.tensors.to(module.device), strata=Strata.predict)
+                finally:
+                    if was_training:
+                        module.train()
 
-        written = ModelRuntime.write(module, raw, source=source, retain=retain, compiled=compiled)
-        return apply(written, postprocessors)
+            written.append(ModelRuntime.write(module, raw, source=encoded.source, retain=retain, compiled=compiled))
+            del encoded, raw
+
+        return apply(pa.concat_tables(written), postprocessors)
 
 
 step = ModelRuntime.step
