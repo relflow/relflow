@@ -119,6 +119,7 @@ class FieldOptions(TypedDict, total=False):
     description: str | None
     embed: bool
     n_heads: int
+    ffnx: int
     dropout: float | None
     active: bool
     query: str | None
@@ -254,6 +255,7 @@ class Node(NodeMixin, Renderable, pydantic.BaseModel):
     description: str | None = None
     embed: bool = False
     n_heads: Annotated[int, pydantic.Field(gt=0, default=4)] = 4
+    ffnx: Annotated[pydantic.StrictInt, pydantic.Field(gt=0)] = 8
     dropout: Rate | None = None
 
     @classmethod
@@ -416,6 +418,7 @@ class Leaf(Node):
             "decoder_position",
             "weight",
             "n_heads",
+            "ffnx",
             "n_linear",
             "dropout",
         )

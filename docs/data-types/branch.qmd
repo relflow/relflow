@@ -91,6 +91,7 @@ collide with configuration. Use [Set](set.qmd) for membership alone and
 | `attention` | `"mha"` | Encoder mode; see below. |
 | `n_layers` | `1` | Positive sequence-encoder depth. |
 | `n_heads` | `4` | Positive, even encoder head count and fallback for Attention reduction. Active attention requires heads to divide `d_model` with at least two dimensions per head. |
+| `ffnx` | `8` | Positive integer feed-forward multiplier for this branch's encoders and learned reduction. See [model-tree configuration](../core-concepts/model-tree.qmd#configure-the-context). |
 | `reduction` | `rf.Attention()` | What encoded memory reaches the parent. |
 | `dropout` | `None` | Optional encoder dropout in `[0, 1)` and reduction fallback. |
 | `mask` | `False` | [Masking policy](../core-concepts/dynamic-masking.qmd) applied atomically to active descendants. |

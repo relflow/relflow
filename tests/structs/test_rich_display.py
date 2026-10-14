@@ -26,7 +26,7 @@ def test_leaf_rich_display_uses_schema_summary() -> None:
 
     assert "amount [number] active" in rendered
     assert "query=" not in rendered
-    assert "pooling=query weight=1 n_heads=4 n_linear=1" in rendered
+    assert "pooling=query weight=1 n_heads=4 ffnx=8 n_linear=1" in rendered
     assert "jitter=Jitter(add=0.0, multiply=0.0, normalize=True) n_bands=8 offset=4 objective=mae" in rendered
     assert "model_config" not in rendered
     assert "model_fields_set" not in rendered
@@ -113,7 +113,7 @@ def test_branch_rich_display_renders_child_subtree() -> None:
     )
 
     assert (
-        "line_items [branch] length=32 overflow=head attention=mha n_layers=1 n_heads=4 "
+        "line_items [branch] length=32 overflow=head attention=mha n_layers=1 n_heads=4 ffnx=8 "
         "reduction=attention(n_outputs=1, n_layers=1)" in " ".join(rendered.split())
     )
     assert "embed=False" not in rendered
@@ -305,7 +305,7 @@ def test_model_select_pprint_uses_rich_node_display() -> None:
     for output in (rendered, rich_rendered):
         assert "species [category] active reconstruct" in output
         assert "query=" not in output
-        assert " pooling=query weight=1 n_heads=4 n_linear=1" in output
+        assert " pooling=query weight=1 n_heads=4 ffnx=8 n_linear=1" in output
         assert " p_unavailable=0.01 topk=[]" in output
         assert "Request(name=" not in output
         assert "Selection(" not in output

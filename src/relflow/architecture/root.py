@@ -56,6 +56,7 @@ from relflow.structs.experiment import (
 )
 from relflow.structs.packages import Prediction
 from relflow.structs.reduction import Attention, ReductionConfig
+from relflow.structs.structure import OMITTED
 from relflow.structs.tree import Address, MaskInput, Node, Rate, Renderable
 from relflow.tensorfields.base import TENSORFIELDS, Extension
 
@@ -137,6 +138,7 @@ class Model(lit.LightningModule, Renderable):
         d_model: int,
         n_layers: int,
         n_heads: int,
+        ffnx: int = 8,
         batch_size: int = 1,
         fields: Mapping[str, TreeFieldInput] | None = None,
         query: str | None = None,
@@ -169,6 +171,7 @@ class Model(lit.LightningModule, Renderable):
         d_model: int | None = None,
         n_layers: int | None = None,
         n_heads: int | None = None,
+        ffnx: int = cast(int, OMITTED),
         batch_size: int = 1,
         fields: Mapping[str, TreeFieldInput] | None = None,
         query: str | None = None,
@@ -194,6 +197,8 @@ class Model(lit.LightningModule, Renderable):
         its embedding during prediction. ``attention`` selects the root
         encoder mode; ``None`` disables its coordinate and sequence attention.
         ``reduction`` independently selects its output representation.
+        ``ffnx`` multiplies the root feed-forward width; each child has its own
+        value, defaulting to 8. Activation and normalization are fixed.
 
         ``optimizer`` accepts a Torch optimizer or a factory receiving this
         model. ``scheduler`` accepts a Torch scheduler, a Lightning scheduler
@@ -206,6 +211,8 @@ class Model(lit.LightningModule, Renderable):
         architecture and cannot be combined with tree fields or dimensions.
         """
         if schema is not None:
+            if ffnx is not OMITTED:
+                raise TypeError("schema cannot be combined with a root ffnx override")
             if fields is not None or field_kwargs or mask is not False:
                 raise TypeError("schema cannot be combined with tree fields")
             if d_model is not None or n_layers is not None or n_heads is not None:
@@ -223,6 +230,7 @@ class Model(lit.LightningModule, Renderable):
                 d_model=cast(int, d_model),
                 n_layers=cast(int, n_layers),
                 n_heads=cast(int, n_heads),
+                ffnx=8 if ffnx is OMITTED else ffnx,
                 fields=fields,
                 query=query,
                 description=description,

@@ -31,6 +31,7 @@ class Options(TypedDict, total=False):
     d_model: int
     n_layers: int
     n_heads: int
+    ffnx: int
     batch_size: int
     query: str | None
     description: str | None

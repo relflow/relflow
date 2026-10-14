@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, cast
 import torch
 
 from relflow.architecture.attention import RotaryMultiheadAttention
+from relflow.architecture.blocks import feed_forward, norm
 from relflow.architecture.packed import Packed, block, customized, pack, stochastic, unpack
 from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool
 from relflow.structs.packages import Parcel
@@ -27,12 +28,13 @@ class RotaryTransformerEncoderLayer(torch.nn.Module):
         nhead: int,
         n_kv_heads: int,
         dropout: float,
-        ffn_multiplier: int = 4,
+        *,
+        ffnx: int = 8,
     ) -> None:
         super().__init__()
 
-        self.attention_norm = torch.nn.LayerNorm(normalized_shape=d_model)
-        self.ffn_norm = torch.nn.LayerNorm(normalized_shape=d_model)
+        self.attention_norm = norm(d_model)
+        self.ffn_norm = norm(d_model)
 
         self.attention = RotaryMultiheadAttention(
             d_model=d_model,
@@ -41,14 +43,7 @@ class RotaryTransformerEncoderLayer(torch.nn.Module):
             dropout=dropout,
         )
 
-        hidden = d_model * ffn_multiplier
-        self.ffn = torch.nn.Sequential(
-            torch.nn.Linear(in_features=d_model, out_features=hidden),
-            torch.nn.GELU(),
-            torch.nn.Dropout(p=dropout),
-            torch.nn.Linear(in_features=hidden, out_features=d_model),
-            torch.nn.Dropout(p=dropout),
-        )
+        self.ffn = feed_forward(d_model, dropout, ffnx)
 
     def forward(
         self, inputs: torch.Tensor, present: torch.Tensor | None, *, packing: Packed | None = None
@@ -94,6 +89,7 @@ class BranchEncoder(torch.nn.Module):
                         nhead=branch.n_heads,
                         n_kv_heads=attention.kv_heads(branch.n_heads),
                         dropout=dropout,
+                        ffnx=branch.ffnx,
                     )
                 )
 
@@ -125,6 +121,7 @@ class BranchEncoder(torch.nn.Module):
                 nhead=coordinate_heads,
                 n_kv_heads=attention.kv_heads(coordinate_heads),
                 dropout=dropout,
+                ffnx=branch.ffnx,
             )
 
         self.reduction = branch.reduction
@@ -145,6 +142,7 @@ class BranchEncoder(torch.nn.Module):
                     n_linear=branch.reduction.n_layers,
                     position=branch.reduction.position,
                     mass_capacity=max(1, self.input_width),
+                    ffnx=branch.ffnx,
                 )
             case _:
                 raise ValueError(f"unsupported branch reduction: {branch.reduction}")

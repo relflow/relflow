@@ -66,7 +66,7 @@ def customized(layers: Iterable[torch.nn.Module], *, additional: tuple[type[torc
         RotaryMultiheadAttention,
         RotaryEmbedding,
         torch.nn.Linear,
-        torch.nn.LayerNorm,
+        torch.nn.RMSNorm,
         torch.nn.Sequential,
         torch.nn.GELU,
         torch.nn.Dropout,
@@ -76,7 +76,7 @@ def customized(layers: Iterable[torch.nn.Module], *, additional: tuple[type[torc
         return True
     return any(
         type(module) not in canonical
-        or (isinstance(module, torch.nn.LayerNorm) and len(module.normalized_shape) != 1)
+        or (isinstance(module, torch.nn.RMSNorm) and len(module.normalized_shape) != 1)
         or "forward" in module.__dict__
         or any(getattr(module, name) for name in hooks)
         for layer in layers

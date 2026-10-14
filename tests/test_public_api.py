@@ -26,6 +26,7 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.Address("transactions", "amount") == "/transactions/amount"
     assert relflow.Address() == "/"
     assert relflow.Branch.__name__ == "Branch"
+    assert not hasattr(relflow, "Block")
     assert relflow.Extension.__name__ == "Extension"
     assert tensorfields.Extension is relflow.Extension
     assert not hasattr(relflow, "Plugin")

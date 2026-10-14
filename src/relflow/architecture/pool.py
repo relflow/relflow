@@ -4,16 +4,17 @@ from typing import TYPE_CHECKING
 import torch
 
 from relflow.architecture.attention import RotaryMultiheadAttention
+from relflow.architecture.blocks import feed_forward, norm
 
 
 class CrossAttentionBlock(torch.nn.Module):
     """Update query embeddings against present memory coordinates."""
 
-    def __init__(self, d_model: int, nhead: int, dropout: float, ffn_multiplier: int, position: bool = True) -> None:
+    def __init__(self, d_model: int, nhead: int, dropout: float, position: bool = True, *, ffnx: int = 8) -> None:
         super().__init__()
 
-        self.attention_norm = torch.nn.LayerNorm(normalized_shape=d_model)
-        self.ffn_norm = torch.nn.LayerNorm(normalized_shape=d_model)
+        self.attention_norm = norm(d_model)
+        self.ffn_norm = norm(d_model)
         self.attention = RotaryMultiheadAttention(
             d_model=d_model,
             nhead=nhead,
@@ -21,14 +22,7 @@ class CrossAttentionBlock(torch.nn.Module):
             position=position,
         )
 
-        hidden = d_model * ffn_multiplier
-        self.ffn = torch.nn.Sequential(
-            torch.nn.Linear(in_features=d_model, out_features=hidden),
-            torch.nn.GELU(),
-            torch.nn.Dropout(p=dropout),
-            torch.nn.Linear(in_features=hidden, out_features=d_model),
-            torch.nn.Dropout(p=dropout),
-        )
+        self.ffn = feed_forward(d_model, dropout, ffnx)
 
     def forward(
         self,
@@ -60,9 +54,10 @@ class LearnedQueryCrossAttention(torch.nn.Module):
         nhead: int,
         dropout: float,
         n_linear: int = 1,
-        ffn_multiplier: int = 4,
         position: bool = True,
         mass_capacity: int | None = None,
+        *,
+        ffnx: int = 8,
     ) -> None:
         super().__init__()
 
@@ -77,11 +72,11 @@ class LearnedQueryCrossAttention(torch.nn.Module):
                     d_model=d_model,
                     nhead=nhead,
                     dropout=dropout,
-                    ffn_multiplier=ffn_multiplier,
                     position=position,
+                    ffnx=ffnx,
                 )
             )
-        self.norm = torch.nn.LayerNorm(normalized_shape=d_model)
+        self.norm = norm(d_model)
         self.mass_capacity = mass_capacity
         self.mass_projection = (
             torch.nn.Linear(d_model, n_context * d_model, bias=False) if mass_capacity is not None else None

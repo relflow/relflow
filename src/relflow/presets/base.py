@@ -24,6 +24,7 @@ class BranchDefaults(pydantic.BaseModel):
 
     n_layers: Annotated[int, pydantic.Field(gt=0)]
     n_heads: Annotated[int, pydantic.Field(gt=0, multiple_of=2)]
+    ffnx: Annotated[pydantic.StrictInt, pydantic.Field(gt=0)] = 8
     attention: AttentionMode | None = AttentionMode.mha
     dropout: Rate | None = 0.0
     reduction: ReductionConfig | None
@@ -35,6 +36,7 @@ class LeafDefaults(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(frozen=True, extra="forbid")
 
     n_heads: Annotated[int, pydantic.Field(gt=0, multiple_of=2)]
+    ffnx: Annotated[pydantic.StrictInt, pydantic.Field(gt=0)] = 8
     pooling: Literal["query", "mean"] = "query"
     n_linear: Annotated[int, pydantic.Field(gt=0)] = 1
     dropout: Rate | None = 0.0
@@ -79,6 +81,7 @@ def resolve(
     d_model: int = cast(int, OMITTED),
     n_layers: int = cast(int, OMITTED),
     n_heads: int = cast(int, OMITTED),
+    ffnx: int = cast(int, OMITTED),
     fields: Mapping[str, TreeFieldInput] | None = None,
     query: str | None = None,
     description: str | None = None,
@@ -96,6 +99,7 @@ def resolve(
         d_model=d_model,
         n_layers=n_layers,
         n_heads=n_heads,
+        ffnx=ffnx,
         attention=attention,
         reduction=reduction,
         dropout=dropout,

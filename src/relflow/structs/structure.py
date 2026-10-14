@@ -29,7 +29,8 @@ class Branch(Node):
     limits the repeated collection; ``overflow`` chooses which excess rows to
     retain. ``reduction`` controls the context passed to the parent branch.
     ``attention=None`` disables coordinate and sequence attention independently
-    of the reduction.
+    of the reduction. ``ffnx`` multiplies this node's feed-forward hidden width
+    and defaults to 8 independently of its parent.
     ``mask`` accepts the same policies as a leaf and applies to its descendants.
     """
 
@@ -58,6 +59,7 @@ class Branch(Node):
         attention: AttentionInput = cast(AttentionInput, OMITTED),
         n_layers: int = cast(int, OMITTED),
         n_heads: int = cast(int, OMITTED),
+        ffnx: int = cast(int, OMITTED),
         reduction: ReductionConfig | None = cast(ReductionConfig | None, OMITTED),
         dropout: Rate | None = cast(Rate | None, OMITTED),
         mask: MaskInput = False,
@@ -76,6 +78,7 @@ class Branch(Node):
             attention=attention,
             n_layers=n_layers,
             n_heads=n_heads,
+            ffnx=ffnx,
             reduction=reduction,
             dropout=dropout,
             mask=mask,
@@ -157,7 +160,7 @@ class Branch(Node):
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
         is_root = getattr(getattr(self, "parent", None), "type", None) == "schema"
         display_type = "root" if is_root else self.type
-        attributes = ("query", "attention", "n_layers", "n_heads", "reduction", "dropout")
+        attributes = ("query", "attention", "n_layers", "n_heads", "ffnx", "reduction", "dropout")
         if not is_root:
             attributes = ("length", "overflow", *attributes)
 

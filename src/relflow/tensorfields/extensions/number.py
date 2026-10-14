@@ -404,7 +404,7 @@ class Embedder(EmbedderBase):
         weighted = content.unsqueeze(dim=1).mul(self.weights)
         fourier = torch.cat([torch.sin(weighted), torch.cos(weighted)], dim=1)
 
-        projection = torch.nn.functional.gelu(self.linear(fourier)).reshape(N, *dims, -1)
+        projection = torch.nn.functional.gelu(self.linear(fourier), approximate="tanh").reshape(N, *dims, -1)
 
         embeddings = self.embeddings(state).reshape(N, *dims, -1)
 

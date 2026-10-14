@@ -90,6 +90,10 @@ model = rf.Model(
   masking; `Mask(query=...)` selects with an Arrow Boolean field; `skip=True`
   prevents tensorization and embedding; `reconstruct=True` adds an objective.
 - `embed=True` emits an embedding in prediction output. It does not make the field a supervised target.
+- `ffnx` is a positive integer feed-forward multiplier, defaulting to `8` on
+  each node. The model root, child branches, and tensorfield decoders configure
+  it independently. Hidden neural activations use tanh GELU and normalization
+  uses RMSNorm; these have no configuration knobs.
 - `Hash` represents large identifiers with batch-salted hashes, preserving equality across fields in one encoded batch without learning a persistent vocabulary.
 - `DateParts` is for calendar parts. If elapsed time or recency matters, derive a `Number`.
 - `rf.Jitter(add=..., multiply=..., normalize=...)` is a shared frozen

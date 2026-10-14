@@ -334,7 +334,7 @@ class Embedder(EmbedderBase):
         ranks = cast(torch.Tensor, inputs.content).reshape(-1, 1)
         weighted = ranks * self.frequencies
         features = torch.cat((ranks, weighted.sin(), weighted.cos()), dim=-1)
-        payload = self.embeddings(state) + torch.nn.functional.gelu(self.linear(features))
+        payload = self.embeddings(state) + torch.nn.functional.gelu(self.linear(features), approximate="tanh")
         lane = torch.where(state.eq(Tokens.valued), ranks[:, 0], payload[:, -1])
         payload = torch.cat((payload[:, :-1], (lane + payload[:, -1] * 0.0).unsqueeze(-1)), dim=-1)
         return Parcel(

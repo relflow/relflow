@@ -137,11 +137,44 @@ their own settings.
 | --- | --- |
 | `attention` | The branch encoder: `"mha"`, `"gqa"`, `"mqa"`, or `None`. |
 | `n_layers`, `n_heads`, `dropout` | That branch's encoder. |
+| `ffnx` | Feed-forward hidden width as a multiplier of `d_model`; defaults to `8` on every node. |
 | `reduction` | What the branch passes to its parent. Defaults to `rf.Attention()`. |
 | `length` | Maximum retained records in a child branch. |
 | `overflow` | Keep the first records (`"head"`, default), last records (`"tail"`), or raise (`"error"`). |
 | `mask` | Which inputs to hide or reconstruct. |
 | `embed=True` | Export the representation at that address. |
+
+Encoder and learned-pooling attention blocks use feed-forward hidden widths
+of **`ffnx` × `d_model`**. Every node defaults to `ffnx=8`; set a positive
+integer on the model root, a child branch, or a tensorfield to change that
+node's feed-forward layers. A branch applies it to its sequence and coordinate
+encoders and learned reduction. A tensorfield applies it to its query decoder
+and aligned context projection.
+Each child keeps its own default unless explicitly configured.
+
+```python
+model = rf.Model(
+    d_model=64,
+    n_layers=2,
+    n_heads=4,
+    ffnx=8,
+    transactions=rf.Branch(
+        length=64,
+        ffnx=4,
+        amount=rf.Number,
+        merchant=rf.Category,
+    ),
+    returned=rf.Boolean(mask=True, ffnx=6),
+)
+```
+
+GELU with its tanh approximation and RMSNorm with epsilon `1e-5` are fixed.
+RelFlow's feature projections also use tanh GELU, and aligned decoder context
+projections use RMSNorm. These choices apply to RelFlow's neural modules;
+pretrained text encoders retain their own architectures.
+
+Checkpoints created with the previous architecture require its matching
+RelFlow version. Train and save a new model to adopt the fixed architecture.
 
 Encoder and reduction settings are separate. `attention=None` disables
 encoder attention but leaves the selected reduction in place. An attention

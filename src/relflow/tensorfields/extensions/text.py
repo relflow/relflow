@@ -298,7 +298,7 @@ class Embedder(EmbedderBase):
         self.counter = Counter(address=address, size=len(Tokens))
         self.linear = torch.nn.Sequential(
             torch.nn.Linear(in_features=self.hidden_size, out_features=schema.d_model),
-            torch.nn.GELU(),
+            torch.nn.GELU(approximate="tanh"),
         )
 
     @beartype

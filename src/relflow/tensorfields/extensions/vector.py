@@ -172,7 +172,7 @@ class Embedder(EmbedderBase):
         )
         self.linear = torch.nn.Sequential(
             torch.nn.Linear(in_features=request.n_dim, out_features=schema.d_model),
-            torch.nn.GELU(),
+            torch.nn.GELU(approximate="tanh"),
         )
 
     @beartype

@@ -314,10 +314,10 @@ class DecoderBase(torch.nn.Module):
 
         self.context_projection = (
             torch.nn.Sequential(
-                torch.nn.LayerNorm(schema.d_model),
-                torch.nn.Linear(schema.d_model, schema.d_model),
-                torch.nn.GELU(),
-                torch.nn.Linear(schema.d_model, schema.d_model),
+                torch.nn.RMSNorm(schema.d_model, eps=1e-5),
+                torch.nn.Linear(schema.d_model, schema.d_model * request.ffnx),
+                torch.nn.GELU(approximate="tanh"),
+                torch.nn.Linear(schema.d_model * request.ffnx, schema.d_model),
             )
             if any(aligns(item) for item in self.context_addresses) and request.pooling == "query"
             else None
@@ -325,6 +325,7 @@ class DecoderBase(torch.nn.Module):
         match request.pooling:
             case "query":
                 self.pool = LearnedQueryCrossAttention(
+                    ffnx=request.ffnx,
                     n_context=n_context,
                     d_model=schema.d_model,
                     nhead=request.n_heads,

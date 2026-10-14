@@ -98,6 +98,7 @@ class Schema(Node):
 
     embed: ClassVar[None] = None  # pyrefly: ignore [bad-override]
     dropout: ClassVar[None] = None  # pyrefly: ignore [bad-override]
+    ffnx: ClassVar[None] = None  # pyrefly: ignore [bad-override]
 
     _selection_cache: dict[SelectionKey, SelectionCacheEntry] = pydantic.PrivateAttr(default_factory=dict)
 
@@ -130,6 +131,7 @@ class Schema(Node):
         d_model: int,
         n_layers: int,
         n_heads: int,
+        ffnx: int = 8,
         fields: Mapping[str, TreeFieldInput] | None = None,
         query: str | None = None,
         description: str | None = None,
@@ -152,6 +154,7 @@ class Schema(Node):
                 attention=attention,
                 n_layers=n_layers,
                 n_heads=n_heads,
+                ffnx=ffnx,
                 reduction=reduction,
                 length=1,
                 overflow=Overflow.error,
@@ -491,8 +494,13 @@ class Schema(Node):
                 applicable_values = {name: value for name, value in values.items() if has_model_attribute(node, name)}
 
                 if validate and applicable_values:
-                    payload = node.model_dump(mode="python", round_trip=True, exclude={"mask", *applicable_values})
+                    excluded = {"mask", *applicable_values}
+                    if isinstance(node, Branch):
+                        excluded.add("fields")
+                    payload = node.model_dump(mode="python", round_trip=True, exclude=excluded)
                     payload["mask"] = cast(SchemaField, node).mask
+                    if isinstance(node, Branch):
+                        payload["fields"] = [bind_tree_field(cast(str, child.name), child) for child in node.fields]
                     payload.update(applicable_values)
                     validated = type(node).model_validate(payload)
                     applicable_values = {name: getattr(validated, name) for name in applicable_values}

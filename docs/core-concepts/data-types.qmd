@@ -82,6 +82,7 @@ are rejected.
 | `embed` | `False` | Export a normalized contextual embedding during prediction. |
 | `pooling` | `"query"` | Decoder context pooling: `"query"` or `"mean"`. |
 | `n_heads` | `4` | Positive, even query-pooling head count; attention requires it to divide `d_model` with at least two dimensions per head. |
+| `ffnx` | `8` | Positive integer feed-forward multiplier for this field's query decoder and aligned context projection. See [model-tree configuration](model-tree.qmd#configure-the-context). |
 | `dropout` | `None` | Optional query-pooling dropout in `[0, 1)`. |
 | `n_linear` | `1` | Positive number of learned-query decoder pooling blocks. |
 | `decoder_position` | `None` | Automatic: off for scalar targets, on for repeated targets. A Boolean overrides it. |
