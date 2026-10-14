@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from relflow.data.datasets.arrow import ArrowDataModule, ArrowInput, ArrowSource, ArrowStream, ArrowUnit, Retain
+from relflow.data.arrow import Retain
+from relflow.data.datasets.arrow import ArrowDataModule, ArrowInput, ArrowSource, ArrowStream, ArrowUnit
 from relflow.data.datasets.base import StratumConfig
 from relflow.data.datasets.custom import CustomDataModule
 from relflow.data.datasets.duckdb import DuckDBDataModule

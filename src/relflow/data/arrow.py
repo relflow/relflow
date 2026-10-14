@@ -4,13 +4,29 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, cast
+from typing import Any, Literal, TypeAlias, cast
 
 import numpy as np
 import pyarrow as pa
 from tensordict import TensorDict
 
 from relflow.structs.tree import Address
+
+Retain: TypeAlias = tuple[str, ...] | Literal["*"]
+
+
+def retention(names: Retain, *, context: str = "retain") -> Retain:
+    """Validate one selection of processed input columns."""
+
+    if isinstance(names, str) and names == "*":
+        return names
+    if not isinstance(names, tuple):
+        raise TypeError(f"{context} must be a tuple of column names or '*', got {type(names).__name__}")
+    if any(not isinstance(name, str) or not name for name in names):
+        raise TypeError(f"{context} entries must be non-empty strings, got {names!r}")
+    if len(set(names)) != len(names):
+        raise ValueError(f"{context} entries must be unique, got {names!r}")
+    return names
 
 
 def mappings(
@@ -87,7 +103,7 @@ class Encoded:
 
     tensors: TensorDict
     source: pa.Table
-    retain: tuple[str, ...] | Literal["*"] = ()
+    retain: Retain = ()
     observations: Mapping[Address, TensorDict] = field(default_factory=dict)
     bindings: Mapping[Address, object] = field(default_factory=dict)
 
@@ -113,12 +129,7 @@ class Encoded:
         if any(not isinstance(address, str) or not address for address in self.bindings):
             raise TypeError("Encoded binding addresses must be non-empty strings")
         object.__setattr__(self, "bindings", {Address(address): value for address, value in self.bindings.items()})
-        if self.retain != "*" and (
-            not isinstance(self.retain, tuple)
-            or any(not isinstance(name, str) or not name for name in self.retain)
-            or len(set(self.retain)) != len(self.retain)
-        ):
-            raise ValueError("Encoded retain must be '*', or a tuple of unique non-empty column names")
+        retention(self.retain, context="Encoded retain")
 
     def pin_memory(self) -> Encoded:
         """Pin every tensor payload while leaving Arrow metadata untouched."""

@@ -419,7 +419,7 @@ def test_deployment_builder_replaces_processor_collections():
     assert deployment._postprocessors == (finish,)
 
 
-@pytest.mark.parametrize("retain", [("id", "id"), ("",), ["id"]])
+@pytest.mark.parametrize("retain", [("id", "id"), ("",), (1,), ([],), "id", ["id"]])
 def test_deployment_rejects_invalid_retention(retain):
     with pytest.raises((TypeError, ValueError, pydantic.ValidationError)):
         Deployment(checkpoint="unused", retain=retain)

@@ -6,7 +6,8 @@ import polars as pl
 import pyarrow as pa
 
 import relflow
-from relflow.data.datasets.arrow import ArrowDataModule, Retain
+from relflow.data.arrow import Retain
+from relflow.data.datasets.arrow import ArrowDataModule
 from relflow.data.datasets.base import StratumConfig
 from relflow.data.processors import PreprocessorInput
 
@@ -30,7 +31,6 @@ class PolarsDataModule(ArrowDataModule):
         seed: int = 0,
         shuffle: StratumConfig[bool | None] = None,
         sample: StratumConfig[float] = 1.0,
-        replacement: StratumConfig[bool] = False,
         epoch_size: StratumConfig[int | None] = None,
         shuffle_rows: StratumConfig[int | None] = None,
         drop_last: StratumConfig[bool] = False,
@@ -68,7 +68,6 @@ class PolarsDataModule(ArrowDataModule):
             seed=seed,
             shuffle=shuffle,
             sample=sample,
-            replacement=replacement,
             epoch_size=epoch_size,
             shuffle_rows=shuffle_rows,
             drop_last=drop_last,

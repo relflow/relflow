@@ -38,10 +38,9 @@ from relflow.architecture.runtime import (
     Output,
     OutputPlan,
     PredictionInput,
-    Retain,
     step,
 )
-from relflow.data.arrow import Encoded
+from relflow.data.arrow import Encoded, Retain
 from relflow.data.datasets.base import EncodedInput, InterprocessEncodingContext
 from relflow.data.processors import PostprocessorInput, PreprocessorInput
 from relflow.helpers.optimizers import adamw

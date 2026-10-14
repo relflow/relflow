@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal, Self, TypeAlias, TypeVar, cast
+from typing import Any, Self, TypeAlias, TypeVar, cast
 
 import fastapi
 import orjson
@@ -25,14 +25,13 @@ from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from relflow.architecture.root import Model
-from relflow.data.arrow import mappings
+from relflow.data.arrow import Retain, mappings, retention
 from relflow.data.processors import Postprocessor, PostprocessorInput, Preprocessor, PreprocessorInput
 from relflow.structs.experiment import NodeAttribute, NodePredicate
 from relflow.structs.tree import Node
 
 Input: TypeAlias = dict[str, Any]
 ModelSource: TypeAlias = str | Path | Model
-Retain: TypeAlias = tuple[str, ...] | Literal["*"]
 UpdateOperation: TypeAlias = tuple[tuple[NodePredicate | NodeAttribute | Callable[[Node], bool], ...], dict[str, Any]]
 DeploymentType = TypeVar("DeploymentType", bound="Deployment")
 JSON_MEDIA_TYPE = "application/json"
@@ -80,20 +79,6 @@ class ErrorItem(pydantic.BaseModel):
 
     status_code: int
     message: str
-
-
-def retention(value: Retain) -> Retain:
-    """Validate the deployment's processed-input retention projection."""
-
-    if value == "*":
-        return value
-    if not isinstance(value, tuple):
-        raise TypeError("retain must be a tuple of top-level column names or '*'")
-    if any(not isinstance(name, str) or not name for name in value):
-        raise TypeError("retain entries must be non-empty strings")
-    if len(set(value)) != len(value):
-        raise ValueError("retain entries must be unique")
-    return value
 
 
 class FastAPIRuntime:

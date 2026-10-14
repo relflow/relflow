@@ -708,7 +708,7 @@ def test_synthetic_generator_is_called_for_every_source_iteration():
     assert list(source())[0]["id"].to_pylist() == [2]
 
 
-def test_parallel_configuration_and_replacement_validation():
+def test_parallel_configuration_validation():
     source = pa.table({"id": [1, 2]})
     module = rf.ArrowDataModule(
         model=model(),
@@ -729,8 +729,6 @@ def test_parallel_configuration_and_replacement_validation():
         rf.ArrowDataModule(model=model(), train=source, persistent_workers=True)
     with pytest.raises(ValueError, match="prefetch_factor"):
         rf.ArrowDataModule(model=model(), train=source, prefetch_factor=0)
-    with pytest.raises(NotImplementedError, match="replacement sampling is not implemented"):
-        rf.ArrowDataModule(model=model(), train=source, replacement=True)
 
 
 def test_recreated_loaders_use_current_model_batch_size_schema_and_context():
@@ -822,7 +820,6 @@ def test_split_overrides_stay_isolated_when_loaders_are_recreated():
         ("shuffle", "yes", TypeError),
         ("sample", True, TypeError),
         ("sample", 0.0, ValueError),
-        ("replacement", True, NotImplementedError),
         ("epoch_size", False, ValueError),
         ("shuffle_rows", 0, ValueError),
         ("drop_last", 1, TypeError),

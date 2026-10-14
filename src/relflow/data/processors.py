@@ -12,7 +12,9 @@ from typing import Any, Generic, Literal, Self, TypeAlias, TypeVar, overload
 import polars as pl
 import pyarrow as pa
 
-import relflow
+from relflow.structs import experiment
+from relflow.structs.enums import Strata
+from relflow.structs.tree import Address
 
 EMPTY = inspect.Signature.empty
 Scope = Literal["partition", "dataset"]
@@ -241,9 +243,9 @@ class Preprocessor(Processor[Result]):
         self,
         value: pl.DataFrame,
         *,
-        strata: relflow.Strata,
-        schema: relflow.Schema,
-        encoding_context: dict[relflow.Address, object],
+        strata: Strata,
+        schema: experiment.Schema,
+        encoding_context: dict[Address, object],
     ) -> Iterator[pl.DataFrame]:
         """Yield the zero, one, or many Polars frames produced by one call."""
 

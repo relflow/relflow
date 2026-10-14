@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import random
 from dataclasses import replace
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import numpy as np
 import pyarrow as pa
 import torch
 from tensordict import TensorDict
 
-from relflow.data.arrow import Encoded
+from relflow.data.arrow import Encoded, Retain
 from relflow.data.datasets.base import EncodedInput, InterprocessEncodingContext
 from relflow.data.ragged import RaggedField, boolean, coalesce
 from relflow.structs.enums import Component, Strata, Tokens
@@ -27,7 +27,7 @@ def encode(
     interprocess_encoding_context: InterprocessEncodingContext,
     seed: int = 0,
     epoch: int = 0,
-    retain: tuple[str, ...] | Literal["*"] = (),
+    retain: Retain = (),
 ) -> Encoded:
     out: dict[Address, TensorFieldBase] = {}
     observations: dict[Address, TensorDict] = {}

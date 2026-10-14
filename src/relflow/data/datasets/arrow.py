@@ -19,7 +19,7 @@ import torch
 from torch.utils.data import DataLoader, IterableDataset, get_worker_info
 
 import relflow
-from relflow.data.arrow import Encoded
+from relflow.data.arrow import Encoded, Retain, retention
 from relflow.data.datasets.base import InterprocessEncodingContext, StratumConfig
 from relflow.data.iterables import encode
 from relflow.data.processors import Preprocessor, PreprocessorInput, arrow, polars
@@ -34,7 +34,6 @@ Default = TypeVar("Default")
 
 ArrowUnit: TypeAlias = pa.Table | pa.RecordBatch
 ArrowStream: TypeAlias = pa.RecordBatchReader | Iterable[ArrowUnit]
-Retain: TypeAlias = tuple[str, ...] | Literal["*"]
 
 
 ArrowSource: TypeAlias = ArrowUnit | ds.Dataset | Source | Callable[[], ArrowStream]
@@ -636,7 +635,6 @@ class ArrowDataModule(lit.LightningDataModule):
         seed: int = 0,
         shuffle: StratumConfig[bool | None] = None,
         sample: StratumConfig[float] = 1.0,
-        replacement: StratumConfig[bool] = False,
         epoch_size: StratumConfig[int | None] = None,
         shuffle_rows: StratumConfig[int | None] = None,
         drop_last: StratumConfig[bool] = False,
@@ -672,13 +670,7 @@ class ArrowDataModule(lit.LightningDataModule):
             retained = normalized
         else:
             retained = {strata: retain for strata in self.sources}
-        for strata, names in retained.items():
-            if names != "*" and (
-                not isinstance(names, tuple)
-                or any(not isinstance(name, str) or not name for name in names)
-                or len(set(names)) != len(names)
-            ):
-                raise ValueError(f"retain for {strata} must be '*', or a tuple of unique non-empty column names")
+        retained = {strata: retention(names, context=f"retain for {strata}") for strata, names in retained.items()}
         configured_preprocessors = expand(preprocessor, default=())
         preprocessors = {
             strata: Preprocessor.normalize(processors) for strata, processors in configured_preprocessors.items()
@@ -703,12 +695,6 @@ class ArrowDataModule(lit.LightningDataModule):
         rates = {strata: float(rate) for strata, rate in configured_sample.items()}
         if any(not 0.0 < rate <= 1.0 for rate in rates.values()):
             raise ValueError("sample must be greater than zero and at most one")
-
-        configured_replacement = expand(replacement, default=False)
-        if any(not isinstance(value, bool) for value in configured_replacement.values()):
-            raise TypeError("replacement must contain booleans")
-        if any(configured_replacement.values()):
-            raise NotImplementedError("replacement sampling is not implemented")
 
         sizes = expand(epoch_size, default=None)
         if any(

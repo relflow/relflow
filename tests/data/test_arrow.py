@@ -129,5 +129,5 @@ def test_encoded_validates_source_and_retain():
 
     with pytest.raises(TypeError, match="pyarrow.Table"):
         Encoded(tensors=tensors, source=object())  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="tuple of unique"):
+    with pytest.raises(ValueError, match="Encoded retain entries must be unique"):
         Encoded(tensors=tensors, source=pa.table({"value": [10]}), retain=("value", "value"))

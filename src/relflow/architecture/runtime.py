@@ -16,7 +16,7 @@ from relflow.architecture.binding import bind
 from relflow.architecture.contracts import sanitize
 from relflow.architecture.encoder import BranchEncoder
 from relflow.architecture.node import NodeModule
-from relflow.data.arrow import Encoded, mappings
+from relflow.data.arrow import Encoded, Retain, mappings, retention
 from relflow.data.datasets.base import EncodedInput
 from relflow.data.iterables import encode as encode_batch
 from relflow.data.processors import (
@@ -45,7 +45,6 @@ from relflow.tensorfields.output import STATE, embedding, inferred, shape, state
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
 
-Retain = tuple[str, ...] | Literal["*"]
 PredictionInput: TypeAlias = pa.Table | pa.RecordBatch | Sequence[Mapping[str, object]]
 RESERVED = frozenset({TensorKey.state.name, TensorKey.inferred.name, TensorKey.embedding.name})
 
@@ -201,25 +200,10 @@ def observations(
     return source
 
 
-def retention(names: Retain) -> Retain:
-    """Validate and normalize one retained-input selection."""
-
-    if names == "*":
-        return names
-    if not isinstance(names, tuple):
-        raise TypeError("retain must be a tuple of column names or '*'")
-    if any(not isinstance(name, str) or not name for name in names):
-        raise TypeError("retain entries must be non-empty strings")
-    if len(set(names)) != len(names):
-        raise ValueError("retain entries must be unique")
-    return names
-
-
 def project(source: pa.Table, names: Retain) -> pa.Array:
-    """Build the canonical retained-input value for each source row."""
+    """Project a validated column selection into one struct per source row."""
 
-    normalized = retention(names)
-    selected = tuple(source.column_names) if normalized == "*" else normalized
+    selected = tuple(source.column_names) if names == "*" else names
 
     missing = [name for name in selected if name not in source.column_names]
     if missing:
@@ -712,7 +696,7 @@ class ModelRuntime:
         if not isinstance(source, pa.Table):
             raise TypeError(f"source must be a pyarrow.Table, got {type(source).__name__}")
         active = plan(module, retain, refresh=True) if compiled is None else compiled
-        if active.retain != retention(retain):
+        if active.retain != retain:
             raise ValueError(f"compiled output plan retain {active.retain!r} does not match write retain {retain!r}")
         inputs = project(source, active.retain)
         outputs = (
