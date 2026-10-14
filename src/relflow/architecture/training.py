@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from uuid import uuid4
@@ -17,7 +17,9 @@ from lightning.pytorch.accelerators import (
     MPSAccelerator,
 )
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-from lightning.pytorch.plugins.precision import Precision
+from lightning.pytorch.plugins.precision import MixedPrecision, Precision
+from lightning.pytorch.strategies import Strategy
+from lightning.pytorch.utilities import GradClipAlgorithmType
 
 from relflow.architecture.checkpoint import RollbackCheckpoint
 from relflow.structs.enums import Strata
@@ -25,7 +27,23 @@ from relflow.structs.enums import Strata
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
 
-__all__ = ["trainer", "policies"]
+__all__ = ["BFloatPrecision", "trainer", "policies"]
+
+
+class BFloatPrecision(MixedPrecision):
+    """Clip ordinary BF16 gradients without the FP16 optimizer-unscaling guard."""
+
+    def __init__(self, device: str) -> None:
+        super().__init__(precision="bf16-mixed", device=device)
+
+    def clip_gradients(
+        self,
+        optimizer: torch.optim.Optimizer,
+        clip_val: int | float = 0.0,
+        gradient_clip_algorithm: GradClipAlgorithmType = GradClipAlgorithmType.NORM,
+    ) -> None:
+        # BF16 has no scaler; fused optimizers receive already unscaled gradients.
+        Precision.clip_gradients(self, optimizer, clip_val, gradient_clip_algorithm)
 
 
 @runtime_checkable
@@ -117,9 +135,27 @@ def trainer(
     ):
         defaults["max_epochs"] = 50
     defaults.update(options)
+    plugins = defaults.get("plugins") or ()
+    if isinstance(plugins, Iterable):
+        plugins = list(plugins)
+        defaults["plugins"] = plugins
+        supplied_precision = [plugin for plugin in plugins if isinstance(plugin, Precision)]
+    else:
+        supplied_precision = [plugins] if isinstance(plugins, Precision) else []
+    strategy = defaults.get("strategy")
+    owned_precision = strategy.precision_plugin if isinstance(strategy, Strategy) else None
     hardware(defaults)
     defaults.setdefault("enable_checkpointing", any(isinstance(callback, ModelCheckpoint) for callback in configured))
-    return lit.Trainer(callbacks=configured, **defaults)
+    runner = lit.Trainer(callbacks=configured, **defaults)
+    precision = runner.precision_plugin
+    if (
+        type(precision) is MixedPrecision
+        and precision.precision == "bf16-mixed"
+        and precision is not owned_precision
+        and not any(precision is plugin for plugin in supplied_precision)
+    ):
+        runner.strategy.precision_plugin = BFloatPrecision(precision.device)
+    return runner
 
 
 def policies(
