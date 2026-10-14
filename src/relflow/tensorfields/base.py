@@ -9,8 +9,8 @@ import re
 import shlex
 import sys
 import warnings
-from abc import abstractmethod
-from collections.abc import Generator, Iterator, Mapping
+from abc import ABC, abstractmethod
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from types import MappingProxyType, UnionType
@@ -34,16 +34,14 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import torch
 from lightning.pytorch import Callback
-from rich.console import Console, ConsoleOptions
-from rich.text import Text
 from tensordict import TensorClass, TensorDict
 from typing_extensions import TypeVar as DefaultTypeVar
 
 from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool
 from relflow.data.arrow import variants
-from relflow.structs.enums import Component, Strata, TensorKey, Tokens
+from relflow.structs.enums import Component, Strata, TensorKey
 from relflow.structs.packages import Parcel, Prediction
-from relflow.structs.tree import Address, Leaf, Renderable
+from relflow.structs.tree import Address, Leaf
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
@@ -435,28 +433,12 @@ class DecoderBase(torch.nn.Module):
         return combined.masked_fill(~present.any(dim=2).unsqueeze(-1), 0.0)
 
 
-class TensorFieldBase(Renderable, Generic[ContentT]):
+class TensorFieldBase(ABC, Generic[ContentT]):
     """Tensorized values and targets with an extension-owned content type.
 
     Consumers read content through this base interface. Concrete tensorclasses
     declare its storage as either a Tensor or a TensorDict and own replacement.
     """
-
-    STATE_PREVIEW_LIMIT: int = 80
-    STATE_LABELS: dict[int, str] = {
-        Tokens.valued.value: "V",
-        Tokens.null.value: "N",
-        Tokens.padded.value: "P",
-        Tokens.masked.value: "M",
-        Tokens.other.value: "O",
-    }
-    STATE_STYLES: dict[int, str] = {
-        Tokens.valued.value: "bold green",
-        Tokens.null.value: "bold yellow",
-        Tokens.padded.value: "dim",
-        Tokens.masked.value: "bold magenta",
-        Tokens.other.value: "bold cyan",
-    }
 
     if TYPE_CHECKING:
 
@@ -528,94 +510,6 @@ class TensorFieldBase(Renderable, Generic[ContentT]):
             content=gather(self.content),
             batch_size=[count],
         )
-
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
-        state = getattr(self, TensorKey.state, None)
-        trainable = getattr(self, TensorKey.trainable, None)
-        targets = getattr(self, TensorKey.targets, None)
-
-        heading = Text()
-        heading.append(type(self).__name__, style=self.RICH_NAME_STYLE)
-        heading.append(" ")
-        heading.append("[tensorfield]", style=self.RICH_TYPE_STYLE)
-
-        if torch.is_tensor(state):
-            heading.append(" ")
-            heading.append("state=", style="dim")
-            heading.append(str(tuple(state.shape)), style="cyan")
-            heading.append(" ")
-            heading.append("device=", style="dim")
-            heading.append(str(state.device), style="cyan")
-
-        if torch.is_tensor(trainable):
-            heading.append(" ")
-            heading.append("trainable=", style="dim")
-            heading.append(str(int(trainable.sum().item())), style="cyan")
-
-        yield heading
-
-        if torch.is_tensor(state):
-            yield self.state_counts_text(state)
-            yield self.state_preview_text(state)
-
-        if isinstance(targets, TensorDict) and targets.keys():
-            text = Text(" targets=", style="dim")
-            text.append(", ".join(str(key) for key in sorted(targets.keys(), key=str)), style="cyan")
-            yield text
-
-    def state_counts_text(self, state: torch.Tensor) -> Text:
-        values = state.detach().reshape(-1).to(device="cpu", dtype=torch.int64)
-        text = Text(" counts ", style="dim")
-        for token in Tokens:
-            count = int(values.eq(token.value).sum().item())
-            text.append(self.STATE_LABELS[token.value], style=self.STATE_STYLES[token.value])
-            text.append(f"={count} ", style="dim")
-
-        return text
-
-    def state_preview_text(self, state: torch.Tensor) -> Text:
-        preview = self.first_root_slice(state)
-        text = Text(" state ", style="dim")
-
-        if preview.ndim <= 1:
-            rows = preview.reshape(1, -1)
-            row_prefix = " "
-        else:
-            rows = preview.reshape(-1, preview.shape[-1])
-            row_prefix = "\n       "
-
-        limit = min(preview.numel(), self.STATE_PREVIEW_LIMIT)
-        count = 0
-
-        for row_index, row in enumerate(rows):
-            if count >= limit:
-                break
-            if row_index:
-                text.append(row_prefix, style="dim")
-
-            for column_index, value in enumerate(row.tolist()):
-                if count >= limit:
-                    break
-                if column_index:
-                    text.append(" ")
-
-                token = int(value)
-                text.append(self.STATE_LABELS.get(token, str(token)), style=self.STATE_STYLES.get(token, "bold red"))
-                count += 1
-
-        if preview.numel() > limit:
-            text.append(" ...", style="dim")
-
-        return text
-
-    def first_root_slice(self, tensor: torch.Tensor) -> torch.Tensor:
-        values = tensor.detach().to(device="cpu")
-        if values.ndim > 0:
-            values = values[0]
-        if values.ndim > 0:
-            values = values[0]
-
-        return values.to(dtype=torch.int64)
 
 
 TENSORFIELDS: dict[str, "Extension"] = {}

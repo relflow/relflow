@@ -3,64 +3,22 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Mapping, MutableMapping
-from typing import Any, ClassVar, Self, cast
-
-from rich.console import Console, ConsoleRenderable
-from rich.logging import RichHandler
-from rich.text import Text
+from typing import Any, Self, TextIO, cast
 
 CONTEXT = "relflow_context"
 LOG_LEVEL = os.getenv("RELFLOW_LOG_LEVEL", "DEBUG").upper()
-console = Console(stderr=True)
 
 
-class Handler(RichHandler):
-    """Render structured RelFlow records as compact, styled terminal events."""
+class Formatter(logging.Formatter):
+    """Append structured context without changing standard logging behavior."""
 
-    styles: ClassVar[dict[int, str]] = {
-        logging.DEBUG: "bold white on #475569",
-        logging.INFO: "bold white on #2563eb",
-        logging.WARNING: "bold #422006 on #fbbf24",
-        logging.ERROR: "bold white on #dc2626",
-        logging.CRITICAL: "bold white on #991b1b",
-    }
-
-    def render_message(self, record: logging.LogRecord, message: str) -> ConsoleRenderable:
+    def formatMessage(self, record: logging.LogRecord) -> str:
+        message = super().formatMessage(record)
         context = getattr(record, CONTEXT, {})
-        if not isinstance(context, Mapping):
-            context = {}
+        return f"{message} {dict(context)!r}" if isinstance(context, Mapping) and context else message
 
-        rendered = Text()
-        component = context.get("component")
-        if component is not None:
-            label = str(component).replace("_", " ").upper()
-            rendered.append(f" {label} ", style=self.styles.get(record.levelno, "bold white on #2563eb"))
-            rendered.append("  ")
-        rendered.append(message, style="bold" if record.levelno >= logging.WARNING else None)
 
-        details = [(key, value) for key, value in context.items() if key != "component"]
-        if details:
-            rendered.append("\n")
-            for index, (key, value) in enumerate(details):
-                if index:
-                    rendered.append("  •  ", style="dim")
-                rendered.append(str(key), style="dim cyan")
-                rendered.append("=", style="dim")
-                rendered.append(self.value(value), style="cyan")
-        return rendered
-
-    @staticmethod
-    def value(value: object) -> str:
-        if value is None:
-            return "∅"
-        if isinstance(value, bool):
-            return "true" if value else "false"
-        if isinstance(value, int):
-            return f"{value:,}"
-        if isinstance(value, float):
-            return f"{value:,.6g}"
-        rendered = str(value).replace("\n", " ↵ ")
-        return rendered if len(rendered) <= 120 else f"{rendered[:117]}…"
+FORMATTER = Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
 
 class Logger(logging.LoggerAdapter):
@@ -84,8 +42,8 @@ class Logger(logging.LoggerAdapter):
         return msg, kwargs
 
 
-def configure(*, level: str | int | None = None, output: Console | None = None) -> Logger:
-    """Install one Rich handler on the package logger and return its adapter."""
+def configure(*, level: str | int | None = None, output: TextIO | None = None) -> Logger:
+    """Install one plain stream handler, retaining handlers owned by callers."""
 
     selected = LOG_LEVEL if level is None else level
     if isinstance(selected, str):
@@ -108,26 +66,17 @@ def configure(*, level: str | int | None = None, output: Console | None = None) 
     core.setLevel(selected)
     core.propagate = False
     for existing in tuple(core.handlers):
-        if isinstance(existing, Handler):
+        if existing.formatter is FORMATTER:
             core.removeHandler(existing)
+            existing.close()
 
-    handler = Handler(
-        level=selected,
-        console=output or console,
-        show_time=True,
-        omit_repeated_times=False,
-        show_level=True,
-        show_path=False,
-        rich_tracebacks=True,
-        tracebacks_word_wrap=True,
-        tracebacks_show_locals=False,
-        log_time_format="%H:%M:%S",
-    )
-    handler.setFormatter(logging.Formatter("%(message)s"))
+    handler = logging.StreamHandler(output)
+    handler.setLevel(selected)
+    handler.setFormatter(FORMATTER)
     core.addHandler(handler)
     return Logger(core, {})
 
 
 logger = configure()
 
-__all__ = ["CONTEXT", "Handler", "LOG_LEVEL", "Logger", "configure", "console", "logger"]
+__all__ = ["CONTEXT", "LOG_LEVEL", "Logger", "configure", "logger"]

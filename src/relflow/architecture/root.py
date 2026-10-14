@@ -16,8 +16,6 @@ from beartype.roar import BeartypeCallHintParamViolation
 from lightning.pytorch import Callback
 from lightning.pytorch.callbacks import BasePredictionWriter, EarlyStopping
 from lightning.pytorch.utilities.types import LRSchedulerConfigType, OptimizerLRSchedulerConfig
-from rich.console import Console, ConsoleOptions
-from rich.text import Text
 from torchmetrics import Metric as TorchMetric
 
 from relflow import presets
@@ -58,7 +56,7 @@ from relflow.structs.experiment import (
 from relflow.structs.packages import Prediction
 from relflow.structs.reduction import Attention, ReductionConfig
 from relflow.structs.structure import OMITTED
-from relflow.structs.tree import Address, MaskInput, Node, Rate, Renderable
+from relflow.structs.tree import Address, MaskInput, Node, Rate
 from relflow.tensorfields.base import TENSORFIELDS, Extension
 
 OptimizerConfig = torch.optim.Optimizer | Callable[["Model"], torch.optim.Optimizer]
@@ -109,7 +107,7 @@ __all__ = [
 _DEFAULT_REDUCTION = Attention()
 
 
-class Model(lit.LightningModule, Renderable):
+class Model(lit.LightningModule):
     """Neural model generated from a `relflow` schema tree.
 
     `Model` owns the schema tree, tensorfield embedders, branch
@@ -352,45 +350,6 @@ class Model(lit.LightningModule, Renderable):
             )
         compiler.compile(self, encoders=encoders, pools=pools, backend=backend, dynamic=dynamic, options=options)
         return self
-
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
-        parameters = sum(parameter.numel() for parameter in self.parameters())
-        heading = Text()
-        heading.append(type(self).__name__, style=self.RICH_NAME_STYLE)
-        heading.append(" ")
-        heading.append("[model]", style=self.RICH_TYPE_STYLE)
-        for name, value in (
-            ("batch_size", self.batch_size),
-            ("d_model", self.schema.d_model),
-            ("parameters", f"{parameters:,}"),
-            ("branches", len(self.schema.branches)),
-            ("fields", len(self.schema.active_requests)),
-            ("reconstruct", len(self.schema.reconstruct)),
-            ("embeds", len(self.schema.embed)),
-        ):
-            heading.append(" ")
-            heading.append(f"{name}=", style="dim")
-            heading.append(str(value), style="cyan")
-        yield heading
-
-        lines = list(self.schema.fields.__rich_console__(console, options))
-        if not lines:
-            return
-        first = Text()
-        first.append("`-- ", style=self.RICH_TREE_STYLE)
-        if isinstance(lines[0], Text):
-            first.append_text(lines[0])
-        else:
-            first.append(str(lines[0]))
-        yield first
-        for line in lines[1:]:
-            nested = Text()
-            nested.append("    ", style=self.RICH_TREE_STYLE)
-            if isinstance(line, Text):
-                nested.append_text(line)
-            else:
-                nested.append(str(line))
-            yield nested
 
     def select(
         self,

@@ -1,16 +1,12 @@
 """Schema tree node primitives used by models and tensorfields."""
 
 import functools
-import io
-from abc import ABC
-from collections.abc import Generator, Mapping
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self, TypeAlias, TypedDict, cast
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypeAlias, TypedDict, cast
 
 import pydantic
 from anytree import NodeMixin
 from pydantic_core import CoreSchema
-from rich.console import Console, ConsoleOptions
-from rich.text import Text
 
 from relflow.structs.enums import Overflow
 
@@ -131,76 +127,6 @@ class FieldOptions(TypedDict, total=False):
     n_linear: int
 
 
-class Renderable(ABC):
-    """Base class for objects rendered consistently through Rich."""
-
-    RICH_NAME_STYLE: ClassVar[str] = "bold white on #1f2937"
-    RICH_TYPE_STYLE: ClassVar[str] = "bold yellow on #3f3f46"
-    RICH_TREE_STYLE: ClassVar[str] = "bold dim"
-
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
-        yield Text(repr(self))
-
-    def __rich_repr__(self) -> Generator[str, None, None]:
-        yield str(self)
-
-    def __str__(self) -> str:
-        console = Console(file=io.StringIO(), record=True, width=120, force_jupyter=False)
-        console.print(self)
-        return console.export_text(clear=False).rstrip("\n")
-
-    def _repr_mimebundle_(self, include: list[str] | None = None, exclude: list[str] | None = None) -> dict[str, str]:
-        return {
-            "text/plain": str(self),
-            "text/html": self._repr_html_(),
-        }
-
-    def _repr_html_(self) -> str:
-        console = Console(file=io.StringIO(), record=True, width=120, force_jupyter=False)
-        console.print(self)
-        return console.export_html(
-            inline_styles=True,
-            clear=False,
-            code_format=(
-                '<pre style="font-family: Menlo, Consolas, monospace; '
-                "white-space: pre-wrap; margin: 0; padding: 0; border: 0; "
-                'background: transparent;"><code>{code}</code></pre>'
-            ),
-        )
-
-    def _mime_(self) -> tuple[str, str]:
-        return "text/html", self._repr_html_()
-
-
-class Selection(list, Renderable):
-    """List-like selection result with readable Rich and pprint output."""
-
-    # Rich supports opting out of its optional representation protocol.
-    __rich_repr__: ClassVar[None] = None  # pyrefly: ignore [bad-override]
-
-    def __repr__(self) -> str:
-        return str(self)
-
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
-        if not self:
-            yield Text("[]")
-            return
-
-        yield Text("[", style="dim")
-        for index, node in enumerate(self):
-            lines = list(node.__rich_console__(console, options))
-            for line_index, line in enumerate(lines):
-                text = Text("  ")
-                if isinstance(line, Text):
-                    text.append_text(line)
-                else:
-                    text.append(str(line))
-                if index < len(self) - 1 and line_index == len(lines) - 1:
-                    text.append(",")
-                yield text
-        yield Text("]", style="dim")
-
-
 class Address(str):
     """Absolute schema path from child names or a serialized path.
 
@@ -230,7 +156,7 @@ class Address(str):
         return core_schema.no_info_after_validator_function(cls, core_schema.str_schema())
 
 
-class Node(NodeMixin, Renderable, pydantic.BaseModel):
+class Node(NodeMixin, pydantic.BaseModel):
     """Base schema tree node shared by branches and tensorfield requests."""
 
     model_config = pydantic.ConfigDict(extra="forbid")
@@ -383,88 +309,6 @@ class Leaf(Node):
 
         compile(self.query)
         return self
-
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
-        flags = ["active" if self.active else "inactive"]
-        if self.embed:
-            flags.append("embed")
-        if any(policy.reconstruct for owner in self.path for policy in getattr(owner, "mask", ())):
-            flags.append("reconstruct")
-
-        heading = Text()
-        if self.name is not None:
-            heading.append(self.name, style=self.RICH_NAME_STYLE)
-            heading.append(" ")
-        heading.append(f"[{self.type}]", style=self.RICH_TYPE_STYLE)
-        for flag in flags:
-            heading.append(" ")
-            heading.append(
-                flag,
-                style={
-                    "active": "bold #64748b",
-                    "inactive": "bold #7f1d1d",
-                    "embed": "bold #065f46",
-                    "reconstruct": "bold #713f12",
-                }.get(flag, "bold"),
-            )
-        if self.query is not None:
-            heading.append(" ")
-            heading.append("query=", style="dim")
-            heading.append(self.query, style="cyan")
-        yield heading
-
-        common_names = (
-            "pooling",
-            "decoder_position",
-            "weight",
-            "n_heads",
-            "ffnx",
-            "n_linear",
-            "dropout",
-        )
-        common = Text()
-        first = True
-        for name in common_names:
-            value = getattr(self, name, None)
-            if value is None:
-                continue
-            if isinstance(value, float) and value.is_integer():
-                value = int(value)
-            elif hasattr(value, "value"):
-                value = value.value
-            if not first:
-                common.append(" ")
-            common.append(f"{name}=", style="dim")
-            common.append(str(value), style="cyan")
-            first = False
-        if common.plain:
-            line = Text(" ")
-            line.append_text(common)
-            yield line
-
-        excluded = {"name", "type", "description", "active", "embed", "query", "nullable", "mask", *common_names}
-        specific = Text()
-        first = True
-        for name, field in type(self).model_fields.items():
-            if name in excluded:
-                continue
-            value = getattr(self, name, None)
-            if value is None:
-                continue
-            if isinstance(value, float) and value.is_integer():
-                value = int(value)
-            elif hasattr(value, "value"):
-                value = value.value
-            if not first:
-                specific.append(" ")
-            label = field.serialization_alias or field.alias or name
-            specific.append(f"{label}=", style="dim")
-            specific.append(str(value), style="cyan")
-            first = False
-        if specific.plain:
-            line = Text(" ")
-            line.append_text(specific)
-            yield line
 
     @functools.cached_property
     def shape(self) -> tuple[int, ...]:

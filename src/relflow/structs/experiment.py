@@ -9,8 +9,6 @@ from typing import Annotated, Any, ClassVar, Literal, Self, TypeAlias, cast
 
 import pydantic
 from anytree import LevelOrderGroupIter, PreOrderIter
-from rich.console import Console, ConsoleOptions
-from rich.text import Text
 
 from relflow.structs.enums import AttentionInput, AttentionMode, Component, Overflow, Strata
 from relflow.structs.reduction import Attention, ReductionConfig
@@ -26,7 +24,7 @@ from relflow.structs.selectors import (
     where,
 )
 from relflow.structs.structure import Branch, Mask, RequestTypes
-from relflow.structs.tree import Address, Leaf, MaskInput, Node, Rate, Selection
+from relflow.structs.tree import Address, Leaf, MaskInput, Node, Rate
 from relflow.tensorfields.base import TENSORFIELDS
 
 __all__ = [
@@ -446,7 +444,7 @@ class Schema(Node):
         key = ("select", include_root, combined.key)
 
         if use_cache and combined.cacheable and key in self._selection_cache:
-            return Selection(self._selection_cache[key].nodes)
+            return list(self._selection_cache[key].nodes)
 
         nodes = tuple(
             node for node in PreOrderIter(self.fields) if (include_root or node is not self.fields) if combined(node)
@@ -460,7 +458,7 @@ class Schema(Node):
                 nodes=nodes,
             )
 
-        return Selection(nodes)
+        return list(nodes)
 
     def update(
         self,
@@ -684,39 +682,3 @@ class Schema(Node):
             self.clear_tree_caches()
             self.post_bind_validate()
             self.refresh_selection_cache()
-
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
-        heading = Text()
-        heading.append(self.name, style=self.RICH_NAME_STYLE)
-        heading.append(" ")
-        heading.append(f"[{self.type}]", style=self.RICH_TYPE_STYLE)
-        for name, value in (
-            ("d_model", self.d_model),
-            ("branches", len(self.branches)),
-            ("fields", len(self.active_requests)),
-            ("reconstruct", len(self.reconstruct)),
-            ("embeds", len(self.embed)),
-        ):
-            heading.append(" ")
-            heading.append(f"{name}=", style="dim")
-            heading.append(str(value), style="cyan")
-        yield heading
-
-        lines = list(self.fields.__rich_console__(console, options))
-        if not lines:
-            return
-        first = Text()
-        first.append("`-- ", style=self.RICH_TREE_STYLE)
-        if isinstance(lines[0], Text):
-            first.append_text(lines[0])
-        else:
-            first.append(str(lines[0]))
-        yield first
-        for line in lines[1:]:
-            nested = Text()
-            nested.append("    ", style=self.RICH_TREE_STYLE)
-            if isinstance(line, Text):
-                nested.append_text(line)
-            else:
-                nested.append(str(line))
-            yield nested

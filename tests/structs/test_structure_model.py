@@ -96,11 +96,10 @@ def test_schema_depthwise_contains_branch_levels():
 def test_schema_string_representation_contains_tree_nodes():
     structure = Schema.model_validate(_payload())
     rendered = str(structure)
-    assert "schema [schema]" in rendered
-    root_line = next(line for line in rendered.splitlines() if "`-- [root]" in line)
-    assert "length=" not in root_line
-    assert "overflow=" not in root_line
-    assert "category_leaf [category]" in rendered
+    assert "type='schema'" in rendered
+    assert "fields=Branch(" in rendered
+    assert "name='branch'" in rendered
+    assert "name='category_leaf'" in rendered
 
 
 def test_schema_preserves_field_and_branch_descriptions():

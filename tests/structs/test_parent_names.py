@@ -118,7 +118,7 @@ def test_late_extension_fields_keep_the_same_binding_and_validation_contract():
 def test_public_signatures_and_display_support_anonymous_definitions(constructor):
     assert "name" not in inspect.signature(constructor).parameters
     definition = constructor()
-    assert f"[{definition.type}]" in str(definition)
+    assert f"type='{definition.type}'" in str(definition)
     assert definition.name is None
 
 

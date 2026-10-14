@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import builtins
-from collections.abc import Generator, Mapping
+from collections.abc import Mapping
 from typing import Annotated, Any, Literal, Self, TypeAlias, cast
 
 import pydantic
-from rich.console import Console, ConsoleOptions
-from rich.text import Text
 
 from relflow.structs.enums import AttentionInput, AttentionMode, Overflow, OverflowInput
 from relflow.structs.reduction import Attention, ReductionConfig
@@ -156,69 +154,3 @@ class Branch(Node):
             raise ValueError(f"branch '{self.address}' has a mask but no active descendant leaves")
 
         return None
-
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
-        is_root = getattr(getattr(self, "parent", None), "type", None) == "schema"
-        display_type = "root" if is_root else self.type
-        attributes = ("query", "attention", "n_layers", "n_heads", "ffnx", "reduction", "dropout")
-        if not is_root:
-            attributes = ("length", "overflow", *attributes)
-
-        heading = Text()
-        if self.name is not None:
-            heading.append(self.name, style=self.RICH_NAME_STYLE)
-            heading.append(" ")
-        heading.append(f"[{display_type}]", style=self.RICH_TYPE_STYLE)
-        if self.embed:
-            heading.append(" ")
-            heading.append("embed", style="bold #065f46")
-        for name in attributes:
-            value = getattr(self, name, None)
-            if value is None and name not in ("attention", "reduction"):
-                continue
-            if name == "reduction":
-                if value is None:
-                    value = "None"
-                elif isinstance(value, Attention):
-                    settings = value.model_dump(exclude={"type"}, exclude_none=True)
-                    if settings.get("position") is True:
-                        settings.pop("position")
-                    parameters = ", ".join(f"{key}={setting}" for key, setting in settings.items())
-                    value = f"{value.type}({parameters})"
-                else:
-                    value = value.type
-            elif isinstance(value, float) and value.is_integer():
-                value = int(value)
-            elif hasattr(value, "value"):
-                value = value.value
-            heading.append(" ")
-            heading.append(f"{name}=", style="dim")
-            heading.append(str(value), style="cyan")
-        if self.mask:
-            heading.append(" ")
-            heading.append("mask=", style="dim")
-            heading.append(str(len(self.mask)), style="cyan")
-
-        yield heading
-
-        for index, child in enumerate(self.fields):
-            connector = "`-- " if index == len(self.fields) - 1 else "|-- "
-            continuation = "    " if index == len(self.fields) - 1 else "|   "
-            lines = list(child.__rich_console__(console, options))
-            if not lines:
-                continue
-            first = Text()
-            first.append(connector, style=self.RICH_TREE_STYLE)
-            if isinstance(lines[0], Text):
-                first.append_text(lines[0])
-            else:
-                first.append(str(lines[0]))
-            yield first
-            for line in lines[1:]:
-                nested = Text()
-                nested.append(continuation, style=self.RICH_TREE_STYLE)
-                if isinstance(line, Text):
-                    nested.append_text(line)
-                else:
-                    nested.append(str(line))
-                yield nested
