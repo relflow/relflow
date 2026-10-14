@@ -97,7 +97,7 @@ def retention(value: Retain) -> Retain:
 
 
 class FastAPIRuntime:
-    """Load one model and predict one valid Arrow microbatch at a time."""
+    """Load one model and predict Arrow inputs for HTTP requests."""
 
     def __init__(
         self,
@@ -202,8 +202,8 @@ class FastAPIRuntime:
         )
         return data.append_column("model", model)
 
-    def predict_table(self, data: pa.Table) -> pa.Table:
-        """Predict one Arrow microbatch without crossing the Python-row boundary."""
+    def predict_table(self, data: pa.Table, *, batch_size: int | None = None) -> pa.Table:
+        """Predict an Arrow input with optional model batching and no Python rows."""
 
         if not isinstance(data, pa.Table):
             raise TypeError(f"deployment prediction input must be a pyarrow.Table, got {type(data).__name__}")
@@ -213,6 +213,7 @@ class FastAPIRuntime:
             preprocess=self.preprocessors,
             postprocess=self.postprocessors,
             retain=self.retain,
+            batch_size=batch_size,
         )
         if not isinstance(result, pa.Table):
             raise TypeError(f"Model.predict must return a pyarrow.Table, got {type(result).__name__}")
@@ -576,14 +577,7 @@ class Deployment(BaseSettings):
                         status_code=400,
                     )
 
-                chunks = [
-                    table.slice(offset, self.max_batch_size) for offset in range(0, table.num_rows, self.max_batch_size)
-                ]
-                if not chunks:
-                    chunks = [table]
-                predicted = await asyncio.to_thread(
-                    lambda: pa.concat_tables([runtime.predict_table(chunk) for chunk in chunks])
-                )
+                predicted = await asyncio.to_thread(runtime.predict_table, table, batch_size=self.max_batch_size)
                 predicted = runtime.annotate_table(predicted)
                 sink = pa.BufferOutputStream()
                 with ipc.new_stream(sink, predicted.schema) as writer:
