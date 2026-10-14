@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import functools
-from collections.abc import Generator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, Self, TypeAlias, cast
@@ -38,6 +38,7 @@ __all__ = [
 ]
 
 TreeFieldInput: TypeAlias = SchemaField | type[Leaf]
+Defaults: TypeAlias = Callable[[TreeFieldInput], Mapping[str, Any]]
 
 _MISSING = object()
 
@@ -51,10 +52,14 @@ class Roles:
     embed: tuple[Address, ...]
 
 
-def bind_tree_field(name: str, value: TreeFieldInput) -> SchemaField:
+def bind_tree_field(name: str, value: TreeFieldInput, *, defaults: Defaults | None = None) -> SchemaField:
     """Bind a fresh subtree without changing the reusable definition or its parent links."""
     if isinstance(value, type) and issubclass(value, Leaf):
-        value = value()
+        payload = {} if defaults is None else dict(defaults(value))
+        bound = value.model_validate({**payload, "name": name})
+        if defaults is not None:
+            object.__setattr__(bound, "__pydantic_fields_set__", set(type(bound).model_fields))
+        return bound
     if not isinstance(value, (Branch, Leaf)):
         raise TypeError(f"tree field {name!r} must be a Branch, Leaf, or Leaf class; got {type(value).__name__}")
 
@@ -63,19 +68,26 @@ def bind_tree_field(name: str, value: TreeFieldInput) -> SchemaField:
         excluded.add("fields")
     payload = value.model_dump(mode="python", round_trip=True, exclude=excluded)
     payload.update(name=name, mask=value.mask)
+    if defaults is not None:
+        payload.update(
+            {option: default for option, default in defaults(value).items() if option not in value.model_fields_set}
+        )
     if isinstance(value, Branch):
-        payload["fields"] = [bind_tree_field(cast(str, child.name), child) for child in value.fields]
+        payload["fields"] = [bind_tree_field(cast(str, child.name), child, defaults=defaults) for child in value.fields]
     constructor = TENSORFIELDS[value.type].Request if type(value) is Leaf else type(value)
     bound = constructor.model_validate(payload)
     # Cloning retains materialized defaults (including extension factories),
     # while preserving which options the reusable definition supplied.
-    object.__setattr__(bound, "__pydantic_fields_set__", value.model_fields_set | {"name"})
+    if defaults is None:
+        object.__setattr__(bound, "__pydantic_fields_set__", value.model_fields_set | {"name"})
     return bound
 
 
 def bind_fields(
     fields: Mapping[str, TreeFieldInput] | None,
     children: Mapping[str, TreeFieldInput],
+    *,
+    defaults: Defaults | None = None,
 ) -> list[SchemaField]:
     """Merge parent-owned names and reject duplicates before binding any children."""
     if fields is None:
@@ -85,7 +97,7 @@ def bind_fields(
     duplicates = fields.keys() & children.keys()
     if duplicates:
         raise ValueError(f"duplicate field name(s): {sorted(duplicates)}")
-    return [bind_tree_field(name, value) for name, value in (*fields.items(), *children.items())]
+    return [bind_tree_field(name, value, defaults=defaults) for name, value in (*fields.items(), *children.items())]
 
 
 class Schema(Node):
@@ -145,11 +157,12 @@ class Schema(Node):
         **field_kwargs: TreeFieldInput,
     ) -> Self:
         """Build schema from tree fields."""
-        root_fields = bind_fields(fields, field_kwargs)
-        if not root_fields:
-            raise ValueError("from_tree requires at least one field")
-        branch = Branch.model_validate(
-            dict(
+        return build(
+            cls,
+            d_model=d_model,
+            fields=fields,
+            children=field_kwargs,
+            options=dict(
                 query=query,
                 description=description,
                 embed=embed,
@@ -158,35 +171,12 @@ class Schema(Node):
                 n_heads=n_heads,
                 ffnx=ffnx,
                 reduction=reduction,
-                length=1,
-                overflow=Overflow.error,
                 dropout=dropout,
                 mask=mask,
-                fields=root_fields,
-            )
+            ),
         )
-        return cls(d_model=d_model, fields=branch)
 
     def model_post_init(self, __context):
-        def materialize(branch: Branch) -> Branch:
-            fields: list[Branch | RequestTypes] = []
-            for field in list(branch.fields):
-                field.parent = None
-
-                if isinstance(field, Branch):
-                    fields.append(materialize(field))
-                elif type(field) is Leaf:
-                    fields.append(bind_tree_field(cast(str, field.name), field))
-                else:
-                    fields.append(field)
-
-            branch.fields = fields
-            for field in branch.fields:
-                field.parent = branch
-
-            return branch
-
-        self.fields = materialize(self.fields)
         self.fields.length = 1
         self.fields.overflow = Overflow.error
         self.fields.parent = self
@@ -490,29 +480,37 @@ class Schema(Node):
         **children: TreeFieldInput,
     ) -> None:
         """Append parent-named fields under the single branch selected by predicates."""
-        new_fields = bind_fields(fields, children)
-        if not new_fields:
+        self.graft(*predicates, fields=bind_fields(fields, children), include_root=include_root)
+
+    def graft(
+        self,
+        *predicates: NodeSelector,
+        fields: list[SchemaField],
+        include_root: bool = True,
+    ) -> None:
+        """Attach independent bound fields and restore the tree if validation fails."""
+        if not fields:
             raise ValueError("extend requires at least one schema field")
         candidates = [node for node in self.select(*predicates, include_root=include_root) if isinstance(node, Branch)]
         if len(candidates) != 1:
             raise ValueError(f"extend requires exactly one matching branch node, found {len(candidates)}")
         parent = candidates[0]
         existing_names = {field.name for field in parent.fields}
-        duplicate_names = sorted({cast(str, field.name) for field in new_fields if field.name in existing_names})
+        duplicate_names = sorted({cast(str, field.name) for field in fields if field.name in existing_names})
         if duplicate_names:
             raise ValueError(f"duplicate field name(s): {duplicate_names}")
 
         original_fields = list(parent.fields)
         try:
-            parent.fields.extend(new_fields)
-            for field in new_fields:
+            parent.fields.extend(fields)
+            for field in fields:
                 field.parent = parent
 
             self.clear_tree_caches()
             self.post_bind_validate()
         except Exception:
             parent.fields = original_fields
-            for field in new_fields:
+            for field in fields:
                 field.parent = None
             self.clear_tree_caches()
             self.post_bind_validate()
@@ -615,3 +613,21 @@ class Schema(Node):
 
             self.clear_tree_caches()
             self.post_bind_validate()
+
+
+def build[S: Schema](
+    schema: type[S],
+    /,
+    *,
+    d_model: int,
+    fields: Mapping[str, TreeFieldInput] | None,
+    children: Mapping[str, TreeFieldInput],
+    options: Mapping[str, Any],
+    defaults: Defaults | None = None,
+) -> S:
+    """Bind named inputs once and validate their anonymous singleton root."""
+    bound = bind_fields(fields, children, defaults=defaults)
+    if not bound:
+        raise ValueError("from_tree requires at least one field")
+    root = Branch.model_validate({**options, "length": 1, "overflow": Overflow.error, "fields": bound})
+    return schema(d_model=d_model, fields=root)

@@ -101,6 +101,11 @@ class Branch(Node):
 
         fields: list[Any] = []
         for field in value:
+            if type(field) is Leaf:
+                from relflow.structs.experiment import bind_tree_field
+
+                fields.append(bind_tree_field(cast(str, field.name), field))
+                continue
             if not isinstance(field, Mapping):
                 fields.append(field)
                 continue

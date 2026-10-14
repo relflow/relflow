@@ -8,13 +8,12 @@ from typing import Annotated, Any, Literal, cast
 import pydantic
 
 from relflow.structs.enums import AttentionInput, AttentionMode
-from relflow.structs.experiment import Schema, TreeFieldInput, bind_fields, bind_tree_field
+from relflow.structs.experiment import Schema, TreeFieldInput, build
 from relflow.structs.reduction import ReductionConfig
-from relflow.structs.selectors import SchemaField
 from relflow.structs.structure import OMITTED, Branch
 from relflow.structs.tree import MaskInput, Rate
 
-__all__ = ["BranchDefaults", "LeafDefaults", "Preset", "resolve", "subtree"]
+__all__ = ["BranchDefaults", "LeafDefaults", "Preset", "resolve"]
 
 
 class BranchDefaults(pydantic.BaseModel):
@@ -55,23 +54,10 @@ class Preset(pydantic.BaseModel):
     branch: BranchDefaults
     leaf: LeafDefaults
 
-
-def subtree(preset: Preset, name: str, definition: TreeFieldInput) -> SchemaField:
-    """Bind an independent subtree and fill only omitted architecture options."""
-
-    def apply(node: SchemaField) -> SchemaField:
-        scope = preset.branch if isinstance(node, Branch) else preset.leaf
-        excluded = {"mask", "fields"} if isinstance(node, Branch) else {"mask"}
-        values = node.model_dump(mode="python", round_trip=True, exclude=excluded)
-        values["mask"] = node.mask
-        for option in type(scope).model_fields:
-            if option not in node.model_fields_set:
-                values[option] = getattr(scope, option)
-        if isinstance(node, Branch):
-            values["fields"] = [apply(child) for child in node.fields]
-        return type(node).model_validate(values)
-
-    return apply(bind_tree_field(name, definition))
+    def defaults(self, definition: TreeFieldInput) -> Mapping[str, Any]:
+        """Select the architecture defaults for one unbound branch or leaf."""
+        scope = self.branch if isinstance(definition, Branch) else self.leaf
+        return {option: getattr(scope, option) for option in type(scope).model_fields}
 
 
 def resolve(
@@ -105,14 +91,13 @@ def resolve(
         dropout=dropout,
     )
     options.update({name: value for name, value in overrides.items() if value is not OMITTED})
-    resolved = {
-        cast(str, node.name): subtree(preset, cast(str, node.name), node) for node in bind_fields(fields, children)
-    }
-    return Schema.from_tree(
-        fields=resolved,
-        query=query,
-        description=description,
-        embed=embed,
-        mask=mask,
-        **options,
+    width = options.pop("d_model")
+    options.update(query=query, description=description, embed=embed, mask=mask)
+    return build(
+        Schema,
+        d_model=width,
+        fields=fields,
+        children=children,
+        options=options,
+        defaults=preset.defaults,
     )

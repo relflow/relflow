@@ -1,5 +1,9 @@
+from typing import Literal
+
+import pydantic
 import pytest
 
+import relflow as rf
 from relflow.structs.enums import Overflow
 from relflow.structs.experiment import Schema
 from relflow.structs.structure import Branch
@@ -86,6 +90,38 @@ def test_schema_converts_leaf_instances_nested_in_branches():
 
     request = structure.requests["/branch/category_leaf"]
     assert "size" not in request.model_dump()
+
+
+def test_raw_generic_leaves_materialize_through_the_live_registry():
+    extension = rf.Extension(name="generic_materialization", types=(float,))
+    try:
+
+        @extension.register
+        class Request(rf.RequestBase):
+            type: Literal["generic_materialization"] = "generic_materialization"
+            scale: float = pydantic.Field(default=3.0, gt=0)
+
+        generic = rf.RequestBase.model_validate({"name": "value", "type": extension.name})
+        assert type(generic) is rf.RequestBase
+        branch = Branch.model_validate({"name": "items", "length": 2, "fields": [generic]})
+        assert type(branch.fields[0]) is Request
+        assert branch.fields[0].scale == 3.0
+        assert branch.fields[0].parent is branch
+
+        schema = Schema.model_validate(
+            {
+                "d_model": 8,
+                "fields": {"fields": [{"name": "items", "type": "branch", "length": 2, "fields": [generic]}]},
+            }
+        )
+        request = schema.requests["/items/value"]
+        assert type(request) is Request
+        assert request.parent is schema.branches["/items"]
+        assert request.shape == (1, 2)
+        assert generic.parent is None
+        assert Schema.model_validate_json(schema.model_dump_json()).model_dump() == schema.model_dump()
+    finally:
+        rf.TENSORFIELDS.pop(extension.name, None)
 
 
 def test_schema_depthwise_contains_branch_levels():

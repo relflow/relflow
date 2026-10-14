@@ -226,13 +226,19 @@ def test_custom_preset_defaults_and_explicit_node_widths_remain_local():
     values["leaf"]["ffnx"] = 2
     profile = rf.presets.Preset.model_validate(values)
     constructor = rf.presets.factory(profile).__get__(None, rf.Model)
-    definition = rf.Branch(value=rf.Number, target=rf.Number(mask=True, ffnx=7))
+    definition = rf.Branch(
+        value=rf.Number,
+        target=rf.Number(mask=True, ffnx=7),
+        fixed=rf.Branch(ffnx=8, value=rf.Number(ffnx=8)),
+    )
     model = constructor(d_model=8, events=definition, target=rf.Number(mask=True))
     assert definition.ffnx == 8 and "ffnx" not in definition.model_fields_set
     assert model.schema.fields.ffnx == 4
     assert model.schema.branches[rf.Address("events")].ffnx == 3
     assert model.schema.requests[rf.Address("events", "value")].ffnx == 2
     assert model.schema.requests[rf.Address("events", "target")].ffnx == 7
+    assert model.schema.branches[rf.Address("events", "fixed")].ffnx == 8
+    assert model.schema.requests[rf.Address("events", "fixed", "value")].ffnx == 8
     assert model.schema.requests[rf.Address("target")].ffnx == 2
 
 

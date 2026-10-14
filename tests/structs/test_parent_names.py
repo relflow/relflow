@@ -72,6 +72,24 @@ def test_extend_binds_reserved_names_and_keeps_rejected_mutations_atomic():
     assert field.name is None and field.parent is None
 
 
+@pytest.mark.parametrize("constructor", [rf.Model, rf.Model.xs])
+def test_construction_policy_names_remain_available_as_children(constructor):
+    model = constructor(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        defaults=rf.Number,
+        preset=rf.Number,
+        items=rf.Branch(value=rf.Number),
+    )
+    model.extend(rf.where("address") == "/items", defaults=rf.Number, preset=rf.Number)
+
+    for name in ("defaults", "preset"):
+        assert model.schema.requests[f"/{name}"].name == name
+        assert model.schema.requests[f"/items/{name}"].name == name
+        assert model.schema.requests[f"/items/{name}"].parent is model.schema.branches["/items"]
+
+
 def test_named_checkpoint_restoration_preserves_masks_aliases_and_weights(tmp_path):
     model = rf.Model(
         d_model=16,
