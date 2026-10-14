@@ -82,7 +82,6 @@ addopts = ["-n", "auto"]
 
 [tool.ruff]
 line-length = 120
-extend-exclude = ["docs/_extensions"]
 lint.extend-select = ["I"]
 
 [tool.pyrefly]

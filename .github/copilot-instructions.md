@@ -11,8 +11,9 @@ not invent a public `Struct(...)` API.
 
 Keep code direct: use short semantic names, inline one-use forwarding helpers,
 never prefix functions or classes with `_`, preserve Arrow as the canonical CPU
-representation, and keep datatype behavior inside its extension. Keep docs
-static with illustrative nested schemas and Typst model-tree diagrams. Update
-tests and docs with public behavior; docs builds must not execute model code.
-Show data as one nested YAML record, keep Arrow/Polars module examples minimal,
-and check factual claims against the implementation.
+representation, and keep datatype behavior inside its extension. Update tests
+with public behavior and coordinate user documentation changes in the separate
+[relflow/docs repository](https://github.com/relflow/docs). Follow its authoring
+guide for static examples and Typst diagrams; site builds must not run model
+code. Executable modeling proofs, their canonical results, and all branding
+assets live in that documentation repository; package tests remain here.

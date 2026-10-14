@@ -18,14 +18,14 @@ uv run pytest
 ```
 
 Run the smallest relevant test subset while developing. Before publishing a
-branch, run the complete checks above and `make render` when documentation or a
-public contract changed.
+branch, run the complete checks above. Coordinate public contract changes with
+the separate [documentation repository](https://github.com/relflow/docs).
 
 Distributed tests launch every rank on the same machine. On macOS, the test
 suite defaults `GLOO_SOCKET_IFNAME` to the loopback interface `lo0` so Gloo does
 not select the hostname's network interface. An explicitly configured
 `GLOO_SOCKET_IFNAME` takes precedence. For application configuration, see
-[local distributed training](docs/guides/lightning.qmd#local-distributed-training).
+[local distributed training](https://relflow.github.io/docs/guides/lightning.html#local-distributed-training).
 
 ## Editor And Type Checking
 
@@ -277,71 +277,37 @@ new callable contract, Arrow shape, lifecycle hook, or failure mode, document:
 Documentation is static. Use plain `python` fences with the current top-level
 API, realistic nested schemas, and clearly named application-supplied inputs.
 Do not read datasets, train models, or download weights during a docs build.
-Keep runtime examples in tests and proofs; update API references and narrative
-docs alongside a public contract change.
+Keep package runtime checks in this repository's tests and learning proofs in
+[relflow/docs](https://github.com/relflow/docs). Update API references and
+narrative docs alongside a public contract change.
 
-### Build And Illustrate The Docs
+### Maintain The Documentation Separately
 
-```bash
-make render
-make check-docs
-uv run pytest tests/test_docs.py
-```
-
-Quarto renders static HTML and Typst SVGs without importing RelFlow. The docs
-check renders a temporary copy and rejects diagram errors; static tests check
-Python syntax, single-record YAML, links, and public datatype options.
-
-Pages publishes `main` at the site root and every other branch with docs at
-`/relflow/branches/<branch-name>/`. Use the full branch name in the URL, such as
-`/relflow/branches/dev/gpu-optimizations/`; the current navbar has no version
-menu. Older branches retain their own navigation.
-
-The docs workflow discovers branches automatically, renders their pinned
-commits, and assembles one site. It supports Quarto and historical MkDocs
-without executing Python examples. Every included build must succeed before
-publication; branches without either docs configuration are reported and
-skipped. Pushes and manual runs refresh the site, with a daily refresh to pick
-up changes on branches whose workflows predate this setup. Deleted branches
-disappear from the next successful publication.
+The website, modeling proofs, recorded results, and all branding assets live
+in [relflow/docs](https://github.com/relflow/docs). Follow that repository's
+README and agent guide for preview, rendering, checks, and publication. Library
+installs and checks do not build the site or require a neighboring checkout.
 
 Show data as one YAML record, including repeated values under their field
-names. Use simple Arrow or Polars module examples with application-supplied
-splits. Give each concept one home and link to it instead of repeating its
-contract. Verify factual claims against the source, not existing prose.
+names. Use the public API, application-supplied Arrow splits, and consistent
+transaction examples. Give each concept one home and link to it. Verify factual
+claims against the implementation. The documentation repository owns the shared
+[Typst tree functions](https://github.com/relflow/docs/blob/main/docs/assets/typst/README.md)
+and complete branding sources. The library README references its exported
+SVG banners by absolute URL.
 
-Use the current [branding](docs/assets/branding/README.md) and shared
-[Typst tree functions](docs/assets/typst/README.md). Diagram pages declare
-`engine: markdown`; unique figure labels, captions, and alt text describe
-structure, roles, and settings essential to the explanation. Use formatted node
-bodies for masking rules, reduction choices, and other relevant configuration;
-put those distinctions in the figure's text alternative too. The vendored
-[typst-render extension](https://github.com/mcanouil/quarto-typst-render/tree/0.19.0)
-uses the project's bundled Typst compiler. Generated SVGs under
-`docs/assets/diagrams/` are ignored by Git.
+### Run Learning Proofs Separately
 
-Author each modeling proof in one `proofs/<category>/*.py` file. Interleave Markdown
-comment cells (`# %% [markdown]`) with Python cells (`# %%`): the explanation,
-Typst tree, YAML examples, generator, model, training, and controls live together.
-Its commented YAML header includes `proof-id`, `code-fold: true`, and
-`execute: {enabled: false, eval: false}`. Both execution flags are also disabled
-globally. Quarto renders scripts natively without Jupyter or running a proof.
-The build stages ignored copies under `docs/proofs/<family>/<slug>.py` to keep
-published URLs stable; edit only the canonical script.
+The canonical annotated experiment scripts, generators, models, metrics,
+controls, and append-only result history live together in
+[relflow/docs](https://github.com/relflow/docs). Edit and execute those proofs
+there using its documented RelFlow installation and execution commands.
+Library tests cover runtime and architectural behavior; learning experiments
+are separate, explicit runs.
 
-Explicit proof runs append measurements and checks to `proofs/results.yaml`.
-The docs insert this evidence, status, and reproduction commands at render time.
-Keep historical interpretations archived in YAML and current insights in the
-script. An AST fingerprint distinguishes code changes from Markdown and
-formatting edits; full file hashes retain provenance. Separate measured values
-from thresholds and identify single-seed or mechanistic limits.
-
-Use contrasting YAML records to explain why an answer changes or stays the
-same. Label corruption controls that retain the original target explicitly.
-Lead `Insights` with one clear conclusion, explain why it matters, and state
-its essential limit. Distinguish an interpretation of learned behavior from a
-demonstrated mechanism. See [proof authoring](proofs/README.md#author-the-page)
-for the layout and execution commands.
+Keep unsuccessful outcomes, source fingerprints, and essential limits visible
+when interpreting learning evidence. Publishing the static site must not run an
+experiment or change its recorded results.
 
 ## Tests
 
@@ -378,4 +344,4 @@ dependencies, tests, and docs rather than leaving both systems in place.
 
 Specs and exploratory notes are working artifacts unless they are deliberately
 accepted as durable documentation. Lasting contributor rules belong here or in
-`AGENTS.md`; user-facing behavior belongs in `docs/`.
+`AGENTS.md`; user-facing documentation belongs in [relflow/docs](https://github.com/relflow/docs).

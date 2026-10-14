@@ -3,14 +3,6 @@ __pycache__/
 *.py[oc]
 build/
 dist/
-site/
-docs/site/
-_site/
-.quarto/
-docs/.quarto/
-**/*.quarto_ipynb
-**/*_files/
-**/*_cache/
 .cache/
 wheels/
 *.egg-info
@@ -28,14 +20,3 @@ private/
 *.ckpt
 
 /specs
-
-/.quarto/
-
-**/site_libs/
-docs/**/*.html
-!docs/assets/color-scheme.html
-!docs/assets/sidebar.html
-!docs/assets/proof-status.html
-docs/assets/diagrams/
-docs/proofs/
-proofs/*.yaml.lock

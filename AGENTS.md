@@ -237,39 +237,20 @@ uv run ruff check
 uv run pyrefly check
 uv run pytest
 uv run pytest tests/test_public_api.py
-make render
 ```
 
-## Documentation Entry Points
+## Documentation And Learning Proofs
 
-- `docs/index.qmd`
-- `docs/getting-started.qmd`
-- `docs/core-concepts/model-tree.qmd`
-- `docs/core-concepts/binding-data.qmd`
-- `docs/core-concepts/querypaths.qmd`
-- `docs/core-concepts/data-types.qmd`
-- `docs/core-concepts/dynamic-masking.qmd`
-- `docs/guides/data-modules.qmd`
-- `docs/guides/preprocessors.qmd`
+User documentation, executable modeling proofs, recorded learning results, and
+branding assets live in the separate [relflow/docs repository](https://github.com/relflow/docs).
+The website is published at [relflow.github.io/docs](https://relflow.github.io/docs/).
+Follow that repository's agent guide for authoring, Typst diagrams, preview,
+validation, proof execution, and publication. This package has no documentation
+checkout, proof source, or site build dependency.
 
-Documentation is static. Use plain `python` fences and current public imports;
-do not execute Python, train models, load real data, or download model weights
-while building the site. Prefer realistic nested schemas and explicitly name
-application-supplied inputs. Use the shared Typst `node` and `tree` functions in
-`docs/assets/typst/model-tree.typ` for structural diagrams; see the authoring
-contract in `docs/assets/typst/README.md`. Show field roles and repeated contexts,
-not parameter counts or hyperparameters. Keep learning-behavior checks in tests
-and proofs rather than extracting and executing documentation snippets.
-Give diagram roots descriptive labels such as `order`, `customer`, or `record`.
-These are illustrative labels, not model options or schema-address prefixes;
-the actual root remains anonymous at `rf.Address()`.
-
-Show observation and prediction examples as one YAML record, with repeated
-values nested beneath their field names. Keep Arrow and Polars data-module
-snippets to `model` and named splits unless the page explains another option.
-Use `rf.Address("transactions", "amount")` with one argument per child name
-for schema addresses in Python documentation examples; use `rf.Address()` for the root.
-Keep ordinary data keys, query strings, metric names, and serialized keys as strings.
-Give each concept one home and link to it. Verify claims against source code
-when editing a page; existing prose is not evidence. Use the current branding
-under `docs/assets/branding` and Typst diagrams for visual explanations.
+Coordinate documentation and proof changes with public API changes. Verify
+claims against the implementation and use the current top-level imports.
+Package runtime and architectural tests belong in this repository's `tests/`;
+learning experiments and their canonical results belong in `relflow/docs`.
+Documentation builds remain static; learning proofs run only when explicitly
+invoked in that repository with RelFlow installed.
