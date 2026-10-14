@@ -32,7 +32,6 @@ def test_schema_representations_include_extension_options_without_parent_cycles(
                 assert "units='EUR'" in output
                 assert "type='representation'" in output
                 assert "_NodeMixin" not in output
-                assert "_selection_cache" not in output
 
         assert schema.model_dump(mode="python") == before
         assert field.parent is schema.branches["/transactions"]
@@ -41,7 +40,7 @@ def test_schema_representations_include_extension_options_without_parent_cycles(
         rf.TENSORFIELDS.pop("representation", None)
 
 
-def test_schema_selection_is_a_plain_list_independent_of_cached_results() -> None:
+def test_schema_selection_returns_independent_plain_lists() -> None:
     schema = rf.Schema.from_tree(d_model=8, n_layers=1, n_heads=2, amount=rf.Number)
     predicate = rf.where("name") == "amount"
     selected = schema.select(predicate)

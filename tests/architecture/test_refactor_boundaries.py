@@ -166,7 +166,7 @@ def test_mutation_logging_does_not_evaluate_predicates_again(action, address, op
         seen.add(id(node))
         return node.address == address
 
-    getattr(model, action)(select_once, use_cache=False, **options)
+    getattr(model, action)(select_once, **options)
     assert seen
 
 

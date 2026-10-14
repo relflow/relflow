@@ -144,12 +144,10 @@ class SchemaEditor:
         self,
         *predicates: NodePredicate | NodeAttribute | Callable[[Node], bool],
         include_root: bool = True,
-        use_cache: bool = True,
     ) -> list[Node]:
         return self.module.schema.select(
             *predicates,
             include_root=include_root,
-            use_cache=use_cache,
         )
 
     def update(
@@ -158,7 +156,6 @@ class SchemaEditor:
         strict: bool = True,
         include_root: bool = True,
         validate: bool = True,
-        use_cache: bool = False,
         **values: Any,
     ) -> None:
         self.assert_mutation_allowed("update")
@@ -168,7 +165,6 @@ class SchemaEditor:
                 strict=strict,
                 include_root=include_root,
                 validate=validate,
-                use_cache=use_cache,
                 **values,
             )
             ModelGraph.rebuild(self.module)
@@ -180,7 +176,6 @@ class SchemaEditor:
         *predicates: NodePredicate | NodeAttribute | Callable[[Node], bool],
         fields: Mapping[str, TreeFieldInput] | None = None,
         include_root: bool = True,
-        use_cache: bool = True,
         **children: TreeFieldInput,
     ) -> None:
         self.assert_mutation_allowed("extend")
@@ -192,9 +187,7 @@ class SchemaEditor:
             }
             children = {}
         with self.transaction():
-            self.module.schema.extend(
-                *predicates, fields=fields, include_root=include_root, use_cache=use_cache, **children
-            )
+            self.module.schema.extend(*predicates, fields=fields, include_root=include_root, **children)
             ModelGraph.rebuild(self.module)
         self.module.reset_contracts()
         logger.bind(component="schema_mutation", action="extend").info("extended model schema")
@@ -203,11 +196,10 @@ class SchemaEditor:
         self,
         *predicates: NodePredicate | NodeAttribute | Callable[[Node], bool],
         include_root: bool = False,
-        use_cache: bool = True,
     ) -> None:
         self.assert_mutation_allowed("delete")
         with self.transaction():
-            self.module.schema.delete(*predicates, include_root=include_root, use_cache=use_cache)
+            self.module.schema.delete(*predicates, include_root=include_root)
             ModelGraph.rebuild(self.module)
         self.module.reset_contracts()
         logger.bind(component="schema_mutation", action="delete").info("deleted model schema nodes")
@@ -216,14 +208,12 @@ class SchemaEditor:
         self,
         *predicates: NodePredicate | NodeAttribute | Callable[[Node], bool],
         include_root: bool = True,
-        use_cache: bool = True,
         descendants: bool = False,
     ) -> None:
         self.assert_mutation_allowed("reset")
         selected = self.module.schema.select(
             *predicates,
             include_root=include_root,
-            use_cache=use_cache,
         )
         if not selected:
             raise ValueError("reset matched no nodes")
@@ -239,7 +229,6 @@ class SchemaEditor:
         strict: bool = True,
         include_root: bool = True,
         validate: bool = True,
-        use_cache: bool = False,
         **values: Any,
     ) -> Generator[None, None, None]:
         self.assert_mutation_allowed("override")
@@ -250,7 +239,6 @@ class SchemaEditor:
                 strict=strict,
                 include_root=include_root,
                 validate=validate,
-                use_cache=use_cache,
                 **values,
             ):
                 entered = True

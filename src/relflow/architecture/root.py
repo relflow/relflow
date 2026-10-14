@@ -355,10 +355,9 @@ class Model(lit.LightningModule):
         self,
         *predicates: NodeSelector,
         include_root: bool = True,
-        use_cache: bool = True,
     ) -> list[Node]:
         """Return schema nodes that satisfy every predicate."""
-        return self._schema_editor.select(*predicates, include_root=include_root, use_cache=use_cache)
+        return self._schema_editor.select(*predicates, include_root=include_root)
 
     def update(
         self,
@@ -366,7 +365,6 @@ class Model(lit.LightningModule):
         strict: bool = True,
         include_root: bool = True,
         validate: bool = True,
-        use_cache: bool = False,
         **values: object,
     ) -> None:
         """Mutate selected schema nodes and rebuild compatible modules.
@@ -376,8 +374,6 @@ class Model(lit.LightningModule):
             strict: Raise when a selected node cannot accept one of `values`.
             include_root: Include the root node in predicate matching.
             validate: Validate each node after applying candidate values.
-            use_cache: Permit cached selector results. Mutations default this to
-                `False` so updates always evaluate against current schema state.
             **values: Declared schema attributes to update. Use `description` for notes.
         """
         self._schema_editor.update(
@@ -385,7 +381,6 @@ class Model(lit.LightningModule):
             strict=strict,
             include_root=include_root,
             validate=validate,
-            use_cache=use_cache,
             **values,
         )
 
@@ -394,35 +389,29 @@ class Model(lit.LightningModule):
         *predicates: NodeSelector,
         fields: Mapping[str, TreeFieldInput] | None = None,
         include_root: bool = True,
-        use_cache: bool = True,
         **children: TreeFieldInput,
     ) -> None:
         """Append keyword or mapping-named children under one selected branch."""
-        self._schema_editor.extend(
-            *predicates, fields=fields, include_root=include_root, use_cache=use_cache, **children
-        )
+        self._schema_editor.extend(*predicates, fields=fields, include_root=include_root, **children)
 
     def delete(
         self,
         *predicates: NodeSelector,
         include_root: bool = False,
-        use_cache: bool = True,
     ) -> None:
         """Permanently remove selected schema nodes and rebuild modules."""
-        self._schema_editor.delete(*predicates, include_root=include_root, use_cache=use_cache)
+        self._schema_editor.delete(*predicates, include_root=include_root)
 
     def reset(
         self,
         *predicates: NodeSelector,
         include_root: bool = True,
-        use_cache: bool = True,
         descendants: bool = False,
     ) -> None:
         """Reinitialize selected runtime node modules while preserving schema values."""
         self._schema_editor.reset(
             *predicates,
             include_root=include_root,
-            use_cache=use_cache,
             descendants=descendants,
         )
 
@@ -433,7 +422,6 @@ class Model(lit.LightningModule):
         strict: bool = True,
         include_root: bool = True,
         validate: bool = True,
-        use_cache: bool = False,
         **values: object,
     ) -> Generator[None, None, None]:
         """Temporarily mutate selected schema nodes and keep runtime modules synchronized."""
@@ -442,7 +430,6 @@ class Model(lit.LightningModule):
             strict=strict,
             include_root=include_root,
             validate=validate,
-            use_cache=use_cache,
             **values,
         ):
             yield

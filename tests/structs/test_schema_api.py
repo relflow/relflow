@@ -1,20 +1,25 @@
 import json
 import pickle
+import re
 
 import pytest
 
 import relflow as rf
+from relflow.architecture.graph import ModelGraph
 from relflow.structs.enums import TensorKey
 
 
-def test_schema_pickle_discards_derived_selection_predicates():
-    model = rf.Model(id=rf.Category(), d_model=8, n_layers=1, n_heads=2)
-    selected = model.select(rf.where("type") == "category")
+def test_schema_pickle_does_not_retain_selection_closures():
+    model = rf.Model(id=rf.Category(mask=True), d_model=8, n_layers=1, n_heads=2)
+    wanted = {"id"}
+    selected = model.select(rf.predicate(lambda node: node.name in wanted) & (rf.where("type") == "category"))
+    roles = model.schema.roles
 
     restored = pickle.loads(pickle.dumps(model.schema))
 
     assert selected == [model.schema.requests["/id"]]
-    assert restored._selection_cache == {}
+    assert restored.model_dump() == model.schema.model_dump()
+    assert restored.roles == roles
     assert restored.select(rf.where("type") == "category") == [restored.requests["/id"]]
 
 
@@ -246,12 +251,127 @@ def test_model_select_returns_nodes_and_update_refreshes_cached_role_views():
     assert model.select(reconstruct, include_root=False) == [params.requests["/label"]]
 
 
-def test_schema_helper_classmethods_back_public_dsl():
-    predicate = rf.NodePredicate.from_callable("amount-name", lambda node: node.name == "amount")
-    attribute = rf.NodeAttribute.named("name")
+def test_schema_predicate_constructors_back_public_dsl():
+    schema = rf.Schema.from_tree(amount=rf.Number, d_model=8, n_layers=1, n_heads=2)
 
-    assert rf.predicate("amount-name", lambda node: node.name == "amount").key == predicate.key
-    assert rf.where("name") == attribute
+    def named_amount(node):
+        return node.name == "amount"
+
+    attribute = rf.NodeAttribute.named("name")
+    for selector in (rf.predicate(named_amount), rf.NodePredicate(func=named_amount), attribute == "amount"):
+        assert schema.select(selector) == [schema.requests["/amount"]]
+
+
+@pytest.mark.parametrize("metadata", [{"key": ("obsolete",)}, {"cacheable": False}])
+def test_node_predicates_reject_removed_cache_configuration(metadata):
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        rf.NodePredicate(func=lambda node: True, **metadata)
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_select_rechecks_callable_state_without_retaining_it_for_mutations(wrapped):
+    model = rf.Model(amount=rf.Number, memo=rf.Number, d_model=8, n_layers=1, n_heads=2)
+    wanted = {"amount"}
+    calls = 0
+
+    def chosen(node):
+        nonlocal calls
+        calls += 1
+        return node.name in wanted
+
+    selector = rf.predicate(chosen) if wrapped else chosen
+    assert model.select(selector) == [model.schema.requests["/amount"]]
+    wanted.clear()
+    wanted.add("memo")
+    assert model.select(selector) == [model.schema.requests["/memo"]]
+    count = calls
+    model.update(rf.where("name") == "amount", description="Transaction amount")
+    assert calls == count
+
+
+def test_where_predicates_use_current_field_and_comparison_values():
+    model = rf.Model(amount=rf.Number, label=rf.Category(topk=[2]), d_model=8, n_layers=1, n_heads=2)
+    unnamed = rf.where("description").is_null()
+    assert model.select(unnamed, include_root=False) == list(model.schema.requests.values())
+    model.schema.requests["/amount"].description = "Transaction amount"
+    assert model.select(unnamed, include_root=False) == [model.schema.requests["/label"]]
+
+    expected = [2]
+    selector = rf.where("topk") == expected
+    assert model.select(selector) == [model.schema.requests["/label"]]
+    expected.append(3)
+    assert model.select(selector) == []
+
+    assert model.select(rf.where("name").matches(re.compile("AMOUNT", re.IGNORECASE))) == [
+        model.schema.requests["/amount"]
+    ]
+    assert model.select(rf.where("name").matches(re.compile("AMOUNT"))) == []
+
+
+def test_fixed_roles_reuse_an_immutable_projection_without_exposing_mutable_lists():
+    model = rf.Model(
+        items=rf.Branch(length=2, value=rf.Number(mask=rf.Mask(rate=0.5, reconstruct=True))),
+        label=rf.Boolean(mask=True),
+        embed=True,
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+    )
+    schema = model.schema
+    projection = schema.roles
+    expected = {
+        "reconstruct": ["/items/value", "/label"],
+        "objectives": ["/items/value", "/label"],
+        "decodes": ["/label"],
+        "embed": ["/"],
+    }
+    for name, values in expected.items():
+        returned = getattr(schema, name)
+        assert returned == values
+        returned.clear()
+        assert getattr(schema, name) == values
+        assert schema.roles is projection
+
+    selected = rf.where("address") == "/items"
+    model.update(selected, mask=True, embed=True)
+    changed = schema.roles
+    assert changed is not projection
+    assert schema.decodes == ["/items/value", "/label"]
+    assert schema.embed == ["/", "/items"]
+
+    with model.override(selected, mask=False, embed=False):
+        assert schema.roles is not changed
+        assert schema.decodes == ["/label"]
+        assert schema.embed == ["/"]
+    assert schema.roles == changed
+
+    model.extend(rf.where("address") == "/", extra=rf.Number(embed=True))
+    assert schema.embed == ["/", "/items", "/extra"]
+    model.delete(rf.where("name") == "extra")
+    assert schema.roles == changed
+
+
+@pytest.mark.parametrize("failure", ["validation", "rebuild"])
+def test_failed_mutation_restores_fixed_roles_and_runtime_graph(monkeypatch, failure):
+    model = rf.Model(amount=rf.Number, label=rf.Boolean(mask=True), d_model=8, n_layers=1, n_heads=2)
+    roles = model.schema.roles
+    nodes = model.nodes
+
+    def fail(module):
+        raise RuntimeError("rebuild failed")
+
+    if failure == "rebuild":
+        monkeypatch.setattr(ModelGraph, "rebuild", fail)
+    options = {"n_heads": 3} if failure == "validation" else {}
+    error = ValueError if failure == "validation" else RuntimeError
+    message = "n_heads" if failure == "validation" else "rebuild failed"
+    with pytest.raises(error, match=message):
+        model.update(rf.where("name") == "amount", mask=True, embed=True, **options)
+
+    assert model.schema.roles == roles
+    assert model.schema.forward_for("train") == ["/label"]
+    assert model.schema.forward_for("predict") == ["/label"]
+    assert model.nodes is nodes
 
 
 def test_schema_select_returns_nodes_and_accepts_boolean_predicates():
@@ -333,7 +453,7 @@ def test_model_update_disables_attention_without_removing_reduction() -> None:
         assert value.equal(reduction[name])
 
 
-def test_model_update_uses_current_schema_when_selection_cache_is_stale():
+def test_model_update_uses_current_schema_after_a_direct_attribute_edit():
     model = rf.Model(amount=rf.Number(), d_model=16, n_layers=1, n_heads=4)
     predicate = rf.where("name") == "amount"
 

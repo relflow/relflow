@@ -1,4 +1,4 @@
-"""Composable schema node selectors and selection cache models."""
+"""Composable predicates for selecting schema nodes."""
 
 from __future__ import annotations
 
@@ -11,32 +11,15 @@ import pydantic
 from relflow.structs.structure import Branch
 from relflow.structs.tree import Leaf, Node
 
-SelectionKey: TypeAlias = tuple[Any, ...]
 SchemaField: TypeAlias = Branch | Leaf
-
-
-class SelectionCacheEntry(pydantic.BaseModel):
-    model_config = pydantic.ConfigDict(frozen=True, arbitrary_types_allowed=True)
-
-    key: SelectionKey
-    predicate: Callable[[Node], bool]
-    include_root: bool
-    nodes: tuple[Node, ...]
 
 
 class NodePredicate(pydantic.BaseModel):
     """Composable predicate used to select schema nodes."""
 
-    model_config = pydantic.ConfigDict(frozen=True, arbitrary_types_allowed=True)
+    model_config = pydantic.ConfigDict(frozen=True, arbitrary_types_allowed=True, extra="forbid")
 
     func: Callable[[Node], bool]
-    key: SelectionKey
-    cacheable: bool = True
-
-    @classmethod
-    def from_callable(cls, key: str | tuple[Any, ...], func: Callable[[Node], bool]) -> "NodePredicate":
-        cache_key = key if isinstance(key, tuple) else ("callable", key)
-        return cls(func=func, key=cache_key)
 
     @classmethod
     def from_selector(cls, value: "NodeSelector") -> "NodePredicate":
@@ -44,58 +27,31 @@ class NodePredicate(pydantic.BaseModel):
             return value
 
         if isinstance(value, NodeAttribute):
-            return cls(
-                func=lambda node: has_model_attribute(node, value.name) and value.get(node) is True,
-                key=("truthy", value.name),
-            )
+            return cls(func=lambda node: has_model_attribute(node, value.name) and value.get(node) is True)
 
         if not callable(value):
             raise TypeError("node predicates must be where(...) expressions or callables")
 
-        return cls(
-            func=value,
-            key=("callable", id(value)),
-            cacheable=True,
-        )
+        return cls(func=value)
 
     def __call__(self, node: Node) -> bool:
         return self.func(node)
 
     def __and__(self, other: "NodePredicate | NodeAttribute | Callable[[Node], bool]") -> "NodePredicate":
         predicate = NodePredicate.from_selector(other)
-        return NodePredicate(
-            func=lambda node: self(node) and predicate(node),
-            key=("and", (self.key, predicate.key)),
-            cacheable=self.cacheable and predicate.cacheable,
-        )
+        return NodePredicate(func=lambda node: self(node) and predicate(node))
 
     def __or__(self, other: "NodePredicate | NodeAttribute | Callable[[Node], bool]") -> "NodePredicate":
         predicate = NodePredicate.from_selector(other)
-        return NodePredicate(
-            func=lambda node: self(node) or predicate(node),
-            key=("or", (self.key, predicate.key)),
-            cacheable=self.cacheable and predicate.cacheable,
-        )
+        return NodePredicate(func=lambda node: self(node) or predicate(node))
 
     def __invert__(self) -> "NodePredicate":
-        return NodePredicate(
-            func=lambda node: not self(node),
-            key=("not", self.key),
-            cacheable=self.cacheable,
-        )
+        return NodePredicate(func=lambda node: not self(node))
 
 
-def cache_value(value: Any) -> Any:
-    try:
-        hash(value)
-    except TypeError:
-        return repr(value)
-    return value
-
-
-def predicate(key: str | tuple[Any, ...], func: Callable[[Node], bool]) -> NodePredicate:
-    """Create a cacheable node predicate from a callable."""
-    return NodePredicate.from_callable(key=key, func=func)
+def predicate(func: Callable[[Node], bool]) -> NodePredicate:
+    """Wrap a callable for composition with schema predicates."""
+    return NodePredicate(func=func)
 
 
 _QUERYABLE_BUILTINS = frozenset(
@@ -149,10 +105,7 @@ class NodeAttribute(pydantic.BaseModel):
         return getattr(node, self.name, default)
 
     def exists(self) -> NodePredicate:
-        return NodePredicate(
-            func=lambda node: has_model_attribute(node, self.name),
-            key=("exists", self.name),
-        )
+        return NodePredicate(func=lambda node: has_model_attribute(node, self.name))
 
     def __and__(self, other: "NodePredicate | NodeAttribute | Callable[[Node], bool]") -> NodePredicate:
         return NodePredicate.from_selector(self) & other
@@ -161,61 +114,33 @@ class NodeAttribute(pydantic.BaseModel):
         return NodePredicate.from_selector(self) | other
 
     def __invert__(self) -> NodePredicate:
-        return NodePredicate(
-            func=lambda node: not bool(self.get(node, False)),
-            key=("not_truthy", self.name),
-        )
+        return NodePredicate(func=lambda node: not bool(self.get(node, False)))
 
     def __bool__(self) -> bool:
         raise TypeError("Use ~where(...) for negated predicates; Python 'not where(...)' cannot build a predicate")
 
     def is_in(self, values: Iterable[Any]) -> NodePredicate:
-        cached_values = tuple(values)
-        return NodePredicate(
-            func=lambda node: self.get(node) in cached_values,
-            key=(
-                "is_in",
-                self.name,
-                tuple(sorted((cache_value(value) for value in cached_values), key=repr)),
-            ),
-        )
+        candidates = tuple(values)
+        return NodePredicate(func=lambda node: self.get(node) in candidates)
 
     def matches(self, pattern: str | re.Pattern[str]) -> NodePredicate:
         regex = re.compile(pattern) if isinstance(pattern, str) else pattern
-        return NodePredicate(
-            func=lambda node: regex.search(str(self.get(node, ""))) is not None,
-            key=("matches", self.name, regex.pattern),
-        )
+        return NodePredicate(func=lambda node: regex.search(str(self.get(node, ""))) is not None)
 
     def contains(self, value: Any) -> NodePredicate:
-        return NodePredicate(
-            func=lambda node: value in (self.get(node) or ()),
-            key=("contains", self.name, cache_value(value)),
-        )
+        return NodePredicate(func=lambda node: value in (self.get(node) or ()))
 
     def is_null(self) -> NodePredicate:
-        return NodePredicate(
-            func=lambda node: self.get(node) is None,
-            key=("is_null", self.name),
-        )
+        return NodePredicate(func=lambda node: self.get(node) is None)
 
     def is_not_null(self) -> NodePredicate:
-        return NodePredicate(
-            func=lambda node: self.get(node) is not None,
-            key=("is_not_null", self.name),
-        )
+        return NodePredicate(func=lambda node: self.get(node) is not None)
 
     def __eq__(self, other: Any) -> NodePredicate:  # type: ignore[override]
-        return NodePredicate(
-            func=lambda node: self.get(node) == other,
-            key=("eq", self.name, cache_value(other)),
-        )
+        return NodePredicate(func=lambda node: self.get(node) == other)
 
     def __ne__(self, other: Any) -> NodePredicate:  # type: ignore[override]
-        return NodePredicate(
-            func=lambda node: self.get(node) != other,
-            key=("ne", self.name, cache_value(other)),
-        )
+        return NodePredicate(func=lambda node: self.get(node) != other)
 
 
 def where(name: str) -> NodeAttribute:
