@@ -82,7 +82,7 @@ def test_extension_subclasses_keep_custom_defaults_and_intent_when_bound():
     generations = count()
     try:
 
-        @extension.register
+        @extension.register(rf.Component.Request)
         class Request(rf.RequestBase):
             type: Literal["field_intent"] = "field_intent"
             generation: int = pydantic.Field(default_factory=lambda: next(generations))

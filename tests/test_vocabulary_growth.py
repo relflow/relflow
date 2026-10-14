@@ -354,15 +354,15 @@ def test_late_registered_category_subclass_uses_its_registered_bind_component():
     calls = []
     try:
 
-        @extension.register
+        @extension.register(rf.Component.Request)
         class Request(rf.Category):
             type: Literal["vocabulary_growth_label"] = "vocabulary_growth_label"
 
         for component, implementation in category.components.items():
             if component not in {rf.Component.Request, rf.Component.bind}:
-                extension.register(implementation, component)
+                extension.register(component, implementation)
 
-        @extension.register
+        @extension.register(rf.Component.bind)
         def bind(module, field, observation, binding, *, address, strata, resize):
             assert module.schema.requests[address].type == name
             assert isinstance(binding, VocabularyBatch)

@@ -14,7 +14,7 @@ from beartype import beartype
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
-from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
+from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
@@ -62,7 +62,7 @@ def seeds(salt: int, lane: int, family: int) -> tuple[int, int, int, int]:
     )
 
 
-@hashable.register
+@hashable.register(Component.Request)
 class Request(RequestBase):
     """Hash-based tensorfield with no learned identity vocabulary.
 
@@ -107,7 +107,7 @@ class Request(RequestBase):
         ) -> None: ...
 
 
-@hashable.register
+@hashable.register(Component.TensorField)
 @tensorclass
 class TensorField(TensorFieldBase[torch.Tensor]):
     state: torch.Tensor
@@ -200,7 +200,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         )
 
 
-@hashable.register
+@hashable.register(Component.Embedder)
 class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -247,7 +247,7 @@ class Embedder(EmbedderBase):
         )
 
 
-@hashable.register
+@hashable.register(Component.Decoder)
 class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -272,7 +272,7 @@ class Decoder(DecoderBase):
         )
 
 
-@hashable.register
+@hashable.register(Component.loss)
 def loss(
     module: Model,
     prediction: Prediction,

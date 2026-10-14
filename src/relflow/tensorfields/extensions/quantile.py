@@ -19,7 +19,7 @@ from tensordict import TensorDict, tensorclass
 from relflow.data.ragged import RaggedField
 from relflow.distributed import all_gather_object, broadcast_object, is_distributed
 from relflow.helpers.digest import Digest
-from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
+from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
@@ -130,7 +130,7 @@ quantile.callback(CounterUpdateCallback)
 quantile.callback(Synchronize)
 
 
-@quantile.register
+@quantile.register(Component.Request)
 class Request(RequestBase):
     """A finite scalar normalized to its estimated training percentile.
 
@@ -208,7 +208,7 @@ def percentiles(digest: Digest, raw: torch.Tensor, state: torch.Tensor) -> torch
     return torch.where(state.eq(Tokens.valued), ranks, 0.5)
 
 
-@quantile.register
+@quantile.register(Component.observe)
 def observe(
     field: RaggedField, *, address: Address, schema: Schema, state: object | None, learn: bool
 ) -> TensorDict | None:
@@ -217,7 +217,7 @@ def observe(
     return TensorDict({TensorKey.state: tally(torch.from_numpy(field.dense.copy()), len(Tokens))}, batch_size=[])
 
 
-@quantile.register
+@quantile.register(Component.TensorField)
 @tensorclass
 class TensorField(TensorFieldBase[torch.Tensor]):
     content: torch.Tensor
@@ -281,7 +281,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         )
 
 
-@quantile.register
+@quantile.register(Component.bind)
 def bind(
     module: Model,
     field: TensorFieldBase,
@@ -313,7 +313,7 @@ def bind(
         )
 
 
-@quantile.register
+@quantile.register(Component.Embedder)
 class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema, address)
@@ -346,14 +346,14 @@ class Embedder(EmbedderBase):
         )
 
 
-@quantile.register
+@quantile.register(Component.learn)
 def learn(module: Model, observation: TensorDict, *, address: Address, strata: Strata) -> None:
     if strata != Strata.train:
         raise ValueError(f"Quantile learner at '{address}' requires train strata, got {strata}")
     cast(Embedder, module.nodes[address].embedder).counter.learn(cast(torch.Tensor, observation[TensorKey.state]))
 
 
-@quantile.register
+@quantile.register(Component.Decoder)
 class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema, address)
@@ -376,7 +376,7 @@ class Decoder(DecoderBase):
         )
 
 
-@quantile.register
+@quantile.register(Component.loss)
 def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: Strata) -> torch.Tensor:
     address = prediction.address
     request = cast(Request, module.schema.requests[address])
@@ -416,12 +416,12 @@ def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: 
     return result
 
 
-@quantile.register
+@quantile.register(Component.output)
 def output(module: Model, address: Address) -> pa.StructType:
     return pa.struct([pa.field(TensorKey.content.name, pa.float64(), nullable=True)])
 
 
-@quantile.register
+@quantile.register(Component.write)
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
     content = array(cast(torch.Tensor, prediction.payload[TensorKey.content]), pa.float64())
     content = pc.if_else(pc.is_nan(content), pa.scalar(None, type=pa.float64()), content)

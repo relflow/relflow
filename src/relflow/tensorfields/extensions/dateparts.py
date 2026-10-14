@@ -19,7 +19,7 @@ from tensordict import TensorDict, tensorclass
 from relflow.data.arrow import variants
 from relflow.data.ragged import RaggedField
 from relflow.helpers import Jitter
-from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
+from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
@@ -221,7 +221,7 @@ def parse(
     return result
 
 
-@dateparts.register
+@dateparts.register(Component.Request)
 class Request(RequestBase):
     """Calendar components represented as cyclical sine/cosine pairs.
 
@@ -304,7 +304,7 @@ class Request(RequestBase):
         return v
 
 
-@dateparts.register
+@dateparts.register(Component.TensorField)
 @tensorclass
 class TensorField(TensorFieldBase[TensorDict]):
     state: torch.Tensor
@@ -383,7 +383,7 @@ class TensorField(TensorFieldBase[TensorDict]):
         )
 
 
-@dateparts.register
+@dateparts.register(Component.Embedder)
 class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -429,7 +429,7 @@ class Embedder(EmbedderBase):
         )
 
 
-@dateparts.register
+@dateparts.register(Component.Decoder)
 class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -459,7 +459,7 @@ class Decoder(DecoderBase):
         )
 
 
-@dateparts.register
+@dateparts.register(Component.loss)
 def loss(
     module: Model,
     prediction: Prediction,

@@ -13,7 +13,7 @@ from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
 from relflow.helpers import Jitter
-from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
+from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
@@ -122,7 +122,7 @@ class CachedModel:
         return self.model
 
 
-@text.register
+@text.register(Component.Request)
 class Request(RequestBase):
     """String input represented by a frozen Hugging Face encoder.
 
@@ -163,7 +163,7 @@ class Request(RequestBase):
         ) -> None: ...
 
 
-@text.register
+@text.register(Component.observe)
 def observe(
     field: RaggedField,
     *,
@@ -182,7 +182,7 @@ def observe(
     )
 
 
-@text.register
+@text.register(Component.TensorField)
 @tensorclass
 class TensorField(TensorFieldBase[TensorDict]):
     content: TensorDict
@@ -275,7 +275,7 @@ class TensorField(TensorFieldBase[TensorDict]):
         )
 
 
-@text.register
+@text.register(Component.Embedder)
 class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -418,7 +418,7 @@ class Embedder(EmbedderBase):
         )
 
 
-@text.register
+@text.register(Component.learn)
 def learn(
     module: Model,
     observation: TensorDict,
@@ -434,7 +434,7 @@ def learn(
     embedder.counter.learn(cast(torch.Tensor, observation[TensorKey.state]))
 
 
-@text.register
+@text.register(Component.Decoder)
 class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -460,7 +460,7 @@ class Decoder(DecoderBase):
         )
 
 
-@text.register
+@text.register(Component.loss)
 def loss(
     module: Model,
     prediction: Prediction,

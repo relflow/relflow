@@ -110,7 +110,7 @@ def test_late_extension_fields_keep_the_same_binding_and_validation_contract():
     extension = rf.Extension(name="parent_named", types=(float,))
     try:
 
-        @extension.register
+        @extension.register(rf.Component.Request)
         class Request(rf.RequestBase):
             type: Literal["parent_named"] = "parent_named"
             scale: float = pydantic.Field(default=1, gt=0)

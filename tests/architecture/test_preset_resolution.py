@@ -114,7 +114,7 @@ def test_late_extension_uses_common_profile_without_losing_extension_fields():
     extension = rf.Extension(name="preset_extension", types=(float,))
     try:
 
-        @extension.register
+        @extension.register(rf.Component.Request)
         class Request(rf.RequestBase):
             type: Literal["preset_extension"] = "preset_extension"
             scale: float = pydantic.Field(default=1.0, gt=0)

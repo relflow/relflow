@@ -20,7 +20,7 @@ from torchmetrics.classification import (
 )
 
 from relflow.data.ragged import RaggedField
-from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
+from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
@@ -48,7 +48,7 @@ Threshold = Annotated[float, pydantic.Field(ge=0.0, le=1.0)]
 Thresholds = Annotated[list[Threshold], pydantic.Field(min_length=1)]
 
 
-@boolean.register
+@boolean.register(Component.Request)
 class Request(RequestBase):
     """True/false scalar with a fixed representation and no vocabulary.
 
@@ -121,7 +121,7 @@ class BooleanCounter(Counter):
         return super().observe(values.gt(0).to(dtype=torch.int64))
 
 
-@boolean.register
+@boolean.register(Component.observe)
 def observe(
     field: RaggedField,
     *,
@@ -147,7 +147,7 @@ def observe(
     )
 
 
-@boolean.register
+@boolean.register(Component.TensorField)
 @tensorclass
 class TensorField(TensorFieldBase[torch.Tensor]):
     content: torch.Tensor
@@ -202,7 +202,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         )
 
 
-@boolean.register
+@boolean.register(Component.Embedder)
 class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -235,7 +235,7 @@ class Embedder(EmbedderBase):
         )
 
 
-@boolean.register
+@boolean.register(Component.learn)
 def learn(
     module: Model,
     observation: TensorDict,
@@ -252,7 +252,7 @@ def learn(
     cast(Counter, embedder.counters[TensorKey.content.name]).learn(cast(torch.Tensor, observation[TensorKey.content]))
 
 
-@boolean.register
+@boolean.register(Component.Decoder)
 class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -300,7 +300,7 @@ class Decoder(DecoderBase):
         )
 
 
-@boolean.register
+@boolean.register(Component.loss)
 def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: Strata) -> torch.Tensor:
     address = prediction.address
     embedder: Embedder = cast(Embedder, module.nodes[address].embedder)
@@ -357,13 +357,13 @@ def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: 
     return total
 
 
-@boolean.register
+@boolean.register(Component.output)
 def output(module: Model, address: Address) -> pa.StructType:
     content = pa.struct([pa.field(TensorKey.probability.name, pa.float32(), nullable=False)])
     return pa.struct([pa.field(TensorKey.content.name, content, nullable=False)])
 
 
-@boolean.register
+@boolean.register(Component.write)
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
     content_type = datatype.field(TensorKey.content.name).type
     probabilities = array(cast(torch.Tensor, prediction.payload[TensorKey.content]).sigmoid(), pa.float32())

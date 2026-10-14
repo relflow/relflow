@@ -19,7 +19,7 @@ from relflow.data.ragged import RaggedField
 from relflow.distributed import broadcast_object
 from relflow.helpers.resize import Resize
 from relflow.logging import logger
-from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
+from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
@@ -64,7 +64,7 @@ _OVERRIDE_LOCK: str = "cluster assignment overrides"
 Assignment = int | torch.Tensor | list[float] | tuple[float, ...]
 
 
-@cluster.register
+@cluster.register(Component.Request)
 class Request(RequestBase):
     """Scalar labels represented through shared, learned latent clusters.
 
@@ -244,7 +244,7 @@ class Request(RequestBase):
         return ClusterRuntime(model=model, address=address).override(assignments)
 
 
-@cluster.register
+@cluster.register(Component.observe)
 def observe(
     field: RaggedField,
     *,
@@ -271,7 +271,7 @@ def observe(
     )
 
 
-@cluster.register
+@cluster.register(Component.TensorField)
 @tensorclass
 class TensorField(TensorFieldBase[torch.Tensor]):
     state: torch.Tensor
@@ -346,7 +346,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         )
 
 
-@cluster.register
+@cluster.register(Component.Embedder)
 class Embedder(EmbedderBase):
     usage_ema: torch.Tensor
     committed: torch.Tensor
@@ -539,7 +539,7 @@ class Embedder(EmbedderBase):
         super()._save_to_state_dict(destination, prefix, keep_vars)
 
 
-@cluster.register
+@cluster.register(Component.bind)
 def bind(
     module: Model,
     field: TensorFieldBase,
@@ -568,7 +568,7 @@ def bind(
         )
 
 
-@cluster.register
+@cluster.register(Component.learn)
 def learn(
     module: Model,
     observation: TensorDict,
@@ -668,7 +668,7 @@ class ClusterRuntime:
                     model.locks[_OVERRIDE_LOCK] -= 1
 
 
-@cluster.register
+@cluster.register(Component.Decoder)
 class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         # Cluster assignments belong to stable identities. Row-varying sibling
@@ -702,7 +702,7 @@ class Decoder(DecoderBase):
         )
 
 
-@cluster.register
+@cluster.register(Component.loss)
 def loss(
     module: Model,
     prediction: Prediction,
@@ -834,7 +834,7 @@ def loss(
     return loss
 
 
-@cluster.register
+@cluster.register(Component.output)
 def output(module: Model, address: Address) -> pa.StructType:
     cluster_type = pa.struct(
         [
@@ -856,7 +856,7 @@ def output(module: Model, address: Address) -> pa.StructType:
     )
 
 
-@cluster.register
+@cluster.register(Component.write)
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
     cluster_type = datatype.field(TensorKey.cluster.name).type
     content_type = datatype.field(TensorKey.content.name).type

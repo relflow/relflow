@@ -46,7 +46,7 @@ def test_declared_extension_options_remain_supported():
     extension = rf.Extension(name="declared_options", types=(float,))
     try:
 
-        @extension.register
+        @extension.register(rf.Component.Request)
         class Request(rf.RequestBase):
             type: Literal["declared_options"] = "declared_options"
             scale: float = 1.0

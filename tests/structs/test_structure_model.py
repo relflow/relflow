@@ -96,7 +96,7 @@ def test_raw_generic_leaves_materialize_through_the_live_registry():
     extension = rf.Extension(name="generic_materialization", types=(float,))
     try:
 
-        @extension.register
+        @extension.register(rf.Component.Request)
         class Request(rf.RequestBase):
             type: Literal["generic_materialization"] = "generic_materialization"
             scale: float = pydantic.Field(default=3.0, gt=0)

@@ -11,7 +11,7 @@ def test_schema_representations_include_extension_options_without_parent_cycles(
     extension = rf.Extension(name="representation", types=(float,))
     try:
 
-        @extension.register
+        @extension.register(rf.Component.Request)
         class Request(rf.RequestBase):
             type: Literal["representation"] = "representation"
             units: str = "USD"

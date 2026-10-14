@@ -107,6 +107,11 @@ model = rf.Model(
   `Extension(types=...)`; custom Python atoms add extension-owned physical matchers
   with `Extension(..., arrow={Type: matcher})`. Keep datatype contracts out of
   `Request` and the shared ragged engine.
+- Register components by role, such as
+  `@extension.register(rf.Component.Request)` or
+  `extension.register(rf.Component.write, custom_writer)`. Python names are
+  independent of component roles; implementations follow the declared base-class
+  and callable protocols.
 - Preprocessors accept and return eager `polars.DataFrame` objects before
   query/coalescing. Use them for source renaming, expressions, windowing,
   joins, normalization, or row expansion/grouping. Their output is the

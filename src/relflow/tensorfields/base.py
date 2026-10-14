@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import inspect
 import math
 import re
 import shlex
@@ -13,6 +12,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+from functools import partial
 from types import MappingProxyType, UnionType
 from typing import (
     TYPE_CHECKING,
@@ -54,6 +54,7 @@ RequestBase: TypeAlias = Leaf
 CallbackFactory: TypeAlias = type[Callback] | Callable[[], Callback]
 ComponentValue: TypeAlias = Callable[..., Any] | type[Any]
 RegisterT = TypeVar("RegisterT", bound=ComponentValue)
+OMITTED = object()
 ValueTypeFamily: TypeAlias = type[Any] | UnionType
 ArrowMatcher: TypeAlias = Callable[[pa.DataType], bool]
 ContentT = DefaultTypeVar(
@@ -519,7 +520,8 @@ class Extension:
     """Registry object for a tensorfield implementation.
 
     Register request, tensorfield, embedder, decoder, loss, output, and write
-    components with `@extension.register`. ``types`` names the Python equivalents
+    components with ``@extension.register(Component.Request)`` or another explicit
+    role. ``types`` names the Python equivalents
     of accepted canonical Arrow terminal families. Separate tuple entries are
     incompatible; types joined in one PEP 604 union may share one Arrow column.
     ``arrow`` supplies a physical-type matcher for custom Python atoms or
@@ -837,164 +839,56 @@ class Extension:
             ) from error
 
     @overload
-    def register(self, obj: None, component: Component | str) -> None: ...
+    def register(self, component: Component | str) -> Callable[[RegisterT], RegisterT]: ...
 
     @overload
-    def register(self, obj: RegisterT, component: Component | str | None = None) -> RegisterT: ...
+    def register(self, component: Component | str, obj: RegisterT) -> RegisterT: ...
+
+    @overload
+    def register(self, component: Component | str, obj: None) -> None: ...
 
     def register(
         self,
-        obj: RegisterT | None,
-        component: Component | str | None = None,
-    ) -> RegisterT | None:
-        """Register one tensorfield component with this extension."""
-        if obj is None:
-            if component is None:
-                raise TypeError("component must be provided when registering None")
+        component: Component | str,
+        obj: RegisterT | None | object = OMITTED,
+    ) -> Callable[[RegisterT], RegisterT] | RegisterT | None:
+        """Register an explicit role directly or return its identity decorator.
 
-            key = Component(component)
-            if key not in {Component.output, Component.write}:
-                raise TypeError("only output and write may be registered as None")
-
-            if key in self.components:
-                raise ValueError(f"Component '{key}' already registered in extension '{self.name}'")
-
-            self.components[key] = None
-            return None
-
-        if not hasattr(obj, "__name__"):
-            raise NameError(f"Object {obj} does not have a name")
-
-        # Extension registration also accepts unchecked callable objects.
-        name = str(obj.__name__)  # pyrefly: ignore [unnecessary-type-conversion]
-        try:
-            key = Component(name)
-        except ValueError:
-            raise ValueError(f"Component '{name}' is not a valid Component enum value") from None
-
+        Class roles require their corresponding extension base class. Hooks
+        follow the declared protocols without constraining callable names,
+        annotations, or introspectable signatures. Only output and write may
+        explicitly register None, retaining their optional no-op behavior.
+        """
+        key = Component(component)
+        if obj is OMITTED:
+            return partial(self.register, key)
         if key in self.components:
             raise ValueError(f"Component '{key}' already registered in extension '{self.name}'")
-
-        match key:
-            case Component.Request:
-                if not isinstance(obj, type):
-                    raise TypeError("Request must be a class type")
-
-                if not issubclass(obj, Leaf):
-                    raise TypeError("Request must be a subclass of RequestBase")
-
-            case Component.TensorField:
-                if not isinstance(obj, type):
-                    raise TypeError("TensorField must be a class type")
-
-                if not issubclass(obj, TensorFieldBase):
-                    raise TypeError("TensorField must be a subclass of TensorFieldBase")
-
-                new_params = inspect.signature(cast(type[TensorFieldBase], obj).new).parameters
-                required = {
-                    "input",
-                    "target",
-                    "present",
-                    "trainable",
-                    "inferred",
-                    "address",
-                    "schema",
-                    "strata",
-                    "context",
-                }
-                if not required.issubset(new_params):
-                    names = ", ".join(sorted(required))
-                    raise TypeError(f"TensorField.new must accept these parameters: {names}")
-
-            case Component.Embedder:
-                if not isinstance(obj, type):
-                    raise TypeError("Embedder must be a class type")
-
-                if not issubclass(obj, EmbedderBase):
-                    raise TypeError("Embedder must be a subclass of EmbedderBase")
-
-                init_params = list(obj.__init__.__annotations__.keys())
-                if "schema" not in init_params or "address" not in init_params:
-                    raise TypeError("Embedder __init__ method must accept 'schema' and 'address' parameters")
-
-                forward_params = inspect.signature(cast(type[EmbedderBase], obj).forward).parameters
-                if "inputs" not in forward_params:
-                    raise TypeError("Embedder.forward must accept a compact 'inputs' parameter")
-
-            case Component.Decoder:
-                if not isinstance(obj, type):
-                    raise TypeError("Decoder must be a class type")
-
-                if not issubclass(obj, DecoderBase):
-                    raise TypeError("Decoder must be a subclass of DecoderBase")
-
-                init_params = list(obj.__init__.__annotations__.keys())
-                if "schema" not in init_params or "address" not in init_params:
-                    raise TypeError("Decoder __init__ method must accept 'schema' and 'address' parameters")
-
-            case Component.loss:
-                if not callable(obj):
-                    raise TypeError("Loss must be a callable function")
-
-                expected_params: list[str] = ["module", "prediction", "batch", "strata"]
-                func_params: list[str] = list(obj.__annotations__.keys())
-
-                if not set(expected_params).issubset(set(func_params)):
+        if obj is None:
+            if key not in {Component.output, Component.write}:
+                raise TypeError(
+                    f"extension '{self.name}' component '{key}' cannot be None; "
+                    "only output and write may be registered as None"
+                )
+        else:
+            base = {
+                Component.Request: RequestBase,
+                Component.TensorField: TensorFieldBase,
+                Component.Embedder: EmbedderBase,
+                Component.Decoder: DecoderBase,
+            }.get(key)
+            if base is not None:
+                if not isinstance(obj, type) or not issubclass(obj, base):
+                    actual = obj.__name__ if isinstance(obj, type) else type(obj).__name__
                     raise TypeError(
-                        f"Loss function must accept the following parameters: {expected_params}, got {func_params}"
+                        f"extension '{self.name}' component '{key}' must be a subclass of {key}Base, got {actual}"
                     )
+            elif not callable(obj):
+                raise TypeError(f"extension '{self.name}' component '{key}' must be callable, got {type(obj).__name__}")
 
-            case Component.observe:
-                expected_params = ["field", "address", "schema", "state", "learn"]
-                func_params = list(inspect.signature(obj).parameters)
-                if func_params != expected_params:
-                    raise TypeError(
-                        f"Observe function must accept the following parameters: {expected_params}, got {func_params}"
-                    )
-
-            case Component.learn:
-                expected_params = ["module", "observation", "address", "strata"]
-                func_params = list(inspect.signature(obj).parameters)
-                if func_params != expected_params:
-                    raise TypeError(
-                        f"Learn function must accept the following parameters: {expected_params}, got {func_params}"
-                    )
-
-            case Component.bind:
-                expected_params = ["module", "field", "observation", "binding", "address", "strata", "resize"]
-                func_params = list(inspect.signature(obj).parameters)
-                if func_params != expected_params:
-                    raise TypeError(
-                        f"Bind function must accept the following parameters: {expected_params}, got {func_params}"
-                    )
-
-            case Component.write:
-                if obj is not None and not callable(obj):
-                    raise TypeError("Write must be a callable function")
-
-                expected_params: list[str] = ["module", "prediction", "datatype"]
-                func_params = list(inspect.signature(obj).parameters)
-
-                if func_params != expected_params:
-                    raise TypeError(
-                        f"Write function must accept the following parameters: {expected_params}, got {func_params}"
-                    )
-
-            case Component.output:
-                if not callable(obj):
-                    raise TypeError("Output must be a callable function")
-
-                expected_params = ["module", "address"]
-                func_params = list(inspect.signature(obj).parameters)
-
-                if func_params != expected_params:
-                    raise TypeError(
-                        f"Output function must accept the following parameters: {expected_params}, got {func_params}"
-                    )
-
-        self.components[key] = obj
-
-        return obj
+        value = cast(ComponentValue | None, obj)
+        self.components[key] = value
+        return cast(RegisterT | None, value)
 
     @overload
     def callback(self, factory: CallbackFactory, /) -> CallbackFactory: ...
@@ -1076,11 +970,3 @@ class Extension:
     @property
     def write(self) -> Write:
         return cast(Write, self.component(Component.write))
-
-    def __getattr__(self, key: str) -> ComponentValue:
-        try:
-            component = Component(key)
-        except ValueError:
-            raise ValueError(f"Component '{key}' is not a valid Component enum value") from None
-
-        return self.component(component)
