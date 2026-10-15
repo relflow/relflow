@@ -45,7 +45,7 @@ def schema_api() -> None:
         selected=rf.Boolean(mask=rf.Mask(query="selected", reconstruct=True)),
     )
     assert_type(branch.attention, AttentionMode | None)
-    assert_type(branch.overflow, Overflow)
+    assert_type(branch.overflow, Overflow | None)
     assert_type(branch.mask, tuple[rf.Mask, ...])
     rf.Branch(fields={"length": number, "description": rf.Category}, reduction=rf.Mean())
     rf.Model(d_model=32, n_heads=4, n_layers=1, items=branch, label=rf.Boolean(mask=True))

@@ -257,11 +257,13 @@ class Model(lit.LightningModule):
         self.nodes: torch.nn.ModuleDict = torch.nn.ModuleDict()
         self._schema_editor: SchemaEditor = SchemaEditor(self)
         self._contract_generation: int = 0
+        self._length_warning_generation: int = -1
         self._contract_scheduler: ContractScheduler = ContractScheduler()
         self.output_plans: dict[tuple[int, Retain], OutputPlan] = {}
         self.execution_plan: ExecutionPlan | None = None
 
         ModelGraph.install(self)
+        self.warn_unbounded()
 
         logger.bind(
             component="model",
@@ -314,6 +316,32 @@ class Model(lit.LightningModule):
         self._contract_scheduler.reset()
         self.output_plans.clear()
         self.execution_plan = None
+        self.warn_unbounded()
+
+    def warn_unbounded(self) -> None:
+        """Report unbounded active collection paths once per model generation."""
+
+        if self._length_warning_generation == self._contract_generation:
+            return
+        self._length_warning_generation = self._contract_generation
+        ancestors = {
+            owner.address
+            for request in self.schema.active_requests.values()
+            for owner in request.path
+            if getattr(owner, "type", None) == "branch"
+        }
+        addresses = [
+            str(address)
+            for address, branch in self.schema.branches.items()
+            if branch.length is None and address in ancestors
+        ]
+        if addresses:
+            logger.bind(component="model", branches=tuple(addresses)).warning(
+                "Unbounded branches "
+                + ", ".join(repr(address) for address in addresses)
+                + " allow untrusted records to determine batch widths and exhaust memory or compute, "
+                "causing denial of service. Configure finite length limits and request-size limits before public serving."
+            )
 
     # RelFlow's existing region-selection API is chainable, unlike nn.Module.compile.
     def compile(  # pyrefly: ignore[bad-override]
@@ -339,6 +367,8 @@ class Model(lit.LightningModule):
         internals or nested hooks, including hooks added after compilation.
 
         ``backend``, ``dynamic``, and ``options`` are PyTorch compiler settings.
+        Omitted ``dynamic`` enables dynamic shapes. Packed grouping stays eager;
+        dense tensor regions remain eligible for compilation.
         Inductor defaults preserve eager random draws and disable CUDA graphs
         and automatic tensor padding. Floating-point results may still differ.
         """

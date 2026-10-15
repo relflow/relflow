@@ -67,9 +67,110 @@ def test_schema_derives_branches_requests_and_shapes():
 
 
 def test_branch_accepts_overflow_policy():
-    branch = Branch(category_leaf=Category(), overflow="tail")
+    branch = Branch(category_leaf=Category(), length=4, overflow="tail")
 
     assert branch.overflow == Overflow.tail
+
+
+def test_branch_defaults_to_unbounded_collections():
+    branch = Branch(value=rf.Number)
+
+    assert branch.length is None
+    assert branch.overflow is None
+    assert Branch.model_validate_json(branch.model_dump_json()).model_dump() == branch.model_dump()
+
+
+@pytest.mark.parametrize("length", [0, -1, True, 2.5, "3"])
+def test_branch_limits_require_positive_integers(length):
+    with pytest.raises(ValueError, match="length"):
+        Branch(length=length, value=rf.Number)
+
+
+@pytest.mark.parametrize("overflow", ["head", "tail", "error"])
+def test_unbounded_branches_cannot_select_overflow(overflow):
+    with pytest.raises(ValueError, match="unbounded branch.*finite length"):
+        Branch(overflow=overflow, value=rf.Number)
+    with pytest.raises(ValueError, match="unbounded branch.*finite length"):
+        Branch.model_validate({"name": "items", "overflow": overflow, "fields": []})
+
+
+def test_bounded_branches_default_to_head_with_an_explicit_null_policy():
+    assert Branch(length=3, value=rf.Number).overflow == Overflow.head
+    assert Branch(length=3, overflow=None, value=rf.Number).overflow == Overflow.head
+
+
+def test_schema_keeps_dynamic_shapes_and_normalizes_the_root_before_validation():
+    schema = Schema.model_validate(
+        {
+            "d_model": 8,
+            "fields": {
+                "overflow": "error",
+                "fields": [
+                    {
+                        "type": "branch",
+                        "name": "events",
+                        "reduction": None,
+                        "fields": [{"type": "number", "name": "amount"}],
+                    }
+                ],
+            },
+        }
+    )
+
+    assert schema.fields.length == 1
+    assert schema.fields.overflow == Overflow.error
+    assert schema.shapes["/events/amount"] == (1, None)
+    assert schema.branch_outputs["/events"] is None
+    restored = Schema.model_validate_json(schema.model_dump_json())
+    assert restored.shapes == schema.shapes
+    assert restored.branches["/events"].overflow is None
+
+
+@pytest.mark.parametrize(
+    "options",
+    [{"length": 0}, {"length": -1}, {"length": True}, {"length": "3"}, {"overflow": "middle"}],
+)
+def test_raw_root_normalization_does_not_hide_invalid_configuration(options):
+    with pytest.raises(ValueError, match="length|overflow"):
+        Schema.model_validate({"d_model": 8, "fields": {**options, "fields": [{"name": "value", "type": "number"}]}})
+
+
+@pytest.mark.parametrize("options", [{"length": None, "overflow": None}, {"length": 2, "overflow": "tail"}])
+def test_valid_raw_root_options_normalize_to_the_singleton(options):
+    schema = Schema.model_validate(
+        {"d_model": 8, "fields": {**options, "fields": [{"name": "value", "type": "number"}]}}
+    )
+
+    assert schema.fields.length == 1
+    assert schema.fields.overflow == Overflow.error
+
+
+def test_collection_bound_mutations_preserve_the_pair_and_roll_back_failures():
+    schema = Schema.from_tree(d_model=8, n_layers=1, n_heads=2, events=Branch(length=3, value=rf.Number))
+    selected = rf.where("address") == "/events"
+    before = schema.model_dump()
+
+    with pytest.raises(ValueError, match="unbounded branch.*finite length"):
+        schema.update(selected, length=None)
+    assert schema.model_dump() == before
+
+    schema.update(selected, length=None, overflow=None)
+    assert schema.branches["/events"].length is None
+    assert schema.branches["/events"].overflow is None
+
+    with pytest.raises(ValueError, match="unbounded branch.*finite length"):
+        schema.update(selected, overflow="tail")
+    assert schema.branches["/events"].length is None
+    assert schema.branches["/events"].overflow is None
+
+    schema.update(selected, length=5)
+    assert schema.branches["/events"].length == 5
+    assert schema.branches["/events"].overflow == Overflow.head
+
+    before = schema.model_dump()
+    with pytest.raises(ValueError, match="root must remain a singleton"):
+        schema.update(rf.where("address") == "/", length=None, overflow=None)
+    assert schema.model_dump() == before
 
 
 def test_branch_rejects_invalid_overflow_policy():

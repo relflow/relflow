@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, cast
 
@@ -9,6 +10,7 @@ import pydantic
 import torch
 from tensordict import TensorDict
 
+from relflow.data.arrow import Geometry
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.tree import Address
 from relflow.tensorfields.base import TENSORFIELDS, TensorFieldBase
@@ -31,7 +33,8 @@ INTEGER_DTYPES = {
 
 
 ContractSignature = tuple[object, ...]
-ContractScope = tuple[str, int, int, ContractSignature]
+ContractScope = tuple[int, str, int, int, ContractSignature]
+CONTRACT_SCOPES = 128
 
 
 class ContractScheduler(pydantic.BaseModel):
@@ -40,7 +43,7 @@ class ContractScheduler(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
 
     periodic_interval: int = 1024
-    _counts: dict[ContractScope, int] = pydantic.PrivateAttr(default_factory=dict)
+    _counts: OrderedDict[ContractScope, int] = pydantic.PrivateAttr(default_factory=OrderedDict)
 
     def reset(self) -> None:
         self._counts.clear()
@@ -55,6 +58,7 @@ class ContractScheduler(pydantic.BaseModel):
     ) -> bool:
         generation = int(getattr(module, "_contract_generation", 0))
         scope = (
+            int(getattr(module, "global_rank", 0)),
             str(strata),
             dataloader_idx,
             generation,
@@ -62,6 +66,9 @@ class ContractScheduler(pydantic.BaseModel):
         )
         count = self._counts.get(scope, 0)
         self._counts[scope] = count + 1
+        self._counts.move_to_end(scope)
+        if len(self._counts) > CONTRACT_SCOPES:
+            self._counts.popitem(last=False)
         return is_backoff_index(count, periodic_interval=self.periodic_interval)
 
 
@@ -74,6 +81,18 @@ def sanitize(
 ) -> None:
     """Validate the generic forward-input contract before model execution."""
     normalized = Strata.normalize(strata)
+    if not isinstance(inputs, TensorDict):
+        raise TypeError(f"forward inputs must be a TensorDict, got {type(inputs).__name__}")
+
+    require_forward_addresses(module, inputs, strata=normalized)
+    for address in module.schema.active_requests:
+        require_registered_tensorfield(module, address, inputs[address])
+    shapes = require_geometry(module, inputs)
+    for address in module.schema.active_requests:
+        tensorfield = cast(TensorFieldBase, inputs[address])
+        require_core_tensors(module, address, tensorfield, shape=shapes[address])
+        require_tensor_devices(module, address, tensorfield)
+
     scheduler = getattr(module, "_contract_scheduler", None)
     if isinstance(scheduler, ContractScheduler) and not scheduler.should_check(
         module,
@@ -83,17 +102,16 @@ def sanitize(
     ):
         return
 
-    if not isinstance(inputs, TensorDict):
-        raise TypeError(f"forward inputs must be a TensorDict, got {type(inputs).__name__}")
-
-    require_forward_addresses(module, inputs, strata=normalized)
-
+    require_geometry_values(module, inputs)
     for address in module.schema.active_requests:
-        tensorfield = inputs[address]
-        require_registered_tensorfield(module, address, tensorfield)
-        tensorfield = cast(TensorFieldBase, tensorfield)
-        require_core_tensors(module, address, tensorfield)
-        require_tensor_devices(module, address, tensorfield)
+        tensorfield = cast(TensorFieldBase, inputs[address])
+        require_token_values(address, TensorKey.state, tensorfield.state)
+        if TensorKey.state in tensorfield.targets:
+            require_token_values(
+                address,
+                f"{TensorKey.targets}[{TensorKey.state}]",
+                cast(torch.Tensor, tensorfield.targets[TensorKey.state]),
+            )
         require_objective_contract(module, address, tensorfield)
         require_routing_contract(module, address, tensorfield, strata=normalized)
 
@@ -142,7 +160,7 @@ def tensor_signature(value: object) -> tuple[object, ...]:
 
     return (
         "tensor",
-        tuple(value.shape),
+        value.ndim,
         str(value.dtype),
         str(value.device),
     )
@@ -177,6 +195,8 @@ def require_forward_addresses(
 ) -> None:
     addresses = {Address(str(key)) for key in inputs.keys()}
     expected = set(module.schema.active_requests)
+    if isinstance(inputs.get(Address()), TensorDict):
+        expected.add(Address())
 
     missing = expected - addresses
     if missing:
@@ -216,7 +236,118 @@ def require_registered_tensorfield(module: "Model", address: Address, value: obj
         )
 
 
-def require_core_tensors(module: "Model", address: Address, tensorfield: TensorFieldBase) -> None:
+def require_geometry(module: "Model", inputs: TensorDict) -> dict[Address, tuple[int, ...]]:
+    """Validate shared branch extents without reading tensor values on the device."""
+
+    metadata = inputs.get(Address())
+    paths = {
+        address: tuple(node.address for node in request.path if node.type == "branch")
+        for address, request in module.schema.active_requests.items()
+    }
+    if metadata is None:
+        if any(size is None for address in paths for size in module.schema.shapes[address]):
+            raise ForwardContractError("forward inputs with automatic branch lengths require branch geometry at '/'")
+        first = next(iter(paths), None)
+        state = (
+            None
+            if first is None
+            else require_tensor_attribute(first, cast(TensorFieldBase, inputs[first]), TensorKey.state)
+        )
+        batch = 0 if state is None or not state.ndim else state.shape[0]
+        return {address: (batch, *cast(tuple[int, ...], module.schema.shapes[address])) for address in paths}
+
+    if not isinstance(metadata, TensorDict):
+        raise TypeError(f"forward branch geometry at '/' must be a TensorDict, got {type(metadata).__name__}")
+    expected = {Address(), *(parent for path in paths.values() for parent in path)}
+    actual = {Address(str(address)) for address in metadata.keys()}
+    if actual != expected:
+        raise ForwardContractError(
+            f"forward branch geometry addresses must match active branches: "
+            f"expected {format_addresses(expected)}, got {format_addresses(actual)}"
+        )
+
+    extents: dict[Address, int] = {}
+    batch = 0
+    for address, branch in module.schema.branches.items():
+        if address not in expected:
+            continue
+        geometry = metadata[address]
+        if not isinstance(geometry, Geometry):
+            raise TypeError(f"forward branch geometry '{address}' must be a Geometry, got {type(geometry).__name__}")
+        tensors = {name: getattr(geometry, name, None) for name in ("lengths", "present", "valid", "slots")}
+        devices: set[torch.device] = set()
+        for name, tensor in tensors.items():
+            if not isinstance(tensor, torch.Tensor):
+                raise TypeError(f"forward branch geometry '{address}' {name} must be a torch.Tensor")
+            dtype = torch.int64 if name == "lengths" else torch.bool
+            if tensor.dtype != dtype:
+                raise TypeError(f"forward branch geometry '{address}' {name} must use {dtype}, got {tensor.dtype}")
+            devices.add(tensor.device)
+        if address == Address():
+            if geometry.lengths.ndim != 1:
+                raise ForwardContractError("forward root geometry lengths must have rank one")
+            batch = geometry.lengths.shape[0]
+        parents = tuple(node.address for node in branch.path if node.type == "branch" and node is not branch)
+        parent_shape = (batch, *(extents[parent] for parent in parents))
+        for name in ("lengths", "present", "valid"):
+            tensor = getattr(geometry, name)
+            if tuple(tensor.shape) != parent_shape:
+                raise ForwardContractError(
+                    f"forward branch geometry '{address}' {name} must have shape {parent_shape}, "
+                    f"got {tuple(tensor.shape)}"
+                )
+        if geometry.slots.ndim != len(parent_shape) + 1 or tuple(geometry.slots.shape[:-1]) != parent_shape:
+            raise ForwardContractError(
+                f"forward branch geometry '{address}' slots must start with parent shape {parent_shape}, "
+                f"got {tuple(geometry.slots.shape)}"
+            )
+        extent = geometry.slots.shape[-1]
+        if (address == Address() and extent != 1) or (branch.length is not None and extent > branch.length):
+            raise ForwardContractError(
+                f"forward branch geometry '{address}' extent must be "
+                f"{'one' if address == Address() else f'at most {branch.length}'}, got {extent}"
+            )
+        module_device = getattr(module, "device", None)
+        if len(devices) != 1 or (
+            isinstance(module_device, torch.device) and not same_device(next(iter(devices)), module_device)
+        ):
+            raise ForwardContractError(
+                f"forward branch geometry '{address}' tensors must share module device {module_device}, "
+                f"got {', '.join(sorted(map(str, devices)))}"
+            )
+        extents[address] = extent
+    return {address: (batch, *(extents[parent] for parent in path)) for address, path in paths.items()}
+
+
+def require_geometry_values(module: "Model", inputs: TensorDict) -> None:
+    """Check collection validity and offsets on the expensive validation schedule."""
+
+    metadata = inputs.get(Address())
+    if not isinstance(metadata, TensorDict):
+        return
+    for address in metadata.keys():
+        geometry = cast(Geometry, metadata[address])
+        if (geometry.lengths < 0).any() or (geometry.lengths > geometry.slots.shape[-1]).any():
+            raise ForwardContractError(f"forward branch geometry '{address}' lengths must be within its extent")
+        if (geometry.valid & ~geometry.present).any() or (geometry.lengths.masked_select(~geometry.valid) != 0).any():
+            raise ForwardContractError(
+                f"forward branch geometry '{address}' validity must agree with collection lengths"
+            )
+        positions = torch.arange(geometry.slots.shape[-1], device=geometry.slots.device)
+        if (geometry.slots & (positions >= geometry.lengths.unsqueeze(-1))).any():
+            raise ForwardContractError(f"forward branch geometry '{address}' slots must lie within collection lengths")
+        if address == Address():
+            if not geometry.present.all() or not geometry.valid.all() or (geometry.lengths != 1).any():
+                raise ForwardContractError("forward root geometry must preserve one collection slot per batch row")
+        else:
+            parent = cast(Geometry, metadata[module.schema.branches[Address(address)].parent.address])
+            if (geometry.present & ~parent.slots).any():
+                raise ForwardContractError(f"forward branch geometry '{address}' cannot exist outside its parent slots")
+
+
+def require_core_tensors(
+    module: "Model", address: Address, tensorfield: TensorFieldBase, *, shape: tuple[int, ...]
+) -> None:
     state = require_tensor_attribute(address, tensorfield, TensorKey.state)
     present = require_tensor_attribute(address, tensorfield, TensorKey.present)
     trainable = require_tensor_attribute(address, tensorfield, TensorKey.trainable)
@@ -234,11 +365,8 @@ def require_core_tensors(module: "Model", address: Address, tensorfield: TensorF
             f"forward input '{address}' state must have rank {len(field_shape) + 1}, got {state.ndim}"
         )
 
-    expected_shape = (state.shape[0], *field_shape)
-    if tuple(state.shape) != expected_shape:
-        raise ForwardContractError(
-            f"forward input '{address}' state must have shape {expected_shape}, got {tuple(state.shape)}"
-        )
+    if tuple(state.shape) != shape:
+        raise ForwardContractError(f"forward input '{address}' state must have shape {shape}, got {tuple(state.shape)}")
 
     if state.dtype not in INTEGER_DTYPES:
         raise TypeError(f"forward input '{address}' state must use an integer dtype, got {state.dtype}")
@@ -255,7 +383,6 @@ def require_core_tensors(module: "Model", address: Address, tensorfield: TensorF
         if values.dtype != torch.bool:
             raise TypeError(f"forward input '{address}' {name} must use bool dtype, got {values.dtype}")
 
-    require_token_values(address, TensorKey.state, state)
     require_content_prefix_shapes(address, content, state)
 
     if TensorKey.state in targets.keys():
@@ -269,7 +396,6 @@ def require_core_tensors(module: "Model", address: Address, tensorfield: TensorF
             expected={(): state},
         )
         require_integer_tensors(address, target_state_name, target_state)
-        require_token_values(address, target_state_name, cast(torch.Tensor, targets[TensorKey.state]))
 
     if TensorKey.content in targets.keys():
         target_content_name = f"{TensorKey.targets}[{TensorKey.content}]"

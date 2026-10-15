@@ -311,8 +311,8 @@ class Leaf(Node):
         return self
 
     @functools.cached_property
-    def shape(self) -> tuple[int, ...]:
-        out: list[int] = []
+    def shape(self) -> tuple[int | None, ...]:
+        out: list[int | None] = []
 
         for node in self.path:
             if node.type == "branch":
@@ -321,8 +321,8 @@ class Leaf(Node):
         return tuple(out)
 
     @functools.cached_property
-    def overflows(self) -> tuple[Overflow, ...]:
-        out: list[Overflow] = []
+    def overflows(self) -> tuple[Overflow | None, ...]:
+        out: list[Overflow | None] = []
 
         for node in self.path:
             if node.type == "branch":

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, cast
 
 import torch
+from tensordict import TensorDict
 
 from relflow.architecture.attention import RotaryMultiheadAttention
 from relflow.architecture.blocks import feed_forward, norm
@@ -14,9 +16,56 @@ from relflow.structs.reduction import Attention, Mean
 from relflow.structs.tree import Address, Leaf, Node
 
 if TYPE_CHECKING:
+    from relflow.data.arrow import Geometry
     from relflow.structs.experiment import Schema
+    from relflow.structs.structure import Branch
 
 FLASH_BATCH_MAX = 65535
+
+
+def locate(parcel: Parcel, *, schema: Schema, geometry: TensorDict | None) -> Parcel:
+    """Attach structural leaf coordinates independently of values and masking."""
+    branch = cast("Branch", schema.requests[parcel.origin].parent)
+    capacity = branch.length
+    width = parcel.payload.shape[-2]
+    shape = tuple(parcel.payload.shape[:-2])
+    layout = cast("Geometry", geometry[branch.address]) if geometry is not None else None
+    lengths = layout.lengths if layout is not None else None
+    parcel.positions = torch.arange(width, device=parcel.payload.device).expand(parcel.payload.shape[:-1])
+    parcel.spans = (
+        torch.full(shape, capacity, device=parcel.payload.device, dtype=torch.int64)
+        if capacity is not None
+        else lengths
+        if lengths is not None
+        else torch.full(shape, width, device=parcel.payload.device, dtype=torch.int64)
+    )
+    parcel.slots = (
+        parcel.positions < lengths.unsqueeze(-1)
+        if lengths is not None
+        else torch.ones_like(parcel.present, dtype=torch.bool)
+    )
+    return parcel
+
+
+def sequence(
+    parcels: list[Parcel], *, order: dict[Address, int] | None = None
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Concatenate fields using structural spans rather than padded storage widths."""
+    if order is not None:
+        parcels = sorted(parcels, key=lambda parcel: order[parcel.origin])
+    first = parcels[0]
+    spans = torch.zeros(first.payload.shape[:-2], device=first.payload.device, dtype=torch.int64)
+    positions, slots = [], []
+    for parcel in parcels:
+        local = parcel.positions
+        if local is None:
+            local = torch.arange(parcel.payload.shape[-2], device=parcel.payload.device).expand(
+                parcel.payload.shape[:-1]
+            )
+        positions.append(local + spans.unsqueeze(-1))
+        slots.append(torch.ones_like(parcel.present) if parcel.slots is None else parcel.slots)
+        spans = spans + (parcel.payload.shape[-2] if parcel.spans is None else parcel.spans)
+    return torch.cat(positions, dim=-1), spans, torch.cat(slots, dim=-1)
 
 
 class RotaryTransformerEncoderLayer(torch.nn.Module):
@@ -46,7 +95,12 @@ class RotaryTransformerEncoderLayer(torch.nn.Module):
         self.ffn = feed_forward(d_model, dropout, ffnx)
 
     def forward(
-        self, inputs: torch.Tensor, present: torch.Tensor | None, *, packing: Packed | None = None
+        self,
+        inputs: torch.Tensor,
+        present: torch.Tensor | None,
+        *,
+        packing: Packed | None = None,
+        positions: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if packing is not None:
             return block(self, inputs, packing)
@@ -58,7 +112,14 @@ class RotaryTransformerEncoderLayer(torch.nn.Module):
         if present is not None:
             inputs = inputs.masked_fill(~present.unsqueeze(-1), 0.0)
         normed = self.attention_norm(inputs)
-        inputs = inputs + self.attention(normed, normed, normed, key_padding_mask=None if present is None else ~present)
+        inputs = inputs + self.attention(
+            normed,
+            normed,
+            normed,
+            key_padding_mask=None if present is None else ~present,
+            query_positions=positions,
+            key_positions=positions,
+        )
         inputs = inputs + self.ffn(self.ffn_norm(inputs))
         return inputs if present is None else inputs.masked_fill(~present.unsqueeze(-1), 0.0)
 
@@ -95,11 +156,13 @@ class BranchEncoder(torch.nn.Module):
 
         self.encoder = torch.nn.ModuleList(layers)
 
-        child_width = sum(
+        widths = [
             int(child.active) if isinstance(child, Leaf) else schema.branch_outputs[child.address]
             for child in branch.fields
-        )
-        self.input_width = branch.length * child_width
+        ]
+        child_width = None if any(width is None for width in widths) else sum(cast(list[int], widths))
+        self.input_width = None if branch.length is None or child_width is None else branch.length * child_width
+        self.parent_capacity = getattr(branch.parent, "length", 1)
         self.child_order = {child.address: index for index, child in enumerate(branch.fields)}
 
         self.coordinate_origins = frozenset(
@@ -141,13 +204,13 @@ class BranchEncoder(torch.nn.Module):
                     dropout=float(branch.reduction.dropout if branch.reduction.dropout is not None else dropout),
                     n_linear=branch.reduction.n_layers,
                     position=branch.reduction.position,
-                    mass_capacity=max(1, self.input_width),
+                    mass_capacity=max(1, self.input_width or 1),
                     ffnx=branch.ffnx,
                 )
             case _:
                 raise ValueError(f"unsupported branch reduction: {branch.reduction}")
 
-    def forward(self, parcels: list[Parcel]) -> Parcel:
+    def forward(self, parcels: list[Parcel], *, geometry: TensorDict | None = None) -> Parcel:
         from relflow.architecture.compiler import canonical
 
         if not parcels:
@@ -159,6 +222,8 @@ class BranchEncoder(torch.nn.Module):
             raise ValueError(f"branch encoder '{self.origin}' received parcel(s) from non-child address(es): {origins}")
         parcels = sorted(parcels, key=lambda parcel: self.child_order[parcel.origin])
         parcels = self.contextualize(parcels)
+        positions, spans, slots = sequence(parcels)
+        positioned = any(parcel.positions is not None for parcel in parcels)
         payloads = [parcel.payload for parcel in parcels]
         presence = [parcel.present for parcel in parcels]
         for parcel in parcels:
@@ -172,8 +237,10 @@ class BranchEncoder(torch.nn.Module):
         concatenated: torch.Tensor = torch.cat(payloads, dim=-2)
         present = torch.cat(presence, dim=-1)
         N, *dims, L, C = concatenated.shape
-        encoded: torch.Tensor = concatenated.reshape(-1, L, C)
-        present = present.reshape(-1, L)
+        rows = N * math.prod(dims)
+        encoded: torch.Tensor = concatenated.reshape(rows, L, C)
+        present = present.reshape(rows, L)
+        flat_positions = positions.reshape(rows, L)
         active = present.any(dim=1)
         indices = active.nonzero(as_tuple=False).reshape(-1)
 
@@ -186,6 +253,7 @@ class BranchEncoder(torch.nn.Module):
         if count:
             selected = encoded if complete else encoded.index_select(0, indices)
             selected_present = present.index_select(0, indices)
+            selected_positions = flat_positions if complete else flat_positions.index_select(0, indices)
             selected = selected.masked_fill(~selected_present.unsqueeze(-1), 0.0)
             evidence = selected
 
@@ -196,7 +264,7 @@ class BranchEncoder(torch.nn.Module):
             )
             full = prepared and bool(selected_present.all())
             if prepared and not full:
-                values, packing = pack(selected, selected_present)
+                values, packing = pack(selected, selected_present, selected_positions if positioned else None)
                 values = self.compute(values, selected_present, packing=packing)
                 selected = unpack(
                     values,
@@ -214,7 +282,12 @@ class BranchEncoder(torch.nn.Module):
                     and type(self) is BranchEncoder
                     and canonical(self, self.compute)
                 )
-                selected = self.compute(selected, None if unmasked else selected_present)
+                if positioned and type(self).compute is BranchEncoder.compute and canonical(self, self.compute):
+                    selected = self.compute(
+                        selected, None if unmasked else selected_present, positions=selected_positions
+                    )
+                else:
+                    selected = self.compute(selected, None if unmasked else selected_present)
 
             match self.reduction:
                 case None:
@@ -223,7 +296,12 @@ class BranchEncoder(torch.nn.Module):
                 case _:
                     assert self.pool is not None
                     if isinstance(self.pool, LearnedQueryCrossAttention):
-                        selected_output = self.pool(selected, present=selected_present, evidence=evidence)
+                        selected_output = self.pool(
+                            selected,
+                            present=selected_present,
+                            evidence=evidence,
+                            memory_positions=selected_positions if positioned else None,
+                        )
                     else:
                         selected_output = self.pool(selected, present=selected_present)
                     selected_output_present = torch.ones(
@@ -256,12 +334,33 @@ class BranchEncoder(torch.nn.Module):
 
         reduced = reduced.reshape(N, *dims, output_width, C)
         reduced_present = reduced_present.reshape(N, *dims, output_width)
+        if self.n_outputs is not None:
+            positions = torch.arange(output_width, device=encoded.device).expand(N, *dims, output_width)
+            spans = torch.full((N, *dims), output_width, device=encoded.device, dtype=torch.int64)
+            slots = torch.ones((N, *dims, output_width), device=encoded.device, dtype=torch.bool)
         if dims:
+            offsets = spans.cumsum(dim=-1) - spans
+            positions = (positions + offsets.unsqueeze(-1)).reshape(N, *dims[:-1], dims[-1] * output_width)
+            slots = slots.reshape(N, *dims[:-1], dims[-1] * output_width)
+            parent = cast("Geometry", geometry[self.destination]) if geometry is not None else None
+            if parent is not None:
+                retained = torch.arange(dims[-1], device=encoded.device) < parent.lengths.unsqueeze(-1)
+                slots = slots.reshape(N, *dims, output_width).masked_fill(~retained.unsqueeze(-1), False)
+                slots = slots.reshape(N, *dims[:-1], dims[-1] * output_width)
+                spans = spans.masked_fill(~retained, 0)
+            capacity = self.input_width if self.n_outputs is None else self.n_outputs
+            spans = (
+                torch.full((N, *dims[:-1]), self.parent_capacity * capacity, device=encoded.device, dtype=torch.int64)
+                if self.parent_capacity is not None and capacity is not None
+                else spans.sum(dim=-1)
+            )
             routed = reduced.reshape(N, *dims[:-1], dims[-1] * output_width, C)
             routed_present = reduced_present.reshape(N, *dims[:-1], dims[-1] * output_width)
         elif output_width == 1:
             routed = reduced[:, 0]
             routed_present = reduced_present[:, 0]
+            positions = positions[:, 0]
+            slots = slots[:, 0]
         else:
             routed = reduced
             routed_present = reduced_present
@@ -271,16 +370,31 @@ class BranchEncoder(torch.nn.Module):
             present=routed_present,
             origin=self.origin,
             destination=self.destination,
+            positions=positions,
+            spans=spans,
+            slots=slots,
             batch_size=N,
         )
 
     def compute(
-        self, inputs: torch.Tensor, present: torch.Tensor | None, *, packing: Packed | None = None
+        self,
+        inputs: torch.Tensor,
+        present: torch.Tensor | None,
+        *,
+        packing: Packed | None = None,
+        positions: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Encode prepared sequences; absent presence means every coordinate is live."""
         for layer in cast(Iterable[RotaryTransformerEncoderLayer], self.encoder):
             if packing is None:
-                inputs = layer(inputs, present=present)
+                if (
+                    positions is not None
+                    and type(layer) is RotaryTransformerEncoderLayer
+                    and "forward" not in layer.__dict__
+                ):
+                    inputs = layer(inputs, present=present, positions=positions)
+                else:
+                    inputs = layer(inputs, present=present)
             else:
                 inputs = layer(inputs, present=present, packing=packing)
         return inputs
@@ -306,8 +420,9 @@ class BranchEncoder(torch.nn.Module):
         present = torch.stack([parcel.present for parcel in selected], dim=-1)
         field_count = payload.shape[-2]
         channel_count = payload.shape[-1]
-        inputs = payload.reshape(-1, field_count, channel_count)
-        presence = present.reshape(-1, field_count)
+        rows = math.prod(payload.shape[:-2])
+        inputs = payload.reshape(rows, field_count, channel_count)
+        presence = present.reshape(rows, field_count)
         prepared = (
             bool(field_count)
             and not customized((self.coordinate_encoder,))
@@ -334,6 +449,9 @@ class BranchEncoder(torch.nn.Module):
                 present=parcel.present,
                 origin=parcel.origin,
                 destination=parcel.destination,
+                positions=parcel.positions,
+                spans=parcel.spans,
+                slots=parcel.slots,
                 batch_size=parcel.payload.shape[0],
             )
         return contextualized

@@ -82,7 +82,20 @@ model = rf.Model(
   `rf.Preprocessor`.
 - `transactions=rf.Branch(...)` reads the same-named child collection, and its
   leaves read keys such as `amount` from each child mapping.
-- `Branch(overflow="head")` is the default. Use `overflow="tail"` for recency-ordered histories and `overflow="error"` for strict schemas. The generated root branch uses internal `Overflow.error`.
+- `Branch.length` defaults to `None`: collection width follows the largest
+  retained collection in each batch, without changing the schema or parameters.
+  A positive integer sets a hard limit; omitted overflow then defaults to
+  `"head"`. Use `length=N, overflow="tail"` for recency-ordered histories or
+  `overflow="error"` to reject excess rows. Unbounded branches require
+  `overflow=None` and log one resource-exhaustion warning per model generation.
+  The anonymous root remains `length=1, overflow="error"`.
+- Bounded axes also compact execution to the observed batch width, up to their
+  cap. Prediction writes their declared fixed-size Arrow lists with null
+  coordinate padding; unbounded axes use variable lists and structural offsets.
+  Tensorized input keeps branch `Geometry` under the reserved root address `/`
+  alongside leaf tensorfields, so cloning, device transfer, and row selection
+  preserve lengths and structural holes. Do not infer geometry from leaf values
+  or masks.
 - `mask=True` is shorthand for
   `Mask(skip=True, dropout=False, reconstruct=True)`: the field is never
   embedded and is decoded as a supervised reconstruction target.

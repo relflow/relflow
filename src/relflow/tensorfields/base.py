@@ -38,7 +38,8 @@ from tensordict import TensorClass, TensorDict
 from typing_extensions import TypeVar as DefaultTypeVar
 
 from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool
-from relflow.data.arrow import variants
+from relflow.architecture.rotary import coordinates, flatten, signal
+from relflow.data.arrow import Geometry, variants
 from relflow.structs.enums import Component, Strata, TensorKey
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, Leaf
@@ -277,11 +278,28 @@ class DecoderBase(torch.nn.Module):
         self.register_buffer("anchor", torch.zeros(()), persistent=False)
 
         request = schema.requests[address]
-        n_context = 1
-        for dimension in schema.shapes[address]:
-            n_context *= dimension
+        self.shape = schema.shapes[address]
+        self.axes = tuple(node.address for node in request.path if getattr(node, "type", None) == "branch")
+        n_context = math.prod(dimension if dimension is not None else 1 for dimension in self.shape)
         self.n_context = n_context
         self.d_model = schema.d_model
+        self.memory_coordinates: dict[Address, tuple[tuple[Address, ...], tuple[int | None, ...], int | None]] = {}
+        for origin in request.heritage:
+            node = schema.requests[origin] if origin in schema.requests else schema.branches[origin]
+            path = tuple(cast("Branch", node) for node in node.path if getattr(node, "type", None) == "branch")
+            if isinstance(node, Leaf):
+                outer = path[:-1]
+                capacity = path[-1].length
+            else:
+                outer = path[:-2]
+                capacity = schema.branch_outputs[origin]
+                if len(path) > 1:
+                    capacity = None if path[-2].length is None or capacity is None else path[-2].length * capacity
+            self.memory_coordinates[origin] = (
+                tuple(node.address for node in outer),
+                tuple(node.length for node in outer),
+                capacity,
+            )
 
         def visible(node: Branch | Leaf) -> list[Address]:
             if isinstance(node, Leaf):
@@ -305,11 +323,25 @@ class DecoderBase(torch.nn.Module):
 
         def aligns(context_address: Address) -> bool:
             if context_address in schema.requests:
-                return math.prod(schema.shapes[context_address]) == n_context
+                shape = schema.shapes[context_address]
+                if any(dimension is None for dimension in (*self.shape, *shape)):
+                    axes = tuple(
+                        node.address
+                        for node in schema.requests[context_address].path
+                        if getattr(node, "type", None) == "branch"
+                    )
+                    return axes == self.axes
+                return math.prod(cast(tuple[int, ...], shape)) == n_context
 
             branch = schema.branches[context_address]
             lengths = tuple(node.length for node in branch.path if getattr(node, "type", None) == "branch")
-            return math.prod((*lengths[1:-1], schema.branch_outputs[context_address])) == n_context
+            output = schema.branch_outputs[context_address]
+            if any(dimension is None for dimension in (*self.shape, *lengths, output)):
+                axes = tuple(node.address for node in branch.path if getattr(node, "type", None) == "branch")
+                return axes[:-1] == self.axes and output == 1
+            return math.prod(cast(tuple[int, ...], (*lengths[1:-1], output))) == n_context
+
+        self.aligned_addresses = frozenset(item for item in self.context_addresses if aligns(item))
 
         self.context_projection = (
             torch.nn.Sequential(
@@ -318,7 +350,7 @@ class DecoderBase(torch.nn.Module):
                 torch.nn.GELU(approximate="tanh"),
                 torch.nn.Linear(schema.d_model * request.ffnx, schema.d_model),
             )
-            if any(aligns(item) for item in self.context_addresses) and request.pooling == "query"
+            if self.aligned_addresses and request.pooling == "query"
             else None
         )
         match request.pooling:
@@ -334,7 +366,9 @@ class DecoderBase(torch.nn.Module):
                     # an otherwise unordered evidence set, while repeated
                     # targets retain position as one routing signal. Ordered
                     # scalar tasks can opt in explicitly.
-                    position=n_context > 1 if request.decoder_position is None else request.decoder_position,
+                    position=(n_context > 1 or None in self.shape)
+                    if request.decoder_position is None
+                    else request.decoder_position,
                 )
             case "mean":
                 self.pool = MeanPool(n_context=n_context)
@@ -356,13 +390,35 @@ class DecoderBase(torch.nn.Module):
         batch_size: int,
         device: torch.device,
         embed: bool = False,
+        target_shape: tuple[int, ...] | None = None,
+        geometry: TensorDict | None = None,
     ) -> Prediction:
         if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size < 0:
             raise ValueError(f"decoder batch_size must be a non-negative integer, got {batch_size!r}")
 
+        shape = (
+            target_shape
+            if target_shape is not None
+            else tuple(dimension if dimension is not None else 0 for dimension in self.shape)
+        )
+        count = math.prod(shape)
+        lengths = tuple(cast(Geometry, geometry[axis]).lengths if geometry is not None else None for axis in self.axes)
+        positions = coordinates((batch_size, *shape), self.shape, lengths, device=device).reshape(batch_size, count)
+        queries = None
+        if isinstance(self.pool, LearnedQueryCrossAttention) and (shape != self.shape or None in self.shape):
+            indices = torch.zeros(shape, dtype=torch.int64, device=device)
+            for axis, capacity in enumerate(self.shape):
+                if capacity is not None:
+                    axis_shape = [1] * len(shape)
+                    axis_shape[axis] = shape[axis]
+                    indices = indices * capacity + torch.arange(shape[axis], device=device).reshape(axis_shape)
+            queries = self.pool.queries.index_select(0, indices.reshape(-1)).unsqueeze(0).expand(batch_size, -1, -1)
+            if None in self.shape:
+                queries = queries + signal(positions, self.d_model, dtype=queries.dtype)
+
         if not parcels:
             pooled = torch.zeros(
-                (batch_size, self.n_context, self.d_model),
+                (batch_size, count, self.d_model),
                 device=device,
                 dtype=self.anchor.dtype,
             )
@@ -383,15 +439,53 @@ class DecoderBase(torch.nn.Module):
                     )
 
             stacked = torch.cat(
-                [parcel.payload.reshape(batch_size, -1, self.d_model) for parcel in parcels],
+                [
+                    parcel.payload.reshape(batch_size, math.prod(parcel.payload.shape[1:-1]), self.d_model)
+                    for parcel in parcels
+                ],
                 dim=1,
             )
-            present = torch.cat([parcel.present.reshape(batch_size, -1) for parcel in parcels], dim=1)
-            context = self.context(contexts or (), batch_size=batch_size)
+            present = torch.cat(
+                [parcel.present.reshape(batch_size, math.prod(parcel.present.shape[1:])) for parcel in parcels], dim=1
+            )
+            memory_positions = []
+            offset = torch.zeros(batch_size, dtype=torch.int64, device=device)
+            for parcel in parcels:
+                size = math.prod(parcel.present.shape[1:])
+                if parcel.positions is None or parcel.spans is None:
+                    ranks = torch.arange(size, device=device).expand(batch_size, size)
+                    span = torch.full((batch_size,), size, device=device, dtype=torch.int64)
+                else:
+                    axes, capacities, capacity = self.memory_coordinates[parcel.origin]
+                    lengths = tuple(
+                        cast(Geometry, geometry[axis]).lengths if geometry is not None else None for axis in axes
+                    )
+                    ranks, span = flatten(
+                        parcel.positions.reshape(parcel.present.shape)
+                        if parcel.present.ndim > 1
+                        else parcel.positions.reshape(batch_size, 1),
+                        parcel.spans,
+                        capacities=capacities,
+                        lengths=lengths,
+                        capacity=capacity,
+                    )
+                memory_positions.append(ranks + offset.unsqueeze(-1))
+                offset = offset + span
+            memory_positions = torch.cat(memory_positions, dim=1)
+            context = self.context(contexts or (), batch_size=batch_size, n_context=count)
             if isinstance(self.pool, LearnedQueryCrossAttention):
-                pooled = self.pool(stacked, present=present, context=context)
+                pooled = self.pool(
+                    stacked,
+                    present=present,
+                    context=context,
+                    queries=queries,
+                    positions=positions,
+                    memory_positions=memory_positions,
+                )
             else:
                 pooled = self.pool(stacked, present=present)
+                if count != self.n_context:
+                    pooled = pooled[:, :1].expand(batch_size, count, self.d_model)
             if context is not None:
                 pooled = pooled + context * 0.0
 
@@ -405,7 +499,9 @@ class DecoderBase(torch.nn.Module):
             batch_size=pooled.shape[0],
         )
 
-    def context(self, parcels: tuple[Parcel, ...] | list[Parcel], *, batch_size: int) -> torch.Tensor | None:
+    def context(
+        self, parcels: tuple[Parcel, ...] | list[Parcel], *, batch_size: int, n_context: int | None = None
+    ) -> torch.Tensor | None:
         """Build one data-conditioned decoder query per target coordinate."""
 
         if self.context_projection is None:
@@ -413,10 +509,13 @@ class DecoderBase(torch.nn.Module):
 
         aligned: list[torch.Tensor] = []
         presence: list[torch.Tensor] = []
-        expected = (batch_size, self.n_context, self.d_model)
+        n_context = self.n_context if n_context is None else n_context
+        expected = (batch_size, n_context, self.d_model)
         for parcel in parcels:
-            payload = parcel.payload.reshape(batch_size, -1, self.d_model)
-            present = parcel.present.reshape(batch_size, -1)
+            if parcel.origin not in self.aligned_addresses:
+                continue
+            payload = parcel.payload.reshape(batch_size, math.prod(parcel.payload.shape[1:-1]), self.d_model)
+            present = parcel.present.reshape(batch_size, math.prod(parcel.present.shape[1:]))
             if tuple(payload.shape) != expected:
                 continue
             aligned.append(payload)

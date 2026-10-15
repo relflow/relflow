@@ -136,6 +136,13 @@ class Schema(Node):
 
         if "fields" in values:
             values["fields"] = restore(values["fields"])
+            if isinstance(values["fields"], Mapping):
+                root = dict(values["fields"])
+                if root.get("length") is None:
+                    root["length"] = 1
+                if root.get("overflow") is None:
+                    root["overflow"] = Overflow.error
+                values["fields"] = root
         return values
 
     @classmethod
@@ -238,29 +245,32 @@ class Schema(Node):
         return {node.address: node for node in self.requests.values() if node.active}
 
     @functools.cached_property
-    def shapes(self) -> dict[Address, tuple[int, ...]]:
+    def shapes(self) -> dict[Address, tuple[int | None, ...]]:
         return {request.address: request.shape for request in self.requests.values()}
 
     @functools.cached_property
-    def branch_outputs(self) -> dict[Address, int]:
-        """Static routed token width produced by every structurally active branch."""
+    def branch_outputs(self) -> dict[Address, int | None]:
+        """Symbolic routed widths; ``None`` depends on the observed collections."""
 
-        outputs: dict[Address, int] = {}
+        outputs: dict[Address, int | None] = {}
         for depth in reversed(self.depthwise):
             for address in depth:
                 branch = self.branches[address]
-                child_width = 0
+                widths: list[int | None] = []
                 for child in branch.fields:
                     if isinstance(child, Leaf):
-                        child_width += int(child.active)
+                        widths.append(int(child.active))
                     elif child.address in outputs:
-                        child_width += outputs[child.address]
+                        widths.append(outputs[child.address])
 
-                input_width = branch.length * child_width
-                if input_width == 0:
+                if not any(width != 0 for width in widths):
                     outputs[address] = 0
                 elif branch.reduction is None:
-                    outputs[address] = input_width
+                    outputs[address] = (
+                        None
+                        if branch.length is None or any(width is None for width in widths)
+                        else branch.length * sum(cast(int, width) for width in widths)
+                    )
                 elif isinstance(branch.reduction, Attention):
                     outputs[address] = branch.reduction.n_outputs
                 else:
@@ -268,7 +278,7 @@ class Schema(Node):
 
         return outputs
 
-    def overflows(self, address: Address) -> tuple[Overflow, ...]:
+    def overflows(self, address: Address) -> tuple[Overflow | None, ...]:
         return (Overflow.error, *self.requests[Address(str(address))].overflows)
 
     def masks_for(self, address: Address) -> tuple[tuple[Address, Mask], ...]:
@@ -301,6 +311,8 @@ class Schema(Node):
                 node.__dict__.pop(name, None)
 
     def post_bind_validate(self) -> None:
+        if self.fields.length != 1 or self.fields.overflow != Overflow.error:
+            raise ValueError("model root must remain a singleton with length=1 and overflow='error'")
         if self.fields.name is not None:
             raise ValueError(
                 f"model root must be anonymous, got name {self.fields.name!r}; "
@@ -338,7 +350,7 @@ class Schema(Node):
             if request.address not in decoded or request.pooling != "query":
                 continue
             positional = (
-                any(length > 1 for length in request.shape)
+                any(length is None or length > 1 for length in request.shape)
                 if request.decoder_position is None
                 else request.decoder_position
             )
@@ -441,6 +453,8 @@ class Schema(Node):
                     payload.update(applicable_values)
                     validated = type(node).model_validate(payload)
                     applicable_values = {name: getattr(validated, name) for name in applicable_values}
+                    if isinstance(node, Branch) and "length" in applicable_values:
+                        applicable_values["overflow"] = cast(Branch, validated).overflow
 
                 for name, value in applicable_values.items():
                     snapshots.append(

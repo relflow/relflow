@@ -122,6 +122,7 @@ class FastAPIRuntime:
         model = self.model_source if isinstance(self.model_source, Model) else Model.load(self.model_source)
         for predicates, values in self.update_operations:
             model.update(*predicates, **values)
+        model.warn_unbounded()
 
         self.model = model.to(self.device)
         self.model.eval()

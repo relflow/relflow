@@ -48,10 +48,10 @@ class RotaryMultiheadAttention(torch.nn.Module):
         batch, seq_len, _ = inputs.shape
         return inputs.reshape(batch, seq_len, nhead, self.head_dim).transpose(1, 2)
 
-    def rotate(self, inputs: torch.Tensor) -> torch.Tensor:
+    def rotate(self, inputs: torch.Tensor, positions: torch.Tensor | None = None) -> torch.Tensor:
         if self.rotary is None:
             return inputs
-        return self.rotary(inputs)
+        return self.rotary(inputs, positions=positions)
 
     def forward(
         self,
@@ -61,6 +61,8 @@ class RotaryMultiheadAttention(torch.nn.Module):
         key_padding_mask: torch.Tensor | None = None,
         *,
         packing: Packed | None = None,
+        query_positions: torch.Tensor | None = None,
+        key_positions: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if packing is not None:
             return attend(self, query, key, value, packing)
@@ -92,8 +94,8 @@ class RotaryMultiheadAttention(torch.nn.Module):
             attn_mask[:, 0] |= ~active
             attn_mask = attn_mask[:, None, None, :]
 
-        q = self.rotate(self.splitheads(self.q_proj(query), nhead=self.nhead))
-        k = self.rotate(self.splitheads(self.k_proj(key), nhead=self.n_kv_heads))
+        q = self.rotate(self.splitheads(self.q_proj(query), nhead=self.nhead), query_positions)
+        k = self.rotate(self.splitheads(self.k_proj(key), nhead=self.n_kv_heads), key_positions)
         v = self.splitheads(self.v_proj(value), nhead=self.n_kv_heads)
 
         context = F.scaled_dot_product_attention(

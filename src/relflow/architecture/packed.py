@@ -84,7 +84,9 @@ def customized(layers: Iterable[torch.nn.Module], *, additional: tuple[type[torc
     )
 
 
-def pack(inputs: torch.Tensor, present: torch.Tensor) -> tuple[torch.Tensor, Packed]:
+def pack(
+    inputs: torch.Tensor, present: torch.Tensor, positions: torch.Tensor | None = None
+) -> tuple[torch.Tensor, Packed]:
     """Select live values once, retaining their original positions and row ownership."""
     if present.dtype != torch.bool or tuple(present.shape) != tuple(inputs.shape[:2]):
         raise ValueError(
@@ -93,7 +95,13 @@ def pack(inputs: torch.Tensor, present: torch.Tensor) -> tuple[torch.Tensor, Pac
         )
     batch, capacity, width = inputs.shape
     indices = present.reshape(-1).nonzero(as_tuple=False).reshape(-1)
-    positions = indices.remainder(capacity) if capacity else indices
+    positions = (
+        positions.expand(batch, capacity).reshape(-1).index_select(0, indices)
+        if positions is not None
+        else indices.remainder(capacity)
+        if capacity
+        else indices
+    )
     counts = present.sum(dim=1, dtype=torch.int32)
     offsets = torch.cat((counts.new_zeros(1), counts.cumsum(dim=0, dtype=torch.int32)))
     groups = []

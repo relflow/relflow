@@ -185,7 +185,7 @@ def test_metric_names_use_dotted_addresses_and_preserve_case(monkeypatch, names,
 
 
 def test_absolute_routing_preserves_forward_values_and_gradients(monkeypatch):
-    """Compare identical weights with an explicit test-only root namespace."""
+    """Compare identical weights with a test-only prefix on child addresses."""
 
     def run():
         torch.manual_seed(418)
@@ -219,6 +219,8 @@ def test_absolute_routing_preserves_forward_values_and_gradients(monkeypatch):
     def named_address(node):
         if node.parent is None or node.root.type != "schema":
             return rf.Address("")
+        if node.parent.type == "schema":
+            return rf.Address()
         return rf.Address("reference", *(part.name for part in node.path[2:]))
 
     with monkeypatch.context() as reference:

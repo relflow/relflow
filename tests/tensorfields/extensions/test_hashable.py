@@ -64,7 +64,7 @@ def _new_tensorfield(
     salt: int = 0,
 ) -> TensorField:
     batch = arrow_batch([{"items": [{"identifier": value} for value in root]} for (root,) in values])
-    projection = coalesce(batch, schema=schema, strata=strata)[ADDRESS]
+    projection = coalesce(batch, schema=schema, strata=strata).fields[ADDRESS]
     return tensorize(
         TensorField,
         projection,

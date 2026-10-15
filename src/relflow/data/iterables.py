@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any, cast
 
@@ -11,13 +12,30 @@ import pyarrow as pa
 import torch
 from tensordict import TensorDict
 
-from relflow.data.arrow import Encoded, Retain
+from relflow.data.arrow import Encoded, Geometry, Retain
 from relflow.data.datasets.base import EncodedInput, InterprocessEncodingContext
-from relflow.data.ragged import RaggedField, boolean, coalesce
+from relflow.data.ragged import Layout, RaggedField, boolean, coalesce
 from relflow.structs.enums import Component, Strata, Tokens
 from relflow.structs.experiment import Schema
-from relflow.structs.tree import Address
+from relflow.structs.tree import Address, Node
 from relflow.tensorfields.base import TENSORFIELDS, BatchContext, Context, TensorFieldBase
+
+
+def geometry(layouts: Mapping[Address, Layout], *, rows: int) -> TensorDict:
+    """Move shared Arrow structural coordinates into the Torch batch plane."""
+
+    axes: dict[Address, Geometry] = {}
+    for address, layout in layouts.items():
+        slots = np.zeros(layout.shape, dtype=bool)
+        slots.reshape(-1)[layout.placement] = True
+        axes[address] = Geometry(
+            lengths=torch.from_numpy(layout.lengths),
+            present=torch.from_numpy(layout.present),
+            valid=torch.from_numpy(layout.valid),
+            slots=torch.from_numpy(slots),
+            batch_size=[rows],
+        )
+    return TensorDict(source=cast(Any, axes), batch_size=[rows])
 
 
 def encode(
@@ -35,12 +53,12 @@ def encode(
 
     salt = random.getrandbits(64) if strata in {Strata.train, Strata.validate} else 0
 
-    projections = coalesce(batch, schema=schema, strata=strata, seed=seed, epoch=epoch)
+    coalesced = coalesce(batch, schema=schema, strata=strata, seed=seed, epoch=epoch)
 
     for address, request in schema.active_requests.items():
         extension = TENSORFIELDS[request.type]
         TensorField = extension.TensorField
-        projection = projections.pop(address)
+        projection = coalesced.fields.pop(address)
         pristine = projection.pristine
         nulls = pristine.state.to_numpy(zero_copy_only=False) == Tokens.null.value
         if not request.nullable and nulls.any():
@@ -55,7 +73,7 @@ def encode(
                 raise RuntimeError(f"extension '{extension.name}' at '{address}' requires a bind component")
             state, bindings[address] = state.batch(values)
         observation = None
-        if strata == Strata.train and not projection.vacant:
+        if strata == Strata.train:
             canonical = replace(pristine, values=values)
             observation = extension.observe(
                 field=canonical,
@@ -100,16 +118,40 @@ def encode(
             ),
         )
 
-    inputs = TensorDict(source=cast(Any, out))
+    inputs = TensorDict(source=cast(Any, out), batch_size=[batch.num_rows])
+    inputs[Address()] = geometry(coalesced.layouts, rows=batch.num_rows)
     return Encoded(tensors=inputs, source=batch, retain=retain, observations=observations, bindings=bindings)
 
 
 def mock(schema: Schema, batch_size: int) -> EncodedInput:
     out: dict[Address, TensorFieldBase] = {}
+    axes: dict[Address, Geometry] = {}
+    root = Address()
+    axes[root] = Geometry(
+        lengths=torch.ones(batch_size, dtype=torch.int64),
+        present=torch.ones(batch_size, dtype=torch.bool),
+        valid=torch.ones(batch_size, dtype=torch.bool),
+        slots=torch.ones((batch_size, 1), dtype=torch.bool),
+        batch_size=[batch_size],
+    )
+    required = {
+        node.address for request in schema.active_requests.values() for node in request.path if node.type == "branch"
+    }
+    for address, branch in schema.branches.items():
+        if address == root or address not in required:
+            continue
+        parent = axes[cast(Node, branch.parent).address].slots.shape
+        axes[address] = Geometry(
+            lengths=torch.zeros(parent, dtype=torch.int64),
+            present=torch.zeros(parent, dtype=torch.bool),
+            valid=torch.zeros(parent, dtype=torch.bool),
+            slots=torch.zeros((*parent, 0), dtype=torch.bool),
+            batch_size=[batch_size],
+        )
 
     for address, request in schema.active_requests.items():
         TensorField = TENSORFIELDS[request.type].TensorField
-        shape = (batch_size, *schema.shapes[address])
+        shape = tuple(axes[cast(Node, request.parent).address].slots.shape)
         state = pa.array(np.full(np.prod(shape), Tokens.padded.value, dtype=np.int8))
         field = RaggedField(
             values=pa.nulls(0),
@@ -130,4 +172,6 @@ def mock(schema: Schema, batch_size: int) -> EncodedInput:
             context=Context(),
         )
 
-    return TensorDict(source=cast(Any, out), batch_size=batch_size)
+    inputs = TensorDict(source=cast(Any, out), batch_size=[batch_size])
+    inputs[root] = TensorDict(source=cast(Any, axes), batch_size=[batch_size])
+    return inputs

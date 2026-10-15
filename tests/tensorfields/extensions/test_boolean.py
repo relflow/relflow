@@ -70,7 +70,7 @@ def _tensorfield(groups: list[list[list[Any]]], *, schema: Schema, strata: Strat
             for observation in groups
         ]
     )
-    projection = coalesce(batch, schema=schema, strata=strata)[ADDRESS]
+    projection = coalesce(batch, schema=schema, strata=strata).fields[ADDRESS]
     return tensorize(
         TensorField,
         projection,

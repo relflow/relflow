@@ -331,6 +331,9 @@ def test_runtime_setup_applies_updates_before_device_placement(monkeypatch):
             calls.append(("update", predicates, values))
             return self
 
+        def warn_unbounded(self):
+            calls.append(("warn",))
+
         def to(self, device):
             calls.append(("to", str(device)))
             return self
@@ -352,6 +355,7 @@ def test_runtime_setup_applies_updates_before_device_placement(monkeypatch):
 
     assert calls == [
         ("update", (predicate,), {"target": False}),
+        ("warn",),
         ("to", "cpu"),
         ("eval",),
     ]

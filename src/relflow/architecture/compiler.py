@@ -49,12 +49,16 @@ class Region[**P]:
             cast(Callable[P, torch.Tensor], MethodType(function, eager.__self__)),
             backend=backend,
             fullgraph=True,
-            dynamic=dynamic,
+            dynamic=True if dynamic is None else dynamic,
             options=options or None,
         )
 
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> torch.Tensor:
         owner = cast(BranchEncoder | LearnedQueryCrossAttention, self.eager.__self__)
+        # Packing groups are Python orchestration whose count follows the batch.
+        # Keep them eager instead of caching a graph for every grouping.
+        if kwargs.get("packing") is not None:
+            return cast(torch.Tensor, self.eager(*args, **kwargs))
         layers = (
             owner.encoder
             if isinstance(owner, BranchEncoder)

@@ -8,11 +8,25 @@ from typing import Any, Literal, TypeAlias, cast
 
 import numpy as np
 import pyarrow as pa
-from tensordict import TensorDict
+import torch
+from tensordict import TensorClass, TensorDict
 
 from relflow.structs.tree import Address
 
 Retain: TypeAlias = tuple[str, ...] | Literal["*"]
+
+
+class Geometry(TensorClass):
+    """Retained collection slots, independent of tensorfield values and masks.
+
+    Lengths and collection validity use the parent grid. ``slots`` adds the
+    resolved branch axis and marks its non-null object records.
+    """
+
+    lengths: torch.Tensor
+    present: torch.Tensor
+    valid: torch.Tensor
+    slots: torch.Tensor
 
 
 def retention(names: Retain, *, context: str = "retain") -> Retain:

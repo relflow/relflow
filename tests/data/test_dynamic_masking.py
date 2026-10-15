@@ -39,28 +39,28 @@ def test_branch_query_skip_is_atomic_across_descendants():
         ]
     )
 
-    projections = coalesce(source, schema, Strata.train)
+    projections = coalesce(source, schema, Strata.train).fields
     amount = projections["/items/amount"]
     code = projections["/items/code"]
 
-    assert bits(amount.present) == bits(code.present) == [True, False, False]
-    assert bits(amount.trainable) == bits(code.trainable) == [False, True, False]
-    assert bits(amount.visible) == bits(code.visible) == [True, False, False]
+    assert bits(amount.present) == bits(code.present) == [True, False]
+    assert bits(amount.trainable) == bits(code.trainable) == [False, True]
+    assert bits(amount.visible) == bits(code.visible) == [True, False]
 
     inputs, targets = amount.split(amount.pristine.values)
     assert inputs.values.to_pylist() == [1.0]
-    assert inputs.dense.tolist() == [[[Tokens.valued.value, Tokens.padded.value, Tokens.padded.value]]]
+    assert inputs.dense.tolist() == [[[Tokens.valued.value, Tokens.padded.value]]]
     assert targets.values.to_pylist() == [2.0]
-    assert targets.dense.tolist() == [[[Tokens.padded.value, Tokens.valued.value, Tokens.padded.value]]]
+    assert targets.dense.tolist() == [[[Tokens.padded.value, Tokens.valued.value]]]
 
 
 def test_rate_skip_is_stable_for_one_batch_and_changes_by_epoch():
     schema = model(value=rf.Number(mask=rf.Mask(rate=0.5, skip=True, dropout=False))).schema
     source = arrow_batch([{"value": float(index)} for index in range(512)])
 
-    whole = coalesce(source, schema, Strata.train, seed=17, epoch=3)["/value"]
-    repeated = coalesce(source, schema, Strata.train, seed=17, epoch=3)["/value"]
-    next_epoch = coalesce(source, schema, Strata.train, seed=17, epoch=4)["/value"]
+    whole = coalesce(source, schema, Strata.train, seed=17, epoch=3).fields["/value"]
+    repeated = coalesce(source, schema, Strata.train, seed=17, epoch=3).fields["/value"]
+    next_epoch = coalesce(source, schema, Strata.train, seed=17, epoch=4).fields["/value"]
 
     assert np.array_equal(boolean(whole.present), boolean(repeated.present))
     assert not np.array_equal(boolean(whole.present), boolean(next_epoch.present))
@@ -70,7 +70,7 @@ def test_query_and_rate_sample_only_eligible_owner_coordinates():
     schema = model(value=rf.Number(mask=rf.Mask(query="eligible", rate=0.5, skip=True, dropout=False))).schema
     source = arrow_batch([{"value": float(index), "eligible": index % 2 == 0} for index in range(256)])
 
-    projection = coalesce(source, schema, Strata.train, seed=5, epoch=0)["/value"]
+    projection = coalesce(source, schema, Strata.train, seed=5, epoch=0).fields["/value"]
     skipped = ~boolean(projection.present)
 
     assert skipped.any()
@@ -191,14 +191,14 @@ def test_query_selector_requires_non_null_scalar_booleans(selector, message):
     source = arrow_batch([{"value": 1.0, "selected": selector[0]}, {"value": 2.0, "selected": selector[1]}])
 
     with pytest.raises((TypeError, ValueError), match=message):
-        coalesce(source, schema, Strata.train)
+        coalesce(source, schema, Strata.train).fields
 
 
 def test_source_less_prediction_uses_vacancy_and_fixed_routing():
     schema = model(label=rf.Category(mask=True)).schema
     source = arrow_batch([{"unused": 1}, {"unused": 2}])
 
-    projection = coalesce(source, schema, Strata.predict)["/label"]
+    projection = coalesce(source, schema, Strata.predict).fields["/label"]
     inputs, targets = projection.split(projection.pristine.values)
 
     assert projection.vacant is True
@@ -216,14 +216,14 @@ def test_source_less_reconstruction_fails_outside_prediction(strata):
     source = arrow_batch([{"value": 1.0}, {"value": 2.0}])
 
     with pytest.raises(ValueError, match="field 'label' is absent"):
-        coalesce(source, schema, strata)
+        coalesce(source, schema, strata).fields
 
 
 def test_source_less_learned_mask_reconstruction_remains_present():
     schema = model(label=rf.Category(mask=rf.Mask(dropout=False, reconstruct=True))).schema
     source = arrow_batch([{"unused": 1}, {"unused": 2}])
 
-    projection = coalesce(source, schema, Strata.predict)["/label"]
+    projection = coalesce(source, schema, Strata.predict).fields["/label"]
     inputs, _ = projection.split(projection.pristine.values)
 
     assert projection.vacant is True

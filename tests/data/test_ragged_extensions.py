@@ -267,9 +267,10 @@ model = rf.Model(
     n_layers=1,
     n_heads=2,
 )
-field = coalesce(convert(source), model.schema, Strata.predict)["/value"].pristine
+field = coalesce(convert(source), model.schema, Strata.predict).fields["/value"].pristine
 assert field.shape == (0, 1)
-assert field.values.type == pa.float64()
+assert pa.types.is_null(field.values.type)
+assert source.schema.field("payload").type == pa.map_(pa.string(), pa.float64())
 """
     process = subprocess.run(
         [sys.executable, "-c", program],
@@ -281,7 +282,7 @@ assert field.values.type == pa.float64()
     assert process.returncode == 0, process.stderr
 
 
-def test_typed_empty_branch_preserves_union_storage():
+def test_typed_empty_union_branch_encodes_zero_extent():
     union = pa.dense_union(
         [
             pa.field("integer", pa.int64()),
@@ -299,8 +300,8 @@ def test_typed_empty_branch_preserves_union_storage():
 
     encoded = model.encode(source, strata=Strata.test)["/items/value"]
 
-    assert encoded.state.shape == (0, 1, 3)
-    assert encoded.content.shape == (0, 1, 3)
+    assert encoded.state.shape == (0, 1, 0)
+    assert encoded.content.shape == (0, 1, 0)
 
 
 def test_coalesce_returns_arrow_backed_projections():
@@ -312,7 +313,7 @@ def test_coalesce_returns_arrow_backed_projections():
     )
     source = batch([{"items": [{"value": 1.0}, {"value": None}]}])
 
-    projection = coalesce(source, schema=model.schema, strata=Strata.predict)["/items/value"]
+    projection = coalesce(source, schema=model.schema, strata=Strata.predict).fields["/items/value"]
     field = projection.pristine
 
     assert isinstance(projection, Projection)
@@ -320,10 +321,10 @@ def test_coalesce_returns_arrow_backed_projections():
     assert isinstance(field.values, pa.Array)
     assert field.values.to_pylist() == [1.0]
     assert field.state.type == pa.int8()
-    assert field.state.to_pylist() == [Tokens.valued.value, Tokens.null.value, Tokens.padded.value]
+    assert field.state.to_pylist() == [Tokens.valued.value, Tokens.null.value]
     assert field.placement.type == pa.int64()
     assert field.placement.to_pylist() == [0]
-    assert field.shape == (1, 1, 3)
+    assert field.shape == (1, 1, 2)
 
 
 def test_ragged_field_rejects_null_retained_values():
