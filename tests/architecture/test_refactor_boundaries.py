@@ -26,8 +26,8 @@ FRAMEWORK_PROTOCOL_METHODS = frozenset(
 )
 
 
-def _model() -> rf.Model:
-    return rf.Model(amount=rf.Number(), label=rf.Category(mask=True), d_model=8, n_layers=1, n_heads=2)
+def configured() -> rf.Model:
+    return rf.Model.xs(amount=rf.Number, label=rf.Category(mask=True), d_model=8)
 
 
 @pytest.fixture
@@ -42,7 +42,7 @@ def mutation_records() -> Generator[BufferingHandler, None, None]:
 
 
 def test_model_uses_mutation_facade() -> None:
-    model = _model()
+    model = configured()
 
     assert isinstance(model.schema, rf.Schema)
     assert isinstance(model._schema_editor, SchemaEditor)
@@ -50,7 +50,7 @@ def test_model_uses_mutation_facade() -> None:
 
 
 def test_model_mutations_emit_one_concise_event_per_operation(mutation_records: BufferingHandler) -> None:
-    model = _model()
+    model = configured()
     selected = rf.where("name").is_in(("amount", "label"))
 
     model.update(selected, weight=2.0, description="Transaction fields")
@@ -77,7 +77,7 @@ def test_model_mutations_emit_one_concise_event_per_operation(mutation_records: 
     ],
 )
 def test_rejected_mutations_do_not_emit_success_events(mutation_records, action, address, options) -> None:
-    model = _model()
+    model = configured()
     before = model.schema.model_dump()
     operation = getattr(model, action)
 
@@ -101,7 +101,7 @@ def test_rejected_mutations_do_not_emit_success_events(mutation_records, action,
     ],
 )
 def test_failed_rebuild_rolls_back_without_success_events(mutation_records, monkeypatch, action, address, options):
-    model = _model()
+    model = configured()
     before = model.schema.model_dump()
     nodes = model.nodes
 
@@ -126,7 +126,7 @@ def test_failed_rebuild_rolls_back_without_success_events(mutation_records, monk
     ],
 )
 def test_override_logs_only_completed_transitions(mutation_records, monkeypatch, failure, expected):
-    model = _model()
+    model = configured()
     before = model.schema.model_dump()
     rebuild = ModelGraph.rebuild
     calls = 0
@@ -158,7 +158,7 @@ def test_override_logs_only_completed_transitions(mutation_records, monkeypatch,
     ],
 )
 def test_mutation_logging_does_not_evaluate_predicates_again(action, address, options):
-    model = _model()
+    model = configured()
     seen: set[int] = set()
 
     def select_once(node):
@@ -171,7 +171,7 @@ def test_mutation_logging_does_not_evaluate_predicates_again(action, address, op
 
 
 def test_model_graph_rebuild_preserves_compatible_state() -> None:
-    model = _model()
+    model = configured()
     name, before = next(iter(model.state_dict().items()))
 
     ModelGraph.rebuild(model)
@@ -180,7 +180,7 @@ def test_model_graph_rebuild_preserves_compatible_state() -> None:
 
 
 def test_model_summary_uses_forward_kwargs_example_input() -> None:
-    model = _model()
+    model = configured()
 
     summary = summarize(model, max_depth=1)
 
@@ -188,7 +188,7 @@ def test_model_summary_uses_forward_kwargs_example_input() -> None:
 
 
 def test_checkpoint_state_round_trip(tmp_path) -> None:
-    model = _model()
+    model = configured()
     path = tmp_path / "model.ckpt"
 
     CheckpointState.save(model, path)

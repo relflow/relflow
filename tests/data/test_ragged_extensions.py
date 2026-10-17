@@ -18,7 +18,7 @@ from relflow.structs.enums import Strata, Tokens
 from relflow.structs.tree import Address
 from relflow.tensorfields.base import TENSORFIELDS, Extension
 from relflow.tensorfields.extensions.number import number
-from tests.arrow import batch
+from tests.arrow import table as arrow_table
 
 
 def extension_name() -> str:
@@ -81,13 +81,13 @@ def test_extension_prepare_validates_and_preserves_one_whole_arrow_array():
     "field",
     [
         rf.Category(p_unavailable=0.0),
-        rf.Hash(),
+        rf.Hash,
         rf.Set(p_unavailable=0.0),
         rf.Cluster(n_clusters=2, p_unavailable=0.0),
     ],
 )
 def test_multifamily_extensions_accept_all_null_arrow_columns(field):
-    model = rf.Model(value=field, d_model=8, n_layers=1, n_heads=2)
+    model = rf.Model.xs(value=field, d_model=8)
 
     encoded = model.encode(pa.table({"value": pa.nulls(2)}))["/value"]
 
@@ -98,7 +98,7 @@ def test_multifamily_extensions_accept_all_null_arrow_columns(field):
 
 
 def test_encode_calls_extension_prepare_once_with_the_whole_leaf_column(monkeypatch: pytest.MonkeyPatch):
-    model = rf.Model(value=rf.Number, d_model=8, n_layers=1, n_heads=2)
+    model = rf.Model.xs(value=rf.Number, d_model=8)
     calls: list[pa.DataType] = []
     original = number.prepare
 
@@ -109,7 +109,7 @@ def test_encode_calls_extension_prepare_once_with_the_whole_leaf_column(monkeypa
     monkeypatch.setattr(number, "prepare", prepare)
 
     encode(
-        batch=batch([{"value": 1}, {"value": 2}, {"value": None}]),
+        batch=arrow_table([{"value": 1}, {"value": 2}, {"value": None}]),
         schema=model.schema,
         strata=Strata.predict,
         interprocess_encoding_context=model.interprocess_encoding_context,
@@ -119,14 +119,14 @@ def test_encode_calls_extension_prepare_once_with_the_whole_leaf_column(monkeypa
 
 
 def test_builtin_extension_type_contract_fails_before_codec_coercion():
-    model = rf.Model(value=rf.Number, d_model=8, n_layers=1, n_heads=2)
+    model = rf.Model.xs(value=rf.Number, d_model=8)
 
     with pytest.raises(TypeError, match="extension 'number'.*does not accept Arrow type string"):
         model.encode(pa.table({"value": ["1.5"]}))
 
 
 def test_mask_spelling_is_ordinary_typed_string_content():
-    model = rf.Model(value=rf.Category(p_unavailable=0), d_model=8, n_layers=1, n_heads=2)
+    model = rf.Model.xs(value=rf.Category(p_unavailable=0), d_model=8)
 
     fields = model.encode(pa.table({"value": ["<MASK>"]}))
 
@@ -151,14 +151,12 @@ def test_nested_dictionary_chunks_decode_without_combining_indices():
         )
         expected.extend(labels)
     source = pa.table({"items": pa.chunked_array(chunks)})
-    model = rf.Model(
+    model = rf.Model.xs(
         items=rf.Branch(
             length=100,
             value=rf.Category(p_unavailable=0.0),
         ),
         d_model=8,
-        n_layers=1,
-        n_heads=2,
     )
 
     encoded = model.encode(source, strata=Strata.train)["/items/value"]
@@ -172,11 +170,9 @@ def test_dictionary_null_values_remain_null_after_decoding():
         pa.array([0, 1, None], type=pa.int8()),
         pa.array(["value", None]),
     )
-    model = rf.Model(
+    model = rf.Model.xs(
         value=rf.Category(p_unavailable=0.0),
         d_model=8,
-        n_layers=1,
-        n_heads=2,
     )
 
     encoded = model.encode(pa.table({"value": values}), strata=Strata.train)["/value"]
@@ -209,11 +205,9 @@ def test_extension_storage_uses_dictionary_value_validity():
         pa.array(["value", None]),
     )
     values = pa.ExtensionArray.from_storage(EncodedType(), storage)
-    model = rf.Model(
+    model = rf.Model.xs(
         value=rf.Category(p_unavailable=0.0),
         d_model=8,
-        n_layers=1,
-        n_heads=2,
     )
 
     encoded = model.encode(pa.table({"value": values}), strata=Strata.train)["/value"]
@@ -235,11 +229,9 @@ def test_dateparts_encodes_heterogeneous_date_union():
             pa.array([datetime(2024, 3, 4, 5, 6)], type=pa.timestamp("us")),
         ],
     )
-    model = rf.Model(
+    model = rf.Model.xs(
         value=rf.DateParts(dateparts=["day_of_month"]),
         d_model=8,
-        n_layers=1,
-        n_heads=2,
     )
 
     encoded = model.encode(pa.table({"value": values}), strata=Strata.test)["/value"]
@@ -260,12 +252,10 @@ from relflow.data.ragged import coalesce
 from relflow.structs.enums import Strata
 
 source = pa.table({"payload": pa.chunked_array([], type=pa.map_(pa.string(), pa.float64()))})
-model = rf.Model(
+model = rf.Model.xs(
     query="payload",
     value=rf.Number(query='["value"]'),
     d_model=8,
-    n_layers=1,
-    n_heads=2,
 )
 field = coalesce(convert(source), model.schema, Strata.predict).fields["/value"].pristine
 assert field.shape == (0, 1)
@@ -291,11 +281,9 @@ def test_typed_empty_union_branch_encodes_zero_extent():
     )
     item = pa.struct([pa.field("value", union)])
     source = pa.table({"items": pa.chunked_array([], type=pa.list_(item))})
-    model = rf.Model(
+    model = rf.Model.xs(
         items=rf.Branch(length=3, value=rf.Number),
         d_model=8,
-        n_layers=1,
-        n_heads=2,
     )
 
     encoded = model.encode(source, strata=Strata.test)["/items/value"]
@@ -305,13 +293,11 @@ def test_typed_empty_union_branch_encodes_zero_extent():
 
 
 def test_coalesce_returns_arrow_backed_projections():
-    model = rf.Model(
+    model = rf.Model.xs(
         items=rf.Branch(length=3, value=rf.Number),
         d_model=8,
-        n_layers=1,
-        n_heads=2,
     )
-    source = batch([{"items": [{"value": 1.0}, {"value": None}]}])
+    source = arrow_table([{"items": [{"value": 1.0}, {"value": None}]}])
 
     projection = coalesce(source, schema=model.schema, strata=Strata.predict).fields["/items/value"]
     field = projection.pristine

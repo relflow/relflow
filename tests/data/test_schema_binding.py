@@ -16,13 +16,11 @@ def test_schema_binding_preserves_sparse_coordinates() -> None:
         ]
     )
 
-    model = rf.Model(
+    model = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         events=rf.Branch(
             length=3,
-            ip_country=rf.Category(),
+            ip_country=rf.Category,
             amount=rf.Number,
         ),
     )
@@ -45,13 +43,11 @@ def test_schema_binding_preserves_sparse_coordinates() -> None:
         }
         for record in source
     ]
-    filtered_model = rf.Model(
+    filtered_model = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         login_events=rf.Branch(
             length=2,
-            device_id=rf.Category(),
+            device_id=rf.Category,
             risk_score=rf.Number,
         ),
     )

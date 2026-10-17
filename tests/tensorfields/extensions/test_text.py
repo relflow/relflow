@@ -25,61 +25,60 @@ from relflow.tensorfields.extensions.text import (
     TensorField,
     loss,
 )
-from tests.arrow import batch as arrow_batch
+from tests.arrow import table as arrow_table
 from tests.tensorfields.helpers import tensorize
 
 ADDRESS = "/items/body"
 
 
-def _structure_payload(
+def build_schema(
     *,
+    d_model: int = 16,
+    n_heads: int = 4,
+    model: str = "bert-base-uncased",
+    max_length: int = 4,
     objective: str = "l2",
     encoder_pooling: str = "cls",
     encoder_batch_size: int = 2,
     tokenizer_batch_size: int | None = None,
     mask: bool | Mask = False,
     jitter: Jitter | dict[str, object] | None = None,
-) -> dict:
-    field: dict = {
-        "name": "body",
-        "type": "text",
-        "model": "bert-base-uncased",
-        "max_length": 4,
-        "encoder_batch_size": encoder_batch_size,
-        "encoder_pooling": encoder_pooling,
-        "objective": objective,
-        "mask": mask,
-    }
+) -> Schema:
+    options = {}
     if tokenizer_batch_size is not None:
-        field["tokenizer_batch_size"] = tokenizer_batch_size
+        options["tokenizer_batch_size"] = tokenizer_batch_size
     if jitter is not None:
-        field["jitter"] = jitter
-    return {
-        "d_model": 16,
-        "fields": {
-            "type": "branch",
-            "dropout": 0.1,
-            "fields": [
-                {
-                    "name": "items",
-                    "type": "branch",
-                    "length": 2,
-                    "fields": [field],
-                }
-            ],
-        },
-    }
+        options["jitter"] = jitter
+    return rf.Schema.from_tree(
+        d_model=d_model,
+        n_layers=1,
+        n_heads=n_heads,
+        dropout=0.1,
+        items=rf.Branch(
+            length=2,
+            n_heads=n_heads,
+            body=rf.Text(
+                model=model,
+                max_length=max_length,
+                encoder_batch_size=encoder_batch_size,
+                encoder_pooling=encoder_pooling,
+                objective=objective,
+                mask=mask,
+                **options,
+            ),
+        ),
+    )
 
 
-def _values() -> list:
+def values() -> list:
     return [
         [["alpha", "beta"]],
         [["gamma", "delta"]],
     ]
 
 
-def _new_tensorfield(*, values: list, schema: Schema, strata: Strata) -> TensorField:
-    batch = arrow_batch([{"items": [{"body": value} for value in root]} for (root,) in values])
+def tensorfield(*, values: list, schema: Schema, strata: Strata) -> TensorField:
+    batch = arrow_table([{"items": [{"body": value} for value in root]} for (root,) in values])
     projection = coalesce(batch, schema=schema, strata=strata).fields[ADDRESS]
     return tensorize(
         TensorField,
@@ -158,7 +157,7 @@ class FakeHFModel:
         )
 
 
-def _patch_hf(monkeypatch: pytest.MonkeyPatch, *, hidden_size: int = 4) -> FakeHFModel:
+def patch_hf(monkeypatch: pytest.MonkeyPatch, *, hidden_size: int = 4) -> FakeHFModel:
     fake_model = FakeHFModel(hidden_size=hidden_size)
 
     class FakeAutoModel:
@@ -182,8 +181,8 @@ def _patch_hf(monkeypatch: pytest.MonkeyPatch, *, hidden_size: int = 4) -> FakeH
 
 
 def test_text_request_is_available_in_structure():
-    structure = Schema.model_validate(_structure_payload())
-    request = structure.requests[ADDRESS]
+    schema = build_schema()
+    request = schema.requests[ADDRESS]
     assert request.type == "text"
     assert request.model == "bert-base-uncased"
     assert request.max_length == 4
@@ -191,28 +190,18 @@ def test_text_request_is_available_in_structure():
 
 
 def test_text_request_uses_default_model():
-    payload = _structure_payload()
-    del payload["fields"]["fields"][0]["fields"][0]["model"]
-
-    request = Schema.model_validate(payload).requests[ADDRESS]
+    request = rf.Text()
 
     assert request.model == DEFAULT_TEXT_MODEL
 
 
 def test_text_request_rejects_blank_model():
-    payload = _structure_payload()
-    payload["fields"]["fields"][0]["fields"][0]["model"] = "   "
-
     with pytest.raises(ValueError, match="at least 1 character"):
-        Schema.model_validate(payload)
+        rf.Text(model="   ")
 
 
 def test_text_request_strips_model():
-    payload = _structure_payload()
-    field = payload["fields"]["fields"][0]["fields"][0]
-    field["model"] = "  bert-base-uncased  "
-
-    request = Schema.model_validate(payload).requests[ADDRESS]
+    request = rf.Text(model="  bert-base-uncased  ")
 
     assert request.model == "bert-base-uncased"
 
@@ -220,20 +209,20 @@ def test_text_request_strips_model():
 @pytest.mark.parametrize("tokenizer_batch_size", [0, -1])
 def test_text_request_rejects_nonpositive_tokenizer_batch_size(tokenizer_batch_size: int):
     with pytest.raises(ValueError, match="greater than 0"):
-        Schema.model_validate(_structure_payload(tokenizer_batch_size=tokenizer_batch_size))
+        build_schema(tokenizer_batch_size=tokenizer_batch_size)
 
 
 def test_text_request_hydrates_jitter_from_mapping():
-    structure = Schema.model_validate(_structure_payload(jitter={"add": 0.2, "multiply": 0.1}))
+    schema = build_schema(jitter={"add": 0.2, "multiply": 0.1})
 
-    assert structure.requests[ADDRESS].jitter == Jitter(add=0.2, multiply=0.1)
+    assert schema.requests[ADDRESS].jitter == Jitter(add=0.2, multiply=0.1)
 
 
 @pytest.mark.parametrize("normalize", [True, False])
 def test_text_accepts_jitter_normalization_modes(normalize: bool):
-    structure = Schema.model_validate(_structure_payload(jitter=Jitter(add=0.2, normalize=normalize)))
+    schema = build_schema(jitter=Jitter(add=0.2, normalize=normalize))
 
-    assert structure.requests[ADDRESS].jitter == Jitter(add=0.2, normalize=normalize)
+    assert schema.requests[ADDRESS].jitter == Jitter(add=0.2, normalize=normalize)
 
 
 def test_text_raises_when_transformers_is_missing(monkeypatch: pytest.MonkeyPatch):
@@ -246,7 +235,7 @@ def test_text_raises_when_transformers_is_missing(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(importlib.util, "find_spec", missing_transformers)
 
     with pytest.raises(ModuleNotFoundError, match="relflow\\[text\\]"):
-        rf.Model(body=rf.Text, d_model=8, n_layers=1, n_heads=2)
+        rf.Model.xs(body=rf.Text, d_model=8)
 
     assert TENSORFIELDS["text"].requires == {"transformers": "relflow[text]"}
 
@@ -292,22 +281,22 @@ def test_text_cached_model_reuses_same_tokenizer(monkeypatch: pytest.MonkeyPatch
 
 
 def test_text_embedders_share_frozen_model_resource(monkeypatch: pytest.MonkeyPatch):
-    _patch_hf(monkeypatch)
+    patch_hf(monkeypatch)
 
-    structure = Schema.model_validate(_structure_payload())
-    first = Embedder(schema=structure, address=ADDRESS)
-    second = Embedder(schema=structure, address=ADDRESS)
+    schema = build_schema()
+    first = Embedder(schema=schema, address=ADDRESS)
+    second = Embedder(schema=schema, address=ADDRESS)
 
     assert first.__dict__["_cached_model"] is second.__dict__["_cached_model"]
     assert first.__dict__["_cached_model"].model is second.__dict__["_cached_model"].model
 
 
 def test_text_shared_model_moves_with_shared_device_state(monkeypatch: pytest.MonkeyPatch):
-    fake_model = _patch_hf(monkeypatch)
+    fake_model = patch_hf(monkeypatch)
 
-    structure = Schema.model_validate(_structure_payload())
-    first = Embedder(schema=structure, address=ADDRESS)
-    second = Embedder(schema=structure, address=ADDRESS)
+    schema = build_schema()
+    first = Embedder(schema=schema, address=ADDRESS)
+    second = Embedder(schema=schema, address=ADDRESS)
     cached_model = first.__dict__["_cached_model"]
 
     assert cached_model.module_for(torch.device("cpu")) is fake_model
@@ -317,12 +306,11 @@ def test_text_shared_model_moves_with_shared_device_state(monkeypatch: pytest.Mo
 
 
 def test_text_tensorfield_tokenizes_strings(monkeypatch: pytest.MonkeyPatch):
-    _patch_hf(monkeypatch)
+    patch_hf(monkeypatch)
 
-    structure = Schema.model_validate(_structure_payload())
-    schema = structure
-    field = _new_tensorfield(
-        values=_values(),
+    schema = build_schema()
+    field = tensorfield(
+        values=values(),
         schema=schema,
         strata=Strata.train,
     )
@@ -334,12 +322,12 @@ def test_text_tensorfield_tokenizes_strings(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_text_tensorfield_tokenizes_bounded_numpy_batches(monkeypatch: pytest.MonkeyPatch):
-    _patch_hf(monkeypatch)
+    patch_hf(monkeypatch)
 
-    structure = Schema.model_validate(_structure_payload(tokenizer_batch_size=2))
-    field = _new_tensorfield(
+    schema = build_schema(tokenizer_batch_size=2)
+    field = tensorfield(
         values=[[["a", "bb"]], [["ccc", "dddd"]], [["eeeee", None]]],
-        schema=structure,
+        schema=schema,
         strata=Strata.train,
     )
     tokenizer = CachedModel.get_tokenizer("bert-base-uncased")
@@ -350,22 +338,21 @@ def test_text_tensorfield_tokenizes_bounded_numpy_batches(monkeypatch: pytest.Mo
 
 
 def test_text_embedder_and_decoder_shapes(monkeypatch: pytest.MonkeyPatch):
-    fake_model = _patch_hf(monkeypatch)
+    fake_model = patch_hf(monkeypatch)
 
-    structure = Schema.model_validate(_structure_payload(encoder_batch_size=1))
-    schema = structure
-    field = _new_tensorfield(
-        values=_values(),
+    schema = build_schema(encoder_batch_size=1)
+    field = tensorfield(
+        values=values(),
         schema=schema,
         strata=Strata.train,
     )
 
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    embedder = Embedder(schema=schema, address=ADDRESS)
     parcel = embedder.embed(field)
     assert parcel.payload.shape == (2, 1, 2, 16)
     assert fake_model.calls == 4
 
-    decoder = Decoder(schema=structure, address=ADDRESS)
+    decoder = Decoder(schema=schema, address=ADDRESS)
     prediction = decoder(
         [parcel],
         batch_size=field.state.shape[0],
@@ -380,19 +367,15 @@ def test_text_jitters_only_training_valued_finite_embeddings(
     monkeypatch: pytest.MonkeyPatch,
     normalize: bool,
 ):
-    _patch_hf(monkeypatch)
+    patch_hf(monkeypatch)
 
-    payload = _structure_payload(jitter=Jitter(add=0.5, normalize=normalize))
-    payload["d_model"] = 4
-    payload["fields"]["n_heads"] = 2
-    payload["fields"]["fields"][0]["n_heads"] = 2
-    structure = Schema.model_validate(payload)
-    field = _new_tensorfield(
+    schema = build_schema(d_model=4, n_heads=2, jitter=Jitter(add=0.5, normalize=normalize))
+    field = tensorfield(
         values=[[["alpha", None]], [["gamma", "delta"]]],
-        schema=structure,
+        schema=schema,
         strata=Strata.train,
     )
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    embedder = Embedder(schema=schema, address=ADDRESS)
     embedder.linear = torch.nn.Identity()
     with torch.no_grad():
         embedder.embeddings.weight.zero_()
@@ -427,21 +410,19 @@ def test_text_jitters_only_training_valued_finite_embeddings(
 def test_text_forward_never_reads_reconstruction_targets(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    fake_model = _patch_hf(monkeypatch)
+    fake_model = patch_hf(monkeypatch)
 
-    structure = Schema.model_validate(
-        _structure_payload(
-            encoder_batch_size=2,
-            mask=Mask(reconstruct=True),
-        )
+    schema = build_schema(
+        encoder_batch_size=2,
+        mask=Mask(reconstruct=True),
     )
-    field = _new_tensorfield(
-        values=_values(),
-        schema=structure,
+    field = tensorfield(
+        values=values(),
+        schema=schema,
         strata=Strata.train,
     )
 
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    embedder = Embedder(schema=schema, address=ADDRESS)
     parcel = embedder.embed(field)
 
     assert fake_model.calls == 0
@@ -462,7 +443,7 @@ def test_text_forward_never_reads_reconstruction_targets(
             batch_size=[2],
         ),
     )
-    module = _DummyModule(structure, embedder, Decoder(schema=structure, address=ADDRESS))
+    module = DummyModule(schema, embedder, Decoder(schema=schema, address=ADDRESS))
 
     output = loss(module=module, prediction=prediction, batch=field, strata=Strata.train)
 
@@ -475,17 +456,15 @@ def test_text_encoder_buckets_by_length_trims_batches_and_restores_order(
     monkeypatch: pytest.MonkeyPatch,
     encoder_pooling: str,
 ):
-    fake_model = _patch_hf(monkeypatch)
-    payload = _structure_payload(encoder_batch_size=2, encoder_pooling=encoder_pooling)
-    payload["fields"]["fields"][0]["fields"][0]["max_length"] = 5
-    structure = Schema.model_validate(payload)
-    field = _new_tensorfield(
+    fake_model = patch_hf(monkeypatch)
+    schema = build_schema(encoder_pooling=encoder_pooling, max_length=5)
+    field = tensorfield(
         values=[
             [["a", "abcde"]],
             [["ab", "abcd"]],
             [["abc", None]],
         ],
-        schema=structure,
+        schema=schema,
         strata=Strata.train,
     )
 
@@ -514,7 +493,7 @@ def test_text_encoder_buckets_by_length_trims_batches_and_restores_order(
     field.content[INPUT_IDS] = input_ids.reshape(3, 1, 2, 5)
     field.content[ATTENTION_MASK] = attention_mask.reshape(3, 1, 2, 5)
 
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    embedder = Embedder(schema=schema, address=ADDRESS)
     encoded = embedder.encode(content=field.content, state=field.state).reshape(6, 4)
 
     # Stable ascending bucketing yields [1, 2], [2, 4], [5], leaving the
@@ -542,13 +521,11 @@ def test_text_encoder_buckets_by_length_trims_batches_and_restores_order(
 
 
 def test_text_encoder_keeps_full_width_for_left_padding(monkeypatch: pytest.MonkeyPatch):
-    fake_model = _patch_hf(monkeypatch)
-    payload = _structure_payload(encoder_batch_size=2, encoder_pooling="mean")
-    payload["fields"]["fields"][0]["fields"][0]["max_length"] = 5
-    structure = Schema.model_validate(payload)
-    field = _new_tensorfield(
-        values=_values(),
-        schema=structure,
+    fake_model = patch_hf(monkeypatch)
+    schema = build_schema(encoder_pooling="mean", max_length=5)
+    field = tensorfield(
+        values=values(),
+        schema=schema,
         strata=Strata.train,
     )
     tokenizer = CachedModel.get_tokenizer("bert-base-uncased")
@@ -572,7 +549,7 @@ def test_text_encoder_keeps_full_width_for_left_padding(monkeypatch: pytest.Monk
     field.content[INPUT_IDS] = input_ids.reshape(2, 1, 2, 5)
     field.content[ATTENTION_MASK] = attention_mask.reshape(2, 1, 2, 5)
 
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    embedder = Embedder(schema=schema, address=ADDRESS)
     encoded = embedder.encode(content=field.content, state=field.state).reshape(4, 4)
 
     # Prefix slicing is only valid for right padding. Retaining full width for
@@ -589,17 +566,17 @@ def test_text_encoder_keeps_full_width_for_left_padding(monkeypatch: pytest.Monk
 def test_text_encoder_keeps_full_width_for_valued_row_without_attended_tokens(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    fake_model = _patch_hf(monkeypatch)
-    structure = Schema.model_validate(_structure_payload())
-    field = _new_tensorfield(
-        values=_values(),
-        schema=structure,
+    fake_model = patch_hf(monkeypatch)
+    schema = build_schema()
+    field = tensorfield(
+        values=values(),
+        schema=schema,
         strata=Strata.train,
     )
     field.content[INPUT_IDS][0, 0, 0].zero_()
     field.content[ATTENTION_MASK][0, 0, 0].zero_()
 
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    embedder = Embedder(schema=schema, address=ADDRESS)
     encoded = embedder.encode(content=field.content, state=field.state).reshape(4, 4)
 
     # Empty strings can be valued while producing no attended tokens for
@@ -611,19 +588,19 @@ def test_text_encoder_keeps_full_width_for_valued_row_without_attended_tokens(
 
 
 def test_text_frozen_hf_model_is_not_registered_in_state_dict(monkeypatch: pytest.MonkeyPatch):
-    _patch_hf(monkeypatch)
+    patch_hf(monkeypatch)
 
-    structure = Schema.model_validate(_structure_payload())
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    schema = build_schema()
+    embedder = Embedder(schema=schema, address=ADDRESS)
 
     state_keys = set(embedder.state_dict())
     assert not any("_cached_model" in key or "hf_model" in key for key in state_keys)
     assert "linear.0.weight" in state_keys
 
 
-class _DummyModule:
-    def __init__(self, structure: Schema, embedder: Embedder, decoder: Decoder | None):
-        self.schema = structure
+class DummyModule:
+    def __init__(self, schema: Schema, embedder: Embedder, decoder: Decoder | None):
+        self.schema = schema
         self.nodes = {ADDRESS: SimpleNamespace(embedder=embedder, decoder=decoder)}
         self.logged: list[tuple[tuple[str, ...], float]] = []
 
@@ -633,16 +610,14 @@ class _DummyModule:
 
 
 def test_text_loss_encodes_pristine_targets_without_jitter(monkeypatch: pytest.MonkeyPatch):
-    _patch_hf(monkeypatch)
+    patch_hf(monkeypatch)
 
-    structure = Schema.model_validate(
-        _structure_payload(
-            jitter=Jitter(add=0.5),
-            mask=Mask(reconstruct=True),
-        )
+    schema = build_schema(
+        jitter=Jitter(add=0.5),
+        mask=Mask(reconstruct=True),
     )
-    field = _new_tensorfield(values=_values(), schema=structure, strata=Strata.train)
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    field = tensorfield(values=values(), schema=schema, strata=Strata.train)
+    embedder = Embedder(schema=schema, address=ADDRESS)
     pristine = torch.arange(field.state.numel() * embedder.hidden_size, dtype=torch.float32).reshape(
         *field.state.shape,
         embedder.hidden_size,
@@ -667,7 +642,7 @@ def test_text_loss_encodes_pristine_targets_without_jitter(monkeypatch: pytest.M
             batch_size=[field.state.shape[0]],
         ),
     )
-    module = _DummyModule(structure, embedder, Decoder(schema=structure, address=ADDRESS))
+    module = DummyModule(schema, embedder, Decoder(schema=schema, address=ADDRESS))
 
     output = loss(module=module, prediction=prediction, batch=field, strata=Strata.train)
 
@@ -677,17 +652,16 @@ def test_text_loss_encodes_pristine_targets_without_jitter(monkeypatch: pytest.M
 
 @pytest.mark.parametrize(("objective", "expected"), [("l1", 2.0), ("l2", 4.0)])
 def test_text_loss_reconstructs_frozen_embedding(monkeypatch: pytest.MonkeyPatch, objective: str, expected: float):
-    _patch_hf(monkeypatch)
+    patch_hf(monkeypatch)
 
-    structure = Schema.model_validate(_structure_payload(objective=objective, mask=Mask(reconstruct=True)))
-    schema = structure
-    field = _new_tensorfield(
-        values=_values(),
+    schema = build_schema(objective=objective, mask=Mask(reconstruct=True))
+    field = tensorfield(
+        values=values(),
         schema=schema,
         strata=Strata.train,
     )
-    embedder = Embedder(schema=structure, address=ADDRESS)
-    decoder = Decoder(schema=structure, address=ADDRESS)
+    embedder = Embedder(schema=schema, address=ADDRESS)
+    decoder = Decoder(schema=schema, address=ADDRESS)
     targets = embedder.encode(
         content=field.targets[TensorKey.content],
         state=field.targets[TensorKey.state],
@@ -706,6 +680,6 @@ def test_text_loss_reconstructs_frozen_embedding(monkeypatch: pytest.MonkeyPatch
         ),
     )
 
-    module = _DummyModule(structure, embedder, decoder)
+    module = DummyModule(schema, embedder, decoder)
     output = loss(module=module, prediction=prediction, batch=field, strata=Strata.train)
     assert torch.isclose(output, torch.tensor(expected, dtype=output.dtype), atol=1e-3)

@@ -21,7 +21,7 @@ def model(kind, *, p_unavailable=0.0, mask=True):
         if kind == "set"
         else rf.Cluster(n_clusters=(2, 4), p_unavailable=p_unavailable, mask=mask)
     )
-    result = rf.Model(d_model=8, n_heads=2, n_layers=1, x=rf.Number, label=request)
+    result = rf.Model.xs(d_model=8, x=rf.Number, label=request)
     labels = [["a"], ["b"]] if kind == "set" else ["a", "b"]
     result.encode(pa.table({"x": [0.0, 0.0], "label": labels}), strata="train")
     result.track = lambda names, value: value
@@ -179,7 +179,7 @@ def test_cluster_balancing_can_escape_saturated_initial_assignments():
 @pytest.mark.parametrize("kind", ["set", "cluster"])
 def test_empty_vocabulary_has_differentiable_zero_content_loss(kind):
     request = rf.Set(mask=True) if kind == "set" else rf.Cluster(n_clusters=4, mask=True)
-    module = rf.Model(d_model=8, n_heads=2, n_layers=1, x=rf.Number, label=request)
+    module = rf.Model.xs(d_model=8, x=rf.Number, label=request)
     module.track = lambda names, value: value
     logits = torch.randn(2, 8 if kind == "set" else 4, requires_grad=True)
     labels = [["new"], []] if kind == "set" else ["new", "new"]
@@ -192,10 +192,8 @@ def test_empty_vocabulary_has_differentiable_zero_content_loss(kind):
 
 
 def test_registered_metrics_share_one_callback_and_reset_each_stage():
-    module = rf.Model(
+    module = rf.Model.xs(
         d_model=8,
-        n_heads=2,
-        n_layers=1,
         category=rf.Category(mask=True),
         tags=rf.Set(mask=True),
         group=rf.Cluster(n_clusters=4, mask=True),
@@ -233,10 +231,8 @@ def test_unknown_only_epoch_does_not_revive_or_merge_from_stale_cluster_statisti
 
 def test_mixed_vocabulary_metrics_include_a_distributed_objective_empty_rank():
     selection = rf.Mask(query="selected", reconstruct=True)
-    module = rf.Model(
+    module = rf.Model.xs(
         d_model=8,
-        n_heads=2,
-        n_layers=1,
         batch_size=2,
         x=rf.Number,
         label=rf.Category(mask=selection),
@@ -298,7 +294,7 @@ def test_set_checkpoint_preserves_learned_unavailable_embedding(tmp_path):
 
 @pytest.mark.parametrize("known,unknown", [(False, True), (1, 3), (1.5, 3.5), (b"a", b"new"), ("a", "new")])
 def test_set_unknown_members_are_distinct_within_each_arrow_atom_family(known, unknown):
-    module = rf.Model(d_model=8, n_heads=2, n_layers=1, tags=rf.Set(p_unavailable=0.0))
+    module = rf.Model.xs(d_model=8, tags=rf.Set(p_unavailable=0.0))
     module.encode(pa.table({"tags": [[known]]}), strata="train")
     field = module.encode(pa.table({"tags": [[known, unknown, unknown, None], [unknown], []]}), strata="test")["/tags"]
     assert field.content["unavailable"].reshape(-1).tolist() == [1, 1, 0]
@@ -310,16 +306,13 @@ def test_set_unknown_members_are_distinct_within_each_arrow_atom_family(known, u
     ["cpu", pytest.param("gpu", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable"))],
 )
 def test_set_and_cluster_train_with_bfloat16_mixed_precision(accelerator):
-    module = rf.Model(
+    module = rf.Model.xs(
         d_model=8,
-        n_heads=2,
-        n_layers=1,
         batch_size=4,
         x=rf.Number,
         tags=rf.Set(p_unavailable=0.5, mask=rf.Mask(rate=0.5, reconstruct=True)),
         group=rf.Cluster(bounds=(2, 4), p_unavailable=0.5, mask=True),
     )
-    module.optimizer = rf.adamw(learning_rate=0.001)
     source = pa.table(
         {
             "x": [0.0, 1.0, 2.0, 3.0] * 4,
@@ -327,7 +320,11 @@ def test_set_and_cluster_train_with_bfloat16_mixed_precision(accelerator):
             "group": ["a", "b", "new", "new"] * 4,
         }
     )
-    trainer = lit.Trainer(
+    module.fit(
+        rf.ArrowDataModule(model=module, train=source, validate=source, num_workers=0),
+        learning_rate=0.001,
+        early_stopping=False,
+        rollback=False,
         accelerator=accelerator,
         devices=1,
         precision="bf16-mixed",
@@ -340,8 +337,7 @@ def test_set_and_cluster_train_with_bfloat16_mixed_precision(accelerator):
         enable_progress_bar=False,
         enable_model_summary=False,
     )
-    trainer.fit(module, datamodule=rf.ArrowDataModule(model=module, train=source, validate=source, num_workers=0))
-    assert trainer.global_step == 1
+    assert module.trainer.global_step == 1
     for name in ("tags", "group"):
         scores = module.nodes[f"/{name}"].decoder.metrics["validate_metrics"].compute()
         assert torch.isfinite(scores["loss.content"])

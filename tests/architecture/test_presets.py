@@ -272,10 +272,7 @@ def test_common_leaf_defaults_apply_to_late_registered_extensions(name):
 
 
 def test_xs_predicts_nested_targets_without_padding_and_separate_root_embedding():
-    model = rf.Model.xs(
-        embed=True,
-        events=rf.Branch(length=2, value=rf.Number, answer=rf.Number(mask=True)),
-    )
+    model = rf.Model.xs(embed=True, events=rf.Branch(length=2, value=rf.Number, answer=rf.Number(mask=True)))
     inputs = pa.Table.from_pylist([{"events": [{"value": 1.0}]}, {"events": [{"value": 2.0}, {"value": 3.0}]}])
 
     result = model.predict(inputs)

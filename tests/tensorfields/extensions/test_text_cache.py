@@ -22,7 +22,7 @@ from relflow.tensorfields.extensions.text import (
     TensorField,
     loss,
 )
-from tests.arrow import batch as arrow_batch
+from tests.arrow import table as arrow_table
 from tests.tensorfields.extensions.test_text import FakeHFModel, FakeTokenizer
 from tests.tensorfields.helpers import tensorize
 
@@ -49,31 +49,24 @@ def schema(
     jitter: Jitter | None = None,
     mask: bool | Mask = False,
 ) -> Schema:
-    return Schema.model_validate(
-        {
-            "d_model": 8,
-            "fields": {
-                "type": "branch",
-                "fields": [
-                    {
-                        "name": "body",
-                        "type": "text",
-                        "model": MODEL,
-                        "max_length": 4,
-                        "encoder_batch_size": 2,
-                        "encoder_pooling": pooling,
-                        "cache": cache,
-                        "jitter": jitter or Jitter(),
-                        "mask": mask,
-                    }
-                ],
-            },
-        }
+    return rf.Schema.from_tree(
+        d_model=8,
+        n_layers=1,
+        n_heads=4,
+        body=rf.Text(
+            model=MODEL,
+            max_length=4,
+            encoder_batch_size=2,
+            encoder_pooling=pooling,
+            cache=cache,
+            jitter=jitter or Jitter(),
+            mask=mask,
+        ),
     )
 
 
 def field(structure: Schema, texts: list[str | None]) -> TensorField:
-    batch = arrow_batch([{"body": text} for text in texts])
+    batch = arrow_table([{"body": text} for text in texts])
     projection = coalesce(batch, schema=structure, strata=Strata.train).fields[ADDRESS]
     return tensorize(
         TensorField,

@@ -161,7 +161,7 @@ def test_native_s3_data_pipeline_closes_scans_after_preprocessing_failure_or_epo
             raise ValueError("injected preprocessing failure")
         return frame
 
-    model = rf.Model(id=rf.Number, d_model=8, n_layers=1, n_heads=4, batch_size=2)
+    model = rf.Model.xs(id=rf.Number, d_model=8, batch_size=2)
     source = rf.source("diagnostics/records", match=r".*\.parquet", filesystem=partial(fs.S3FileSystem, **s3.options))
     data = rf.ArrowDataModule(model, predict=source, preprocessor=prepare, epoch_size=1 if stop == "epoch" else None)
     stream = iter(data.predict_dataloader())
@@ -180,14 +180,13 @@ PREDICT = r"""
 import json
 import sys
 from functools import partial
-import lightning.pytorch as lit
 import polars as pl
 import pyarrow.fs as fs
 import pyarrow.parquet as pq
 import relflow as rf
 
 options, mode, output = json.loads(sys.argv[1]), sys.argv[2], sys.argv[3]
-model = rf.Model(id=rf.Number, d_model=8, n_layers=1, n_heads=4, batch_size=2, embed=True)
+model = rf.Model.xs(id=rf.Number, d_model=8, batch_size=2, embed=True)
 source = rf.source('diagnostics/records', match=r'.*\.parquet', filesystem=partial(fs.S3FileSystem, **options))
 
 @rf.preprocess
@@ -198,9 +197,8 @@ def prepare(frame: pl.DataFrame) -> pl.DataFrame:
 
 data = rf.ArrowDataModule(model=model, predict=source, preprocessor=prepare, retain='*')
 writer = rf.Writer(output)
-trainer = lit.Trainer(accelerator='cpu', devices=1, logger=False, enable_checkpointing=False,
-                      enable_progress_bar=False, callbacks=[writer])
-trainer.predict(model, datamodule=data, return_predictions=False)
+model.predict(data, accelerator='cpu', devices=1, logger=False, enable_progress_bar=False,
+              callbacks=[writer], return_predictions=False)
 result = pq.read_table(output + '/rank-0.parquet')
 assert result.num_rows == 3
 assert result.column_names == ['inputs', 'representations']

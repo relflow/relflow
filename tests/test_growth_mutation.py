@@ -25,10 +25,8 @@ def build(kind):
         field = rf.Cluster(bounds=3, revive_temperature=0, **options)
     else:
         field = {"category": rf.Category, "set": rf.Set}[kind](**options)
-    model = rf.Model(
+    model = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         attention=None,
         reduction=rf.Mean(),
         value=field,
@@ -175,7 +173,7 @@ def test_third_party_resource_owns_subtree_rebuild_without_architecture_changes(
             self.resource = Resource(schema.requests[address].allocation)
 
     try:
-        model = rf.Model(d_model=8, n_layers=1, n_heads=2, value=Request())
+        model = rf.Model.xs(d_model=8, value=Request())
         old = model.nodes[ADDRESS].embedder.resource
         assert isinstance(old, Rebuild)
         old.table = torch.nn.Embedding(7, 3)

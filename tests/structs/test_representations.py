@@ -53,7 +53,7 @@ def test_schema_selection_returns_independent_plain_lists() -> None:
 
 
 def test_model_and_tensorfield_use_framework_representations() -> None:
-    model = rf.Model(amount=rf.Number, label=rf.Boolean(mask=True), d_model=8, n_layers=1, n_heads=2)
+    model = rf.Model.xs(amount=rf.Number, label=rf.Boolean(mask=True), d_model=8)
     field = model.encode(pa.Table.from_pylist([{"amount": 1.0, "label": True}]), strata=rf.Strata.train)["/amount"]
     state = field.state.clone()
 

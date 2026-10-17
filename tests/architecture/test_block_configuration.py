@@ -315,11 +315,12 @@ def test_fixed_nested_architecture_completes_a_cpu_optimizer_step():
         pin_memory=False,
         shuffle=False,
     )
-    model.optimizer = rf.adamw(learning_rate=1e-3, fused=False)
     parameter = model.nodes[rf.Address()].encoder.encoder[0].ffn[3].weight
     before = parameter.detach().clone()
     model.fit(
         datamodule,
+        learning_rate=1e-3,
+        fused=False,
         accelerator="cpu",
         devices=1,
         precision="32-true",
@@ -329,9 +330,6 @@ def test_fixed_nested_architecture_completes_a_cpu_optimizer_step():
         num_sanity_val_steps=0,
         early_stopping=False,
         rollback=False,
-        logger=False,
-        enable_checkpointing=False,
-        enable_model_summary=False,
         enable_progress_bar=False,
     )
     assert model.trainer.global_step == 1

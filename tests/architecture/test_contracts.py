@@ -15,23 +15,12 @@ from relflow.architecture.contracts import (
 )
 from relflow.structs.enums import Strata, Tokens
 from relflow.structs.tree import Address
-from tests.arrow import batch as arrow_batch
-
-
-def build(**fields: rf.TreeFieldInput) -> rf.Model:
-    return rf.Model(
-        **fields,
-        d_model=8,
-        n_layers=1,
-        n_heads=4,
-        batch_size=2,
-        attention=None,
-    )
+from tests.arrow import table as arrow_table
 
 
 def prepared(model: rf.Model, rows: list[dict] | None = None, strata: Strata = Strata.train) -> TensorDict:
     return model.encode(
-        arrow_batch(
+        arrow_table(
             rows
             or [
                 {"color": "red", "amount": 1.0, "label": "warm"},
@@ -53,7 +42,7 @@ def test_forward_contract_canonicalizes_default_accelerator_device_indices(monke
 
 
 def test_forward_contract_rejects_missing_active_field() -> None:
-    model = build(color=rf.Category())
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category)
     inputs = prepared(model)
 
     del inputs[Address("/color")]
@@ -63,7 +52,7 @@ def test_forward_contract_rejects_missing_active_field() -> None:
 
 
 def test_forward_contract_requires_strata() -> None:
-    model = build(color=rf.Category())
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category)
     inputs = prepared(model)
 
     with pytest.raises(TypeError, match="strata"):
@@ -71,7 +60,7 @@ def test_forward_contract_requires_strata() -> None:
 
 
 def test_forward_contract_rejects_unknown_extra_field() -> None:
-    model = build(color=rf.Category())
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category)
     inputs = prepared(model)
     inputs[Address("/extra")] = inputs[Address("/color")].clone()
 
@@ -80,7 +69,7 @@ def test_forward_contract_rejects_unknown_extra_field() -> None:
 
 
 def test_forward_contract_rejects_inactive_request_field() -> None:
-    model = build(color=rf.Category(), ignored=rf.Category(active=False))
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category, ignored=rf.Category(active=False))
     inputs = prepared(model)
     inputs[Address("/ignored")] = inputs[Address("/color")].clone()
 
@@ -89,7 +78,7 @@ def test_forward_contract_rejects_inactive_request_field() -> None:
 
 
 def test_forward_contract_rejects_branch_address_field() -> None:
-    model = build(color=rf.Category())
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category)
     inputs = prepared(model)
     inputs[Address("/")] = inputs[Address("/color")].clone()
 
@@ -98,7 +87,7 @@ def test_forward_contract_rejects_branch_address_field() -> None:
 
 
 def test_forward_contract_rejects_wrong_tensorfield_class() -> None:
-    model = build(color=rf.Category(), amount=rf.Number())
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category, amount=rf.Number)
     inputs = prepared(model)
     inputs[Address("/color")] = inputs[Address("/amount")].clone()
 
@@ -107,7 +96,7 @@ def test_forward_contract_rejects_wrong_tensorfield_class() -> None:
 
 
 def test_forward_contract_rejects_wrong_state_shape() -> None:
-    model = build(color=rf.Category())
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category)
     inputs = prepared(model)
     inputs[Address("/color")].state = inputs[Address("/color")].state[:, :0]
 
@@ -116,7 +105,7 @@ def test_forward_contract_rejects_wrong_state_shape() -> None:
 
 
 def test_forward_contract_rejects_wrong_state_dtype() -> None:
-    model = build(color=rf.Category())
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category)
     inputs = prepared(model)
     inputs[Address("/color")].state = inputs[Address("/color")].state.to(torch.float32)
 
@@ -125,7 +114,7 @@ def test_forward_contract_rejects_wrong_state_dtype() -> None:
 
 
 def test_forward_contract_rejects_content_without_state_shape_prefix() -> None:
-    model = build(color=rf.Category())
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category)
     inputs = prepared(model)
     inputs[Address("/color")].content = inputs[Address("/color")].content[:, :0]
 
@@ -134,7 +123,7 @@ def test_forward_contract_rejects_content_without_state_shape_prefix() -> None:
 
 
 def test_forward_contract_allows_masked_non_trainable_input() -> None:
-    model = build(color=rf.Category())
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category)
     inputs = prepared(model)
     field = inputs[Address("/color")]
     field.state[0, 0] = Tokens.masked.value
@@ -143,7 +132,7 @@ def test_forward_contract_allows_masked_non_trainable_input() -> None:
 
 
 def test_forward_contract_allows_masked_non_trainable_predict_input() -> None:
-    model = build(color=rf.Category())
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category)
     inputs = prepared(model, strata=Strata.predict)
     field = inputs[Address("/color")]
     field.state[0, 0] = Tokens.masked.value
@@ -152,7 +141,7 @@ def test_forward_contract_allows_masked_non_trainable_predict_input() -> None:
 
 
 def test_forward_contract_rejects_trainable_input_without_targets() -> None:
-    model = build(color=rf.Category(mask=rf.Mask(dropout=False, reconstruct=True)))
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category(mask=rf.Mask(dropout=False, reconstruct=True)))
     inputs = prepared(model)
     field = inputs[Address("/color")]
     field.targets = TensorDict({}, batch_size=field.state.shape)
@@ -162,7 +151,7 @@ def test_forward_contract_rejects_trainable_input_without_targets() -> None:
 
 
 def test_forward_contract_rejects_presence_state_disagreement() -> None:
-    model = build(color=rf.Category(), label=rf.Category(mask=True))
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category, label=rf.Category(mask=True))
     inputs = prepared(model)
     inputs[Address("/label")].state[0, 0] = Tokens.valued.value
 
@@ -171,7 +160,7 @@ def test_forward_contract_rejects_presence_state_disagreement() -> None:
 
 
 def test_forward_contract_allows_predict_target_placeholder() -> None:
-    model = build(color=rf.Category(), label=rf.Category(mask=True))
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category, label=rf.Category(mask=True))
     inputs = prepared(
         model,
         rows=[
@@ -187,7 +176,7 @@ def test_forward_contract_allows_predict_target_placeholder() -> None:
 
 
 def test_forward_contract_rejects_predict_placeholder_in_train_strata() -> None:
-    model = build(color=rf.Category(), label=rf.Category(mask=True))
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category, label=rf.Category(mask=True))
     inputs = prepared(
         model,
         rows=[
@@ -201,7 +190,7 @@ def test_forward_contract_rejects_predict_placeholder_in_train_strata() -> None:
 
 
 def test_forward_contract_uses_deterministic_backoff_schedule() -> None:
-    model = build(color=rf.Category())
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category)
     inputs = prepared(model)
 
     for _ in range(3):
@@ -215,7 +204,7 @@ def test_forward_contract_uses_deterministic_backoff_schedule() -> None:
 
 
 def test_forward_contract_runs_when_batch_signature_changes() -> None:
-    model = build(color=rf.Category())
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category)
     inputs = prepared(model)
 
     for _ in range(3):
@@ -228,7 +217,7 @@ def test_forward_contract_runs_when_batch_signature_changes() -> None:
 
 
 def test_forward_contract_runs_when_dataloader_index_changes() -> None:
-    model = build(color=rf.Category())
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category)
     inputs = prepared(model)
 
     for _ in range(3):
@@ -241,7 +230,7 @@ def test_forward_contract_runs_when_dataloader_index_changes() -> None:
 
 
 def test_forward_contract_resets_after_schema_mutation() -> None:
-    model = build(color=rf.Category())
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category)
     inputs = prepared(model)
 
     for _ in range(3):
@@ -263,7 +252,7 @@ def collections(model: rf.Model, lengths: tuple[int, ...]) -> TensorDict:
 
 
 def test_dynamic_geometry_grows_and_shrinks_without_creating_contract_scopes() -> None:
-    model = build(history=rf.Branch(amount=rf.Number, balance=rf.Number))
+    model = rf.Model.xs(d_model=8, attention=None, history=rf.Branch(amount=rf.Number, balance=rf.Number))
 
     for lengths in ((0, 0), (1,), (2, 7), (3, 1, 0), (0,)):
         inputs = collections(model, lengths)
@@ -274,7 +263,7 @@ def test_dynamic_geometry_grows_and_shrinks_without_creating_contract_scopes() -
 
 
 def test_shared_branch_extent_is_checked_even_during_contract_backoff() -> None:
-    model = build(history=rf.Branch(amount=rf.Number, balance=rf.Number))
+    model = rf.Model.xs(d_model=8, attention=None, history=rf.Branch(amount=rf.Number, balance=rf.Number))
     inputs = collections(model, (2, 3))
     for _ in range(3):
         sanitize(model, inputs, strata=Strata.predict)
@@ -286,7 +275,7 @@ def test_shared_branch_extent_is_checked_even_during_contract_backoff() -> None:
 
 
 def test_dynamic_forward_requires_geometry_and_rejects_unknown_geometry_addresses() -> None:
-    model = build(history=rf.Branch(amount=rf.Number, balance=rf.Number))
+    model = rf.Model.xs(d_model=8, attention=None, history=rf.Branch(amount=rf.Number, balance=rf.Number))
     inputs = collections(model, (2,))
     geometry = inputs[Address()]
     del inputs[Address()]
@@ -301,7 +290,7 @@ def test_dynamic_forward_requires_geometry_and_rejects_unknown_geometry_addresse
 
 
 def test_geometry_dtype_and_extent_limits_are_checked_before_backoff() -> None:
-    model = build(history=rf.Branch(length=3, amount=rf.Number, balance=rf.Number))
+    model = rf.Model.xs(d_model=8, attention=None, history=rf.Branch(length=3, amount=rf.Number, balance=rf.Number))
     inputs = collections(model, (1, 2))
     for _ in range(3):
         sanitize(model, inputs, strata=Strata.predict)
@@ -319,7 +308,7 @@ def test_geometry_dtype_and_extent_limits_are_checked_before_backoff() -> None:
 
 
 def test_bounded_leaf_only_forward_inputs_keep_their_fixed_geometry_contract() -> None:
-    model = build(history=rf.Branch(length=2, amount=rf.Number, balance=rf.Number))
+    model = rf.Model.xs(d_model=8, attention=None, history=rf.Branch(length=2, amount=rf.Number, balance=rf.Number))
     inputs = collections(model, (2,))
     del inputs[Address()]
 
@@ -327,7 +316,7 @@ def test_bounded_leaf_only_forward_inputs_keep_their_fixed_geometry_contract() -
 
 
 def test_contract_scope_cache_is_bounded_for_new_dataloaders() -> None:
-    model = build(color=rf.Category)
+    model = rf.Model.xs(d_model=8, attention=None, color=rf.Category)
     inputs = prepared(model)
     scheduler = ContractScheduler()
 

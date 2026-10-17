@@ -20,7 +20,7 @@ from relflow.data.arrow import Encoded
     ],
 )
 def test_invalid_retention_is_rejected_at_each_boundary(retain, error, message):
-    model = rf.Model(d_model=8, n_layers=1, n_heads=2, amount=rf.Number, label=rf.Boolean(mask=True))
+    model = rf.Model.xs(d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
     source = pa.table({"id": pa.array([], type=pa.int64()), "amount": pa.array([], type=pa.float64())})
 
     with pytest.raises(error, match=f"Encoded retain.*{message}"):

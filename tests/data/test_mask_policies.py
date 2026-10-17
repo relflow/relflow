@@ -8,12 +8,7 @@ import relflow as rf
 
 
 def model(mask: rf.Mask) -> rf.Model:
-    return rf.Model(
-        d_model=8,
-        n_layers=1,
-        n_heads=2,
-        value=rf.Number(mask=mask),
-    )
+    return rf.Model.xs(d_model=8, value=rf.Number(mask=mask))
 
 
 def selected(field) -> list[bool]:
@@ -109,10 +104,8 @@ def threshold(frame: pl.DataFrame, *, cutoff: float) -> pl.DataFrame:
 
 def test_arrow_preprocessor_selector_and_partial_binding():
     prepare = threshold.partial(cutoff=1_000.0)
-    configured = rf.Model(
+    configured = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         amount=rf.Number(
             mask=rf.Mask(
                 query="mask_amount",
@@ -138,10 +131,8 @@ def test_arrow_preprocessor_selector_and_partial_binding():
 
 
 def test_arrow_preprocessor_attaches_to_data_module():
-    configured = rf.Model(
+    configured = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         batch_size=3,
         amount=rf.Number(
             mask=rf.Mask(
@@ -171,10 +162,8 @@ def prediction_policy(frame: pl.DataFrame, *, strata: rf.Strata) -> pl.DataFrame
 
 
 def test_stratum_aware_selector():
-    configured = rf.Model(
+    configured = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         amount=rf.Number(
             mask=rf.Mask(
                 query="mask_amount",
@@ -224,10 +213,8 @@ def events() -> pa.Table:
 
 
 def test_arrow_selector_is_atomic_for_a_branch():
-    configured = rf.Model(
+    configured = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         events=rf.Branch(
             length=3,
             mask=rf.Mask(
@@ -235,7 +222,7 @@ def test_arrow_selector_is_atomic_for_a_branch():
                 skip=True,
                 dropout=False,
             ),
-            kind=rf.Category(),
+            kind=rf.Category,
             amount=rf.Number,
         ),
     )
@@ -248,10 +235,8 @@ def test_arrow_selector_is_atomic_for_a_branch():
 
 
 def test_shared_selector_can_drive_different_leaf_effects():
-    configured = rf.Model(
+    configured = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         events=rf.Branch(
             length=3,
             kind=rf.Category(
@@ -284,10 +269,8 @@ def recent(frame: pl.DataFrame) -> pl.DataFrame:
 
 
 def test_last_n_selector():
-    configured = rf.Model(
+    configured = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         events=rf.Branch(
             length=3,
             amount=rf.Number(
@@ -340,10 +323,8 @@ def test_exact_k_selector():
         ],
         schema=pa.schema([pa.field("events", RISK_EVENTS)]),
     )
-    configured = rf.Model(
+    configured = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         events=rf.Branch(
             length=3,
             amount=rf.Number(
@@ -378,10 +359,8 @@ def test_nested_selectors_preserve_all_null_schema(preprocess, datatype):
         [pa.nulls(2, type=datatype)],
         names=["events"],
     )
-    configured = rf.Model(
+    configured = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         events=rf.Branch(
             length=3,
             amount=rf.Number(
@@ -432,10 +411,8 @@ def test_observation_selector_broadcasts_into_nested_records():
             ]
         ),
     )
-    configured = rf.Model(
+    configured = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         events=rf.Branch(
             length=2,
             mask=rf.Mask(
@@ -471,10 +448,8 @@ def test_train_only_query_is_not_required_during_prediction():
 
 
 def test_query_backed_target_requires_its_source():
-    configured = rf.Model(
+    configured = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         feature=rf.Number,
         label=rf.Boolean(query="labels.value", mask=True),
     )

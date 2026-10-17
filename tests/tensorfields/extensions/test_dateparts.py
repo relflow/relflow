@@ -17,7 +17,7 @@ ADDRESS = rf.Address("/", "created")
 
 def build(jitter: Jitter | dict[str, object] | None = None) -> rf.Model:
     options = {} if jitter is None else {"jitter": jitter}
-    return rf.Model(created=rf.DateParts(dateparts=["day_of_week"], **options), d_model=8, n_layers=1, n_heads=2)
+    return rf.Model.xs(created=rf.DateParts(dateparts=["day_of_week"], **options), d_model=8)
 
 
 def test_dateparts_request_hydrates_jitter_from_a_mapping():

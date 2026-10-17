@@ -17,10 +17,8 @@ from relflow.tensorfields.extensions.category import Metrics, Reconstruction, lo
 
 
 def model():
-    result = rf.Model(
+    result = rf.Model.xs(
         d_model=8,
-        n_heads=2,
-        n_layers=1,
         x=rf.Number,
         label=rf.Category(topk=[2], mask=True),
     )
@@ -46,10 +44,8 @@ def evaluate(module, labels, logits):
 
 
 def test_unavailable_simulation_preserves_reconstruction_targets():
-    module = rf.Model(
+    module = rf.Model.xs(
         d_model=8,
-        n_heads=2,
-        n_layers=1,
         entity=rf.Category(p_unavailable=1.0),
         label=rf.Category(p_unavailable=1.0, mask=True),
     )
@@ -92,7 +88,7 @@ def test_all_unknown_content_is_zero_for_backward_but_undefined_for_evaluation()
 
 
 def test_single_populated_label_probability_is_conditional_not_learned_competence():
-    module = rf.Model(d_model=8, n_heads=2, n_layers=1, x=rf.Number, label=rf.Category(mask=True))
+    module = rf.Model.xs(d_model=8, x=rf.Number, label=rf.Category(mask=True))
     module.encode(pa.table({"x": [0.0], "label": ["only-label"]}), strata="train")
     result = module.predict(pa.table({"x": [10.0]}))["predictions"].to_pylist()[0]["label"]["content"]
     assert result["value"] == "only-label"
@@ -186,10 +182,8 @@ def test_metrics_keep_integer_counts_and_accelerator_supported_float_sums(device
 
 
 def test_lightning_validation_counts_include_an_objective_empty_rank():
-    module = rf.Model(
+    module = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         batch_size=2,
         x=rf.Number,
         label=rf.Category(mask=rf.Mask(query="selected", reconstruct=True)),

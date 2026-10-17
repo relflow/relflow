@@ -20,36 +20,26 @@ class Tokenizer:
 
 
 @pytest.mark.parametrize(
-    ("kind", "value", "options"),
+    ("field_type", "value", "options"),
     [
-        ("number", 1.5, {}),
-        ("boolean", True, {}),
-        ("category", "known", {"p_unavailable": 0.0}),
-        ("hash", "identifier", {}),
-        ("text", "hello", {"model": "local-test", "max_length": 4}),
+        (rf.Number, 1.5, {}),
+        (rf.Boolean, True, {}),
+        (rf.Category, "known", {"p_unavailable": 0.0}),
+        (rf.Hash, "identifier", {}),
+        (rf.Text, "hello", {"model": "local-test", "max_length": 4}),
     ],
 )
 @pytest.mark.parametrize("objective", [False, True])
 @pytest.mark.parametrize("strata", [rf.Strata.train, rf.Strata.predict])
-def test_targets_follow_objectives(kind, value, options, objective, strata, monkeypatch):
+def test_targets_follow_objectives(field_type, value, options, objective, strata, monkeypatch):
     monkeypatch.setattr(CachedModel, "get_tokenizer", classmethod(lambda cls, key: Tokenizer()))
-    schema = rf.Schema.model_validate(
-        {
-            "d_model": 8,
-            "fields": {
-                "type": "branch",
-                "fields": [
-                    {
-                        "name": "value",
-                        "type": kind,
-                        "mask": rf.Mask(dropout=False, reconstruct=True) if objective else False,
-                        **options,
-                    }
-                ],
-            },
-        }
+    schema = rf.Schema.from_tree(
+        d_model=8,
+        n_layers=1,
+        n_heads=4,
+        value=field_type(mask=rf.Mask(dropout=False, reconstruct=True) if objective else False, **options),
     )
-    context = {"/value": OnlineVocabularyModel(size=8).state} if kind == "category" else {}
+    context = {"/value": OnlineVocabularyModel(size=8).state} if field_type is rf.Category else {}
     batch = encode(
         pa.table({"value": [value, None]}),
         schema=schema,
@@ -64,18 +54,15 @@ def test_targets_follow_objectives(kind, value, options, objective, strata, monk
 
 
 @pytest.mark.parametrize(
-    ("kind", "invalid"),
-    [("number", "invalid"), ("boolean", "invalid"), ("hash", {"nested": 1}), ("text", 42)],
+    ("field_type", "invalid"),
+    [(rf.Number, "invalid"), (rf.Boolean, "invalid"), (rf.Hash, {"nested": 1}), (rf.Text, 42)],
 )
-def test_unused_targets_preserve_masked_pristine_validation(kind, invalid):
-    schema = rf.Schema.model_validate(
-        {
-            "d_model": 8,
-            "fields": {
-                "type": "branch",
-                "fields": [{"name": "value", "type": kind, "mask": rf.Mask(rate=1.0, reconstruct=False)}],
-            },
-        }
+def test_unused_targets_preserve_masked_pristine_validation(field_type, invalid):
+    schema = rf.Schema.from_tree(
+        d_model=8,
+        n_layers=1,
+        n_heads=4,
+        value=field_type(mask=rf.Mask(rate=1.0, reconstruct=False)),
     )
     assert "/value" not in schema.objectives
     with pytest.raises((TypeError, ValueError), match="value"):

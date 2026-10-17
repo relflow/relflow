@@ -15,13 +15,11 @@ from relflow.architecture.pool import LearnedQueryCrossAttention
 
 @pytest.fixture
 def model():
-    return rf.Model(
+    return rf.Model.xs(
         value=rf.Number,
         history=rf.Branch(length=2, attention=None, value=rf.Number),
         label=rf.Boolean(mask=True),
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         dropout=0.0,
         batch_size=2,
     )
@@ -315,15 +313,7 @@ def test_dynamic_dense_region_reuses_a_graph_across_collection_extents(model):
 
 @pytest.mark.parametrize("dropout", [0.0, 0.2])
 def test_real_graph_backend_reaches_training_step_and_preserves_accumulation(monkeypatch, dropout):
-    eager = rf.Model(
-        value=rf.Number,
-        label=rf.Boolean(mask=True),
-        d_model=8,
-        n_layers=1,
-        n_heads=2,
-        dropout=dropout,
-        batch_size=2,
-    )
+    eager = rf.Model.xs(value=rf.Number, label=rf.Boolean(mask=True), d_model=8, dropout=dropout, batch_size=2)
     batch = eager.encode(pa.table({"value": [1.0, 5.0], "label": [False, True]}), strata="train")
     compiled = deepcopy(eager)
     graphs = []

@@ -12,18 +12,16 @@ import relflow as rf
 ADDRESS = rf.Address("/amount")
 
 
-def _model(*, alpha: float | None = None) -> rf.Model:
-    return rf.Model(
+def build_model(*, alpha: float | None = None) -> rf.Model:
+    return rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=4,
         attention=None,
         amount=rf.Number(alpha=alpha),
     )
 
 
 def test_number_normalization_returns_cumulative_snapshot() -> None:
-    model = _model()
+    model = build_model()
     normalizer = model.nodes[ADDRESS].embedder.normalizer
     normalizer.update(torch.tensor([1.0, 3.0]))
 
@@ -45,7 +43,7 @@ def test_number_normalization_returns_cumulative_snapshot() -> None:
 
 
 def test_number_normalization_reports_ema_configuration_without_count() -> None:
-    model = _model(alpha=0.25)
+    model = build_model(alpha=0.25)
     normalizer = model.nodes[ADDRESS].embedder.normalizer
     normalizer.update(torch.tensor([2.0, 4.0]))
 
@@ -59,7 +57,7 @@ def test_number_normalization_reports_ema_configuration_without_count() -> None:
 
 
 def test_number_normalization_count_remains_exact_above_float32_limit() -> None:
-    model = _model()
+    model = build_model()
     normalizer = model.nodes[ADDRESS].embedder.normalizer
     normalizer.count.fill_(2**24)
 
@@ -72,17 +70,15 @@ def test_number_normalization_rejects_invalid_model_and_address() -> None:
     with pytest.raises(TypeError, match="model must be a Model"):
         rf.Number.normalization(object(), ADDRESS)
 
-    model = _model()
+    model = build_model()
     with pytest.raises(KeyError, match="missing"):
         rf.Number.normalization(model, "/missing")
 
 
 def test_number_normalization_rejects_non_number_model_field() -> None:
-    model = rf.Model(
+    model = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=4,
-        category=rf.Category(),
+        category=rf.Category,
     )
 
     with pytest.raises(TypeError, match="not a Number field"):

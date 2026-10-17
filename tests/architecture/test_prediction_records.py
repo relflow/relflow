@@ -11,10 +11,8 @@ from relflow.architecture.runtime import plan
 
 
 def configured():
-    return rf.Model(
+    return rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         embed=True,
         accounts=rf.Branch(
             length=4,
@@ -127,7 +125,7 @@ def test_nested_output_schema_and_values_roundtrip_without_caller_supplied_schem
 
 
 def test_embeddings_only_omit_prediction_and_input_sentinel_columns():
-    model = rf.Model(d_model=8, n_layers=1, n_heads=2, embed=True, amount=rf.Number)
+    model = rf.Model.xs(d_model=8, embed=True, amount=rf.Number)
     source = pa.table({"amount": [1.0]})
     output = model.predict(source)
     assert output.column_names == ["representations"]
@@ -138,7 +136,7 @@ def test_embeddings_only_omit_prediction_and_input_sentinel_columns():
 
 
 def test_model_without_selected_output_rejects_prediction_plan():
-    model = rf.Model(d_model=8, n_layers=1, n_heads=2, amount=rf.Number)
+    model = rf.Model.xs(d_model=8, amount=rf.Number)
     with pytest.raises(ValueError, match="no public prediction outputs"):
         plan(model)
 
@@ -176,12 +174,7 @@ def test_third_party_rich_results_keep_nested_declared_types_and_metadata(tmp_pa
         )
 
     try:
-        model = rf.Model(
-            d_model=8,
-            n_layers=1,
-            n_heads=2,
-            events=rf.Branch(length=3, amount=rf.Number, note=Request(mask=True)),
-        )
+        model = rf.Model.xs(d_model=8, events=rf.Branch(length=3, amount=rf.Number, note=Request(mask=True)))
         source = pa.Table.from_pylist([{"events": [None, {"amount": 1.0}]}])
         output = model.predict(source)
         rows = output.to_pylist()
@@ -209,7 +202,7 @@ def test_custom_output_rejects_noncanonical_list_names_at_planning():
         return pa.struct([pa.field("candidates", pa.list_(pa.float32()))])
 
     try:
-        model = rf.Model(d_model=8, n_layers=1, n_heads=2, note=Request(mask=True))
+        model = rf.Model.xs(d_model=8, note=Request(mask=True))
         with pytest.raises(ValueError, match="/note.*list children named 'element'.*'item'"):
             plan(model)
     finally:
