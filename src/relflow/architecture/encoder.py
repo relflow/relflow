@@ -9,7 +9,7 @@ from tensordict import TensorDict
 
 from relflow.architecture.attention import RotaryMultiheadAttention
 from relflow.architecture.blocks import feed_forward, norm
-from relflow.architecture.packed import Packed, block, customized, pack, stochastic, unpack
+from relflow.architecture.packed import SDPA_BATCH_MAX, Packed, block, customized, pack, stochastic, unpack
 from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool
 from relflow.structs.packages import Parcel
 from relflow.structs.reduction import Attention, Mean
@@ -19,8 +19,6 @@ if TYPE_CHECKING:
     from relflow.data.arrow import Geometry
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
-
-FLASH_BATCH_MAX = 65535
 
 
 def locate(parcel: Parcel, *, schema: Schema, geometry: TensorDict | None) -> Parcel:
@@ -278,7 +276,7 @@ class BranchEncoder(torch.nn.Module):
                 unmasked = (
                     full
                     and selected.is_cuda
-                    and selected.shape[0] <= FLASH_BATCH_MAX
+                    and selected.shape[0] <= SDPA_BATCH_MAX
                     and type(self) is BranchEncoder
                     and canonical(self, self.compute)
                 )
@@ -437,7 +435,7 @@ class BranchEncoder(torch.nn.Module):
         else:
             mixed = self.coordinate_encoder(
                 inputs,
-                present=None if full and inputs.is_cuda and 0 < inputs.shape[0] <= FLASH_BATCH_MAX else presence,
+                present=None if full and inputs.is_cuda and 0 < inputs.shape[0] <= SDPA_BATCH_MAX else presence,
             )
         mixed = mixed.reshape(payload.shape)
 

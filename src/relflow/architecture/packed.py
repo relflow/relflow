@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 import torch
 import torch.nn.functional as F
 
+SDPA_BATCH_MAX = 65535
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
@@ -133,26 +135,30 @@ def attend(
         k = attention.rotary(k.transpose(0, 1), positions=packing.positions).transpose(0, 1)
     context = torch.zeros_like(q)
     for group in packing.groups:
-        selected_q = (
-            q.index_select(0, group.indices)
-            .reshape(group.rows, group.length, attention.nhead, attention.head_dim)
-            .transpose(1, 2)
-        )
-        selected_k = (
-            k.index_select(0, group.indices)
-            .reshape(group.rows, group.length, attention.n_kv_heads, attention.head_dim)
-            .transpose(1, 2)
-        )
-        selected_v = (
-            v.index_select(0, group.indices)
-            .reshape(group.rows, group.length, attention.n_kv_heads, attention.head_dim)
-            .transpose(1, 2)
-        )
-        attended = F.scaled_dot_product_attention(
-            selected_q, selected_k, selected_v, dropout_p=0.0, enable_gqa=attention.nhead != attention.n_kv_heads
-        )
-        attended = attended.transpose(1, 2).reshape(-1, attention.nhead, attention.head_dim)
-        context = context.index_copy(0, group.indices, attended)
+        # FlashAttention's CUDA launch has a bounded batch dimension. Split
+        # independent rows, keeping each row's tokens and rotary positions intact.
+        for indices in group.indices.split(group.length * SDPA_BATCH_MAX):
+            rows = indices.numel() // group.length
+            selected_q = (
+                q.index_select(0, indices)
+                .reshape(rows, group.length, attention.nhead, attention.head_dim)
+                .transpose(1, 2)
+            )
+            selected_k = (
+                k.index_select(0, indices)
+                .reshape(rows, group.length, attention.n_kv_heads, attention.head_dim)
+                .transpose(1, 2)
+            )
+            selected_v = (
+                v.index_select(0, indices)
+                .reshape(rows, group.length, attention.n_kv_heads, attention.head_dim)
+                .transpose(1, 2)
+            )
+            attended = F.scaled_dot_product_attention(
+                selected_q, selected_k, selected_v, dropout_p=0.0, enable_gqa=attention.nhead != attention.n_kv_heads
+            )
+            attended = attended.transpose(1, 2).reshape(-1, attention.nhead, attention.head_dim)
+            context = context.index_copy(0, indices, attended)
     return attention.out_proj(context.reshape(-1, attention.d_model))
 
 
