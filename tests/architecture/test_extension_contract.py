@@ -366,15 +366,13 @@ def test_compact_extension_presence_is_scattered_without_routing_its_payload(mon
         TENSORFIELDS.pop(extension.name, None)
 
 
-def test_source_less_multifamily_extension_uses_the_generic_vacancy():
+def test_source_less_multifamily_extension_without_public_outputs_rejects_prediction():
     extension, Request = build_extension()
     try:
         model = rf.Model(label=Request(mask=True, family="bytes"), d_model=8, n_layers=1, n_heads=2)
 
-        predictions = model.predict(pa.table({"unused": [None, None]}))
-
-        assert len(predictions) == 2
-        assert predictions["predictions"].type == pa.null()
+        with pytest.raises(ValueError, match="model has no public prediction outputs"):
+            model.predict(pa.table({"unused": [None, None]}))
     finally:
         TENSORFIELDS.pop(extension.name, None)
 

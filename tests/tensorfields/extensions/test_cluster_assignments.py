@@ -20,13 +20,14 @@ K = 4
 ADDRESS = "/merchant_id"
 
 
-def _model() -> rf.Model:
+def _model(*, embed: bool = False) -> rf.Model:
     torch.manual_seed(0)
     return rf.Model(
         d_model=16,
         n_layers=1,
         n_heads=4,
         batch_size=4,
+        embed=embed,
         merchant_id=rf.Cluster(n_clusters=(K, K), p_unavailable=0.0),
     )
 
@@ -166,7 +167,7 @@ def test_assign_raises_for_non_cluster_field():
 
 
 def test_override_applies_only_within_prediction_scope():
-    model = _model()
+    model = _model(embed=True)
     embedder = _embedder(model)
     initial_vocab_size = len(embedder.vocab.master)
     initial_row_2 = embedder.embeddings["cluster"].weight[min(initial_vocab_size, CAPACITY)].detach().clone()

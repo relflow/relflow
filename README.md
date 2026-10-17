@@ -79,9 +79,11 @@ Fitting includes early stopping and restoration of the best validation model.
 Configure AdamW directly on `fit`; each call starts with the current model
 parameters and fresh optimization state. Hardware, logging, and Lightning
 options can also be supplied to the model methods.
-Predictions are an Arrow table; decoded values appear under `predictions` at
-addresses such as `/disputed`. For larger file-backed jobs, use an Arrow data
-module with `rf.Writer` to stream predictions to Parquet.
+Predictions are an Arrow table: decoded results use schema field names such as
+`predictions.disputed`, and repeated branches become lists of records. Requested
+embeddings appear separately in `representations`. Retention adds an `inputs`
+column. For larger file-backed jobs, use an Arrow data module with `rf.Writer`
+to stream predictions to Parquet.
 
 ## Documentation
 

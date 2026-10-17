@@ -896,8 +896,10 @@ class Model(lit.LightningModule):
         """Predict direct observations or a data module's batched prediction split.
 
         Returns one Arrow row per processed observation. The ``predictions``
-        column contains decoded values and requested embeddings. ``retain``
-        keeps selected input columns, or all columns with ``"*"``. Use a typed
+        column nests rich decoded results under schema field names and record
+        lists. Requested embeddings appear separately in ``representations``;
+        either column is omitted when unconfigured. ``retain`` adds selected
+        input columns under ``inputs``, or all columns with ``"*"``. Use a typed
         empty Arrow object when there are no observations.
 
         Preprocessors run before encoding; postprocessors receive the final

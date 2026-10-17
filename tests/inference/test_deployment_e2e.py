@@ -108,7 +108,7 @@ def stop_process(process: subprocess.Popen[str], timeout: float = 10.0) -> None:
             log_handle.close()
 
 
-def post_json(url: str, payload: Any, timeout: float = 30.0) -> tuple[int, Any]:
+def post_json(url: str, payload: Any, timeout: float = 30.0) -> tuple[int, Any, dict[str, str]]:
     request = urllib.request.Request(
         url=url,
         data=json.dumps(payload).encode("utf-8"),
@@ -118,7 +118,7 @@ def post_json(url: str, payload: Any, timeout: float = 30.0) -> tuple[int, Any]:
 
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.status, json.loads(response.read().decode("utf-8"))
+            return response.status, json.loads(response.read().decode("utf-8")), dict(response.headers)
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         raise AssertionError(f"deployment returned HTTP {exc.code}: {body}") from exc
@@ -190,16 +190,21 @@ def test_deployment_serves_embeddings_from_temporary_checkpoint(tmp_path: Path) 
 
     try:
         wait_for_server(base_url=base_url, process=process, log_path=log_path)
-        status, payload = post_json(f"{base_url}/predict", {"label": "alpha"})
+        status, payload, headers = post_json(f"{base_url}/predict", {"label": "alpha"})
     finally:
         stop_process(process)
 
     assert status == 200
-    assert "/label" in payload["predictions"]
-
-    embedding = payload["predictions"]["/label"]["embedding"]
+    assert set(payload) == {"representations"}
+    representation = payload["representations"][0]
+    assert representation["path"] == ["label"]
+    assert representation["parents"] == []
+    assert representation["output_index"] == 0
+    embedding = representation["embedding"]
     assert len(embedding) == model_schema.d_model
     assert all(isinstance(value, float) for value in embedding)
+    assert headers["x-relflow-prediction-format"] == "2"
+    assert headers["x-relflow-model-version"]
 
 
 def test_deployment_accepts_multiple_inputs_in_one_request(tmp_path: Path) -> None:
@@ -211,7 +216,7 @@ def test_deployment_accepts_multiple_inputs_in_one_request(tmp_path: Path) -> No
 
     try:
         wait_for_server(base_url=base_url, process=process, log_path=log_path)
-        status, payload = post_json(f"{base_url}/predict", [{"label": "alpha"}, {"label": "beta"}])
+        status, payload, _ = post_json(f"{base_url}/predict", [{"label": "alpha"}, {"label": "beta"}])
     finally:
         stop_process(process)
 
@@ -219,8 +224,9 @@ def test_deployment_accepts_multiple_inputs_in_one_request(tmp_path: Path) -> No
     assert isinstance(payload, list)
     assert len(payload) == 2
     for item in payload:
-        assert "/label" in item["predictions"]
-        embedding = item["predictions"]["/label"]["embedding"]
+        assert set(item) == {"representations"}
+        assert item["representations"][0]["path"] == ["label"]
+        embedding = item["representations"][0]["embedding"]
         assert len(embedding) == model_schema.d_model
 
 
@@ -233,12 +239,12 @@ def test_deployment_accepts_unseen_category_values_at_runtime(tmp_path: Path) ->
 
     try:
         wait_for_server(base_url=base_url, process=process, log_path=log_path)
-        _, alpha_payload = post_json(f"{base_url}/predict", {"label": "alpha"})
-        status, gamma_payload = post_json(f"{base_url}/predict", {"label": "gamma"})
+        _, alpha_payload, _ = post_json(f"{base_url}/predict", {"label": "alpha"})
+        status, gamma_payload, _ = post_json(f"{base_url}/predict", {"label": "gamma"})
     finally:
         stop_process(process)
 
     assert status == 200
-    assert "/label" in alpha_payload["predictions"]
-    assert "/label" in gamma_payload["predictions"]
-    assert alpha_payload["predictions"]["/label"]["embedding"] != gamma_payload["predictions"]["/label"]["embedding"]
+    assert alpha_payload["representations"][0]["path"] == ["label"]
+    assert gamma_payload["representations"][0]["path"] == ["label"]
+    assert alpha_payload["representations"][0]["embedding"] != gamma_payload["representations"][0]["embedding"]

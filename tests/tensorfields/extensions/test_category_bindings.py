@@ -110,8 +110,9 @@ def test_category_vocabulary_is_available_to_inference_preprocessor() -> None:
     assert seen == [("ALPHA", "BETA")]
     assert len(contexts) == 1
     assert rf.Category.vocabulary(contexts[0], ADDRESS) == ("ALPHA", "BETA")
-    root = predictions["predictions"].combine_chunks().field("/")
-    assert len(root.field("embedding")) == 2
+    root = predictions["representations"].combine_chunks()
+    assert len(root) == 2
+    assert all(row[0]["path"] == [] and len(row[0]["embedding"]) == 8 for row in root.to_pylist())
 
 
 @pytest.mark.parametrize("use_model", [True, False], ids=["model", "encoding-context"])

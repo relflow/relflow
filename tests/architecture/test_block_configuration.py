@@ -142,10 +142,11 @@ def test_python_yaml_and_presets_build_the_same_node_local_architecture(tmp_path
         assert model.schema.requests[rf.Address("events", "target")].ffnx == 2
         assert model.schema.requests[rf.Address("amount")].ffnx == 8
         assert_blocks(model)
-        predictions = model.predict(observations())["predictions"].combine_chunks()
-        assert predictions.type.get_field_index("/events/target") >= 0
-        assert predictions.type.get_field_index("/target") >= 0
-        embedding = predictions.field("/").field("embedding")
+        result = model.predict(observations())
+        predictions = result["predictions"].combine_chunks()
+        assert predictions.field("events").values.type.get_field_index("target") >= 0
+        assert predictions.type.get_field_index("target") >= 0
+        embedding = result["representations"].combine_chunks().values.field("embedding")
         assert torch.isfinite(torch.as_tensor(embedding.values.to_numpy().copy())).all()
 
 

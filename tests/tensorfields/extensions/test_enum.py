@@ -266,7 +266,11 @@ def test_enum_empty_prediction_and_single_class_are_well_defined():
     empty = configured.predict(records())
     assert empty.num_rows == 0
     assert (
-        empty.schema.field("predictions").type.field(str(ADDRESS)).type.field("content").type.field("value").type
+        empty.schema.field("predictions")
+        .type.field(str(ADDRESS).removeprefix("/"))
+        .type.field("content")
+        .type.field("value")
+        .type
         == pa.large_string()
     )
     field = configured.encode(records("only"), strata=rf.Strata.train)[ADDRESS]
@@ -417,7 +421,12 @@ def test_enum_lightning_training_preserves_fixed_classes_and_training_counts():
     assert rf.Enum.vocabulary(configured, ADDRESS) == VALUES
     expected_counts = {"pending": 32, "complete": 32, "rejected": 0}
     assert rf.Enum.counts(configured, ADDRESS) == expected_counts
-    output = configured.predict(validate)["predictions"].combine_chunks().field(str(ADDRESS)).field("content")
+    output = (
+        configured.predict(validate)["predictions"]
+        .combine_chunks()
+        .field(str(ADDRESS).removeprefix("/"))
+        .field("content")
+    )
     assert len(output) == 64
     assert set(output.field("value").to_pylist()) <= set(VALUES)
     probabilities = torch.from_numpy(output.field("probability").to_numpy().copy())

@@ -677,7 +677,7 @@ def test_predict_encodes_batch_and_returns_supervised_outputs() -> None:
     supervised = model.predict(table([{"color": "red"}, {"color": "blue"}]))
 
     assert model.training
-    label = supervised["predictions"].combine_chunks().field("/label")
+    label = supervised["predictions"].combine_chunks().field("label")
     content = label.field(TensorKey.content.name).to_pylist()
     state = label.field(TensorKey.state.name).to_pylist()
 
@@ -820,10 +820,13 @@ def test_predict_encodes_batch_and_returns_embedding_outputs() -> None:
 
     predictions = model.predict(table([{"color": "red"}, {"color": "blue"}]))
 
-    root = predictions["predictions"].combine_chunks().field("/")
+    root = predictions["representations"].combine_chunks().values
     embedding = root.field(TensorKey.embedding.name)
     assert len(embedding) == 2
-    assert embedding.type == pa.list_(pa.float32(), 8)
+    assert embedding.type == pa.list_(pa.field("element", pa.float32()), 8)
+    assert root.field("path").to_pylist() == [[], []]
+    assert root.field("parents").to_pylist() == [[], []]
+    assert root.field("output_index").to_pylist() == [0, 0]
 
 
 def test_leaf_embed_uses_decoder_pooled_embedding() -> None:
@@ -872,7 +875,7 @@ def test_inference_helpers_accept_postprocess() -> None:
     predictions = model.predict(batch=batch, postprocess=compact)
 
     assert len(calls) == 1
-    assert calls[0].columns == ["inputs", "predictions"]
+    assert calls[0].columns == ["predictions", "representations"]
     assert predictions.to_pydict() == {"label": ["postprocessed", "postprocessed"]}
 
 
@@ -886,4 +889,4 @@ def test_inference_helpers_accept_preprocess() -> None:
     supervised = model.predict(table([{"hue": "red"}, {"hue": "blue"}]), preprocess=recolor)
 
     predictions = supervised["predictions"].combine_chunks()
-    assert predictions.type.get_field_index("/label") >= 0
+    assert predictions.type.get_field_index("label") >= 0

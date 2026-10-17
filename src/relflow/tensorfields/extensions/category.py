@@ -510,7 +510,7 @@ def output(module: Model, address: Address) -> pa.StructType:
         [
             pa.field(TensorKey.value.name, pa.large_string()),
             pa.field(TensorKey.probability.name, pa.float32(), nullable=False),
-            pa.field(TensorKey.topk.name, pa.list_(candidate), nullable=False),
+            pa.field(TensorKey.topk.name, pa.list_(pa.field("element", candidate)), nullable=False),
         ]
     )
     return pa.struct([pa.field(TensorKey.content.name, content, nullable=False)])
@@ -564,7 +564,9 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
         {
             TensorKey.value.name: best_labels,
             TensorKey.probability.name: array(best_probabilities, pa.float32()),
-            TensorKey.topk.name: variable(candidates, candidate_counts),
+            TensorKey.topk.name: variable(
+                candidates, candidate_counts, datatype=content_type.field(TensorKey.topk.name).type
+            ),
         },
         content_type,
     )

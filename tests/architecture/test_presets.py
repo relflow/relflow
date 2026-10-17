@@ -271,7 +271,7 @@ def test_common_leaf_defaults_apply_to_late_registered_extensions(name):
         TENSORFIELDS.pop(extension.name, None)
 
 
-def test_xs_predicts_nested_targets_with_padding_and_root_embedding():
+def test_xs_predicts_nested_targets_without_padding_and_separate_root_embedding():
     model = rf.Model.xs(
         embed=True,
         events=rf.Branch(length=2, value=rf.Number, answer=rf.Number(mask=True)),
@@ -282,8 +282,10 @@ def test_xs_predicts_nested_targets_with_padding_and_root_embedding():
 
     assert result.num_rows == 2
     predictions = result["predictions"].combine_chunks()
-    assert predictions.type.field("/").type.field("embedding").type == pa.list_(pa.float32(), 64)
-    answers = predictions.field("/events/answer")
-    assert pa.types.is_fixed_size_list(answers.type)
-    assert answers.type.list_size == 2
-    assert answers.values.field("inferred").to_pylist() == [True, False, True, True]
+    representations = result["representations"].combine_chunks().values
+    assert representations.field("embedding").type == pa.list_(pa.field("element", pa.float32()), 64)
+    assert representations.field("path").to_pylist() == [[], []]
+    events = predictions.field("events")
+    assert pa.types.is_list(events.type)
+    assert events.offsets.to_pylist() == [0, 1, 3]
+    assert events.values.field("answer").field("inferred").to_pylist() == [True, True, True]

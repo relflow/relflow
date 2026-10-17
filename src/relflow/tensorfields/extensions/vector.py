@@ -286,7 +286,7 @@ def loss(
 @vector.register(Component.output)
 def output(module: Model, address: Address) -> pa.StructType:
     request: Request = cast(Request, module.schema.requests[address])
-    content = pa.list_(pa.float32(), request.n_dim)
+    content = pa.list_(pa.field("element", pa.float32()), request.n_dim)
     return pa.struct([pa.field(TensorKey.content.name, content, nullable=False)])
 
 
@@ -296,5 +296,5 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
     content = cast(torch.Tensor, prediction.payload[TensorKey.content]).detach().float().clone()
     non_valued = cast(torch.Tensor, prediction.payload[TensorKey.state]).argmax(dim=-1).ne(Tokens.valued.value)
     content[non_valued] = 0.0
-    values = fixed(array(content, pa.float32()), request.n_dim)
+    values = fixed(array(content, pa.float32()), request.n_dim, datatype=datatype.field(TensorKey.content.name).type)
     return struct({TensorKey.content.name: values}, datatype)
