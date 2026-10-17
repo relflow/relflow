@@ -512,7 +512,7 @@ def output(module: Model, address: Address) -> pa.StructType:
             pa.field(TensorKey.probability.name, pa.float32(), nullable=False),
         ]
     )
-    return pa.struct([pa.field(TensorKey.content.name, pa.list_(candidate), nullable=False)])
+    return pa.struct([pa.field(TensorKey.content.name, pa.list_(pa.field("element", candidate)), nullable=False)])
 
 
 @sets.register(Component.write)
@@ -548,4 +548,7 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
         },
         candidate_type,
     )
-    return struct({TensorKey.content.name: variable(candidates, counts)}, datatype)
+    return struct(
+        {TensorKey.content.name: variable(candidates, counts, datatype=datatype.field(TensorKey.content.name).type)},
+        datatype,
+    )

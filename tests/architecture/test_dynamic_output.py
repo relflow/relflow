@@ -31,11 +31,16 @@ def test_variable_targets_keep_types_offsets_and_stream_across_batch_widths(tmp_
 
     assert all(batch.schema == combined.schema for batch in batches)
     assert batched.schema == combined.schema
-    labels = combined["predictions"].combine_chunks().field("/events/label")
-    assert pa.types.is_list(labels.type)
-    assert labels.offsets.to_pylist() == [0, 0, 0, 2, 7]
-    assert labels.is_valid().to_pylist() == [True, False, True, True]
-    assert len(labels[2].as_py()) == 2
+    events = combined["predictions"].combine_chunks().field("events")
+    assert pa.types.is_list(events.type)
+    assert events.offsets.to_pylist() == [0, 0, 0, 2, 7]
+    assert events.is_valid().to_pylist() == [True, False, True, True]
+    assert events[2].as_py()[0] is None
+    assert len(events[2].as_py()) == 2
+    assert "embedding" not in events.type.value_type.field("label").type.names
+    representations = combined["representations"].to_pylist()
+    assert [item["parents"] for item in representations[2]] == [[1]]
+    assert all(item["path"] == ["events", "label"] for row in representations for item in row)
 
     writer = rf.Writer(tmp_path)
     for index, batch in enumerate(batches):
@@ -48,7 +53,7 @@ def test_variable_targets_keep_types_offsets_and_stream_across_batch_widths(tmp_
 
 
 @pytest.mark.parametrize("length", [1, 4])
-def test_explicit_limits_pad_only_arrow_outputs(length):
+def test_explicit_limits_keep_observed_output_lengths(length):
     model = rf.Model(
         d_model=8,
         n_layers=1,
@@ -58,11 +63,11 @@ def test_explicit_limits_pad_only_arrow_outputs(length):
     source = observations([[{"amount": 2.0}]])
 
     assert model.encode(source)["/events/amount"].state.shape == (1, 1, 1)
-    output = model.predict(source)["predictions"].combine_chunks().field("/events/label")
-    assert pa.types.is_fixed_size_list(output.type)
-    assert output.type.list_size == length
-    assert len(output[0].as_py()) == length
-    assert output[0].as_py()[1:] == [None] * (length - 1)
+    output = model.predict(source)["predictions"].combine_chunks().field("events")
+    assert pa.types.is_list(output.type)
+    assert output.type.value_field.name == "element"
+    assert len(output[0].as_py()) == 1
+    assert list(output[0].as_py()[0]) == ["label"]
 
 
 def test_nested_variable_axes_and_pass_through_embeddings_preserve_structural_slots():
@@ -86,12 +91,21 @@ def test_nested_variable_axes_and_pass_through_embeddings_preserve_structural_sl
     output = model.predict(source)
     assert output.schema == model.predict(source, batch_size=1).schema
     rows = output.to_pylist()
-    assert len(rows[0]["predictions"]["/events/items/label"]) == 1
-    assert len(rows[0]["predictions"]["/events/items/label"][0]) == 2
-    assert len(rows[0]["predictions"]["/events/items"][0]) == 4
-    assert len(rows[0]["predictions"]["/events"]) == 5
-    assert len(rows[1]["predictions"]["/events/items"][0]) == 0
-    assert len(rows[1]["predictions"]["/events/items"][1]) == 2
+    assert len(rows[0]["predictions"]["events"]) == 1
+    assert len(rows[0]["predictions"]["events"][0]["items"]) == 2
+    assert rows[0]["predictions"]["events"][0]["items"][0] is None
+    first = rows[0]["representations"]
+    outer = [item for item in first if item["path"] == ["events"]]
+    inner = [item for item in first if item["path"] == ["events", "items"]]
+    assert len(outer) == 5
+    assert len(inner) == 4
+    assert all(item["parents"] == [] for item in outer)
+    assert all(item["parents"] == [0] for item in inner)
+    assert [item["output_index"] for item in outer] == list(range(5))
+    assert [item["output_index"] for item in inner] == list(range(4))
+    second_inner = [item for item in rows[1]["representations"] if item["path"] == ["events", "items"]]
+    assert len(second_inner) == 2
+    assert all(item["parents"] == [1] for item in second_inner)
 
 
 def test_checkpoint_keeps_symbolic_geometry_and_predictions(tmp_path):
@@ -103,7 +117,7 @@ def test_checkpoint_keeps_symbolic_geometry_and_predictions(tmp_path):
         events=rf.Branch(amount=rf.Number, label=rf.Boolean(mask=True)),
     ).eval()
     source = observations([[{"amount": float(i)} for i in range(4)]])
-    expected = model.predict(source).to_pylist()[0]["predictions"]["/events/label"]
+    expected = model.predict(source).to_pylist()[0]["predictions"]["events"]
     checkpoint = tmp_path / "model.pt"
     model.save(checkpoint)
     restored = rf.Model.load(checkpoint).eval()
@@ -112,14 +126,14 @@ def test_checkpoint_keeps_symbolic_geometry_and_predictions(tmp_path):
     assert branch.length is None
     assert branch.overflow is None
     assert restored.schema.model_dump() == model.schema.model_dump()
-    actual = restored.predict(source).to_pylist()[0]["predictions"]["/events/label"]
+    actual = restored.predict(source).to_pylist()[0]["predictions"]["events"]
     torch.testing.assert_close(
-        torch.tensor([value["content"]["probability"] for value in actual]),
-        torch.tensor([value["content"]["probability"] for value in expected]),
+        torch.tensor([value["label"]["content"]["probability"] for value in actual]),
+        torch.tensor([value["label"]["content"]["probability"] for value in expected]),
     )
 
 
-def test_pass_through_outputs_distinguish_empty_and_missing_collections():
+def test_pass_through_outputs_keep_intrinsic_slots_separate_from_item_coordinates():
     model = rf.Model(
         d_model=8,
         n_layers=1,
@@ -127,11 +141,12 @@ def test_pass_through_outputs_distinguish_empty_and_missing_collections():
         events=rf.Branch(reduction=None, embed=True, amount=rf.Number),
     ).eval()
     result = model.predict(observations([[], None, [None]]))
-    events = result["predictions"].combine_chunks().field("/events")
-
-    assert events.offsets.to_pylist() == [0, 0, 0, 1]
-    assert events.is_valid().to_pylist() == [True, False, True]
-    assert events[2].as_py()[0]["embedding"] == [0.0] * 8
+    assert result.column_names == ["representations"]
+    rows = result["representations"].to_pylist()
+    assert rows[:2] == [[], []]
+    assert rows[2] == [
+        {"path": ["events"], "parents": [], "output_index": 0, "embedding": [0.0] * 8},
+    ]
 
 
 def test_unbounded_warning_names_active_paths_once_per_generation(monkeypatch):
@@ -174,8 +189,12 @@ def test_third_party_tensorfields_follow_automatic_axes_without_shared_special_c
             [{"events": []}, {"events": [{"value": "one", "label": "yes"}]}, {"events": [{"value": "two"}] * 5}],
             schema=pa.schema([("events", pa.list_(pa.struct([("value", pa.string()), ("label", pa.string())])))]),
         )
-        output = model.predict(source, batch_size=1)["predictions"].combine_chunks().field("/events/label")
-        assert output.offsets.to_pylist() == [0, 0, 1, 6]
-        assert all(len(value["embedding"]) == 8 for row in output.to_pylist() for value in row)
+        result = model.predict(source, batch_size=1)
+        assert result.column_names == ["representations"]
+        representations = result["representations"].to_pylist()
+        assert [len(row) for row in representations] == [0, 1, 5]
+        assert all(len(value["embedding"]) == 8 for row in representations for value in row)
+        assert all(value["path"] == ["events", "label"] for row in representations for value in row)
+        assert [value["parents"] for value in representations[2]] == [[index] for index in range(5)]
     finally:
         rf.TENSORFIELDS.pop(extension.name, None)

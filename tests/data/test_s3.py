@@ -203,7 +203,7 @@ trainer = lit.Trainer(accelerator='cpu', devices=1, logger=False, enable_checkpo
 trainer.predict(model, datamodule=data, return_predictions=False)
 result = pq.read_table(output + '/rank-0.parquet')
 assert result.num_rows == 3
-assert 'predictions' in result.column_names
+assert result.column_names == ['inputs', 'representations']
 assert sorted(result['inputs'].combine_chunks().field('id').to_pylist()) == [1, 2, 3]
 print('committed 3 predictions', flush=True)
 # Keep the data module reachable through interpreter exit.

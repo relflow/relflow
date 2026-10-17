@@ -373,7 +373,7 @@ def test_quantile_nullable_false_and_typed_empty_predictions():
 
     output = configured.predict(values())
     assert output.num_rows == 0
-    content = output.schema.field("predictions").type.field(str(ADDRESS)).type.field("content")
+    content = output.schema.field("predictions").type.field(str(ADDRESS).removeprefix("/")).type.field("content")
     assert content.type == pa.float64()
     assert content.nullable
 
@@ -457,7 +457,12 @@ def test_quantile_lightning_training_learns_only_consumed_values():
         assert distribution.state.manager is None
         assert isinstance(distribution.state.master, list)
 
-    predictions = configured.predict(validate)["predictions"].combine_chunks().field(str(target)).field("content")
+    predictions = (
+        configured.predict(validate)["predictions"]
+        .combine_chunks()
+        .field(str(target).removeprefix("/"))
+        .field("content")
+    )
     assert predictions.null_count == 0
     content = torch.from_numpy(predictions.to_numpy().copy())
     assert torch.isfinite(content).all()

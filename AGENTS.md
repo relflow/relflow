@@ -90,8 +90,9 @@ model = rf.Model(
   `overflow=None` and log one resource-exhaustion warning per model generation.
   The anonymous root remains `length=1, overflow="error"`.
 - Bounded axes also compact execution to the observed batch width, up to their
-  cap. Prediction writes their declared fixed-size Arrow lists with null
-  coordinate padding; unbounded axes use variable lists and structural offsets.
+  cap. Prediction writes every record collection as a variable Arrow list,
+  even for bounded branches, without cap padding. Structural offsets and
+  validity preserve null collections, empty collections, and null items.
   Tensorized input keeps branch `Geometry` under the reserved root address `/`
   alongside leaf tensorfields, so cloning, device transfer, and row selection
   preserve lengths and structural holes. Do not infer geometry from leaf values
@@ -175,8 +176,20 @@ without executing them.
 
 `model.predict(...)` returns a `pyarrow.Table`. It accepts Arrow inputs directly
 and retains a nonempty sequence of mappings as a small interactive convenience;
-pass a typed empty Arrow object when there are no rows. Canonical predictions
-are stored under the table's `"predictions"` column.
+pass a typed empty Arrow object when there are no rows. Canonical decoded
+results use actual schema child names under `predictions`, with branches stored
+as `list<struct<...>>`. Rich leaf results retain `state`, extension-owned output,
+and `inferred`. Requested embeddings are separate `representations` records:
+`path` segments (root `[]`), repeated ancestor `parents` ordinals, intrinsic
+`output_index`, and a fixed-width `embedding`. Omit unconfigured output columns;
+`inputs` appears only when retention is selected. Models with no public output
+reject prediction. Output format/version metadata travels with Arrow tables and
+HTTP headers. Extension output list children must be named `element`.
+
+PyArrow Parquet cannot round-trip fixed-size lists below null containers.
+`rf.Writer` rejects those batches before writing; use Arrow IPC for sparse
+vector results. Scalar rich results and nonnull representation vectors retain
+normal Parquet support.
 
 ## Inference
 

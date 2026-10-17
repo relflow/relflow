@@ -35,7 +35,9 @@ class PredictModel:
         inputs = pa.StructArray.from_arrays([ids], names=["id"])
         labels = pa.array([str(value) for value in ids.to_pylist()], type=pa.large_string())
         predictions = pa.StructArray.from_arrays([labels], names=["label"])
-        result = pa.table({"inputs": inputs, "predictions": predictions})
+        result = pa.table({"predictions": predictions})
+        if retain == "*" or "id" in retain:
+            result = result.append_column("inputs", inputs)
         return apply(result, postprocess)
 
 
@@ -157,8 +159,8 @@ def test_runtime_converts_valid_requests_to_one_arrow_prediction_call():
     assert call["postprocess"] == ()
     assert call["retain"] == ("id",)
     assert outputs == [
-        {"predictions": {"label": "3"}},
-        {"predictions": {"label": "1"}},
+        {"predictions": {"label": "3"}, "inputs": {"id": 3}},
+        {"predictions": {"label": "1"}, "inputs": {"id": 1}},
     ]
 
 
@@ -174,6 +176,44 @@ def test_runtime_predicts_an_arrow_table_without_python_rows():
     ]
     assert len(model.calls) == 1
     assert model.calls[0]["batch_size"] == 2
+
+
+def test_runtime_preserves_embedding_only_outputs_and_invalid_request_slots():
+    vector = pa.list_(pa.field("element", pa.float32(), nullable=False), 4)
+    representation = pa.struct(
+        [
+            ("path", pa.list_(pa.field("element", pa.string()))),
+            ("parents", pa.list_(pa.field("element", pa.int32()))),
+            ("output_index", pa.int32()),
+            pa.field("embedding", vector, nullable=False),
+        ]
+    )
+
+    class EmbeddingModel:
+        def predict(self, source, **kwargs):
+            rows = [
+                [{"path": [], "parents": [], "output_index": 0, "embedding": [float(value), 0.0, 0.0, 0.0]}]
+                for value in source["id"].to_pylist()
+            ]
+            return pa.table({"representations": pa.array(rows, type=pa.list_(pa.field("element", representation)))})
+
+    server = runtime(model=EmbeddingModel())
+
+    outputs = server.predict_payloads([{"id": 2}, "invalid", {"id": 4}])
+
+    assert "predictions" not in outputs[0]
+    assert outputs[0]["representations"][0]["embedding"] == [2.0, 0.0, 0.0, 0.0]
+    assert outputs[1]["predictions"] is None
+    assert outputs[1]["error"]["status_code"] == 422
+    assert outputs[2]["representations"][0]["embedding"] == [4.0, 0.0, 0.0, 0.0]
+
+
+def test_runtime_keeps_user_postprocessor_columns_without_reserved_model_name():
+    @rf.postprocess
+    def rename(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.select(model=pl.col("predictions").struct.field("label"))
+
+    assert runtime(postprocessor=rename).predict_payloads([{"id": 1}]) == [{"model": "1"}]
 
 
 def test_runtime_preserves_request_fields_introduced_after_the_first_row():
@@ -203,7 +243,7 @@ def test_runtime_preserves_request_order_around_validation_errors():
     assert outputs[1]["error"]["status_code"] == 422
     assert "greater than 0" in outputs[1]["error"]["message"]
     assert outputs[2] == {
-        "predictions": {},
+        "predictions": None,
         "error": {"status_code": 422, "message": "each request must be a JSON object, got str"},
     }
     assert outputs[3] == {"predictions": {"label": "4"}}
@@ -229,13 +269,12 @@ def test_runtime_uses_model_output_order_positionally():
     ]
 
 
-def test_default_response_never_exposes_retained_inputs():
+def test_response_preserves_explicitly_retained_inputs():
     server = runtime(retain=("id",))
 
     output = server.predict_payloads([{"id": 8}])[0]
 
-    assert output == {"predictions": {"label": "8"}}
-    assert "inputs" not in output
+    assert output == {"predictions": {"label": "8"}, "inputs": {"id": 8}}
     assert "identity" not in output
 
 
@@ -456,58 +495,22 @@ def test_deployment_forge_registers_openapi_signatures():
         "application/json, application/vnd.apache.arrow.stream"
     )
     assert "DeploymentError" in schema["components"]["schemas"]
-    assert schema["components"]["schemas"]["ModelProvenance"] == {
-        "type": "object",
-        "required": ["version", "checkpoint"],
-        "properties": {
-            "version": {
-                "type": "string",
-                "description": "RelFlow version stored in the loaded model checkpoint.",
-            },
-            "checkpoint": {
-                "type": ["string", "null"],
-                "description": "Configured checkpoint filename without its path, or null for an in-memory model.",
-            },
-        },
-    }
+    assert "ModelProvenance" not in schema["components"]["schemas"]
     response_schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
-    assert response_schema["anyOf"][0]["required"] == ["predictions", "model"]
-    assert response_schema["anyOf"][0]["properties"]["model"] == {"$ref": "#/components/schemas/ModelProvenance"}
+    assert response_schema["anyOf"][0]["required"] == ["predictions"]
+    assert "model" not in response_schema["anyOf"][0]["properties"]
+    assert operation["responses"]["200"]["headers"]["X-RelFlow-Prediction-Format"]["example"] == "2"
+    assert "X-RelFlow-Model-Version" in operation["responses"]["200"]["headers"]
+    assert schema["components"]["schemas"]["DeploymentError"]["properties"]["predictions"] == {"type": "null"}
 
 
-def test_runtime_annotates_responses_with_model_provenance():
-    server = runtime()
-    server.model.version = "1.2.3"
-    server.checkpoint = "fraud-model.ckpt"
+def test_runtime_headers_mirror_canonical_metadata_without_checkpoint_paths():
+    server = runtime(model=SimpleNamespace(version="1.2.3"))
 
-    assert server.annotate({"predictions": {"label": "yes"}}) == {
-        "predictions": {"label": "yes"},
-        "model": {"version": "1.2.3", "checkpoint": "fraud-model.ckpt"},
+    assert server.headers() == {
+        "X-RelFlow-Prediction-Format": "2",
+        "X-RelFlow-Model-Version": "1.2.3",
     }
-    output = server.annotate_table(pa.table({"score": [0.75]}))
-    assert output.to_pylist() == [
-        {
-            "score": 0.75,
-            "model": {"version": "1.2.3", "checkpoint": "fraud-model.ckpt"},
-        }
-    ]
-
-
-def test_runtime_reports_only_the_checkpoint_basename_and_null_for_an_in_memory_model():
-    path_server = deployment_module.FastAPIRuntime(
-        checkpoint="/private/models/releases/fraud-v7.ckpt",
-        accelerator=deployment_module.Accelerator.cpu,
-    )
-    path_server.model = SimpleNamespace(version="7.0.0")
-    model = Model(value=Number, d_model=8, n_layers=1, n_heads=2)
-    memory_server = deployment_module.FastAPIRuntime(
-        checkpoint=model,
-        accelerator=deployment_module.Accelerator.cpu,
-    )
-    memory_server.model = model
-
-    assert path_server.provenance() == {"version": "7.0.0", "checkpoint": "fraud-v7.ckpt"}
-    assert memory_server.provenance() == {"version": model.version, "checkpoint": None}
 
 
 @pytest.mark.parametrize("empty", [False, True])
@@ -579,7 +582,9 @@ def test_arrow_deployment_batches_processed_rows_and_runs_global_processors_once
         "request_id": [] if empty else [3, 1, 8],
         "value": [] if empty else [-1.0, -3.0, 4.0],
     }
-    assert output["model"].to_pylist() == [{"version": model.version, "checkpoint": None}] * source.num_rows
+    assert "model" not in output.column_names
+    assert response.headers["x-relflow-prediction-format"] == "2"
+    assert response.headers["x-relflow-model-version"] == model.version
     assert processed == [source.num_rows]
     assert postprocessed == [2 * source.num_rows]
     assert batches == ([] if empty else [2, 2, 2])
@@ -716,6 +721,6 @@ def test_error_item_is_stable():
     error = ErrorItem(status_code=422, message="bad input")
 
     assert runtime().failure(error) == {
-        "predictions": {},
+        "predictions": None,
         "error": {"status_code": 422, "message": "bad input"},
     }

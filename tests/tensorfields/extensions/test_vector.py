@@ -1,3 +1,4 @@
+import pyarrow as pa
 import pydantic
 import pytest
 import torch
@@ -264,7 +265,8 @@ def test_vector_loss_uses_selected_objective(objective: str, expected: float):
     assert torch.isclose(output, torch.tensor(expected, dtype=output.dtype))
 
 
-def test_vector_write_returns_content_payload():
+@pytest.mark.parametrize("nullable", [True, False])
+def test_vector_write_returns_content_payload(nullable):
     structure = Schema.model_validate(structure_payload())
     state_logits = torch.full((2, 2, len(Tokens)), -50.0)
     state_logits[0, :, Tokens.valued.value] = 50.0
@@ -282,9 +284,13 @@ def test_vector_write_returns_content_payload():
 
     module = DummyModule(structure)
     datatype = output_type(module, ADDRESS)
+    assert datatype.field(TensorKey.content.name).type.value_field.name == "element"
+    element = pa.field("element", pa.float32(), nullable=nullable, metadata={b"unit": b"coordinate"})
+    datatype = pa.struct([pa.field(TensorKey.content.name, pa.list_(element, 3), nullable=False)])
     output = write(module=module, prediction=prediction, datatype=datatype)
     assert output.type == datatype
     content = output.field(TensorKey.content.name)
+    assert content.type.value_field.equals(element, check_metadata=True)
     assert len(content) == 4
     assert content.to_pylist() == [
         [1.0, 1.0, 1.0],

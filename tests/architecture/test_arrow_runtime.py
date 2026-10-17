@@ -44,7 +44,7 @@ def test_predict_returns_canonical_arrow_table_with_retained_inputs():
     assert len(result) == 2
     assert result["inputs"].combine_chunks().type == pa.struct([("request_id", pa.string())])
     prediction_type = result["predictions"].combine_chunks().type
-    assert prediction_type.get_field_index("/label") == 0
+    assert prediction_type.get_field_index("label") == 0
     assert result["inputs"].to_pylist() == [{"request_id": "a"}, {"request_id": "b"}]
 
 
@@ -123,7 +123,7 @@ def test_predict_bounds_preparation_and_forward_without_reordering(
     assert forwarded == expected
     assert configured.batch_size == (2 if batch_size is None else batch_size)
     assert result["inputs"].to_pylist() == [{"request_id": name} for name in source["request_id"].to_pylist()]
-    assert result["predictions"].type.get_field_index("/label") == 0
+    assert result["predictions"].type.get_field_index("label") == 0
 
 
 @pytest.mark.parametrize("batch_size", [0, -1, True, 1.5, "2"])
@@ -235,7 +235,7 @@ def test_typed_empty_prediction_compiles_the_exact_output_schema_without_forward
     assert result["inputs"].type == pa.struct([pa.field("request_id", pa.large_string())])
     predictions = result["predictions"].type
     assert pa.types.is_struct(predictions)
-    assert predictions.get_field_index("/label") == 0
+    assert predictions.get_field_index("label") == 0
 
 
 @pytest.mark.parametrize("batch_size", [None, 2])
@@ -270,10 +270,10 @@ def test_preprocessor_may_filter_every_prediction_row_without_erasing_schema(bat
     assert calls == {"pre": 1, "post": 1}
     assert len(result) == 0
     assert result["inputs"].type == pa.struct([pa.field("request_id", pa.large_string())])
-    assert result["predictions"].type.get_field_index("/label") == 0
+    assert result["predictions"].type.get_field_index("label") == 0
 
 
-def test_predict_preserves_nested_model_axes_as_fixed_lists():
+def test_predict_writes_bounded_branches_as_observed_record_collections():
     configured = model(nested=True)
     source = pa.Table.from_pylist(
         [
@@ -284,11 +284,12 @@ def test_predict_preserves_nested_model_axes_as_fixed_lists():
 
     result = configured.predict(source)
     predictions = result["predictions"].combine_chunks()
-    field = predictions.type.field("/items/label")
+    field = predictions.type.field("items")
 
-    assert pa.types.is_fixed_size_list(field.type)
-    assert field.type.list_size == 3
-    assert all(len(row["/items/label"]) == 3 for row in predictions.to_pylist())
+    assert pa.types.is_list(field.type)
+    assert field.type.value_field.name == "element"
+    assert [child.name for child in field.type.value_type] == ["label"]
+    assert [len(row["items"]) for row in predictions.to_pylist()] == [2, 1]
 
 
 def test_predict_batches_nested_outputs_with_retained_row_identity():
@@ -307,18 +308,62 @@ def test_predict_batches_nested_outputs_with_retained_row_identity():
     predictions = result["predictions"].combine_chunks()
 
     assert result["inputs"].to_pylist() == [{"request_id": name} for name in ["a", "b", "c", "d", "e"]]
-    assert predictions.type.field("/items/label").type.list_size == 3
-    assert all(len(row["/items/label"]) == 3 for row in predictions.to_pylist())
+    assert pa.types.is_list(predictions.type.field("items").type)
+    assert [len(row["items"]) for row in predictions.to_pylist()] == [2, 0, 1, 3, 1]
+
+
+def test_nested_sibling_results_share_structural_slots_and_allow_metadata_names():
+    configured = rf.Model(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        events=rf.Branch(
+            length=3,
+            amount=rf.Number,
+            state=rf.Boolean(mask=True),
+            embedding=rf.Number(mask=True),
+            items=rf.Boolean(mask=True),
+            outputs=rf.Boolean(mask=True),
+        ),
+    )
+    source = pa.Table.from_pylist([{"events": [{"amount": 1.0}, None, {"amount": 2.0}]}])
+
+    result = configured.predict(source)
+    events = result["predictions"].combine_chunks().field("events")
+
+    assert events.offsets.to_pylist() == [0, 3]
+    assert events.values.is_valid().to_pylist() == [True, False, True]
+    assert events.type.value_type.names == ["state", "embedding", "items", "outputs"]
+    assert events[0].as_py()[1] is None
+    assert set(events[0].as_py()[0]) == {"state", "embedding", "items", "outputs"}
+    assert events.type.value_type.field("embedding").type.field("content").type == pa.float64()
+
+
+def test_bounded_collection_validity_is_independent_of_batch_width():
+    configured = model(nested=True)
+    source = pa.Table.from_pylist([{"items": []}, {"items": None}, {"items": [{"value": 1.0}]}])
+
+    whole = configured.predict(source)
+    chunked = configured.predict(source, batch_size=1)
+    whole_items = whole["predictions"].combine_chunks().field("items")
+    chunked_items = chunked["predictions"].combine_chunks().field("items")
+
+    assert whole.schema.equals(chunked.schema, check_metadata=True)
+    assert whole_items.offsets.to_pylist() == chunked_items.offsets.to_pylist() == [0, 0, 0, 1]
+    assert whole_items.is_valid().to_pylist() == chunked_items.is_valid().to_pylist() == [True, False, True]
+    assert whole_items.to_pylist()[:2] == chunked_items.to_pylist()[:2] == [[], None]
 
 
 def test_embedding_only_address_has_no_state_or_inferred_fields():
     configured = model(embed=True)
 
     result = configured.predict(pa.table({"value": [1.0]}))
-    root = result["predictions"].combine_chunks().type.field("/").type
+    root = result["representations"].combine_chunks().type.value_type
 
-    assert [field.name for field in root] == ["embedding"]
-    assert root.field("embedding").type == pa.list_(pa.float32(), 8)
+    assert [field.name for field in root] == ["path", "parents", "output_index", "embedding"]
+    assert root.field("embedding").type == pa.list_(pa.field("element", pa.float32()), 8)
+    assert result["representations"].to_pylist()[0][0]["path"] == []
+    assert result["predictions"].type.get_field_index("label") == 0
 
 
 def test_root_embedding_exposes_each_configured_reduction_output():
@@ -332,11 +377,12 @@ def test_root_embedding_exposes_each_configured_reduction_output():
     )
 
     result = configured.predict(pa.table({"value": [1.0, 2.0]}))
-    root = result["predictions"].combine_chunks().type.field("/").type
+    rows = result["representations"].to_pylist()
 
-    assert pa.types.is_fixed_size_list(root)
-    assert root.list_size == 3
-    assert root.value_type.field("embedding").type == pa.list_(pa.float32(), 8)
+    assert result.column_names == ["representations"]
+    assert all([item["output_index"] for item in row] == [0, 1, 2] for row in rows)
+    assert all(item["path"] == [] and item["parents"] == [] for row in rows for item in row)
+    assert all(len(item["embedding"]) == 8 for row in rows for item in row)
 
 
 def test_none_reduction_root_embedding_exposes_every_input_token():
@@ -352,10 +398,11 @@ def test_none_reduction_root_embedding_exposes_every_input_token():
     )
 
     result = configured.predict(pa.table({"first": [1.0], "second": [2.0]}))
-    root = result["predictions"].combine_chunks().type.field("/").type
+    root = result["representations"].to_pylist()[0]
 
-    assert pa.types.is_fixed_size_list(root)
-    assert root.list_size == 2
+    assert result.column_names == ["representations"]
+    assert [item["output_index"] for item in root] == [0, 1]
+    assert all(item["path"] == [] and item["parents"] == [] for item in root)
 
 
 def test_nested_branch_embedding_preserves_parent_and_reduction_axes():
@@ -379,23 +426,22 @@ def test_nested_branch_embedding_preserves_parent_and_reduction_axes():
     )
 
     result = configured.predict(source)
-    children = result["predictions"].combine_chunks().type.field("/parents/children").type
+    children = result["representations"].to_pylist()[0]
 
-    assert pa.types.is_fixed_size_list(children)
-    assert children.list_size == 3
-    assert pa.types.is_fixed_size_list(children.value_type)
-    assert children.value_type.list_size == 2
+    assert result.column_names == ["representations"]
+    assert [item["path"] for item in children] == [["parents", "children"]] * 4
+    assert [item["parents"] for item in children] == [[0], [0], [1], [1]]
+    assert [item["output_index"] for item in children] == [0, 1, 0, 1]
 
 
-def test_empty_retain_uses_typed_null_without_changing_row_count():
+def test_empty_retain_omits_inputs_without_changing_row_count():
     result = model().predict(pa.table({"value": [1.0, 2.0, 3.0]}))
 
-    assert result["inputs"].type == pa.null()
-    assert result["inputs"].null_count == 3
+    assert result.column_names == ["predictions"]
     assert len(result) == 3
 
 
-def test_reconstruction_without_public_extension_output_keeps_a_typed_null_prediction_column():
+def test_reconstruction_without_public_extension_output_rejects_an_empty_plan():
     configured = rf.Model(
         value=rf.Number,
         identifier=rf.Hash(mask=True),
@@ -404,10 +450,8 @@ def test_reconstruction_without_public_extension_output_keeps_a_typed_null_predi
         n_heads=2,
     )
 
-    result = configured.predict(pa.table({"value": [1.0, 2.0]}))
-
-    assert result["predictions"].type == pa.null()
-    assert result["predictions"].null_count == 2
+    with pytest.raises(ValueError, match="no public prediction outputs"):
+        configured.predict(pa.table({"value": [1.0, 2.0]}))
 
 
 def test_predict_runs_polars_preprocessor_and_postprocessor_once():

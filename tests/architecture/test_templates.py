@@ -355,10 +355,13 @@ def test_yaml_model_predicts_nested_targets_and_exports_root_embedding(tmp_path)
     model = rf.Model.from_yaml(path)
     data = pa.Table.from_pylist([{"events": [{"amount": 1.0}]}, {"events": [{"amount": 2.0}, {"amount": 3.0}]}])
 
-    predictions = model.predict(data)["predictions"].combine_chunks()
+    result = model.predict(data)
+    predictions = result["predictions"].combine_chunks()
 
-    assert predictions.field("/").type.field("embedding").type == pa.list_(pa.float32(), 16)
-    assert predictions.field("/events/target").values.field("inferred").to_pylist() == [True, False, True, True]
+    representations = result["representations"].combine_chunks().values
+    assert representations.field("embedding").type == pa.list_(pa.field("element", pa.float32()), 16)
+    assert representations.field("path").to_pylist() == [[], []]
+    assert predictions.field("events").values.field("target").field("inferred").to_pylist() == [True, True, True]
 
 
 @pytest.mark.parametrize(

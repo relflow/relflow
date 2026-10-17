@@ -121,7 +121,7 @@ def test_topk_is_capped_by_discovered_labels_including_empty_vocabulary(known):
     model = build("category")
     if known:
         model.encode(source("category", known), strata="train")
-    predicted = model.predict(source("category", ["unseen"]))["predictions"].to_pylist()[0][ADDRESS]["content"]
+    predicted = model.predict(source("category", ["unseen"]))["predictions"].to_pylist()[0]["label"]["content"]
     assert len(predicted["topk"]) == len(known)
     assert {item["value"] for item in predicted["topk"]} == set(known)
     if not known:

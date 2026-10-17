@@ -101,6 +101,87 @@ def test_writer_locks_the_exact_first_batch_schema_and_closes_on_drift(tmp_path)
     assert table["score"].to_pylist() == [1]
 
 
+def test_writer_locks_prediction_metadata_and_closes_on_provenance_drift(tmp_path):
+    writer = Writer(tmp_path)
+    output = pa.table({"score": [0.25]}).replace_schema_metadata({b"relflow.model_version": b"first"})
+    write(writer, output)
+
+    with pytest.raises(ValueError, match="schema differs from the first batch"):
+        write(writer, output.replace_schema_metadata({b"relflow.model_version": b"second"}), batch_idx=1)
+
+    assert writer.writer is None
+    assert pq.read_table(tmp_path / "rank-0.parquet").schema.metadata == output.schema.metadata
+
+
+def test_writer_preserves_metadata_through_postprocessing(tmp_path):
+    @rf.postprocess
+    def select(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.select("score")
+
+    output = pa.table({"score": [0.25], "other": [1]}).replace_schema_metadata(
+        {b"relflow.prediction_format": b"2", b"relflow.model_version": b"example"}
+    )
+    writer = Writer(tmp_path, postprocessor=select)
+    write(writer, output)
+    writer.close()
+
+    restored = pq.read_table(tmp_path / "rank-0.parquet")
+    assert restored.column_names == ["score"]
+    assert restored.schema.metadata == output.schema.metadata
+
+
+@pytest.mark.parametrize("layout", ["null_fixed_list", "null_struct", "null_struct_in_list"])
+def test_writer_rejects_null_fixed_size_list_coordinates_before_creating_a_shard(tmp_path, layout):
+    vector = pa.list_(pa.field("element", pa.float32()), 4)
+    embedded = pa.struct([("embedding", vector)])
+    if layout == "null_fixed_list":
+        column = pa.array([None], type=vector)
+    elif layout == "null_struct":
+        column = pa.array([None], type=embedded)
+    else:
+        column = pa.array([[None]], type=pa.list_(pa.field("element", embedded)))
+    writer = Writer(tmp_path)
+
+    with pytest.raises(ValueError, match="fixed-size lists.*use Arrow IPC"):
+        write(writer, pa.table({"predictions": column}))
+
+    assert writer.writer is None
+    assert not (tmp_path / "rank-0.parquet").exists()
+
+
+def test_writer_accepts_null_collection_and_null_struct_with_scalar_descendants(tmp_path):
+    result = pa.struct([("value", pa.float32())])
+    output = pa.table(
+        {
+            "predictions": pa.array(
+                [None, [], [None], [{"value": 0.5}, None]], type=pa.list_(pa.field("element", result))
+            )
+        }
+    )
+    writer = Writer(tmp_path)
+    write(writer, output)
+    writer.close()
+
+    assert pq.read_table(tmp_path / "rank-0.parquet").equals(output)
+
+
+def test_writer_accepts_sliced_fixed_size_embeddings_in_nonnull_representation_rows(tmp_path):
+    vector = pa.list_(pa.field("element", pa.float32()), 4)
+    output = pa.table(
+        {
+            "representations": pa.array(
+                [None, [], [{"embedding": [1.0, 2.0, 3.0, 4.0]}]],
+                type=pa.list_(pa.field("element", pa.struct([("embedding", vector)]))),
+            )
+        }
+    ).slice(1)
+    writer = Writer(tmp_path)
+    write(writer, output)
+    writer.close()
+
+    assert pq.read_table(tmp_path / "rank-0.parquet").equals(output)
+
+
 def test_writer_treats_identity_as_an_ordinary_user_column(tmp_path):
     writer = Writer(tmp_path)
 

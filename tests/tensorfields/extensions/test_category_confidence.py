@@ -94,7 +94,7 @@ def test_all_unknown_content_is_zero_for_backward_but_undefined_for_evaluation()
 def test_single_populated_label_probability_is_conditional_not_learned_competence():
     module = rf.Model(d_model=8, n_heads=2, n_layers=1, x=rf.Number, label=rf.Category(mask=True))
     module.encode(pa.table({"x": [0.0], "label": ["only-label"]}), strata="train")
-    result = module.predict(pa.table({"x": [10.0]}))["predictions"].to_pylist()[0]["/label"]["content"]
+    result = module.predict(pa.table({"x": [10.0]}))["predictions"].to_pylist()[0]["label"]["content"]
     assert result["value"] == "only-label"
     assert result["probability"] == 1.0
 
