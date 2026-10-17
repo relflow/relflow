@@ -72,6 +72,24 @@ def test_extend_binds_reserved_names_and_keeps_rejected_mutations_atomic():
     assert field.name is None and field.parent is None
 
 
+@pytest.mark.parametrize("constructor", [rf.Model, rf.Model.xs])
+def test_construction_policy_names_remain_available_as_children(constructor):
+    model = constructor(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        defaults=rf.Number,
+        preset=rf.Number,
+        items=rf.Branch(value=rf.Number),
+    )
+    model.extend(rf.where("address") == "/items", defaults=rf.Number, preset=rf.Number)
+
+    for name in ("defaults", "preset"):
+        assert model.schema.requests[f"/{name}"].name == name
+        assert model.schema.requests[f"/items/{name}"].name == name
+        assert model.schema.requests[f"/items/{name}"].parent is model.schema.branches["/items"]
+
+
 def test_named_checkpoint_restoration_preserves_masks_aliases_and_weights(tmp_path):
     model = rf.Model(
         d_model=16,
@@ -92,7 +110,7 @@ def test_late_extension_fields_keep_the_same_binding_and_validation_contract():
     extension = rf.Extension(name="parent_named", types=(float,))
     try:
 
-        @extension.register
+        @extension.register(rf.Component.Request)
         class Request(rf.RequestBase):
             type: Literal["parent_named"] = "parent_named"
             scale: float = pydantic.Field(default=1, gt=0)
@@ -118,7 +136,7 @@ def test_late_extension_fields_keep_the_same_binding_and_validation_contract():
 def test_public_signatures_and_display_support_anonymous_definitions(constructor):
     assert "name" not in inspect.signature(constructor).parameters
     definition = constructor()
-    assert f"[{definition.type}]" in str(definition)
+    assert f"type='{definition.type}'" in str(definition)
     assert definition.name is None
 
 

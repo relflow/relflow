@@ -54,8 +54,11 @@ def test_runtime_constructor_retains_custom_scheduler_support():
             pass
 
     model = rf.Model(d_model=16, n_layers=1, n_heads=4, value=rf.Number(mask=True))
-    optimizer = adamw(1e-3)(model)
-    scheduler = CustomScheduler(optimizer)
-    configured = rf.Model(model.schema, optimizer=optimizer, scheduler=scheduler)
-    assert configured.scheduler is scheduler
-    assert configured.configure_optimizers() == {"optimizer": optimizer, "lr_scheduler": scheduler}
+    configured = rf.Model(
+        model.schema,
+        optimizer=adamw(1e-3),
+        scheduler=lambda module, optimizer: CustomScheduler(optimizer),
+    )
+    training = configured.configure_optimizers()
+    assert isinstance(training["lr_scheduler"], CustomScheduler)
+    assert training["lr_scheduler"].optimizer is training["optimizer"]

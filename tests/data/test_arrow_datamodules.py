@@ -338,7 +338,7 @@ def test_dataset_scope_preprocessor_receives_one_logical_split(monkeypatch: pyte
     assert calls == [9]
 
 
-def test_preprocessor_pipeline_runs_in_order_and_is_stored_as_a_tuple(monkeypatch: pytest.MonkeyPatch):
+def test_preprocessor_pipeline_runs_in_order_and_snapshots_configuration(monkeypatch: pytest.MonkeyPatch):
     calls: list[str] = []
 
     @rf.preprocess
@@ -362,7 +362,6 @@ def test_preprocessor_pipeline_runs_in_order_and_is_stored_as_a_tuple(monkeypatc
 
     batches = collect(module.val_dataloader().dataset, monkeypatch)
 
-    assert module.preprocessors[Strata.validate] == (derive, replace)
     assert calls == ["derive", "replace"]
     assert pa.concat_tables(batches)["id"].to_pylist() == [4, 6, 8]
 
@@ -395,8 +394,6 @@ def test_preprocessor_mapping_accepts_an_ordered_pipeline_per_split(monkeypatch:
     collect(module.train_dataloader().dataset, monkeypatch)
     collect(module.val_dataloader().dataset, monkeypatch)
 
-    assert module.preprocessors[Strata.train] == (first, second)
-    assert module.preprocessors[Strata.validate] == (second,)
     assert calls == [
         (Strata.train, "first"),
         (Strata.train, "second"),
@@ -711,7 +708,7 @@ def test_synthetic_generator_is_called_for_every_source_iteration():
     assert list(source())[0]["id"].to_pylist() == [2]
 
 
-def test_parallel_configuration_and_replacement_validation():
+def test_parallel_configuration_validation():
     source = pa.table({"id": [1, 2]})
     module = rf.ArrowDataModule(
         model=model(),
@@ -732,23 +729,27 @@ def test_parallel_configuration_and_replacement_validation():
         rf.ArrowDataModule(model=model(), train=source, persistent_workers=True)
     with pytest.raises(ValueError, match="prefetch_factor"):
         rf.ArrowDataModule(model=model(), train=source, prefetch_factor=0)
-    with pytest.raises(NotImplementedError, match="replacement sampling is not implemented"):
-        rf.ArrowDataModule(model=model(), train=source, replacement=True)
 
 
-def test_model_batch_size_remains_the_single_batch_authority(monkeypatch: pytest.MonkeyPatch):
+def test_recreated_loaders_use_current_model_batch_size_schema_and_context():
     configured_model = model(2)
     module = rf.ArrowDataModule(
         model=configured_model,
-        validate=pa.table({"id": list(range(5))}),
+        validate=pa.table({"id": list(range(5)), "merchant": ["a", "b", "a", "b", "a"]}),
         shuffle=False,
     )
-    configured_model.batch_size = 3
+    first = list(module.val_dataloader())
+    assert [len(batch.source) for batch in first] == [2, 2, 1]
+    assert all("/merchant" not in batch.tensors for batch in first)
 
-    batches = collect(module.val_dataloader().dataset, monkeypatch)
+    module.batch_size = 3
+    configured_model.extend(rf.where("address") == "/", merchant=rf.Category)
+    batches = list(module.val_dataloader())
 
-    assert module.batch_size == 3
-    assert [len(batch) for batch in batches] == [3, 2]
+    assert module.batch_size == configured_model.batch_size == 3
+    assert [len(batch.source) for batch in batches] == [3, 2]
+    assert all("/merchant" in batch.tensors for batch in batches)
+    assert all(batch.tensors["/merchant"].present.all() for batch in batches)
 
 
 def test_retain_mapping_matches_configured_splits_exactly():
@@ -760,10 +761,74 @@ def test_retain_mapping_matches_configured_splits_exactly():
         retain={"train": ("request_id",), "validate": "*"},
     )
 
-    assert module.retain == {
-        Strata.train: ("request_id",),
-        Strata.validate: "*",
-    }
+    assert all(batch.retain == ("request_id",) for batch in module.train_dataloader())
+    assert all(batch.retain == "*" for batch in module.val_dataloader())
 
     with pytest.raises(ValueError, match="match configured splits exactly"):
         rf.ArrowDataModule(model=model(), train=source, validate=source, retain={"train": ()})
+    with pytest.raises(ValueError, match="match configured splits exactly"):
+        rf.ArrowDataModule(model=model(), train=source, retain={"train": (), "validate": ()})
+
+
+def test_split_overrides_stay_isolated_when_loaders_are_recreated():
+    @rf.preprocess
+    def shift(frame: pl.DataFrame, *, strata: Strata) -> pl.DataFrame:
+        offset = 100 if strata == Strata.train else 200
+        return frame.with_columns(id=pl.col("id") + offset)
+
+    source = pa.table({"id": list(range(7)), "request_id": [str(index) for index in range(7)]})
+    module = rf.ArrowDataModule(
+        model=model(),
+        train=source,
+        validate=source,
+        test=source,
+        predict=source,
+        preprocessor={"train": shift, "validate": shift},
+        shuffle=False,
+        epoch_size={"train": 5, "validate": 3},
+        drop_last={"train": True},
+        num_workers={"predict": 1},
+        persistent_workers={"predict": True},
+        pin_memory={"predict": True},
+        prefetch_factor={"predict": 3},
+        retain={"train": ("request_id",), "validate": "*", "test": (), "predict": ("request_id",)},
+    )
+    expected = {
+        Strata.train: ([100, 101, 102, 103], ("request_id",)),
+        Strata.validate: ([200, 201, 202], "*"),
+        Strata.test: (list(range(7)), ()),
+        Strata.predict: (list(range(7)), ("request_id",)),
+    }
+
+    for _ in range(2):
+        for strata, (values, retained) in expected.items():
+            loader = module.dataloader(strata)
+            prediction = strata == Strata.predict
+            assert loader.num_workers == int(prediction)
+            assert loader.persistent_workers is prediction
+            assert loader.prefetch_factor == (3 if prediction else None)
+            assert loader.pin_memory is False
+            batches = list(loader.dataset)
+            assert pa.concat_tables([batch.source for batch in batches])["id"].to_pylist() == values
+            assert all(batch.retain == retained for batch in batches)
+
+
+@pytest.mark.parametrize(
+    "option,value,error",
+    [
+        ("preprocessor", 42, TypeError),
+        ("shuffle", "yes", TypeError),
+        ("sample", True, TypeError),
+        ("sample", 0.0, ValueError),
+        ("epoch_size", False, ValueError),
+        ("shuffle_rows", 0, ValueError),
+        ("drop_last", 1, TypeError),
+        ("num_workers", -1, ValueError),
+        ("persistent_workers", True, ValueError),
+        ("pin_memory", 1, TypeError),
+        ("prefetch_factor", 0, ValueError),
+    ],
+)
+def test_invalid_overrides_are_rejected_even_for_unused_splits(option, value, error):
+    with pytest.raises(error, match=option):
+        rf.ArrowDataModule(model=model(), train=pa.table({"id": [1]}), **{option: {"validate": value}})

@@ -13,7 +13,7 @@ from beartype import beartype
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
-from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
+from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
@@ -48,7 +48,7 @@ sets: Extension = Extension(name="set", types=(bool, int, float, str, bytes))
 sets.callback(VocabularySyncCallback, CounterUpdateCallback, Metrics)
 
 
-@sets.register
+@sets.register(Component.Request)
 class Request(RequestBase):
     """Unordered label membership represented by an online vocabulary.
 
@@ -115,7 +115,7 @@ class Request(RequestBase):
             return tuple(state.master)
 
 
-@sets.register
+@sets.register(Component.observe)
 def observe(
     field: RaggedField,
     *,
@@ -146,7 +146,7 @@ def observe(
     )
 
 
-@sets.register
+@sets.register(Component.TensorField)
 @tensorclass
 class TensorField(TensorFieldBase[TensorDict]):
     state: torch.Tensor
@@ -249,7 +249,7 @@ class TensorField(TensorFieldBase[TensorDict]):
         )
 
 
-@sets.register
+@sets.register(Component.Embedder)
 class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -324,7 +324,7 @@ class Embedder(EmbedderBase):
         return self.vocab.state
 
 
-@sets.register
+@sets.register(Component.bind)
 def bind(
     module: Model,
     field: TensorFieldBase,
@@ -361,7 +361,7 @@ def bind(
         )
 
 
-@sets.register
+@sets.register(Component.learn)
 def learn(
     module: Model,
     observation: TensorDict,
@@ -404,7 +404,7 @@ class Membership(Totals):
         }
 
 
-@sets.register
+@sets.register(Component.Decoder)
 class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -433,7 +433,7 @@ class Decoder(DecoderBase):
         )
 
 
-@sets.register
+@sets.register(Component.loss)
 def loss(
     module: Model,
     prediction: Prediction,
@@ -479,7 +479,6 @@ def loss(
     # negative examples of future labels.
     objective = torch.nn.functional.binary_cross_entropy_with_logits(content_inputs, content_targets, reduction="sum")
     decoder = cast(Decoder, module.nodes[prediction.address].decoder)
-    metric = cast(Membership, decoder.metrics[f"{strata.value}_metrics"])
     with torch.no_grad():
         expected = content_targets.bool()
         predicted = content_inputs.ge(0)
@@ -498,14 +497,14 @@ def loss(
                 predicted.sum(),
             )
         )
-        metric.update(counts, objective.unsqueeze(0))
+        decoder.metrics.record(module, strata, counts, objective.unsqueeze(0))
     module.track(
         (prediction.address, strata, "vocabulary", "size"), value=state_inputs.new_tensor(size, dtype=torch.float32)
     )
     return loss + objective / max(content_inputs.numel(), 1)
 
 
-@sets.register
+@sets.register(Component.output)
 def output(module: Model, address: Address) -> pa.StructType:
     candidate = pa.struct(
         [
@@ -516,7 +515,7 @@ def output(module: Model, address: Address) -> pa.StructType:
     return pa.struct([pa.field(TensorKey.content.name, pa.list_(candidate), nullable=False)])
 
 
-@sets.register
+@sets.register(Component.write)
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
     content_type = datatype.field(TensorKey.content.name).type
     candidate_type = content_type.value_type

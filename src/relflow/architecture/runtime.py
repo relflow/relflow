@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -14,9 +13,10 @@ from tensordict import TensorDict
 
 from relflow.architecture.binding import bind
 from relflow.architecture.contracts import sanitize
-from relflow.architecture.encoder import BranchEncoder
+from relflow.architecture.encoder import BranchEncoder, locate, sequence
 from relflow.architecture.node import NodeModule
-from relflow.data.arrow import Encoded, mappings
+from relflow.architecture.output import projection
+from relflow.data.arrow import Encoded, Retain, mappings, retention
 from relflow.data.datasets.base import EncodedInput
 from relflow.data.iterables import encode as encode_batch
 from relflow.data.processors import (
@@ -40,12 +40,11 @@ from relflow.tensorfields.base import (
     TensorFieldBase,
     Write,
 )
-from relflow.tensorfields.output import STATE, embedding, inferred, shape, state, struct
+from relflow.tensorfields.output import STATE, embedding, inferred, state, struct
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
 
-Retain = tuple[str, ...] | Literal["*"]
 PredictionInput: TypeAlias = pa.Table | pa.RecordBatch | Sequence[Mapping[str, object]]
 RESERVED = frozenset({TensorKey.state.name, TensorKey.inferred.name, TensorKey.embedding.name})
 
@@ -134,7 +133,9 @@ class OutputEntry:
     """Frozen output contract for one expected forward address."""
 
     address: Address
-    axes: tuple[int, ...]
+    axes: tuple[int | None, ...]
+    branches: tuple[Address, ...]
+    passthrough: bool
     decoded: pa.StructType | None
     writer: Write | None
     embed: bool
@@ -171,25 +172,40 @@ def ingress(source: PredictionInput) -> pa.Table | pa.RecordBatch:
         raise TypeError(f"Python prediction observations are not Arrow-compatible: {error}") from error
 
 
-def retention(names: Retain) -> Retain:
-    """Validate and normalize one retained-input selection."""
+def observations(
+    module: Model,
+    batch: pa.Table | pa.RecordBatch,
+    *,
+    preprocess: PreprocessorInput,
+    strata: Strata,
+) -> pa.Table:
+    """Produce the canonical Arrow observations before encoding or batching."""
 
-    if names == "*":
-        return names
-    if not isinstance(names, tuple):
-        raise TypeError("retain must be a tuple of column names or '*'")
-    if any(not isinstance(name, str) or not name for name in names):
-        raise TypeError("retain entries must be non-empty strings")
-    if len(set(names)) != len(names):
-        raise ValueError("retain entries must be unique")
-    return names
+    from relflow.data.datasets.arrow import convert, merge, process
+
+    source = convert(batch)
+    processors = Preprocessor.normalize(preprocess)
+    if not processors:
+        return source
+
+    source = merge(
+        process(
+            (source,),
+            preprocessor=processors,
+            strata=strata,
+            schema=module.schema,
+            encoding_context=module.interprocess_encoding_context,
+        )
+    )
+    if source is None:
+        raise ValueError("preprocessor pipeline returned no observations")
+    return source
 
 
 def project(source: pa.Table, names: Retain) -> pa.Array:
-    """Build the canonical retained-input value for each source row."""
+    """Project a validated column selection into one struct per source row."""
 
-    normalized = retention(names)
-    selected = tuple(source.column_names) if normalized == "*" else normalized
+    selected = tuple(source.column_names) if names == "*" else names
 
     missing = [name for name in selected if name not in source.column_names]
     if missing:
@@ -203,7 +219,7 @@ def project(source: pa.Table, names: Retain) -> pa.Array:
     return pa.StructArray.from_arrays(arrays, fields=fields)
 
 
-def axes(module: Model, address: Address) -> tuple[int, ...]:
+def axes(module: Model, address: Address) -> tuple[int | None, ...]:
     """Return repeated model axes represented inside one output row."""
 
     if address in module.schema.requests:
@@ -214,7 +230,7 @@ def axes(module: Model, address: Address) -> tuple[int, ...]:
         )
         structural = lengths[1:-1]
         outputs = module.schema.branch_outputs[address]
-        return (*structural, outputs) if outputs > 1 else structural
+        return (*structural, outputs) if outputs is None or outputs > 1 else structural
     raise KeyError(f"prediction address {str(address)!r} is absent from the model schema")
 
 
@@ -277,12 +293,20 @@ def plan(module: Model, retain: Retain = (), *, refresh: bool = False) -> Output
         output_type: pa.DataType | None = coordinate_type
         if output_type is not None:
             for size in reversed(model_axes):
-                output_type = pa.list_(output_type, size)
+                output_type = pa.list_(output_type) if size is None else pa.list_(output_type, size)
 
         entries.append(
             OutputEntry(
                 address=address,
                 axes=model_axes,
+                branches=tuple(
+                    owner.address
+                    for owner in node.path
+                    if getattr(owner, "type", None) == "branch"
+                    and owner.address != Address()
+                    and (address in module.schema.requests or owner.address != address)
+                ),
+                passthrough=address in module.schema.branches and module.schema.branches[address].reduction is None,
                 decoded=decoded,
                 writer=writer,
                 embed=address in embeds,
@@ -308,7 +332,8 @@ def coordinate(module: Model, entry: OutputEntry, prediction: Prediction, rows: 
     address = entry.address
     fields: list[pa.Field] = []
     arrays: dict[str, pa.Array] = {}
-    expected = rows * math.prod(entry.axes)
+    projected = projection(entry, prediction, rows)
+    expected = projected.size
 
     if address in module.schema.requests:
         if TensorKey.state not in prediction.payload or TensorKey.inferred not in prediction.payload:
@@ -368,7 +393,7 @@ def coordinate(module: Model, entry: OutputEntry, prediction: Prediction, rows: 
             f"for {rows} rows and model axes {entry.axes}"
         )
 
-    shaped = shape(values, entry.axes)
+    shaped = projected.write(values)
     if shaped.type != entry.output:
         raise TypeError(f"prediction at {address!s} produced output type {shaped.type}; expected {entry.output}")
     if len(shaped) != rows:
@@ -403,7 +428,8 @@ def envelope(module: Model, predictions: list[Prediction], rows: int, compiled: 
         values = coordinate(module, entry, indexed[entry.address], rows)
         if values is None:
             continue
-        fields.append(pa.field(str(entry.address), values.type, nullable=False))
+        nullable = bool(entry.axes and entry.axes[0] is None) or (entry.passthrough and not entry.axes)
+        fields.append(pa.field(str(entry.address), values.type, nullable=nullable))
         arrays.append(values)
 
     if not arrays:
@@ -417,7 +443,14 @@ def vacant(compiled: OutputPlan) -> pa.Array:
     entries = [entry for entry in compiled.entries if entry.output is not None]
     if not entries:
         return pa.nulls(0)
-    fields = [pa.field(str(entry.address), cast(pa.DataType, entry.output), nullable=False) for entry in entries]
+    fields = [
+        pa.field(
+            str(entry.address),
+            cast(pa.DataType, entry.output),
+            nullable=bool(entry.axes and entry.axes[0] is None) or (entry.passthrough and not entry.axes),
+        )
+        for entry in entries
+    ]
     arrays = [pa.array([], type=entry.output) for entry in entries]
     return pa.StructArray.from_arrays(arrays, fields=fields)
 
@@ -461,12 +494,13 @@ class ModelRuntime:
         processed: dict[Address, list[Parcel]] = defaultdict(list)
         outgoing: dict[Address, Parcel] = {}
         predictions: list[Prediction] = []
+        geometry = cast(TensorDict, inputs[Address()]) if Address() in inputs.keys() else None
 
         for address in plan.requests:
             tensorfield = cast(TensorFieldBase, inputs[address])
             node_module = cast(NodeModule, module.nodes[address])
             embedder: EmbedderBase = node_module.embedder
-            embedded = embedder.embed(tensorfield)
+            embedded = locate(embedder.embed(tensorfield), schema=module.schema, geometry=geometry)
             if embedded.destination is None:
                 raise ValueError(f"parcel from '{embedded.origin}' has no destination")
             processed[embedded.destination].append(embedded)
@@ -479,13 +513,18 @@ class ModelRuntime:
 
                 node_module = cast(NodeModule, module.nodes[address])
                 encoder: BranchEncoder = node_module.encoder
-                encoded: Parcel = encoder(processed[address])
+                encoded: Parcel = encoder(processed[address], geometry=geometry)
                 if encoded.destination is None:
                     raise ValueError(f"parcel from '{encoded.origin}' has no destination")
                 processed[encoded.destination].append(encoded)
                 outgoing[encoded.origin] = encoded
 
                 if address in plan.embeds:
+                    positions, spans, slots = (
+                        sequence(processed[address], order=encoder.child_order)
+                        if encoder.reduction is None
+                        else (None, None, None)
+                    )
                     predictions.append(
                         Prediction(
                             address=encoded.origin,
@@ -493,6 +532,10 @@ class ModelRuntime:
                                 {TensorKey.embedding: encoded.payload},
                                 batch_size=encoded.payload.shape[0],
                             ),
+                            geometry=geometry,
+                            positions=positions,
+                            spans=spans,
+                            slots=slots,
                             batch_size=encoded.payload.shape[0],
                         )
                     )
@@ -511,8 +554,13 @@ class ModelRuntime:
                 batch_size=tensorfield.state.shape[0],
                 device=tensorfield.state.device,
                 embed=route.embed,
+                target_shape=tuple(tensorfield.state.shape[1:]),
+                geometry=geometry,
             )
-            prediction.payload[TensorKey.inferred] = tensorfield.inferred if predict else tensorfield.trainable
+            prediction.geometry = geometry
+            prediction.payload[TensorKey.inferred] = (
+                tensorfield.inferred if predict else tensorfield.trainable
+            ).flatten(start_dim=1)
             predictions.append(prediction)
 
         return predictions
@@ -664,6 +712,8 @@ class ModelRuntime:
             return Output(loss=anchor)
 
         loss = module.track((Metric.loss, strata), value=torch.stack(losses).sum() + anchor)
+        if strata == Strata.train:
+            module.track((Metric.loss, "train_epoch"), value=loss, on_step=False, on_epoch=True, logger=False)
         return Output(loss=loss)
 
     @staticmethod
@@ -680,7 +730,7 @@ class ModelRuntime:
         if not isinstance(source, pa.Table):
             raise TypeError(f"source must be a pyarrow.Table, got {type(source).__name__}")
         active = plan(module, retain, refresh=True) if compiled is None else compiled
-        if active.retain != retention(retain):
+        if active.retain != retain:
             raise ValueError(f"compiled output plan retain {active.retain!r} does not match write retain {retain!r}")
         inputs = project(source, active.retain)
         outputs = (
@@ -708,23 +758,7 @@ class ModelRuntime:
     ) -> Encoded:
         """Normalize Arrow input, preprocess it, and encode one table."""
 
-        from relflow.data.datasets.arrow import convert, merge, process
-
-        source = convert(batch)
-        processors = Preprocessor.normalize(preprocess)
-        if processors:
-            source = merge(
-                process(
-                    (source,),
-                    preprocessor=processors,
-                    strata=strata,
-                    schema=module.schema,
-                    encoding_context=module.interprocess_encoding_context,
-                )
-            )
-            if source is None:
-                raise ValueError("preprocessor pipeline returned no observations")
-
+        source = observations(module, batch, preprocess=preprocess, strata=strata)
         encoded = encode_batch(
             batch=source,
             schema=module.schema,
@@ -805,32 +839,45 @@ class ModelRuntime:
         preprocess: PreprocessorInput = (),
         postprocess: PostprocessorInput = (),
         retain: Retain = (),
+        *,
+        batch_size: int | None = None,
     ) -> pa.Table:
-        """Predict one Arrow input unit and return an Arrow table."""
+        """Preprocess once, predict bounded Arrow batches, and postprocess once."""
 
         postprocessors = Postprocessor.normalize(postprocess)
-        encoded = ModelRuntime.prepare(
+        source = observations(
             module,
             ingress(batch),
             preprocess=preprocess,
             strata=Strata.predict,
         )
-        source = encoded.source
-        inputs = encoded.tensors.to(module.device)
-        compiled = plan(module, retain, refresh=True)
-        raw: list[Prediction] = []
-        if source.num_rows:
-            was_training = module.training
-            module.eval()
-            try:
-                with torch.inference_mode():
-                    raw = module(inputs, strata=Strata.predict)
-            finally:
-                if was_training:
-                    module.train()
+        size = max(source.num_rows, 1) if batch_size is None else batch_size
+        written: list[pa.Table] = []
+        compiled: OutputPlan | None = None
+        for offset in range(0, max(source.num_rows, 1), size):
+            encoded = ModelRuntime.prepare(
+                module,
+                source.slice(offset, size),
+                preprocess=(),
+                strata=Strata.predict,
+            )
+            if compiled is None:
+                compiled = plan(module, retain, refresh=True)
+            raw: list[Prediction] = []
+            if encoded.source.num_rows:
+                was_training = module.training
+                module.eval()
+                try:
+                    with torch.inference_mode():
+                        raw = module(encoded.tensors.to(module.device), strata=Strata.predict)
+                finally:
+                    if was_training:
+                        module.train()
 
-        written = ModelRuntime.write(module, raw, source=source, retain=retain, compiled=compiled)
-        return apply(written, postprocessors)
+            written.append(ModelRuntime.write(module, raw, source=encoded.source, retain=retain, compiled=compiled))
+            del encoded, raw
+
+        return apply(pa.concat_tables(written), postprocessors)
 
 
 step = ModelRuntime.step

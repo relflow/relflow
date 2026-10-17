@@ -8,7 +8,8 @@ from typing import Any, TypeAlias
 import pyarrow as pa
 
 import relflow
-from relflow.data.datasets.arrow import ArrowDataModule, ArrowStream, Retain
+from relflow.data.arrow import Retain
+from relflow.data.datasets.arrow import ArrowDataModule, ArrowStream
 from relflow.data.datasets.base import StratumConfig
 from relflow.data.datasets.custom import adapt, schemas
 from relflow.data.processors import PreprocessorInput
@@ -39,7 +40,6 @@ class SyntheticDataModule(ArrowDataModule):
         seed: int = 0,
         shuffle: StratumConfig[bool | None] = None,
         sample: StratumConfig[float] = 1.0,
-        replacement: StratumConfig[bool] = False,
         epoch_size: StratumConfig[int | None] = None,
         shuffle_rows: StratumConfig[int | None] = None,
         drop_last: StratumConfig[bool] = False,
@@ -87,7 +87,6 @@ class SyntheticDataModule(ArrowDataModule):
             seed=seed,
             shuffle=shuffle,
             sample=sample,
-            replacement=replacement,
             epoch_size=epoch_size,
             shuffle_rows=shuffle_rows,
             drop_last=drop_last,

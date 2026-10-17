@@ -64,7 +64,7 @@ def _new_tensorfield(
     state,
 ) -> TensorField:
     batch = arrow_batch([{"items": [{"tags": value} for value in root]} for (root,) in values])
-    projection = coalesce(batch, schema=schema, strata=strata)[ADDRESS]
+    projection = coalesce(batch, schema=schema, strata=strata).fields[ADDRESS]
     return tensorize(
         TensorField,
         projection,
@@ -130,7 +130,7 @@ def test_set_nested_mask_string_is_an_ordinary_label():
     )
 
     assert state.vocab == ["<MASK>", "ALPHA"]
-    assert field.state.tolist() == [[[Tokens.valued.value, Tokens.padded.value]]]
+    assert field.state.tolist() == [[[Tokens.valued.value]]]
     assert field.content["membership"][0, 0, 0, :2].tolist() == [1.0, 1.0]
 
 

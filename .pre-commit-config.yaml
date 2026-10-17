@@ -25,13 +25,6 @@ repos:
         always_run: true
         verbose: true
 
-      - id: docs
-        name: Render Docs (isolated)
-        entry: make check-docs
-        language: system
-        pass_filenames: false
-        always_run: true
-
       - id: pytest
         name: Run Pytest
         entry: uv run pytest

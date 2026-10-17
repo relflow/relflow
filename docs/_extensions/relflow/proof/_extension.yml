@@ -1,6 +1,0 @@
-title: Proof evidence
-author: relflow
-version: 1.0.0
-contributes:
-  shortcodes:
-    - proof.lua

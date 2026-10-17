@@ -40,12 +40,12 @@ def build_extension(
     name = f"extension_{uuid.uuid4().hex}"
     extension = Extension(name=name, types=(str, bytes), requires=requires)
 
-    @extension.register
-    class Request(RequestBase):
+    @extension.register(rf.Component.Request)
+    class Options(RequestBase):
         type: Literal[name] = name
         family: Literal["text", "bytes"] = "text"
 
-    @extension.register
+    @extension.register(rf.Component.TensorField)
     @tensorclass
     class TensorField(TensorFieldBase):
         content: TensorDict
@@ -102,7 +102,7 @@ def build_extension(
                 batch_size=input.batch_size,
             )
 
-    @extension.register
+    @extension.register(rf.Component.Embedder)
     class Embedder(EmbedderBase):
         def __init__(self, schema: rf.Schema, address: Address):
             if embedders is not None:
@@ -116,11 +116,11 @@ def build_extension(
         def context(self) -> object | None:
             return state
 
-        def forward(self, inputs: TensorInput) -> Parcel:
+        def forward(self, batch: TensorInput) -> Parcel:
             values = torch.cat(
                 [
-                    inputs.content["matrix"].reshape(inputs.batch_size[0], -1),
-                    inputs.content["nested", "cube"].reshape(inputs.batch_size[0], -1),
+                    batch.content["matrix"].reshape(batch.batch_size[0], -1),
+                    batch.content["nested", "cube"].reshape(batch.batch_size[0], -1),
                 ],
                 dim=-1,
             )
@@ -135,7 +135,7 @@ def build_extension(
 
     if decoder:
 
-        @extension.register
+        @extension.register(rf.Component.Decoder)
         class Decoder(DecoderBase):
             def __init__(self, schema: rf.Schema, address: Address):
                 if explode:
@@ -154,11 +154,11 @@ def build_extension(
 
     if loss:
 
-        @extension.register
-        def loss(module: object, prediction: Prediction, batch: object, strata: Strata) -> torch.Tensor:
+        @extension.register(rf.Component.loss)
+        def objective(module: object, prediction: Prediction, batch: object, strata: Strata) -> torch.Tensor:
             return prediction.payload[TensorKey.state].sum() * 0.0
 
-    return extension, Request
+    return extension, Options
 
 
 def test_model_reports_missing_extension_packages_before_building_runtime_nodes():

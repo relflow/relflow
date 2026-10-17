@@ -67,7 +67,7 @@ def structure_payload(*, mask: bool | Mask = False, jitter: Jitter | dict[str, o
 
 def tensorfield(rows: list[list[Any]], *, schema: Schema, strata: Strata) -> TensorField:
     batch = arrow_batch([{"items": [{"amount": value} for value in row]} for row in rows])
-    projection = coalesce(batch, schema=schema, strata=strata)[ADDRESS]
+    projection = coalesce(batch, schema=schema, strata=strata).fields[ADDRESS]
     return tensorize(
         TensorField,
         projection,

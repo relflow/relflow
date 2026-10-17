@@ -92,7 +92,7 @@ def _tensorfield(
     state: VocabularyState,
 ) -> TensorField:
     batch = arrow_batch([{"items": [{"cluster": value} for value in row]} for row in rows])
-    projection = coalesce(batch, schema=schema, strata=strata)[ADDRESS]
+    projection = coalesce(batch, schema=schema, strata=strata).fields[ADDRESS]
     return tensorize(
         TensorField,
         projection,
@@ -127,11 +127,11 @@ def test_cluster_tensorfield_routes_oov_to_sentinel_at_validate():
     sentinel = -1
     assert torch.equal(
         field.state,
-        torch.tensor([[[Tokens.valued.value, Tokens.padded.value]]], dtype=torch.int64),
+        torch.tensor([[[Tokens.valued.value]]], dtype=torch.int64),
     )
     assert torch.equal(
         field.content,
-        torch.tensor([[[sentinel, 0]]], dtype=torch.int64),
+        torch.tensor([[[sentinel]]], dtype=torch.int64),
     )
 
 

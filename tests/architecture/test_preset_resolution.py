@@ -7,7 +7,8 @@ import pytest
 
 import relflow as rf
 from relflow.presets import LG, MD, SM, XL, XS, Preset
-from relflow.presets.base import resolve, subtree
+from relflow.presets.base import resolve
+from relflow.structs.experiment import bind_tree_field
 
 
 @pytest.mark.parametrize(
@@ -113,7 +114,7 @@ def test_late_extension_uses_common_profile_without_losing_extension_fields():
     extension = rf.Extension(name="preset_extension", types=(float,))
     try:
 
-        @extension.register
+        @extension.register(rf.Component.Request)
         class Request(rf.RequestBase):
             type: Literal["preset_extension"] = "preset_extension"
             scale: float = pydantic.Field(default=1.0, gt=0)
@@ -130,8 +131,8 @@ def test_late_extension_uses_common_profile_without_losing_extension_fields():
 
 
 def test_profile_words_remain_available_as_ordinary_child_names():
-    schema = resolve(XS, preset=rf.Number, size=rf.Number, md=rf.Number)
-    assert list(schema.requests) == [rf.Address("preset"), rf.Address("size"), rf.Address("md")]
+    schema = resolve(XS, preset=rf.Number, defaults=rf.Number, size=rf.Number, md=rf.Number)
+    assert list(schema.requests) == [rf.Address("preset"), rf.Address("defaults"), rf.Address("size"), rf.Address("md")]
 
 
 def test_policy_snapshot_is_frozen_and_can_default_new_nodes_after_restore():
@@ -145,12 +146,70 @@ def test_policy_snapshot_is_frozen_and_can_default_new_nodes_after_restore():
         restored.branch.reduction.n_outputs = 1
 
     definition = rf.Branch(value=rf.Number, child=rf.Branch(target=rf.Category(n_heads=4)))
-    live = subtree(XL, "added", definition)
-    loaded = subtree(restored, "added", definition)
+    live = bind_tree_field("added", definition, defaults=XL.defaults)
+    loaded = bind_tree_field("added", definition, defaults=restored.defaults)
     assert live.model_dump() == loaded.model_dump()
     assert loaded.n_heads == 8
     assert loaded.fields[0].n_heads == 8
     assert loaded.fields[1].fields[0].n_heads == 4
+
+
+def test_preset_construction_and_growth_validate_each_bound_leaf_once():
+    visits = []
+    allocations = []
+
+    def allocate():
+        allocations.append(len(allocations))
+        return allocations[-1]
+
+    class TracedNumber(rf.Number):
+        generation: int = pydantic.Field(default_factory=allocate)
+        scales: list[float] = pydantic.Field(default_factory=lambda: [1.0])
+
+        @pydantic.model_validator(mode="after")
+        def check_visit(self):
+            visits.append((self.name, self.n_heads))
+            return self
+
+    leaf = TracedNumber(ffnx=8, dropout=None)
+    definition = rf.Branch(child=rf.Branch(value=leaf))
+    original = definition.model_dump()
+    supplied = [(node, node.model_fields_set.copy()) for node in (definition, *definition.descendants, leaf)]
+    values = XS.model_dump()
+    values["root"]["ffnx"] = 4
+    values["branch"]["ffnx"] = 3
+    values["leaf"]["ffnx"] = 2
+    profile = Preset.model_validate(values)
+    constructor = rf.presets.factory(profile).__get__(None, rf.Model)
+
+    visits.clear()
+    model = constructor(d_model=16, first=definition, second=definition, bare=TracedNumber)
+    assert len(visits) == 3
+    assert all(heads == 2 for _, heads in visits)
+    assert allocations == [0, 1]
+    first = model.schema.requests["/first/child/value"]
+    second = model.schema.requests["/second/child/value"]
+    assert type(first) is type(second) is TracedNumber
+    assert first.generation == second.generation == leaf.generation == 0
+    assert first.ffnx == second.ffnx == 8
+    assert first.dropout is second.dropout is None
+    assert model.schema.requests["/bare"].ffnx == 2
+    first.scales.append(2.0)
+    assert second.scales == leaf.scales == [1.0]
+
+    visits.clear()
+    model.extend(rf.where("address") == "/", added=definition, bare_added=TracedNumber)
+    assert len(visits) == 2
+    assert all(heads == 2 for _, heads in visits)
+    assert allocations == [0, 1, 2]
+    added = model.schema.requests["/added/child/value"]
+    assert type(added) is TracedNumber
+    assert added.generation == 0 and added.scales == [1.0]
+    assert added.parent is model.schema.branches["/added/child"]
+    assert model.schema.branches["/added"].parent is model.schema.fields
+    assert definition.model_dump() == original
+    assert definition.parent is leaf.parent is None
+    assert all(node.model_fields_set == fields for node, fields in supplied)
 
 
 @pytest.mark.parametrize(

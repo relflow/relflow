@@ -1,9 +1,10 @@
 """Public Lightning model facade for `relflow` schemas."""
 
 from collections import Counter
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from functools import partialmethod
+from math import isfinite
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, Required, Self, TypedDict, TypeVar, Unpack, cast, overload
 
@@ -13,14 +14,13 @@ import torch
 from beartype import beartype
 from beartype.roar import BeartypeCallHintParamViolation
 from lightning.pytorch import Callback
+from lightning.pytorch.callbacks import BasePredictionWriter, EarlyStopping
 from lightning.pytorch.utilities.types import LRSchedulerConfigType, OptimizerLRSchedulerConfig
-from rich.console import Console, ConsoleOptions
-from rich.text import Text
 from torchmetrics import Metric as TorchMetric
 
 from relflow import presets
 from relflow._version import __version__
-from relflow.architecture import compiler, template
+from relflow.architecture import compiler, template, training
 from relflow.architecture.binding import bind
 from relflow.architecture.checkpoint import CheckpointState, RollbackCheckpoint
 from relflow.architecture.contracts import ContractScheduler
@@ -38,12 +38,12 @@ from relflow.architecture.runtime import (
     Output,
     OutputPlan,
     PredictionInput,
-    Retain,
     step,
 )
-from relflow.data.arrow import Encoded
+from relflow.data.arrow import Encoded, Retain
 from relflow.data.datasets.base import EncodedInput, InterprocessEncodingContext
 from relflow.data.processors import PostprocessorInput, PreprocessorInput
+from relflow.helpers.optimizers import adamw
 from relflow.logging import logger
 from relflow.logging.throughput import ThroughputLogger
 from relflow.structs.enums import AttentionInput, AttentionMode, Strata, StrataInput
@@ -54,7 +54,8 @@ from relflow.structs.experiment import (
 )
 from relflow.structs.packages import Prediction
 from relflow.structs.reduction import Attention, ReductionConfig
-from relflow.structs.tree import Address, MaskInput, Node, Rate, Renderable
+from relflow.structs.structure import OMITTED
+from relflow.structs.tree import Address, MaskInput, Node, Rate
 from relflow.tensorfields.base import TENSORFIELDS, Extension
 
 OptimizerConfig = torch.optim.Optimizer | Callable[["Model"], torch.optim.Optimizer]
@@ -105,7 +106,7 @@ __all__ = [
 _DEFAULT_REDUCTION = Attention()
 
 
-class Model(lit.LightningModule, Renderable):
+class Model(lit.LightningModule):
     """Neural model generated from a `relflow` schema tree.
 
     `Model` owns the schema tree, tensorfield embedders, branch
@@ -135,6 +136,7 @@ class Model(lit.LightningModule, Renderable):
         d_model: int,
         n_layers: int,
         n_heads: int,
+        ffnx: int = 8,
         batch_size: int = 1,
         fields: Mapping[str, TreeFieldInput] | None = None,
         query: str | None = None,
@@ -167,6 +169,7 @@ class Model(lit.LightningModule, Renderable):
         d_model: int | None = None,
         n_layers: int | None = None,
         n_heads: int | None = None,
+        ffnx: int = cast(int, OMITTED),
         batch_size: int = 1,
         fields: Mapping[str, TreeFieldInput] | None = None,
         query: str | None = None,
@@ -192,17 +195,22 @@ class Model(lit.LightningModule, Renderable):
         its embedding during prediction. ``attention`` selects the root
         encoder mode; ``None`` disables its coordinate and sequence attention.
         ``reduction`` independently selects its output representation.
+        ``ffnx`` multiplies the root feed-forward width; each child has its own
+        value, defaulting to 8. Activation and normalization are fixed.
 
         ``optimizer`` accepts a Torch optimizer or a factory receiving this
         model. ``scheduler`` accepts a Torch scheduler, a Lightning scheduler
         configuration dictionary, or a factory receiving model and optimizer.
         Custom schedulers also work with an overridden ``lr_scheduler_step``.
-        Configure an optimizer before fitting; neither factory is checkpointed.
+        ``Model.fit`` supplies AdamW when no optimizer is configured. Direct
+        Trainer fitting requires an optimizer; neither factory is checkpointed.
 
         A positional ``Schema`` or ``schema=...`` restores an existing
         architecture and cannot be combined with tree fields or dimensions.
         """
         if schema is not None:
+            if ffnx is not OMITTED:
+                raise TypeError("schema cannot be combined with a root ffnx override")
             if fields is not None or field_kwargs or mask is not False:
                 raise TypeError("schema cannot be combined with tree fields")
             if d_model is not None or n_layers is not None or n_heads is not None:
@@ -220,6 +228,7 @@ class Model(lit.LightningModule, Renderable):
                 d_model=cast(int, d_model),
                 n_layers=cast(int, n_layers),
                 n_heads=cast(int, n_heads),
+                ffnx=8 if ffnx is OMITTED else ffnx,
                 fields=fields,
                 query=query,
                 description=description,
@@ -232,26 +241,29 @@ class Model(lit.LightningModule, Renderable):
             )
 
         super().__init__()
-        if batch_size <= 0:
-            raise ValueError("batch_size must be > 0")
 
         # Model provenance intentionally uses a string rather than nn.Module's
         # internal integer state-dict revision; preserve the existing artifact contract.
         self._version: str = __version__  # pyrefly: ignore[bad-override-mutable-attribute]
         self.schema: Schema = schema
         self.preset: presets.Preset | None = None
-        self.batch_size: int = batch_size
-        self.optimizer: OptimizerConfig | None = optimizer
-        self.scheduler: SchedulerConfig | None = scheduler
+        self.batch_size = batch_size
+        self.optimizer: OptimizerConfig | None
+        self.scheduler: SchedulerConfig | None
+        # Training recipes remain configuration even when their callables are Modules.
+        object.__setattr__(self, "optimizer", optimizer)
+        object.__setattr__(self, "scheduler", scheduler)
         self.locks: Counter[str | Strata] = Counter()
         self.nodes: torch.nn.ModuleDict = torch.nn.ModuleDict()
         self._schema_editor: SchemaEditor = SchemaEditor(self)
         self._contract_generation: int = 0
+        self._length_warning_generation: int = -1
         self._contract_scheduler: ContractScheduler = ContractScheduler()
         self.output_plans: dict[tuple[int, Retain], OutputPlan] = {}
         self.execution_plan: ExecutionPlan | None = None
 
         ModelGraph.install(self)
+        self.warn_unbounded()
 
         logger.bind(
             component="model",
@@ -287,12 +299,49 @@ class Model(lit.LightningModule, Renderable):
         """RelFlow version associated with this model's checkpoint provenance."""
         return self._version
 
+    @property
+    def batch_size(self) -> int:
+        """Current per-device batch size for model-owned data loaders."""
+        return self._batch_size
+
+    @batch_size.setter
+    def batch_size(self, value: int) -> None:
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise ValueError(f"model batch_size must be a positive integer, got {value!r}")
+        self._batch_size = value
+
     def reset_contracts(self) -> None:
         compiler.clear(self)
         self._contract_generation += 1
         self._contract_scheduler.reset()
         self.output_plans.clear()
         self.execution_plan = None
+        self.warn_unbounded()
+
+    def warn_unbounded(self) -> None:
+        """Report unbounded active collection paths once per model generation."""
+
+        if self._length_warning_generation == self._contract_generation:
+            return
+        self._length_warning_generation = self._contract_generation
+        ancestors = {
+            owner.address
+            for request in self.schema.active_requests.values()
+            for owner in request.path
+            if getattr(owner, "type", None) == "branch"
+        }
+        addresses = [
+            str(address)
+            for address, branch in self.schema.branches.items()
+            if branch.length is None and address in ancestors
+        ]
+        if addresses:
+            logger.bind(component="model", branches=tuple(addresses)).warning(
+                "Unbounded branches "
+                + ", ".join(repr(address) for address in addresses)
+                + " allow untrusted records to determine batch widths and exhaust memory or compute, "
+                "causing denial of service. Configure finite length limits and request-size limits before public serving."
+            )
 
     # RelFlow's existing region-selection API is chainable, unlike nn.Module.compile.
     def compile(  # pyrefly: ignore[bad-override]
@@ -318,6 +367,8 @@ class Model(lit.LightningModule, Renderable):
         internals or nested hooks, including hooks added after compilation.
 
         ``backend``, ``dynamic``, and ``options`` are PyTorch compiler settings.
+        Omitted ``dynamic`` enables dynamic shapes. Packed grouping stays eager;
+        dense tensor regions remain eligible for compilation.
         Inductor defaults preserve eager random draws and disable CUDA graphs
         and automatic tensor padding. Floating-point results may still differ.
         """
@@ -329,53 +380,13 @@ class Model(lit.LightningModule, Renderable):
         compiler.compile(self, encoders=encoders, pools=pools, backend=backend, dynamic=dynamic, options=options)
         return self
 
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
-        parameters = sum(parameter.numel() for parameter in self.parameters())
-        heading = Text()
-        heading.append(type(self).__name__, style=self.RICH_NAME_STYLE)
-        heading.append(" ")
-        heading.append("[model]", style=self.RICH_TYPE_STYLE)
-        for name, value in (
-            ("batch_size", self.batch_size),
-            ("d_model", self.schema.d_model),
-            ("parameters", f"{parameters:,}"),
-            ("branches", len(self.schema.branches)),
-            ("fields", len(self.schema.active_requests)),
-            ("reconstruct", len(self.schema.reconstruct)),
-            ("embeds", len(self.schema.embed)),
-        ):
-            heading.append(" ")
-            heading.append(f"{name}=", style="dim")
-            heading.append(str(value), style="cyan")
-        yield heading
-
-        lines = list(self.schema.fields.__rich_console__(console, options))
-        if not lines:
-            return
-        first = Text()
-        first.append("`-- ", style=self.RICH_TREE_STYLE)
-        if isinstance(lines[0], Text):
-            first.append_text(lines[0])
-        else:
-            first.append(str(lines[0]))
-        yield first
-        for line in lines[1:]:
-            nested = Text()
-            nested.append("    ", style=self.RICH_TREE_STYLE)
-            if isinstance(line, Text):
-                nested.append_text(line)
-            else:
-                nested.append(str(line))
-            yield nested
-
     def select(
         self,
         *predicates: NodeSelector,
         include_root: bool = True,
-        use_cache: bool = True,
     ) -> list[Node]:
         """Return schema nodes that satisfy every predicate."""
-        return self._schema_editor.select(*predicates, include_root=include_root, use_cache=use_cache)
+        return self._schema_editor.select(*predicates, include_root=include_root)
 
     def update(
         self,
@@ -383,7 +394,6 @@ class Model(lit.LightningModule, Renderable):
         strict: bool = True,
         include_root: bool = True,
         validate: bool = True,
-        use_cache: bool = False,
         **values: object,
     ) -> None:
         """Mutate selected schema nodes and rebuild compatible modules.
@@ -393,8 +403,6 @@ class Model(lit.LightningModule, Renderable):
             strict: Raise when a selected node cannot accept one of `values`.
             include_root: Include the root node in predicate matching.
             validate: Validate each node after applying candidate values.
-            use_cache: Permit cached selector results. Mutations default this to
-                `False` so updates always evaluate against current schema state.
             **values: Declared schema attributes to update. Use `description` for notes.
         """
         self._schema_editor.update(
@@ -402,7 +410,6 @@ class Model(lit.LightningModule, Renderable):
             strict=strict,
             include_root=include_root,
             validate=validate,
-            use_cache=use_cache,
             **values,
         )
 
@@ -411,35 +418,29 @@ class Model(lit.LightningModule, Renderable):
         *predicates: NodeSelector,
         fields: Mapping[str, TreeFieldInput] | None = None,
         include_root: bool = True,
-        use_cache: bool = True,
         **children: TreeFieldInput,
     ) -> None:
         """Append keyword or mapping-named children under one selected branch."""
-        self._schema_editor.extend(
-            *predicates, fields=fields, include_root=include_root, use_cache=use_cache, **children
-        )
+        self._schema_editor.extend(*predicates, fields=fields, include_root=include_root, **children)
 
     def delete(
         self,
         *predicates: NodeSelector,
         include_root: bool = False,
-        use_cache: bool = True,
     ) -> None:
         """Permanently remove selected schema nodes and rebuild modules."""
-        self._schema_editor.delete(*predicates, include_root=include_root, use_cache=use_cache)
+        self._schema_editor.delete(*predicates, include_root=include_root)
 
     def reset(
         self,
         *predicates: NodeSelector,
         include_root: bool = True,
-        use_cache: bool = True,
         descendants: bool = False,
     ) -> None:
         """Reinitialize selected runtime node modules while preserving schema values."""
         self._schema_editor.reset(
             *predicates,
             include_root=include_root,
-            use_cache=use_cache,
             descendants=descendants,
         )
 
@@ -450,7 +451,6 @@ class Model(lit.LightningModule, Renderable):
         strict: bool = True,
         include_root: bool = True,
         validate: bool = True,
-        use_cache: bool = False,
         **values: object,
     ) -> Generator[None, None, None]:
         """Temporarily mutate selected schema nodes and keep runtime modules synchronized."""
@@ -459,7 +459,6 @@ class Model(lit.LightningModule, Renderable):
             strict=strict,
             include_root=include_root,
             validate=validate,
-            use_cache=use_cache,
             **values,
         ):
             yield
@@ -507,8 +506,17 @@ class Model(lit.LightningModule, Renderable):
                 "with mask=True or Mask(reconstruct=True) before fitting"
             )
 
-    def track(self, names: tuple[str, ...], /, value: MetricValue) -> MetricValue:
-        """Log an epoch metric with a leading dot for address groups and return its value."""
+    def track(
+        self,
+        names: tuple[str, ...],
+        /,
+        value: MetricValue,
+        *,
+        on_step: bool | None = None,
+        on_epoch: bool | None = None,
+        logger: bool | None = None,
+    ) -> MetricValue:
+        """Log training steps or evaluation aggregates, using dotted address groups."""
         assert len(names) > 1
         group, *keys = names
         group = ("." if group.startswith("/") else "") + group.strip("/").replace("/", ".")
@@ -521,8 +529,9 @@ class Model(lit.LightningModule, Renderable):
         self.log(
             name=f"{group}/{key}",
             value=value.detach() if isinstance(value, torch.Tensor) else value,
-            on_step=False,
-            on_epoch=True,
+            on_step=on_step,
+            on_epoch=not self.training if on_epoch is None else on_epoch,
+            logger=logger,
             sync_dist=True,
             rank_zero_only=not stateful,
             batch_size=self.batch_size,
@@ -571,14 +580,194 @@ class Model(lit.LightningModule, Renderable):
         else:
             optimizer = self.optimizer(self)
 
+        optimized = {id(parameter) for group in optimizer.param_groups for parameter in group["params"]}
+        parameters = {id(parameter) for parameter in self.parameters()}
+        if not optimized <= parameters:
+            raise ValueError(
+                "optimizer references a previous or different model graph; "
+                "supply a factory that binds the current model.parameters()"
+            )
+
         scheduler = self.scheduler(self, optimizer) if callable(self.scheduler) else self.scheduler
 
         if scheduler is None:
             return optimizer
 
+        scheduled = scheduler.get("scheduler") if isinstance(scheduler, Mapping) else scheduler
+        if scheduled is not None and scheduled.optimizer is not optimizer:
+            raise ValueError(
+                "scheduler references a different optimizer; supply a factory receiving the current model and optimizer"
+            )
+
         # Lightning permits custom stateful schedulers with an overridden step
         # hook, although its return annotation lists only Torch schedulers.
         return cast(OptimizerLRSchedulerConfig, {"optimizer": optimizer, "lr_scheduler": scheduler})
+
+    def fit(
+        self,
+        datamodule: lit.LightningDataModule,
+        *,
+        batch_size: int | None = None,
+        optimizer: OptimizerConfig | None = None,
+        scheduler: SchedulerConfig | None = None,
+        learning_rate: float | None = None,
+        weight_decay: float | None = None,
+        betas: tuple[float, float] | None = None,
+        eps: float | None = None,
+        fused: bool | None = cast(bool | None, OMITTED),
+        decay_bias: bool | None = None,
+        decay_1d: bool | None = None,
+        no_decay_name_fragments: tuple[str, ...] | None = None,
+        callbacks: Sequence[Callback] | None = None,
+        early_stopping: bool | EarlyStopping = True,
+        rollback: bool | RollbackCheckpoint = True,
+        monitor: str = "loss/validate",
+        mode: Literal["min", "max"] = "min",
+        patience: int = 10,
+        min_delta: float = 0.0,
+        checkpoint_dir: str | Path | None = None,
+        ckpt_path: str | Path | None = None,
+        **trainer_options: Any,
+    ) -> Self:
+        """Fit a data module and automatically restore its best saved model state.
+
+        Unspecified hardware uses all available devices, DDP with unused-parameter
+        detection across multiple devices or nodes, and BF16 mixed precision where supported. Native training-step
+        metrics reach attached loggers every ``log_every_n_steps`` optimizer
+        updates (default 50); training loss averages remain internal to callbacks.
+        ``val_check_interval`` controls validation independently. Explicit
+        Lightning batch limits can shorten a loop; no automatic limits apply.
+        ``batch_size`` sets the current per-device size for model-owned data
+        loaders, including validation. Omission retains the current size.
+
+        Early stopping and rollback accept booleans or configured callbacks.
+        Their default monitor requires a validation split. Train-only fitting
+        can disable both policies or explicitly monitor ``loss/train_epoch``.
+        Full training continuation requires ``ckpt_path``; another ordinary
+        call starts a new run from the current model state.
+
+        Configure AdamW directly with ``learning_rate``, ``weight_decay``,
+        ``betas``, ``eps``, and ``fused``. Defaults are 1e-3, 0.01,
+        (0.9, 0.95), 1e-8, and True. Biases, one-dimensional parameters,
+        and names containing "norm" receive no decay unless their policies
+        are overridden. Explicit ``fused=None`` lets Torch select its backend.
+
+        These options and ``scheduler`` belong to this run. The optimizer is
+        constructed from the current graph after device and checkpoint setup;
+        repeated calls can use different options after rollback or mutation.
+        An explicit optimizer configuration cannot be combined with AdamW
+        options. Model-level configurations remain defaults for advanced use.
+        """
+        selected = optimizer if optimizer is not None else self.optimizer
+        adamw_options: dict[str, Any] = {
+            name: value
+            for name, value in {
+                "weight_decay": weight_decay,
+                "betas": betas,
+                "eps": eps,
+                "decay_bias": decay_bias,
+                "decay_1d": decay_1d,
+                "no_decay_name_fragments": no_decay_name_fragments,
+            }.items()
+            if value is not None
+        }
+        if fused is not OMITTED:
+            adamw_options["fused"] = fused
+        if selected is not None and (learning_rate is not None or adamw_options):
+            raise ValueError(
+                "AdamW options conflict with a configured optimizer; "
+                "supply options directly to fit without a separate optimizer, or configure its factory"
+            )
+        if learning_rate is not None and (not isfinite(learning_rate) or learning_rate <= 0):
+            raise ValueError(f"learning_rate must be finite and positive, got {learning_rate!r}")
+        configured = training.policies(
+            callbacks,
+            early_stopping=early_stopping,
+            rollback=rollback,
+            monitor=monitor,
+            mode=mode,
+            patience=patience,
+            min_delta=min_delta,
+            checkpoint_dir=checkpoint_dir,
+            options=trainer_options,
+        )
+        monitors = tuple(
+            callback.monitor
+            for callback in configured
+            if isinstance(callback, (EarlyStopping, RollbackCheckpoint)) and callback.monitor is not None
+        )
+        if monitors:
+            configured.append(training.Selection(monitors))
+        runner = training.trainer(
+            self,
+            datamodule,
+            strata=Strata.train,
+            batch_size=batch_size,
+            callbacks=configured,
+            options=trainer_options,
+        )
+        previous_optimizer, previous_scheduler = self.optimizer, self.scheduler
+        object.__setattr__(
+            self,
+            "optimizer",
+            selected
+            if selected is not None
+            else adamw(learning_rate=1e-3 if learning_rate is None else learning_rate, **adamw_options),
+        )
+        object.__setattr__(self, "scheduler", scheduler if scheduler is not None else previous_scheduler)
+        try:
+            runner.fit(self, datamodule=datamodule, ckpt_path=ckpt_path)
+        finally:
+            object.__setattr__(self, "optimizer", previous_optimizer)
+            object.__setattr__(self, "scheduler", previous_scheduler)
+        return self
+
+    def validate(
+        self,
+        datamodule: lit.LightningDataModule,
+        *,
+        batch_size: int | None = None,
+        callbacks: Sequence[Callback] | None = None,
+        ckpt_path: str | Path | None = None,
+        verbose: bool = True,
+        **trainer_options: Any,
+    ) -> list[dict[str, float]]:
+        """Evaluate validation metrics, optionally updating the per-device batch size."""
+        runner = training.trainer(
+            self,
+            datamodule,
+            strata=Strata.validate,
+            batch_size=batch_size,
+            callbacks=callbacks,
+            options=trainer_options,
+        )
+        return [
+            dict(metrics)
+            for metrics in runner.validate(self, datamodule=datamodule, ckpt_path=ckpt_path, verbose=verbose)
+        ]
+
+    def test(
+        self,
+        datamodule: lit.LightningDataModule,
+        *,
+        batch_size: int | None = None,
+        callbacks: Sequence[Callback] | None = None,
+        ckpt_path: str | Path | None = None,
+        verbose: bool = True,
+        **trainer_options: Any,
+    ) -> list[dict[str, float]]:
+        """Evaluate test metrics, optionally updating the per-device batch size."""
+        runner = training.trainer(
+            self,
+            datamodule,
+            strata=Strata.test,
+            batch_size=batch_size,
+            callbacks=callbacks,
+            options=trainer_options,
+        )
+        return [
+            dict(metrics) for metrics in runner.test(self, datamodule=datamodule, ckpt_path=ckpt_path, verbose=verbose)
+        ]
 
     def on_save_checkpoint(self, checkpoint: dict[str, Any]) -> None:
         CheckpointState.dump(self, checkpoint)
@@ -630,15 +819,81 @@ class Model(lit.LightningModule, Renderable):
             epoch=epoch,
         )
 
-    @immutable("inference")
+    @overload
     def predict(
         self,
         batch: PredictionInput,
         preprocess: PreprocessorInput = (),
         postprocess: PostprocessorInput = (),
         retain: Retain = (),
-    ) -> pa.Table:
-        """Predict an Arrow table, record batch, or nonempty sequence of mappings.
+        *,
+        batch_size: int | None = None,
+    ) -> pa.Table: ...
+
+    @overload
+    def predict(
+        self,
+        *,
+        datamodule: lit.LightningDataModule,
+        batch_size: int | None = None,
+        callbacks: Sequence[Callback] | None = None,
+        ckpt_path: str | Path | None = None,
+        return_predictions: Literal[True] = True,
+        **trainer_options: Any,
+    ) -> pa.Table: ...
+
+    @overload
+    def predict(
+        self,
+        *,
+        datamodule: lit.LightningDataModule,
+        batch_size: int | None = None,
+        callbacks: Sequence[Callback] | None = None,
+        ckpt_path: str | Path | None = None,
+        return_predictions: Literal[False],
+        **trainer_options: Any,
+    ) -> None: ...
+
+    @overload
+    def predict(
+        self,
+        batch: lit.LightningDataModule,
+        *,
+        batch_size: int | None = None,
+        callbacks: Sequence[Callback] | None = None,
+        ckpt_path: str | Path | None = None,
+        return_predictions: Literal[True] = True,
+        **trainer_options: Any,
+    ) -> pa.Table: ...
+
+    @overload
+    def predict(
+        self,
+        batch: lit.LightningDataModule,
+        *,
+        batch_size: int | None = None,
+        callbacks: Sequence[Callback] | None = None,
+        ckpt_path: str | Path | None = None,
+        return_predictions: Literal[False],
+        **trainer_options: Any,
+    ) -> None: ...
+
+    @immutable("inference")
+    def predict(
+        self,
+        batch: PredictionInput | lit.LightningDataModule | None = None,
+        preprocess: PreprocessorInput = (),
+        postprocess: PostprocessorInput = (),
+        retain: Retain = (),
+        *,
+        datamodule: lit.LightningDataModule | None = None,
+        batch_size: int | None = None,
+        callbacks: Sequence[Callback] | None = None,
+        ckpt_path: str | Path | None = None,
+        return_predictions: bool = True,
+        **trainer_options: Any,
+    ) -> pa.Table | None:
+        """Predict direct observations or a data module's batched prediction split.
 
         Returns one Arrow row per processed observation. The ``predictions``
         column contains decoded values and requested embeddings. ``retain``
@@ -647,15 +902,62 @@ class Model(lit.LightningModule, Renderable):
 
         Preprocessors run before encoding; postprocessors receive the final
         eager Polars frame and may reshape the output before conversion to Arrow.
-        """
+        For direct inputs, ``batch_size`` bounds each encoded and forwarded
+        batch after preprocessing. Postprocessing runs once on the combined
+        output. A supplied size also becomes the model's current batch size.
+        Omission processes the direct input as one batch.
 
-        return ModelRuntime.predict(
+        Data-module inference accepts Lightning callbacks and Trainer options.
+        ``batch_size`` updates the current per-device size for model-owned data
+        loaders; omission retains the current size.
+        Configure preprocessing/retention on the data module and postprocessing
+        on a Writer. Distributed prediction requires a prediction writer and
+        ``return_predictions=False``; ``devices=1`` collects one Arrow table.
+        """
+        if batch is not None and datamodule is not None:
+            raise TypeError("predict accepts either observations or a datamodule, not both")
+        if isinstance(batch, lit.LightningDataModule):
+            datamodule = batch
+            batch = None
+        if datamodule is None:
+            if batch is None:
+                raise TypeError("predict requires observations or a datamodule")
+            if callbacks is not None or ckpt_path is not None or not return_predictions or trainer_options:
+                raise TypeError("callbacks, checkpoint loading, and Trainer options require predict(datamodule=...)")
+            if batch_size is not None:
+                self.batch_size = batch_size
+            return ModelRuntime.predict(
+                self, batch=batch, preprocess=preprocess, postprocess=postprocess, retain=retain, batch_size=batch_size
+            )
+        if preprocess != () or postprocess != () or retain != ():
+            raise TypeError(
+                "data-module prediction configures preprocessing/retention on the data module and postprocessing on Writer"
+            )
+        if not return_predictions and not any(
+            isinstance(callback, BasePredictionWriter) for callback in callbacks or ()
+        ):
+            raise ValueError("return_predictions=False requires a prediction writer in callbacks")
+        runner = training.trainer(
             self,
-            batch=batch,
-            preprocess=preprocess,
-            postprocess=postprocess,
-            retain=retain,
+            datamodule,
+            strata=Strata.predict,
+            batch_size=batch_size,
+            callbacks=callbacks,
+            options=trainer_options,
         )
+        if return_predictions and runner.num_devices * runner.num_nodes > 1:
+            raise ValueError(
+                "distributed prediction requires a writer and return_predictions=False; use devices=1 to collect an Arrow table"
+            )
+        outputs = runner.predict(
+            self, datamodule=datamodule, ckpt_path=ckpt_path, return_predictions=return_predictions
+        )
+        if not return_predictions:
+            return None
+        tables = [table for output in outputs or () for table in (output if isinstance(output, list) else [output])]
+        if any(not isinstance(table, pa.Table) for table in tables):
+            raise TypeError("data-module predict_step must return pyarrow.Table batches")
+        return pa.concat_tables(tables) if tables else ModelRuntime.write(self, [], source=pa.table({}))
 
     def on_before_batch_transfer(self, batch: Any, dataloader_idx: int) -> Any:
         """Commit extension resources before DDP starts this batch's graph."""

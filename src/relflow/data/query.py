@@ -17,6 +17,10 @@ ListType: TypeAlias = pa.ListType | pa.LargeListType | pa.FixedSizeListType
 Array = TypeVar("Array", bound=pa.Array | pa.ChunkedArray, covariant=True)
 
 
+class MissingFieldError(ValueError):
+    """A structural query names a member absent from its Arrow struct type."""
+
+
 @dataclass(frozen=True, slots=True)
 class Member:
     """A named struct member."""
@@ -298,7 +302,9 @@ def bind(query: Query | str, source: pa.Schema | pa.DataType, *, address: str | 
                 raise context(parsed, step.segment, address, f"expected a struct, got {datatype}")
             indices = datatype.get_all_field_indices(step.name)
             if not indices:
-                raise context(parsed, step.segment, address, f"field {step.name!r} is absent from {datatype}")
+                raise MissingFieldError(
+                    context(parsed, step.segment, address, f"field {step.name!r} is absent from {datatype}")
+                )
             if len(indices) > 1:
                 raise context(parsed, step.segment, address, f"field {step.name!r} is ambiguous in {datatype}")
             datatype = datatype.field(indices[0]).type
@@ -323,7 +329,9 @@ def bind(query: Query | str, source: pa.Schema | pa.DataType, *, address: str | 
         if pa.types.is_struct(datatype) and isinstance(step.value, str):
             indices = datatype.get_all_field_indices(step.value)
             if not indices:
-                raise context(parsed, step.segment, address, f"field {step.value!r} is absent from {datatype}")
+                raise MissingFieldError(
+                    context(parsed, step.segment, address, f"field {step.value!r} is absent from {datatype}")
+                )
             if len(indices) > 1:
                 raise context(parsed, step.segment, address, f"field {step.value!r} is ambiguous in {datatype}")
             datatype = datatype.field(indices[0]).type

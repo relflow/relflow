@@ -15,7 +15,7 @@ from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
 from relflow.helpers import Jitter
-from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
+from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
@@ -49,7 +49,7 @@ class Objective(enum.StrEnum):
         return torch.nn.functional.mse_loss(input=inputs, target=targets, reduction="none").mean(dim=1)
 
 
-@vector.register
+@vector.register(Component.Request)
 class Request(RequestBase):
     """Fixed-width numeric vector, such as a precomputed embedding.
 
@@ -79,7 +79,7 @@ class Request(RequestBase):
         ) -> None: ...
 
 
-@vector.register
+@vector.register(Component.TensorField)
 @tensorclass
 class TensorField(TensorFieldBase[torch.Tensor]):
     content: torch.Tensor
@@ -156,7 +156,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         )
 
 
-@vector.register
+@vector.register(Component.Embedder)
 class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -172,7 +172,7 @@ class Embedder(EmbedderBase):
         )
         self.linear = torch.nn.Sequential(
             torch.nn.Linear(in_features=request.n_dim, out_features=schema.d_model),
-            torch.nn.GELU(),
+            torch.nn.GELU(approximate="tanh"),
         )
 
     @beartype
@@ -199,7 +199,7 @@ class Embedder(EmbedderBase):
         )
 
 
-@vector.register
+@vector.register(Component.Decoder)
 class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -225,7 +225,7 @@ class Decoder(DecoderBase):
         )
 
 
-@vector.register
+@vector.register(Component.loss)
 def loss(
     module: Model,
     prediction: Prediction,
@@ -283,14 +283,14 @@ def loss(
     return output
 
 
-@vector.register
+@vector.register(Component.output)
 def output(module: Model, address: Address) -> pa.StructType:
     request: Request = cast(Request, module.schema.requests[address])
     content = pa.list_(pa.float32(), request.n_dim)
     return pa.struct([pa.field(TensorKey.content.name, content, nullable=False)])
 
 
-@vector.register
+@vector.register(Component.write)
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
     request: Request = cast(Request, module.schema.requests[prediction.address])
     content = cast(torch.Tensor, prediction.payload[TensorKey.content]).detach().float().clone()

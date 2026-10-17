@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal, Self, TypeAlias, TypeVar, cast
+from typing import Any, Self, TypeAlias, TypeVar, cast
 
 import fastapi
 import orjson
@@ -25,14 +25,13 @@ from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from relflow.architecture.root import Model
-from relflow.data.arrow import mappings
+from relflow.data.arrow import Retain, mappings, retention
 from relflow.data.processors import Postprocessor, PostprocessorInput, Preprocessor, PreprocessorInput
 from relflow.structs.experiment import NodeAttribute, NodePredicate
 from relflow.structs.tree import Node
 
 Input: TypeAlias = dict[str, Any]
 ModelSource: TypeAlias = str | Path | Model
-Retain: TypeAlias = tuple[str, ...] | Literal["*"]
 UpdateOperation: TypeAlias = tuple[tuple[NodePredicate | NodeAttribute | Callable[[Node], bool], ...], dict[str, Any]]
 DeploymentType = TypeVar("DeploymentType", bound="Deployment")
 JSON_MEDIA_TYPE = "application/json"
@@ -82,22 +81,8 @@ class ErrorItem(pydantic.BaseModel):
     message: str
 
 
-def retention(value: Retain) -> Retain:
-    """Validate the deployment's processed-input retention projection."""
-
-    if value == "*":
-        return value
-    if not isinstance(value, tuple):
-        raise TypeError("retain must be a tuple of top-level column names or '*'")
-    if any(not isinstance(name, str) or not name for name in value):
-        raise TypeError("retain entries must be non-empty strings")
-    if len(set(value)) != len(value):
-        raise ValueError("retain entries must be unique")
-    return value
-
-
 class FastAPIRuntime:
-    """Load one model and predict one valid Arrow microbatch at a time."""
+    """Load one model and predict Arrow inputs for HTTP requests."""
 
     def __init__(
         self,
@@ -137,6 +122,7 @@ class FastAPIRuntime:
         model = self.model_source if isinstance(self.model_source, Model) else Model.load(self.model_source)
         for predicates, values in self.update_operations:
             model.update(*predicates, **values)
+        model.warn_unbounded()
 
         self.model = model.to(self.device)
         self.model.eval()
@@ -202,8 +188,8 @@ class FastAPIRuntime:
         )
         return data.append_column("model", model)
 
-    def predict_table(self, data: pa.Table) -> pa.Table:
-        """Predict one Arrow microbatch without crossing the Python-row boundary."""
+    def predict_table(self, data: pa.Table, *, batch_size: int | None = None) -> pa.Table:
+        """Predict an Arrow input with optional model batching and no Python rows."""
 
         if not isinstance(data, pa.Table):
             raise TypeError(f"deployment prediction input must be a pyarrow.Table, got {type(data).__name__}")
@@ -213,6 +199,7 @@ class FastAPIRuntime:
             preprocess=self.preprocessors,
             postprocess=self.postprocessors,
             retain=self.retain,
+            batch_size=batch_size,
         )
         if not isinstance(result, pa.Table):
             raise TypeError(f"Model.predict must return a pyarrow.Table, got {type(result).__name__}")
@@ -576,14 +563,7 @@ class Deployment(BaseSettings):
                         status_code=400,
                     )
 
-                chunks = [
-                    table.slice(offset, self.max_batch_size) for offset in range(0, table.num_rows, self.max_batch_size)
-                ]
-                if not chunks:
-                    chunks = [table]
-                predicted = await asyncio.to_thread(
-                    lambda: pa.concat_tables([runtime.predict_table(chunk) for chunk in chunks])
-                )
+                predicted = await asyncio.to_thread(runtime.predict_table, table, batch_size=self.max_batch_size)
                 predicted = runtime.annotate_table(predicted)
                 sink = pa.BufferOutputStream()
                 with ipc.new_stream(sink, predicted.schema) as writer:

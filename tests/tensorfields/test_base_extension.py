@@ -36,22 +36,21 @@ def build_extension() -> Extension:
             return object()
 
     class Embedder(EmbedderBase):
-        def __init__(self, schema: object, address: object):
+        def __init__(self, schema, address):
             super().__init__(schema=schema, address=address)
 
-        def forward(self, inputs):
-            return inputs
+        def forward(self, values):
+            return values
 
     class Decoder(DecoderBase):
-        def __init__(self, schema: object, address: object):
-            super().__init__(schema=schema, address=address)
+        pass
 
-    extension.register(Request)
-    extension.register(TensorField)
-    extension.register(Embedder)
-    extension.register(Decoder)
+    extension.register(Component.Request, Request)
+    extension.register(Component.TensorField, TensorField)
+    extension.register(Component.Embedder, Embedder)
+    extension.register(Component.Decoder, Decoder)
 
-    def loss(module: object, prediction: object, batch: object, strata: Strata):
+    def objective(module, prediction, batch, strata):
         return 3.14
 
     def output(module: object, address: object) -> pa.StructType:
@@ -60,9 +59,9 @@ def build_extension() -> Extension:
     def write(module: object, prediction: object, datatype: pa.StructType | None) -> None:
         return None
 
-    extension.register(loss)
-    extension.register(output)
-    extension.register(write)
+    extension.register(Component.loss, objective)
+    extension.register(Component.output, output)
+    extension.register(Component.write, write)
 
     return extension
 
@@ -351,7 +350,7 @@ def test_extension_warns_and_overwrites_duplicate_name():
         TENSORFIELDS.pop(name, None)
 
 
-def test_extension_registers_components_and_wraps_loss():
+def test_extension_registers_explicit_components_without_signature_policing():
     extension = build_extension()
     try:
         assert Component.Request in extension.components
@@ -362,19 +361,7 @@ def test_extension_registers_components_and_wraps_loss():
         assert Component.output in extension.components
         assert Component.write in extension.components
 
-        class DummyModule:
-            def __init__(self):
-                self.calls: list[tuple] = []
-
-            def track(self, key: tuple, value: float):
-                self.calls.append((key, value))
-                return value
-
-        class DummyPrediction:
-            address = "/field"
-
-        module = DummyModule()
-        value = extension.loss(module, prediction=DummyPrediction(), batch=object(), strata=Strata.train)
+        value = extension.loss(object(), prediction=object(), batch=object(), strata=Strata.train)
         assert value == 3.14
     finally:
         TENSORFIELDS.pop(extension.name, None)
@@ -424,26 +411,86 @@ def test_extension_observation_components_default_to_no_op():
         TENSORFIELDS.pop(extension.name, None)
 
 
-@pytest.mark.parametrize("component", ["observe", "learn"])
-def test_extension_observation_components_require_exact_signatures(component):
-    extension = Extension(name=extension_name(f"bad{component}"), types=(object,))
+def test_explicit_component_role_overrides_a_misleading_function_name():
+    extension = Extension(name=extension_name("explicitrole"), types=(object,))
 
-    if component == "observe":
-
-        def observe(field, address):
-            return None
-
-        function = observe
-    else:
-
-        def learn(module, observation):
-            return None
-
-        function = learn
+    def output(module, prediction, datatype):
+        return None
 
     try:
-        with pytest.raises(TypeError, match=f"{component.title()} function must accept"):
-            extension.register(function)
+        assert extension.register("write", output) is output
+        assert extension.write is output
+        assert Component.output not in extension.components
+    finally:
+        TENSORFIELDS.pop(extension.name, None)
+
+
+def test_extension_accepts_callable_objects_without_a_name_or_annotations():
+    class Writer:
+        def __init__(self):
+            self.arguments = None
+
+        def __call__(self, **arguments):
+            self.arguments = arguments
+            return None
+
+    extension = Extension(name=extension_name("callableobject"), types=(object,))
+    writer = Writer()
+    try:
+        assert extension.register(Component.write, writer) is writer
+        assert extension.write(module=1, prediction=2, datatype=None) is None
+        assert writer.arguments == {"module": 1, "prediction": 2, "datatype": None}
+    finally:
+        TENSORFIELDS.pop(extension.name, None)
+
+
+def test_extension_component_decorators_preserve_callable_identity():
+    extension = Extension(name=extension_name("decorator"), types=(object,))
+    try:
+
+        @extension.register("output")
+        def schema_for(**arguments):
+            return None
+
+        assert extension.output is schema_for
+        assert extension.output(module=object(), address=Address("value")) is None
+    finally:
+        TENSORFIELDS.pop(extension.name, None)
+
+
+@pytest.mark.parametrize("initial", [None, lambda **arguments: None])
+def test_duplicate_component_registration_preserves_the_original(initial):
+    extension = Extension(name=extension_name("duplicatecomponent"), types=(object,))
+    try:
+        extension.register(Component.write, initial)
+        before = extension.components.copy()
+        with pytest.raises(ValueError, match="already registered"):
+            extension.register(Component.write, lambda **arguments: None)
+        assert extension.components == before
+    finally:
+        TENSORFIELDS.pop(extension.name, None)
+
+
+@pytest.mark.parametrize(
+    "component,implementation,error",
+    [
+        ("unknown", lambda **arguments: None, ValueError),
+        (Component.loss, None, TypeError),
+        (Component.observe, object(), TypeError),
+        (Component.Request, object, TypeError),
+        (Component.TensorField, object, TypeError),
+        (Component.Embedder, object, TypeError),
+        (Component.Decoder, object, TypeError),
+    ],
+)
+def test_invalid_component_registration_does_not_change_registered_components(component, implementation, error):
+    extension = Extension(name=extension_name("invalidcomponent"), types=(object,))
+    try:
+        extension.register(Component.write, None)
+        before = extension.components.copy()
+        with pytest.raises(error):
+            extension.register(component, implementation)
+        assert extension.components == before
     finally:
         TENSORFIELDS.pop(extension.name, None)
 
@@ -451,7 +498,7 @@ def test_extension_observation_components_require_exact_signatures(component):
 def test_extension_accepts_explicit_none_write():
     extension = Extension(name=extension_name("nonehooks"), types=(object,))
     try:
-        extension.register(None, component=Component.write)
+        extension.register(Component.write, None)
 
         assert extension.write(module=object(), prediction=object(), datatype=None) is None
     finally:
@@ -461,22 +508,9 @@ def test_extension_accepts_explicit_none_write():
 def test_extension_accepts_explicit_none_output():
     extension = Extension(name=extension_name("noneoutput"), types=(object,))
     try:
-        extension.register(None, component=Component.output)
+        extension.register(Component.output, None)
 
         assert extension.output(module=object(), address=object()) is None
-    finally:
-        TENSORFIELDS.pop(extension.name, None)
-
-
-def test_extension_output_requires_module_and_address_parameters():
-    extension = Extension(name=extension_name("badoutput"), types=(object,))
-
-    def output(module: object) -> pa.StructType:
-        return pa.struct([])
-
-    try:
-        with pytest.raises(TypeError, match="Output function must accept"):
-            extension.register(output)
     finally:
         TENSORFIELDS.pop(extension.name, None)
 
@@ -488,20 +522,20 @@ def test_extension_write_accepts_a_return_annotation():
         return None
 
     try:
-        assert extension.register(write) is write
+        assert extension.register(Component.write, write) is write
     finally:
         TENSORFIELDS.pop(extension.name, None)
 
 
-def test_extension_write_requires_declared_datatype_parameter():
-    extension = Extension(name=extension_name("missingdatatype"), types=(object,))
-
-    def write(module: object, prediction: object) -> None:
-        return None
-
+@pytest.mark.parametrize(
+    "component",
+    [Component.Request, Component.TensorField, Component.Embedder, Component.Decoder, Component.bind, Component.loss],
+)
+def test_extension_missing_required_component_reports_the_extension_and_role(component):
+    extension = Extension(name=extension_name("missingcomponent"), types=(object,))
     try:
-        with pytest.raises(TypeError, match="Write function must accept"):
-            extension.register(write)
+        with pytest.raises(AttributeError, match=f"{extension.name}.*{component}"):
+            extension.component(component)
     finally:
         TENSORFIELDS.pop(extension.name, None)
 
@@ -545,42 +579,30 @@ def test_extension_request_must_implement_leaf_contract():
     extension = Extension(name=extension_name("badrequest"), types=(object,))
     try:
         with pytest.raises(TypeError, match="subclass of RequestBase"):
-            extension.register(Request)
+            extension.register(Component.Request, Request)
     finally:
         TENSORFIELDS.pop(extension.name, None)
 
 
-def test_extension_tensorfield_requires_all_batch_inputs():
-    class TensorField(TensorFieldBase):
+def test_extension_tensorfield_accepts_flexible_keyword_inputs():
+    class ColumnBatch(TensorFieldBase):
         @classmethod
-        def new(cls, values, address, schema, strata):
+        def new(cls, *arguments, **options):
             return object()
 
-    extension = Extension(name=extension_name("missinginputs"), types=(object,))
+    extension = Extension(name=extension_name("flexibleinputs"), types=(object,))
     try:
-        with pytest.raises(TypeError, match="TensorField.new must accept these parameters"):
-            extension.register(TensorField)
+        assert extension.register(Component.TensorField, ColumnBatch) is ColumnBatch
+        assert extension.TensorField is ColumnBatch
     finally:
         TENSORFIELDS.pop(extension.name, None)
 
 
-def test_extension_rejects_embedder_with_missing_address_param():
-    class Embedder(EmbedderBase):
-        def __init__(self, schema: object):
-            super().__init__(schema=schema, address=None)
-
-    extension = Extension(name=extension_name("badembedder"), types=(object,))
-    try:
-        with pytest.raises(TypeError, match="must accept 'schema' and 'address'"):
-            extension.register(Embedder)
-    finally:
-        TENSORFIELDS.pop(extension.name, None)
-
-
-def test_extension_getattr_rejects_invalid_component_key():
+def test_extension_unknown_attributes_follow_normal_python_lookup():
     extension = Extension(name=extension_name("badattr"), types=(object,))
     try:
-        with pytest.raises(ValueError, match="is not a valid Component enum value"):
-            extension.__getattr__("not_real")
+        with pytest.raises(AttributeError, match="not_real"):
+            getattr(extension, "not_real")
+        assert not hasattr(extension, "not_real")
     finally:
         TENSORFIELDS.pop(extension.name, None)

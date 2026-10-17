@@ -14,7 +14,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from relflow.data.arrow import variants
-from relflow.data.query import listed, parts, query
+from relflow.data.query import MissingFieldError, listed, parts, query
 from relflow.structs.enums import Overflow, Strata, Tokens
 from relflow.structs.tree import Address
 
@@ -118,6 +118,9 @@ class Layout:
     records: pa.Array | pa.ChunkedArray
     placement: np.ndarray
     shape: tuple[int, ...]
+    lengths: np.ndarray
+    present: np.ndarray
+    valid: np.ndarray
 
 
 @dataclass(frozen=True, slots=True)
@@ -291,6 +294,14 @@ class Projection:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class Coalesced:
+    """Policy-resolved fields and their shared, pristine branch layouts."""
+
+    fields: dict[Address, Projection]
+    layouts: dict[Address, Layout]
+
+
 def root(values: pa.Table, branch: Branch, *, size: int | None = None) -> Layout:
     """Build the singleton root layout without copying unmodeled columns."""
 
@@ -305,6 +316,9 @@ def root(values: pa.Table, branch: Branch, *, size: int | None = None) -> Layout
             records=records,
             placement=np.arange(rows, dtype=np.int64),
             shape=(rows, 1),
+            lengths=np.ones(rows, dtype=np.int64),
+            present=np.ones(rows, dtype=bool),
+            valid=np.ones(rows, dtype=bool),
         )
 
     selected = query(records, branch.query, address=str(branch.address))
@@ -317,34 +331,46 @@ def root(values: pa.Table, branch: Branch, *, size: int | None = None) -> Layout
         records=retain(selected.values, retained),
         placement=np.flatnonzero(retained).astype(np.int64, copy=False),
         shape=(rows, 1),
+        lengths=np.ones(rows, dtype=np.int64),
+        present=np.ones(rows, dtype=bool),
+        valid=np.ones(rows, dtype=bool),
     )
 
 
 def descend(layout: Layout, branch: Branch, address: Address) -> Layout:
-    """Lower one repeated branch and retain its dense child positions."""
+    """Retain collection slots before resolving their shared execution extent."""
 
+    parent_size = math.prod(layout.shape)
+    retained_lengths = np.zeros(parent_size, dtype=np.int64)
+    collection_present = np.zeros(parent_size, dtype=bool)
+    collection_valid = np.zeros(parent_size, dtype=bool)
     expression = branch.query or member(cast(str, branch.name))
-    selected = query(layout.records, expression, address=str(branch.address))
+    selected = None
+    if len(layout.records):
+        try:
+            selected = query(layout.records, expression, address=str(branch.address))
+        except MissingFieldError:
+            pass
+    if selected is None or pa.types.is_null(selected.values.type):
+        if selected is not None:
+            collection_present[layout.placement] = boolean(selected.present)
+        return Layout(
+            records=pa.array([], type=pa.struct([])),
+            placement=np.empty(0, dtype=np.int64),
+            shape=(*layout.shape, 0),
+            lengths=retained_lengths.reshape(layout.shape),
+            present=collection_present.reshape(layout.shape),
+            valid=collection_valid.reshape(layout.shape),
+        )
     if selected.present.type != pa.bool_():
         raise ValueError(f"branch query {expression!r} must select one list per parent")
     if not listed(selected.values.type):
         raise ValueError(f"branch query {expression!r} expected a list, got {selected.values.type}")
 
-    capacity = branch.length
-    overflow = Overflow(branch.overflow)
-    shape = (*layout.shape, capacity)
     present = boolean(selected.present)
     source = compact(selected.values)
-    if isinstance(source, pa.ChunkedArray) and source.num_chunks == 0:
-        return Layout(
-            records=pa.chunked_array([], type=source.type.value_type),
-            placement=np.empty(0, dtype=np.int64),
-            shape=shape,
-        )
     chunks = source.chunks if isinstance(source, pa.ChunkedArray) else [source]
-
-    record_chunks: list[pa.Array] = []
-    placement_chunks: list[np.ndarray] = []
+    retained: list[tuple[np.ndarray, pa.Array, np.ndarray, np.ndarray]] = []
     offset = 0
     for values in chunks:
         parent_placement = layout.placement[offset : offset + len(values)]
@@ -353,29 +379,43 @@ def descend(layout: Layout, branch: Branch, address: Address) -> Layout:
 
         list_offsets, children, valid_list = parts(values)
         lengths = np.diff(list_offsets)
+        collection_present[parent_placement] = available
         available = available & valid_list
-        if overflow == Overflow.error and np.any(available & (lengths > capacity)):
+        collection_valid[parent_placement] = available
+        if (
+            branch.length is not None
+            and branch.overflow == Overflow.error
+            and np.any(available & (lengths > branch.length))
+        ):
             axis = len(layout.shape)
-            raise ValueError(f"branch overflow at dimension {axis} for {address}: capacity is {capacity}")
+            raise ValueError(f"branch overflow at dimension {axis} for {address}: capacity is {branch.length}")
 
-        counts = np.where(available, np.minimum(lengths, capacity), 0)
+        counts = np.where(available, lengths if branch.length is None else np.minimum(lengths, branch.length), 0)
+        retained_lengths[parent_placement] = counts
+        starts = list_offsets[:-1] + (lengths - counts if branch.overflow == Overflow.tail else 0)
+        retained.append((starts, children, counts, parent_placement))
+
+    extent = int(retained_lengths.max(initial=0))
+    shape = (*layout.shape, extent)
+    record_chunks: list[pa.Array] = []
+    placement_chunks: list[np.ndarray] = []
+    for starts, children, counts, parent_placement in retained:
         total = int(counts.sum())
         if total == 0:
             record_chunks.append(children.slice(0, 0))
             placement_chunks.append(np.empty(0, dtype=np.int64))
             continue
 
-        parents = np.repeat(np.arange(len(values), dtype=np.int64), counts)
-        starts = np.repeat(np.cumsum(counts) - counts, counts)
-        slots = np.arange(total, dtype=np.int64) - starts
-        starts = list_offsets[:-1] + (lengths - counts if overflow == Overflow.tail else 0)
+        parents = np.repeat(np.arange(len(counts), dtype=np.int64), counts)
+        boundaries = np.repeat(np.cumsum(counts) - counts, counts)
+        slots = np.arange(total, dtype=np.int64) - boundaries
         indices = starts[parents] + slots
         if int(indices[-1]) - int(indices[0]) + 1 == total:
             records = children.slice(int(indices[0]), total)
         else:
             records = pc.take(children, pa.array(indices, type=pa.int64()))
         valid_record = valid(records)
-        placement = parent_placement[parents] * capacity + slots
+        placement = parent_placement[parents] * extent + slots
         if valid_record.all():
             record_chunks.append(records)
             placement_chunks.append(placement)
@@ -384,12 +424,15 @@ def descend(layout: Layout, branch: Branch, address: Address) -> Layout:
             placement_chunks.append(placement[valid_record])
 
     records = (
-        record_chunks[0] if len(record_chunks) == 1 else pa.chunked_array(record_chunks, type=record_chunks[0].type)
+        record_chunks[0] if len(record_chunks) == 1 else pa.chunked_array(record_chunks, type=source.type.value_type)
     )
     return Layout(
         records=records,
-        placement=np.concatenate(placement_chunks),
+        placement=np.concatenate(placement_chunks) if placement_chunks else np.empty(0, dtype=np.int64),
         shape=shape,
+        lengths=retained_lengths.reshape(layout.shape),
+        present=collection_present.reshape(layout.shape),
+        valid=collection_valid.reshape(layout.shape),
     )
 
 
@@ -440,6 +483,8 @@ def active(mask: Mask, strata: Strata) -> bool:
 def eligible(layout: Layout, mask: Mask, *, address: Address) -> np.ndarray:
     """Resolve one policy query against its owner's retained records."""
 
+    if not len(layout.records):
+        return np.empty(0, dtype=bool)
     if mask.query is None:
         return np.ones(len(layout.records), dtype=bool)
 
@@ -579,7 +624,8 @@ def project(
         for decision in decisions
     )
     source_less = bool(
-        allow_vacancy
+        not len(layout.records)
+        or allow_vacancy
         and request.query is None
         and pa.types.is_struct(layout.records.type)
         and not layout.records.type.get_all_field_indices(request.name)
@@ -629,7 +675,7 @@ def coalesce(
     *,
     seed: int = 0,
     epoch: int = 0,
-) -> dict[Address, Projection]:
+) -> Coalesced:
     """Resolve schema geometry and masks before datatype conversion."""
     if not isinstance(values, pa.Table):
         raise TypeError(f"coalesce values must be a pyarrow.Table, got {type(values).__name__}")
@@ -640,9 +686,6 @@ def coalesce(
 
     strata = Strata.normalize(strata)
     addresses = tuple(schema.active_requests)
-    if not addresses:
-        return {}
-
     descendants: dict[Address, list[Address]] = {}
     for address in addresses:
         for node in schema.requests[address].path:
@@ -650,8 +693,10 @@ def coalesce(
                 descendants.setdefault(node.address, []).append(address)
 
     fields: dict[Address, Projection] = {}
+    layouts: dict[Address, Layout] = {}
 
     def visit(branch: Branch, layout: Layout, inherited: tuple[Decision, ...]) -> None:
+        layouts[branch.address] = layout
         for child in branch.fields:
             if getattr(child, "type", None) == "branch":
                 child = cast("Branch", child)
@@ -680,7 +725,7 @@ def coalesce(
     decisions = resolve(layout, schema.fields, seed=seed, epoch=epoch, strata=strata)
     visit(schema.fields, layout, decisions)
 
-    return fields
+    return Coalesced(fields=fields, layouts=layouts)
 
 
-__all__ = ["Projection", "RaggedField"]
+__all__ = ["Coalesced", "Projection", "RaggedField"]

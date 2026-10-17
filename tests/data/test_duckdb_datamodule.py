@@ -68,7 +68,7 @@ def test_named_splits_bind_parameters_and_preserve_nested_arrow_values(database:
         assert table["line_items"].to_pylist() == [
             [{"amount": float(value)}, {"amount": value + 0.5}] for value in expected
         ]
-        assert all(set(batch.tensors.keys()) == {"/id", "/line_items/amount"} for batch in batches)
+        assert all(set(batch.tensors.keys()) == {"/", "/id", "/line_items/amount"} for batch in batches)
 
 
 def test_arrow_ingress_chunks_are_rebatched_for_the_model(database: Path):

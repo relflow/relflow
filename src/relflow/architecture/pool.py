@@ -1,19 +1,20 @@
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import torch
 
 from relflow.architecture.attention import RotaryMultiheadAttention
+from relflow.architecture.blocks import feed_forward, norm
 
 
 class CrossAttentionBlock(torch.nn.Module):
     """Update query embeddings against present memory coordinates."""
 
-    def __init__(self, d_model: int, nhead: int, dropout: float, ffn_multiplier: int, position: bool = True) -> None:
+    def __init__(self, d_model: int, nhead: int, dropout: float, position: bool = True, *, ffnx: int = 8) -> None:
         super().__init__()
 
-        self.attention_norm = torch.nn.LayerNorm(normalized_shape=d_model)
-        self.ffn_norm = torch.nn.LayerNorm(normalized_shape=d_model)
+        self.attention_norm = norm(d_model)
+        self.ffn_norm = norm(d_model)
         self.attention = RotaryMultiheadAttention(
             d_model=d_model,
             nhead=nhead,
@@ -21,20 +22,16 @@ class CrossAttentionBlock(torch.nn.Module):
             position=position,
         )
 
-        hidden = d_model * ffn_multiplier
-        self.ffn = torch.nn.Sequential(
-            torch.nn.Linear(in_features=d_model, out_features=hidden),
-            torch.nn.GELU(),
-            torch.nn.Dropout(p=dropout),
-            torch.nn.Linear(in_features=hidden, out_features=d_model),
-            torch.nn.Dropout(p=dropout),
-        )
+        self.ffn = feed_forward(d_model, dropout, ffnx)
 
     def forward(
         self,
         queries: torch.Tensor,
         memory: torch.Tensor,
         present: torch.Tensor | None = None,
+        *,
+        positions: torch.Tensor | None = None,
+        memory_positions: torch.Tensor | None = None,
     ) -> torch.Tensor:
         padding = None if present is None else ~present
         attended = self.attention(
@@ -42,6 +39,8 @@ class CrossAttentionBlock(torch.nn.Module):
             memory,
             memory,
             key_padding_mask=padding,
+            query_positions=positions,
+            key_positions=memory_positions,
         )
         queries = queries + attended
         return queries + self.ffn(self.ffn_norm(queries))
@@ -60,9 +59,10 @@ class LearnedQueryCrossAttention(torch.nn.Module):
         nhead: int,
         dropout: float,
         n_linear: int = 1,
-        ffn_multiplier: int = 4,
         position: bool = True,
         mass_capacity: int | None = None,
+        *,
+        ffnx: int = 8,
     ) -> None:
         super().__init__()
 
@@ -77,11 +77,11 @@ class LearnedQueryCrossAttention(torch.nn.Module):
                     d_model=d_model,
                     nhead=nhead,
                     dropout=dropout,
-                    ffn_multiplier=ffn_multiplier,
                     position=position,
+                    ffnx=ffnx,
                 )
             )
-        self.norm = torch.nn.LayerNorm(normalized_shape=d_model)
+        self.norm = norm(d_model)
         self.mass_capacity = mass_capacity
         self.mass_projection = (
             torch.nn.Linear(d_model, n_context * d_model, bias=False) if mass_capacity is not None else None
@@ -96,7 +96,13 @@ class LearnedQueryCrossAttention(torch.nn.Module):
         present: torch.Tensor | None = None,
         context: torch.Tensor | None = None,
         evidence: torch.Tensor | None = None,
+        *,
+        queries: torch.Tensor | None = None,
+        positions: torch.Tensor | None = None,
+        memory_positions: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        from relflow.architecture.compiler import canonical
+
         N, _, _ = memory.shape
         if present is None:
             present = torch.ones(memory.shape[:2], dtype=torch.bool, device=memory.device)
@@ -112,7 +118,7 @@ class LearnedQueryCrossAttention(torch.nn.Module):
 
         active = present.any(dim=1)
         indices = active.nonzero(as_tuple=False).reshape(-1)
-        shape = (N, self.queries.shape[0], self.queries.shape[1])
+        shape = (N, self.queries.shape[0], self.queries.shape[1]) if queries is None else tuple(queries.shape)
         dtype, device = memory.dtype, memory.device
         if not indices.numel():
             pooled = memory.new_zeros(shape)
@@ -128,15 +134,37 @@ class LearnedQueryCrossAttention(torch.nn.Module):
         if evidence is not None:
             evidence = evidence.contiguous() if complete else evidence.index_select(0, indices)
             evidence = evidence.masked_fill(~present.unsqueeze(-1), 0.0)
-        if context is not None and tuple(context.shape) != (N, self.queries.shape[0], self.queries.shape[1]):
-            raise ValueError(
-                f"pool query context must have shape {(N, self.queries.shape[0], self.queries.shape[1])}, "
-                f"got {tuple(context.shape)}"
-            )
+        if context is not None and tuple(context.shape) != shape:
+            raise ValueError(f"pool query context must have shape {shape}, got {tuple(context.shape)}")
         if context is not None:
             context = context.index_select(0, indices)
+        if queries is not None:
+            queries = queries.index_select(0, indices)
+        if positions is not None and positions.ndim > 1:
+            positions = positions.index_select(0, indices)
+        if memory_positions is not None and memory_positions.ndim > 1:
+            memory_positions = memory_positions.index_select(0, indices)
 
-        queries = self.compute(memory, present, context, evidence)
+        original = type(self).compute is LearnedQueryCrossAttention.compute and canonical(self, self.compute)
+        if not original or (queries is None and positions is None and memory_positions is None):
+            queries = self.compute(memory, present, context, evidence)
+        else:
+            queries = self.compute(
+                memory,
+                present,
+                context,
+                evidence,
+                queries=queries,
+                positions=positions,
+                memory_positions=memory_positions,
+            )
+        expected = (indices.numel(), *shape[1:])
+        if tuple(queries.shape) != expected:
+            raise RuntimeError(
+                f"custom pool compute must return query shape {expected}, got {tuple(queries.shape)}; "
+                "use the base compute implementation with module hooks, or adapt the pool forward method "
+                "to the runtime query geometry"
+            )
         if complete and queries.shape == shape and queries.dtype == dtype and queries.device == device:
             return queries.clone(memory_format=torch.contiguous_format)
         return memory.new_zeros(shape, dtype=dtype, device=device).index_copy(0, indices, queries)
@@ -147,9 +175,14 @@ class LearnedQueryCrossAttention(torch.nn.Module):
         present: torch.Tensor,
         context: torch.Tensor | None,
         evidence: torch.Tensor | None,
+        *,
+        queries: torch.Tensor | None = None,
+        positions: torch.Tensor | None = None,
+        memory_positions: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Pool compacted nonempty rows with absent memory and evidence already zeroed."""
-        queries = self.queries
+        if queries is None:
+            queries = self.queries.unsqueeze(0).expand(memory.shape[0], -1, -1)
 
         if not torch.is_grad_enabled():
             queries = queries.detach()
@@ -159,23 +192,28 @@ class LearnedQueryCrossAttention(torch.nn.Module):
             if context is not None:
                 context = context.detach()
 
-        queries = queries.unsqueeze(0).expand(memory.shape[0], -1, -1)
         if context is not None:
             queries = queries + context
 
         for block in self.blocks:
-            queries = block(queries=queries, memory=memory, present=present)
+            queries = block(
+                queries=queries,
+                memory=memory,
+                present=present,
+                positions=positions,
+                memory_positions=memory_positions,
+            )
 
-        queries = self.norm(queries)
+        result = cast(torch.Tensor, self.norm(queries))
         if self.mass_projection is not None and self.mass_direction is not None:
             additive = memory if evidence is None else evidence
             assert self.mass_capacity is not None
             total = additive.sum(dim=1) / math.sqrt(self.mass_capacity)
-            mass = self.mass_projection(total).reshape_as(queries)
-            count = present.sum(dim=1).to(dtype=queries.dtype) / self.mass_capacity
-            queries = queries + mass + count[:, None, None] * self.mass_direction.unsqueeze(0)
+            mass = self.mass_projection(total).reshape_as(result)
+            count = present.sum(dim=1).to(dtype=result.dtype) / self.mass_capacity
+            result = result + mass + count[:, None, None] * self.mass_direction.unsqueeze(0)
 
-        return queries
+        return result
 
     if TYPE_CHECKING:
         __call__ = forward

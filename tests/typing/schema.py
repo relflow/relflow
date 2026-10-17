@@ -45,7 +45,7 @@ def schema_api() -> None:
         selected=rf.Boolean(mask=rf.Mask(query="selected", reconstruct=True)),
     )
     assert_type(branch.attention, AttentionMode | None)
-    assert_type(branch.overflow, Overflow)
+    assert_type(branch.overflow, Overflow | None)
     assert_type(branch.mask, tuple[rf.Mask, ...])
     rf.Branch(fields={"length": number, "description": rf.Category}, reduction=rf.Mean())
     rf.Model(d_model=32, n_heads=4, n_layers=1, items=branch, label=rf.Boolean(mask=True))
@@ -57,7 +57,7 @@ def schema_api() -> None:
 def third_party_schema() -> None:
     extension = rf.Extension(name="typing_custom", types=(str,))
 
-    @extension.register
+    @extension.register(rf.Component.Request)
     class Request(rf.RequestBase):
         """Extension-owned options do not require edits to shared field hints."""
 
@@ -78,6 +78,12 @@ def third_party_schema() -> None:
 def field_content(tensor: rf.TensorFieldBase[torch.Tensor], nested: rf.TensorFieldBase[TensorDict]) -> None:
     assert_type(tensor.content, torch.Tensor)
     assert_type(nested.content, TensorDict)
+
+
+def registration(extension: rf.Extension, writer: Write, objective: Loss) -> None:
+    assert_type(extension.register(rf.Component.write, writer), Write)
+    assert_type(extension.register("loss", objective), Loss)
+    assert_type(extension.register(rf.Component.output, None), None)
 
 
 def arrow_normalization(extension: rf.Extension, values: pa.Array, chunks: pa.ChunkedArray) -> None:

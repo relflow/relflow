@@ -9,8 +9,8 @@ import pyarrow as pa
 from torch.utils.data import IterableDataset
 
 import relflow
-from relflow.data.arrow import mappings
-from relflow.data.datasets.arrow import ArrowDataModule, ArrowStream, Retain
+from relflow.data.arrow import Retain, mappings
+from relflow.data.datasets.arrow import ArrowDataModule, ArrowStream
 from relflow.data.datasets.base import StratumConfig
 from relflow.data.processors import PreprocessorInput
 from relflow.structs.enums import Strata
@@ -120,7 +120,6 @@ class CustomDataModule(ArrowDataModule):
         seed: int = 0,
         shuffle: StratumConfig[bool | None] = None,
         sample: StratumConfig[float] = 1.0,
-        replacement: StratumConfig[bool] = False,
         epoch_size: StratumConfig[int | None] = None,
         shuffle_rows: StratumConfig[int | None] = None,
         drop_last: StratumConfig[bool] = False,
@@ -168,7 +167,6 @@ class CustomDataModule(ArrowDataModule):
             seed=seed,
             shuffle=shuffle,
             sample=sample,
-            replacement=replacement,
             epoch_size=epoch_size,
             shuffle_rows=shuffle_rows,
             drop_last=drop_last,

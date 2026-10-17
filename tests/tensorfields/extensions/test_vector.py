@@ -63,7 +63,7 @@ def values() -> list:
 
 def tensorfield(*, values: list, schema: Schema, strata: Strata) -> TensorField:
     batch = arrow_batch([{"items": [{"embedding": value} for value in root]} for (root,) in values])
-    projection = coalesce(batch, schema=schema, strata=strata)[ADDRESS]
+    projection = coalesce(batch, schema=schema, strata=strata).fields[ADDRESS]
     return tensorize(
         TensorField,
         projection,

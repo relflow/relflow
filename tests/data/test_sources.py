@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import os
 import pickle
 import re
+import weakref
 from datetime import timedelta
 from pathlib import Path
 
@@ -19,6 +19,7 @@ import torch.distributed as distributed
 import torch.multiprocessing as multiprocessing
 
 import relflow as rf
+from relflow.data import sources
 from relflow.data.datasets import arrow
 from relflow.data.sources import Source, matches
 
@@ -87,35 +88,57 @@ def test_construction_is_lazy_and_preparation_shares_a_manifest(tmp_path, monkey
     data = rf.ArrowDataModule(model(), train=source)
     assert not calls
     assert source.manifest is None
-    assert source.dataset is None
+    assert not hasattr(source, "dataset")
     loader = data.train_dataloader()
     assert len(calls) == 1
     assert loader.dataset.source.manifest is not None
-    assert loader.dataset.source.dataset is None
+    assert not hasattr(loader.dataset.source, "dataset")
     data.train_dataloader()
     assert len(calls) == 1
 
 
-def test_pickle_preserves_manifest_and_drops_live_resources(tmp_path):
+def test_pickle_preserves_manifest_without_live_resources(tmp_path):
     pq.write_table(pa.table({"id": [1, 2]}), tmp_path / "train.parquet")
     source = rf.source(tmp_path)
     expected = list(source())
-    assert source.dataset is not None
     restored = pickle.loads(pickle.dumps(source))
     assert restored.manifest == source.manifest
-    assert restored.dataset is None
-    assert restored.process is None
+    assert not hasattr(restored, "dataset")
+    assert not hasattr(restored, "process")
     assert list(restored()) == expected
 
 
-def test_source_discards_resources_inherited_from_another_process(tmp_path, monkeypatch):
+@pytest.mark.parametrize("stop", ["complete", "early", "failure"])
+def test_each_scan_releases_datasets_even_with_a_retained_iterator_or_traceback(tmp_path, monkeypatch, stop):
     pq.write_table(pa.table({"id": [1]}), tmp_path / "train.parquet")
+    datasets = []
+    create = sources.ds.dataset
+
+    def record(*args, **kwargs):
+        dataset = create(*args, **kwargs)
+        datasets.append(weakref.ref(dataset))
+        return dataset
+
+    monkeypatch.setattr(sources.ds, "dataset", record)
     source = rf.source(tmp_path)
-    list(source())
-    original = source.dataset
-    source.process = os.getpid() + 1
-    list(source())
-    assert source.dataset is not original
+    source.manifest = source.discover()
+    assert all(item() is None for item in datasets)
+    stream = source()
+    if stop == "complete":
+        list(stream)
+    elif stop == "early":
+        next(stream)
+        assert datasets[-1]() is not None
+        stream.close()
+    else:
+        pq.write_table(pa.table({"id": [1, 2]}), tmp_path / "train.parquet")
+        with pytest.raises(RuntimeError, match="changed") as caught:
+            list(stream)
+        assert caught.value.__traceback__ is not None
+    assert all(item() is None for item in datasets)
+    if stop != "failure":
+        assert list(source())[0]["id"].to_pylist() == [1]
+        assert all(item() is None for item in datasets)
 
 
 @pytest.mark.parametrize(

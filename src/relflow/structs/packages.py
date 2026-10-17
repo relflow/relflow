@@ -9,9 +9,16 @@ class Parcel(TensorClass):
     present: torch.Tensor
     origin: Address
     destination: Address | None
+    positions: torch.Tensor | None = None
+    spans: torch.Tensor | None = None
+    slots: torch.Tensor | None = None
 
 
 # @jaxtyped(typechecker=beartype)
 class Prediction(TensorClass):
     address: Address
     payload: TensorDict
+    geometry: TensorDict | None = None
+    positions: torch.Tensor | None = None
+    spans: torch.Tensor | None = None
+    slots: torch.Tensor | None = None

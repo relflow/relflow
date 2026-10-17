@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import enum
 import math
+from collections import OrderedDict
 from dataclasses import InitVar, dataclass
+from threading import RLock
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, Unpack, cast
 
 import numpy as np
@@ -13,7 +15,7 @@ from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
 from relflow.helpers import Jitter
-from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
+from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
@@ -45,6 +47,58 @@ text.callback(CounterUpdateCallback)
 INPUT_IDS = "input_ids"
 ATTENTION_MASK = "attention_mask"
 DEFAULT_TEXT_MODEL = "google/bert_uncased_L-2_H-128_A-2"
+
+type CacheKey = tuple[str, torch.dtype | None, bytes]
+
+
+class EmbeddingCache:
+    """Transient CPU embeddings with least-frequency, then least-recent eviction."""
+
+    def __init__(self, capacity: int | None):
+        self.capacity = capacity
+        self.values: dict[CacheKey, torch.Tensor] = {}
+        self.frequencies: dict[CacheKey, int] = {}
+        self.buckets: dict[int, OrderedDict[CacheKey, None]] = {}
+        self.minimum = 0
+        self.lock = RLock()
+
+    def __len__(self) -> int:
+        return len(self.values)
+
+    def __reduce__(self):
+        # Model copies and spawned workers start cold, without serializing
+        # input-derived vectors or the process-local lock.
+        return type(self), (self.capacity,)
+
+    def get(self, key: CacheKey) -> torch.Tensor | None:
+        with self.lock:
+            if key not in self.values:
+                return None
+            frequency = self.frequencies[key]
+            self.buckets[frequency].pop(key)
+            if not self.buckets[frequency]:
+                del self.buckets[frequency]
+                if self.minimum == frequency:
+                    self.minimum += 1
+            self.frequencies[key] = frequency + 1
+            self.buckets.setdefault(frequency + 1, OrderedDict())[key] = None
+            return self.values[key]
+
+    def put(self, key: CacheKey, value: torch.Tensor, *, count: int) -> None:
+        with self.lock:
+            if key in self.values:
+                return
+            if self.capacity is not None and len(self.values) == self.capacity:
+                evicted, _ = self.buckets[self.minimum].popitem(last=False)
+                del self.values[evicted], self.frequencies[evicted]
+                if not self.buckets[self.minimum]:
+                    del self.buckets[self.minimum]
+            self.values[key] = value.detach().to(device="cpu", dtype=torch.float32).clone()
+            self.frequencies[key] = 1
+            self.buckets.setdefault(1, OrderedDict())[key] = None
+            self.minimum = 1
+            for _ in range(count - 1):
+                self.get(key)
 
 
 class Pooling(enum.StrEnum):
@@ -122,14 +176,17 @@ class CachedModel:
         return self.model
 
 
-@text.register
+@text.register(Component.Request)
 class Request(RequestBase):
     """String input represented by a frozen Hugging Face encoder.
 
     ``model`` names a pretrained model or local path. ``max_length`` limits
     tokens; ``tokenizer_batch_size`` and ``encoder_batch_size`` bound each
     tokenizer and encoder call. ``encoder_pooling`` selects ``"cls"``,
-    ``"mean"``, or ``"pooler"``. ``jitter`` perturbs pooled training inputs.
+    ``"mean"``, or ``"pooler"``. ``cache=True`` retains pooled frozen encoder
+    outputs in CPU memory; a positive integer bounds the cache with least-used
+    eviction. Caches are per field and process, exclude tokenization, and are
+    not checkpointed. ``jitter`` perturbs pooled training inputs.
     Reconstructing masks use ``"l1"`` or ``"l2"`` ``objective`` loss against
     pristine frozen embeddings. Prediction can export an embedding with
     ``embed=True``; this field does not generate text.
@@ -143,6 +200,7 @@ class Request(RequestBase):
     tokenizer_batch_size: Annotated[int, pydantic.Field(gt=0, default=4096)] = 4096
     encoder_batch_size: Annotated[int, pydantic.Field(gt=0, default=32)] = 32
     encoder_pooling: Pooling = Pooling.cls
+    cache: pydantic.StrictBool | Annotated[pydantic.StrictInt, pydantic.Field(gt=0)] = False
     objective: Objective = Objective.l2
     jitter: Jitter = pydantic.Field(default_factory=Jitter)
 
@@ -156,6 +214,7 @@ class Request(RequestBase):
             tokenizer_batch_size: int = 4096,
             encoder_batch_size: int = 32,
             encoder_pooling: Pooling | Literal["cls", "mean", "pooler"] = Pooling.cls,
+            cache: bool | int = False,
             objective: Objective | Literal["l1", "l2"] = Objective.l2,
             jitter: Jitter = ...,
             type: Literal["text"] = "text",
@@ -163,7 +222,7 @@ class Request(RequestBase):
         ) -> None: ...
 
 
-@text.register
+@text.register(Component.observe)
 def observe(
     field: RaggedField,
     *,
@@ -182,7 +241,7 @@ def observe(
     )
 
 
-@text.register
+@text.register(Component.TensorField)
 @tensorclass
 class TensorField(TensorFieldBase[TensorDict]):
     content: TensorDict
@@ -275,7 +334,7 @@ class TensorField(TensorFieldBase[TensorDict]):
         )
 
 
-@text.register
+@text.register(Component.Embedder)
 class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -288,6 +347,7 @@ class Embedder(EmbedderBase):
         self.__dict__["_cached_model"] = cached_model
         self.hidden_size: int = cached_model.hidden_size
         self.request = request
+        self.cache = EmbeddingCache(None if request.cache is True else request.cache) if request.cache else None
         self.jitter: Jitter = request.jitter
         self.padding_side: str = getattr(CachedModel.get_tokenizer(request.model), "padding_side", "right")
 
@@ -298,7 +358,7 @@ class Embedder(EmbedderBase):
         self.counter = Counter(address=address, size=len(Tokens))
         self.linear = torch.nn.Sequential(
             torch.nn.Linear(in_features=self.hidden_size, out_features=schema.d_model),
-            torch.nn.GELU(),
+            torch.nn.GELU(approximate="tanh"),
         )
 
     @beartype
@@ -321,7 +381,62 @@ class Embedder(EmbedderBase):
 
         valued_ids = flat_ids[valued]
         valued_mask = flat_mask[valued]
-        model = self.__dict__["_cached_model"].module_for(flat_ids.device)
+        if self.cache is None:
+            embeddings[valued] = self.pool(valued_ids, valued_mask)
+            return embeddings.reshape(N, *dims, self.hidden_size)
+
+        # Exact token rows include padding and the attention mask. Equal
+        # truncated inputs can reuse a vector; different precision/device
+        # contexts must not silently reuse a lower-precision result.
+        device = valued_ids.device
+        dtype = torch.get_autocast_dtype(device.type) if torch.is_autocast_enabled(device.type) else None
+        rows = (
+            torch.stack((valued_ids, valued_mask), dim=1)
+            .detach()
+            .cpu()
+            .contiguous()
+            .numpy()
+            .reshape(len(valued_ids), -1)
+        )
+        keys = cast(
+            list[bytes], rows.view(np.dtype((np.void, rows.shape[1] * rows.dtype.itemsize))).reshape(-1).tolist()
+        )
+        hits: list[torch.Tensor] = []
+        hit_positions: list[int] = []
+        missing: dict[CacheKey, list[int]] = {}
+        for position, row in enumerate(keys):
+            key = (str(device), dtype, row)
+            value = self.cache.get(key)
+            if value is None:
+                missing.setdefault(key, []).append(position)
+            else:
+                hit_positions.append(position)
+                hits.append(value)
+
+        valued_embeddings = torch.empty((len(keys), self.hidden_size), device=device, dtype=torch.float32)
+        if hits:
+            valued_embeddings.index_copy_(
+                0,
+                torch.tensor(hit_positions, device=device),
+                torch.stack(hits).to(device),
+            )
+        if missing:
+            indices = torch.tensor([positions[0] for positions in missing.values()], device=device)
+            fresh = self.pool(valued_ids.index_select(0, indices), valued_mask.index_select(0, indices))
+            positions = torch.tensor([position for group in missing.values() for position in group], device=device)
+            inverse = torch.tensor(
+                [index for index, group in enumerate(missing.values()) for _ in group], device=device
+            )
+            valued_embeddings.index_copy_(0, positions, fresh.index_select(0, inverse))
+            host = fresh.detach().to("cpu")
+            for (key, group), value in zip(missing.items(), host, strict=True):
+                self.cache.put(key, value, count=len(group))
+        embeddings[valued] = valued_embeddings
+        return embeddings.reshape(N, *dims, self.hidden_size)
+
+    def pool(self, valued_ids: torch.Tensor, valued_mask: torch.Tensor) -> torch.Tensor:
+        """Encode token rows with the frozen model and restore their input order."""
+        model = self.__dict__["_cached_model"].module_for(valued_ids.device)
 
         restore_order: torch.Tensor | None = None
         starts = range(0, valued_ids.size(0), self.request.encoder_batch_size)
@@ -390,9 +505,7 @@ class Embedder(EmbedderBase):
         else:
             valued_embeddings = torch.empty_like(batched_embeddings)
             valued_embeddings[restore_order] = batched_embeddings
-        embeddings[valued] = valued_embeddings
-
-        return embeddings.reshape(N, *dims, self.hidden_size)
+        return valued_embeddings
 
     @beartype
     def forward(self, inputs: TensorInput) -> Parcel:
@@ -418,7 +531,7 @@ class Embedder(EmbedderBase):
         )
 
 
-@text.register
+@text.register(Component.learn)
 def learn(
     module: Model,
     observation: TensorDict,
@@ -434,7 +547,7 @@ def learn(
     embedder.counter.learn(cast(torch.Tensor, observation[TensorKey.state]))
 
 
-@text.register
+@text.register(Component.Decoder)
 class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -460,7 +573,7 @@ class Decoder(DecoderBase):
         )
 
 
-@text.register
+@text.register(Component.loss)
 def loss(
     module: Model,
     prediction: Prediction,
