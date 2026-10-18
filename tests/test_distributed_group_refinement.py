@@ -1,6 +1,7 @@
 """Group's own identity proposals commit or roll back coherently across ranks."""
 
 import copy
+import os
 from datetime import timedelta
 
 import pyarrow as pa
@@ -30,7 +31,13 @@ CASES = (
 def exercise(directory):
     """Keep both ranks alive through successful proposals and local head failures."""
     torch.set_num_threads(1)
-    distributed.init_process_group("gloo", timeout=timedelta(seconds=20))
+    distributed.init_process_group(
+        "gloo",
+        init_method=(directory / "rendezvous").as_uri(),
+        rank=int(os.environ["RANK"]),
+        world_size=int(os.environ["WORLD_SIZE"]),
+        timeout=timedelta(seconds=30),
+    )
     rank = distributed.get_rank()
     results = {}
     for case in CASES:
