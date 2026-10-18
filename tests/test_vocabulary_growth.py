@@ -21,7 +21,7 @@ REQUESTS = {"category": rf.Category, "set": rf.Set, "group": rf.Group}
 
 def build(kind):
     options = {"p_unavailable": 0.0, "mask": rf.Mask(query="supervise", reconstruct=True)}
-    request = rf.Group(bounds=3, revive_temperature=0.0, **options) if kind == "group" else REQUESTS[kind](**options)
+    request = rf.Group(n_groups=3, revive_temperature=0.0, **options) if kind == "group" else REQUESTS[kind](**options)
     return rf.Model.xs(
         d_model=8,
         attention=None,

@@ -23,7 +23,7 @@ def model(kind, *, p_unavailable=0.0, mask=True):
     request = (
         rf.Set(p_unavailable=p_unavailable, mask=mask)
         if kind == "set"
-        else rf.Group(bounds=(2, 4), p_unavailable=p_unavailable, mask=mask)
+        else rf.Group(n_groups=(2, 4), p_unavailable=p_unavailable, mask=mask)
     )
     result = rf.Model.xs(d_model=8, x=rf.Number, label=request)
     labels = [["a"], ["b"]] if kind == "set" else ["a", "b"]
@@ -182,7 +182,7 @@ def test_group_balancing_can_escape_saturated_initial_assignments():
 
 @pytest.mark.parametrize("kind", ["set", "group"])
 def test_empty_vocabulary_has_differentiable_zero_content_loss(kind):
-    request = rf.Set(mask=True) if kind == "set" else rf.Group(bounds=4, mask=True)
+    request = rf.Set(mask=True) if kind == "set" else rf.Group(n_groups=4, mask=True)
     module = rf.Model.xs(d_model=8, x=rf.Number, label=request)
     module.track = lambda names, value: value
     logits = torch.randn(2, 8 if kind == "set" else 4, requires_grad=True)
@@ -200,7 +200,7 @@ def test_registered_metrics_share_one_callback_and_reset_each_stage():
         d_model=8,
         category=rf.Category(mask=True),
         tags=rf.Set(mask=True),
-        group=rf.Group(bounds=4, mask=True),
+        group=rf.Group(n_groups=4, mask=True),
     )
     assert sum(isinstance(callback, Metrics) for callback in module.configure_callbacks()) == 1
     for node in module.nodes.values():
@@ -241,7 +241,7 @@ def mixed_metrics():
         x=rf.Number,
         label=rf.Category(mask=selection),
         tags=rf.Set(mask=selection),
-        group=rf.Group(bounds=(2, 4), mask=selection),
+        group=rf.Group(n_groups=(2, 4), mask=selection),
     )
     module.encode(
         pa.table(
@@ -320,7 +320,7 @@ def test_set_and_group_train_with_bfloat16_mixed_precision(accelerator):
         batch_size=4,
         x=rf.Number,
         tags=rf.Set(p_unavailable=0.5, mask=rf.Mask(rate=0.5, reconstruct=True)),
-        group=rf.Group(bounds=(2, 4), p_unavailable=0.5, mask=True),
+        group=rf.Group(n_groups=(2, 4), p_unavailable=0.5, mask=True),
     )
     source = pa.table(
         {

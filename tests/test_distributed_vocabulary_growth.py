@@ -222,7 +222,7 @@ def train(directory, bucket_view, accumulation, init_sync):
         batch_size=2,
         category=rf.Category(p_unavailable=0, mask=selected),
         tags=rf.Set(p_unavailable=0, mask=selected),
-        group=rf.Group(bounds=2, p_unavailable=0, revive_temperature=0, mask=selected),
+        group=rf.Group(n_groups=2, p_unavailable=0, revive_temperature=0, mask=selected),
         outcome=rf.Boolean(mask=True),
     )
     # Visible rows train the input embeddings through outcome; masked rows train each vocabulary decoder.

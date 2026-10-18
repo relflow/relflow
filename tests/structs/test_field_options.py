@@ -10,7 +10,7 @@ import relflow as rf
 REQUESTS = [
     (rf.Boolean, {}),
     (rf.Category, {}),
-    (rf.Group, {"bounds": 4}),
+    (rf.Group, {"n_groups": 4}),
     (rf.DateParts, {"dateparts": ["day_of_week"]}),
     (rf.Hash, {}),
     (rf.Number, {}),
@@ -93,7 +93,7 @@ def test_mutations_reject_metadata_even_when_validation_is_disabled(schema_only)
     [
         (rf.Category(), "topk", [2, 100]),
         (rf.Set(), "threshold", 0.8),
-        (rf.Group(bounds=4), "bounds", (4, 8)),
+        (rf.Group(n_groups=4), "n_groups", (4, 8)),
     ],
 )
 def test_mutations_accept_declared_options(schema_only, field, attribute, value):

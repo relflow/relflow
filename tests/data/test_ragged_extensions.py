@@ -83,7 +83,7 @@ def test_extension_prepare_validates_and_preserves_one_whole_arrow_array():
         rf.Category(p_unavailable=0.0),
         rf.Hash,
         rf.Set(p_unavailable=0.0),
-        rf.Group(bounds=2, p_unavailable=0.0),
+        rf.Group(n_groups=2, p_unavailable=0.0),
     ],
 )
 def test_multifamily_extensions_accept_all_null_arrow_columns(field):

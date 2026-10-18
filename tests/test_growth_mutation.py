@@ -22,7 +22,7 @@ LABELS = ("a", "b", "c", "d", "e", "a")
 def build(kind):
     options = {"p_unavailable": 0, "mask": rf.Mask(reconstruct=True)}
     if kind == "group":
-        field = rf.Group(bounds=3, revive_temperature=0, **options)
+        field = rf.Group(n_groups=3, revive_temperature=0, **options)
     else:
         field = {"category": rf.Category, "set": rf.Set}[kind](**options)
     model = rf.Model.xs(
@@ -123,12 +123,12 @@ def test_allocation_options_are_rejected_without_changing_grown_state(kind, opti
         assert model.schema.model_dump() == schema
 
 
-def test_group_bounds_change_retains_grown_capacity_but_reinitializes_changed_columns():
+def test_group_n_groups_change_retains_grown_capacity_but_reinitializes_changed_columns():
     model = build("group")
     old = model.nodes[ADDRESS]
     counts = old.embedder.counters["content"].counts.clone()
 
-    model.update(rf.where("address") == ADDRESS, bounds=(5, 5))
+    model.update(rf.where("address") == ADDRESS, n_groups=(5, 5))
 
     node = model.nodes[ADDRESS]
     assert node.embedder.capacity == 8

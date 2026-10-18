@@ -38,7 +38,7 @@ def exercise(directory):
         model = rf.Model.xs(
             d_model=8,
             batch_size=128,
-            identity=rf.Group(bounds=3, mask=True, p_unavailable=0),
+            identity=rf.Group(n_groups=3, mask=True, p_unavailable=0),
         )
         model.encode(pa.table({"identity": ["a", "b", "unobserved", "absent"]}), strata="train")
         embedder = resolve_group_embedder(model, ADDRESS)

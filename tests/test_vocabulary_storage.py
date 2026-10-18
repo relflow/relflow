@@ -21,7 +21,7 @@ def build(kind):
     field = {
         "category": rf.Category(mask=True, topk=[2, 10000]),
         "set": rf.Set(mask=True),
-        "group": rf.Group(bounds=3, mask=True, revive_temperature=0),
+        "group": rf.Group(n_groups=3, mask=True, revive_temperature=0),
     }[kind]
     return rf.Model.xs(d_model=8, x=rf.Number, label=field)
 
@@ -59,7 +59,7 @@ def approximate(value):
 @pytest.mark.parametrize("field", FIELDS)
 @pytest.mark.parametrize("option", ["size", "capacity"])
 def test_allocation_options_are_rejected_by_constructor_and_schema(field, option):
-    required = {"bounds": 3} if field is rf.Group else {}
+    required = {"n_groups": 3} if field is rf.Group else {}
     with pytest.raises(pydantic.ValidationError, match=option):
         field(**required, **{option: 8})
     with pytest.raises(pydantic.ValidationError, match=option):

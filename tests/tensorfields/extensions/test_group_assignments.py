@@ -26,7 +26,7 @@ def build_model(*, embed: bool = False) -> rf.Model:
         d_model=16,
         batch_size=4,
         embed=embed,
-        merchant_id=rf.Group(bounds=(K, K), p_unavailable=0.0),
+        merchant_id=rf.Group(n_groups=(K, K), p_unavailable=0.0),
     )
 
 

@@ -21,7 +21,7 @@ from relflow.tensorfields.extensions.group import resolve_group_embedder, vocabu
 
 @pytest.fixture
 def case(monkeypatch):
-    model = rf.Model.xs(d_model=8, batch_size=256, identity=rf.Group(bounds=2, mask=True, p_unavailable=0))
+    model = rf.Model.xs(d_model=8, batch_size=256, identity=rf.Group(n_groups=2, mask=True, p_unavailable=0))
     model.encode(pa.table({"identity": ["a", "b", "absent"]}), strata="train")
     embedder = resolve_group_embedder(model, "/identity")
     weight = embedder.embeddings[TensorKey.group.name].weight
@@ -192,7 +192,7 @@ def test_failed_own_head_restores_parameters_buffers_modes_and_rng(case, monkeyp
 
 
 def test_single_identity_likelihood_ties_keep_assignment_and_optimizer_history():
-    model = rf.Model.xs(d_model=8, batch_size=8, identity=rf.Group(bounds=3, mask=True, p_unavailable=0))
+    model = rf.Model.xs(d_model=8, batch_size=8, identity=rf.Group(n_groups=3, mask=True, p_unavailable=0))
     table = pa.table({"identity": ["only", "only"]})
     model.encode(table, strata="train")
     embedder = resolve_group_embedder(model, "/identity")
@@ -231,7 +231,7 @@ def test_ineligible_refinement_keeps_assignments_and_skips_head(case, monkeypatc
 
 
 def test_plain_visible_group_does_not_borrow_another_fields_objective(monkeypatch):
-    model = rf.Model.xs(d_model=8, identity=rf.Group(bounds=2), target=rf.Number(mask=True))
+    model = rf.Model.xs(d_model=8, identity=rf.Group(n_groups=2), target=rf.Number(mask=True))
     table = pa.table({"identity": ["a", "b"], "target": [1.0, 2.0]})
     model.encode(table, strata="train")
 
@@ -261,7 +261,7 @@ def test_nested_group_evidence_includes_multiple_identities_and_repeated_coordin
     model = rf.Model.xs(
         d_model=8,
         batch_size=8,
-        items=rf.Branch(identity=rf.Group(bounds=2, mask=True, p_unavailable=0)),
+        items=rf.Branch(identity=rf.Group(n_groups=2, mask=True, p_unavailable=0)),
     )
     train = pa.Table.from_pylist([{"items": [{"identity": "a"}, {"identity": "b"}, {"identity": "a"}]}])
     model.encode(train, strata="train")
@@ -308,7 +308,7 @@ def test_unrelated_third_party_decoder_and_loss_are_not_called():
         model = rf.Model.xs(
             d_model=8,
             batch_size=8,
-            identity=rf.Group(bounds=2, mask=True, p_unavailable=0),
+            identity=rf.Group(n_groups=2, mask=True, p_unavailable=0),
             unrelated=Request(mask=True),
         )
         table = pa.table({"identity": ["a", "b"], "unrelated": [1.0, 2.0]})
@@ -320,7 +320,7 @@ def test_unrelated_third_party_decoder_and_loss_are_not_called():
 
 
 def test_ordinary_supervised_backpropagation_still_trains_visible_group_assignments(monkeypatch):
-    model = rf.Model.xs(d_model=8, identity=rf.Group(bounds=2, p_unavailable=0), target=rf.Number(mask=True))
+    model = rf.Model.xs(d_model=8, identity=rf.Group(n_groups=2, p_unavailable=0), target=rf.Number(mask=True))
     source = pa.table({"identity": ["a", "b", "a"], "target": [1.0, -1.0, 2.0]})
     inputs = model.encode(source, strata="train")
     monkeypatch.setattr(model, "track", lambda *args, value, **kwargs: value)
@@ -339,7 +339,7 @@ def test_callback_without_own_objective_or_validation_retains_no_calibration_or_
 ):
     model = rf.Model.xs(
         d_model=8,
-        identity=rf.Group(bounds=2, mask=rf.Mask(reconstruct=True) if objective else ()),
+        identity=rf.Group(n_groups=2, mask=rf.Mask(reconstruct=True) if objective else ()),
         target=rf.Number(mask=True),
     )
     table = pa.table({"identity": ["a", "b"], "target": [1.0, 2.0]})
@@ -523,7 +523,7 @@ def test_fit_checkpoint_metrics_and_callback_state_describe_refined_mapping(case
     )
 
 
-def test_calibration_bounds_rows_and_bytes_without_retaining_full_source_buffers():
+def test_calibration_n_groups_rows_and_bytes_without_retaining_full_source_buffers():
     source = pa.table({"text": ["x" * 100 for _ in range(20)]})
     calibration = grouping.Calibration(limit=8, byte_limit=source.slice(0, 4).nbytes)
     calibration.add(source)

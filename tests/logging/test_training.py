@@ -129,7 +129,7 @@ def test_validation_keeps_its_metric_name_and_default_checkpoint_monitor(fit_opt
         (rf.Category(mask=True), ["a", "b", "b", "a"]),
         (rf.Enum(values=("a", "b"), mask=True), ["a", "b", "b", "a"]),
         (rf.Set(mask=True), [["a"], ["b"], ["b"], ["a"]]),
-        (rf.Group(bounds=2, mask=True), ["a", "b", "b", "a"]),
+        (rf.Group(n_groups=2, mask=True), ["a", "b", "b", "a"]),
     ],
 )
 def test_vocabulary_scores_log_per_batch_and_validation_keeps_pass_totals(fit_options, field, labels):

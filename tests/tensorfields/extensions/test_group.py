@@ -36,32 +36,43 @@ from tests.tensorfields.helpers import tensorize
 ADDRESS = "/items/group"
 
 
-@pytest.mark.parametrize("bounds, normalized", [(3, (3, 3)), ((2, 4), (2, 4))])
-def test_group_configuration_has_one_normalized_bounds_field(bounds, normalized):
-    field = rf.Group(bounds=bounds)
-    assert field.bounds == normalized
-    assert field.model_dump()["bounds"] == normalized
+@pytest.mark.parametrize("n_groups, normalized", [(3, (3, 3)), ((2, 4), (2, 4))])
+def test_group_configuration_has_one_normalized_n_groups_field(n_groups, normalized):
+    field = rf.Group(n_groups=n_groups)
+    assert field.n_groups == normalized
+    assert field.model_dump()["n_groups"] == normalized
     assert not hasattr(field, "n_clusters")
-    assert not hasattr(field, "n_groups")
-    for obsolete in ("n_clusters", "n_groups"):
+    assert not hasattr(field, "bounds")
+    assert set(rf.Group.model_fields).isdisjoint({"n_clusters", "bounds"})
+    for obsolete in ("n_clusters", "bounds"):
         with pytest.raises(pydantic.ValidationError, match=obsolete):
-            rf.Group.model_validate({"bounds": bounds, obsolete: bounds})
+            rf.Group.model_validate({"n_groups": n_groups, obsolete: n_groups})
+        with pytest.raises(pydantic.ValidationError, match=obsolete):
+            rf.Group.model_validate({obsolete: n_groups})
 
 
 def test_group_checkpoint_and_output_preserve_user_field_names(tmp_path):
-    model = rf.Model.xs(d_model=8, fields={"cluster": rf.Group(bounds=2, mask=True)})
+    model = rf.Model.xs(d_model=8, fields={"cluster": rf.Group(n_groups=2, mask=True)})
     inputs = pa.table({"cluster": ["a", "b"]})
     model.encode(inputs, strata="train")
     path = model.save(tmp_path / "group.ckpt")
     restored = rf.Model.load(path)
     assert restored.schema.model_dump() == model.schema.model_dump()
-    assert restored.schema.requests["/cluster"].bounds == (2, 2)
+    assert restored.schema.requests["/cluster"].n_groups == (2, 2)
     assert restored.schema.requests["/cluster"].type == "group"
     predictions = restored.predict(inputs)["predictions"].combine_chunks().field("cluster")
     assert {field.name for field in predictions.type} == {"state", "group", "content", "inferred"}
     assert set(rf.Group.assignments(restored, "/cluster")["a"]) == {"group", "probabilities"}
 
     checkpoint = torch.load(path, weights_only=False)
+    field = checkpoint["schema"]["fields"]["fields"][0]
+    assert field["n_groups"] == [2, 2]
+    assert set(field).isdisjoint({"n_clusters", "bounds"})
+    field["bounds"] = field.pop("n_groups")
+    torch.save(checkpoint, path)
+    with pytest.raises(pydantic.ValidationError, match="bounds"):
+        rf.Model.load(path)
+    field["n_groups"] = field.pop("bounds")
     checkpoint["schema"]["fields"]["fields"][0]["type"] = "cluster"
     torch.save(checkpoint, path)
     with pytest.raises(pydantic.ValidationError, match="unknown tensor field type: cluster"):
@@ -79,7 +90,7 @@ def build_embedder(schema):
 
 def build_schema(
     *,
-    bounds: int | list[int] | tuple[int, int] = (2, 4),
+    n_groups: int | list[int] | tuple[int, int] = (2, 4),
     p_unavailable: float | None = None,
     revive_temperature: float | None = None,
     ema_decay: float | None = None,
@@ -97,7 +108,7 @@ def build_schema(
         n_layers=1,
         n_heads=4,
         dropout=0.1,
-        items=rf.Branch(length=2, group=rf.Group(bounds=bounds, mask=mask, **options)),
+        items=rf.Branch(length=2, group=rf.Group(n_groups=n_groups, mask=mask, **options)),
     )
 
 
@@ -184,7 +195,7 @@ def test_group_tensorfield_simulates_unavailable_during_training():
 
 
 def test_group_embedder_train_forward_uses_the_same_identity_assignment():
-    schema = build_schema(bounds=4, p_unavailable=0.0)
+    schema = build_schema(n_groups=4, p_unavailable=0.0)
     embedder = build_embedder(schema)
     embedder.train()
 
@@ -210,7 +221,7 @@ def test_group_embedder_train_forward_uses_the_same_identity_assignment():
 
 
 def test_group_embedder_routes_sentinel_row_for_oov_tokens():
-    schema = build_schema(bounds=4, p_unavailable=0.0)
+    schema = build_schema(n_groups=4, p_unavailable=0.0)
     embedder = build_embedder(schema)
     embedder.eval()
     sentinel = embedder.capacity
@@ -236,7 +247,7 @@ def test_group_embedder_routes_sentinel_row_for_oov_tokens():
 
 
 def test_group_embedder_zeros_group_contribution_for_non_valued_state():
-    schema = build_schema(bounds=4, p_unavailable=0.0)
+    schema = build_schema(n_groups=4, p_unavailable=0.0)
     embedder = build_embedder(schema)
     embedder.eval()
 
@@ -270,7 +281,7 @@ def test_group_embedder_zeros_group_contribution_for_non_valued_state():
 
 
 def test_group_embedder_rejects_indices_beyond_capacity():
-    schema = build_schema(bounds=4, p_unavailable=0.0)
+    schema = build_schema(n_groups=4, p_unavailable=0.0)
     embedder = build_embedder(schema)
 
     field = TensorField(
@@ -288,7 +299,7 @@ def test_group_embedder_rejects_indices_beyond_capacity():
 
 def test_group_embedder_init_commits_only_lower_columns():
     # Init at ``lower`` keeps Sinkhorn from locking n_committed at ``upper`` from step 0.
-    schema = build_schema(bounds=(2, 6))
+    schema = build_schema(n_groups=(2, 6))
     embedder = build_embedder(schema)
 
     assert embedder.committed.tolist() == [True, True, False, False, False, False]
@@ -303,7 +314,7 @@ def test_group_embedder_init_perplexity_matches_lower_bound():
     # starts small and only grows through revive.
     import math
 
-    schema = build_schema(bounds=(3, 8))
+    schema = build_schema(n_groups=(3, 8))
     embedder = build_embedder(schema)
 
     normalized = embedder.usage_ema / embedder.usage_ema.sum().clamp_min(1e-12)
@@ -313,9 +324,9 @@ def test_group_embedder_init_perplexity_matches_lower_bound():
     assert round(perplexity) == 3
 
 
-def test_group_embedder_init_matches_upper_when_bounds_fixed():
+def test_group_embedder_init_matches_upper_when_n_groups_fixed():
     # lower == upper is the "fixed K" case; init should commit all columns uniformly.
-    schema = build_schema(bounds=(4, 4))
+    schema = build_schema(n_groups=(4, 4))
     embedder = build_embedder(schema)
 
     assert embedder.committed.tolist() == [True] * 4
@@ -328,7 +339,7 @@ def test_group_embedder_init_matches_upper_when_bounds_fixed():
 def write_model(*, vocab_tokens: list[str], capacity: int, K: int, assign_weight: torch.Tensor | None = None):
     configured = rf.Model.xs(
         d_model=8,
-        items=rf.Branch(length=2, group=rf.Group(bounds=K, mask=True)),
+        items=rf.Branch(length=2, group=rf.Group(n_groups=K, mask=True)),
     )
     embedder = configured.nodes[ADDRESS].embedder
     resize = Resize()
@@ -474,14 +485,14 @@ def _prepared_train_batch(
 def test_group_loss_sinkhorn_pushes_gradient_toward_spread():
     # Logits must be commensurate with ε=0.05 so Sinkhorn's Boltzmann map is not saturated.
     schema = build_schema(
-        bounds=(4, 4),
+        n_groups=(4, 4),
         p_unavailable=1.0,
         mask=Mask(reconstruct=True),
     )
     field, embedder = _prepared_train_batch(schema, rows=[["ALPHA", "BETA"]] * 4)
     decoder = Decoder(schema=schema, address=ADDRESS)
     module = TrackingModule(schema, embedder, decoder)
-    K = schema.requests[ADDRESS].bounds[-1]
+    K = schema.requests[ADDRESS].n_groups[-1]
 
     group_logits = torch.zeros(*field.state.shape, K)
     group_logits[..., 0] = 0.025
@@ -518,14 +529,14 @@ def test_group_loss_balance_penalizes_uncommitted_mass():
     # donor row into a dead column) must INCREASE balance loss, which is exactly the signal
     # the model needs to eventually push those uncommitted rows back down.
     schema = build_schema(
-        bounds=(2, 4),
+        n_groups=(2, 4),
         p_unavailable=1.0,
         mask=Mask(reconstruct=True),
     )
     field, embedder = _prepared_train_batch(schema, rows=[["ALPHA", "BETA"]] * 4)
     decoder = Decoder(schema=schema, address=ADDRESS)
-    K = schema.requests[ADDRESS].bounds[-1]
-    lower = schema.requests[ADDRESS].bounds[0]
+    K = schema.requests[ADDRESS].n_groups[-1]
+    lower = schema.requests[ADDRESS].n_groups[0]
 
     base_logits = torch.zeros(*field.state.shape, K)
     base_logits[..., 0] = 0.075
@@ -569,14 +580,14 @@ def test_group_loss_balance_gradient_reaches_uncommitted_columns():
     # gradient on uncommitted logits (push them down) while committed logits still get pulled
     # up. This is the mechanism that lets ``adherence_ema`` decay once the true K is reached.
     schema = build_schema(
-        bounds=(2, 4),
+        n_groups=(2, 4),
         p_unavailable=1.0,
         mask=Mask(reconstruct=True),
     )
     field, embedder = _prepared_train_batch(schema, rows=[["ALPHA", "BETA"]] * 4)
     decoder = Decoder(schema=schema, address=ADDRESS)
     module = TrackingModule(schema, embedder, decoder)
-    K = schema.requests[ADDRESS].bounds[-1]
+    K = schema.requests[ADDRESS].n_groups[-1]
 
     with torch.no_grad():
         embedder.usage_ema.zero_()
@@ -617,7 +628,7 @@ def test_group_loss_balance_gradient_reaches_uncommitted_columns():
 
 def test_group_coverage_ignores_simulated_input_unavailability():
     schema = build_schema(
-        bounds=(2, 4),
+        n_groups=(2, 4),
         p_unavailable=1.0,
         mask=Mask(reconstruct=True),
     )
@@ -627,7 +638,7 @@ def test_group_coverage_ignores_simulated_input_unavailability():
     )
     decoder = Decoder(schema=schema, address=ADDRESS)
     module = TrackingModule(schema, embedder, decoder)
-    K = schema.requests[ADDRESS].bounds[-1]
+    K = schema.requests[ADDRESS].n_groups[-1]
 
     prediction = Prediction(
         address=ADDRESS,
@@ -649,13 +660,13 @@ def test_group_coverage_ignores_simulated_input_unavailability():
 def test_group_content_counter_does_not_reweight_probability_objective():
     # Exposure counts are not a request to replace the observed class prior.
     schema = build_schema(
-        bounds=(4, 4),
+        n_groups=(4, 4),
         p_unavailable=0.0,
         mask=Mask(reconstruct=True),
     )
     embedder = build_embedder(schema)
     decoder = Decoder(schema=schema, address=ADDRESS)
-    K = schema.requests[ADDRESS].bounds[-1]
+    K = schema.requests[ADDRESS].n_groups[-1]
     capacity = embedder.capacity
 
     content_counter = embedder.counters[TensorKey.content.name]
@@ -701,14 +712,14 @@ def test_group_content_counter_does_not_reweight_probability_objective():
 
 def test_group_loss_usage_ema_updates_toward_batch_distribution():
     schema = build_schema(
-        bounds=(4, 4),
+        n_groups=(4, 4),
         p_unavailable=1.0,
         mask=Mask(reconstruct=True),
     )
     field, embedder = _prepared_train_batch(schema, rows=[["ALPHA", "BETA"]] * 4)
     decoder = Decoder(schema=schema, address=ADDRESS)
     module = TrackingModule(schema, embedder, decoder)
-    K = schema.requests[ADDRESS].bounds[-1]
+    K = schema.requests[ADDRESS].n_groups[-1]
 
     prior = embedder.usage_ema.clone()
     group_logits = torch.zeros(*field.state.shape, K)
@@ -746,7 +757,7 @@ def _seed_uncommitted_batch(*, revive_temperature: float | None = None):
     and biases the group logits toward those dead columns so ``adherence_ema`` accumulates.
     """
     schema = build_schema(
-        bounds=(2, 4),
+        n_groups=(2, 4),
         p_unavailable=1.0,
         revive_temperature=revive_temperature,
         mask=Mask(reconstruct=True),
@@ -755,8 +766,8 @@ def _seed_uncommitted_batch(*, revive_temperature: float | None = None):
     decoder = Decoder(schema=schema, address=ADDRESS)
     # These callback fixtures represent an epoch with known reconstruction evidence.
     decoder.metrics["train_metrics"].update(torch.tensor([2, 2, 0]), torch.zeros(2))
-    K = schema.requests[ADDRESS].bounds[-1]
-    lower = schema.requests[ADDRESS].bounds[0]
+    K = schema.requests[ADDRESS].n_groups[-1]
+    lower = schema.requests[ADDRESS].n_groups[0]
     with torch.no_grad():
         # Force perplexity ~ lower so dynamic n_committed lands at `lower` and topk picks [0, lower).
         embedder.usage_ema.zero_()
@@ -799,8 +810,8 @@ def test_revive_callback_noop_when_revive_temperature_zero():
     assert embedder.adherence_ema.item() == pytest.approx(0.9)
 
 
-def test_revive_callback_noop_when_bounds_are_fixed():
-    schema = build_schema(bounds=(4, 4), p_unavailable=1.0, revive_temperature=10.0)
+def test_revive_callback_noop_when_n_groups_are_fixed():
+    schema = build_schema(n_groups=(4, 4), p_unavailable=1.0, revive_temperature=10.0)
     embedder = build_embedder(schema)
     decoder = Decoder(schema=schema, address=ADDRESS)
     # These callback fixtures represent an epoch with known reconstruction evidence.
@@ -852,7 +863,7 @@ def test_revive_callback_does_not_fire_on_saturated_committed_alone():
     # natural end state of Sinkhorn balance, not a signal that more groups are needed. Past
     # warmup, with adherence == 0, saturation alone must NOT fire revive.
     _, _, module, embedder, decoder, _ = _seed_uncommitted_batch(revive_temperature=10.0)
-    lower = module.schema.requests[ADDRESS].bounds[0]
+    lower = module.schema.requests[ADDRESS].n_groups[0]
     with torch.no_grad():
         embedder.usage_ema.zero_()
         embedder.usage_ema[:lower] = 1.0 / lower  # perfectly balanced -> "saturated"
@@ -866,13 +877,13 @@ def test_revive_callback_does_not_fire_on_saturated_committed_alone():
 
 def test_revive_callback_splits_donor_into_dead_column_and_resets_state():
     torch.manual_seed(0)
-    # bounds=(3, 4) yields exactly 1 uncommitted column so the donor is halved exactly once.
-    schema = build_schema(bounds=(3, 4), p_unavailable=1.0, revive_temperature=10.0)
+    # n_groups=(3, 4) yields exactly 1 uncommitted column so the donor is halved exactly once.
+    schema = build_schema(n_groups=(3, 4), p_unavailable=1.0, revive_temperature=10.0)
     embedder = build_embedder(schema)
     decoder = Decoder(schema=schema, address=ADDRESS)
     # These callback fixtures represent an epoch with known reconstruction evidence.
     decoder.metrics["train_metrics"].update(torch.tensor([2, 2, 0]), torch.zeros(2))
-    lower = schema.requests[ADDRESS].bounds[0]
+    lower = schema.requests[ADDRESS].n_groups[0]
     embedder.committed[lower:] = False
     module = TrackingModule(schema, embedder, decoder)
 
@@ -931,12 +942,12 @@ def test_revive_callback_base_probability_decays_with_epoch():
     # At epoch >> revive_temperature the base probability decays to ~0 and revival never fires
     # even with saturated adherence.
     torch.manual_seed(0)
-    schema = build_schema(bounds=(3, 4), p_unavailable=1.0, revive_temperature=1.0)
+    schema = build_schema(n_groups=(3, 4), p_unavailable=1.0, revive_temperature=1.0)
     embedder = build_embedder(schema)
     decoder = Decoder(schema=schema, address=ADDRESS)
     # These callback fixtures represent an epoch with known reconstruction evidence.
     decoder.metrics["train_metrics"].update(torch.tensor([2, 2, 0]), torch.zeros(2))
-    lower = schema.requests[ADDRESS].bounds[0]
+    lower = schema.requests[ADDRESS].n_groups[0]
     embedder.committed[lower:] = False
     embedder.adherence_ema.fill_(1.0)
     module = TrackingModule(schema, embedder, decoder)
@@ -955,12 +966,12 @@ def test_revive_callback_warmup_caps_expected_revivals_at_one_per_epoch():
     # per-column cap is still ``1 / n_dead`` so the expected number of revivals in a single
     # epoch is ~1 (not "all dead columns"). This is what prevents ``n_committed`` from jumping
     # straight to the upper bound on the first epoch.
-    schema = build_schema(bounds=(1, 12), p_unavailable=1.0, revive_temperature=10.0)
+    schema = build_schema(n_groups=(1, 12), p_unavailable=1.0, revive_temperature=10.0)
     embedder = build_embedder(schema)
     decoder = Decoder(schema=schema, address=ADDRESS)
     # These callback fixtures represent an epoch with known reconstruction evidence.
     decoder.metrics["train_metrics"].update(torch.tensor([2, 2, 0]), torch.zeros(2))
-    lower = schema.requests[ADDRESS].bounds[0]
+    lower = schema.requests[ADDRESS].n_groups[0]
     embedder.committed[:] = False
     embedder.committed[:lower] = True
     embedder.adherence_ema.zero_()  # warmup should drive the plan even without adherence
@@ -998,13 +1009,13 @@ def _seed_committed_pair(*, similarity: float):
     """Build a real embedder/decoder with two committed columns whose content_w columns and
     group_w rows share ``similarity`` cosine similarity (both weights, since the merge plan
     requires joint redundancy)."""
-    schema = build_schema(bounds=(2, 4), p_unavailable=1.0)
+    schema = build_schema(n_groups=(2, 4), p_unavailable=1.0)
     embedder = build_embedder(schema)
     decoder = Decoder(schema=schema, address=ADDRESS)
     # These callback fixtures represent an epoch with known reconstruction evidence.
     decoder.metrics["train_metrics"].update(torch.tensor([2, 2, 0]), torch.zeros(2))
-    lower = schema.requests[ADDRESS].bounds[0]
-    K = schema.requests[ADDRESS].bounds[-1]
+    lower = schema.requests[ADDRESS].n_groups[0]
+    K = schema.requests[ADDRESS].n_groups[-1]
 
     # Commit only [0, 1, 2] so K==4 with one dead column; merge target is between 0 and 1.
     embedder.committed[:] = False
@@ -1067,10 +1078,10 @@ def test_merge_callback_noop_when_columns_are_distinct():
     assert torch.equal(decoder.linears[TensorKey.group.name].weight, prior_group_w)
 
 
-def test_merge_callback_noop_when_bounds_are_fixed():
+def test_merge_callback_noop_when_n_groups_are_fixed():
     # With a fixed range there is no "shrink room"; the merge plan must not fire even under
     # perfect redundancy so the model can rely on the full committed set.
-    schema = build_schema(bounds=(3, 3), p_unavailable=1.0)
+    schema = build_schema(n_groups=(3, 3), p_unavailable=1.0)
     embedder = build_embedder(schema)
     decoder = Decoder(schema=schema, address=ADDRESS)
     # These callback fixtures represent an epoch with known reconstruction evidence.
@@ -1093,12 +1104,12 @@ def test_merge_callback_noop_when_bounds_are_fixed():
 def test_merge_callback_noop_at_lower_bound():
     # ``n_committed == lower`` means the model already believes it's at the minimum plausible K
     # for this batch; refusing to shrink further prevents cannibalizing the last group.
-    schema = build_schema(bounds=(2, 4), p_unavailable=1.0)
+    schema = build_schema(n_groups=(2, 4), p_unavailable=1.0)
     embedder = build_embedder(schema)
     decoder = Decoder(schema=schema, address=ADDRESS)
     # These callback fixtures represent an epoch with known reconstruction evidence.
     decoder.metrics["train_metrics"].update(torch.tensor([2, 2, 0]), torch.zeros(2))
-    lower = schema.requests[ADDRESS].bounds[0]
+    lower = schema.requests[ADDRESS].n_groups[0]
     # Only ``lower`` columns committed, and make them duplicates to prove the guard fires
     # before the similarity check.
     embedder.committed[:] = False

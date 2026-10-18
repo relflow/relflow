@@ -75,7 +75,7 @@ def train(directory, accumulation):
         d_model=8,
         batch_size=4,
         identity=rf.Group(
-            bounds=(1, 3),
+            n_groups=(1, 3),
             ema_decay=0.5,
             revive_temperature=0,
             p_unavailable=0,

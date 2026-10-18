@@ -15,11 +15,11 @@ from relflow.tensorfields.extensions.group import GroupMergeCallback, GroupReviv
 ADDRESS = "/identity"
 
 
-def model(bounds, *, revive_temperature=0):
+def model(n_groups, *, revive_temperature=0):
     configured = rf.Model.xs(
         d_model=8,
         identity=rf.Group(
-            bounds=bounds,
+            n_groups=n_groups,
             ema_decay=0,
             revive_temperature=revive_temperature,
             p_unavailable=0,
@@ -115,7 +115,7 @@ def test_balance_cross_entropy_does_not_overweight_individual_observations():
 
 
 def test_single_group_preserves_nonuniform_learned_identity_priors():
-    configured = rf.Model.xs(d_model=8, identity=rf.Group(bounds=1, mask=True))
+    configured = rf.Model.xs(d_model=8, identity=rf.Group(n_groups=1, mask=True))
     configured.encode(pa.table({"identity": ["a", "b"]}), strata="train")
     configured.track = lambda names, value: value
     with torch.no_grad():

@@ -109,11 +109,11 @@ model = rf.Model(
   it independently. Hidden neural activations use tanh GELU and normalization
   uses RMSNorm; these have no configuration knobs.
 - `Hash` represents large identifiers with batch-salted hashes, preserving equality across fields in one encoded batch without learning a persistent vocabulary.
-- `Group` represents scalar identities through shared learned groups. `bounds=K`
-  normalizes to `(K, K)`; `bounds=(lower, upper)` permits an adaptive committed
+- `Group` represents scalar identities through shared learned groups. `n_groups=K`
+  normalizes to `(K, K)`; `n_groups=(lower, upper)` permits an adaptive committed
   balancing subset. Nonretired columns remain assignment candidates; commitment
   is not an occupied-group count or evidence of meaningful group discovery.
-  `bounds` is the sole count configuration and normalized attribute. Public
+  `n_groups` is the sole count configuration and normalized attribute. Public
   prediction and assignment records use `group`; use `Group.assign`,
   `Group.override`, `Group.assignments`, and `Group.status` for runtime control.
   Defaults use weak balanced initialization, deterministic straight-through

@@ -19,7 +19,7 @@ def request(field_type: str, *, query: str | None = None):
     if field_type == "category":
         return rf.Category(query=query, p_unavailable=0.0)
     if field_type == "group":
-        return rf.Group(query=query, bounds=2, p_unavailable=0.0)
+        return rf.Group(query=query, n_groups=2, p_unavailable=0.0)
     if field_type == "set":
         return rf.Set(query=query, p_unavailable=0.0)
     raise AssertionError(f"unsupported test field type: {field_type}")

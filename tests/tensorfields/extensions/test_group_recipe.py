@@ -14,7 +14,7 @@ def embedder():
         d_model=8,
         n_layers=1,
         n_heads=2,
-        identity=rf.Group(bounds=3, mask=True, p_unavailable=0.0),
+        identity=rf.Group(n_groups=3, mask=True, p_unavailable=0.0),
     )
     return Embedder(schema=schema, address="/identity")
 

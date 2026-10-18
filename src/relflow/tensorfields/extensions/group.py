@@ -79,8 +79,8 @@ def initialize(weight: torch.Tensor, start: int, stop: int, retired: torch.Tenso
 class Request(RequestBase):
     """Scalar labels represented through shared, learned latent groups.
 
-    Training grows label storage automatically. ``bounds=K`` normalizes to ``(K, K)``;
-    ``bounds=(lower, upper)`` allows an adaptive group count within that
+    Training grows label storage automatically. ``n_groups=K`` normalizes to ``(K, K)``;
+    ``n_groups=(lower, upper)`` allows an adaptive group count within that
     range. ``p_unavailable`` routes known training labels through shared unavailable content.
     ``ema_decay`` smooths usage statistics; ``revive_temperature=0`` disables
     inactive-group revival. Assignments initialize weakly and evenly and route
@@ -98,7 +98,7 @@ class Request(RequestBase):
     ema_decay: Annotated[float, pydantic.Field(ge=0.0, le=1.0, default=0.99)] = 0.99
     revive_temperature: Annotated[float, pydantic.Field(ge=0.0, default=10.0)] = 10.0
 
-    bounds: Annotated[
+    n_groups: Annotated[
         tuple[int, int],
         pydantic.Field(
             description="(lower_bound, upper_bound) for the number of groups. A single int is broadcast to (K, K) to specify an exact number of groups.",
@@ -110,7 +110,7 @@ class Request(RequestBase):
         def __init__(
             self,
             *,
-            bounds: int | tuple[int, int],
+            n_groups: int | tuple[int, int],
             p_unavailable: float = 0.01,
             ema_decay: float = 0.99,
             revive_temperature: float = 10.0,
@@ -118,22 +118,22 @@ class Request(RequestBase):
             **options: Unpack[FieldOptions],
         ) -> None: ...
 
-    @pydantic.field_validator("bounds", mode="before")
+    @pydantic.field_validator("n_groups", mode="before")
     @classmethod
-    def check_bounds_input(cls, value: Any) -> Any:
+    def check_n_groups_input(cls, value: Any) -> Any:
         if isinstance(value, int) and not isinstance(value, bool):
             return (value, value)
         return value
 
     @pydantic.model_validator(mode="after")
-    def check_bounds(self):
-        if len(self.bounds) != 2:
-            raise ValueError("bounds tuple must have exactly 2 elements (lower_bound, upper_bound)")
-        lower, upper = self.bounds
+    def check_n_groups(self):
+        if len(self.n_groups) != 2:
+            raise ValueError("n_groups tuple must have exactly 2 elements (lower_bound, upper_bound)")
+        lower, upper = self.n_groups
         if lower <= 0:
-            raise ValueError("bounds lower bound must be greater than 0")
+            raise ValueError("n_groups lower bound must be greater than 0")
         if lower > upper:
-            raise ValueError("bounds lower bound must be less than or equal to upper bound")
+            raise ValueError("n_groups lower bound must be less than or equal to upper bound")
         return self
 
     @classmethod
@@ -353,7 +353,7 @@ class Embedder(EmbedderBase):
         request: Request = cast(Request, schema.requests[address])
         self.origin: Address = address
         self.destination: Address = cast("Branch", request.parent).address
-        self.size: int = request.bounds[-1]
+        self.size: int = request.n_groups[-1]
 
         if address not in schema.reconstruct:
             # Group loss fires only for reconstructed rows; a plain-input
@@ -390,7 +390,7 @@ class Embedder(EmbedderBase):
             }
         )
 
-        lower: int = request.bounds[0]
+        lower: int = request.n_groups[0]
         usage_init = torch.zeros(self.size)
         usage_init[:lower] = 1.0 / lower
         committed_init = torch.zeros(self.size, dtype=torch.bool)
@@ -695,7 +695,7 @@ class Decoder(DecoderBase):
         super().__init__(schema=schema, address=address, conditioned=False)
 
         request: Request = cast(Request, schema.requests[address])
-        size: int = request.bounds[-1]
+        size: int = request.n_groups[-1]
         self.metrics = Scores(address, Reconstruction)
 
         self.linears = torch.nn.ModuleDict(
@@ -783,7 +783,7 @@ def loss(
     # move the usage EMA, committed count, or balancing targets.
     valued_logits = group_logits[known].float()
     n_valued: int = valued_logits.shape[0]
-    lower: int = request.bounds[0]
+    lower: int = request.n_groups[0]
 
     valued_probs = valued_logits.softmax(dim=-1)
     with torch.no_grad():
@@ -853,7 +853,7 @@ def update_usage(embedder: Embedder, request: Request, statistics: torch.Tensor)
     decay = request.ema_decay
     embedder.usage_ema.mul_(decay).add_(usage * (1 - decay))
     embedder.information_ema.mul_(decay).add_(information * (1 - decay))
-    lower, upper = request.bounds
+    lower, upper = request.n_groups
     available = int((~embedder.retired).sum().item())
     count = max(lower, min(upper, available, round(embedder.information_ema.exp().item())))
     indices = embedder.usage_ema.masked_fill(embedder.retired, -1.0).topk(count).indices
@@ -1016,7 +1016,7 @@ class GroupReviveCallback(Callback):
             request = pl_module.schema.requests.get(cast(Address, address))
             if not isinstance(request, Request) or request.revive_temperature <= 0.0:
                 continue
-            if request.bounds[0] == request.bounds[-1]:
+            if request.n_groups[0] == request.n_groups[-1]:
                 continue
             embedder = getattr(node, "embedder", None)
             decoder = getattr(node, "decoder", None)
@@ -1142,7 +1142,7 @@ class GroupMergeCallback(Callback):
             request = pl_module.schema.requests.get(cast(Address, address))
             if not isinstance(request, Request):
                 continue
-            if request.bounds[0] == request.bounds[-1]:
+            if request.n_groups[0] == request.n_groups[-1]:
                 continue
             embedder = getattr(node, "embedder", None)
             decoder = getattr(node, "decoder", None)
@@ -1166,7 +1166,7 @@ class GroupMergeCallback(Callback):
     def plan(embedder: "Embedder", decoder: "Decoder", request: "Request") -> dict[str, int] | None:
         committed_idx = embedder.committed.nonzero(as_tuple=True)[0]
         n_committed = committed_idx.numel()
-        lower = request.bounds[0]
+        lower = request.n_groups[0]
         if n_committed <= lower or n_committed < 2:
             return None
 

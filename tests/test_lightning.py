@@ -55,7 +55,7 @@ def test_native_batch_size_callback_restores_state_then_trains_bf16(tmp_path, ac
     if accelerator == "auto" and torch.cuda.device_count() > 1:
         pytest.skip("Lightning's batch-size finder requires a single device")
     field = {"category": rf.Category, "set": rf.Set, "group": rf.Group}[kind]
-    options = {"bounds": 2, "revive_temperature": 0.0} if kind == "group" else {}
+    options = {"n_groups": 2, "revive_temperature": 0.0} if kind == "group" else {}
     configured = model(field(mask=rf.Mask(reconstruct=True), **options))
     initial = {name: value.clone() for name, value in configured.named_parameters()}
     finder = BatchSizeFinder(mode="binsearch", init_val=2, max_trials=2, max_val=8, margin=0)

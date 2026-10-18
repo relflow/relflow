@@ -35,7 +35,7 @@ def model():
         batch_size=4,
         category=rf.Category(mask=True, p_unavailable=1.0),
         tags=rf.Set(mask=True, p_unavailable=1.0),
-        group=rf.Group(bounds=2, mask=True, p_unavailable=1.0),
+        group=rf.Group(n_groups=2, mask=True, p_unavailable=1.0),
     )
 
 
