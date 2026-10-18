@@ -8,14 +8,15 @@ authors = [
     { name = "Reid Taylor" },
 ]
 license = "Apache-2.0"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "beartype>=0.21.0",
     "pydantic>=2.11.7",
     "pyyaml>=6.0.2",
     "anytree>=2.13.0",
     "pyarrow>=21.0.0",
-    "polars>=1.35.2",
+    # Polars 2 removes the seed quartet used by existing Hash encodings.
+    "polars>=1.35.2,<2",
     "numpy>=2.2.6",
     "lightning>=2.6.4",
     "tensordict>=0.10.0",
@@ -46,7 +47,9 @@ duckdb = [
 dev = [
     "ruff>=0.12.12",
     "pytest>=8.4.1",
+    "pytest-cov>=7.0.0",
     "pytest-xdist>=3.8.0",
+    "coverage>=7.10.6",
     "fastapi>=0.124.0",
     "orjson>=3.10.0",
     "pydantic-settings>=2.10.1",
@@ -79,6 +82,31 @@ python_files = ["test_*.py"]
 pythonpath = ["."]
 addopts = ["-n", "auto"]
 
+[tool.coverage.run]
+branch = true
+source = ["relflow"]
+relative_files = true
+concurrency = ["multiprocessing"]
+patch = ["subprocess"]
+parallel = true
+sigterm = true
+
+[tool.coverage.paths]
+source = ["src/relflow", "*/src/relflow", "*/site-packages/relflow"]
+
+[tool.coverage.report]
+show_missing = true
+precision = 2
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+[tool.coverage.json]
+output = "coverage.json"
+
 [tool.ruff]
 line-length = 120
 lint.extend-select = ["I"]
@@ -86,5 +114,5 @@ lint.extend-select = ["I"]
 [tool.pyrefly]
 project-includes = ["src/relflow", "tests/typing"]
 search-path = ["src"]
-python-version = "3.12"
+python-version = "3.11"
 preset = "default"

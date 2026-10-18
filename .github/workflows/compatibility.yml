@@ -1,0 +1,75 @@
+name: Dependency compatibility
+
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compatibility-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  OMP_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+  POLARS_MAX_THREADS: "2"
+  HF_HUB_OFFLINE: "1"
+  TOKENIZERS_PARALLELISM: "false"
+
+jobs:
+  dependencies:
+    name: ${{ matrix.profile }} / Python ${{ matrix.python }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    continue-on-error: ${{ matrix.advisory || false }}
+    env:
+      UV_PYTHON: ${{ matrix.python }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: minimum
+            python: "3.11"
+            resolution: lowest-direct
+          - profile: latest
+            python: "3.14"
+            resolution: highest
+          - profile: python-next
+            python: "3.15"
+            resolution: highest
+            advisory: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: true
+      - name: Resolve compatibility environment independently of locked versions
+        run: uv sync --all-extras --no-editable --upgrade --resolution ${{ matrix.resolution }}
+      - name: Record resolved environment
+        run: |
+          uv run --no-sync python -VV > environment.txt
+          uv pip freeze >> environment.txt
+      - name: Exercise checkpoint and complete suite
+        run: |
+          uv run --no-sync python scripts/checkpoint.py create --output checkpoint-current
+          uv run --no-sync python scripts/checkpoint.py check --input checkpoint-current --output checkpoint-check
+          uv run --no-sync pytest -n 2 --junitxml=junit.xml
+      - name: Upload resolved dependencies and test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compatibility-${{ matrix.profile }}
+          path: |
+            environment.txt
+            uv.lock
+            junit.xml
+            checkpoint-current/metadata.json
+            checkpoint-check/report.json
+          if-no-files-found: warn
+          retention-days: 14

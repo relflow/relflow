@@ -211,12 +211,9 @@ def parse(
             continue
         indices = offsets[selected] if offsets is not None else positions
         child = pc.take(values.field(index), pa.array(indices, type=pa.int64()))
-        # Arrow exposes scatter dynamically; pyarrow-stubs omits it.
-        placed = pc.scatter(  # pyrefly: ignore [missing-attribute]
-            parse(child, pattern),
-            pa.array(positions, type=pa.int64()),
-            max_index=len(values) - 1,
-        )
+        gather = np.zeros(len(values), dtype=np.int64)
+        gather[positions] = np.arange(len(positions))
+        placed = pc.take(parse(child, pattern), pa.array(gather, type=pa.int64(), mask=~selected))
         result = pc.coalesce(result, placed)
     return result
 

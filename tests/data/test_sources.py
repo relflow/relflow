@@ -381,6 +381,7 @@ def test_discovery_error_is_broadcast_before_workers_start(tmp_path, monkeypatch
 
 
 @pytest.mark.parametrize("missing", [False, True])
+@pytest.mark.skipif(not distributed.is_available() or not distributed.is_gloo_available(), reason="requires CPU Gloo")
 def test_ranks_share_manifest_and_discovery_errors(tmp_path, missing):
     pq.write_table(pa.table({"id": list(range(8))}), tmp_path / "train.parquet")
     multiprocessing.spawn(distributed_source, args=(str(tmp_path), missing), nprocs=2, join=True)

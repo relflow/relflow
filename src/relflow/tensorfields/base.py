@@ -879,8 +879,9 @@ class Extension:
                 indices = offsets[selected] if offsets is not None else positions
                 child = pc.take(values.field(index), pa.array(indices, type=pa.int64()))
                 normalized = self.normalize(child, datatype)
-                # Arrow exposes scatter dynamically; pyarrow-stubs omits it.
-                placed = pc.scatter(normalized, pa.array(positions, type=pa.int64()), max_index=len(values) - 1)  # pyrefly: ignore [missing-attribute]
+                gather = np.zeros(len(values), dtype=np.int64)
+                gather[positions] = np.arange(len(positions))
+                placed = pc.take(normalized, pa.array(gather, type=pa.int64(), mask=~selected))
                 result = pc.coalesce(result, placed)
             return result
         if (

@@ -6,7 +6,7 @@ contract and the invariants affected by the change.
 
 ## Development Setup
 
-Use Python 3.12 or newer and install the development environment with uv:
+Use Python 3.11 or newer and install the development environment with uv:
 
 ```bash
 uv sync
@@ -29,6 +29,87 @@ full test suite. Review any files changed by the hooks before committing again.
 Distributed tests launch every rank on the same machine. On macOS, the test
 suite defaults `GLOO_SOCKET_IFNAME` to the loopback interface `lo0`. An explicitly
 configured `GLOO_SOCKET_IFNAME` takes precedence.
+
+## Coverage
+
+Coverage is opt-in and measures package lines and branches, including pytest
+workers, Python subprocesses, and Torch multiprocessing workers:
+
+```bash
+uv run pytest -n 2 --cov --cov-report=term-missing --cov-report=html --cov-report=xml --cov-report=json
+```
+
+Open `htmlcov/index.html` for the source report. `coverage.xml` supports coverage
+tools and editors; `coverage.json` includes line and branch totals. Generated
+reports are ignored by Git. Normal tests and commit hooks run without tracing.
+There is no coverage threshold until the hosted baseline is established.
+
+README status badges follow `main`. After a successful same-repository push
+runs the Tests workflow, the Coverage badge workflow publishes a Shields JSON
+endpoint at `badges:coverage.json` and a `summary.json` containing line and branch
+totals, the tested commit, and the source run URL. The badge displays line
+coverage and links to the test workflow's complete reports. These files live on
+the separate `badges` branch; source branches keep generated reports ignored.
+Pull requests and release validation cannot publish badge updates. Old runs
+cannot replace the current main commit's results, and test jobs stay read-only.
+The first live coverage badge appears after this workflow reaches `main` and
+that branch's tests pass. No coverage-service account or additional secret is
+required.
+
+## Compatibility CI
+
+The Tests workflow runs the complete suite on Linux with Python 3.11, 3.12,
+3.13, and 3.14, plus macOS ARM and Windows with Python 3.12. It installs a wheel
+with all extras from the lockfile and verifies that imports come from site-packages.
+Linux/Python 3.12 also runs formatting, lint, typing, and coverage checks. Each
+job uploads its environment and JUnit results; the coverage job adds HTML, XML,
+and JSON reports and a workflow summary.
+
+Every environment loads a checkpoint trained with RelFlow 0.3.1 on Linux and
+Python 3.12. The check compares schema, learned state, prediction structure and
+values, then resaves the model and resumes one optimizer step. To reproduce the
+artifact exchange across two installed environments:
+
+```bash
+python scripts/checkpoint.py create --output checkpoint-baseline
+python scripts/checkpoint.py check --input checkpoint-baseline --output checkpoint-check
+```
+
+Output directories must not already exist. Keep checkpoint artifacts outside
+the source tree when running locally.
+
+The `Required tests` job fails if the checkpoint producer or any supported
+environment fails or is skipped. Use that check in branch protection.
+Publication runs the same workflow for the release commit and waits for
+success before building or publishing.
+
+Python 3.15 also runs on every push and pull request as an advisory preview.
+It uses official nightly CPU PyTorch wheels while stable wheels are unavailable,
+then resolves the other dependencies from PyPI. Torch and DuckDB require binary
+wheels; other dependencies may build from source, and prereleases are allowed
+when needed. It saves installation diagnostics and resolved package versions,
+then runs the same checkpoint and test checks. This preview does not gate releases.
+
+Dependency compatibility runs nightly or manually. Its minimum profile resolves
+the lowest compatible direct dependencies on Python 3.11; its latest profile
+resolves fresh dependencies on Python 3.14. A separate Python 3.15 advisory probe
+checks stable dependency availability, without the preview's nightly Torch index.
+These jobs resolve in disposable checkouts and save their resulting lockfiles.
+The minimum profile targets CPU compatibility; accelerator jobs use the locked
+dependency set.
+
+Real accelerator jobs run nightly or manually after a runner is configured.
+Set GitHub repository variables `CUDA_RUNNER` and/or `MPS_RUNNER` to JSON arrays
+of labels for the corresponding self-hosted runner, for example:
+
+```json
+["self-hosted", "linux", "x64", "relflow-cuda"]
+```
+
+An unset variable leaves that hardware job disabled. Configured jobs require
+the selected accelerator to be available before running, so skipped tests do
+not substitute for GPU execution. They use a separate Actions workspace and
+do not change an existing lab checkout or environment.
 
 ## Type Checking And Editors
 

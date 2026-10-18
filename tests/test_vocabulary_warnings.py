@@ -255,5 +255,6 @@ def distributed_warning(rank, directory):
         distributed.destroy_process_group()
 
 
+@pytest.mark.skipif(not distributed.is_available() or not distributed.is_gloo_available(), reason="requires CPU Gloo")
 def test_distributed_warning_uses_global_counts_and_logs_only_on_rank_zero(tmp_path):
     multiprocessing.spawn(distributed_warning, args=(str(tmp_path),), nprocs=2, join=True)

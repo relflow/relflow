@@ -1,0 +1,213 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  OMP_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+  POLARS_MAX_THREADS: "2"
+  HF_HUB_OFFLINE: "1"
+  TOKENIZERS_PARALLELISM: "false"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  checkpoint:
+    name: Produce 0.3.1 checkpoint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: true
+      - name: Install previous release
+        run: |
+          uv venv
+          uv pip install 'relflow==0.3.1' --torch-backend=cpu
+      - name: Create trained checkpoint and expected predictions
+        run: uv run --no-sync python scripts/checkpoint.py create --output checkpoint-baseline
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint-baseline
+          path: checkpoint-baseline/
+          if-no-files-found: error
+          retention-days: 7
+
+  suite:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    needs: checkpoint
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      UV_PYTHON: ${{ matrix.python }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            python: "3.11"
+          - os: ubuntu-24.04
+            python: "3.12"
+            coverage: true
+          - os: ubuntu-24.04
+            python: "3.13"
+          - os: ubuntu-24.04
+            python: "3.14"
+          - os: macos-15
+            python: "3.12"
+          - os: windows-2025
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: true
+      - name: Install locked dependencies and package wheel
+        run: uv sync --locked --all-extras --no-editable
+      - name: Verify wheel installation and record environment
+        run: |
+          uv run --no-sync python - <<'PY' > environment.txt
+          import os
+          import platform
+          import sys
+          import sysconfig
+          from pathlib import Path
+          import relflow
+          assert ".".join(map(str, sys.version_info[:2])) == os.environ["UV_PYTHON"]
+          assert Path(relflow.__file__).resolve().is_relative_to(Path(sysconfig.get_paths()["purelib"]).resolve())
+          print(sys.version)
+          print(platform.platform(), platform.machine())
+          print("RelFlow", relflow.__version__, relflow.__file__)
+          PY
+          uv pip freeze >> environment.txt
+      - name: Check formatting, lint, and types
+        if: matrix.coverage
+        run: |
+          uv run --no-sync ruff format --check
+          uv run --no-sync ruff check
+          uv run --no-sync pyrefly check
+      - uses: actions/download-artifact@v4
+        with:
+          name: checkpoint-baseline
+          path: checkpoint-baseline
+      - name: Load, predict, resave, and resume previous checkpoint
+        run: uv run --no-sync python scripts/checkpoint.py check --input checkpoint-baseline --output checkpoint-check
+      - name: Run complete suite
+        env:
+          COLLECT_COVERAGE: ${{ matrix.coverage || false }}
+        run: |
+          if [ "$COLLECT_COVERAGE" = "true" ]; then
+            uv run --no-sync pytest -n 2 --cov --cov-report=term-missing --cov-report=html --cov-report=xml --cov-report=json --junitxml=junit.xml
+          else
+            uv run --no-sync pytest -n 2 --junitxml=junit.xml
+          fi
+      - name: Coverage summary
+        if: always() && matrix.coverage
+        run: uv run --no-sync coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tests-${{ matrix.os }}-py${{ matrix.python }}
+          path: |
+            environment.txt
+            junit.xml
+            checkpoint-check/report.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload coverage reports
+        if: always() && matrix.coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage.xml
+            coverage.json
+            htmlcov/
+          if-no-files-found: warn
+          retention-days: 14
+
+  preview:
+    name: Python 3.15 preview
+    needs: checkpoint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    continue-on-error: true
+    env:
+      UV_PYTHON: "3.15"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.15"
+      - uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: true
+      - name: Record preview interpreter
+        run: |
+          python -VV > environment.txt
+          python -c "import platform; print(platform.platform(), platform.machine())" >> environment.txt
+      - name: Install preview dependencies with nightly CPU Torch
+        run: |
+          uv venv
+          uv pip install --no-deps --index https://download.pytorch.org/whl/nightly/cpu --prerelease allow torch 2>&1 | tee torch-resolution.log
+          uv pip install --group dev -r pyproject.toml --all-extras --no-editable . --only-binary torch,duckdb --prerelease if-necessary-or-explicit 2>&1 | tee resolution.log
+      - name: Record resolved dependencies
+        run: uv pip freeze >> environment.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: checkpoint-baseline
+          path: checkpoint-baseline
+      - name: Exercise previous checkpoint and complete suite
+        run: |
+          uv run --no-sync python scripts/checkpoint.py check --input checkpoint-baseline --output checkpoint-check
+          uv run --no-sync pytest -n 2 --junitxml=junit.xml
+      - name: Upload preview environment and test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tests-python-3.15-preview
+          path: |
+            environment.txt
+            torch-resolution.log
+            resolution.log
+            junit.xml
+            checkpoint-check/report.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  passed:
+    name: Required tests
+    if: always()
+    needs: [checkpoint, suite]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every compatibility job
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        shell: python
+        run: |
+          import json
+          import os
+          results = json.loads(os.environ["RESULTS"])
+          assert all(job["result"] == "success" for job in results.values()), results

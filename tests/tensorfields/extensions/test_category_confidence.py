@@ -144,6 +144,7 @@ def reduce_statistics(rank, directory):
         distributed.destroy_process_group()
 
 
+@pytest.mark.skipif(not distributed.is_available() or not distributed.is_gloo_available(), reason="requires CPU Gloo")
 def test_reconstruction_counts_reduce_globally_with_an_all_unknown_rank(tmp_path):
     multiprocessing.spawn(reduce_statistics, args=(str(tmp_path),), nprocs=2, join=True)
 
@@ -181,6 +182,7 @@ def test_metrics_keep_integer_counts_and_accelerator_supported_float_sums(device
     assert metric.sums.dtype == torch.float32
 
 
+@pytest.mark.skipif(not distributed.is_available() or not distributed.is_gloo_available(), reason="requires CPU Gloo")
 def test_lightning_validation_counts_include_an_objective_empty_rank():
     module = rf.Model.xs(
         d_model=8,

@@ -1,0 +1,65 @@
+name: Accelerator tests
+
+on:
+  schedule:
+    - cron: "53 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: accelerators-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  OMP_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+  POLARS_MAX_THREADS: "2"
+  HF_HUB_OFFLINE: "1"
+  TOKENIZERS_PARALLELISM: "false"
+
+jobs:
+  cuda:
+    if: vars.CUDA_RUNNER != ''
+    runs-on: ${{ fromJSON(vars.CUDA_RUNNER) }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v9
+        with:
+          python-version: "3.12"
+      - name: Install locked wheel
+        run: uv sync --locked --all-extras --no-editable
+      - name: Require actual CUDA hardware
+        run: uv run --no-sync python -c "import torch; assert torch.cuda.is_available(), 'CUDA runner has no usable GPU'; print(torch.__version__, torch.cuda.get_device_name())"
+      - name: Run accelerator and precision regressions
+        run: uv run --no-sync pytest -n 0 tests/test_accelerators.py tests/test_precision.py tests/test_lightning.py tests/tensorfields/extensions/test_quantile_devices.py tests/architecture/test_attention_equivalence.py --junitxml=junit-cuda.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cuda-results
+          path: junit-cuda.xml
+          if-no-files-found: warn
+
+  mps:
+    if: vars.MPS_RUNNER != ''
+    runs-on: ${{ fromJSON(vars.MPS_RUNNER) }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v9
+        with:
+          python-version: "3.12"
+      - name: Install locked wheel
+        run: uv sync --locked --all-extras --no-editable
+      - name: Require actual MPS hardware
+        run: uv run --no-sync python -c "import torch; assert torch.backends.mps.is_available(), 'MPS runner has no usable GPU'; print(torch.__version__)"
+      - name: Run accelerator and precision regressions
+        run: uv run --no-sync pytest -n 0 tests/test_accelerators.py tests/test_precision.py tests/test_lightning.py tests/tensorfields/extensions/test_quantile_devices.py tests/architecture/test_attention_equivalence.py --junitxml=junit-mps.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mps-results
+          path: junit-mps.xml
+          if-no-files-found: warn

@@ -438,6 +438,7 @@ def distributed_normalization(rank: int, directory: str, empty: bool) -> None:
 
 
 @pytest.mark.parametrize("empty", [False, True])
+@pytest.mark.skipif(not distributed.is_available() or not distributed.is_gloo_available(), reason="requires CPU Gloo")
 def test_number_float32_moments_merge_across_ranks(tmp_path, empty):
     multiprocessing.spawn(distributed_normalization, args=(str(tmp_path), empty), nprocs=2, join=True)
 

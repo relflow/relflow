@@ -6,6 +6,7 @@ import lightning.pytorch as lit
 import pyarrow as pa
 import pytest
 import torch
+import torch.distributed as distributed
 from tensordict import TensorDict
 
 import relflow as rf
@@ -229,6 +230,7 @@ def test_unknown_only_epoch_does_not_revive_or_merge_from_stale_cluster_statisti
         torch.testing.assert_close(value, embedder.state_dict()[key])
 
 
+@pytest.mark.skipif(not distributed.is_available() or not distributed.is_gloo_available(), reason="requires CPU Gloo")
 def test_mixed_vocabulary_metrics_include_a_distributed_objective_empty_rank():
     selection = rf.Mask(query="selected", reconstruct=True)
     module = rf.Model.xs(

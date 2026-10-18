@@ -78,21 +78,34 @@ def wait_for_server(base_url: str, process: subprocess.Popen[str], log_path: Pat
 
 def stop_process(process: subprocess.Popen[str], timeout: float = 10.0) -> None:
     try:
-        if process.poll() is None:
+        for action in ("interrupt", "terminate", "kill"):
+            if process.poll() is not None:
+                return
             try:
-                os.killpg(process.pid, signal.SIGINT)
+                if os.name == "nt":
+                    if action == "interrupt":
+                        process.send_signal(signal.CTRL_BREAK_EVENT)
+                    elif action == "terminate":
+                        process.terminate()
+                    else:
+                        process.kill()
+                else:
+                    signals = {"interrupt": signal.SIGINT, "terminate": signal.SIGTERM, "kill": signal.SIGKILL}
+                    os.killpg(process.pid, signals[action])
+            except ProcessLookupError:
+                process.wait(timeout=timeout)
+                return
+            except OSError:
+                # Headless Windows runners may not provide a console for CTRL_BREAK.
+                if os.name == "nt" and action == "interrupt":
+                    continue
+                raise
+            try:
                 process.wait(timeout=timeout)
                 return
             except subprocess.TimeoutExpired:
-                pass
-
-            os.killpg(process.pid, signal.SIGTERM)
-            try:
-                process.wait(timeout=timeout)
-                return
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait(timeout=timeout)
+                if action == "kill":
+                    raise
     finally:
         log_handle = getattr(process, "log_handle", None)
         if log_handle is not None:
@@ -117,14 +130,19 @@ def post_json(url: str, payload: Any, timeout: float = 30.0) -> tuple[int, Any, 
 
 def launch_deployment(checkpoint: Path, port: int, log_path: Path) -> subprocess.Popen[str]:
     log_handle = log_path.open("w", encoding="utf-8")
-    process = subprocess.Popen(
-        [sys.executable, "-u", "-c", SERVER_SCRIPT, str(checkpoint), str(port)],
-        cwd=Path(__file__).resolve().parents[2],
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        text=True,
-        start_new_session=True,
-    )
+    try:
+        process = subprocess.Popen(
+            [sys.executable, "-u", "-c", SERVER_SCRIPT, str(checkpoint), str(port)],
+            cwd=Path(__file__).resolve().parents[2],
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            text=True,
+            start_new_session=os.name != "nt",
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+        )
+    except BaseException:
+        log_handle.close()
+        raise
     process.log_handle = log_handle
     return process
 

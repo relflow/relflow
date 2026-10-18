@@ -571,6 +571,9 @@ def test_arbitrary_data_module_evaluates_complete_validation_loaders(model, data
     assert callback.counts["validate"] == 48
 
 
+@pytest.mark.skipif(
+    not torch.distributed.is_available() or not torch.distributed.is_gloo_available(), reason="requires CPU Gloo"
+)
 def test_distributed_logging_and_rollback_complete_on_every_rank(model, data, options, tmp_path):
     from lightning.pytorch.strategies import DDPStrategy
 
