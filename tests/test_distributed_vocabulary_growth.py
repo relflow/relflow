@@ -14,6 +14,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 import relflow as rf
 from relflow.structs.enums import TensorKey, Tokens
+from tests.distributed import launch
 
 LABELS = (("rank0-a", "rank0-b", "rank0-b", "rank0-a"), ("rank1-a", "rank1-b", "rank1-late", "rank1-late"))
 FIELDS = ("category", "tags", "cluster")
@@ -211,18 +212,7 @@ class GrowthAudit(lit.Callback):
         )
 
 
-@pytest.mark.skipif(
-    not torch.distributed.is_available() or not torch.distributed.is_gloo_available(), reason="requires CPU Gloo"
-)
-@pytest.mark.parametrize(
-    "bucket_view,accumulation,init_sync",
-    [(False, 1, True), (True, 1, True), (False, 2, True), (True, 2, True), (True, 2, False)],
-    ids=["ddp", "bucket_view", "accumulate", "bucket_view_accumulate", "no_initial_sync"],
-)
-def test_distributed_vocabulary_growth_in_one_fit(tmp_path, monkeypatch, bucket_view, accumulation, init_sync):
-    # The two data workers also use spawn; keep this proof independent of host thread counts.
-    monkeypatch.setenv("OMP_NUM_THREADS", "1")
-    monkeypatch.setenv("MKL_NUM_THREADS", "1")
+def train(directory, bucket_view, accumulation, init_sync):
     lit.seed_everything(31415, workers=True)
     selected = rf.Mask(query="selected", reconstruct=True)
     model = rf.Model(
@@ -268,7 +258,7 @@ def test_distributed_vocabulary_growth_in_one_fit(tmp_path, monkeypatch, bucket_
         accelerator="cpu",
         devices=2,
         strategy=DDPStrategy(
-            start_method="spawn",
+            start_method="popen",
             process_group_backend="gloo",
             timeout=timedelta(seconds=60),
             find_unused_parameters=True,
@@ -280,15 +270,29 @@ def test_distributed_vocabulary_growth_in_one_fit(tmp_path, monkeypatch, bucket_
         limit_val_batches=0,
         num_sanity_val_steps=0,
         accumulate_grad_batches=accumulation,
-        callbacks=[GrowthAudit(tmp_path, bucket_view)],
+        callbacks=[GrowthAudit(directory, bucket_view)],
         logger=False,
         enable_checkpointing=False,
         enable_progress_bar=False,
         enable_model_summary=False,
-        default_root_dir=tmp_path,
+        default_root_dir=directory,
     )
     trainer.fit(model, datamodule=datamodule)
 
+
+@pytest.mark.skipif(
+    not torch.distributed.is_available() or not torch.distributed.is_gloo_available(), reason="requires CPU Gloo"
+)
+@pytest.mark.parametrize(
+    "bucket_view,accumulation,init_sync",
+    [(False, 1, True), (True, 1, True), (False, 2, True), (True, 2, True), (True, 2, False)],
+    ids=["ddp", "bucket_view", "accumulate", "bucket_view_accumulate", "no_initial_sync"],
+)
+def test_distributed_vocabulary_growth_in_one_fit(tmp_path, monkeypatch, bucket_view, accumulation, init_sync):
+    # The two data workers also use spawn; keep this proof independent of host thread counts.
+    monkeypatch.setenv("OMP_NUM_THREADS", "1")
+    monkeypatch.setenv("MKL_NUM_THREADS", "1")
+    launch(train, tmp_path, bucket_view, accumulation, init_sync)
     ranks = [torch.load(tmp_path / f"rank-{rank}.pt", weights_only=True) for rank in range(2)]
     expected_vocabulary = ["rank0-a", "rank1-a", "rank0-b", "rank1-b", "rank1-late"]
     global_counts = Counter(label for labels in LABELS for label in labels)
