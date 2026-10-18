@@ -46,7 +46,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           enable-cache: true
       - name: Resolve compatibility environment independently of locked versions
