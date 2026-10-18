@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Generator, Mapping
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import InitVar
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Unpack, cast, overload
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Unpack, cast
 from weakref import ReferenceType, ref
 
 import pyarrow as pa
@@ -16,7 +16,7 @@ from lightning.pytorch import Callback, LightningModule, Trainer
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
-from relflow.distributed import broadcast_object
+from relflow.distributed import all_reduce_sum, broadcast_object
 from relflow.helpers.resize import Resize
 from relflow.logging import logger
 from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
@@ -31,6 +31,7 @@ from relflow.tensorfields.base import (
     TensorFieldBase,
     TensorInput,
 )
+from relflow.tensorfields.grouping import Refinement
 from relflow.tensorfields.output import array, labels, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
 from relflow.tensorfields.shared.reconstruction import Metrics, Reconstruction, Scores
@@ -49,9 +50,9 @@ if TYPE_CHECKING:
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
 
-cluster: Extension = Extension(name="cluster", types=(bool, int, float, str, bytes))
+group: Extension = Extension(name="group", types=(bool, int, float, str, bytes))
 
-cluster.callback(VocabularySyncCallback, CounterUpdateCallback, Metrics)
+group.callback(VocabularySyncCallback, CounterUpdateCallback, Metrics)
 
 # Algorithmic constants: fixed values from the SwAV/DINO literature or symmetry-breaking
 # magnitudes that have no reason to be user-tuned.
@@ -59,85 +60,80 @@ _BALANCE_EPSILON: float = 0.05
 _BALANCE_ITERS: int = 3
 _REVIVE_NOISE: float = 0.02
 _REVIVE_WARMUP: int = 1
-_OVERRIDE_LOCK: str = "cluster assignment overrides"
+_OVERRIDE_LOCK: str = "group assignment overrides"
 
 Assignment = int | torch.Tensor | list[float] | tuple[float, ...]
 
 
-@cluster.register(Component.Request)
+@torch.no_grad()
+def initialize(weight: torch.Tensor, start: int, stop: int, retired: torch.Tensor) -> None:
+    """Break assignment symmetry weakly and evenly without changing learned rows."""
+    available = (~retired).nonzero(as_tuple=True)[0]
+    rows = weight[start:stop]
+    rows.zero_()
+    selected = available[torch.arange(start, stop, device=weight.device) % available.numel()]
+    rows.scatter_(1, selected.unsqueeze(-1), 0.1)
+
+
+@group.register(Component.Request)
 class Request(RequestBase):
-    """Scalar labels represented through shared, learned latent clusters.
+    """Scalar labels represented through shared, learned latent groups.
 
     Training grows label storage automatically. ``bounds=K`` normalizes to ``(K, K)``;
-    ``bounds=(lower, upper)`` allows an adaptive cluster count within that
-    range. The normalized tuple is stored as ``n_clusters``. ``p_unavailable``
-    routes known training labels through shared unavailable content.
+    ``bounds=(lower, upper)`` allows an adaptive group count within that
+    range. ``p_unavailable`` routes known training labels through shared unavailable content.
     ``ema_decay`` smooths usage statistics; ``revive_temperature=0`` disables
-    inactive-cluster revival. A reconstructing mask trains the cluster head.
-    Predictions expose the best cluster and the best known vocabulary label.
+    inactive-group revival. Assignments initialize weakly and evenly and route
+    deterministically with straight-through gradients. A reconstructing mask
+    trains the group head; identity likelihoods normalize within each group.
+    When Group has a reconstruction objective, fitting can refine memberships
+    against its own training identity likelihood, accepting only improvement
+    on its own validation likelihood. Other losses guide ordinary backpropagation
+    without defining Group's objective. Predictions expose the best group and identity.
     """
 
-    model_config = pydantic.ConfigDict(populate_by_name=True, serialize_by_alias=True)
-
-    type: Literal["cluster"] = "cluster"
+    type: Literal["group"] = "group"
     p_unavailable: Annotated[float, pydantic.Field(ge=0.0, le=1.0, default=0.01)] = 0.01
 
     ema_decay: Annotated[float, pydantic.Field(ge=0.0, le=1.0, default=0.99)] = 0.99
     revive_temperature: Annotated[float, pydantic.Field(ge=0.0, default=10.0)] = 10.0
 
-    n_clusters: Annotated[
+    bounds: Annotated[
         tuple[int, int],
         pydantic.Field(
-            alias="bounds",
-            serialization_alias="bounds",
-            description="(lower_bound, upper_bound) for the number of clusters. A single int is broadcast to (K, K) to specify an exact number of clusters.",
+            description="(lower_bound, upper_bound) for the number of groups. A single int is broadcast to (K, K) to specify an exact number of groups.",
         ),
     ]
 
     if TYPE_CHECKING:
 
-        @overload
         def __init__(
             self,
             *,
             bounds: int | tuple[int, int],
-            n_clusters: int | tuple[int, int] = ...,
             p_unavailable: float = 0.01,
             ema_decay: float = 0.99,
             revive_temperature: float = 10.0,
-            type: Literal["cluster"] = "cluster",
+            type: Literal["group"] = "group",
             **options: Unpack[FieldOptions],
         ) -> None: ...
 
-        @overload
-        def __init__(
-            self,
-            *,
-            n_clusters: int | tuple[int, int],
-            bounds: int | tuple[int, int] = ...,
-            p_unavailable: float = 0.01,
-            ema_decay: float = 0.99,
-            revive_temperature: float = 10.0,
-            type: Literal["cluster"] = "cluster",
-            **options: Unpack[FieldOptions],
-        ) -> None: ...
-
-    @pydantic.field_validator("n_clusters", mode="before")
+    @pydantic.field_validator("bounds", mode="before")
     @classmethod
-    def check_n_clusters_input(cls, value: Any) -> Any:
+    def check_bounds_input(cls, value: Any) -> Any:
         if isinstance(value, int) and not isinstance(value, bool):
             return (value, value)
         return value
 
     @pydantic.model_validator(mode="after")
-    def check_n_clusters(self):
-        if len(self.n_clusters) != 2:
-            raise ValueError("n_clusters tuple must have exactly 2 elements (lower_bound, upper_bound)")
-        lower, upper = self.n_clusters
+    def check_bounds(self):
+        if len(self.bounds) != 2:
+            raise ValueError("bounds tuple must have exactly 2 elements (lower_bound, upper_bound)")
+        lower, upper = self.bounds
         if lower <= 0:
-            raise ValueError("n_clusters lower bound must be greater than 0")
+            raise ValueError("bounds lower bound must be greater than 0")
         if lower > upper:
-            raise ValueError("n_clusters lower bound must be less than or equal to upper bound")
+            raise ValueError("bounds lower bound must be less than or equal to upper bound")
         return self
 
     @classmethod
@@ -149,8 +145,8 @@ class Request(RequestBase):
         assignment: int | torch.Tensor | list[float] | tuple[float, ...],
         /,
     ) -> int:
-        """Persistently assign one token to a cluster or cluster distribution."""
-        return ClusterRuntime(model=model, address=address).assign(token, assignment)
+        """Persistently assign one token to a group or group distribution."""
+        return GroupRuntime(model=model, address=address).assign(token, assignment)
 
     @classmethod
     def vocabulary(
@@ -159,12 +155,12 @@ class Request(RequestBase):
         address: Address | str,
         /,
     ) -> tuple[Any, ...]:
-        """Return an immutable snapshot of one Cluster vocabulary."""
+        """Return an immutable snapshot of one Group vocabulary."""
         from relflow.architecture.root import Model
 
         normalized = Address(str(address))
         if isinstance(source, Model):
-            embedder = resolve_cluster_embedder(source, normalized)
+            embedder = resolve_group_embedder(source, normalized)
             with embedder.vocab.lock:
                 return tuple(embedder.vocab.master)
         elif isinstance(source, Mapping):
@@ -178,7 +174,7 @@ class Request(RequestBase):
                 )
         else:
             raise TypeError(
-                f"Cluster.vocabulary source must be a Model or InterprocessEncodingContext, got {type(source).__name__}"
+                f"Group.vocabulary source must be a Model or InterprocessEncodingContext, got {type(source).__name__}"
             )
 
         with state.lock:
@@ -192,27 +188,26 @@ class Request(RequestBase):
         /,
     ) -> dict[Any, dict[str, int | tuple[float, ...]]]:
         """Return evaluation-time assignments for every populated token."""
-        embedder = resolve_cluster_embedder(model, address)
+        embedder = resolve_group_embedder(model, address)
         with embedder.vocab.lock:
             vocabulary = tuple(embedder.vocab.master)
             logits = (
-                cast(torch.Tensor, embedder.embeddings[TensorKey.cluster.name].weight)[: len(vocabulary)]
-                .detach()
-                .clone()
+                cast(torch.Tensor, embedder.embeddings[TensorKey.group.name].weight)[: len(vocabulary)].detach().clone()
             )
 
         if not vocabulary:
             return {}
 
+        logits = embedder.support(logits)
         probabilities = torch.softmax(logits, dim=-1)
-        clusters: list[int] = logits.argmax(dim=-1).cpu().tolist()
+        groups: list[int] = logits.argmax(dim=-1).cpu().tolist()
         rows: list[list[float]] = probabilities.cpu().tolist()
         return {
             token: {
-                "cluster": cluster_id,
+                "group": group_id,
                 "probabilities": tuple(float(probability) for probability in row),
             }
-            for token, cluster_id, row in zip(vocabulary, clusters, rows, strict=True)
+            for token, group_id, row in zip(vocabulary, groups, rows, strict=True)
         }
 
     @classmethod
@@ -222,13 +217,14 @@ class Request(RequestBase):
         address: Address | str,
         /,
     ) -> dict[str, tuple[int, ...] | tuple[float, ...]]:
-        """Return committed cluster IDs and their usage EMA snapshot."""
-        embedder = resolve_cluster_embedder(model, address)
+        """Return the balancing subset, retired IDs, and reconstruction-head usage."""
+        embedder = resolve_group_embedder(model, address)
         committed = embedder.committed.detach().cpu().clone()
         usage = embedder.usage_ema.detach().cpu().clone()
 
         return {
             "committed": tuple(index for index, value in enumerate(committed.tolist()) if value),
+            "retired": tuple(embedder.retired.nonzero(as_tuple=True)[0].cpu().tolist()),
             "usage": tuple(float(value) for value in usage.tolist()),
         }
 
@@ -241,10 +237,10 @@ class Request(RequestBase):
         /,
     ) -> AbstractContextManager[None]:
         """Temporarily override token assignments within a context."""
-        return ClusterRuntime(model=model, address=address).override(assignments)
+        return GroupRuntime(model=model, address=address).override(assignments)
 
 
-@cluster.register(Component.observe)
+@group.register(Component.observe)
 def observe(
     field: RaggedField,
     *,
@@ -253,12 +249,12 @@ def observe(
     state: object | None,
     learn: bool,
 ) -> TensorDict | None:
-    """Reserve and count the complete pristine clustering exposure."""
+    """Reserve and count the complete pristine grouping exposure."""
 
     if not learn:
         return None
     if not isinstance(state, VocabularyState):
-        raise RuntimeError(f"cluster field at '{address}' requires a vocabulary encoding context")
+        raise RuntimeError(f"group field at '{address}' requires a vocabulary encoding context")
 
     indices = state.indices(field.values, learn=True)
     content = torch.from_numpy(indices.copy())
@@ -271,7 +267,7 @@ def observe(
     )
 
 
-@cluster.register(Component.TensorField)
+@group.register(Component.TensorField)
 @tensorclass
 class TensorField(TensorFieldBase[torch.Tensor]):
     state: torch.Tensor
@@ -302,15 +298,13 @@ class TensorField(TensorFieldBase[torch.Tensor]):
     ) -> TensorField:
         state = context.state
         if state is not None and not isinstance(state, VocabularyState):
-            raise TypeError(
-                f"cluster field at '{address}' requires VocabularyState context, got {type(state).__name__}"
-            )
+            raise TypeError(f"group field at '{address}' requires VocabularyState context, got {type(state).__name__}")
 
         def encode(field: RaggedField) -> torch.Tensor:
             if not len(field.values):
                 return torch.zeros(field.shape, dtype=torch.int64)
             if state is None:
-                raise RuntimeError(f"cluster field at '{address}' requires a vocabulary encoding context")
+                raise RuntimeError(f"group field at '{address}' requires a vocabulary encoding context")
             tokens = state.indices(field.values, learn=False)
             return torch.from_numpy(field.place(tokens, fill=0))
 
@@ -346,10 +340,11 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         )
 
 
-@cluster.register(Component.Embedder)
+@group.register(Component.Embedder)
 class Embedder(EmbedderBase):
     usage_ema: torch.Tensor
     committed: torch.Tensor
+    retired: torch.Tensor
     adherence_ema: torch.Tensor
 
     def __init__(self, schema: Schema, address: Address):
@@ -358,14 +353,14 @@ class Embedder(EmbedderBase):
         request: Request = cast(Request, schema.requests[address])
         self.origin: Address = address
         self.destination: Address = cast("Branch", request.parent).address
-        self.size: int = request.n_clusters[-1]
+        self.size: int = request.bounds[-1]
 
         if address not in schema.reconstruct:
-            # Cluster loss fires only for reconstructed rows; a plain-input
-            # Cluster silently freezes n_committed at initialization.
-            logger.bind(component="tensorfield", field_type="cluster", address=str(address)).warning(
-                f"Cluster field {address!s} has no reconstructing Mask; dynamic K-selection "
-                "will not engage. Add Mask(reconstruct=True) to train the cluster head."
+            # Group loss fires only for reconstructed rows; a plain-input
+            # Group silently freezes n_committed at initialization.
+            logger.bind(component="tensorfield", field_type="group", address=str(address)).warning(
+                f"Group field {address!s} has no reconstructing Mask; dynamic K-selection "
+                "will not engage. Add Mask(reconstruct=True) to train the group head."
             )
 
         self.vocab: OnlineVocabularyModel = OnlineVocabularyModel()
@@ -377,7 +372,7 @@ class Embedder(EmbedderBase):
                     num_embeddings=len(Tokens),
                     embedding_dim=schema.d_model,
                 ),
-                TensorKey.cluster.name: Embedding(
+                TensorKey.group.name: Embedding(
                     num_embeddings=self.capacity + 1,
                     embedding_dim=self.size,
                 ),
@@ -395,22 +390,37 @@ class Embedder(EmbedderBase):
             }
         )
 
-        lower: int = request.n_clusters[0]
+        lower: int = request.bounds[0]
         usage_init = torch.zeros(self.size)
         usage_init[:lower] = 1.0 / lower
         committed_init = torch.zeros(self.size, dtype=torch.bool)
         committed_init[:lower] = True
         self.register_buffer("usage_ema", usage_init)
         self.register_buffer("committed", committed_init)
+        self.register_buffer("retired", torch.zeros(self.size, dtype=torch.bool))
         self.register_buffer("adherence_ema", torch.zeros(()))
+        self.register_buffer("information_ema", torch.tensor(math.log(lower)))
+        self.register_buffer("statistics", torch.zeros(self.size + 2), persistent=False)
+        with torch.no_grad():
+            weight = cast(torch.Tensor, self.embeddings[TensorKey.group.name].weight)
+            weight.zero_()
+            initialize(weight, 0, self.capacity, self.retired)
 
     @property
     def capacity(self) -> int:
         return self.vocab.size
 
+    def support(self, logits: torch.Tensor) -> torch.Tensor:
+        """Retired groups have no assignment or prediction probability until revived."""
+        return logits.masked_fill(self.retired, float("-inf"))
+
     def resize(self, size: int, resize: Resize) -> None:
-        """Expand identity rows without changing cluster columns or their state."""
-        resize.embedding(cast(torch.nn.Embedding, self.embeddings[TensorKey.cluster.name]), size + 1, tail=True)
+        """Expand identity rows without changing group columns or their state."""
+        previous = self.embeddings[TensorKey.group.name].weight
+        resize.embedding(cast(torch.nn.Embedding, self.embeddings[TensorKey.group.name]), size + 1, tail=True)
+        for old, new in resize.parameters:
+            if old is previous:
+                initialize(new, old.shape[0] - 1, new.shape[0] - 1, self.retired)
         cast(Counter, self.counters[TensorKey.content.name]).resize(size + 1, resize, tail=True)
         if self.vocab.size != size:
             resize.attribute(self.vocab, "size", size)
@@ -431,17 +441,19 @@ class Embedder(EmbedderBase):
                 raise ValueError(f"Token in address {self.origin} outside [-1, {self.capacity})")
 
         safe_content = content.masked_fill(content.eq(-1), self.capacity).masked_fill(~valued, 0)
-        assign_logits = self.embeddings[TensorKey.cluster.name](safe_content)
+        assign_logits = self.support(self.embeddings[TensorKey.group.name](safe_content))
         if self.training:
-            cluster_assignments = torch.nn.functional.gumbel_softmax(assign_logits, hard=True, dim=-1)
+            soft = assign_logits.softmax(dim=-1)
+            hard = torch.zeros_like(soft).scatter_(1, soft.argmax(dim=-1, keepdim=True), 1.0)
+            group_assignments = hard - soft.detach() + soft
         else:
             hard = torch.zeros_like(assign_logits)
             hard.scatter_(-1, assign_logits.argmax(dim=-1, keepdim=True), 1.0)
-            cluster_assignments = hard
-        cluster_assignments = cluster_assignments * valued.unsqueeze(-1)
-        cluster_embeddings = self.embeddings[TensorKey.content.name](cluster_assignments)
+            group_assignments = hard
+        group_assignments = group_assignments * valued.unsqueeze(-1)
+        group_embeddings = self.embeddings[TensorKey.content.name](group_assignments)
 
-        embeddings: torch.Tensor = (self.embeddings[TensorKey.state.name](state) + cluster_embeddings).reshape(
+        embeddings: torch.Tensor = (self.embeddings[TensorKey.state.name](state) + group_embeddings).reshape(
             N, *dims, -1
         )
 
@@ -458,12 +470,14 @@ class Embedder(EmbedderBase):
         return self.vocab.state
 
     def assignment_logits(self, assignment: Assignment) -> torch.Tensor:
-        weight = cast(torch.Tensor, self.embeddings[TensorKey.cluster.name].weight)
+        weight = cast(torch.Tensor, self.embeddings[TensorKey.group.name].weight)
         if isinstance(assignment, bool):
-            raise TypeError("assignment must be a cluster index or probability vector")
+            raise TypeError("assignment must be a group index or probability vector")
         if isinstance(assignment, int):
             if not 0 <= assignment < self.size:
-                raise ValueError(f"cluster must be in [0, {self.size}); got {assignment}")
+                raise ValueError(f"group must be in [0, {self.size}); got {assignment}")
+            if bool(self.retired[assignment]):
+                raise ValueError(f"group {assignment} at {self.origin} is retired; choose an available group")
             distribution = torch.zeros(self.size, dtype=weight.dtype, device=weight.device)
             distribution[assignment] = 1.0
             return torch.log(distribution.clamp_min(1e-8))
@@ -477,15 +491,19 @@ class Embedder(EmbedderBase):
         total = float(distribution.sum().item())
         if not math.isclose(total, 1.0, abs_tol=1e-4):
             raise ValueError(f"assignment probabilities must sum to 1; got {total}")
+        if bool(distribution[self.retired].gt(0).any()):
+            raise ValueError(
+                f"assignment at {self.origin} gives probability to a retired group; choose available groups"
+            )
         return torch.log(distribution.clamp_min(1e-8))
 
     def assign_token(self, token: Any, assignment: Assignment) -> int:
         logits = self.assignment_logits(assignment)
-        weight = cast(torch.Tensor, self.embeddings[TensorKey.cluster.name].weight)
+        weight = cast(torch.Tensor, self.embeddings[TensorKey.group.name].weight)
         index = self.vocab.state.index.get(token)
         if index is None:
             if len(self.vocab.master) >= self.capacity:
-                raise ValueError(f"cluster field {self.origin} at capacity ({self.capacity}); cannot assign {token!r}")
+                raise ValueError(f"group field {self.origin} at capacity ({self.capacity}); cannot assign {token!r}")
             self.vocab.master.append(token)
             self.vocab._snapshot_cache = None
             self.vocab._snapshot_size = -1
@@ -497,10 +515,10 @@ class Embedder(EmbedderBase):
     @contextmanager
     def override_assignments(self, assignments: Mapping[Any, Assignment]) -> Generator[None, None, None]:
         if self._override_depth:
-            raise RuntimeError("Cluster assignment overrides cannot be nested")
+            raise RuntimeError("Group assignment overrides cannot be nested")
 
         self._override_depth += 1
-        weight = cast(torch.Tensor, self.embeddings[TensorKey.cluster.name].weight)
+        weight = cast(torch.Tensor, self.embeddings[TensorKey.group.name].weight)
         saved: list[tuple[int, torch.Tensor, bool]] = []
         try:
             for token, assignment in assignments.items():
@@ -513,7 +531,7 @@ class Embedder(EmbedderBase):
 
                 if len(self.vocab.master) >= self.capacity:
                     raise ValueError(
-                        f"cluster field {self.origin} at capacity ({self.capacity}); cannot override {token!r}"
+                        f"group field {self.origin} at capacity ({self.capacity}); cannot override {token!r}"
                     )
                 new_index = len(self.vocab.master)
                 original = weight[new_index].detach().clone()
@@ -535,11 +553,11 @@ class Embedder(EmbedderBase):
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         if self._override_depth:
-            raise RuntimeError("cannot save or rebuild a model while Cluster assignment overrides are active")
+            raise RuntimeError("cannot save or rebuild a model while Group assignment overrides are active")
         super()._save_to_state_dict(destination, prefix, keep_vars)
 
 
-@cluster.register(Component.bind)
+@group.register(Component.bind)
 def bind(
     module: Model,
     field: TensorFieldBase,
@@ -550,9 +568,9 @@ def bind(
     strata: Strata,
     resize: Resize,
 ) -> None:
-    """Grow source identities while preserving the unavailable row and cluster count."""
+    """Grow source identities while preserving the unavailable row and group count."""
     if not isinstance(binding, VocabularyBatch):
-        raise TypeError(f"cluster binding at '{address}' requires VocabularyBatch, got {type(binding).__name__}")
+        raise TypeError(f"group binding at '{address}' requires VocabularyBatch, got {type(binding).__name__}")
     embedder = cast(Embedder, module.nodes[address].embedder)
     mapping, size = binding.resolve(embedder.vocab, learn=strata == Strata.train, device=module.device, resize=resize)
     embedder.resize(size, resize)
@@ -568,7 +586,7 @@ def bind(
         )
 
 
-@cluster.register(Component.learn)
+@group.register(Component.learn)
 def learn(
     module: Model,
     observation: TensorDict,
@@ -576,21 +594,21 @@ def learn(
     address: Address,
     strata: Strata,
 ) -> None:
-    """Apply pristine clustering counts to model-owned resources."""
+    """Apply pristine grouping counts to model-owned resources."""
 
     if strata != Strata.train:
-        raise ValueError(f"cluster learner at '{address}' requires train strata, got {strata}")
+        raise ValueError(f"group learner at '{address}' requires train strata, got {strata}")
     embedder: Embedder = cast(Embedder, module.nodes[address].embedder)
     cast(Counter, embedder.counters[TensorKey.state.name]).learn(cast(torch.Tensor, observation[TensorKey.state]))
     cast(Counter, embedder.counters[TensorKey.content.name]).learn(cast(torch.Tensor, observation[TensorKey.content]))
 
 
-def resolve_cluster_embedder(model: "Model", address: Address | str) -> Embedder:
-    """Resolve a live Cluster embedder without importing Model at module load."""
+def resolve_group_embedder(model: "Model", address: Address | str) -> Embedder:
+    """Resolve a live Group embedder without importing Model at module load."""
     from relflow.architecture.root import Model
 
     if not isinstance(model, Model):
-        raise TypeError(f"Cluster binding model must be a Model, got {type(model).__name__}")
+        raise TypeError(f"Group binding model must be a Model, got {type(model).__name__}")
 
     normalized = Address(str(address))
     if normalized not in model.nodes:
@@ -598,12 +616,12 @@ def resolve_cluster_embedder(model: "Model", address: Address | str) -> Embedder
 
     embedder = getattr(model.nodes[normalized], "embedder", None)
     if not isinstance(embedder, Embedder):
-        raise TypeError(f"address {str(normalized)!r} is not a Cluster field (got {type(embedder).__name__})")
+        raise TypeError(f"address {str(normalized)!r} is not a Group field (got {type(embedder).__name__})")
     return embedder
 
 
-class ClusterRuntime:
-    """Resolve and mutate one Cluster field's model-owned runtime state."""
+class GroupRuntime:
+    """Resolve and mutate one Group field's model-owned runtime state."""
 
     def __init__(self, model: "Model", address: Address | str):
         self._model: ReferenceType[Model] = ref(model)
@@ -613,22 +631,22 @@ class ClusterRuntime:
     def resolve(self) -> tuple[Model, Embedder]:
         model = self._model()
         if model is None:
-            raise RuntimeError("the model bound to this Cluster field no longer exists")
+            raise RuntimeError("the model bound to this Group field no longer exists")
         if self.address not in model.nodes:
             raise KeyError(f"no field at address {str(self.address)!r}")
 
         embedder = getattr(model.nodes[self.address], "embedder", None)
         if not isinstance(embedder, Embedder):
-            raise TypeError(f"address {str(self.address)!r} is not a Cluster field (got {type(embedder).__name__})")
+            raise TypeError(f"address {str(self.address)!r} is not a Group field (got {type(embedder).__name__})")
         return model, embedder
 
     @staticmethod
     def assert_writable(model: Model, embedder: Embedder) -> None:
         if embedder.vocab.is_shared:
-            raise RuntimeError("Cluster assignments cannot change while vocabulary state is shared")
+            raise RuntimeError("Group assignments cannot change while vocabulary state is shared")
         active = tuple(str(name) for name, count in model.locks.items() if count > 0)
         if active:
-            raise RuntimeError(f"Cluster assignments cannot change while the model is active: {', '.join(active)}")
+            raise RuntimeError(f"Group assignments cannot change while the model is active: {', '.join(active)}")
 
     def assign(self, token: Any, assignment: Assignment) -> int:
         from relflow.architecture.binding import optimizers
@@ -668,16 +686,16 @@ class ClusterRuntime:
                     model.locks[_OVERRIDE_LOCK] -= 1
 
 
-@cluster.register(Component.Decoder)
+@group.register(Component.Decoder)
 class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
-        # Cluster assignments belong to stable identities. Row-varying sibling
+        # Group assignments belong to stable identities. Row-varying sibling
         # values may supervise them through downstream objectives, but must not
         # alter the query used to reconstruct the identity itself.
         super().__init__(schema=schema, address=address, conditioned=False)
 
         request: Request = cast(Request, schema.requests[address])
-        n_clusters: int = request.n_clusters[-1]
+        size: int = request.bounds[-1]
         self.metrics = Scores(address, Reconstruction)
 
         self.linears = torch.nn.ModuleDict(
@@ -686,9 +704,7 @@ class Decoder(DecoderBase):
                     in_features=schema.d_model,
                     out_features=len(Tokens),
                 ),
-                TensorKey.cluster.name: torch.nn.Linear(
-                    in_features=schema.d_model, out_features=n_clusters, bias=False
-                ),
+                TensorKey.group.name: torch.nn.Linear(in_features=schema.d_model, out_features=size, bias=False),
             }
         )
 
@@ -697,12 +713,12 @@ class Decoder(DecoderBase):
         return TensorDict(
             source={
                 TensorKey.state: self.linears[TensorKey.state.name](pooled),
-                TensorKey.cluster: self.linears[TensorKey.cluster.name](pooled),
+                TensorKey.group: self.linears[TensorKey.group.name](pooled),
             }
         )
 
 
-@cluster.register(Component.loss)
+@group.register(Component.loss)
 def loss(
     module: Model,
     prediction: Prediction,
@@ -740,16 +756,15 @@ def loss(
     )
 
     valued: torch.Tensor = trainable & state_targets.eq(Tokens.valued.value)
-    cluster_logits: torch.Tensor = cast(torch.Tensor, prediction.payload[TensorKey.cluster]).reshape(N, -1)
+    group_logits = embedder.support(cast(torch.Tensor, prediction.payload[TensorKey.group]).reshape(N, -1))
     content_targets = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(N)
 
-    assign_weight: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.cluster.name].weight)
     vocab_size = len(embedder.vocab.master)
     known = valued & content_targets.ge(0) & content_targets.lt(vocab_size)
     # The reconstruction support matches the writer. Neither the unavailable
     # input embedding nor unallocated label rows are output candidates.
-    cluster_probs = cluster_logits[known].float().softmax(dim=-1)
-    vocab_logits = cluster_probs @ assign_weight[:vocab_size].float().T
+    group_probs = group_logits[known].float().softmax(dim=-1)
+    vocab_logits = vocabulary_logits(embedder, group_probs)
     objective = torch.nn.functional.cross_entropy(vocab_logits, content_targets[known], reduction="sum")
     decoder = cast(Decoder, module.nodes[prediction.address].decoder)
     with torch.no_grad():
@@ -766,32 +781,27 @@ def loss(
 
     # Unknown identities provide no assignment evidence: they must not
     # move the usage EMA, committed count, or balancing targets.
-    valued_logits = cluster_logits[known].float()
+    valued_logits = group_logits[known].float()
     n_valued: int = valued_logits.shape[0]
-    lower: int = request.n_clusters[0]
+    lower: int = request.bounds[0]
+
+    valued_probs = valued_logits.softmax(dim=-1)
+    with torch.no_grad():
+        entropy = -(valued_probs * valued_probs.clamp_min(1e-12).log()).sum()
+        embedder.statistics.add_(
+            torch.cat((valued_probs.sum(dim=0), entropy.reshape(1), valued_probs.new_tensor([n_valued])))
+        )
 
     if n_valued < max(lower, 2):
         return loss
 
-    valued_probs = torch.softmax(valued_logits, dim=-1)
-    upper: int = request.n_clusters[-1]
-
     with torch.no_grad():
-        batch_usage = valued_probs.detach().mean(dim=0)
-        embedder.usage_ema.mul_(request.ema_decay).add_(batch_usage * (1.0 - request.ema_decay))
-
-        # Perplexity of natural usage tells us how many clusters the data is currently spending
-        # mass on. Clamped into [lower, upper] this becomes the committed count so the balance
-        # loss can grow the active set when content CE recruits more columns.
         usage_normalized = embedder.usage_ema / embedder.usage_ema.sum().clamp_min(1e-12)
         usage_safe = usage_normalized.clamp_min(1e-12)
         usage_entropy = -(usage_safe * usage_safe.log()).sum()
-        perplexity = torch.exp(usage_entropy)
-        n_committed: int = max(lower, min(upper, round(perplexity.item())))
-
-        _, committed_idx = embedder.usage_ema.topk(n_committed)
-        embedder.committed.zero_()
-        embedder.committed[committed_idx] = True
+        perplexity = embedder.information_ema.exp()
+        committed_idx = embedder.committed.nonzero(as_tuple=True)[0]
+        n_committed = committed_idx.numel()
 
         # Preserve finite-logit support under sharp assignments. Exponentiating
         # before balancing can underflow entire columns, leaving no recovery
@@ -800,43 +810,82 @@ def loss(
         for _ in range(_BALANCE_ITERS):
             log_q = log_q - torch.logsumexp(log_q, dim=1, keepdim=True) - math.log(n_valued)
             log_q = log_q - torch.logsumexp(log_q, dim=0, keepdim=True) - math.log(n_committed)
-        Q = (log_q + math.log(n_valued)).exp()
+        Q = log_q.softmax(dim=1)
 
     full_log_probs = torch.log_softmax(valued_logits, dim=-1)
     committed_log_probs = full_log_probs[:, committed_idx]
     balance_loss = -(Q * committed_log_probs).sum(dim=-1).mean()
 
     loss += module.track(
-        (prediction.address, strata, Metric.loss, TensorKey.cluster),
+        (prediction.address, strata, Metric.loss, TensorKey.group),
         value=balance_loss,
     )
     module.track(
-        (prediction.address, strata, "cluster", "active"),
+        (prediction.address, strata, "group", "active"),
         value=perplexity,
     )
     module.track(
-        (prediction.address, strata, "cluster", "committed"),
+        (prediction.address, strata, "group", "committed"),
         value=state_inputs.new_tensor(float(n_committed)),
     )
     module.track(
-        (prediction.address, strata, "cluster", "usage_entropy"),
+        (prediction.address, strata, "group", "usage_entropy"),
         value=usage_entropy,
     )
 
-    if lower != upper:
-        uncommitted = ~embedder.committed
-        if uncommitted.any():
-            uncommitted_mass = valued_probs[:, uncommitted].mean(dim=0).sum()
-            with torch.no_grad():
-                embedder.adherence_ema.mul_(request.ema_decay).add_(
-                    uncommitted_mass.detach() * (1.0 - request.ema_decay)
-                )
     return loss
 
 
-@cluster.register(Component.output)
+@torch.no_grad()
+def update_usage(embedder: Embedder, request: Request, statistics: torch.Tensor) -> None:
+    """Update grouping evidence once from globally weighted training observations.
+
+    Marginal entropy alone mistakes identical uncertain predictions for many
+    distinct groups. Subtracting the mean prediction entropy measures variation
+    between observations instead. Empty batches provide no evidence.
+    """
+    count = statistics[-1]
+    if not bool(count > 0):
+        return
+    usage = statistics[:-2] / count
+    entropy = -(usage * usage.clamp_min(1e-12).log()).sum()
+    information = (entropy - statistics[-2] / count).clamp_min(0)
+    decay = request.ema_decay
+    embedder.usage_ema.mul_(decay).add_(usage * (1 - decay))
+    embedder.information_ema.mul_(decay).add_(information * (1 - decay))
+    lower, upper = request.bounds
+    available = int((~embedder.retired).sum().item())
+    count = max(lower, min(upper, available, round(embedder.information_ema.exp().item())))
+    indices = embedder.usage_ema.masked_fill(embedder.retired, -1.0).topk(count).indices
+    embedder.committed.zero_()
+    embedder.committed[indices] = True
+    if lower != upper:
+        mass = usage[~embedder.committed].sum()
+        embedder.adherence_ema.mul_(decay).add_(mass * (1 - decay))
+
+
+def vocabulary_logits(embedder: Embedder, probabilities: torch.Tensor) -> torch.Tensor:
+    """Mix identity likelihoods normalized within each available group.
+
+    Normalizing over identities preserves learned frequency priors, including
+    when only one group exists. Spare rows and unavailable input are not labels.
+    """
+    weight = cast(torch.Tensor, embedder.embeddings[TensorKey.group.name].weight)
+    available = ~embedder.retired
+    assignments = weight[: len(embedder.vocab.master), available].float()
+    conditional = assignments.log_softmax(dim=0)
+    predicted = probabilities[:, available].float().clamp_min(1e-30).log()
+    # Iterate the small group axis rather than materializing batch x vocabulary
+    # x groups. Work remains vectorized over every identity and observation.
+    result = predicted.new_full((predicted.shape[0], assignments.shape[0]), float("-inf"))
+    for context, identity in zip(predicted.unbind(-1), conditional.unbind(-1), strict=True):
+        result = torch.logaddexp(result, context.unsqueeze(-1) + identity.unsqueeze(0))
+    return result
+
+
+@group.register(Component.output)
 def output(module: Model, address: Address) -> pa.StructType:
-    cluster_type = pa.struct(
+    group_type = pa.struct(
         [
             pa.field(TensorKey.value.name, pa.int32(), nullable=False),
             pa.field(TensorKey.probability.name, pa.float32(), nullable=False),
@@ -850,43 +899,41 @@ def output(module: Model, address: Address) -> pa.StructType:
     )
     return pa.struct(
         [
-            pa.field(TensorKey.cluster.name, cluster_type, nullable=False),
+            pa.field(TensorKey.group.name, group_type, nullable=False),
             pa.field(TensorKey.content.name, content_type, nullable=False),
         ]
     )
 
 
-@cluster.register(Component.write)
+@group.register(Component.write)
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
-    cluster_type = datatype.field(TensorKey.cluster.name).type
+    group_type = datatype.field(TensorKey.group.name).type
     content_type = datatype.field(TensorKey.content.name).type
     embedder: Embedder = cast(Embedder, module.nodes[prediction.address].embedder)
-    logits = cast(torch.Tensor, prediction.payload[TensorKey.cluster])
-    cluster_probabilities = logits.reshape(-1, logits.shape[-1]).softmax(dim=-1)
-    cluster_probability, cluster_ids = cluster_probabilities.max(dim=-1)
-    cluster_values = struct(
+    logits = cast(torch.Tensor, prediction.payload[TensorKey.group])
+    group_probabilities = embedder.support(logits.reshape(-1, logits.shape[-1])).float().softmax(dim=-1)
+    group_probability, group_ids = group_probabilities.max(dim=-1)
+    group_values = struct(
         {
-            TensorKey.value.name: array(cluster_ids, pa.int32()),
-            TensorKey.probability.name: array(cluster_probability, pa.float32()),
+            TensorKey.value.name: array(group_ids, pa.int32()),
+            TensorKey.probability.name: array(group_probability, pa.float32()),
         },
-        cluster_type,
+        group_type,
     )
 
-    assign_weight: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.cluster.name].weight).detach()
-    vocabulary_logits = cluster_probabilities @ assign_weight.T
+    logits = vocabulary_logits(embedder, group_probabilities)
     vocabulary = labels(embedder.vocab)
     size = len(vocabulary)
-    if size > vocabulary_logits.shape[-1]:
+    if size > logits.shape[-1]:
         raise ValueError(
-            f"cluster vocabulary at {prediction.address!s} has {size} values but assignment width is "
-            f"{vocabulary_logits.shape[-1]}"
+            f"group vocabulary at {prediction.address!s} has {size} values but assignment width is {logits.shape[-1]}"
         )
 
-    count = vocabulary_logits.shape[0]
+    count = logits.shape[0]
     content_labels: pa.Array = pa.nulls(count, type=pa.large_string())
     content_probability = torch.zeros(count, dtype=torch.float32, device=logits.device)
     if size:
-        probabilities = vocabulary_logits[:, :size].softmax(dim=-1)
+        probabilities = logits.softmax(dim=-1)
         content_probability, indices = probabilities.max(dim=-1)
         content_labels = pc.take(vocabulary, array(indices, pa.int64()))
 
@@ -899,14 +946,67 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
     )
     return struct(
         {
-            TensorKey.cluster.name: cluster_values,
+            TensorKey.group.name: group_values,
             TensorKey.content.name: content_values,
         },
         datatype,
     )
 
 
-class ClusterReviveCallback(Callback):
+@torch.no_grad()
+def reset_history(
+    parameter: torch.Tensor,
+    axis: int,
+    index: int,
+    optimizers: Sequence[torch.optim.Optimizer],
+) -> None:
+    """Forget replaced coordinates without changing scalar steps or neighboring history."""
+    if parameter.grad is not None:
+        parameter.grad.select(axis, index).zero_()
+    for optimizer in optimizers:
+        for value in optimizer.state.get(parameter, {}).values():
+            if isinstance(value, torch.Tensor) and value.shape == parameter.shape:
+                value.select(axis, index).zero_()
+
+
+def adaptable(embedder: Embedder, decoder: Decoder) -> bool:
+    """An adaptive transition must preserve every frozen assignment or representation."""
+    return all(
+        parameter.requires_grad
+        for parameter in (
+            embedder.embeddings[TensorKey.group.name].weight,
+            embedder.embeddings[TensorKey.content.name].weight,
+            decoder.linears[TensorKey.group.name].weight,
+        )
+    )
+
+
+class GroupUsageCallback(Callback):
+    """Commit globally weighted assignment evidence after every training batch."""
+
+    @torch.no_grad()
+    def on_train_batch_end(
+        self,
+        trainer: Trainer,
+        pl_module: LightningModule,
+        outputs: Any,
+        batch: Any,
+        batch_idx: int,
+    ) -> None:
+        module = cast("Model", pl_module)
+        # An objective-empty rank still joins every reduction. Loss functions
+        # cannot provide that guarantee because the shared loop skips them.
+        for address in sorted(module.schema.reconstruct):
+            request = module.schema.requests[address]
+            if not isinstance(request, Request):
+                continue
+            embedder = cast(Embedder, module.nodes[address].embedder)
+            totals = all_reduce_sum(embedder.statistics.clone())
+            embedder.statistics.zero_()
+            update_usage(embedder, request, totals)
+
+
+class GroupReviveCallback(Callback):
     @torch.no_grad()
     def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         pl_module = cast("Model", pl_module)
@@ -916,11 +1016,11 @@ class ClusterReviveCallback(Callback):
             request = pl_module.schema.requests.get(cast(Address, address))
             if not isinstance(request, Request) or request.revive_temperature <= 0.0:
                 continue
-            if request.n_clusters[0] == request.n_clusters[-1]:
+            if request.bounds[0] == request.bounds[-1]:
                 continue
             embedder = getattr(node, "embedder", None)
             decoder = getattr(node, "decoder", None)
-            if isinstance(embedder, Embedder) and isinstance(decoder, Decoder):
+            if isinstance(embedder, Embedder) and isinstance(decoder, Decoder) and adaptable(embedder, decoder):
                 if decoder.metrics.compute(Strata.train)["targets.known"] > 0:
                     targets[cast(Address, address)] = (embedder, decoder, request)
 
@@ -934,11 +1034,20 @@ class ClusterReviveCallback(Callback):
         plans = broadcast_object(plans, src=0)
 
         for address, (embedder, decoder, request) in targets.items():
-            self.apply(embedder, decoder, plans.get(address))
+            self.apply(embedder, decoder, plans.get(address), optimizers=getattr(trainer, "optimizers", ()))
 
     @staticmethod
     def plan(embedder: "Embedder", request: "Request", *, epoch: int) -> dict[str, Any] | None:
-        dead = (~embedder.committed).nonzero(as_tuple=True)[0]
+        # Uncommitted candidates can still encode known identities. Revival may
+        # replace only columns with no actual members, including retired slots.
+        occupied = torch.zeros_like(embedder.committed)
+        with embedder.vocab.lock:
+            assignments = cast(torch.Tensor, embedder.embeddings[TensorKey.group.name].weight)[
+                : len(embedder.vocab.master)
+            ]
+            if assignments.numel():
+                occupied[embedder.support(assignments).argmax(dim=-1)] = True
+        dead = (~embedder.committed & ~occupied).nonzero(as_tuple=True)[0]
         n_dead = dead.numel()
         if n_dead == 0:
             return None
@@ -972,7 +1081,7 @@ class ClusterReviveCallback(Callback):
             donor = int(embedder.usage_ema.argmax().item())
             donors = [donor] * len(chosen)
 
-        assign_w: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.cluster.name].weight)
+        assign_w: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.group.name].weight)
         content_w: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.content.name].weight)
         v_plus_1 = assign_w.shape[0]
         d_model = content_w.shape[0]
@@ -983,30 +1092,40 @@ class ClusterReviveCallback(Callback):
             "donors": donors,
             "noise_assign": noise * torch.randn(n_chosen, v_plus_1),
             "noise_content": noise * torch.randn(n_chosen, d_model),
-            "noise_cluster": noise * torch.randn(n_chosen, d_model),
+            "noise_group": noise * torch.randn(n_chosen, d_model),
         }
 
     @staticmethod
-    def apply(embedder: "Embedder", decoder: "Decoder", plan: dict[str, Any] | None) -> None:
-        if plan is None:
+    @torch.no_grad()
+    def apply(
+        embedder: "Embedder",
+        decoder: "Decoder",
+        plan: dict[str, Any] | None,
+        *,
+        optimizers: Sequence[torch.optim.Optimizer] = (),
+    ) -> None:
+        if plan is None or not adaptable(embedder, decoder):
             return
 
-        assign_w: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.cluster.name].weight)
+        assign_w: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.group.name].weight)
         content_w: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.content.name].weight)
-        cluster_w: torch.Tensor = cast(torch.Tensor, decoder.linears[TensorKey.cluster.name].weight)
+        group_w: torch.Tensor = cast(torch.Tensor, decoder.linears[TensorKey.group.name].weight)
         donors = plan["donors"]
         device = assign_w.device
         dtype = assign_w.dtype
 
         for i, k in enumerate(plan["dead_ids"]):
             donor = donors[i]
-            assign_w.data[:, k] = assign_w.data[:, donor] + plan["noise_assign"][i].to(device=device, dtype=dtype)
-            content_w.data[:, k] = content_w.data[:, donor] + plan["noise_content"][i].to(device=device, dtype=dtype)
-            cluster_w.data[k, :] = cluster_w.data[donor, :] + plan["noise_cluster"][i].to(
-                device=cluster_w.device, dtype=cluster_w.dtype
-            )
+            assign_w[:, k].copy_(assign_w[:, donor] + plan["noise_assign"][i].to(device=device, dtype=dtype))
+            content_w[:, k].copy_(content_w[:, donor] + plan["noise_content"][i].to(device=device, dtype=dtype))
+            group_w[k].copy_(group_w[donor] + plan["noise_group"][i].to(device=group_w.device, dtype=group_w.dtype))
             embedder.usage_ema[k] = embedder.usage_ema[donor] * 0.5
             embedder.usage_ema[donor] *= 0.5
+            embedder.committed[k] = True
+            embedder.retired[k] = False
+            reset_history(assign_w, 1, k, optimizers)
+            reset_history(content_w, 1, k, optimizers)
+            reset_history(group_w, 0, k, optimizers)
 
         embedder.adherence_ema.zero_()
 
@@ -1014,7 +1133,7 @@ class ClusterReviveCallback(Callback):
 _MERGE_THRESHOLD: float = 0.95
 
 
-class ClusterMergeCallback(Callback):
+class GroupMergeCallback(Callback):
     @torch.no_grad()
     def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         pl_module = cast("Model", pl_module)
@@ -1023,11 +1142,11 @@ class ClusterMergeCallback(Callback):
             request = pl_module.schema.requests.get(cast(Address, address))
             if not isinstance(request, Request):
                 continue
-            if request.n_clusters[0] == request.n_clusters[-1]:
+            if request.bounds[0] == request.bounds[-1]:
                 continue
             embedder = getattr(node, "embedder", None)
             decoder = getattr(node, "decoder", None)
-            if isinstance(embedder, Embedder) and isinstance(decoder, Decoder):
+            if isinstance(embedder, Embedder) and isinstance(decoder, Decoder) and adaptable(embedder, decoder):
                 if decoder.metrics.compute(Strata.train)["targets.known"] > 0:
                     targets[cast(Address, address)] = (embedder, decoder, request)
 
@@ -1041,27 +1160,27 @@ class ClusterMergeCallback(Callback):
         plans = broadcast_object(plans, src=0)
 
         for address, (embedder, decoder, _) in targets.items():
-            self.apply(embedder, decoder, plans.get(address))
+            self.apply(embedder, decoder, plans.get(address), optimizers=getattr(trainer, "optimizers", ()))
 
     @staticmethod
     def plan(embedder: "Embedder", decoder: "Decoder", request: "Request") -> dict[str, int] | None:
         committed_idx = embedder.committed.nonzero(as_tuple=True)[0]
         n_committed = committed_idx.numel()
-        lower = request.n_clusters[0]
+        lower = request.bounds[0]
         if n_committed <= lower or n_committed < 2:
             return None
 
         content_w = cast(torch.Tensor, embedder.embeddings[TensorKey.content.name].weight)  # (d_model, K)
-        cluster_w = cast(torch.Tensor, decoder.linears[TensorKey.cluster.name].weight)  # (K, d_model)
+        group_w = cast(torch.Tensor, decoder.linears[TensorKey.group.name].weight)  # (K, d_model)
 
         content_cols = content_w[:, committed_idx]
-        cluster_rows = cluster_w[committed_idx, :]
+        group_rows = group_w[committed_idx, :]
         content_norm = content_cols / content_cols.norm(dim=0).clamp_min(1e-12)
-        cluster_norm = cluster_rows / cluster_rows.norm(dim=1, keepdim=True).clamp_min(1e-12)
+        group_norm = group_rows / group_rows.norm(dim=1, keepdim=True).clamp_min(1e-12)
 
         content_sim = content_norm.T @ content_norm
-        cluster_sim = cluster_norm @ cluster_norm.T
-        joint_sim = torch.minimum(content_sim, cluster_sim)
+        group_sim = group_norm @ group_norm.T
+        joint_sim = torch.minimum(content_sim, group_sim)
         joint_sim.fill_diagonal_(-1.0)
 
         max_sim, max_j = joint_sim.max(dim=1)
@@ -1081,16 +1200,36 @@ class ClusterMergeCallback(Callback):
         return {"loser": loser, "winner": winner}
 
     @staticmethod
-    def apply(embedder: "Embedder", decoder: "Decoder", plan: dict[str, int] | None) -> None:
-        if plan is None:
+    @torch.no_grad()
+    def apply(
+        embedder: "Embedder",
+        decoder: "Decoder",
+        plan: dict[str, int] | None,
+        *,
+        optimizers: Sequence[torch.optim.Optimizer] = (),
+    ) -> None:
+        if plan is None or not adaptable(embedder, decoder):
             return
 
         loser = plan["loser"]
         winner = plan["winner"]
+        assign_w = cast(torch.Tensor, embedder.embeddings[TensorKey.group.name].weight)
+        content_w = cast(torch.Tensor, embedder.embeddings[TensorKey.content.name].weight)
+        group_w = cast(torch.Tensor, decoder.linears[TensorKey.group.name].weight)
+        assign_w[:, winner].copy_(torch.logaddexp(assign_w[:, winner], assign_w[:, loser]))
+        # Keep stored logits finite so a zero retired probability cannot produce 0 * -inf.
+        floor = (assign_w.amin(dim=1) - 30).clamp_min(torch.finfo(assign_w.dtype).min)
+        assign_w[:, loser].copy_(floor)
+        content_w[:, loser].zero_()
+        group_w[loser].zero_()
         embedder.usage_ema[winner] = embedder.usage_ema[winner] + embedder.usage_ema[loser]
         embedder.usage_ema[loser] = 0.0
         embedder.committed[loser] = False
-        cast(torch.Tensor, decoder.linears[TensorKey.cluster.name].weight).data[loser, :].zero_()
+        embedder.retired[loser] = True
+        reset_history(assign_w, 1, winner, optimizers)
+        reset_history(assign_w, 1, loser, optimizers)
+        reset_history(content_w, 1, loser, optimizers)
+        reset_history(group_w, 0, loser, optimizers)
 
 
-cluster.callback(ClusterReviveCallback, ClusterMergeCallback)
+group.callback(GroupUsageCallback, GroupReviveCallback, GroupMergeCallback, Refinement)

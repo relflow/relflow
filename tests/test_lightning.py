@@ -46,7 +46,7 @@ def test_checkpoint_schema_loads_without_custom_pickle_globals(tmp_path):
 
 
 @pytest.mark.parametrize("accelerator", ["cpu", "cuda", "mps", "auto"])
-@pytest.mark.parametrize("kind", ["category", "set", "cluster"])
+@pytest.mark.parametrize("kind", ["category", "set", "group"])
 def test_native_batch_size_callback_restores_state_then_trains_bf16(tmp_path, accelerator, kind):
     if accelerator == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA is unavailable")
@@ -54,8 +54,8 @@ def test_native_batch_size_callback_restores_state_then_trains_bf16(tmp_path, ac
         pytest.skip("MPS is unavailable")
     if accelerator == "auto" and torch.cuda.device_count() > 1:
         pytest.skip("Lightning's batch-size finder requires a single device")
-    field = {"category": rf.Category, "set": rf.Set, "cluster": rf.Cluster}[kind]
-    options = {"bounds": 2, "revive_temperature": 0.0} if kind == "cluster" else {}
+    field = {"category": rf.Category, "set": rf.Set, "group": rf.Group}[kind]
+    options = {"bounds": 2, "revive_temperature": 0.0} if kind == "group" else {}
     configured = model(field(mask=rf.Mask(reconstruct=True), **options))
     initial = {name: value.clone() for name, value in configured.named_parameters()}
     finder = BatchSizeFinder(mode="binsearch", init_val=2, max_trials=2, max_val=8, margin=0)

@@ -13,7 +13,7 @@
   <a href="https://github.com/relflow/relflow/actions/workflows/compatibility.yml?query=branch%3Amain"><img alt="Dependency compatibility" src="https://github.com/relflow/relflow/actions/workflows/compatibility.yml/badge.svg?branch=main" /></a>
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&amp;logoColor=white" />
   <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-2E8B57" /></a>
-  <a href="https://relflow.github.io/docs/"><img alt="Documentation build" src="https://github.com/relflow/docs/actions/workflows/docs.yml/badge.svg?branch=main&amp;event=push" /></a>
+  <a href="https://relflow.ai/"><img alt="Documentation build" src="https://github.com/relflow/docs/actions/workflows/docs.yml/badge.svg?branch=main&amp;event=push" /></a>
   <!-- discord-invite:start -->
   <a href="https://discord.gg/DVyZUkvTFA"><img alt="Discord channel invite" src="https://img.shields.io/badge/discord-join%20the%20channel-5865F2?logo=discord&amp;logoColor=white" /></a>
   <!-- discord-invite:end -->
@@ -90,15 +90,15 @@ to stream predictions to Parquet.
 
 ## Documentation
 
-- [Getting started](https://relflow.github.io/docs/getting-started.html)
-- [Add transaction history](https://relflow.github.io/docs/tutorials/transaction-history.html)
-- [Model structure](https://relflow.github.io/docs/core-concepts/model-tree.html)
-- [Data types](https://relflow.github.io/docs/core-concepts/data-types.html)
-- [Arrow data loading](https://relflow.github.io/docs/guides/data-modules.html)
-- [Preprocessing](https://relflow.github.io/docs/guides/preprocessors.html)
-- [Training and checkpoints](https://relflow.github.io/docs/guides/lightning.html)
-- [Batch inference](https://relflow.github.io/docs/guides/batch-inference.html)
-- [Prediction output](https://relflow.github.io/docs/guides/prediction-output.html)
+- [Getting started](https://relflow.ai/getting-started.html)
+- [Add transaction history](https://relflow.ai/tutorials/transaction-history.html)
+- [Model structure](https://relflow.ai/core-concepts/model-tree.html)
+- [Data types](https://relflow.ai/core-concepts/data-types.html)
+- [Arrow data loading](https://relflow.ai/guides/data-modules.html)
+- [Preprocessing](https://relflow.ai/guides/preprocessors.html)
+- [Training and checkpoints](https://relflow.ai/guides/lightning.html)
+- [Batch inference](https://relflow.ai/guides/batch-inference.html)
+- [Prediction output](https://relflow.ai/guides/prediction-output.html)
 
 Documentation, modeling proofs, and branding sources live in the separate
 [relflow/docs repository](https://github.com/relflow/docs). Its website uses

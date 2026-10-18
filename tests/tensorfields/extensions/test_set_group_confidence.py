@@ -13,7 +13,7 @@ from tensordict import TensorDict
 
 import relflow as rf
 from relflow.structs.packages import Prediction
-from relflow.tensorfields.extensions import cluster
+from relflow.tensorfields.extensions import group
 from relflow.tensorfields.extensions import set as sets
 from relflow.tensorfields.shared.reconstruction import Metrics
 from tests.distributed import launch
@@ -23,7 +23,7 @@ def model(kind, *, p_unavailable=0.0, mask=True):
     request = (
         rf.Set(p_unavailable=p_unavailable, mask=mask)
         if kind == "set"
-        else rf.Cluster(n_clusters=(2, 4), p_unavailable=p_unavailable, mask=mask)
+        else rf.Group(bounds=(2, 4), p_unavailable=p_unavailable, mask=mask)
     )
     result = rf.Model.xs(d_model=8, x=rf.Number, label=request)
     labels = [["a"], ["b"]] if kind == "set" else ["a", "b"]
@@ -36,7 +36,7 @@ def evaluate(module, labels, logits, strata=rf.Strata.test):
     # Encode without admission, including when testing the training objective.
     batch = module.encode(pa.table({"x": [0.0] * len(labels), "label": labels}), strata="test")["/label"]
     kind = module.schema.requests["/label"].type
-    key = rf.TensorKey.content if kind == "set" else rf.TensorKey.cluster
+    key = rf.TensorKey.content if kind == "set" else rf.TensorKey.group
     prediction = Prediction(
         address="/label",
         payload=TensorDict(
@@ -47,10 +47,10 @@ def evaluate(module, labels, logits, strata=rf.Strata.test):
             batch_size=[len(labels)],
         ),
     )
-    return (sets.loss if kind == "set" else cluster.loss)(module, prediction, batch, strata)
+    return (sets.loss if kind == "set" else group.loss)(module, prediction, batch, strata)
 
 
-@pytest.mark.parametrize("kind", ["set", "cluster"])
+@pytest.mark.parametrize("kind", ["set", "group"])
 def test_input_augmentation_preserves_pristine_answers(kind):
     module = model(kind, p_unavailable=1.0, mask=False)
     labels = [["a", "b"], [], None] if kind == "set" else ["a", "b", None]
@@ -102,7 +102,7 @@ def test_set_partial_unknown_targets_keep_known_positive_and_negative_gradients(
     assert scores["sets.complete"] == 1
 
 
-@pytest.mark.parametrize("kind", ["set", "cluster"])
+@pytest.mark.parametrize("kind", ["set", "group"])
 def test_scores_do_not_depend_on_batch_partition(kind):
     labels = [["a"], ["a", "new"], ["new"], [], ["b"], None] if kind == "set" else ["a", "new", "new", "b", "a", None]
     width = 8 if kind == "set" else 4
@@ -130,8 +130,8 @@ def test_set_unused_capacity_does_not_inflate_bit_accuracy_or_dilute_loss():
     assert left["accuracy.set"] == 0
 
 
-def test_cluster_unknown_targets_do_not_change_assignment_or_adaptive_state():
-    module = model("cluster")
+def test_group_unknown_targets_do_not_change_assignment_or_adaptive_state():
+    module = model("group")
     embedder = module.nodes["/label"].embedder
     usage, committed, adherence = (
         value.clone() for value in (embedder.usage_ema, embedder.committed, embedder.adherence_ema)
@@ -141,7 +141,7 @@ def test_cluster_unknown_targets_do_not_change_assignment_or_adaptive_state():
     objective.backward()
     assert torch.isfinite(objective)
     assert not logits.grad.any()
-    assert not embedder.embeddings["cluster"].weight.grad.any()
+    assert not embedder.embeddings["group"].weight.grad.any()
     torch.testing.assert_close(embedder.usage_ema, usage)
     torch.testing.assert_close(embedder.committed, committed)
     torch.testing.assert_close(embedder.adherence_ema, adherence)
@@ -151,8 +151,8 @@ def test_cluster_unknown_targets_do_not_change_assignment_or_adaptive_state():
     assert torch.isnan(scores["loss.content"])
 
 
-def test_cluster_balancing_uses_known_rows_and_proper_unweighted_label_objective():
-    base, mixed = model("cluster"), model("cluster")
+def test_group_balancing_uses_known_rows_and_proper_unweighted_label_objective():
+    base, mixed = model("group"), model("group")
     mixed.load_state_dict(base.state_dict())
     mixed.nodes["/label"].embedder.counters["content"].counts[0] = 1000
     known_logits = torch.randn(4, 4, requires_grad=True)
@@ -165,11 +165,11 @@ def test_cluster_balancing_uses_known_rows_and_proper_unweighted_label_objective
     torch.testing.assert_close(left.usage_ema, right.usage_ema)
     torch.testing.assert_close(left.committed, right.committed)
     torch.testing.assert_close(left.adherence_ema, right.adherence_ema)
-    assert not right.embeddings["cluster"].weight.grad[2:].any()
+    assert not right.embeddings["group"].weight.grad[2:].any()
 
 
-def test_cluster_balancing_can_escape_saturated_initial_assignments():
-    module = model("cluster")
+def test_group_balancing_can_escape_saturated_initial_assignments():
+    module = model("group")
     logits = torch.tensor([[1000.0, 0.0, 0.0, 0.0]] * 4, requires_grad=True)
     objective = evaluate(module, ["a", "b", "a", "b"], logits, rf.Strata.train)
     objective.backward()
@@ -180,9 +180,9 @@ def test_cluster_balancing_can_escape_saturated_initial_assignments():
     assert logits.grad[:, 1].mean() < -0.1
 
 
-@pytest.mark.parametrize("kind", ["set", "cluster"])
+@pytest.mark.parametrize("kind", ["set", "group"])
 def test_empty_vocabulary_has_differentiable_zero_content_loss(kind):
-    request = rf.Set(mask=True) if kind == "set" else rf.Cluster(n_clusters=4, mask=True)
+    request = rf.Set(mask=True) if kind == "set" else rf.Group(bounds=4, mask=True)
     module = rf.Model.xs(d_model=8, x=rf.Number, label=request)
     module.track = lambda names, value: value
     logits = torch.randn(2, 8 if kind == "set" else 4, requires_grad=True)
@@ -200,7 +200,7 @@ def test_registered_metrics_share_one_callback_and_reset_each_stage():
         d_model=8,
         category=rf.Category(mask=True),
         tags=rf.Set(mask=True),
-        group=rf.Cluster(n_clusters=4, mask=True),
+        group=rf.Group(bounds=4, mask=True),
     )
     assert sum(isinstance(callback, Metrics) for callback in module.configure_callbacks()) == 1
     for node in module.nodes.values():
@@ -215,20 +215,20 @@ def test_registered_metrics_share_one_callback_and_reset_each_stage():
             assert not metric.counts.is_shared()
 
 
-def test_unknown_only_epoch_does_not_revive_or_merge_from_stale_cluster_statistics():
-    module = model("cluster")
+def test_unknown_only_epoch_does_not_revive_or_merge_from_stale_group_statistics():
+    module = model("group")
     embedder = module.nodes["/label"].embedder
     decoder = module.nodes["/label"].decoder
     with torch.no_grad():
         embedder.adherence_ema.fill_(1)
         embedder.committed[:3] = True
         embedder.embeddings["content"].weight[:, 1].copy_(embedder.embeddings["content"].weight[:, 0])
-        decoder.linears["cluster"].weight[1].copy_(decoder.linears["cluster"].weight[0])
+        decoder.linears["group"].weight[1].copy_(decoder.linears["group"].weight[0])
     before = {key: value.clone() for key, value in embedder.state_dict().items() if isinstance(value, torch.Tensor)}
     evaluate(module, ["new"] * 6, torch.randn(6, 4), rf.Strata.train)
     trainer = SimpleNamespace(current_epoch=0, is_global_zero=True)
-    cluster.ClusterMergeCallback().on_train_epoch_end(trainer, module)
-    cluster.ClusterReviveCallback().on_train_epoch_end(trainer, module)
+    group.GroupMergeCallback().on_train_epoch_end(trainer, module)
+    group.GroupReviveCallback().on_train_epoch_end(trainer, module)
     for key, value in before.items():
         torch.testing.assert_close(value, embedder.state_dict()[key])
 
@@ -241,7 +241,7 @@ def mixed_metrics():
         x=rf.Number,
         label=rf.Category(mask=selection),
         tags=rf.Set(mask=selection),
-        group=rf.Cluster(bounds=(2, 4), mask=selection),
+        group=rf.Group(bounds=(2, 4), mask=selection),
     )
     module.encode(
         pa.table(
@@ -314,13 +314,13 @@ def test_set_unknown_members_are_distinct_within_each_arrow_atom_family(known, u
     "accelerator",
     ["cpu", pytest.param("gpu", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable"))],
 )
-def test_set_and_cluster_train_with_bfloat16_mixed_precision(accelerator):
+def test_set_and_group_train_with_bfloat16_mixed_precision(accelerator):
     module = rf.Model.xs(
         d_model=8,
         batch_size=4,
         x=rf.Number,
         tags=rf.Set(p_unavailable=0.5, mask=rf.Mask(rate=0.5, reconstruct=True)),
-        group=rf.Cluster(bounds=(2, 4), p_unavailable=0.5, mask=True),
+        group=rf.Group(bounds=(2, 4), p_unavailable=0.5, mask=True),
     )
     source = pa.table(
         {

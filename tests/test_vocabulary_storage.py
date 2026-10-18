@@ -10,18 +10,18 @@ import torch
 import relflow as rf
 from relflow.helpers.resize import Resize
 from relflow.structs.packages import Prediction
-from relflow.tensorfields.extensions import category, cluster
+from relflow.tensorfields.extensions import category, group
 from relflow.tensorfields.extensions import set as sets
 
 ADDRESS = "/label"
-FIELDS = (rf.Category, rf.Set, rf.Cluster)
+FIELDS = (rf.Category, rf.Set, rf.Group)
 
 
 def build(kind):
     field = {
         "category": rf.Category(mask=True, topk=[2, 10000]),
         "set": rf.Set(mask=True),
-        "cluster": rf.Cluster(bounds=3, mask=True, revive_temperature=0),
+        "group": rf.Group(bounds=3, mask=True, revive_temperature=0),
     }[kind]
     return rf.Model.xs(d_model=8, x=rf.Number, label=field)
 
@@ -35,7 +35,7 @@ def reserve(model, width):
     """Force spare runtime storage as an experimental control, not a field option."""
     node = model.nodes[ADDRESS]
     resize = Resize()
-    if model.schema.requests[ADDRESS].type == "cluster":
+    if model.schema.requests[ADDRESS].type == "group":
         node.embedder.resize(width, resize)
     else:
         resize.embedding(node.embedder.embeddings["content"], width)
@@ -59,7 +59,7 @@ def approximate(value):
 @pytest.mark.parametrize("field", FIELDS)
 @pytest.mark.parametrize("option", ["size", "capacity"])
 def test_allocation_options_are_rejected_by_constructor_and_schema(field, option):
-    required = {"bounds": 3} if field is rf.Cluster else {}
+    required = {"bounds": 3} if field is rf.Group else {}
     with pytest.raises(pydantic.ValidationError, match=option):
         field(**required, **{option: 8})
     with pytest.raises(pydantic.ValidationError, match=option):
@@ -68,7 +68,7 @@ def test_allocation_options_are_rejected_by_constructor_and_schema(field, option
     assert option not in field(**required).model_dump()
 
 
-@pytest.mark.parametrize("kind", ["category", "set", "cluster"])
+@pytest.mark.parametrize("kind", ["category", "set", "group"])
 @pytest.mark.parametrize("width", [8, 128])
 def test_spare_storage_preserves_predictions_schema_and_checkpoint(kind, width, tmp_path):
     model = build(kind)
@@ -94,7 +94,7 @@ def test_spare_storage_preserves_predictions_schema_and_checkpoint(kind, width, 
     assert restored["predictions"].to_pylist() == expected
 
 
-@pytest.mark.parametrize("kind", ["category", "set", "cluster"])
+@pytest.mark.parametrize("kind", ["category", "set", "group"])
 @pytest.mark.parametrize("labels", [["a", "b", "unseen", None], ["unseen", None]])
 def test_spare_storage_preserves_loss_and_gradients(kind, labels):
     small, large = build(kind), build(kind)
@@ -103,7 +103,7 @@ def test_spare_storage_preserves_loss_and_gradients(kind, labels):
     reserve(large, 128)
     probe = torch.randn(len(labels), 8)
     results, gradients = [], []
-    objective = {"category": category.loss, "set": sets.loss, "cluster": cluster.loss}[kind]
+    objective = {"category": category.loss, "set": sets.loss, "group": group.loss}[kind]
     for model in (small, large):
         model.eval()
         model.track = lambda names, value: value
@@ -124,7 +124,7 @@ def test_spare_storage_preserves_loss_and_gradients(kind, labels):
             continue
         if parameter.shape == other.shape:
             torch.testing.assert_close(parameter.grad, other.grad)
-        elif kind == "cluster":
+        elif kind == "group":
             torch.testing.assert_close(parameter.grad[:-1], other.grad[: parameter.shape[0] - 1])
             torch.testing.assert_close(parameter.grad[-1], other.grad[-1])
             assert not other.grad[parameter.shape[0] - 1 : -1].any()

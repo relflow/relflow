@@ -35,12 +35,12 @@ def model():
         batch_size=4,
         category=rf.Category(mask=True, p_unavailable=1.0),
         tags=rf.Set(mask=True, p_unavailable=1.0),
-        cluster=rf.Cluster(bounds=2, mask=True, p_unavailable=1.0),
+        group=rf.Group(bounds=2, mask=True, p_unavailable=1.0),
     )
 
 
 def table(labels):
-    return pa.table({"category": labels, "tags": [[label] for label in labels], "cluster": labels})
+    return pa.table({"category": labels, "tags": [[label] for label in labels], "group": labels})
 
 
 def warnings(records):
@@ -59,7 +59,7 @@ def test_warning_counts_only_allocated_pristine_training_exposures(records, stag
 
     events = warnings(records)
     assert len(events) == 3
-    assert [event["address"] for event in events] == ["/category", "/cluster", "/tags"]
+    assert [event["address"] for event in events] == ["/category", "/group", "/tags"]
     for event in events:
         assert event == {
             "component": "vocabulary",

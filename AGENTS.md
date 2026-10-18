@@ -109,6 +109,21 @@ model = rf.Model(
   it independently. Hidden neural activations use tanh GELU and normalization
   uses RMSNorm; these have no configuration knobs.
 - `Hash` represents large identifiers with batch-salted hashes, preserving equality across fields in one encoded batch without learning a persistent vocabulary.
+- `Group` represents scalar identities through shared learned groups. `bounds=K`
+  normalizes to `(K, K)`; `bounds=(lower, upper)` permits an adaptive committed
+  balancing subset. Nonretired columns remain assignment candidates; commitment
+  is not an occupied-group count or evidence of meaningful group discovery.
+  `bounds` is the sole count configuration and normalized attribute. Public
+  prediction and assignment records use `group`; use `Group.assign`,
+  `Group.override`, `Group.assignments`, and `Group.status` for runtime control.
+  Defaults use weak balanced initialization, deterministic straight-through
+  routing, and identity likelihoods normalized within each group.
+  Group owns its reconstruction objective and periodic membership refinement:
+  training identity likelihood proposes changes; its validation likelihood
+  accepts them before ordinary validation/checkpoint selection. Other losses
+  still train Group through ordinary backpropagation; they need no scoring API.
+  Group count recovery and unseen-identity discovery are not guaranteed.
+  The former Cluster API and checkpoints are not supported.
 - `DateParts` is for calendar parts. If elapsed time or recency matters, derive a `Number`.
 - `rf.Jitter(add=..., multiply=..., normalize=...)` is a shared frozen
   configuration whose `apply(inputs, mask)` method owns the vectorized affine
@@ -289,7 +304,7 @@ uv run pytest tests/test_public_api.py
 
 User documentation, executable modeling proofs, recorded learning results, and
 branding assets live in the separate [relflow/docs repository](https://github.com/relflow/docs).
-The website is published at [relflow.github.io/docs](https://relflow.github.io/docs/).
+The website is published at [relflow.ai](https://relflow.ai/).
 Follow that repository's agent guide for authoring, Typst diagrams, preview,
 validation, proof execution, and publication. This package has no documentation
 checkout, proof source, or site build dependency.

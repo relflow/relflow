@@ -68,6 +68,10 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.Number.model_fields["type"].default == "number"
     assert relflow.Quantile.model_fields["type"].default == "quantile"
     assert relflow.Set.model_fields["type"].default == "set"
+    assert relflow.Group.model_fields["type"].default == "group"
+    assert not hasattr(relflow, "Cluster")
+    assert relflow.TensorKey.group == "group"
+    assert not hasattr(relflow.TensorKey, "cluster")
     assert relflow.Hash.model_fields["type"].default == "hash"
     assert not hasattr(relflow, "Entity")
     assert not hasattr(relflow, "StaticEntity")
@@ -78,6 +82,8 @@ def test_common_resources_are_available_from_package_root():
     assert "quantile" in relflow.TENSORFIELDS
     assert "boolean" in relflow.TENSORFIELDS
     assert "set" in relflow.TENSORFIELDS
+    assert "group" in relflow.TENSORFIELDS
+    assert "cluster" not in relflow.TENSORFIELDS
     assert "hash" in relflow.TENSORFIELDS
     assert "entity" not in relflow.TENSORFIELDS
     assert "static_entity" not in relflow.TENSORFIELDS

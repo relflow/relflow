@@ -18,8 +18,8 @@ def request(field_type: str, *, query: str | None = None):
         return rf.Hash(query=query, n_hashes=2)
     if field_type == "category":
         return rf.Category(query=query, p_unavailable=0.0)
-    if field_type == "cluster":
-        return rf.Cluster(query=query, n_clusters=2, p_unavailable=0.0)
+    if field_type == "group":
+        return rf.Group(query=query, bounds=2, p_unavailable=0.0)
     if field_type == "set":
         return rf.Set(query=query, p_unavailable=0.0)
     raise AssertionError(f"unsupported test field type: {field_type}")
