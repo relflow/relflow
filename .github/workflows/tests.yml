@@ -19,6 +19,7 @@ env:
   POLARS_MAX_THREADS: "2"
   HF_HUB_OFFLINE: "1"
   TOKENIZERS_PARALLELISM: "false"
+  PYTEST_ADDOPTS: "-v --maxfail=1 -o faulthandler_timeout=120"
 
 defaults:
   run:
