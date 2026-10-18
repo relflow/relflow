@@ -18,13 +18,7 @@ from relflow.structs.enums import Strata
 
 
 def model(batch_size: int = 2) -> rf.Model:
-    return rf.Model(
-        id=rf.Number,
-        d_model=8,
-        n_layers=1,
-        n_heads=4,
-        batch_size=batch_size,
-    )
+    return rf.Model.xs(d_model=8, batch_size=batch_size, id=rf.Number)
 
 
 class Records(IterableDataset):
@@ -232,13 +226,7 @@ def test_distributed_ownership_is_independent_of_arrow_batch_boundaries():
 
 
 def test_arrow_dataset_uses_distributed_rank_and_world_size(monkeypatch: pytest.MonkeyPatch):
-    configured = rf.Model(
-        id=rf.Category(),
-        d_model=8,
-        n_layers=1,
-        n_heads=4,
-        batch_size=2,
-    )
+    configured = rf.Model.xs(d_model=8, batch_size=2, id=rf.Category)
     module = rf.ArrowDataModule(
         model=configured,
         validate=pa.table({"id": ["a", "b", "c", "d", "e"]}),

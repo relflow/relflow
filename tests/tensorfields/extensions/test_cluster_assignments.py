@@ -20,25 +20,23 @@ K = 4
 ADDRESS = "/merchant_id"
 
 
-def _model(*, embed: bool = False) -> rf.Model:
+def build_model(*, embed: bool = False) -> rf.Model:
     torch.manual_seed(0)
-    return rf.Model(
+    return rf.Model.xs(
         d_model=16,
-        n_layers=1,
-        n_heads=4,
         batch_size=4,
         embed=embed,
         merchant_id=rf.Cluster(n_clusters=(K, K), p_unavailable=0.0),
     )
 
 
-def _embedder(model: rf.Model) -> Embedder:
+def cluster_embedder(model: rf.Model) -> Embedder:
     embedder = model.nodes[Address(ADDRESS)].embedder
     assert isinstance(embedder, Embedder)
     return embedder
 
 
-def _one_valued_token(index: int) -> TensorField:
+def valued_token(index: int) -> TensorField:
     return TensorField(
         state=torch.tensor([[Tokens.valued.value]], dtype=torch.int64),
         content=torch.tensor([[index]], dtype=torch.int64),
@@ -54,8 +52,8 @@ def _one_valued_token(index: int) -> TensorField:
 
 
 def test_assign_grows_vocab_and_writes_row_for_int_cluster():
-    model = _model()
-    embedder = _embedder(model)
+    model = build_model()
+    embedder = cluster_embedder(model)
     assert len(embedder.vocab.master) == 0
 
     index = rf.Cluster.assign(model, ADDRESS, "brand-new", 2)
@@ -67,8 +65,8 @@ def test_assign_grows_vocab_and_writes_row_for_int_cluster():
 
 
 def test_assign_accepts_probability_vector():
-    model = _model()
-    embedder = _embedder(model)
+    model = build_model()
+    embedder = cluster_embedder(model)
     probs = [0.05, 0.05, 0.6, 0.3]
 
     rf.Cluster.assign(model, ADDRESS, "soft-token", probs)
@@ -79,8 +77,8 @@ def test_assign_accepts_probability_vector():
 
 
 def test_assign_overwrites_existing_token():
-    model = _model()
-    embedder = _embedder(model)
+    model = build_model()
+    embedder = cluster_embedder(model)
     idx = rf.Cluster.assign(model, ADDRESS, "shared-token", 1)
     assert int(embedder.embeddings["cluster"].weight[idx].argmax().item()) == 1
 
@@ -92,8 +90,8 @@ def test_assign_overwrites_existing_token():
 
 
 def test_assign_grows_when_capacity_full():
-    model = _model()
-    embedder = _embedder(model)
+    model = build_model()
+    embedder = cluster_embedder(model)
     for i in range(CAPACITY):
         rf.Cluster.assign(model, ADDRESS, f"tok-{i}", i % K)
     assert len(embedder.vocab.master) == CAPACITY
@@ -106,14 +104,14 @@ def test_assign_grows_when_capacity_full():
 
 
 def test_assign_rejects_out_of_range_cluster():
-    model = _model()
+    model = build_model()
 
     with pytest.raises(ValueError, match=r"cluster must be in \[0, 4\)"):
         rf.Cluster.assign(model, ADDRESS, "tok", K)
 
 
 def test_assign_requires_exactly_one_assignment():
-    model = _model()
+    model = build_model()
 
     with pytest.raises(TypeError):
         rf.Cluster.assign(model, ADDRESS, "tok")
@@ -122,28 +120,28 @@ def test_assign_requires_exactly_one_assignment():
 
 
 def test_assign_rejects_bad_probability_shape():
-    model = _model()
+    model = build_model()
 
     with pytest.raises(ValueError, match="shape"):
         rf.Cluster.assign(model, ADDRESS, "tok", [1.0, 0.0])
 
 
 def test_assign_rejects_probabilities_that_do_not_sum_to_one():
-    model = _model()
+    model = build_model()
 
     with pytest.raises(ValueError, match="sum to 1"):
         rf.Cluster.assign(model, ADDRESS, "tok", [0.5, 0.3, 0.1, 0.0])
 
 
 def test_assign_rejects_negative_probabilities():
-    model = _model()
+    model = build_model()
 
     with pytest.raises(ValueError, match="non-negative"):
         rf.Cluster.assign(model, ADDRESS, "tok", [1.5, -0.5, 0.0, 0.0])
 
 
 def test_assign_raises_for_unknown_address():
-    model = _model()
+    model = build_model()
 
     with pytest.raises(KeyError):
         rf.Cluster.assign(model, "/nonexistent", "tok", 0)
@@ -151,10 +149,8 @@ def test_assign_raises_for_unknown_address():
 
 def test_assign_raises_for_non_cluster_field():
     torch.manual_seed(0)
-    model = rf.Model(
+    model = rf.Model.xs(
         d_model=16,
-        n_layers=1,
-        n_heads=4,
         batch_size=4,
         amount=rf.Number,
     )
@@ -167,8 +163,8 @@ def test_assign_raises_for_non_cluster_field():
 
 
 def test_override_applies_only_within_prediction_scope():
-    model = _model(embed=True)
-    embedder = _embedder(model)
+    model = build_model(embed=True)
+    embedder = cluster_embedder(model)
     initial_vocab_size = len(embedder.vocab.master)
     initial_row_2 = embedder.embeddings["cluster"].weight[min(initial_vocab_size, CAPACITY)].detach().clone()
 
@@ -182,7 +178,7 @@ def test_override_applies_only_within_prediction_scope():
 
 
 def test_override_is_used_by_tensorization():
-    model = _model()
+    model = build_model()
 
     with rf.Cluster.override(model, ADDRESS, {"overridden": 3}):
         overridden = model.encode(pa.table({"merchant_id": ["overridden"]}))[Address(ADDRESS)]
@@ -194,8 +190,8 @@ def test_override_is_used_by_tensorization():
 
 
 def test_override_rolls_back_when_prediction_scope_raises():
-    model = _model()
-    embedder = _embedder(model)
+    model = build_model()
+    embedder = cluster_embedder(model)
     original = embedder.embeddings["cluster"].weight[0].detach().clone()
 
     with pytest.raises(RuntimeError, match="prediction failed"):
@@ -208,8 +204,8 @@ def test_override_rolls_back_when_prediction_scope_raises():
 
 
 def test_override_rolls_back_when_entering_scope_raises():
-    model = _model()
-    embedder = _embedder(model)
+    model = build_model()
+    embedder = cluster_embedder(model)
     original = embedder.embeddings["cluster"].weight[0].detach().clone()
 
     with pytest.raises(ValueError, match="shape"):
@@ -221,8 +217,8 @@ def test_override_rolls_back_when_entering_scope_raises():
 
 
 def test_override_restores_an_existing_assignment():
-    model = _model()
-    embedder = _embedder(model)
+    model = build_model()
+    embedder = cluster_embedder(model)
     index = rf.Cluster.assign(model, ADDRESS, "existing", 1)
     original = embedder.embeddings["cluster"].weight[index].detach().clone()
 
@@ -235,7 +231,7 @@ def test_override_restores_an_existing_assignment():
 
 
 def test_override_blocks_checkpointing_and_model_mutation(tmp_path: Path):
-    model = _model()
+    model = build_model()
 
     with rf.Cluster.override(model, ADDRESS, {"temporary": 2}):
         with pytest.raises(RuntimeError, match="assignment overrides are active"):
@@ -243,14 +239,14 @@ def test_override_blocks_checkpointing_and_model_mutation(tmp_path: Path):
         with pytest.raises(RuntimeError, match="active loop"):
             model.reset(ADDRESS)
 
-    assert "temporary" not in _embedder(model).vocab.state.index
+    assert "temporary" not in cluster_embedder(model).vocab.state.index
 
 
 def test_runtime_assignments_reject_active_models_and_shared_vocabulary(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    model = _model()
-    embedder = _embedder(model)
+    model = build_model()
+    embedder = cluster_embedder(model)
 
     model.locks[Strata.train] += 1
     try:
@@ -271,8 +267,8 @@ def test_override_replaces_encoder_row_for_oov_token():
     Overrides act on the encoder path; the write() cluster.value comes from the
     decoder, so probe the embedder's forward output directly.
     """
-    model = _model()
-    embedder = _embedder(model)
+    model = build_model()
+    embedder = cluster_embedder(model)
     embedder.eval()
 
     with torch.no_grad():
@@ -282,14 +278,14 @@ def test_override_replaces_encoder_row_for_oov_token():
     with rf.Cluster.override(model, ADDRESS, {"overridden-oov": 2}):
         # During the override, this token is encoded as valued/index 0.
         overridden_index = embedder.vocab.state.index["overridden-oov"]
-        overridden_output = embedder.embed(_one_valued_token(overridden_index)).payload.clone()
+        overridden_output = embedder.embed(valued_token(overridden_index)).payload.clone()
 
     # Reference: forward pass for a hand-built row that argmaxes to cluster 2.
     with torch.no_grad():
         reference_row = torch.full((K,), -10.0)
         reference_row[2] = 10.0
         embedder.embeddings["cluster"].weight[0].copy_(reference_row)
-    reference_output = embedder.embed(_one_valued_token(0)).payload.clone()
+    reference_output = embedder.embed(valued_token(0)).payload.clone()
 
     # Both should route through cluster 2 in eval mode (argmax), so the cluster
     # embedding contribution must match. State embedding is identical either way.
@@ -297,8 +293,8 @@ def test_override_replaces_encoder_row_for_oov_token():
 
 
 def test_override_accepts_probability_vector():
-    model = _model()
-    embedder = _embedder(model)
+    model = build_model()
+    embedder = cluster_embedder(model)
     embedder.eval()
 
     with rf.Cluster.override(model, ADDRESS, {"soft": [0.0, 0.1, 0.9, 0.0]}):
@@ -310,8 +306,8 @@ def test_override_accepts_probability_vector():
 
 
 def test_persistent_assignment_survives_predict_calls():
-    model = _model()
-    embedder = _embedder(model)
+    model = build_model()
+    embedder = cluster_embedder(model)
     embedder.eval()
 
     rf.Cluster.assign(model, ADDRESS, "returning-token", 3)
@@ -319,7 +315,7 @@ def test_persistent_assignment_survives_predict_calls():
     first_row = embedder.embeddings["cluster"].weight[assigned_index].detach().clone()
 
     # Simulate a subsequent predict call by running the embedder again.
-    _ = embedder.embed(_one_valued_token(assigned_index))
+    _ = embedder.embed(valued_token(assigned_index))
     second_row = embedder.embeddings["cluster"].weight[assigned_index].detach().clone()
 
     assert torch.equal(first_row, second_row)
@@ -327,24 +323,24 @@ def test_persistent_assignment_survives_predict_calls():
 
 
 def test_persistent_assignment_round_trips_through_checkpoint(tmp_path: Path):
-    model = _model()
+    model = build_model()
     index = rf.Cluster.assign(model, ADDRESS, "persistent", 2)
     pathname = tmp_path / "cluster.rf"
 
     model.save(pathname)
     restored = rf.Model.load(pathname)
-    embedder = _embedder(restored)
+    embedder = cluster_embedder(restored)
 
     assert embedder.vocab.state.index["persistent"] == index
     assert int(embedder.embeddings["cluster"].weight[index].argmax().item()) == 2
 
 
 def test_assign_resolves_the_live_embedder_after_reset():
-    model = _model()
-    original = _embedder(model)
+    model = build_model()
+    original = cluster_embedder(model)
 
     model.reset(rf.where("address") == ADDRESS)
-    rebuilt = _embedder(model)
+    rebuilt = cluster_embedder(model)
     assert rebuilt is not original
 
     index = rf.Cluster.assign(model, ADDRESS, "after-reset", 2)

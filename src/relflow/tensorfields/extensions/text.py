@@ -5,7 +5,7 @@ import math
 from collections import OrderedDict
 from dataclasses import InitVar, dataclass
 from threading import RLock
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, Unpack, cast
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, TypeAlias, Unpack, cast
 
 import numpy as np
 import pydantic
@@ -48,7 +48,7 @@ INPUT_IDS = "input_ids"
 ATTENTION_MASK = "attention_mask"
 DEFAULT_TEXT_MODEL = "google/bert_uncased_L-2_H-128_A-2"
 
-type CacheKey = tuple[str, torch.dtype | None, bytes]
+CacheKey: TypeAlias = tuple[str, torch.dtype | None, bytes]
 
 
 class EmbeddingCache:

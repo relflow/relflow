@@ -144,10 +144,8 @@ def test_nonnull_atoms_are_not_silently_treated_as_absent_collections(source):
 
 @pytest.mark.parametrize("missing", [False, True])
 def test_vacant_training_still_observes_and_learns_every_registered_field(monkeypatch, missing):
-    model = rf.Model(
+    model = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         events=rf.Branch(number=rf.Number, category=rf.Category, quantile=rf.Quantile),
     )
     calls = []

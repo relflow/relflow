@@ -8,9 +8,12 @@
 
 <p align="center">
   <a href="https://pypi.org/project/relflow/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/relflow?logo=pypi&amp;logoColor=white" /></a>
-  <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&amp;logoColor=white" />
+  <a href="https://github.com/relflow/relflow/actions/workflows/tests.yml?query=branch%3Amain"><img alt="Tests" src="https://github.com/relflow/relflow/actions/workflows/tests.yml/badge.svg?branch=main&amp;event=push" /></a>
+  <a href="https://github.com/relflow/relflow/actions/workflows/tests.yml?query=branch%3Amain"><img alt="Line coverage" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frelflow%2Frelflow%2Fbadges%2Fcoverage.json" /></a>
+  <a href="https://github.com/relflow/relflow/actions/workflows/compatibility.yml?query=branch%3Amain"><img alt="Dependency compatibility" src="https://github.com/relflow/relflow/actions/workflows/compatibility.yml/badge.svg?branch=main" /></a>
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&amp;logoColor=white" />
   <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-2E8B57" /></a>
-  <a href="https://relflow.github.io/docs/"><img alt="Documentation" src="https://img.shields.io/badge/docs-Quarto-39729E?logo=quarto&amp;logoColor=white" /></a>
+  <a href="https://relflow.github.io/docs/"><img alt="Documentation build" src="https://github.com/relflow/docs/actions/workflows/docs.yml/badge.svg?branch=main&amp;event=push" /></a>
   <!-- discord-invite:start -->
   <a href="https://discord.gg/DVyZUkvTFA"><img alt="Discord channel invite" src="https://img.shields.io/badge/discord-join%20the%20channel-5865F2?logo=discord&amp;logoColor=white" /></a>
   <!-- discord-invite:end -->
@@ -22,7 +25,7 @@ contexts; decoders learn to predict selected fields from the available context.
 
 ## Install
 
-Python 3.12 or newer:
+Python 3.11 or newer:
 
 ```bash
 uv add relflow

@@ -56,5 +56,6 @@ def distributed_quantiles(rank: int, directory: str) -> None:
         distributed.destroy_process_group()
 
 
+@pytest.mark.skipif(not distributed.is_available() or not distributed.is_gloo_available(), reason="requires CPU Gloo")
 def test_quantile_digest_merges_across_ranks_with_empty_observations(tmp_path):
     multiprocessing.spawn(distributed_quantiles, args=(str(tmp_path),), nprocs=2, join=True)

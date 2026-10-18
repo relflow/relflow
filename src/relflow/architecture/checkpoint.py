@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import lightning.pytorch as lit
 import torch
@@ -16,6 +16,8 @@ from relflow.structs.experiment import Schema
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
+
+M = TypeVar("M", bound="Model")
 
 
 class RollbackCheckpoint(ModelCheckpoint):
@@ -129,7 +131,7 @@ class CheckpointState:
         module.reset_contracts()
 
     @staticmethod
-    def load[M: Model](model_cls: type[M], checkpoint: str | Path) -> M:
+    def load(model_cls: type[M], checkpoint: str | Path) -> M:
         """Construct the requested Model subclass from saved schema and tensor state."""
         path = Path(checkpoint)
         logger.bind(component="model_factory", checkpoint=str(path)).info("loading Model from checkpoint")

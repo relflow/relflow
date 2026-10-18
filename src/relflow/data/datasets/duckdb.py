@@ -49,7 +49,7 @@ class Query:
                 statements = connection.extract_statements(self.sql)
                 if len(statements) != 1 or statements[0].type != duckdb.StatementType.SELECT:
                     raise ValueError(f"{self.strata} DuckDB source requires exactly one SELECT query, including a CTE")
-                with connection.execute(self.sql, self.parameters).to_arrow_reader(self.rows) as reader:
+                with connection.sql(self.sql, params=self.parameters).to_arrow_reader(self.rows) as reader:
                     emitted = False
                     for batch in reader:
                         emitted = True

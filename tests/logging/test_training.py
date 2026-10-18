@@ -35,8 +35,20 @@ class FixedLosses(rf.Model):
         return {"loss": loss}
 
 
-def test_track_logs_only_steps_and_keeps_training_loss_internal_with_accumulation(tmp_path):
-    model = FixedLosses(d_model=8, n_layers=1, n_heads=2, batch_size=2, label=rf.Boolean(mask=True))
+@pytest.fixture
+def fit_options(tmp_path):
+    return {
+        "max_epochs": 1,
+        "accelerator": "cpu",
+        "devices": 1,
+        "precision": "32-true",
+        "enable_progress_bar": False,
+        "default_root_dir": tmp_path,
+    }
+
+
+def test_track_logs_only_steps_and_keeps_training_loss_internal_with_accumulation(fit_options):
+    model = FixedLosses.xs(d_model=8, batch_size=2, label=rf.Boolean(mask=True))
     rows = pa.table({"label": [True, False, True, False, True, False, True]})
     data = rf.ArrowDataModule(model, train=rows)
     logger = RecordingLogger()
@@ -44,15 +56,10 @@ def test_track_logs_only_steps_and_keeps_training_loss_internal_with_accumulatio
         data,
         early_stopping=False,
         rollback=False,
-        max_epochs=1,
         accumulate_grad_batches=2,
         log_every_n_steps=1,
         logger=logger,
-        accelerator="cpu",
-        devices=1,
-        precision="32-true",
-        enable_progress_bar=False,
-        default_root_dir=tmp_path,
+        **fit_options,
     )
     reports = [(metrics, step) for metrics, step in logger.records if "loss/train" in metrics]
     assert [step for _, step in reports] == [0, 1]
@@ -65,21 +72,16 @@ def test_track_logs_only_steps_and_keeps_training_loss_internal_with_accumulatio
     assert model.trainer.global_step == 2
 
 
-def test_logging_interval_samples_steps_and_zero_keeps_training_loss_internal(tmp_path):
-    model = FixedLosses(d_model=8, n_layers=1, n_heads=2, batch_size=2, label=rf.Boolean(mask=True))
+def test_logging_interval_samples_steps_and_zero_keeps_training_loss_internal(fit_options):
+    model = FixedLosses.xs(d_model=8, batch_size=2, label=rf.Boolean(mask=True))
     rows = pa.table({"label": [True, False] * 5})
     data = rf.ArrowDataModule(model, train=rows)
     logger = RecordingLogger()
     options = dict(
         early_stopping=False,
         rollback=False,
-        max_epochs=1,
         logger=logger,
-        accelerator="cpu",
-        devices=1,
-        precision="32-true",
-        enable_progress_bar=False,
-        default_root_dir=tmp_path,
+        **fit_options,
     )
     model.fit(data, log_every_n_steps=3, **options)
     reports = [(metrics, step) for metrics, step in logger.records if "loss/train" in metrics]
@@ -96,22 +98,17 @@ def test_logging_interval_samples_steps_and_zero_keeps_training_loss_internal(tm
     assert model.trainer.global_step == 5
 
 
-def test_validation_keeps_its_metric_name_and_default_checkpoint_monitor(tmp_path):
-    model = rf.Model(d_model=8, n_layers=1, n_heads=2, batch_size=2, label=rf.Boolean(mask=True))
+def test_validation_keeps_its_metric_name_and_default_checkpoint_monitor(fit_options):
+    model = rf.Model.xs(d_model=8, batch_size=2, label=rf.Boolean(mask=True))
     rows = pa.table({"label": [True, False] * 3})
     data = rf.ArrowDataModule(model, train=rows, validate=rows)
     logger = RecordingLogger()
     model.fit(
         data,
-        max_epochs=1,
         log_every_n_steps=1,
         logger=logger,
-        accelerator="cpu",
-        devices=1,
-        precision="32-true",
-        enable_progress_bar=False,
         num_sanity_val_steps=0,
-        default_root_dir=tmp_path,
+        **fit_options,
     )
     assert any("loss/train" in metrics for metrics, _ in logger.records)
     training = [metrics for metrics, _ in logger.records if "loss/train" in metrics]
@@ -135,22 +132,17 @@ def test_validation_keeps_its_metric_name_and_default_checkpoint_monitor(tmp_pat
         (rf.Cluster(bounds=2, mask=True), ["a", "b", "b", "a"]),
     ],
 )
-def test_vocabulary_scores_log_per_batch_and_validation_keeps_pass_totals(tmp_path, field, labels):
-    model = rf.Model(d_model=8, n_layers=1, n_heads=2, batch_size=2, amount=rf.Number, label=field)
+def test_vocabulary_scores_log_per_batch_and_validation_keeps_pass_totals(fit_options, field, labels):
+    model = rf.Model.xs(d_model=8, batch_size=2, amount=rf.Number, label=field)
     rows = pa.table({"amount": [1.0, 2.0, 3.0, 4.0], "label": labels})
     data = rf.ArrowDataModule(model, train=rows, validate=rows, shuffle=False)
     logger = RecordingLogger()
     model.fit(
         data,
-        max_epochs=1,
         log_every_n_steps=1,
         logger=logger,
-        accelerator="cpu",
-        devices=1,
-        precision="32-true",
-        enable_progress_bar=False,
         num_sanity_val_steps=0,
-        default_root_dir=tmp_path,
+        **fit_options,
     )
     training = [(metrics, step) for metrics, step in logger.records if "loss/train" in metrics]
     assert [step for _, step in training] == [0, 1]

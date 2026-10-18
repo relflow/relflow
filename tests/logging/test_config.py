@@ -96,8 +96,15 @@ def test_configure_replaces_only_its_own_handler(package_logger: logging.Logger)
     logger.info("filtered")
     logger.warning("logged once")
 
-    assert package_logger.handlers[0] is records
-    assert len(package_logger.handlers) == 2
+    handlers = [
+        handler
+        for handler in package_logger.handlers
+        if isinstance(handler, logging.StreamHandler) and handler.stream in (previous, current)
+    ]
+    assert records in package_logger.handlers
+    assert len(handlers) == 1
+    assert handlers[0].stream is current
+    assert handlers[0].level == logging.WARNING
     assert previous.getvalue() == ""
     assert current.getvalue().partition(" ")[2] == "WARNING logged once\n"
     assert [record.getMessage() for record in records.buffer] == ["logged once"]

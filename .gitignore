@@ -6,6 +6,13 @@ dist/
 .cache/
 wheels/
 *.egg-info
+.coverage
+.coverage.*
+coverage.xml
+coverage.json
+htmlcov/
+junit*.xml
+test-results/
 
 # Virtual environments
 .venv

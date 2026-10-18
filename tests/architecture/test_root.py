@@ -23,7 +23,6 @@ from relflow.tensorfields.shared.vocabulary import (
     OnlineVocabularyModel,
     VocabularySyncCallback,
 )
-from tests.arrow import batch as arrow_batch
 from tests.arrow import table
 
 
@@ -69,7 +68,7 @@ def test_model_rejects_schema_combined_with_tree_configuration() -> None:
 
 def test_model_tree_constructor_requires_architecture_options() -> None:
     with pytest.raises(TypeError, match="requires n_layers, n_heads"):
-        Model(amount=rf.Number(), d_model=8)
+        Model(amount=rf.Number, d_model=8)
 
 
 def test_on_save_checkpoint_serializes_schema() -> None:
@@ -137,7 +136,7 @@ def primed() -> Model:
     schema = prediction_schema()
     model = Model(schema=schema, batch_size=2)
     inputs = model.encode(
-        arrow_batch(
+        table(
             [
                 {"color": "red", "label": "warm"},
                 {"color": "blue", "label": "cool"},
@@ -478,7 +477,7 @@ def test_training_counters_observe_all_encoded_fields() -> None:
     schema = prediction_schema()
     model = Model(schema=schema, batch_size=2)
     inputs = encode(
-        batch=arrow_batch(
+        batch=table(
             [
                 {"color": "red", "label": "warm"},
                 {"color": "blue", "label": "cool"},
@@ -507,7 +506,7 @@ def test_training_counters_observe_all_encoded_fields() -> None:
 def test_distributed_step_rejects_bindings_that_bypassed_pre_forward_transfer():
     model = Model(schema=prediction_schema(), batch_size=2)
     batch = encode(
-        batch=arrow_batch([{"color": "red", "label": "warm"}]),
+        batch=table([{"color": "red", "label": "warm"}]),
         schema=model.schema,
         strata=Strata.train,
         interprocess_encoding_context=model.interprocess_encoding_context,
@@ -524,7 +523,7 @@ def test_distributed_step_rejects_bindings_that_bypassed_pre_forward_transfer():
 def test_sanity_check_batch_binding_uses_validation_stage(monkeypatch):
     model = Model(schema=prediction_schema(), batch_size=2)
     batch = encode(
-        batch=arrow_batch([{"color": "red", "label": "warm"}]),
+        batch=table([{"color": "red", "label": "warm"}]),
         schema=model.schema,
         strata=Strata.validate,
         interprocess_encoding_context=model.interprocess_encoding_context,
@@ -556,7 +555,7 @@ def test_training_counters_learn_fixed_width_empty_observations() -> None:
     schema = prediction_schema()
     model = Model(schema=schema, batch_size=2)
     inputs = encode(
-        batch=arrow_batch(
+        batch=table(
             [
                 {"color": None, "label": "warm"},
                 {"color": None, "label": "cool"},
@@ -604,7 +603,7 @@ def test_training_step_returns_only_loss_to_avoid_retaining_prediction_graphs(mo
     schema = prediction_schema()
     model = Model(schema=schema, batch_size=2)
     inputs = encode(
-        batch=arrow_batch(
+        batch=table(
             [
                 {"color": "red", "label": "warm"},
                 {"color": "blue", "label": "cool"},
@@ -649,7 +648,7 @@ def test_inactive_leaf_nodes_are_ignored_by_encoding_and_forward() -> None:
     )
 
     inputs = encode(
-        batch=arrow_batch(
+        batch=table(
             [
                 {"color": "red"},
                 {"color": "blue"},
@@ -709,7 +708,7 @@ def test_encode_returns_tensorfield_inputs_for_raw_batch() -> None:
 
 
 def test_encode_branch_tail_overflow_keeps_last_values() -> None:
-    model = rf.Model(events=rf.Branch(amount=rf.Number(), length=2, overflow="tail"), d_model=8, n_layers=1, n_heads=4)
+    model = rf.Model(events=rf.Branch(amount=rf.Number, length=2, overflow="tail"), d_model=8, n_layers=1, n_heads=4)
 
     inputs = model.encode(
         table(
@@ -730,7 +729,7 @@ def test_encode_branch_tail_overflow_keeps_last_values() -> None:
 
 
 def test_encode_branch_error_overflow_raises() -> None:
-    model = rf.Model(events=rf.Branch(amount=rf.Number(), length=2, overflow="error"), d_model=8, n_layers=1, n_heads=4)
+    model = rf.Model(events=rf.Branch(amount=rf.Number, length=2, overflow="error"), d_model=8, n_layers=1, n_heads=4)
 
     with pytest.raises(ValueError, match="branch overflow at dimension 2 for /events/amount"):
         model.encode(

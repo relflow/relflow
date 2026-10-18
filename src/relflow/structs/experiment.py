@@ -6,7 +6,7 @@ import functools
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, Literal, Self, TypeAlias, cast
+from typing import Annotated, Any, ClassVar, Literal, Self, TypeAlias, TypeVar, cast
 
 import pydantic
 from anytree import LevelOrderGroupIter, PreOrderIter
@@ -629,7 +629,10 @@ class Schema(Node):
             self.post_bind_validate()
 
 
-def build[S: Schema](
+S = TypeVar("S", bound=Schema)
+
+
+def build(
     schema: type[S],
     /,
     *,

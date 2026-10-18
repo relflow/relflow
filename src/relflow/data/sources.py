@@ -10,7 +10,7 @@ from collections.abc import Callable, Generator, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TypeAlias, cast
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 import pyarrow as pa
 import pyarrow.dataset as ds
@@ -61,9 +61,7 @@ def resolve(location: str, filesystem: fs.FileSystem | None) -> tuple[fs.FileSys
         return filesystem, filesystem.normalize_path(location)
     scheme, remainder = location.split("://", 1)
     authority, _, key = remainder.partition("/")
-    filesystem, base = fs.FileSystem.from_uri(f"{scheme}://{authority}/")
-    path = posixpath.join(base, unquote(key))
-    return filesystem, filesystem.normalize_path(path)
+    return fs.FileSystem.from_uri(f"{scheme}://{authority}/{quote(unquote(key), safe='/:')}")
 
 
 @dataclass(frozen=True, slots=True)

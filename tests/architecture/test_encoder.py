@@ -12,7 +12,7 @@ from relflow.structs.experiment import Schema
 from relflow.structs.packages import Parcel
 
 
-def _payload(*, attention: str | None = "mha", pooling: str = "query") -> dict:
+def schema_payload(*, attention: str | None = "mha", pooling: str = "query") -> dict:
     field: dict = {
         "name": "category",
         "type": "category",
@@ -38,7 +38,7 @@ def _payload(*, attention: str | None = "mha", pooling: str = "query") -> dict:
 
 
 def test_branch_encoder_uses_gqa_kv_head_count():
-    schema = Schema.model_validate(_payload(attention="gqa"))
+    schema = Schema.model_validate(schema_payload(attention="gqa"))
     encoder = BranchEncoder(schema=schema, address="/")
 
     assert len(encoder.encoder) == 1
@@ -46,7 +46,7 @@ def test_branch_encoder_uses_gqa_kv_head_count():
 
 
 def test_branch_encoder_uses_mqa_kv_head_count():
-    schema = Schema.model_validate(_payload(attention="mqa"))
+    schema = Schema.model_validate(schema_payload(attention="mqa"))
     encoder = BranchEncoder(schema=schema, address="/")
 
     assert len(encoder.encoder) == 1
@@ -54,7 +54,7 @@ def test_branch_encoder_uses_mqa_kv_head_count():
 
 
 def test_branch_encoder_none_skips_transformer_layers():
-    schema = Schema.model_validate(_payload(attention=None))
+    schema = Schema.model_validate(schema_payload(attention=None))
     encoder = BranchEncoder(schema=schema, address="/")
 
     assert len(encoder.encoder) == 0
@@ -63,7 +63,7 @@ def test_branch_encoder_none_skips_transformer_layers():
 
 def test_branch_encoder_skips_coordinate_head_resolution_when_attention_is_disabled():
     schema = rf.Schema.from_tree(
-        first=rf.Number(), second=rf.Number(), d_model=1, n_layers=1, n_heads=2, attention=None, reduction=rf.Mean()
+        first=rf.Number, second=rf.Number, d_model=1, n_layers=1, n_heads=2, attention=None, reduction=rf.Mean()
     )
 
     encoder = BranchEncoder(schema=schema, address="/")
@@ -74,8 +74,8 @@ def test_branch_encoder_skips_coordinate_head_resolution_when_attention_is_disab
 def test_coordinate_encoder_uses_configured_attention_mode():
     for attention, expected_kv_heads in (("gqa", 2), ("mqa", 1)):
         schema = rf.Schema.from_tree(
-            first=rf.Number(),
-            second=rf.Number(),
+            first=rf.Number,
+            second=rf.Number,
             d_model=16,
             n_layers=1,
             n_heads=4,
@@ -90,7 +90,7 @@ def test_coordinate_encoder_uses_configured_attention_mode():
 
 
 def test_decoder_mean_pooling_repeats_heritage_mean_for_each_target_slot():
-    schema = Schema.model_validate(_payload(pooling="mean"))
+    schema = Schema.model_validate(schema_payload(pooling="mean"))
     model = Model(schema=schema, batch_size=2)
     decoder = model.nodes["/items/category"].decoder
     parcel = Parcel(
@@ -109,7 +109,7 @@ def test_decoder_mean_pooling_repeats_heritage_mean_for_each_target_slot():
 
 
 def test_branch_encoder_propagates_presence_and_zeros_empty_rows():
-    schema = Schema.model_validate(_payload())
+    schema = Schema.model_validate(schema_payload())
     encoder = BranchEncoder(schema=schema, address="/")
     payload = torch.randn(2, 3, 16)
     parcel = Parcel(
@@ -226,7 +226,7 @@ def test_branch_encoder_routes_multiple_attention_outputs_to_its_parent():
 
 def test_branch_encoder_none_reduction_routes_every_encoded_token_and_presence():
     schema = rf.Schema.from_tree(
-        items=rf.Branch(first=rf.Number(), second=rf.Number(), length=2, attention=None, reduction=None),
+        items=rf.Branch(first=rf.Number, second=rf.Number, length=2, attention=None, reduction=None),
         d_model=4,
         n_layers=1,
         n_heads=2,
@@ -263,7 +263,7 @@ def test_branch_encoder_none_reduction_routes_every_encoded_token_and_presence()
 def test_branch_encoder_orders_nested_and_leaf_parcels_by_schema() -> None:
     schema = rf.Schema.from_tree(
         nested=rf.Branch(length=2, attention=None, reduction=None, value=rf.Number),
-        direct=rf.Number(),
+        direct=rf.Number,
         d_model=4,
         n_layers=1,
         n_heads=2,
@@ -293,7 +293,7 @@ def test_branch_encoder_orders_nested_and_leaf_parcels_by_schema() -> None:
 
 def test_branch_encoder_contextualizes_only_jointly_aligned_field_coordinates():
     schema = rf.Schema.from_tree(
-        items=rf.Branch(first=rf.Number(), second=rf.Number(), length=3, reduction=None),
+        items=rf.Branch(first=rf.Number, second=rf.Number, length=3, reduction=None),
         d_model=8,
         n_layers=1,
         n_heads=2,
@@ -341,7 +341,7 @@ def test_branch_encoder_contextualizes_only_jointly_aligned_field_coordinates():
 
 def test_branch_encoder_mean_reduction_uses_one_output_and_ignores_padding():
     schema = rf.Schema.from_tree(
-        items=rf.Branch(value=rf.Number(), length=3, attention=None, reduction=rf.Mean()),
+        items=rf.Branch(value=rf.Number, length=3, attention=None, reduction=rf.Mean()),
         d_model=4,
         n_layers=1,
         n_heads=2,
@@ -421,7 +421,7 @@ def test_decoder_receives_canonical_heritage_and_separate_sibling_context():
 
 
 def test_decoder_supports_zero_context():
-    schema = Schema.model_validate(_payload(pooling="mean"))
+    schema = Schema.model_validate(schema_payload(pooling="mean"))
     model = Model(schema=schema, batch_size=2)
     decoder = model.nodes["/items/category"].decoder
 

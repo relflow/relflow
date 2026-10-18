@@ -16,10 +16,8 @@ N_CLUSTERS = 3
 
 def build() -> rf.Model:
     torch.manual_seed(0)
-    return rf.Model(
+    return rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=4,
         batch_size=2,
         attention=None,
         merchant_id=rf.Cluster(
@@ -143,10 +141,8 @@ def test_cluster_status_returns_detached_cpu_native_snapshot() -> None:
 
 
 def test_cluster_decoder_does_not_condition_identity_on_row_siblings() -> None:
-    model = rf.Model(
+    model = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         merchant_id=rf.Cluster(
             n_clusters=(2, N_CLUSTERS),
             mask=rf.Mask(rate=0.1, reconstruct=True),
@@ -186,10 +182,8 @@ def test_cluster_model_bindings_reject_missing_address(binding) -> None:
     ids=["vocabulary", "assignments", "status"],
 )
 def test_cluster_model_bindings_reject_non_cluster_field(binding) -> None:
-    model = rf.Model(
+    model = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=4,
         amount=rf.Number,
     )
 

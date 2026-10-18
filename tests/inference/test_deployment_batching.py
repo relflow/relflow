@@ -12,7 +12,6 @@ import torch
 
 import relflow as rf
 import relflow.inference.deployment as deployment_module
-from relflow import Model, Number, where
 from relflow.data.processors import apply
 from relflow.inference.deployment import Deployment, ErrorItem
 
@@ -102,11 +101,9 @@ def test_batcher_runs_processors_once_for_one_collated_arrow_batch():
         return frame.select("value")
 
     async def run():
-        model = Model(
-            value=Number,
+        model = rf.Model.xs(
+            value=rf.Number,
             d_model=8,
-            n_layers=1,
-            n_heads=2,
             embed=True,
         )
         server = deployment_module.FastAPIRuntime(
@@ -383,7 +380,7 @@ def test_runtime_setup_applies_updates_before_device_placement(monkeypatch):
 
     loaded = LoadedModel()
     monkeypatch.setattr(deployment_module.Model, "load", classmethod(lambda cls, checkpoint: loaded))
-    predicate = where("name") == "label"
+    predicate = rf.where("name") == "label"
     server = deployment_module.FastAPIRuntime(
         checkpoint="unused",
         accelerator=deployment_module.Accelerator.cpu,
@@ -401,7 +398,7 @@ def test_runtime_setup_applies_updates_before_device_placement(monkeypatch):
 
 
 def test_runtime_setup_uses_an_in_memory_model(monkeypatch):
-    model = Model(amount=Number(), d_model=8, n_layers=1, n_heads=2)
+    model = rf.Model.xs(amount=rf.Number, d_model=8)
     monkeypatch.setattr(
         deployment_module.Model,
         "load",
@@ -537,7 +534,7 @@ def test_arrow_deployment_batches_processed_rows_and_runs_global_processors_once
             .with_row_index("row")
         )
 
-    model = Model(value=Number, d_model=8, n_layers=1, n_heads=2, embed=True)
+    model = rf.Model.xs(value=rf.Number, d_model=8, embed=True)
     hook = model.register_forward_pre_hook(lambda module, inputs: batches.append(inputs[0]["/value"].state.shape[0]))
     monkeypatch.setattr(
         deployment_module,
@@ -601,7 +598,7 @@ def test_arrow_deployment_rejects_final_prediction_cardinality_drift(stage):
     def drop_outputs(frame: pl.DataFrame) -> pl.DataFrame:
         return frame.head(2)
 
-    model = Model(value=Number, d_model=8, n_layers=1, n_heads=2, embed=True)
+    model = rf.Model.xs(value=rf.Number, d_model=8, embed=True)
     deployment = Deployment(checkpoint=model, accelerator="cpu", max_batch_size=2)
     if stage == "preprocess":
         deployment.preprocess(drop_inputs)
@@ -711,7 +708,7 @@ def test_multiworker_deployment_rejects_in_process_builder_configuration():
 
 
 def test_deployment_rejects_explicit_checkpoint_and_model():
-    model = Model(amount=Number(), d_model=8, n_layers=1, n_heads=2)
+    model = rf.Model.xs(amount=rf.Number, d_model=8)
 
     with pytest.raises(ValueError, match="pass either checkpoint or model"):
         Deployment(checkpoint="model.ckpt", model=model)

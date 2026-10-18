@@ -43,9 +43,7 @@ class CustomMixedPrecision(MixedPrecision):
 
 
 def configured() -> tuple[rf.Model, rf.ArrowDataModule]:
-    model = LargeGradient(
-        d_model=8, n_layers=1, n_heads=2, batch_size=2, amount=rf.Number, target=rf.Boolean(mask=True)
-    )
+    model = LargeGradient.xs(d_model=8, batch_size=2, amount=rf.Number, target=rf.Boolean(mask=True))
     table = pa.table({"amount": [1.0, 3.0], "target": [False, True]})
     datamodule = rf.ArrowDataModule(
         model=model,
@@ -63,10 +61,11 @@ def configured() -> tuple[rf.Model, rf.ArrowDataModule]:
 @pytest.mark.parametrize("algorithm", ["norm", "value"])
 def test_bf16_fused_adamw_clips_large_gradients_and_updates_weights(precision, algorithm):
     model, datamodule = configured()
-    model.optimizer = rf.adamw(1e-3, fused=True)
     before = {name: parameter.detach().clone() for name, parameter in model.named_parameters()}
     model.fit(
         datamodule,
+        learning_rate=1e-3,
+        fused=True,
         accelerator="cpu",
         devices=1,
         precision=precision,

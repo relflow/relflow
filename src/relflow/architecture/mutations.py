@@ -6,7 +6,7 @@ from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from copy import deepcopy
 from functools import partialmethod, wraps
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 import lightning.pytorch as lit
 import torch
@@ -22,7 +22,10 @@ if TYPE_CHECKING:
     from relflow.architecture.root import Model
 
 
-def immutable[F: Callable[..., object]](name: str | Strata) -> Callable[[F], F]:
+F = TypeVar("F", bound=Callable[..., object])
+
+
+def immutable(name: str | Strata) -> Callable[[F], F]:
     """Hold a model mutation lock without changing the decorated call signature."""
 
     def decorator(method: F) -> F:

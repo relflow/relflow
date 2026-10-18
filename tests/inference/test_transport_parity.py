@@ -15,10 +15,8 @@ from relflow.inference.deployment import ARROW_MEDIA_TYPE, JSON_MEDIA_TYPE, Depl
 
 @pytest.mark.parametrize("retain", [(), "*"])
 def test_direct_parquet_arrow_and_json_preserve_the_same_selected_columns(tmp_path, retain):
-    model = rf.Model(
+    model = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         embed=True,
         amount=rf.Number,
         disputed=rf.Boolean(mask=True),

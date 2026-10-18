@@ -25,7 +25,7 @@ from relflow.data.sources import Source, matches
 
 
 def model(batch_size=2):
-    return rf.Model(id=rf.Number, d_model=8, n_layers=1, n_heads=4, batch_size=batch_size)
+    return rf.Model.xs(id=rf.Number, d_model=8, batch_size=batch_size)
 
 
 @rf.preprocess
@@ -176,8 +176,9 @@ def test_globs_and_regexes_select_sorted_files(tmp_path):
     assert sorted(value for batch in recursive() for value in batch["id"].to_pylist()) == [1, 3]
 
 
-def test_explicit_files_are_sorted_deduplicated_and_uri_normalized(tmp_path):
-    a, b = tmp_path / "a.parquet", tmp_path / "b.parquet"
+@pytest.mark.parametrize("suffix", ["", " space #%23"])
+def test_explicit_files_are_sorted_deduplicated_and_uri_normalized(tmp_path, suffix):
+    a, b = tmp_path / f"a{suffix}.parquet", tmp_path / f"b{suffix}.parquet"
     pq.write_table(pa.table({"id": [1]}), a)
     pq.write_table(pa.table({"id": [2]}), b)
     source = rf.source([b.as_uri(), a.as_uri(), b.as_uri()])
@@ -192,9 +193,15 @@ def test_relative_path_is_fixed_at_construction(tmp_path, monkeypatch):
     assert list(source())[0]["id"].to_pylist() == [1]
 
 
-def test_file_uri_question_mark_glob(tmp_path):
-    pq.write_table(pa.table({"id": [1]}), tmp_path / "train-1.parquet")
-    assert list(rf.source(tmp_path.as_uri() + "/train-?.parquet")())[0]["id"].to_pylist() == [1]
+@pytest.mark.parametrize("pattern", ["train-?.parquet", "train-*.parquet", "train-[0-9].parquet"])
+def test_file_uri_globs_preserve_escaped_path_characters(tmp_path, pattern):
+    directory = tmp_path / "space # %23"
+    directory.mkdir()
+    pq.write_table(pa.table({"id": [1]}), directory / "train-1.parquet")
+    pq.write_table(pa.table({"id": [2]}), directory / "other-1.parquet")
+    assert [
+        value for batch in rf.source(directory.as_uri() + f"/{pattern}")() for value in batch["id"].to_pylist()
+    ] == [1]
 
 
 def test_filesystem_factory_is_lazy_and_remote_selection_uses_its_namespace(tmp_path):
@@ -381,6 +388,7 @@ def test_discovery_error_is_broadcast_before_workers_start(tmp_path, monkeypatch
 
 
 @pytest.mark.parametrize("missing", [False, True])
+@pytest.mark.skipif(not distributed.is_available() or not distributed.is_gloo_available(), reason="requires CPU Gloo")
 def test_ranks_share_manifest_and_discovery_errors(tmp_path, missing):
     pq.write_table(pa.table({"id": list(range(8))}), tmp_path / "train.parquet")
     multiprocessing.spawn(distributed_source, args=(str(tmp_path), missing), nprocs=2, join=True)

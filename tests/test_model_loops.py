@@ -42,7 +42,7 @@ class DistributedState(lit.Callback):
 
 @pytest.fixture
 def model():
-    return rf.Model(d_model=8, n_layers=1, n_heads=2, batch_size=2, amount=rf.Number, label=rf.Boolean(mask=True))
+    return rf.Model.xs(d_model=8, batch_size=2, amount=rf.Number, label=rf.Boolean(mask=True))
 
 
 @pytest.fixture
@@ -245,7 +245,7 @@ def test_custom_policies_replace_defaults_and_train_only_requires_a_policy_choic
 
 
 def test_input_ownership_and_option_conflicts_fail_before_execution(model, data, options):
-    other = rf.Model(d_model=8, n_layers=1, n_heads=2, amount=rf.Number, label=rf.Boolean(mask=True))
+    other = rf.Model.xs(d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
     with pytest.raises(ValueError, match="different model"):
         other.fit(data, **options)
     with pytest.raises(TypeError, match="LightningDataModule"):
@@ -571,6 +571,9 @@ def test_arbitrary_data_module_evaluates_complete_validation_loaders(model, data
     assert callback.counts["validate"] == 48
 
 
+@pytest.mark.skipif(
+    not torch.distributed.is_available() or not torch.distributed.is_gloo_available(), reason="requires CPU Gloo"
+)
 def test_distributed_logging_and_rollback_complete_on_every_rank(model, data, options, tmp_path):
     from lightning.pytorch.strategies import DDPStrategy
 

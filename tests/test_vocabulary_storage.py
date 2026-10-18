@@ -23,7 +23,7 @@ def build(kind):
         "set": rf.Set(mask=True),
         "cluster": rf.Cluster(bounds=3, mask=True, revive_temperature=0),
     }[kind]
-    return rf.Model(d_model=8, n_layers=1, n_heads=2, dropout=0.0, x=rf.Number, label=field)
+    return rf.Model.xs(d_model=8, x=rf.Number, label=field)
 
 
 def source(kind, labels):
@@ -45,6 +45,17 @@ def reserve(model, width):
     resize.commit()
 
 
+def approximate(value):
+    """Allow float32 GEMM rounding while keeping prediction structure and labels exact."""
+    if isinstance(value, float):
+        return pytest.approx(value, rel=1e-6, abs=1e-7)
+    if isinstance(value, dict):
+        return {name: approximate(child) for name, child in value.items()}
+    if isinstance(value, list):
+        return [approximate(child) for child in value]
+    return value
+
+
 @pytest.mark.parametrize("field", FIELDS)
 @pytest.mark.parametrize("option", ["size", "capacity"])
 def test_allocation_options_are_rejected_by_constructor_and_schema(field, option):
@@ -64,17 +75,23 @@ def test_spare_storage_preserves_predictions_schema_and_checkpoint(kind, width, 
     model.encode(source(kind, ["a", "b", "c"]), strata="train")
     schema = deepcopy(model.schema.model_dump())
     labels = tuple(model.nodes[ADDRESS].embedder.vocab.master)
-    before = model.predict(source(kind, ["unseen", "a", None]))["predictions"].to_pylist()
+    probe = source(kind, ["unseen", "a", None])
+    before = model.predict(probe)
+    expected = approximate(before["predictions"].to_pylist())
 
     reserve(model, width)
 
     assert model.schema.model_dump() == schema
     assert tuple(model.nodes[ADDRESS].embedder.vocab.master) == labels
-    assert model.predict(source(kind, ["unseen", "a", None]))["predictions"].to_pylist() == before
+    after = model.predict(probe)
+    assert after.schema.equals(before.schema, check_metadata=True)
+    assert after["predictions"].to_pylist() == expected
     loaded = rf.Model.load(model.save(tmp_path / "spare.ckpt"))
     assert loaded.schema.model_dump() == schema
     assert loaded.nodes[ADDRESS].embedder.vocab.size == width
-    assert loaded.predict(source(kind, ["unseen", "a", None]))["predictions"].to_pylist() == before
+    restored = loaded.predict(probe)
+    assert restored.schema.equals(before.schema, check_metadata=True)
+    assert restored["predictions"].to_pylist() == expected
 
 
 @pytest.mark.parametrize("kind", ["category", "set", "cluster"])

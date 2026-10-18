@@ -41,7 +41,6 @@ def test_invalid_public_inputs_are_rejected(tmp_path):
 
 def test_runtime_constructor_retains_custom_scheduler_support():
     import relflow as rf
-    from relflow.helpers.optimizers import adamw
 
     class CustomScheduler:
         def __init__(self, optimizer):
@@ -53,10 +52,10 @@ def test_runtime_constructor_retains_custom_scheduler_support():
         def load_state_dict(self, state_dict):
             pass
 
-    model = rf.Model(d_model=16, n_layers=1, n_heads=4, value=rf.Number(mask=True))
+    model = rf.Model.xs(d_model=16, value=rf.Number(mask=True))
     configured = rf.Model(
         model.schema,
-        optimizer=adamw(1e-3),
+        optimizer=rf.adamw(1e-3),
         scheduler=lambda module, optimizer: CustomScheduler(optimizer),
     )
     training = configured.configure_optimizers()

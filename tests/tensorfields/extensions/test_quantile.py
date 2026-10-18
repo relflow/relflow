@@ -19,7 +19,7 @@ ADDRESS = rf.Address("amount")
 
 
 def model(**options) -> rf.Model:
-    return rf.Model.xs(d_model=8, n_heads=2, n_layers=1, batch_size=2, amount=rf.Quantile(**options))
+    return rf.Model.xs(d_model=8, batch_size=2, amount=rf.Quantile(**options))
 
 
 def values(*content: float | None) -> pa.Table:
@@ -147,8 +147,6 @@ def test_quantile_repeated_null_and_empty_rows_keep_geometry():
     address = rf.Address("items", "amount")
     configured = rf.Model.xs(
         d_model=8,
-        n_heads=2,
-        n_layers=1,
         items=rf.Branch(length=3, amount=rf.Quantile(mask=rf.Mask(reconstruct=True))),
     )
     source = pa.Table.from_pylist(
@@ -176,7 +174,7 @@ def test_quantile_observes_skipped_supervised_targets_once(owner):
     address = rf.Address("items", "amount")
     leaf = rf.Quantile(mask=owner == "leaf")
     branch = rf.Branch(length=3, mask=owner == "branch", amount=leaf)
-    configured = rf.Model.xs(d_model=8, n_heads=2, n_layers=1, mask=owner == "root", items=branch)
+    configured = rf.Model.xs(d_model=8, mask=owner == "root", items=branch)
     source = pa.Table.from_pylist([{"items": [{"amount": 2.0}, {"amount": None}, {"amount": 8.0}]}])
     field = configured.encode(source, strata=rf.Strata.train)[address]
 
@@ -393,13 +391,10 @@ def test_quantile_lightning_training_learns_only_consumed_values():
     torch.manual_seed(811)
     configured = rf.Model.xs(
         d_model=16,
-        n_heads=2,
-        n_layers=1,
         batch_size=64,
         x=rf.Quantile,
         y=rf.Quantile(mask=True),
     )
-    configured.optimizer = rf.adamw(learning_rate=0.01, weight_decay=0.0, fused=False)
     x = torch.linspace(0.0, 1.0, 64, dtype=torch.float64)
     train = pa.table({"x": x.numpy(), "y": (100 + 900 * x.square()).numpy()})
     validate = pa.table({"x": (10 + x).numpy(), "y": (1_000_000 + x).numpy()})
@@ -427,7 +422,14 @@ def test_quantile_lightning_training_learns_only_consumed_values():
         persistent_workers=False,
         pin_memory=False,
     )
-    trainer = lit.Trainer(
+    configured.fit(
+        data,
+        learning_rate=0.01,
+        weight_decay=0.0,
+        fused=False,
+        early_stopping=False,
+        rollback=False,
+        precision="32-true",
         accelerator="cpu",
         devices=1,
         max_epochs=1,
@@ -440,8 +442,6 @@ def test_quantile_lightning_training_learns_only_consumed_values():
         enable_progress_bar=False,
         callbacks=[Audit()],
     )
-
-    trainer.fit(configured, datamodule=data)
 
     assert len(losses) == len(gradients) == 1
     assert torch.isfinite(losses[0])
@@ -475,8 +475,6 @@ def test_quantile_forward_reuses_encoded_inputs_after_restoring_resources(tmp_pa
     torch.manual_seed(811)
     configured = rf.Model.xs(
         d_model=8,
-        n_heads=2,
-        n_layers=1,
         x=rf.Quantile,
         y=rf.Quantile(mask=True),
     )

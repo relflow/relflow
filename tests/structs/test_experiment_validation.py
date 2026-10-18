@@ -3,7 +3,7 @@ import pytest
 from relflow.structs.experiment import Schema
 
 
-def _structure_payload() -> dict:
+def schema_payload() -> dict:
     field: dict = {
         "name": "identifier",
         "type": "hash",
@@ -25,12 +25,8 @@ def _structure_payload() -> dict:
     }
 
 
-def _schema_payload() -> dict:
-    return _structure_payload()
-
-
 def test_schema_rejects_undeclared_options():
-    payload = _schema_payload()
+    payload = schema_payload()
     payload["unexpected"] = True
 
     with pytest.raises(ValueError, match="Extra inputs are not permitted"):
@@ -38,7 +34,7 @@ def test_schema_rejects_undeclared_options():
 
 
 def test_schema_derives_effective_reconstruct_roles_from_masks():
-    payload = _schema_payload()
+    payload = schema_payload()
     payload["fields"]["fields"][0]["mask"] = {"reconstruct": True, "dropout": False}
 
     schema = Schema.model_validate(payload)
@@ -51,7 +47,7 @@ def test_schema_derives_effective_reconstruct_roles_from_masks():
 
 
 def test_schema_derives_embed_from_node_attribute():
-    payload = _schema_payload()
+    payload = schema_payload()
     payload["fields"]["embed"] = True
 
     schema = Schema.model_validate(payload)
@@ -60,7 +56,7 @@ def test_schema_derives_embed_from_node_attribute():
 
 
 def test_schema_excludes_dynamic_reconstruct_from_prediction_decodes():
-    payload = _schema_payload()
+    payload = schema_payload()
     payload["fields"]["fields"][0]["fields"][0]["mask"] = {
         "rate": 0.5,
         "reconstruct": True,
@@ -76,7 +72,7 @@ def test_schema_excludes_dynamic_reconstruct_from_prediction_decodes():
 
 
 def test_schema_mask_round_trip_preserves_skip_policy():
-    payload = _schema_payload()
+    payload = schema_payload()
     payload["fields"]["mask"] = {"skip": True, "reconstruct": True, "dropout": False}
     schema = Schema.model_validate(payload)
 

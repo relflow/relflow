@@ -12,10 +12,8 @@ ADDRESS = rf.Address("/flag")
 
 
 def build() -> rf.Model:
-    return rf.Model(
+    return rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=4,
         batch_size=4,
         attention=None,
         flag=rf.Boolean,
@@ -59,11 +57,9 @@ def test_boolean_counts_validates_model_and_address() -> None:
     with pytest.raises(KeyError, match="missing"):
         rf.Boolean.counts(model, "/missing")
 
-    wrong_model = rf.Model(
+    wrong_model = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=4,
-        category=rf.Category(),
+        category=rf.Category,
     )
     with pytest.raises(TypeError, match="not a Boolean field"):
         rf.Boolean.counts(wrong_model, "/category")

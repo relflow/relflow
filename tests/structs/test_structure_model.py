@@ -10,7 +10,7 @@ from relflow.structs.structure import Branch
 from relflow.tensorfields.extensions.category import Request as Category
 
 
-def _payload() -> dict:
+def schema_payload() -> dict:
     return {
         "d_model": 16,
         "fields": {
@@ -55,7 +55,7 @@ def test_branch_rejects_children_that_are_not_definitions():
 
 
 def test_schema_derives_branches_requests_and_shapes():
-    structure = Schema.model_validate(_payload())
+    structure = Schema.model_validate(schema_payload())
 
     assert "/" in structure.branches
     assert "/branch" in structure.branches
@@ -226,12 +226,12 @@ def test_raw_generic_leaves_materialize_through_the_live_registry():
 
 
 def test_schema_depthwise_contains_branch_levels():
-    structure = Schema.model_validate(_payload())
+    structure = Schema.model_validate(schema_payload())
     assert structure.depthwise == [["/"], ["/branch"]]
 
 
 def test_schema_string_representation_contains_tree_nodes():
-    structure = Schema.model_validate(_payload())
+    structure = Schema.model_validate(schema_payload())
     rendered = str(structure)
     assert "type='schema'" in rendered
     assert "fields=Branch(" in rendered
@@ -240,14 +240,14 @@ def test_schema_string_representation_contains_tree_nodes():
 
 
 def test_schema_preserves_field_and_branch_descriptions():
-    structure = Schema.model_validate(_payload())
+    structure = Schema.model_validate(schema_payload())
     assert structure.branches["/"].description == "root branch docs"
     assert structure.branches["/branch"].description == "branch docs"
     assert structure.requests["/branch/category_leaf"].description == "category docs"
 
 
 def test_schema_uses_direct_branch_dropout():
-    structure = Schema.model_validate(_payload())
+    structure = Schema.model_validate(schema_payload())
 
     assert structure.branches["/"].dropout == 0.1
     assert structure.branches["/branch"].dropout is None
@@ -255,7 +255,7 @@ def test_schema_uses_direct_branch_dropout():
 
 
 def test_schema_allows_missing_dropout():
-    payload = _payload()
+    payload = schema_payload()
     payload["fields"].pop("dropout")
     structure = Schema.model_validate(payload)
 
@@ -264,7 +264,7 @@ def test_schema_allows_missing_dropout():
 
 
 def test_schema_preserves_direct_field_dropout():
-    payload = _payload()
+    payload = schema_payload()
     payload["fields"]["fields"][0]["fields"][0]["dropout"] = 0.4
 
     structure = Schema.model_validate(payload)
@@ -273,7 +273,7 @@ def test_schema_preserves_direct_field_dropout():
 
 
 def test_schema_rejects_undeclared_branch_options():
-    payload = _payload()
+    payload = schema_payload()
     payload["fields"]["notes"] = "Undeclared option"
 
     with pytest.raises(ValueError, match="Extra inputs are not permitted"):
@@ -281,7 +281,7 @@ def test_schema_rejects_undeclared_branch_options():
 
 
 def test_schema_allows_missing_mask():
-    structure = Schema.model_validate(_payload())
+    structure = Schema.model_validate(schema_payload())
 
     assert structure.fields.mask == ()
     assert structure.branches["/branch"].mask == ()
@@ -289,7 +289,7 @@ def test_schema_allows_missing_mask():
 
 
 def test_inactive_leaf_nodes_are_kept_in_tree_but_removed_from_runtime_maps():
-    payload = _payload()
+    payload = schema_payload()
     payload["fields"]["fields"][0]["fields"][0]["active"] = False
     payload["fields"]["fields"][0]["fields"][0]["mask"] = True
     payload["fields"]["fields"][0]["fields"][0]["embed"] = True

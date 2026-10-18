@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from copy import deepcopy
 from types import FunctionType, MethodType
-from typing import Any, cast
+from typing import Any, Generic, ParamSpec, cast
 
 import torch
 
@@ -15,8 +15,10 @@ from relflow.architecture.pool import CrossAttentionBlock, LearnedQueryCrossAtte
 
 __all__ = ["canonical", "clear", "compile"]
 
+P = ParamSpec("P")
 
-class Region[**P]:
+
+class Region(Generic[P]):
     """Bind one compiler cache to one compute method, without serializing it."""
 
     def __init__(

@@ -171,11 +171,16 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             series = pl.from_arrow(values, rechunk=False)
             if not isinstance(series, pl.Series):
                 raise TypeError(f"hash field at '{address}' could not construct a Polars Series from {values.type}")
+            frame = series.to_frame()
             hashes = np.empty((len(values), n_hashes), dtype=np.int64)
             for lane in range(n_hashes):
                 seed, seed_1, seed_2, seed_3 = seeds(context.salt, lane, family)
+                # Execute the expression directly; Series' generated wrappers depend on Python bytecode.
                 hashes[:, lane] = (
-                    series.hash(seed=seed, seed_1=seed_1, seed_2=seed_2, seed_3=seed_3).to_numpy().view(np.int64)
+                    frame.select(pl.all().hash(seed=seed, seed_1=seed_1, seed_2=seed_2, seed_3=seed_3))
+                    .to_series()
+                    .to_numpy()
+                    .view(np.int64)
                 )
             return torch.from_numpy(field.place(hashes, fill=0, value_shape=(n_hashes,)))
 
