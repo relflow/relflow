@@ -44,7 +44,7 @@ class Strata(enum.StrEnum):
 class TensorKey(enum.StrEnum):
     value = "value"
     content = "content"
-    cluster = "cluster"
+    group = "group"
     state = "state"
     present = "present"
     trainable = "trainable"

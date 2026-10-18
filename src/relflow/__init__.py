@@ -83,9 +83,9 @@ from relflow.tensorfields import (
 )
 from relflow.tensorfields.extensions.boolean import Request as Boolean
 from relflow.tensorfields.extensions.category import Request as Category
-from relflow.tensorfields.extensions.cluster import Request as Cluster
 from relflow.tensorfields.extensions.dateparts import Request as DateParts
 from relflow.tensorfields.extensions.enum import Request as Enum
+from relflow.tensorfields.extensions.group import Request as Group
 from relflow.tensorfields.extensions.hashable import Request as Hash
 from relflow.tensorfields.extensions.number import Request as Number
 from relflow.tensorfields.extensions.quantile import Request as Quantile
@@ -148,7 +148,6 @@ __all__ = [
     "AttentionInput",
     "ArrowDataModule",
     "ArrowInput",
-    "Cluster",
     "Category",
     "Component",
     "Context",
@@ -160,6 +159,7 @@ __all__ = [
     "DecoderBase",
     "Deployment",
     "EmbedderBase",
+    "Group",
     "Hash",
     "Schema",
     "Input",

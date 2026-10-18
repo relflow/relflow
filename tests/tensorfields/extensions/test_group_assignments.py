@@ -1,4 +1,4 @@
-"""Tests for persistent Cluster assignments and scoped overrides."""
+"""Tests for persistent Group assignments and scoped overrides."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from tensordict import TensorDict
 import relflow as rf
 from relflow.structs.enums import Strata, Tokens
 from relflow.structs.tree import Address
-from relflow.tensorfields.extensions.cluster import Embedder, TensorField
+from relflow.tensorfields.extensions.group import Embedder, TensorField
 
 CAPACITY = 8
 K = 4
@@ -26,11 +26,11 @@ def build_model(*, embed: bool = False) -> rf.Model:
         d_model=16,
         batch_size=4,
         embed=embed,
-        merchant_id=rf.Cluster(n_clusters=(K, K), p_unavailable=0.0),
+        merchant_id=rf.Group(n_groups=(K, K), p_unavailable=0.0),
     )
 
 
-def cluster_embedder(model: rf.Model) -> Embedder:
+def group_embedder(model: rf.Model) -> Embedder:
     embedder = model.nodes[Address(ADDRESS)].embedder
     assert isinstance(embedder, Embedder)
     return embedder
@@ -51,103 +51,103 @@ def valued_token(index: int) -> TensorField:
 # ---------- persistent assignments ----------
 
 
-def test_assign_grows_vocab_and_writes_row_for_int_cluster():
+def test_assign_grows_vocab_and_writes_row_for_int_group():
     model = build_model()
-    embedder = cluster_embedder(model)
+    embedder = group_embedder(model)
     assert len(embedder.vocab.master) == 0
 
-    index = rf.Cluster.assign(model, ADDRESS, "brand-new", 2)
+    index = rf.Group.assign(model, ADDRESS, "brand-new", 2)
 
     assert index == 0
     assert list(embedder.vocab.master) == ["brand-new"]
-    row = embedder.embeddings["cluster"].weight[index]
+    row = embedder.embeddings["group"].weight[index]
     assert int(row.argmax().item()) == 2
 
 
 def test_assign_accepts_probability_vector():
     model = build_model()
-    embedder = cluster_embedder(model)
+    embedder = group_embedder(model)
     probs = [0.05, 0.05, 0.6, 0.3]
 
-    rf.Cluster.assign(model, ADDRESS, "soft-token", probs)
+    rf.Group.assign(model, ADDRESS, "soft-token", probs)
 
-    row = embedder.embeddings["cluster"].weight[0]
+    row = embedder.embeddings["group"].weight[0]
     # A probability vector round-trips to logits via log(probs); argmax must land on 2.
     assert int(row.argmax().item()) == 2
 
 
 def test_assign_overwrites_existing_token():
     model = build_model()
-    embedder = cluster_embedder(model)
-    idx = rf.Cluster.assign(model, ADDRESS, "shared-token", 1)
-    assert int(embedder.embeddings["cluster"].weight[idx].argmax().item()) == 1
+    embedder = group_embedder(model)
+    idx = rf.Group.assign(model, ADDRESS, "shared-token", 1)
+    assert int(embedder.embeddings["group"].weight[idx].argmax().item()) == 1
 
-    idx_again = rf.Cluster.assign(model, ADDRESS, "shared-token", 3)
+    idx_again = rf.Group.assign(model, ADDRESS, "shared-token", 3)
 
     assert idx_again == idx
     assert len(embedder.vocab.master) == 1
-    assert int(embedder.embeddings["cluster"].weight[idx].argmax().item()) == 3
+    assert int(embedder.embeddings["group"].weight[idx].argmax().item()) == 3
 
 
 def test_assign_grows_when_capacity_full():
     model = build_model()
-    embedder = cluster_embedder(model)
+    embedder = group_embedder(model)
     for i in range(CAPACITY):
-        rf.Cluster.assign(model, ADDRESS, f"tok-{i}", i % K)
+        rf.Group.assign(model, ADDRESS, f"tok-{i}", i % K)
     assert len(embedder.vocab.master) == CAPACITY
 
-    before = embedder.embeddings["cluster"].weight.detach().clone()
-    assert rf.Cluster.assign(model, ADDRESS, "one-more", 0) == CAPACITY
+    before = embedder.embeddings["group"].weight.detach().clone()
+    assert rf.Group.assign(model, ADDRESS, "one-more", 0) == CAPACITY
     assert embedder.capacity == CAPACITY * 2
-    torch.testing.assert_close(embedder.embeddings["cluster"].weight[:CAPACITY], before[:CAPACITY])
-    torch.testing.assert_close(embedder.embeddings["cluster"].weight[-1], before[-1])
+    torch.testing.assert_close(embedder.embeddings["group"].weight[:CAPACITY], before[:CAPACITY])
+    torch.testing.assert_close(embedder.embeddings["group"].weight[-1], before[-1])
 
 
-def test_assign_rejects_out_of_range_cluster():
+def test_assign_rejects_out_of_range_group():
     model = build_model()
 
-    with pytest.raises(ValueError, match=r"cluster must be in \[0, 4\)"):
-        rf.Cluster.assign(model, ADDRESS, "tok", K)
+    with pytest.raises(ValueError, match=r"group must be in \[0, 4\)"):
+        rf.Group.assign(model, ADDRESS, "tok", K)
 
 
 def test_assign_requires_exactly_one_assignment():
     model = build_model()
 
     with pytest.raises(TypeError):
-        rf.Cluster.assign(model, ADDRESS, "tok")
+        rf.Group.assign(model, ADDRESS, "tok")
     with pytest.raises(TypeError):
-        rf.Cluster.assign(model, ADDRESS, "tok", 0, [1.0, 0.0, 0.0, 0.0])
+        rf.Group.assign(model, ADDRESS, "tok", 0, [1.0, 0.0, 0.0, 0.0])
 
 
 def test_assign_rejects_bad_probability_shape():
     model = build_model()
 
     with pytest.raises(ValueError, match="shape"):
-        rf.Cluster.assign(model, ADDRESS, "tok", [1.0, 0.0])
+        rf.Group.assign(model, ADDRESS, "tok", [1.0, 0.0])
 
 
 def test_assign_rejects_probabilities_that_do_not_sum_to_one():
     model = build_model()
 
     with pytest.raises(ValueError, match="sum to 1"):
-        rf.Cluster.assign(model, ADDRESS, "tok", [0.5, 0.3, 0.1, 0.0])
+        rf.Group.assign(model, ADDRESS, "tok", [0.5, 0.3, 0.1, 0.0])
 
 
 def test_assign_rejects_negative_probabilities():
     model = build_model()
 
     with pytest.raises(ValueError, match="non-negative"):
-        rf.Cluster.assign(model, ADDRESS, "tok", [1.5, -0.5, 0.0, 0.0])
+        rf.Group.assign(model, ADDRESS, "tok", [1.5, -0.5, 0.0, 0.0])
 
 
 def test_assign_raises_for_unknown_address():
     model = build_model()
 
     with pytest.raises(KeyError):
-        rf.Cluster.assign(model, "/nonexistent", "tok", 0)
+        rf.Group.assign(model, "/nonexistent", "tok", 0)
 
 
-def test_assign_raises_for_non_cluster_field():
+def test_assign_raises_for_non_group_field():
     torch.manual_seed(0)
     model = rf.Model.xs(
         d_model=16,
@@ -155,8 +155,8 @@ def test_assign_raises_for_non_cluster_field():
         amount=rf.Number,
     )
 
-    with pytest.raises(TypeError, match="not a Cluster field"):
-        rf.Cluster.assign(model, "/amount", "tok", 0)
+    with pytest.raises(TypeError, match="not a Group field"):
+        rf.Group.assign(model, "/amount", "tok", 0)
 
 
 # ---------- scoped overrides ----------
@@ -164,23 +164,23 @@ def test_assign_raises_for_non_cluster_field():
 
 def test_override_applies_only_within_prediction_scope():
     model = build_model(embed=True)
-    embedder = cluster_embedder(model)
+    embedder = group_embedder(model)
     initial_vocab_size = len(embedder.vocab.master)
-    initial_row_2 = embedder.embeddings["cluster"].weight[min(initial_vocab_size, CAPACITY)].detach().clone()
+    initial_row_2 = embedder.embeddings["group"].weight[min(initial_vocab_size, CAPACITY)].detach().clone()
 
-    with rf.Cluster.override(model, ADDRESS, {"overridden": 3}):
+    with rf.Group.override(model, ADDRESS, {"overridden": 3}):
         model.predict(pa.table({"merchant_id": ["overridden"]}))
 
     assert len(embedder.vocab.master) == initial_vocab_size
     # The row that got temporarily written must be reverted to its original values.
-    reverted_row = embedder.embeddings["cluster"].weight[min(initial_vocab_size, CAPACITY)]
+    reverted_row = embedder.embeddings["group"].weight[min(initial_vocab_size, CAPACITY)]
     assert torch.equal(reverted_row, initial_row_2)
 
 
 def test_override_is_used_by_tensorization():
     model = build_model()
 
-    with rf.Cluster.override(model, ADDRESS, {"overridden": 3}):
+    with rf.Group.override(model, ADDRESS, {"overridden": 3}):
         overridden = model.encode(pa.table({"merchant_id": ["overridden"]}))[Address(ADDRESS)]
         assert int(overridden.content.item()) == 0
         assert int(overridden.state.item()) == Tokens.valued.value
@@ -191,132 +191,132 @@ def test_override_is_used_by_tensorization():
 
 def test_override_rolls_back_when_prediction_scope_raises():
     model = build_model()
-    embedder = cluster_embedder(model)
-    original = embedder.embeddings["cluster"].weight[0].detach().clone()
+    embedder = group_embedder(model)
+    original = embedder.embeddings["group"].weight[0].detach().clone()
 
     with pytest.raises(RuntimeError, match="prediction failed"):
-        with rf.Cluster.override(model, ADDRESS, {"overridden": 3}):
+        with rf.Group.override(model, ADDRESS, {"overridden": 3}):
             assert embedder.vocab.state.index["overridden"] == 0
             raise RuntimeError("prediction failed")
 
     assert "overridden" not in embedder.vocab.state.index
-    assert torch.equal(embedder.embeddings["cluster"].weight[0], original)
+    assert torch.equal(embedder.embeddings["group"].weight[0], original)
 
 
 def test_override_rolls_back_when_entering_scope_raises():
     model = build_model()
-    embedder = cluster_embedder(model)
-    original = embedder.embeddings["cluster"].weight[0].detach().clone()
+    embedder = group_embedder(model)
+    original = embedder.embeddings["group"].weight[0].detach().clone()
 
     with pytest.raises(ValueError, match="shape"):
-        with rf.Cluster.override(model, ADDRESS, {"valid": 2, "invalid": [1.0, 0.0]}):
+        with rf.Group.override(model, ADDRESS, {"valid": 2, "invalid": [1.0, 0.0]}):
             pytest.fail("invalid overrides should fail before entering the scope")
 
     assert list(embedder.vocab.master) == []
-    assert torch.equal(embedder.embeddings["cluster"].weight[0], original)
+    assert torch.equal(embedder.embeddings["group"].weight[0], original)
 
 
 def test_override_restores_an_existing_assignment():
     model = build_model()
-    embedder = cluster_embedder(model)
-    index = rf.Cluster.assign(model, ADDRESS, "existing", 1)
-    original = embedder.embeddings["cluster"].weight[index].detach().clone()
+    embedder = group_embedder(model)
+    index = rf.Group.assign(model, ADDRESS, "existing", 1)
+    original = embedder.embeddings["group"].weight[index].detach().clone()
 
-    with rf.Cluster.override(model, ADDRESS, {"existing": 3}):
-        assert int(embedder.embeddings["cluster"].weight[index].argmax().item()) == 3
+    with rf.Group.override(model, ADDRESS, {"existing": 3}):
+        assert int(embedder.embeddings["group"].weight[index].argmax().item()) == 3
 
     assert list(embedder.vocab.master) == ["existing"]
     assert embedder.vocab.state.index["existing"] == index
-    assert torch.equal(embedder.embeddings["cluster"].weight[index], original)
+    assert torch.equal(embedder.embeddings["group"].weight[index], original)
 
 
 def test_override_blocks_checkpointing_and_model_mutation(tmp_path: Path):
     model = build_model()
 
-    with rf.Cluster.override(model, ADDRESS, {"temporary": 2}):
+    with rf.Group.override(model, ADDRESS, {"temporary": 2}):
         with pytest.raises(RuntimeError, match="assignment overrides are active"):
             model.save(tmp_path / "overridden.rf")
         with pytest.raises(RuntimeError, match="active loop"):
             model.reset(ADDRESS)
 
-    assert "temporary" not in cluster_embedder(model).vocab.state.index
+    assert "temporary" not in group_embedder(model).vocab.state.index
 
 
 def test_runtime_assignments_reject_active_models_and_shared_vocabulary(
     monkeypatch: pytest.MonkeyPatch,
 ):
     model = build_model()
-    embedder = cluster_embedder(model)
+    embedder = group_embedder(model)
 
     model.locks[Strata.train] += 1
     try:
         with pytest.raises(RuntimeError, match="model is active"):
-            rf.Cluster.assign(model, ADDRESS, "active", 1)
+            rf.Group.assign(model, ADDRESS, "active", 1)
     finally:
         model.locks.pop(Strata.train)
 
     monkeypatch.setattr(type(embedder.vocab), "is_shared", property(lambda self: True))
     with pytest.raises(RuntimeError, match="vocabulary state is shared"):
-        with rf.Cluster.override(model, ADDRESS, {"shared": 1}):
+        with rf.Group.override(model, ADDRESS, {"shared": 1}):
             pytest.fail("shared vocabulary should fail before entering the scope")
 
 
 def test_override_replaces_encoder_row_for_oov_token():
     """The encoder consumes the override row instead of the OOV sentinel.
 
-    Overrides act on the encoder path; the write() cluster.value comes from the
+    Overrides act on the encoder path; the write() group.value comes from the
     decoder, so probe the embedder's forward output directly.
     """
     model = build_model()
-    embedder = cluster_embedder(model)
+    embedder = group_embedder(model)
     embedder.eval()
 
     with torch.no_grad():
-        embedder.embeddings["cluster"].weight[embedder.capacity].zero_()  # dull sentinel
-        embedder.embeddings["cluster"].weight[embedder.capacity, 0] = 10.0  # sentinel argmax = 0
+        embedder.embeddings["group"].weight[embedder.capacity].zero_()  # dull sentinel
+        embedder.embeddings["group"].weight[embedder.capacity, 0] = 10.0  # sentinel argmax = 0
 
-    with rf.Cluster.override(model, ADDRESS, {"overridden-oov": 2}):
+    with rf.Group.override(model, ADDRESS, {"overridden-oov": 2}):
         # During the override, this token is encoded as valued/index 0.
         overridden_index = embedder.vocab.state.index["overridden-oov"]
         overridden_output = embedder.embed(valued_token(overridden_index)).payload.clone()
 
-    # Reference: forward pass for a hand-built row that argmaxes to cluster 2.
+    # Reference: forward pass for a hand-built row that argmaxes to group 2.
     with torch.no_grad():
         reference_row = torch.full((K,), -10.0)
         reference_row[2] = 10.0
-        embedder.embeddings["cluster"].weight[0].copy_(reference_row)
+        embedder.embeddings["group"].weight[0].copy_(reference_row)
     reference_output = embedder.embed(valued_token(0)).payload.clone()
 
-    # Both should route through cluster 2 in eval mode (argmax), so the cluster
+    # Both should route through group 2 in eval mode (argmax), so the group
     # embedding contribution must match. State embedding is identical either way.
     assert torch.allclose(overridden_output, reference_output)
 
 
 def test_override_accepts_probability_vector():
     model = build_model()
-    embedder = cluster_embedder(model)
+    embedder = group_embedder(model)
     embedder.eval()
 
-    with rf.Cluster.override(model, ADDRESS, {"soft": [0.0, 0.1, 0.9, 0.0]}):
+    with rf.Group.override(model, ADDRESS, {"soft": [0.0, 0.1, 0.9, 0.0]}):
         index = embedder.vocab.state.index["soft"]
         # In eval mode, forward hard-argmaxes assignment logits. This distribution
-        # produces log probabilities whose argmax is cluster 2.
-        assign_logits = embedder.embeddings["cluster"](torch.tensor([index]))
+        # produces log probabilities whose argmax is group 2.
+        assign_logits = embedder.embeddings["group"](torch.tensor([index]))
         assert int(assign_logits.argmax(dim=-1).item()) == 2
 
 
 def test_persistent_assignment_survives_predict_calls():
     model = build_model()
-    embedder = cluster_embedder(model)
+    embedder = group_embedder(model)
     embedder.eval()
 
-    rf.Cluster.assign(model, ADDRESS, "returning-token", 3)
+    rf.Group.assign(model, ADDRESS, "returning-token", 3)
     assigned_index = embedder.vocab.state.index["returning-token"]
-    first_row = embedder.embeddings["cluster"].weight[assigned_index].detach().clone()
+    first_row = embedder.embeddings["group"].weight[assigned_index].detach().clone()
 
     # Simulate a subsequent predict call by running the embedder again.
     _ = embedder.embed(valued_token(assigned_index))
-    second_row = embedder.embeddings["cluster"].weight[assigned_index].detach().clone()
+    second_row = embedder.embeddings["group"].weight[assigned_index].detach().clone()
 
     assert torch.equal(first_row, second_row)
     assert int(first_row.argmax().item()) == 3
@@ -324,32 +324,32 @@ def test_persistent_assignment_survives_predict_calls():
 
 def test_persistent_assignment_round_trips_through_checkpoint(tmp_path: Path):
     model = build_model()
-    index = rf.Cluster.assign(model, ADDRESS, "persistent", 2)
-    pathname = tmp_path / "cluster.rf"
+    index = rf.Group.assign(model, ADDRESS, "persistent", 2)
+    pathname = tmp_path / "group.rf"
 
     model.save(pathname)
     restored = rf.Model.load(pathname)
-    embedder = cluster_embedder(restored)
+    embedder = group_embedder(restored)
 
     assert embedder.vocab.state.index["persistent"] == index
-    assert int(embedder.embeddings["cluster"].weight[index].argmax().item()) == 2
+    assert int(embedder.embeddings["group"].weight[index].argmax().item()) == 2
 
 
 def test_assign_resolves_the_live_embedder_after_reset():
     model = build_model()
-    original = cluster_embedder(model)
+    original = group_embedder(model)
 
     model.reset(rf.where("address") == ADDRESS)
-    rebuilt = cluster_embedder(model)
+    rebuilt = group_embedder(model)
     assert rebuilt is not original
 
-    index = rf.Cluster.assign(model, ADDRESS, "after-reset", 2)
+    index = rf.Group.assign(model, ADDRESS, "after-reset", 2)
     assert rebuilt.vocab.master[index] == "after-reset"
-    assert int(rebuilt.embeddings["cluster"].weight[index].argmax().item()) == 2
+    assert int(rebuilt.embeddings["group"].weight[index].argmax().item()) == 2
 
 
-def test_cluster_api_does_not_leak_into_model_or_runtime_signatures():
-    assert not hasattr(rf.Cluster, "bind")
-    assert "cluster_hints" not in inspect.signature(rf.Model.predict).parameters
-    assert not hasattr(rf.Model, "commit_cluster")
-    assert not hasattr(rf.Model, "_cluster_embedder")
+def test_group_api_does_not_leak_into_model_or_runtime_signatures():
+    assert not hasattr(rf.Group, "bind")
+    assert "group_hints" not in inspect.signature(rf.Model.predict).parameters
+    assert not hasattr(rf.Model, "commit_group")
+    assert not hasattr(rf.Model, "_group_embedder")

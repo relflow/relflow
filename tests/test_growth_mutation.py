@@ -15,14 +15,14 @@ from relflow.tensorfields.base import TENSORFIELDS, Extension
 from relflow.tensorfields.extensions import number
 
 ADDRESS = rf.Address("/value")
-KINDS = ("category", "set", "cluster")
+KINDS = ("category", "set", "group")
 LABELS = ("a", "b", "c", "d", "e", "a")
 
 
 def build(kind):
     options = {"p_unavailable": 0, "mask": rf.Mask(reconstruct=True)}
-    if kind == "cluster":
-        field = rf.Cluster(bounds=3, revive_temperature=0, **options)
+    if kind == "group":
+        field = rf.Group(n_groups=3, revive_temperature=0, **options)
     else:
         field = {"category": rf.Category, "set": rf.Set}[kind](**options)
     model = rf.Model.xs(
@@ -51,15 +51,15 @@ def check_state(actual, expected):
 
 def check_allocation(model, kind, size):
     node = model.nodes[ADDRESS]
-    rows = size + (kind == "cluster")
+    rows = size + (kind == "group")
     assert node.embedder.vocab.size == size
     counter = node.embedder.counters["content"]
     assert counter.size == rows
     assert counter.counts.shape == counter._pending_counts.shape == (rows,)
-    embedding = node.embedder.embeddings["cluster" if kind == "cluster" else "content"]
+    embedding = node.embedder.embeddings["group" if kind == "group" else "content"]
     assert embedding.num_embeddings == rows
-    assert embedding.weight.shape == (rows, 3 if kind == "cluster" else 8)
-    if kind != "cluster":
+    assert embedding.weight.shape == (rows, 3 if kind == "group" else 8)
+    if kind != "group":
         linear = node.decoder.linears["content"]
         assert linear.out_features == size
         assert linear.weight.shape == (size, 8)
@@ -123,21 +123,21 @@ def test_allocation_options_are_rejected_without_changing_grown_state(kind, opti
         assert model.schema.model_dump() == schema
 
 
-def test_cluster_bounds_change_retains_grown_capacity_but_reinitializes_changed_columns():
-    model = build("cluster")
+def test_group_n_groups_change_retains_grown_capacity_but_reinitializes_changed_columns():
+    model = build("group")
     old = model.nodes[ADDRESS]
     counts = old.embedder.counters["content"].counts.clone()
 
-    model.update(rf.where("address") == ADDRESS, n_clusters=(5, 5))
+    model.update(rf.where("address") == ADDRESS, n_groups=(5, 5))
 
     node = model.nodes[ADDRESS]
     assert node.embedder.capacity == 8
     assert node.embedder.size == 5
-    assert node.embedder.embeddings["cluster"].weight.shape == (9, 5)
+    assert node.embedder.embeddings["group"].weight.shape == (9, 5)
     assert node.embedder.embeddings["content"].weight.shape == (8, 5)
-    assert node.decoder.linears["cluster"].weight.shape == (5, 8)
+    assert node.decoder.linears["group"].weight.shape == (5, 8)
     assert node.embedder.committed.shape == node.embedder.usage_ema.shape == (5,)
-    assert not torch.all(node.embedder.embeddings["cluster"].weight == 7.25)
+    assert not torch.all(node.embedder.embeddings["group"].weight == 7.25)
     torch.testing.assert_close(node.embedder.counters["content"].counts, counts)
     assert node.embedder.vocab.snapshot() == list(dict.fromkeys(LABELS))
 

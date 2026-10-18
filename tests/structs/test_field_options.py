@@ -10,7 +10,7 @@ import relflow as rf
 REQUESTS = [
     (rf.Boolean, {}),
     (rf.Category, {}),
-    (rf.Cluster, {"bounds": 4}),
+    (rf.Group, {"n_groups": 4}),
     (rf.DateParts, {"dateparts": ["day_of_week"]}),
     (rf.Hash, {}),
     (rf.Number, {}),
@@ -89,23 +89,23 @@ def test_mutations_reject_metadata_even_when_validation_is_disabled(schema_only)
 
 @pytest.mark.parametrize("schema_only", [False, True])
 @pytest.mark.parametrize(
-    "field, attribute, value, canonical",
+    "field, attribute, value",
     [
-        (rf.Category(), "topk", [2, 100], "topk"),
-        (rf.Set(), "threshold", 0.8, "threshold"),
-        (rf.Cluster(bounds=4), "n_clusters", (4, 8), "n_clusters"),
+        (rf.Category(), "topk", [2, 100]),
+        (rf.Set(), "threshold", 0.8),
+        (rf.Group(n_groups=4), "n_groups", (4, 8)),
     ],
 )
-def test_mutations_accept_declared_options_with_serialization_aliases(schema_only, field, attribute, value, canonical):
+def test_mutations_accept_declared_options(schema_only, field, attribute, value):
     model = rf.Model.xs(d_model=16, value=field)
     target = model.schema if schema_only else model
     selector = rf.where("name") == "value"
-    original = getattr(model.schema.requests["/value"], canonical)
+    original = getattr(model.schema.requests["/value"], attribute)
     with target.override(selector, **{attribute: value}):
-        assert getattr(model.schema.requests["/value"], canonical) == value
-    assert getattr(model.schema.requests["/value"], canonical) == original
+        assert getattr(model.schema.requests["/value"], attribute) == value
+    assert getattr(model.schema.requests["/value"], attribute) == original
     target.update(selector, **{attribute: value})
-    assert getattr(model.schema.requests["/value"], canonical) == value
+    assert getattr(model.schema.requests["/value"], attribute) == value
 
 
 def test_partial_updates_still_accept_options_supported_by_some_selected_nodes():
