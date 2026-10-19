@@ -18,11 +18,22 @@ def selected_attention(attention, query, key, value, padding):
         return query.new_zeros(query.shape) + sum(parameter.sum() * 0 for parameter in attention.parameters())
 
     present = torch.ones(key.shape[:2], dtype=torch.bool, device=key.device) if padding is None else ~padding
-    q = attention.rotate(attention.splitheads(attention.q_proj(query), attention.nhead))
-    k = attention.rotate(
-        attention.splitheads(attention.k_proj(key.masked_fill(~present[..., None], 0)), attention.n_kv_heads)
+    q = attention.rotate(
+        attention.q_norm(attention.q_proj(query).unflatten(-1, (attention.nhead, attention.head_dim)).transpose(1, 2))
+        * attention.head_scale[None, :, None, :]
     )
-    v = attention.splitheads(attention.v_proj(value.masked_fill(~present[..., None], 0)), attention.n_kv_heads)
+    k = attention.rotate(
+        attention.k_norm(
+            attention.k_proj(key.masked_fill(~present[..., None], 0))
+            .unflatten(-1, (attention.n_kv_heads, attention.head_dim))
+            .transpose(1, 2)
+        )
+    )
+    v = (
+        attention.v_proj(value.masked_fill(~present[..., None], 0))
+        .unflatten(-1, (attention.n_kv_heads, attention.head_dim))
+        .transpose(1, 2)
+    )
     rows = []
     for row, selected in enumerate(present):
         if selected.any():
@@ -155,7 +166,7 @@ def test_attention_dropout_preserves_rng_boundary_and_eval_is_deterministic(devi
 
 
 @pytest.mark.parametrize("device", DEVICES)
-def test_attention_state_dict_retains_projection_parameters_only(device):
+def test_attention_state_dict_retains_projections_normalization_and_head_scale(device):
     attention = RotaryMultiheadAttention(16, 4, 0, n_kv_heads=2).to(device)
     restored = RotaryMultiheadAttention(16, 4, 0, n_kv_heads=2).to(device)
     state = deepcopy(attention.state_dict())
@@ -164,6 +175,7 @@ def test_attention_state_dict_retains_projection_parameters_only(device):
         for projection in ("q_proj", "k_proj", "v_proj", "out_proj")
         for parameter in ("weight", "bias")
     }
+    expected_keys.update({"q_norm.weight", "k_norm.weight", "head_scale"})
     assert set(state) == expected_keys
     restored.load_state_dict(state, strict=True)
     query = torch.randn(2, 3, 16, device=device)
@@ -171,3 +183,14 @@ def test_attention_state_dict_retains_projection_parameters_only(device):
     output = attention(query, memory, memory)
     torch.testing.assert_close(output, restored(query, memory, memory), rtol=0, atol=0)
     assert set(attention.state_dict()) == expected_keys
+
+
+def test_attention_rejects_checkpoints_without_head_normalization():
+    attention = RotaryMultiheadAttention(16, 4, 0)
+    state = {
+        name: value
+        for name, value in attention.state_dict().items()
+        if name not in {"q_norm.weight", "k_norm.weight", "head_scale"}
+    }
+    with pytest.raises(RuntimeError, match="Missing key"):
+        attention.load_state_dict(state, strict=True)

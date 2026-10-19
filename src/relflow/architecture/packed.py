@@ -127,9 +127,7 @@ def attend(
     value: torch.Tensor,
     packing: Packed,
 ) -> torch.Tensor:
-    q = attention.q_proj(query).reshape(-1, attention.nhead, attention.head_dim)
-    k = attention.k_proj(key).reshape(-1, attention.n_kv_heads, attention.head_dim)
-    v = attention.v_proj(value).reshape(-1, attention.n_kv_heads, attention.head_dim)
+    q, k, v = attention.project(query, key, value)
     if attention.rotary is not None:
         q = attention.rotary(q.transpose(0, 1), positions=packing.positions).transpose(0, 1)
         k = attention.rotary(k.transpose(0, 1), positions=packing.positions).transpose(0, 1)
