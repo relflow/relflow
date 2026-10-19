@@ -4,6 +4,9 @@
 refresh follows the [current docs](https://relflow.github.io/docs/) at
 `b46f1b0` and the Relflow 0.3.2 runtime at `2bb35ad`.
 
+[Watch the complete video (480p MP4)](relflow-narrated-480p.mp4), including
+narration, embedded subtitles and chapter markers.
+
 Start with one payment and a hidden dispute label, then explore the model tree,
 Arrow layout, parent-relative queries, value states, field representations,
 branch attention, reduction, output, masks, pretraining, and measured limits.
