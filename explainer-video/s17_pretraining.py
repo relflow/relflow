@@ -5,13 +5,13 @@ import math
 import numpy as np
 
 from explainer import *  # noqa: F403
-from videos.relflow.common import (
+from videos.ml.relflow.common import (
     D, Mono, Plot, code, heat_grid, label, note, proof_tag, real_tag, show_episode_card, tile,
 )
 
 PRETRAIN = '''
 pretrain = rf.Model(
-    d_model=64, n_layers=2, n_heads=4, batch_size=128,
+    d_model=64, n_layers=2, n_heads=4,
     line_items=rf.Branch(
         length=8,
         sku=rf.Category(mask=rf.Mask(rate=0.15, reconstruct=True)),
@@ -26,7 +26,7 @@ sku, price = rf.Address("line_items", "sku"), rf.Address("line_items", "price")
 model = rf.Model.load("pretrained.rf")
 model.update(rf.where("address").is_in([sku, price]), mask=False)
 model.extend(rf.where("address") == rf.Address(), returned=rf.Boolean(mask=True))
-model.optimizer = rf.adamw(learning_rate=1e-3)
+model.fit(labeled_data, batch_size=128, learning_rate=1e-3, max_epochs=20)
 '''
 
 GROUP_COLORS = [C.RF_TARGET, C.NUMBER, C.CATEGORY, C.HASH, C.BOOLEAN, C.VALUED, C.MASS, C.RF_BRANCH]
@@ -158,7 +158,7 @@ class Pretraining(VoiceoverScene):
         with self.voiceover(
             "Fine-tuning takes a few lines. <bookmark mark='l'/> Load the pretrained model, <bookmark mark='u'/> turn "
             "the reconstructed fields back into ordinary inputs, <bookmark mark='e'/> add the label you care about as a "
-            "new target, <bookmark mark='o'/> give it an optimizer, and fit, exactly as before. Weights whose names "
+            "new target, <bookmark mark='o'/> call fit with fresh optimization state. Weights whose names "
             "and shapes still match carry over; the new decoder starts fresh."
         ) as vo:
             self.play(FadeIn(c))

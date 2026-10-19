@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter
 
 from explainer import *  # noqa: F403
-from videos.relflow.common import (
+from videos.ml.relflow.common import (
     D, Mono, label, logo, mtex, note, proof_tag, show_episode_card, wordmark,
 )
 
@@ -56,10 +56,10 @@ class Evidence(VoiceoverScene):
         tag = proof_tag(r"\texttt{proofs/results.yaml}, all 78 entries")
         with self.voiceover(
             "How do we know any of this works, beyond a few demos? <bookmark mark='c'/> relflow ships its own evidence: "
-            "a catalog of 78 proofs, small controlled experiments that each test one learning claim, with controls "
+            "in the archived 0.2.3 snapshot, a catalog of 78 proofs, small controlled experiments that each test one learning claim, with controls "
             "designed to fail when the claim is false. They're empirical tests, not mathematical proofs, and the "
             "catalog says so. <bookmark mark='s'/> 55 are marked passing, <bookmark mark='l'/> 13 limited, "
-            "<bookmark mark='p'/> and 10 partial. <bookmark mark='m'/> In the latest recorded runs, seven of them "
+            "<bookmark mark='p'/> and 10 partial. <bookmark mark='m'/> In that snapshot, seven of them "
             "missed their own gates, and that's recorded too."
         ) as vo:
             vo.wait_until("c")
@@ -158,7 +158,7 @@ class Evidence(VoiceoverScene):
         arrows = VGroup(*[Arrow(a.get_right(), b.get_left(), buff=0.03, stroke_width=2.5, color=GREY_B,
                                 max_tip_length_to_length_ratio=0.5, tip_length=0.12) for a, b in zip(boxes[:-1], boxes[1:])])
         with self.voiceover(
-            "So, the journey of one batch. <bookmark mark='a'/> Nested Arrow records are laid into fixed rectangles by "
+            "So, the journey of one batch. <bookmark mark='a'/> Nested Arrow records are laid into batch sized rectangles by "
             "a single placement rule, with a state beside every value. <bookmark mark='b'/> Each field becomes vectors "
             "in its own way: Fourier features and a ruler for numbers, a growing table for labels, a salted hash for "
             "identities. <bookmark mark='c'/> Each branch lets an item's fields talk, then lets its items talk, with "

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from explainer import *  # noqa: F403
-from videos.relflow.common import (
+from videos.ml.relflow.common import (
     D, Mono, label, mtex, note, real_tag, show_episode_card, tile,
 )
 
@@ -19,12 +19,12 @@ def tiles(n, color, size=0.2, gap=0.04, fill=0.85, direction=RIGHT, dashed=False
 class Routing(VoiceoverScene):
     def construct(self):
         show_episode_card(self)
-        nodes = {n["address"]: n for n in D("schema")["customer"]["nodes"]}
+        nodes = {n["address"]: n for n in D("schema_current")["customer"]["nodes"]}
         li, od, rt = nodes["/orders/line_items"], nodes["/orders"], nodes["/"]
         assert li["input_width"] == 32 and li["outputs"] == 4
         assert od["input_width"] == 320 and od["outputs"] == 4
         assert rt["input_width"] == 7 and rt["outputs"] == 4
-        assert D("schema")["customer"]["depthwise"] == [["/"], ["/orders"], ["/orders/line_items"]]
+        assert D("schema_current")["customer"]["depthwise"] == [["/"], ["/orders"], ["/orders/line_items"]]
         self.level_items()
         self.level_orders()
         self.level_root()
@@ -49,7 +49,7 @@ class Routing(VoiceoverScene):
         shape.to_corner(DR, buff=0.4).shift(UP * 0.2)
         with self.voiceover(
             "Let's run a whole model, the customer model with its orders and line items, and follow the "
-            "shapes from the leaves up. <bookmark mark='l'/> "
+            "shapes from the leaves up. This is a fully populated capped example; shorter batches compact their execution widths. <bookmark mark='l'/> "
             "Every field has been embedded into vectors of width 256. <bookmark mark='d'/> The deepest branch runs "
             "first. For each of a customer's 64 orders, the line items encoder sees 16 SKU slots and 16 quantity "
             "slots: 32 tokens. <bookmark mark='r'/> It encodes them, and reduces them to four summary vectors, the "
@@ -150,7 +150,7 @@ class Routing(VoiceoverScene):
             label(r"deepest first; each branch waits\\only for its own children", font_size=22, color=GREY_A),
             label(r"each hand-off is a reshape:\\the item axis folds into the order axis", font_size=22, color=GREY_A),
         ).arrange(DOWN, aligned_edge=LEFT, buff=0.16).to_corner(UR, buff=0.5).shift(DOWN * 1.2)
-        tag = real_tag(r"widths and plan from \texttt{model.schema}, relflow 0.2.3", corner=DL)
+        tag = real_tag(r"widths and plan from \texttt{model.schema}, relflow 0.3.2", corner=DL)
         with self.voiceover(
             "That's relflow's execution plan: <bookmark mark='p'/> branches grouped by depth and run deepest first, "
             "each one waiting only for its own children. <bookmark mark='r'/> And every hand-off between levels is just "

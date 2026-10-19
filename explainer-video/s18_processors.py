@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from explainer import *  # noqa: F403
-from videos.relflow.common import (
+from videos.ml.relflow.common import (
     D, Mono, box, code, label, note, real_tag, show_episode_card,
 )
 
@@ -30,7 +30,7 @@ data = rf.ArrowDataModule(model=model, train=train, validate=validate, preproces
 POST = '''
 @rf.postprocess
 def decision(frame: pl.DataFrame, *, threshold: float) -> pl.DataFrame:
-    flagged = pl.col("predictions").struct.field(rf.Address("flagged"))
+    flagged = pl.col("predictions").struct.field("flagged")
     probability = flagged.struct.field("content").struct.field("probability")
     return frame.select(
         transfer_id=pl.col("inputs").struct.field("transfer_id"),

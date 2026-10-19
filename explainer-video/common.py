@@ -5,11 +5,42 @@ from __future__ import annotations
 import functools
 import json
 import math
+import os
 from pathlib import Path
 
 import numpy as np
 
 from explainer import *  # noqa: F403
+from explainer import tts
+
+# Keep concurrent CPU narration jobs from each occupying every core.
+os.environ.setdefault("OMP_NUM_THREADS", "2")
+os.environ.setdefault("MKL_NUM_THREADS", "2")
+
+# Series pronunciation stays with its scenes instead of modifying the shared toolkit.
+tts.LEXICON[:0] = [
+    (r"\brelflow's\b", "[relflow's](/ɹˈɛlflˌOz/)"),
+    (r"\brelflow\b(?!')", "[relflow](/ɹˈɛlflˌO/)"),
+    (r"\bPyTorch\b", "[PyTorch](/pˈItˌɔɹʧ/)"),
+    (r"\bParquet\b", "[Parquet](/pɑɹkˈA/)"),
+    (r"\bYAML\b", "[YAML](/jˈæməl/)"),
+    (r"\bSKUs\b", "S K U's"), (r"\bSKU\b", "S K U"),
+    (r"\bRoPE\b", "rope"), (r"\bSDPA\b", "S D P A"),
+    (r"\bAUC\b", "A U C"), (r"\bRMSNorm\b", "R M S norm"),
+    (r"\bMHA\b", "M H A"), (r"\bGQA\b", "G Q A"), (r"\bMQA\b", "M Q A"),
+    (r"\bDDP\b", "D D P"), (r"\bSHA-256\b", "shah two fifty six"),
+    (r"\bt-digest\b", "tee digest"), (r"\btrxns\b", "transactions"),
+    (r"\b[Tt]ensorfields\b", "tensor fields"), (r"\b[Tt]ensorfield\b", "tensor field"),
+]
+
+# Keep the series palette local; the shared framework no longer ships Relflow colors.
+for name, color in {
+    "RF_ROOT": "#A8D59A", "RF_BRANCH": "#7FB7DA", "RF_FIELD": "#D9E2DA", "RF_TARGET": "#E8C17F",
+    "VALUED": "#3FBF8F", "NULL_STATE": "#FFD166", "PADDED": "#4A5160", "MASKED": "#D46BFF",
+    "NUMBER": "#5CD0F0", "CATEGORY": "#FFA94D", "HASH": "#B197FC", "BOOLEAN": "#FF8FA3",
+    "ARROW_BUF": "#B8C4CE", "MASS": "#FF7EB6", "LIVE": "#3FBF8F",
+}.items():
+    setattr(C, name, color)
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 ASSETS = Path(__file__).resolve().parent / "assets"
@@ -29,7 +60,13 @@ except Exception:  # pragma: no cover - falls back to the default serif
 
 def logo(height=2.0) -> SVGMobject:
     """relflow's logo (docs/assets/branding/logos/logo.dark.svg in the relflow repository)."""
-    return SVGMobject(str(ASSETS / "relflow_logo.svg")).set(height=height)
+    # SVGMobject sanitizes through a sibling temporary SVG. Give each process
+    # its own copy so parallel scenes cannot delete one another's temporary file.
+    cache = Path(config.text_dir) / "relflow-assets"
+    cache.mkdir(parents=True, exist_ok=True)
+    path = cache / f"logo-{os.getpid()}.svg"
+    path.write_bytes((ASSETS / "relflow_logo.svg").read_bytes())
+    return SVGMobject(str(path)).set(height=height)
 
 
 def wordmark(font_size=110, color=BRAND_INK) -> Text:
@@ -38,7 +75,7 @@ def wordmark(font_size=110, color=BRAND_INK) -> Text:
 
 @functools.cache
 def D(name: str) -> dict:
-    """A committed result of ``python -m videos.relflow.compute`` (real relflow runs)."""
+    """A committed result of ``python -m videos.ml.relflow.compute`` (real relflow runs)."""
     return json.loads((DATA_DIR / f"{name}.json").read_text())
 
 
@@ -77,7 +114,9 @@ def title(text: str, font_size=40, color=WHITE) -> Tex:
     return label(text, font_size=font_size, color=color).to_edge(UP, buff=0.4)
 
 
-def real_tag(text: str = r"real relflow 0.2.3, run on the computer that rendered this video", corner=DR) -> Tex:
+def real_tag(text: str = r"recorded experiment: relflow 0.2.3, Apple M1", corner=DR) -> Tex:
+    if "0.3.2" not in text and "0.2.3" not in text:
+        text += r"; recorded 0.2.3"
     return note(text, color=GREY_A, font_size=20).to_corner(corner, buff=0.25)
 
 
@@ -86,7 +125,7 @@ def schematic_tag(corner=DR) -> Tex:
 
 
 def proof_tag(text: str, corner=DR) -> Tex:
-    return note(r"recorded in relflow's proof catalog: " + text, color=GREY_A, font_size=20).to_corner(corner, buff=0.25)
+    return note(r"archived proof snapshot, relflow 0.2.3: " + text, color=GREY_A, font_size=20).to_corner(corner, buff=0.25)
 
 
 class Mono(VGroup):
@@ -144,10 +183,13 @@ def episode_card(number: int, text: str) -> VGroup:
 
 def show_episode_card(scene: Scene, hold: float = 1.4):
     """The scene's episode number and title, from the manifest (each scene is one episode of the series)."""
-    from videos.relflow.manifest import episode
+    from videos.ml.relflow.manifest import episode
 
     e = episode(type(scene).__name__)
     card = episode_card(e["number"], e["title"])
+    provenance = note(e.get("provenance", "API: relflow 0.3.2; measured examples: archived 0.2.3"), font_size=20)
+    provenance.next_to(card, DOWN, buff=0.55)
+    card.add(provenance)
     scene.play(FadeIn(card, shift=UP * 0.2), run_time=0.8)
     scene.wait(hold)
     scene.play(FadeOut(card, shift=UP * 0.2), run_time=0.6)

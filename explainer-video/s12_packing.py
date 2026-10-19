@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from explainer import *  # noqa: F403
-from videos.relflow.common import (
+from videos.ml.relflow.common import (
     D, Mono, Plot, fmt_int, label, mtex, note, real_tag, show_episode_card,
 )
 
@@ -170,13 +170,13 @@ class Packing(VoiceoverScene):
         setup = label(rf"two encoder layers, {p['rows']} rows $\times$ {p['capacity']} slots,\\"
                       rf"$d_{{\mathrm{{model}}}}={p['d_model']}$, {p['threads']} CPU threads", font_size=22, color=GREY_A)
         setup.next_to(leg, DOWN, buff=0.5).align_to(leg, LEFT)
-        tag = real_tag(r"timed with relflow's own packing code on the computer that rendered this video")
+        tag = real_tag(r"timed with relflow's own packing code on an M1, relflow 0.2.3 (archive)")
         sp0 = t[0]["dense_ms"] / t[0]["packed_ms"]
         sp1, sp2 = (t[i]["dense_ms"] / t[i]["packed_ms"] for i in (1, 2))
         assert sp0 > sp1 > sp2 > 1.5
         say = {2: "twice", 3: "three times"}
         with self.voiceover(
-            "And it's fast. <bookmark mark='s'/> Here's relflow's own packing code, timed on this machine: two encoder "
+            "And it's fast. <bookmark mark='s'/> Here's relflow's own packing code, timed on the recorded M1: two encoder "
             "layers over 256 rows, with room for 128 tokens each. <bookmark mark='a'/> When rows hold about four live "
             f"tokens on average, dense attention takes {t[0]['dense_ms']:.0f} milliseconds; packed, "
             f"{t[0]['packed_ms']:.0f}. {sp0:.0f} times faster. <bookmark mark='b'/> At twelve tokens it's "

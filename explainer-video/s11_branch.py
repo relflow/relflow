@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from explainer import *  # noqa: F403
-from videos.relflow.common import (
+from videos.ml.relflow.common import (
     D, Mono, Plot, chip, label, mtex, note, real_tag, schematic_tag, show_episode_card, tile,
 )
 
@@ -40,7 +40,7 @@ class InsideABranch(VoiceoverScene):
         with self.voiceover(
             "Every field has been embedded: one vector per field, per slot. Let's step inside a branch, an order's line items, and see what "
             "its encoder does with them. <bookmark mark='g'/> Arrange the tokens in a grid: one row per field, one "
-            "column per slot. This order has five items, so the last three columns are padding."
+            "column per slot. For this capped branch, assume another order fills all eight slots in the batch. Our order has five items, so its last three columns are padding."
         ) as vo:
             self.play(LaggedStart(*[FadeIn(r, lag_ratio=0.05) for r in rows], lag_ratio=0.3), run_time=2)
             vo.wait_until("g")
@@ -184,9 +184,9 @@ class InsideABranch(VoiceoverScene):
     # ------------------------------------------------------------------
     def layer(self):
         x = mtex(r"x", font_size=40)
-        steps = [r"\mathrm{LayerNorm}", r"\text{attention}", r"+", r"\mathrm{LayerNorm}", r"\text{feed-forward}", r"+"]
-        f1 = mtex(r"x \leftarrow x + \text{Attention}\big(\mathrm{LN}(x)\big)", font_size=40)
-        f2 = mtex(r"x \leftarrow x + \text{FFN}\big(\mathrm{LN}(x)\big)", font_size=40)
+        steps = [r"\mathrm{RMSNorm}", r"\text{attention}", r"+", r"\mathrm{RMSNorm}", r"\text{feed-forward}", r"+"]
+        f1 = mtex(r"x \leftarrow x + \text{Attention}\big(\mathrm{RMSNorm}(x)\big)", font_size=40)
+        f2 = mtex(r"x \leftarrow x + \text{FFN}\big(\mathrm{RMSNorm}(x)\big)", font_size=40)
         f3 = mtex(r"x \leftarrow x \odot \text{present}", font_size=40)
         fs = VGroup(f1, f2, f3).arrange(DOWN, aligned_edge=LEFT, buff=0.35).move_to(LEFT * 2.6 + UP * 0.8)
         lab3 = label(r"padding zeroed going in and coming out,\\and masked out of every attention", font_size=24,
@@ -200,7 +200,7 @@ class InsideABranch(VoiceoverScene):
         ).arrange(DOWN, aligned_edge=LEFT, buff=0.2).to_edge(RIGHT, buff=0.7).shift(UP * 0.5)
         with self.voiceover(
             "Each of those layers is the standard pre-norm block: <bookmark mark='a'/> normalize, attend, add the result "
-            "back; <bookmark mark='f'/> normalize, feed forward, add back. <bookmark mark='p'/> Padding is zeroed on the "
+            "back; <bookmark mark='f'/> RMS normalize, expand channels by f f n x, apply tanh GELU, project back, and add. The default multiplier is eight, independently configurable at each node. <bookmark mark='p'/> Padding is zeroed on the "
             "way in and on the way out, and it's masked out of every attention. <bookmark mark='m'/> Each branch can "
             "also choose how many key and value heads to keep: one per query head, one per pair, one shared by all, or "
             "no attention at all."

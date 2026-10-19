@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from explainer import *  # noqa: F403
-from videos.relflow.common import (
+from videos.ml.relflow.common import (
     D, Mono, Plot, Tree, chip, fmt_int, label, mtex, note, real_tag, show_episode_card,
 )
-from videos.relflow.s01_hook import CUSTOMER_TREE
+from videos.ml.relflow.s01_hook import CUSTOMER_TREE
 
 ADDRESSES = {
     "/": "/", "/tenure_days": "/tenure_days", "/orders": "/orders", "/orders/age_days": "/orders/age_days",
@@ -63,51 +63,9 @@ class SchemaIsArchitecture(VoiceoverScene):
 
     # ------------------------------------------------------------------
     def shapes(self):
-        tree = self.tree
-        s = {n["address"]: n for n in D("schema")["customer"]["nodes"]}
-        shape_tex = {
-            "/tenure_days": r"B \times 1", "/orders/age_days": r"B \times 1 \times 64",
-            "/orders/line_items/sku": r"B \times 1 \times 64 \times 16",
-            "/orders/line_items/quantity": r"B \times 1 \times 64 \times 16",
-            "/churned": r"B \times 1", "/next_month_spend": r"B \times 1",
-        }
-        assert s["/orders/line_items/sku"]["shape"] == [1, 64, 16] and s["/orders/age_days"]["shape"] == [1, 64]
-        shapes = VGroup()
-        for a, tx in shape_tex.items():
-            m = mtex(tx, font_size=26, color=GREY_A).next_to(tree.cards[a], RIGHT, buff=0.2)
-            shapes.add(m)
-        lens = VGroup(
-            chip(r"length = 64", color=C.RF_BRANCH, font_size=20).next_to(tree.cards["/orders"], DOWN, buff=0.08),
-            chip(r"length = 16", color=C.RF_BRANCH, font_size=20).next_to(tree.cards["/orders/line_items"], DOWN, buff=0.08),
-        )
-        b = note(r"B = observations in the batch", font_size=24, color=GREY_A).to_corner(DR, buff=0.4)
-        cut = VGroup(
-            label(r"shorter lists are padded", font_size=26),
-            label(r"longer lists are cut: keep the first (\texttt{head})\\or the last (\texttt{tail})", font_size=26),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.25).to_corner(UR, buff=0.5)
-        with self.voiceover(
-            "Each branch also fixes a shape. <bookmark mark='l'/> Orders holds up to 64 entries, and each order up to "
-            "16 line items. <bookmark mark='s'/> So the tensor for SKU always has the shape: batch, by one root, by 64, "
-            "by 16, however many items a real customer happens to have. <bookmark mark='c'/> Short lists get padded. "
-            "Long lists get cut, keeping either the first entries, or the last ones, which is what you want for a "
-            "history sorted oldest to newest. <bookmark mark='f'/> The shapes are fixed by the schema before a single "
-            "record arrives."
-        ) as vo:
-            self.play(tree.animate.shift(LEFT * 0.6), run_time=0.6)
-            for s_ in shapes:
-                s_.shift(LEFT * 0.6)
-            for l_ in lens:
-                l_.shift(LEFT * 0.6)
-            vo.wait_until("l")
-            self.play(FadeIn(lens, shift=UP * 0.1))
-            vo.wait_until("s")
-            self.play(LaggedStart(*[FadeIn(m, shift=LEFT * 0.1) for m in shapes], lag_ratio=0.12), FadeIn(b))
-            self.play(Indicate(shapes[2], color=YELLOW))
-            vo.wait_until("c")
-            self.play(FadeIn(cut[0]))
-            self.play(FadeIn(cut[1]))
-            vo.wait_until("f")
-        self.play(FadeOut(VGroup(shapes, lens, b, cut, tree)))
+        self.play(FadeOut(self.tree))
+        from videos.ml.relflow.current_visuals import dynamic_widths
+        dynamic_widths(self)
 
     # ------------------------------------------------------------------
     def modules(self):
@@ -161,7 +119,7 @@ class SchemaIsArchitecture(VoiceoverScene):
 
     # ------------------------------------------------------------------
     def parameters(self):
-        s = D("schema")["customer"]
+        s = D("schema_current")["customer"]
         nodes = {n["address"]: n for n in s["nodes"]}
         total = s["total_params"]
         rows = [
@@ -195,9 +153,9 @@ class SchemaIsArchitecture(VoiceoverScene):
         head = label(rf"where the customer model's {fmt_int(total)} parameters live", font_size=34).to_edge(UP, buff=0.6)
         sku_note = label(rf"the SKU embedder: {fmt_int(sku)} parameters, its vocabulary still empty", font_size=26,
                          color=C.CATEGORY).next_to(bars, DOWN, buff=0.5)
-        tag = real_tag(r"counted from the real model (preset md, $d_{\mathrm{model}}=256$), relflow 0.2.3")
+        tag = real_tag(r"counted from the real model (preset md, $d_{\mathrm{model}}=256$), relflow 0.3.2")
         with self.voiceover(
-            "Here's where the twelve million parameters of our customer model actually live. <bookmark mark='b'/> "
+            f"Here is where the current customer model's {total / 1e6:.1f} million parameters live. <bookmark mark='b'/> "
             "Almost all of them are in the three encoders, the root's being the deepest, and in the two decoders. "
             "<bookmark mark='e'/> The embedders are tiny. <bookmark mark='s'/> And the SKU embedder is the smallest of "
             "all, because its vocabulary is still empty. It will grow as labels arrive, while it trains."
@@ -214,7 +172,7 @@ class SchemaIsArchitecture(VoiceoverScene):
 
     # ------------------------------------------------------------------
     def presets(self):
-        ps = D("schema")["presets"]
+        ps = D("schema_current")["presets"]
         head = [r"preset", r"$d_{\mathrm{model}}$", r"root layers", r"branch layers", r"heads", r"root outputs",
                 r"branch outputs"]
         cells = [[label(h, font_size=26, color=GREY_A) for h in head]]
@@ -229,7 +187,7 @@ class SchemaIsArchitecture(VoiceoverScene):
         hl = SurroundingRectangle(md_row, buff=0.06, color=C.RF_ROOT, stroke_width=2, corner_radius=0.06)
         override = Mono("rf.Model.md(n_layers=4, ...)  # only the root gets 4 layers", font_size=22, color=GREY_A)
         override.next_to(table, DOWN, buff=0.55)
-        tag = real_tag(r"read from \texttt{rf.presets}, relflow 0.2.3")
+        tag = real_tag(r"read from \texttt{rf.presets}, relflow 0.3.2")
         with self.voiceover(
             "Those sizes come from a preset. <bookmark mark='t'/> relflow ships five, from extra small to extra large. "
             "Each one sets the width, the depth of the root and of every branch, the number of attention heads, and "

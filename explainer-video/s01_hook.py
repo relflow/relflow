@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from explainer import *  # noqa: F403
-from videos.relflow.common import (
+from videos.ml.relflow.common import (
     BRAND_INK, D, Card, Mono, Tree, chip, code, fmt_int, label, logo, note, real_tag, wordmark,
 )
 
@@ -283,18 +283,18 @@ class Hook(VoiceoverScene):
                 ch = chip(r"encoder", color=card.role_color, font_size=20).next_to(card, DOWN, buff=0.08)
                 branch_chips.append(ch)
             chips.add(ch)
-        s = D("schema")["customer"]
+        s = D("schema_current")["customer"]
         total = s["total_params"]
         count = label(rf"this model: {fmt_int(total)} parameters, before it has seen one label", font_size=26,
                       color=GREY_A).to_edge(DOWN, buff=0.45)
-        tag = real_tag(r"counted from the real model, relflow 0.2.3", corner=UR)
+        tag = real_tag(r"counted from the real model, relflow 0.3.2", corner=UR)
         with self.voiceover(
             "From that tree, relflow builds the network. <bookmark mark='e'/> Every input field gets a small embedding "
             "module that turns its values into vectors. <bookmark mark='b'/> Every branch, and the root, gets its own "
             "transformer encoder, which reads a collection and passes a summary up to its parent. "
             "<bookmark mark='d'/> And every target gets a decoder, which reads the summaries back down the tree to "
             "make its prediction. <bookmark mark='n'/> With the medium preset, this one schema becomes a network of "
-            "twelve million parameters."
+            f"{total / 1e6:.1f} million parameters, counted from the current model."
         ) as vo:
             vo.wait_until("e")
             self.play(LaggedStart(*[FadeIn(c, shift=LEFT * 0.1) for c in leaf_chips], lag_ratio=0.15))

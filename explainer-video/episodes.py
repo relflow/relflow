@@ -1,8 +1,8 @@
 """Write EPISODES.md: one entry per published episode, with its file, length, a description for YouTube,
 and the relflow docs pages it belongs on.
 
-    python tools/build.py relflow --episodes      # render and stitch first
-    python -m videos.relflow.episodes             # then describe what was built
+    python explainer-video/render.py --episodes      # render and stitch first
+    python -m videos.ml.relflow.episodes             # then describe what was built
 """
 
 from __future__ import annotations
@@ -10,18 +10,21 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from videos.relflow.manifest import DOCS, EPISODES, SERIES
+from videos.ml.relflow.manifest import DOCS, EPISODES, SERIES
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parent
 HERE = Path(__file__).resolve().parent
 
 DESCRIPTIONS = {
+    "query-paths": "Animate parent-relative query routing, retained records, and the boundary between structural selection and preprocessing.",
+    "jitter": "Actual triangular jitter samples: visible training inputs move while pristine targets, evaluation and normalization statistics stay fixed.",
+    "sets-and-clusters": "Set membership, duplicates, unavailable labels, and the reconstruction objective required to train Cluster assignments; schematic.",
+    "prediction-output": "Format 2: nested records preserve null lists, empty lists and structural holes; embeddings carry explicit paths and parent ordinals.",
     "records-have-shape": "Most data worth learning from has shape: lists inside records. relflow is a model factory "
     "for structured data: describe the shape of one record and it builds the PyTorch model that reads it. The series "
     "road map.",
-    "three-lines": "The happy path: load a schema into a model, build a data module, fit. A real run from those three "
-    "lines, what each training step does, Lightning's four loops, and saving, loading and predicting.",
-    "schema": "Addresses, fixed shapes, what each leaf and branch owns, where the parameters live, and the five size "
+    "three-lines": "One payment, a hidden dispute target, transaction context at a common review cutoff, model.fit, and selected Arrow output planes. Current API smoke-tested; no learning-quality claim.",
+    "schema": "Addresses, batch-dependent execution widths, finite caps, what each leaf and branch owns, where the parameters live, and the five size "
     "presets.",
     "records-to-rectangles": "How nested Arrow records become dense tensors: offsets and child arrays, one placement "
     "rule, head and tail overflow, nested branches, and a state beside every value.",
@@ -55,9 +58,9 @@ DESCRIPTIONS = {
     "into application output. A real model trained through both.",
     "watching-it-learn": "A real training run, its reduction attention read out head by head, exported embeddings, "
     "and the prediction envelope.",
-    "benchmarks": "Training and inference speed and peak memory for every preset, CPU against the M1's GPU, and what "
+    "benchmarks": "Archived relflow 0.2.3 training and inference speed and peak memory for every preset, CPU against the M1's GPU, and what "
     "longer contexts cost: measured on a laptop.",
-    "proofs": "relflow's proof catalog: what passes, what is limited, what is still missing, and a recap of the "
+    "proofs": "Archived relflow 0.2.3 proof catalog: what passes, what is limited, what is still missing, and a recap of the "
     "series.",
 }
 
@@ -68,8 +71,8 @@ def duration(path: Path) -> float:
     return float(out.strip())
 
 
-def main(src: Path = ROOT / "published" / "relflow-episodes", out: Path = HERE / "EPISODES.md",
-         link: str = "../../published/relflow-episodes/"):
+def main(src: Path = ROOT / "renders" / "episodes-narrated-1080p", out: Path = HERE / "EPISODES.md",
+         link: str = ""):
     assert set(DESCRIPTIONS) == {e["slug"] for e in EPISODES}
     lines = [f"# {SERIES}: episodes", "",
              f"The series cut into {len(EPISODES)} standalone videos, one per scene, each ending on a card that names "
@@ -97,7 +100,7 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", type=Path, default=HERE / "EPISODES.md")
-    ap.add_argument("--link", default="../../published/relflow-episodes/",
+    ap.add_argument("--link", default="",
                     help="where EPISODES.md finds the files; empty to name them without linking")
     args = ap.parse_args()
     main(out=args.out, link=args.link)

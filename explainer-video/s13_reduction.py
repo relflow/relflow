@@ -3,10 +3,10 @@ from __future__ import annotations
 import numpy as np
 
 from explainer import *  # noqa: F403
-from videos.relflow.common import (
+from videos.ml.relflow.common import (
     D, Mono, Plot, chip, label, mtex, note, real_tag, schematic_tag, show_episode_card, tile, vector_strip,
 )
-from videos.relflow.s11_branch import FIELDS
+from videos.ml.relflow.s11_branch import FIELDS
 
 
 class Reduction(VoiceoverScene):

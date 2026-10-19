@@ -1,58 +1,64 @@
 # relflow, Visualized
 
-A series of short explainer videos about relflow: what it does, how each piece
-works, and what it costs. There are 21 episodes of 1½ to 3½ minutes each. Every episode
-stands on its own, opens with its own title card and ends on a card naming the
-next one, so they work as a YouTube playlist and embedded next to the matching
-docs pages.
+25 narrated Manim episodes explaining how nested records become a model. This
+refresh follows the [current docs](https://relflow.github.io/docs/) at
+`b46f1b0` and the Relflow 0.3.2 runtime at `2bb35ad`.
 
-The rendered episodes aren't committed here, to keep about 130 MB of video out of
-a library repository; the commands below rebuild them (1080p, with subtitles and
-chapters). [`EPISODES.md`](EPISODES.md) lists every episode with its length, a
-description ready for YouTube, and the docs pages it belongs on. The full
-narration is in [`SCRIPT.md`](SCRIPT.md).
+Start with one payment and a hidden dispute label, then explore the model tree,
+Arrow layout, parent-relative queries, value states, field representations,
+branch attention, reduction, output, masks, pretraining, and measured limits.
+The four new episodes cover query paths, jitter, Set/Cluster, and prediction
+format 2. The schema episode now animates changing batch widths around an
+unchanged model; the training episode uses `model.fit(...)`.
 
-Schematics are labeled `schematic`. Every other chart, grid and number comes from
-running relflow 0.2.3 (commit `5077716`) on the computer that rendered the video,
-an Apple M1, and the narration reads its numbers from that data.
+## Build from this branch
 
-## What's in this folder
-
-| Path | What |
-|---|---|
-| `EPISODES.md` | titles, descriptions, lengths and docs pages |
-| `SCRIPT.md` | the narration, exported from the scene code |
-| `manifest.py` | episode order, titles, docs pages, and the music-bed settings |
-| `s01_hook.py` … `s21_evidence.py` | one [Manim](https://www.manim.community/) scene per episode, with its narration inline |
-| `endcards.py` | the end card after each episode |
-| `common.py` | shared drawing helpers and the loader for `data/` |
-| `compute.py` | every relflow experiment the series shows; writes `data/*.json` |
-| `data/` | the committed results the scenes read |
-| `assets/` | the relflow logo and the Libertinus Serif wordmark face (SIL OFL 1.1, `assets/OFL.txt`) |
-| `episodes.py` | writes `EPISODES.md` from the manifest and the rendered files |
-| `VIDEO.md` | the series' production notes: every episode's content and data, method notes, sound, sources |
-
-## Rendering
-
-The scenes are built on the Manim-based framework in
-[Sir-Teo/explainer-videos](https://github.com/Sir-Teo/explainer-videos) (styles,
-Kokoro narration, the build, music and publishing tools), and import it as
-`explainer` and themselves as `videos.relflow`. This folder is a copy of
-`videos/relflow/` on that repository's `claude/relflow-series` branch at commit `6c22be4`;
-render from that checkout:
+Use the current [explainer-videos toolkit](https://github.com/Sir-Teo/explainer-videos)
+and its environment (Manim 0.22+, ffmpeg, LaTeX, Kokoro). Source stays in this
+folder; the runner creates an ignored local `videos/ml/relflow` symlink in the
+framework. No old framework commit or copied scene tree is required.
 
 ```bash
-git clone https://github.com/Sir-Teo/explainer-videos && cd explainer-videos
-git checkout 6c22be4
-uv venv --python 3.12 .venv && source .venv/bin/activate
-uv pip install --index-url https://download.pytorch.org/whl/cpu torch
-uv pip install -e .                                  # needs ffmpeg and Manim's system dependencies
-python -m videos.relflow.compute                     # optional: re-run every relflow experiment (~20 min on an M1)
-python tools/build.py relflow --episodes             # 1080p30: the full cut and all 21 episodes
-python tools/publish.py relflow --episodes           # GitHub-sized copies -> published/relflow-episodes/
-python -m videos.relflow.episodes                    # EPISODES.md
+# From the relflow repository, with a sibling explainer-videos checkout:
+../explainer-videos/.venv/bin/python explainer-video/render.py -q l
+../explainer-videos/.venv/bin/python explainer-video/render.py --episodes
+
+# Fast layout QA, separate from narrated output:
+EXPLAINER_TTS=silent ../explainer-videos/.venv/bin/python explainer-video/render.py -q l --fps 15
+
+# Rebuild end cards while reusing completed scene movies:
+../explainer-videos/.venv/bin/python explainer-video/render.py --episodes --cards-only
+
+# A selection can be built and stitched independently:
+../explainer-videos/.venv/bin/python explainer-video/render.py -q l --only QueryPaths Jitter Output
 ```
 
-The results the scenes read are committed, so the videos render without relflow
-or torch. `compute.py` needs `relflow==0.2.3` with Polars < 2, as pinned in that
-repository's `pyproject.toml`.
+Pass `--framework /absolute/path/to/explainer-videos` for another location.
+Outputs are ignored under `explainer-video/renders/`; scene movies, narration
+metadata and segments are under `explainer-video/media/`. Masters include
+normalized narration, subtitles and chapters. `--episodes` adds end cards and
+writes individual episode movies. This refresh uses narration without the old
+music bed, which the current shared toolkit no longer provides.
+
+## Evidence stays attached to its version
+
+- `data/current.json`: freshly executed **0.3.2** geometry, output, query and
+  jitter traces, plus one train/validation batch exercising `fit`. The output
+  example is explicitly **untrained**, and is evidence of shape and API behavior.
+- `data/schema_current.json`: current schema geometry, presets, and per-node parameter census (21.3M for the medium customer model).
+- Other `data/*.json`: unchanged **0.2.3** experiments recorded on an Apple M1.
+  They remain useful learning illustrations, with archive labels on episode
+  cards and measured charts. Their throughput, parameter counts and learning
+  results are not new 0.3.2 measurements. See `data/provenance.json`.
+- `compute_current.py` records current behavior; `compute.py` reproduces the
+  historical experiments only in a separate `relflow==0.2.3` environment. For the old proof snapshot, point `RELFLOW_REPO` at an archive checkout of `5077716`; canonical proofs now live in the docs repository.
+
+```bash
+.venv/bin/python explainer-video/compute_current.py
+../explainer-videos/.venv/bin/python explainer-video/check.py --docs /path/to/relflow-docs
+../explainer-videos/.venv/bin/python explainer-video/export.py
+```
+
+[`EPISODES.md`](EPISODES.md) has the playlist and matching doc pages;
+[`SCRIPT.md`](SCRIPT.md) is exported narration; [`VIDEO.md`](VIDEO.md) describes
+visual design, source mappings, provenance and validation.

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from explainer import *  # noqa: F403
-from videos.relflow.common import (
+from videos.ml.relflow.common import (
     D, Mono, Plot, label, mtex, note, proof_tag, show_episode_card, state_tile, tile, vector_strip,
 )
 

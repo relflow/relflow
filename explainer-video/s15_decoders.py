@@ -3,10 +3,10 @@ from __future__ import annotations
 import numpy as np
 
 from explainer import *  # noqa: F403
-from videos.relflow.common import (
+from videos.ml.relflow.common import (
     D, Mono, Tree, chip, label, mtex, note, real_tag, schematic_tag, show_episode_card, state_tile, tile,
 )
-from videos.relflow.s01_hook import CUSTOMER_TREE
+from videos.ml.relflow.s01_hook import CUSTOMER_TREE
 
 
 class Decoders(VoiceoverScene):
@@ -19,7 +19,7 @@ class Decoders(VoiceoverScene):
     # ------------------------------------------------------------------
     def heritage(self):
         tree = Tree(CUSTOMER_TREE, font_size=20, x_gap=0.45, y_gap=0.3).to_edge(LEFT, buff=0.4)
-        nodes = {n["address"]: n for n in D("schema")["customer"]["nodes"]}
+        nodes = {n["address"]: n for n in D("schema_current")["customer"]["nodes"]}
         assert nodes["/churned"]["heritage"] == ["/", "/churned"]
         assert nodes["/orders/line_items/sku"]["heritage"] == ["/", "/orders", "/orders/line_items", "/orders/line_items/sku"]
 
@@ -39,7 +39,7 @@ class Decoders(VoiceoverScene):
                     label(r"+ every order's item summaries", font_size=24, color=GREY_A),
                     label(r"+ its own (masked) slots", font_size=24, color=GREY_A)).arrange(DOWN, aligned_edge=LEFT, buff=0.1)
         VGroup(t1, t2).arrange(DOWN, aligned_edge=LEFT, buff=0.5).to_edge(RIGHT, buff=0.3)
-        tag = real_tag(r"heritage paths read from \texttt{model.schema}")
+        tag = real_tag(r"heritage paths read from \texttt{model.schema}, relflow 0.3.2")
         with self.voiceover(
             "In a relflow model, encoders carry information up the tree, from the leaves to the root. "
             "Decoders read it back down. <bookmark mark='h'/> Each target's "
@@ -67,7 +67,7 @@ class Decoders(VoiceoverScene):
                       zip([r"root", r"orders", r"item summaries", r"own slots"], mem)])
         mem_l = label(r"the heritage: one long memory", font_size=24, color=GREY_A).next_to(mem, UP, buff=0.25)
         qs = VGroup(*[tile(C.QUERY, 0.3) for _ in range(8)]).arrange(RIGHT, buff=0.1).move_to(UP * 1.6)
-        ql = label(r"learned queries shaped like the target: one per slot", font_size=24, color=C.QUERY).next_to(qs, UP, buff=0.2)
+        ql = label(r"learned queries aligned to runtime target positions", font_size=24, color=C.QUERY).next_to(qs, UP, buff=0.2)
         lines = VGroup()
         rng = np.random.default_rng(0)
         flat = [t for g in mem for t in g]
@@ -82,13 +82,13 @@ class Decoders(VoiceoverScene):
         sib_l = label(r"each query is nudged by the visible siblings at its coordinate\\"
                       r"(predicting an item's SKU? start from that item's quantity)", font_size=22, color=C.NUMBER)
         sib_l.to_edge(UP, buff=0.25)
-        counts = note(r"\texttt{churned}: 1 query.\quad a line item's \texttt{sku}: $64 \times 16 = 1{,}024$ queries, with positions",
+        counts = note(r"\texttt{churned}: 1 query.\quad fully populated capped SKU: $64 \times 16 = 1{,}024$ positions",
                       font_size=22).to_edge(DOWN, buff=0.3)
         tag = schematic_tag(corner=UR)
         with self.voiceover(
             "The decoder doesn't average its heritage. <bookmark mark='m'/> It lays it out as one long memory, "
-            "<bookmark mark='q'/> and it brings learned queries of its own, shaped like the target: a single query for "
-            "churned, or one for each of the 64 times 16 item slots, for SKU. <bookmark mark='a'/> Each query "
+            "<bookmark mark='q'/> and it brings learned queries aligned to the current target positions: a single query for "
+            "churned, or one for each item slot for SKU. A fully populated capped example has 64 times 16 positions. Automatic axes reuse learned query parameters as their widths change. <bookmark mark='a'/> Each query "
             "cross-attends into the memory and pulls out what it needs. <bookmark mark='s'/> And before it does, each "
             "query is nudged by the visible siblings at its own coordinate. When the decoder predicts an item's SKU, "
             "the query for that slot starts out knowing the item's quantity."

@@ -5,7 +5,7 @@ import math
 import numpy as np
 
 from explainer import *  # noqa: F403
-from videos.relflow.common import (
+from videos.ml.relflow.common import (
     D, Mono, Plot, chip, code, label, mtex, note, proof_tag, real_tag, show_episode_card, tile,
 )
 

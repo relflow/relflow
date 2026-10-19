@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from explainer import *  # noqa: F403
-from videos.relflow.common import (
+from videos.ml.relflow.common import (
     D, Mono, Plot, code, label, mtex, note, real_tag, show_episode_card, tile,
 )
 
@@ -73,7 +73,7 @@ class RealRun(VoiceoverScene):
         res = r["results"]["intact"]
         assert r["seconds"] < 30, "time the run on an idle CPU"
         side = VGroup(
-            label(rf"{r['seconds']:.0f} seconds on this CPU", font_size=28),
+            label(rf"{r['seconds']:.0f} seconds on the recorded M1 CPU", font_size=28),
             label(r"validation AUC after each epoch:", font_size=24, color=GREY_A),
             label(r", ".join(f"{e['auc']:.2f}" for e in r["epochs"]), font_size=28, color=C.VALUED),
             label(rf"held-out test: AUC {res['auc']:.3f}, accuracy {res['accuracy']:.3f}", font_size=24, color=GREY_A),
@@ -82,7 +82,7 @@ class RealRun(VoiceoverScene):
         assert r["epochs"][1]["auc"] > 0.999 and res["auc"] > 0.999
         misses = round((1 - res["accuracy"]) * r["test_rows"])
         with self.voiceover(
-            "We train on four thousand synthetic orders, on this machine's processor. <bookmark mark='t'/> The whole run "
+            "We train on four thousand synthetic orders, on the recorded M1's processor. <bookmark mark='t'/> The whole run "
             f"takes about {round(r['seconds'])} seconds. <bookmark mark='l'/> The loss falls fast, <bookmark mark='a'/> and by the end "
             "of the second epoch, validation AUC has reached one, and it stays there. On two thousand fresh test "
             "orders, it ranks every returned order above every kept one. "
@@ -217,37 +217,6 @@ class RealRun(VoiceoverScene):
 
     # ------------------------------------------------------------------
     def output(self):
-        ex = self.r["example_prediction"]
-        st, emb = ex["/returned"]["state"], ex["/"]
-        assert abs(emb["embedding_norm"] - 1) < 1e-4 and emb["width"] == 64
-        head = ", ".join(f"{v:.3f}" for v in emb["embedding_head"])
-        lines = [
-            ("predictions:", WHITE),
-            ("  /returned:", C.RF_TARGET),
-            (f"    state:     {{valued: {st['valued']:.4f}, null: {st['null']:.5f}, ...}}", GREY_A),
-            (f"    content:   {{probability: {ex['/returned']['content']['probability']:.3f}}}", WHITE),
-            (f"    inferred:  {str(ex['/returned']['inferred']).lower()}", GREY_A),
-            ("  /:", C.RF_ROOT),
-            (f"    embedding: [{head}, ...]  # {emb['width']} floats, norm 1", GREY_A),
-        ]
-        g = VGroup(*[Mono(t, font_size=22, color=c) for t, c in lines]).arrange(DOWN, aligned_edge=LEFT, buff=0.12)
-        g.move_to(UP * 0.4)
-        x0 = g.get_left()[0]
-        cw = Mono("M" * 10, font_size=22).width / 10
-        for (t, _), m in zip(lines, g):
-            m.shift(RIGHT * (x0 + cw * (len(t) - len(t.lstrip(" "))) - m.get_left()[0]))
-        foot = label(r"one Arrow table: every address carries a state, its decoded content, and an \texttt{inferred} flag;\\"
-                     r"\texttt{rf.Writer} streams it straight to Parquet", font_size=24, color=GREY_A).to_edge(DOWN, buff=0.8)
-        tag = real_tag(r"the real output row for the first order above")
-        with self.voiceover(
-            "And predictions come back as an Arrow table. <bookmark mark='a'/> For every address: a probability for "
-            "each state, the decoded content, and a flag saying whether the value was inferred. Exported embeddings "
-            "sit at their own addresses. <bookmark mark='w'/> In a batch job, a writer callback streams each batch of "
-            "predictions straight to Parquet, so nothing piles up in memory."
-        ) as vo:
-            vo.wait_until("a")
-            self.play(FadeIn(g, lag_ratio=0.1), FadeIn(tag), run_time=1.6)
-            vo.wait_until("w")
-            self.play(FadeIn(foot))
-        self.wait(0.4)
-        self.play(FadeOut(g), FadeOut(foot), FadeOut(tag))
+        # Output readers changed in 0.3.1; never relabel an old learning result as a new one.
+        from videos.ml.relflow.s24_output import Output
+        Output.structure(self)

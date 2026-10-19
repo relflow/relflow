@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from explainer import *  # noqa: F403
-from videos.relflow.common import (
+from videos.ml.relflow.common import (
     D, Mono, label, mtex, note, real_tag, show_episode_card, state_tile,
 )
 
@@ -148,7 +148,7 @@ class RaggedToDense(VoiceoverScene):
         grid = self.dense_grid(head["retained_skus"]).to_edge(RIGHT, buff=0.6).shift(UP * 1.4)
         title = label(r"the model wants a rectangle: 4 slots per order", font_size=26, color=GREY_A)
         title.next_to(grid, UP, buff=0.55)
-        formula = mtex(r"\text{placement} = \text{parent} \times \text{length} + \text{slot}", font_size=34)
+        formula = mtex(r"\text{placement} = \text{parent} \times \text{batch width} + \text{slot}", font_size=34)
         formula.next_to(grid, DOWN, buff=0.45)
         nums = VGroup()
         movers = []
@@ -158,9 +158,9 @@ class RaggedToDense(VoiceoverScene):
             tgt = grid.cells[p]
             nums.add(Mono(str(p), font_size=15, color=GOLD).move_to(tgt.get_corner(UR) + DL * 0.12))
         with self.voiceover(
-            "The model, though, wants rectangles: in this small example, a grid of four slots per order. "
+            "The model computes on rectangles. This bounded example reaches its cap: four slots per order. With shorter batches, the rectangle would contract. "
             "<bookmark mark='p'/> So for every item it keeps, relflow computes a single number, its placement in the "
-            "grid: the parent's position, times the branch length, plus the item's slot within its own list. "
+            "grid: the parent's position, times the execution width, plus the item's slot within its own list. "
             "<bookmark mark='m'/> Item four, for instance, is order three's second item: three times four, plus one, "
             "is thirteen. <bookmark mark='a'/> Then every value is scattered to its placement in one vectorized step."
         ) as vo:
@@ -190,7 +190,7 @@ class RaggedToDense(VoiceoverScene):
         f11 = self.skus[7]
         drop = VGroup(Cross(f11, stroke_color=RED, stroke_width=3).scale(0.7))
         head_t = VGroup(Mono('overflow="head"', font_size=22, color=C.RF_BRANCH),
-                        label(r"(default): keep the first 4", font_size=24, color=GREY_A)).arrange(RIGHT, buff=0.15)
+                        label(r"(bounded default): keep the first 4", font_size=24, color=GREY_A)).arrange(RIGHT, buff=0.15)
         tail_t = VGroup(Mono('overflow="tail"', font_size=22, color=C.RF_BRANCH),
                         label(r": keep the last 4", font_size=24, color=GREY_A)).arrange(RIGHT, buff=0.1)
         head_t.next_to(self.formula, DOWN, buff=0.35)

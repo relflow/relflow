@@ -1,13 +1,13 @@
 """End cards for the standalone episodes: the series, what comes next, and where the docs are.
 
-``End01`` ... ``End21`` are generated from the manifest; ``tools/build.py relflow --episodes`` appends each
-episode's card after its scene.  They are silent: the music bed lifts over them."""
+``End01`` ... ``End25`` are generated from the manifest; ``render.py --episodes`` appends each
+episode's card after its scene.  They are silent pauses between narrated episodes."""
 
 from __future__ import annotations
 
 from explainer import *  # noqa: F403
-from videos.relflow.common import label, logo, wordmark
-from videos.relflow.manifest import DOCS, EPISODES
+from videos.ml.relflow.common import label, logo, wordmark
+from videos.ml.relflow.manifest import DOCS, EPISODES
 
 
 class EndCard(Scene):
@@ -28,6 +28,9 @@ class EndCard(Scene):
         card = VGroup(*rows).arrange(DOWN, buff=0.4)
         card[2].shift(DOWN * 0.15)
         card[3].shift(DOWN * 0.15)
+        # The card is static artwork. Capture it once at the target resolution;
+        # fading thousands of logo paths separately adds minutes to every build.
+        card = ImageMobject(card.get_image(self.renderer.camera)).set(height=config.frame_height)
         self.play(FadeIn(card, shift=UP * 0.2), run_time=0.8)
         self.wait(3.6)
         self.play(FadeOut(card), run_time=0.8)

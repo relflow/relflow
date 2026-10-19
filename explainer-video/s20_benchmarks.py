@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from explainer import *  # noqa: F403
-from videos.relflow.common import (
+from videos.ml.relflow.common import (
     D, Mono, Plot, code, label, note, real_tag, show_episode_card,
 )
 
@@ -53,9 +53,9 @@ class Benchmarks(VoiceoverScene):
                   r" process", font_size=24, color=GREY_A),
         ).arrange(DOWN, aligned_edge=LEFT, buff=0.2).next_to(c, DOWN, buff=0.55)
         with self.voiceover(
-            "What does a relflow model cost? Here's a measurement on the computer that rendered this video: "
+            "What does a relflow model cost? Here's a measurement on an M1, relflow 0.2.3 (archive): "
             f"<bookmark mark='m'/> an Apple {m['chip'].replace('Apple ', '')} laptop with {m['memory_gib']:.0f} "
-            "gigabytes of memory. <bookmark mark='c'/> The model is the customer model from the getting started guide: "
+            "gigabytes of memory. <bookmark mark='c'/> The model is the customer model from the archived getting started guide: "
             "orders with line items, and two targets, built at each of the five sizes. <bookmark mark='b'/> Each batch "
             f"is {d['batch']} synthetic customers with about ten orders each. Every number is the median of several "
             "batches after a warm-up, and memory is the peak of a fresh process."
@@ -153,7 +153,7 @@ class Benchmarks(VoiceoverScene):
         names = {"xs": "extra-small", "sm": "small", "md": "medium", "lg": "large", "xl": "extra-large"}
         if not gpu_wins:
             verdict = ("On every one of them, the CPU wins. For the medium model it trains "
-                       f"{md_t:.1f} times faster. These models do many small operations, and on this machine the "
+                       f"{md_t:.1f} times faster. These models do many small operations, and on the recorded M1 the "
                        "overhead of launching each one on the GPU outweighs its speed.")
         else:
             wins = " and ".join(f"{m}ing the {names[p]} model" for p, m in gpu_wins)

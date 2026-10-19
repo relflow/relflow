@@ -1,0 +1,25 @@
+{
+  "archived_runtime": "0.2.3",
+  "archived_commit": "5077716",
+  "recorded_machine": "Apple M1, 16 GB, 4 Torch CPU threads",
+  "archived_files": {
+    "benchmarks.json": "77d468290cc5bb69684ad6e0e0c70fea480f1d32e7ae7edb48f826b6a40d6ffb",
+    "counting.json": "c712f52fb3da51f5c568973f787e47b51b15c2f1a8f2f9c910a3d270f19ef01e",
+    "encode.json": "41ef7a9fa50b89e2bb722bdda4b37d02f534a7ca40f537e31755157455e2d22c",
+    "happy.json": "61e0b8f655fea62b6b21039eb5248565be93692509a897b123e132fc4cdf4f7f",
+    "hash.json": "9fdea75d8fd2cba9a7fa4e7ee551d56a1369283095af1b0673e49d902aeb90a0",
+    "masks.json": "be2f43b4564f378edeae9120ca37f1959b90faa62c120582a77498a3271fb17d",
+    "number.json": "9af47a23875ed0cdcfc74e0240ce890defc60da721c69c3c37c172c03b4ee64c",
+    "packing.json": "3075a3b0027d9b8058c4685dcf17cc92cf6e60fe6d2001e7df9483ca73bd838f",
+    "pretraining.json": "22338bbbb7639fdb1fc1432dd5fa68807a320e8851940089bfc12c2e60e07306",
+    "processors.json": "a17a4e166cc7cbbbcf561012271559f53ed86c99101f9b14201c2e169c09bf72",
+    "proofs.json": "97ca04cad45bde3cfe9d5de30281260ffa816053a2cd806d0dec70ce3f804c17",
+    "quantile_enum.json": "f4caf9947858e7a64844370ad3e759bc8bd9909c43dd79720676e14cca53fb79",
+    "returns.json": "4d65ffea682d06098a50167ebcf8f42b4f1cf0087bce819dc65da7cdff129f77",
+    "rope.json": "65e875b761a7a45fbd3b9d2b733711ff0a97f42274eca6afd70a5134e8518a77",
+    "schema.json": "6fce609143874a93ff8ef8f5b4ede79e3f955b0aa4ba935be43e7746eb83e835",
+    "time_vector_text.json": "97711b8c03899ba495a3bd54109705aeb111c6dd83caedc3e2a86569315c8800",
+    "vocab.json": "a4afdefe7ffd3fa31fe3c4528abc1d6c35b263640f4c880426f9020e718771f1"
+  },
+  "current": "current.json; separate API traces, not rerun learning evidence"
+}

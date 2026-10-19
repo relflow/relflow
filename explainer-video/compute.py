@@ -6,8 +6,8 @@ Arrow-to-tensor layouts, the real Number and Hash embedders, real vocabulary
 growth with the optimizer state checked before and after, the real packing code
 timed against dense attention, and small real training runs.
 
-    python -m videos.relflow.compute              # everything (about 5 min on 4 cores)
-    python -m videos.relflow.compute counting     # one experiment
+    python -m videos.ml.relflow.compute              # everything (about 5 min on 4 cores)
+    python -m videos.ml.relflow.compute counting     # one experiment
 
 Results are written to ``videos/relflow/data/<experiment>.json`` and committed,
 so rendering the video does not need relflow or torch.  relflow 0.2.3 needs
@@ -1237,7 +1237,7 @@ def benchmarks():
     import torch
 
     def run(*cfg):
-        cmd = [sys.executable, "-m", "videos.relflow.compute", "_bench", *map(str, cfg)]
+        cmd = [sys.executable, "-m", "videos.ml.relflow.compute", "_bench", *map(str, cfg)]
         proc = subprocess.run(cmd, cwd=HERE.parents[1], capture_output=True, text=True)
         line = next((ln for ln in proc.stdout.splitlines() if ln.startswith("RESULT ")), None)
         if line is None:
@@ -1267,6 +1267,10 @@ EXPERIMENTS = {"schema": schema, "encode": encode, "number": number, "vocab": vo
 
 
 def main():
+    from importlib.metadata import version
+    if version("relflow") != "0.2.3":
+        raise SystemExit("Archived experiments require relflow==0.2.3 in a separate environment. "
+                         "Use compute_current.py for current API traces.")
     quiet()
     if sys.argv[1:2] == ["_bench"]:  # one benchmark configuration, in a fresh process (see benchmarks())
         preset, length, mode, device = sys.argv[2:6]
