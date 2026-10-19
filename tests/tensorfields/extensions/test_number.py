@@ -34,40 +34,26 @@ from relflow.tensorfields.extensions.number import (
 from relflow.tensorfields.extensions.number import (
     output as output_type,
 )
-from tests.arrow import batch as arrow_batch
+from tests.arrow import table as arrow_table
 from tests.tensorfields.helpers import tensorize
 
 ADDRESS = "/items/amount"
 
 
-def structure_payload(*, mask: bool | Mask = False, jitter: Jitter | dict[str, object] | None = None) -> dict:
-    field: dict = {
-        "name": "amount",
-        "type": "number",
-        "mask": mask,
-    }
-    if jitter is not None:
-        field["jitter"] = jitter
-    return {
-        "d_model": 16,
-        "fields": {
-            "type": "branch",
-            "dropout": 0.1,
-            "fields": [
-                {
-                    "name": "items",
-                    "type": "branch",
-                    "length": 2,
-                    "fields": [field],
-                }
-            ],
-        },
-    }
+def build_schema(*, mask: bool | Mask = False, jitter: Jitter | dict[str, object] | None = None) -> Schema:
+    options = {} if jitter is None else {"jitter": jitter}
+    return rf.Schema.from_tree(
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+        dropout=0.1,
+        items=rf.Branch(length=2, amount=rf.Number(mask=mask, **options)),
+    )
 
 
 def tensorfield(rows: list[list[Any]], *, schema: Schema, strata: Strata) -> TensorField:
-    batch = arrow_batch([{"items": [{"amount": value} for value in row]} for row in rows])
-    projection = coalesce(batch, schema=schema, strata=strata)[ADDRESS]
+    batch = arrow_table([{"items": [{"amount": value} for value in row]} for row in rows])
+    projection = coalesce(batch, schema=schema, strata=strata).fields[ADDRESS]
     return tensorize(
         TensorField,
         projection,
@@ -79,24 +65,24 @@ def tensorfield(rows: list[list[Any]], *, schema: Schema, strata: Strata) -> Ten
 
 
 def test_number_request_hydrates_jitter_from_a_mapping():
-    structure = Schema.model_validate(structure_payload(jitter={"add": 1.5, "multiply": 0.25, "normalize": False}))
-    jitter = structure.requests[ADDRESS].jitter
+    schema = build_schema(jitter={"add": 1.5, "multiply": 0.25, "normalize": False})
+    jitter = schema.requests[ADDRESS].jitter
 
     assert isinstance(jitter, Jitter)
     assert jitter == Jitter(add=1.5, multiply=0.25, normalize=False)
 
 
 def test_number_jitter_round_trips_through_schema_serialization():
-    structure = Schema.model_validate(structure_payload(jitter=Jitter(add=1.5, multiply=0.25, normalize=False)))
+    schema = build_schema(jitter=Jitter(add=1.5, multiply=0.25, normalize=False))
 
-    restored = Schema.model_validate_json(structure.model_dump_json(round_trip=True))
+    restored = Schema.model_validate_json(schema.model_dump_json(round_trip=True))
 
     assert restored.requests[ADDRESS].jitter == Jitter(add=1.5, multiply=0.25, normalize=False)
 
 
 def test_number_jitter_round_trips_through_model_checkpoint(tmp_path: Path):
     configured = Jitter(add=1.5, multiply=0.25, normalize=False)
-    model = rf.Model(amount=rf.Number(jitter=configured), d_model=8, n_layers=1, n_heads=2)
+    model = rf.Model.xs(amount=rf.Number(jitter=configured), d_model=8)
     pathname = tmp_path / "jitter.ckpt"
 
     model.save(pathname)
@@ -115,9 +101,9 @@ def test_number_requires_a_jitter_configuration(value: object):
 
 
 def test_default_jitter_does_not_advance_rng_during_training():
-    structure = Schema.model_validate(structure_payload())
-    field = tensorfield(rows=[[2.0, 4.0]], schema=structure, strata=Strata.train)
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    schema = build_schema()
+    field = tensorfield(rows=[[2.0, 4.0]], schema=schema, strata=Strata.train)
+    embedder = Embedder(schema=schema, address=ADDRESS)
     embedder.train()
     before = torch.random.get_rng_state().clone()
 
@@ -127,9 +113,9 @@ def test_default_jitter_does_not_advance_rng_during_training():
 
 
 def test_number_embedding_retains_standardized_value_in_monotone_lane():
-    structure = Schema.model_validate(structure_payload())
-    field = tensorfield(rows=[[8.0, 12.0]], schema=structure, strata=Strata.predict)
-    embedder = Embedder(schema=structure, address=ADDRESS).eval()
+    schema = build_schema()
+    field = tensorfield(rows=[[8.0, 12.0]], schema=schema, strata=Strata.predict)
+    embedder = Embedder(schema=schema, address=ADDRESS).eval()
     embedder.normalizer.mean.fill_(10.0)
     embedder.normalizer.var.fill_(4.0)
 
@@ -141,7 +127,7 @@ def test_number_embedding_retains_standardized_value_in_monotone_lane():
 
 def test_number_monotone_lane_retains_autograd_at_model_width_one():
     schema = rf.Schema.from_tree(
-        amount=rf.Number(), d_model=1, n_layers=1, n_heads=2, attention=None, reduction=rf.Mean()
+        amount=rf.Number, d_model=1, n_layers=1, n_heads=2, attention=None, reduction=rf.Mean()
     )
     embedder = Embedder(schema=schema, address="/amount")
     inputs = TensorInput(
@@ -157,8 +143,8 @@ def test_number_monotone_lane_retains_autograd_at_model_width_one():
 
 
 def test_number_jitters_only_finite_valued_coordinates(monkeypatch: pytest.MonkeyPatch):
-    structure = Schema.model_validate(structure_payload(jitter=Jitter(add=0.5)))
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    schema = build_schema(jitter=Jitter(add=0.5))
+    embedder = Embedder(schema=schema, address=ADDRESS)
     captured: list[torch.Tensor] = []
 
     def capture(
@@ -185,9 +171,9 @@ def test_number_jitters_only_finite_valued_coordinates(monkeypatch: pytest.Monke
 
 
 def test_number_jitter_runs_only_in_training_mode(monkeypatch: pytest.MonkeyPatch):
-    structure = Schema.model_validate(structure_payload(jitter=Jitter(add=0.5)))
-    embedder = Embedder(schema=structure, address=ADDRESS)
-    field = tensorfield(rows=[[2.0]], schema=structure, strata=Strata.train)
+    schema = build_schema(jitter=Jitter(add=0.5))
+    embedder = Embedder(schema=schema, address=ADDRESS)
+    field = tensorfield(rows=[[2.0]], schema=schema, strata=Strata.train)
     calls: list[torch.Tensor] = []
 
     def capture(
@@ -222,11 +208,11 @@ def test_number_jitter_respects_normalization_order(
     expected_perturb: float,
     expected_clamp: float,
 ):
-    structure = Schema.model_validate(structure_payload(jitter=Jitter(add=3.0, normalize=normalize)))
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    schema = build_schema(jitter=Jitter(add=3.0, normalize=normalize))
+    embedder = Embedder(schema=schema, address=ADDRESS)
     embedder.normalizer.mean.fill_(10.0)
     embedder.normalizer.var.fill_(4.0)
-    field = tensorfield(rows=[[14.0]], schema=structure, strata=Strata.train)
+    field = tensorfield(rows=[[14.0]], schema=schema, strata=Strata.train)
     observed: dict[str, torch.Tensor] = {}
 
     def add_three(
@@ -253,8 +239,8 @@ def test_number_jitter_respects_normalization_order(
 
 
 def test_number_jitter_is_configuration_not_checkpoint_state():
-    structure = Schema.model_validate(structure_payload(jitter=Jitter(add=1.5, multiply=0.25, normalize=False)))
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    schema = build_schema(jitter=Jitter(add=1.5, multiply=0.25, normalize=False))
+    embedder = Embedder(schema=schema, address=ADDRESS)
 
     assert embedder.jitter == Jitter(add=1.5, multiply=0.25, normalize=False)
     assert not any("jitter" in name for name in embedder.state_dict())
@@ -262,7 +248,7 @@ def test_number_jitter_is_configuration_not_checkpoint_state():
 
 
 def test_number_jitter_mutation_rebuilds_runtime_configuration():
-    model = rf.Model(amount=rf.Number(jitter=rf.Jitter(add=0.1)), d_model=8, n_layers=1, n_heads=2)
+    model = rf.Model.xs(amount=rf.Number(jitter=rf.Jitter(add=0.1)), d_model=8)
     address = rf.Address("/", "amount")
 
     model.update(
@@ -286,17 +272,16 @@ class TrackingModule:
 
 
 def test_number_loss_does_not_mutate_counter():
-    structure = Schema.model_validate(structure_payload(mask=Mask(reconstruct=True)))
-    schema = structure
+    schema = build_schema(mask=Mask(reconstruct=True))
 
     field = tensorfield(
         rows=[[1.0, None], [2.0]],
         schema=schema,
         strata=Strata.train,
     )
-    embedder = Embedder(schema=structure, address=ADDRESS)
-    decoder = Decoder(schema=structure, address=ADDRESS)
-    module = TrackingModule(schema=structure, embedder=embedder, decoder=decoder)
+    embedder = Embedder(schema=schema, address=ADDRESS)
+    decoder = Decoder(schema=schema, address=ADDRESS)
+    module = TrackingModule(schema=schema, embedder=embedder, decoder=decoder)
 
     prediction = Prediction(
         address=ADDRESS,
@@ -418,7 +403,7 @@ def test_number_constant_large_values_do_not_overflow_squared_sums():
 
 
 def test_number_observes_large_integers_in_float32():
-    configured = rf.Model(amount=rf.Number, d_model=8, n_layers=1, n_heads=2, batch_size=2)
+    configured = rf.Model.xs(amount=rf.Number, d_model=8, batch_size=2)
     records = pa.table({"amount": [16_777_217, 16_777_219]})
     datamodule = rf.ArrowDataModule(configured, train=records, shuffle=False)
     encoded = next(iter(datamodule.train_dataloader()))
@@ -453,13 +438,14 @@ def distributed_normalization(rank: int, directory: str, empty: bool) -> None:
 
 
 @pytest.mark.parametrize("empty", [False, True])
+@pytest.mark.skipif(not distributed.is_available() or not distributed.is_gloo_available(), reason="requires CPU Gloo")
 def test_number_float32_moments_merge_across_ranks(tmp_path, empty):
     multiprocessing.spawn(distributed_normalization, args=(str(tmp_path), empty), nprocs=2, join=True)
 
 
 def test_number_embedder_clamps_unsafe_fourier_inputs_and_warns():
-    structure = Schema.model_validate(structure_payload())
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    schema = build_schema()
+    embedder = Embedder(schema=schema, address=ADDRESS)
     bound = embedder.max_fourier_input.detach()
     content = torch.stack(
         [
@@ -509,15 +495,15 @@ def test_number_embedder_clamps_unsafe_fourier_inputs_and_warns():
 
 
 def test_number_embedder_outputs_finite_payload_for_extreme_outliers():
-    structure = Schema.model_validate(structure_payload())
+    schema = build_schema()
     field = tensorfield(
         rows=[[1.0, 2.0]],
-        schema=structure,
+        schema=schema,
         strata=Strata.train,
     )
     field.content[0, 0, 0] = float("inf")
 
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    embedder = Embedder(schema=schema, address=ADDRESS)
     embedder.train()
     parcel = embedder.embed(field)
 
@@ -527,7 +513,7 @@ def test_number_embedder_outputs_finite_payload_for_extreme_outliers():
 
 
 def test_number_write_emits_flat_arrow_content():
-    structure = Schema.model_validate(structure_payload())
+    schema = build_schema()
     state_logits = torch.zeros(2, 1, len(Tokens))
     state_logits[0, 0, Tokens.valued.value] = 10.0
     state_logits[1, 0, Tokens.null.value] = 10.0
@@ -542,7 +528,7 @@ def test_number_write_emits_flat_arrow_content():
         ),
     )
 
-    module = SimpleNamespace(schema=structure)
+    module = SimpleNamespace(schema=schema)
     datatype = output_type(module, ADDRESS)
     output = write(module=module, prediction=prediction, datatype=datatype)
 

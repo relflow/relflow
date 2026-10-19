@@ -12,10 +12,4 @@ def table(rows: Sequence[dict[str, Any]], schema: pa.Schema | None = None) -> pa
     return pa.Table.from_pylist(list(rows), schema=schema)
 
 
-def batch(rows: Sequence[dict[str, Any]], schema: pa.Schema | None = None) -> pa.Table:
-    """Build the canonical Arrow table expected by low-level coalescing."""
-
-    return table(rows, schema=schema)
-
-
-__all__ = ["batch", "table"]
+__all__ = ["table"]

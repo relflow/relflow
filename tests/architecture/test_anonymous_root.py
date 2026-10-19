@@ -150,9 +150,12 @@ def test_root_query_prediction_envelope_and_checkpoint_round_trip(tmp_path):
     table = pa.Table.from_pylist([{"payload": {"items": [{"value": 3.0}, {"value": 5.0}]}}])
     expected = model.predict(table)
     predictions = expected["predictions"].combine_chunks()
-    assert [field.name for field in predictions.type] == ["/", "/items/value"]
-    assert len(predictions.field("/").field("embedding")[0]) == 8
-    assert len(predictions.field("/items/value")[0]) == 2
+    assert [field.name for field in predictions.type] == ["items"]
+    root = expected["representations"].combine_chunks().values
+    assert root.field("path").to_pylist() == [[]]
+    assert len(root.field("embedding")[0]) == 8
+    assert len(predictions.field("items")[0]) == 2
+    assert predictions.field("items").values.type.names == ["value"]
     restored = rf.Model.load(model.save(tmp_path / "anonymous.ckpt"))
     assert restored.predict(table).equals(expected)
     assert set(restored.nodes) == {"/", "/items", "/items/value"}
@@ -185,7 +188,7 @@ def test_metric_names_use_dotted_addresses_and_preserve_case(monkeypatch, names,
 
 
 def test_absolute_routing_preserves_forward_values_and_gradients(monkeypatch):
-    """Compare identical weights with an explicit test-only root namespace."""
+    """Compare identical weights with a test-only prefix on child addresses."""
 
     def run():
         torch.manual_seed(418)
@@ -219,6 +222,8 @@ def test_absolute_routing_preserves_forward_values_and_gradients(monkeypatch):
     def named_address(node):
         if node.parent is None or node.root.type != "schema":
             return rf.Address("")
+        if node.parent.type == "schema":
+            return rf.Address()
         return rf.Address("reference", *(part.name for part in node.path[2:]))
 
     with monkeypatch.context() as reference:

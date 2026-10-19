@@ -11,21 +11,15 @@ import torch
 import relflow as rf
 
 
-def _model() -> rf.Model:
-    return rf.Model(
-        d_model=8,
-        n_layers=1,
-        n_heads=4,
-        attention=None,
-        amount=rf.Number,
-    )
+def configured() -> rf.Model:
+    return rf.Model.xs(d_model=8, attention=None, amount=rf.Number)
 
 
 def test_public_version_matches_installed_distribution() -> None:
     assert rf.__version__ == version("relflow")
 
 
-def _checkpoint(model: rf.Model, **metadata: object) -> dict:
+def checkpoint_state(model: rf.Model, **metadata: object) -> dict:
     return {
         "state_dict": model.state_dict(),
         "schema": model.schema.model_dump(mode="python"),
@@ -35,7 +29,7 @@ def _checkpoint(model: rf.Model, **metadata: object) -> dict:
 
 
 def test_new_model_version_is_current_and_immutable() -> None:
-    model = _model()
+    model = configured()
 
     assert model.version == rf.__version__
     with pytest.raises(AttributeError):
@@ -45,7 +39,7 @@ def test_new_model_version_is_current_and_immutable() -> None:
 
 def test_checkpoint_dump_records_version() -> None:
     checkpoint: dict = {}
-    model = _model()
+    model = configured()
 
     model.on_save_checkpoint(checkpoint)
 
@@ -54,7 +48,7 @@ def test_checkpoint_dump_records_version() -> None:
 
 def test_model_save_persists_version(tmp_path: Path) -> None:
     pathname = tmp_path / "model.ckpt"
-    model = _model()
+    model = configured()
 
     model.save(pathname)
 
@@ -64,8 +58,8 @@ def test_model_save_persists_version(tmp_path: Path) -> None:
 
 def test_model_load_requires_version_metadata(tmp_path: Path) -> None:
     pathname = tmp_path / "incomplete.ckpt"
-    model = _model()
-    torch.save(_checkpoint(model), pathname)
+    model = configured()
+    torch.save(checkpoint_state(model), pathname)
 
     with pytest.raises(ValueError, match="version"):
         rf.Model.load(pathname)
@@ -73,8 +67,8 @@ def test_model_load_requires_version_metadata(tmp_path: Path) -> None:
 
 def test_model_load_and_resave_preserve_version_without_gating(tmp_path: Path) -> None:
     pathname = tmp_path / "future.ckpt"
-    model = _model()
-    torch.save(_checkpoint(model, version="999.0.0"), pathname)
+    model = configured()
+    torch.save(checkpoint_state(model, version="999.0.0"), pathname)
 
     restored = rf.Model.load(pathname)
 
@@ -88,8 +82,8 @@ def test_model_load_and_resave_preserve_version_without_gating(tmp_path: Path) -
 
 
 def test_in_place_and_lightning_restore_update_version() -> None:
-    model = _model()
-    checkpoint = _checkpoint(model, version="1.2.3")
+    model = configured()
+    checkpoint = checkpoint_state(model, version="1.2.3")
 
     model.restore_checkpoint_state(checkpoint)
     assert model.version == "1.2.3"

@@ -1,3 +1,4 @@
+import pyarrow as pa
 import pydantic
 import pytest
 import torch
@@ -15,43 +16,27 @@ from relflow.structs.tree import Mask
 from relflow.tensorfields.base import TENSORFIELDS, TensorInput
 from relflow.tensorfields.extensions.vector import Decoder, Embedder, TensorField, loss, write
 from relflow.tensorfields.extensions.vector import output as output_type
-from tests.arrow import batch as arrow_batch
+from tests.arrow import table as arrow_table
 from tests.tensorfields.helpers import tensorize
 
 ADDRESS = "/items/embedding"
 
 
-def structure_payload(
+def build_schema(
     *,
     n_dim: int = 3,
     objective: str = "l2",
     mask: bool | Mask = False,
     jitter: Jitter | dict[str, object] | None = None,
-) -> dict:
-    field: dict = {
-        "name": "embedding",
-        "type": "vector",
-        "n_dim": n_dim,
-        "objective": objective,
-        "mask": mask,
-    }
-    if jitter is not None:
-        field["jitter"] = jitter
-    return {
-        "d_model": 16,
-        "fields": {
-            "type": "branch",
-            "dropout": 0.1,
-            "fields": [
-                {
-                    "name": "items",
-                    "type": "branch",
-                    "length": 2,
-                    "fields": [field],
-                }
-            ],
-        },
-    }
+) -> Schema:
+    options = {} if jitter is None else {"jitter": jitter}
+    return rf.Schema.from_tree(
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+        dropout=0.1,
+        items=rf.Branch(length=2, embedding=rf.Vector(n_dim=n_dim, objective=objective, mask=mask, **options)),
+    )
 
 
 def values() -> list:
@@ -62,8 +47,8 @@ def values() -> list:
 
 
 def tensorfield(*, values: list, schema: Schema, strata: Strata) -> TensorField:
-    batch = arrow_batch([{"items": [{"embedding": value} for value in root]} for (root,) in values])
-    projection = coalesce(batch, schema=schema, strata=strata)[ADDRESS]
+    batch = arrow_table([{"items": [{"embedding": value} for value in root]} for (root,) in values])
+    projection = coalesce(batch, schema=schema, strata=strata).fields[ADDRESS]
     return tensorize(
         TensorField,
         projection,
@@ -75,22 +60,22 @@ def tensorfield(*, values: list, schema: Schema, strata: Strata) -> TensorField:
 
 
 def test_vector_request_is_available_in_structure():
-    structure = Schema.model_validate(structure_payload())
-    request = structure.requests[ADDRESS]
+    schema = build_schema()
+    request = schema.requests[ADDRESS]
     assert request.type == "vector"
     assert request.n_dim == 3
 
 
 def test_vector_request_rejects_non_positive_n_dim():
     with pytest.raises(ValueError, match="greater than 0"):
-        Schema.model_validate(structure_payload(n_dim=0))
+        build_schema(n_dim=0)
 
 
 @pytest.mark.parametrize("normalize", [True, False])
 def test_vector_request_hydrates_jitter_from_a_mapping(normalize: bool):
-    structure = Schema.model_validate(structure_payload(jitter={"add": 0.2, "multiply": 0.1, "normalize": normalize}))
+    schema = build_schema(jitter={"add": 0.2, "multiply": 0.1, "normalize": normalize})
 
-    assert structure.requests[ADDRESS].jitter == Jitter(add=0.2, multiply=0.1, normalize=normalize)
+    assert schema.requests[ADDRESS].jitter == Jitter(add=0.2, multiply=0.1, normalize=normalize)
 
 
 @pytest.mark.parametrize("value", [None, 0.0, 0.2, 1, True])
@@ -100,8 +85,7 @@ def test_vector_requires_a_jitter_configuration(value: object):
 
 
 def test_vector_tensorfield_new_rejects_wrong_embedding_length():
-    structure = Schema.model_validate(structure_payload(n_dim=3))
-    schema = structure
+    schema = build_schema(n_dim=3)
     bad_values = [
         [[[0.1, 0.2], [0.3, 0.4, 0.5]]],
         [[[0.6, 0.7, 0.8], [0.9, 1.0, 1.1]]],
@@ -116,8 +100,7 @@ def test_vector_tensorfield_new_rejects_wrong_embedding_length():
 
 
 def test_vector_embedder_and_decoder_shapes():
-    structure = Schema.model_validate(structure_payload(n_dim=3))
-    schema = structure
+    schema = build_schema(n_dim=3)
 
     field = tensorfield(
         values=values(),
@@ -125,11 +108,11 @@ def test_vector_embedder_and_decoder_shapes():
         strata=Strata.train,
     )
 
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    embedder = Embedder(schema=schema, address=ADDRESS)
     parcel = embedder.embed(field)
     assert parcel.payload.shape == (2, 1, 2, 16)
 
-    decoder = Decoder(schema=structure, address=ADDRESS)
+    decoder = Decoder(schema=schema, address=ADDRESS)
     prediction = decoder(
         [parcel],
         batch_size=field.state.shape[0],
@@ -140,8 +123,8 @@ def test_vector_embedder_and_decoder_shapes():
 
 
 def test_vector_jitters_only_finite_valued_coordinates(monkeypatch: pytest.MonkeyPatch):
-    structure = Schema.model_validate(structure_payload(jitter=Jitter(add=0.5)))
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    schema = build_schema(jitter=Jitter(add=0.5))
+    embedder = Embedder(schema=schema, address=ADDRESS)
     captured: list[torch.Tensor] = []
 
     def capture(self: Jitter, inputs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -177,9 +160,9 @@ def test_vector_jitters_only_finite_valued_coordinates(monkeypatch: pytest.Monke
 
 @pytest.mark.parametrize("normalize", [True, False])
 def test_vector_jitter_runs_only_in_training_mode(monkeypatch: pytest.MonkeyPatch, normalize: bool):
-    structure = Schema.model_validate(structure_payload(jitter=Jitter(add=0.5, normalize=normalize)))
-    embedder = Embedder(schema=structure, address=ADDRESS)
-    field = tensorfield(values=values(), schema=structure, strata=Strata.train)
+    schema = build_schema(jitter=Jitter(add=0.5, normalize=normalize))
+    embedder = Embedder(schema=schema, address=ADDRESS)
+    field = tensorfield(values=values(), schema=schema, strata=Strata.train)
     calls: list[torch.Tensor] = []
 
     def capture(self: Jitter, inputs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -197,9 +180,9 @@ def test_vector_jitter_runs_only_in_training_mode(monkeypatch: pytest.MonkeyPatc
 
 
 def test_vector_jitter_preserves_content_and_reconstruction_targets(monkeypatch: pytest.MonkeyPatch):
-    structure = Schema.model_validate(structure_payload(jitter=Jitter(add=0.5), mask=Mask(reconstruct=True)))
-    field = tensorfield(values=values(), schema=structure, strata=Strata.train)
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    schema = build_schema(jitter=Jitter(add=0.5), mask=Mask(reconstruct=True))
+    field = tensorfield(values=values(), schema=schema, strata=Strata.train)
+    embedder = Embedder(schema=schema, address=ADDRESS)
     content = field.content.clone()
     targets = field.targets[TensorKey.content].clone()
 
@@ -217,8 +200,8 @@ def test_vector_jitter_preserves_content_and_reconstruction_targets(monkeypatch:
 
 def test_vector_jitter_is_configuration_not_checkpoint_state():
     configured = Jitter(add=0.2, multiply=0.1, normalize=False)
-    structure = Schema.model_validate(structure_payload(jitter=configured))
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    schema = build_schema(jitter=configured)
+    embedder = Embedder(schema=schema, address=ADDRESS)
 
     assert embedder.jitter == configured
     assert not any("jitter" in name for name in embedder.state_dict())
@@ -226,8 +209,8 @@ def test_vector_jitter_is_configuration_not_checkpoint_state():
 
 
 class DummyModule:
-    def __init__(self, structure: Schema):
-        self.schema = structure
+    def __init__(self, schema: Schema):
+        self.schema = schema
         self.logged: list[tuple[tuple[str, ...], float]] = []
 
     def track(self, names: tuple[str, ...], value: torch.Tensor) -> torch.Tensor:
@@ -237,8 +220,7 @@ class DummyModule:
 
 @pytest.mark.parametrize(("objective", "expected"), [("l1", 2.0), ("l2", 4.0)])
 def test_vector_loss_uses_selected_objective(objective: str, expected: float):
-    structure = Schema.model_validate(structure_payload(objective=objective, mask=Mask(reconstruct=True)))
-    schema = structure
+    schema = build_schema(objective=objective, mask=Mask(reconstruct=True))
 
     field = tensorfield(
         values=values(),
@@ -259,13 +241,14 @@ def test_vector_loss_uses_selected_objective(objective: str, expected: float):
         ),
     )
 
-    module = DummyModule(structure)
+    module = DummyModule(schema)
     output = loss(module=module, prediction=prediction, batch=field, strata=Strata.train)
     assert torch.isclose(output, torch.tensor(expected, dtype=output.dtype))
 
 
-def test_vector_write_returns_content_payload():
-    structure = Schema.model_validate(structure_payload())
+@pytest.mark.parametrize("nullable", [True, False])
+def test_vector_write_returns_content_payload(nullable):
+    schema = build_schema()
     state_logits = torch.full((2, 2, len(Tokens)), -50.0)
     state_logits[0, :, Tokens.valued.value] = 50.0
     state_logits[1, :, Tokens.null.value] = 50.0
@@ -280,11 +263,15 @@ def test_vector_write_returns_content_payload():
         ),
     )
 
-    module = DummyModule(structure)
+    module = DummyModule(schema)
     datatype = output_type(module, ADDRESS)
+    assert datatype.field(TensorKey.content.name).type.value_field.name == "element"
+    element = pa.field("element", pa.float32(), nullable=nullable, metadata={b"unit": b"coordinate"})
+    datatype = pa.struct([pa.field(TensorKey.content.name, pa.list_(element, 3), nullable=False)])
     output = write(module=module, prediction=prediction, datatype=datatype)
     assert output.type == datatype
     content = output.field(TensorKey.content.name)
+    assert content.type.value_field.equals(element, check_metadata=True)
     assert len(content) == 4
     assert content.to_pylist() == [
         [1.0, 1.0, 1.0],
@@ -296,7 +283,7 @@ def test_vector_write_returns_content_payload():
 
 @pytest.mark.parametrize("strata", [Strata.train, Strata.validate, Strata.test, Strata.predict])
 def test_vector_omits_targets_without_reconstruction(strata: Strata):
-    schema = Schema.model_validate(structure_payload())
+    schema = build_schema()
 
     field = tensorfield(values=values(), schema=schema, strata=strata)
 
@@ -309,12 +296,18 @@ def test_vector_omits_targets_without_reconstruction(strata: Strata):
 @pytest.mark.parametrize("owner", ["leaf", "branch", "root"])
 @pytest.mark.parametrize("strata", [Strata.train, Strata.predict])
 def test_vector_retains_targets_for_reconstruction(owner: str, strata: Strata):
-    payload = structure_payload()
-    root = payload["fields"]
-    branch = root["fields"][0]
-    leaf = branch["fields"][0]
-    {"root": root, "branch": branch, "leaf": leaf}[owner]["mask"] = Mask(reconstruct=True)
-    schema = Schema.model_validate(payload)
+    schema = rf.Schema.from_tree(
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+        dropout=0.1,
+        mask=Mask(reconstruct=True) if owner == "root" else False,
+        items=rf.Branch(
+            length=2,
+            mask=Mask(reconstruct=True) if owner == "branch" else False,
+            embedding=rf.Vector(n_dim=3, mask=Mask(reconstruct=True) if owner == "leaf" else False),
+        ),
+    )
 
     field = tensorfield(values=values(), schema=schema, strata=strata)
 
@@ -333,7 +326,7 @@ def test_vector_retains_targets_for_reconstruction(owner: str, strata: Strata):
 @pytest.mark.parametrize("reconstruct", [False, True])
 @pytest.mark.parametrize("strata", [Strata.train, Strata.predict])
 def test_vector_target_policy_preserves_empty_nested_rows(reconstruct: bool, strata: Strata):
-    schema = Schema.model_validate(structure_payload(mask=Mask(reconstruct=True) if reconstruct else False))
+    schema = build_schema(mask=Mask(reconstruct=True) if reconstruct else False)
     rows = [[[]], values()[1]]
 
     field = tensorfield(values=rows, schema=schema, strata=strata)
@@ -361,7 +354,7 @@ def test_vector_unused_target_omission_preserves_training(monkeypatch: pytest.Mo
             label=rf.Number(mask=True),
         )
         monkeypatch.setattr(model, "log", lambda *args, **kwargs: None)
-        source = arrow_batch(
+        source = arrow_table(
             [
                 {"embedding": [0.1, 0.2, 0.3], "label": 1.0},
                 {"embedding": [0.4, 0.5, 0.6], "label": -1.0},

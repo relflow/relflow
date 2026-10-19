@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from copy import deepcopy
 from types import FunctionType, MethodType
-from typing import Any, cast
+from typing import Any, Generic, ParamSpec, cast
 
 import torch
 
@@ -13,10 +13,12 @@ from relflow.architecture.encoder import BranchEncoder
 from relflow.architecture.packed import customized
 from relflow.architecture.pool import CrossAttentionBlock, LearnedQueryCrossAttention
 
-__all__ = ["clear", "compile"]
+__all__ = ["canonical", "clear", "compile"]
+
+P = ParamSpec("P")
 
 
-class Region[**P]:
+class Region(Generic[P]):
     """Bind one compiler cache to one compute method, without serializing it."""
 
     def __init__(
@@ -49,12 +51,16 @@ class Region[**P]:
             cast(Callable[P, torch.Tensor], MethodType(function, eager.__self__)),
             backend=backend,
             fullgraph=True,
-            dynamic=dynamic,
+            dynamic=True if dynamic is None else dynamic,
             options=options or None,
         )
 
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> torch.Tensor:
         owner = cast(BranchEncoder | LearnedQueryCrossAttention, self.eager.__self__)
+        # Packing groups are Python orchestration whose count follows the batch.
+        # Keep them eager instead of caching a graph for every grouping.
+        if kwargs.get("packing") is not None:
+            return cast(torch.Tensor, self.eager(*args, **kwargs))
         layers = (
             owner.encoder
             if isinstance(owner, BranchEncoder)
@@ -71,6 +77,12 @@ class Region[**P]:
 
     def __reduce__(self) -> str | tuple[object, ...]:
         return self.eager.__reduce__()
+
+
+def canonical(owner: BranchEncoder | LearnedQueryCrossAttention, method: object) -> bool:
+    """Whether a prepared region still calls its owner's original compute method."""
+    eager = method.eager if isinstance(method, Region) else method
+    return isinstance(eager, MethodType) and eager.__self__ is owner and eager.__func__ is type(owner).compute
 
 
 def clear(model: torch.nn.Module) -> None:
@@ -116,11 +128,7 @@ def compile(
         current = module.compute
         eager = current.eager if isinstance(current, Region) else current
         # Custom compute implementations retain their own execution contract.
-        if (
-            not isinstance(eager, MethodType)
-            or eager.__self__ is not module
-            or eager.__func__ is not type(module).compute
-        ):
+        if not canonical(module, current):
             continue
         local = current.local if isinstance(current, Region) else "compute" in module.__dict__
         region = Region(eager, local, backend=backend, dynamic=dynamic, options=settings.copy())

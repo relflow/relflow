@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypeVar, cast
 
 from relflow.presets.base import Preset, resolve
 from relflow.structs.enums import AttentionInput
@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 
 __all__ = ["factory"]
 
+M = TypeVar("M", bound="Model")
+
 
 def factory(profile: Preset):
     """Capture a preset in a classmethod with an inferred signature and subclass return type."""
@@ -25,13 +27,14 @@ def factory(profile: Preset):
     # Revalidate copies before capturing the immutable construction policy.
     profile = Preset.model_validate(profile.model_dump(mode="python", round_trip=True))
 
-    def construct[M: Model](
+    def construct(
         cls: type[M],
         /,
         *,
         d_model: int = cast(int, OMITTED),
         n_layers: int = cast(int, OMITTED),
         n_heads: int = cast(int, OMITTED),
+        ffnx: int = cast(int, OMITTED),
         batch_size: int = 1,
         fields: Mapping[str, TreeFieldInput] | None = None,
         query: str | None = None,
@@ -52,6 +55,7 @@ def factory(profile: Preset):
             d_model=d_model,
             n_layers=n_layers,
             n_heads=n_heads,
+            ffnx=ffnx,
             fields=fields,
             query=query,
             description=description,

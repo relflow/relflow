@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import builtins
-from collections.abc import Generator, Mapping
+from collections.abc import Mapping
 from typing import Annotated, Any, Literal, Self, TypeAlias, cast
 
 import pydantic
-from rich.console import Console, ConsoleOptions
-from rich.text import Text
 
 from relflow.structs.enums import AttentionInput, AttentionMode, Overflow, OverflowInput
 from relflow.structs.reduction import Attention, ReductionConfig
@@ -21,15 +19,44 @@ RequestTypes: TypeAlias = Leaf
 OMITTED = object()
 
 
+def bounds(branch: Branch) -> None:
+    """Keep a collection cap and its overflow policy as one configuration."""
+
+    if branch.length is not None and (
+        not isinstance(branch.length, int) or isinstance(branch.length, bool) or branch.length < 1
+    ):
+        raise ValueError(
+            f"branch '{branch.address or branch.name}' length must be a positive integer or None, got {branch.length!r}"
+        )
+    if branch.length is None:
+        if branch.overflow is not None:
+            location = f" '{branch.address or branch.name}'" if branch.address or branch.name else ""
+            raise ValueError(
+                f"unbounded branch{location} cannot configure overflow={branch.overflow!r}; "
+                "set a finite length or remove the overflow policy"
+            )
+    elif branch.overflow is None:
+        branch.overflow = Overflow.head
+
+
 class Branch(Node):
     """Repeated nested object group in a `relflow` schema.
 
     Parent keywords supply child names, such as ``amount=rf.Number``. Use a
-    ``fields`` mapping for names that collide with configuration options. ``length``
-    limits the repeated collection; ``overflow`` chooses which excess rows to
-    retain. ``reduction`` controls the context passed to the parent branch.
+    ``fields`` mapping for names that collide with configuration options.
+    ``length=None`` retains every collection slot and resolves its width per
+    batch. A positive integer caps the collection and enables ``overflow`` to
+    choose which excess slots to retain. ``reduction`` controls the context
+    passed to the parent branch.
+
+    During inference, unbounded collections in untrusted input are a
+    denial-of-service (DoS/DDoS) attack vector: requests can exhaust memory or
+    compute. Use finite branch lengths and enforce request-size limits before
+    parsing public requests. Batch size alone does not bound nested collections.
+
     ``attention=None`` disables coordinate and sequence attention independently
-    of the reduction.
+    of the reduction. ``ffnx`` multiplies this node's feed-forward hidden width
+    and defaults to 8 independently of its parent.
     ``mask`` accepts the same policies as a leaf and applies to its descendants.
     """
 
@@ -38,8 +65,8 @@ class Branch(Node):
     type: Annotated[Literal["branch"], pydantic.Field(default="branch")] = "branch"
     query: str | None = None
     attention: AttentionMode | None = AttentionMode.mha
-    length: Annotated[int, pydantic.Field(gt=0, default=1)] = 1
-    overflow: Overflow = Overflow.head
+    length: Annotated[pydantic.StrictInt | None, pydantic.Field(gt=0)] = None
+    overflow: Overflow | None = None
     n_layers: Annotated[int, pydantic.Field(gt=0, default=1)] = 1
     reduction: ReductionConfig | None = pydantic.Field(default_factory=Attention)
     # The before-validator normalizes this public Boolean default to a tuple.
@@ -53,11 +80,12 @@ class Branch(Node):
         query: str | None = None,
         description: str | None = None,
         embed: bool = False,
-        length: int = 1,
-        overflow: OverflowInput = Overflow.head,
+        length: int | None = None,
+        overflow: OverflowInput | None = None,
         attention: AttentionInput = cast(AttentionInput, OMITTED),
         n_layers: int = cast(int, OMITTED),
         n_heads: int = cast(int, OMITTED),
+        ffnx: int = cast(int, OMITTED),
         reduction: ReductionConfig | None = cast(ReductionConfig | None, OMITTED),
         dropout: Rate | None = cast(Rate | None, OMITTED),
         mask: MaskInput = False,
@@ -76,6 +104,7 @@ class Branch(Node):
             attention=attention,
             n_layers=n_layers,
             n_heads=n_heads,
+            ffnx=ffnx,
             reduction=reduction,
             dropout=dropout,
             mask=mask,
@@ -100,6 +129,11 @@ class Branch(Node):
 
         fields: list[Any] = []
         for field in value:
+            if type(field) is Leaf:
+                from relflow.structs.experiment import bind_tree_field
+
+                fields.append(bind_tree_field(cast(str, field.name), field))
+                continue
             if not isinstance(field, Mapping):
                 fields.append(field)
                 continue
@@ -115,6 +149,11 @@ class Branch(Node):
             fields.append(TENSORFIELDS[field_type].Request.model_validate(payload))
 
         return fields
+
+    @pydantic.model_validator(mode="after")
+    def check_overflow(self) -> Self:
+        bounds(self)
+        return self
 
     @pydantic.model_validator(mode="after")
     def check_query(self) -> Self:
@@ -141,6 +180,7 @@ class Branch(Node):
         return self
 
     def post_bind_validate(self) -> None:
+        bounds(self)
         if len(self.mask) == 0:
             return None
 
@@ -153,69 +193,3 @@ class Branch(Node):
             raise ValueError(f"branch '{self.address}' has a mask but no active descendant leaves")
 
         return None
-
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
-        is_root = getattr(getattr(self, "parent", None), "type", None) == "schema"
-        display_type = "root" if is_root else self.type
-        attributes = ("query", "attention", "n_layers", "n_heads", "reduction", "dropout")
-        if not is_root:
-            attributes = ("length", "overflow", *attributes)
-
-        heading = Text()
-        if self.name is not None:
-            heading.append(self.name, style=self.RICH_NAME_STYLE)
-            heading.append(" ")
-        heading.append(f"[{display_type}]", style=self.RICH_TYPE_STYLE)
-        if self.embed:
-            heading.append(" ")
-            heading.append("embed", style="bold #065f46")
-        for name in attributes:
-            value = getattr(self, name, None)
-            if value is None and name not in ("attention", "reduction"):
-                continue
-            if name == "reduction":
-                if value is None:
-                    value = "None"
-                elif isinstance(value, Attention):
-                    settings = value.model_dump(exclude={"type"}, exclude_none=True)
-                    if settings.get("position") is True:
-                        settings.pop("position")
-                    parameters = ", ".join(f"{key}={setting}" for key, setting in settings.items())
-                    value = f"{value.type}({parameters})"
-                else:
-                    value = value.type
-            elif isinstance(value, float) and value.is_integer():
-                value = int(value)
-            elif hasattr(value, "value"):
-                value = value.value
-            heading.append(" ")
-            heading.append(f"{name}=", style="dim")
-            heading.append(str(value), style="cyan")
-        if self.mask:
-            heading.append(" ")
-            heading.append("mask=", style="dim")
-            heading.append(str(len(self.mask)), style="cyan")
-
-        yield heading
-
-        for index, child in enumerate(self.fields):
-            connector = "`-- " if index == len(self.fields) - 1 else "|-- "
-            continuation = "    " if index == len(self.fields) - 1 else "|   "
-            lines = list(child.__rich_console__(console, options))
-            if not lines:
-                continue
-            first = Text()
-            first.append(connector, style=self.RICH_TREE_STYLE)
-            if isinstance(lines[0], Text):
-                first.append_text(lines[0])
-            else:
-                first.append(str(lines[0]))
-            yield first
-            for line in lines[1:]:
-                nested = Text()
-                nested.append(continuation, style=self.RICH_TREE_STYLE)
-                if isinstance(line, Text):
-                    nested.append_text(line)
-                else:
-                    nested.append(str(line))
-                yield nested

@@ -1,0 +1,106 @@
+name: Coverage badge
+
+on:
+  workflow_run:
+    workflows: [Tests]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coverage-badge
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Download coverage from the completed main run
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage
+          path: report
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Publish the coverage endpoint
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { readFileSync } = require('node:fs');
+            const run = context.payload.workflow_run;
+            const repo = context.repo;
+            const main = await github.rest.git.getRef({ ...repo, ref: 'heads/main' });
+            if (main.data.object.sha !== run.head_sha) {
+              core.info('Skipping coverage for an older main commit.');
+              return;
+            }
+
+            const totals = JSON.parse(readFileSync('report/coverage.json', 'utf8')).totals;
+            const { covered_lines: lines, num_statements: statements,
+                    covered_branches: branches, num_branches: totalBranches } = totals;
+            if (![lines, statements, branches, totalBranches].every(Number.isSafeInteger) ||
+                statements <= 0 || lines < 0 || lines > statements ||
+                totalBranches < 0 || branches < 0 || branches > totalBranches) {
+              throw new Error('Coverage totals must contain valid line and branch counts.');
+            }
+            const percent = 100 * lines / statements;
+            const badge = {
+              schemaVersion: 1,
+              label: 'coverage',
+              message: `${percent.toFixed(2)}%`,
+              color: percent >= 90 ? 'brightgreen' : percent >= 80 ? 'green' : percent >= 70 ? 'yellow' : 'red',
+            };
+            const summary = {
+              commit: run.head_sha,
+              run: run.html_url,
+              lines: { covered: lines, total: statements, percent },
+              branches: { covered: branches, total: totalBranches,
+                          percent: totalBranches ? 100 * branches / totalBranches : null },
+            };
+
+            let previous = null;
+            try {
+              previous = (await github.rest.git.getRef({ ...repo, ref: 'heads/badges' })).data.object.sha;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            const base = previous
+              ? (await github.rest.git.getCommit({ ...repo, commit_sha: previous })).data.tree.sha
+              : undefined;
+            const tree = await github.rest.git.createTree({
+              ...repo,
+              base_tree: base,
+              tree: Object.entries({ 'coverage.json': badge, 'summary.json': summary }).map(([path, data]) => ({
+                path, mode: '100644', type: 'blob', content: JSON.stringify(data, null, 2) + '\n',
+              })),
+            });
+            if (tree.data.sha === base) {
+              core.info('Coverage endpoint is already current.');
+              return;
+            }
+            const current = await github.rest.git.getRef({ ...repo, ref: 'heads/main' });
+            if (current.data.object.sha !== run.head_sha) {
+              core.info('Skipping coverage because main advanced during publication.');
+              return;
+            }
+            const commit = await github.rest.git.createCommit({
+              ...repo,
+              message: `Update coverage for ${run.head_sha.slice(0, 7)}`,
+              tree: tree.data.sha,
+              parents: previous ? [previous] : [],
+            });
+            if (previous) {
+              await github.rest.git.updateRef({ ...repo, ref: 'heads/badges', sha: commit.data.sha, force: false });
+            } else {
+              await github.rest.git.createRef({ ...repo, ref: 'refs/heads/badges', sha: commit.data.sha });
+            }

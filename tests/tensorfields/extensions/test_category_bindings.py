@@ -13,10 +13,8 @@ ADDRESS = rf.Address("/category")
 
 
 def build(*, embed: bool = False) -> rf.Model:
-    return rf.Model(
+    return rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=4,
         batch_size=2,
         attention=None,
         embed=embed,
@@ -110,8 +108,9 @@ def test_category_vocabulary_is_available_to_inference_preprocessor() -> None:
     assert seen == [("ALPHA", "BETA")]
     assert len(contexts) == 1
     assert rf.Category.vocabulary(contexts[0], ADDRESS) == ("ALPHA", "BETA")
-    root = predictions["predictions"].combine_chunks().field("/")
-    assert len(root.field("embedding")) == 2
+    root = predictions["representations"].combine_chunks()
+    assert len(root) == 2
+    assert all(row[0]["path"] == [] and len(row[0]["embedding"]) == 8 for row in root.to_pylist())
 
 
 @pytest.mark.parametrize("use_model", [True, False], ids=["model", "encoding-context"])
@@ -136,10 +135,8 @@ def test_category_vocabulary_rejects_invalid_source() -> None:
 
 
 def test_category_vocabulary_rejects_non_category_model_field() -> None:
-    model = rf.Model(
+    model = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=4,
         amount=rf.Number,
     )
 
@@ -177,10 +174,8 @@ def test_category_counts_validates_model_and_address() -> None:
     with pytest.raises(KeyError, match="missing"):
         rf.Category.counts(model, "/missing")
 
-    wrong_model = rf.Model(
+    wrong_model = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=4,
         amount=rf.Number,
     )
     with pytest.raises(TypeError, match="not a Category field"):

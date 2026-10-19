@@ -2,21 +2,23 @@
 
 from __future__ import annotations
 
-import math
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, TypeAlias, TypedDict, cast, overload
 
+import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 import torch
 from tensordict import TensorDict
 
 from relflow.architecture.binding import bind
 from relflow.architecture.contracts import sanitize
-from relflow.architecture.encoder import BranchEncoder
+from relflow.architecture.encoder import BranchEncoder, locate, sequence
 from relflow.architecture.node import NodeModule
-from relflow.data.arrow import Encoded, mappings
+from relflow.architecture.output import Layout, Projection, projection
+from relflow.data.arrow import Encoded, Retain, mappings, retention
 from relflow.data.datasets.base import EncodedInput
 from relflow.data.iterables import encode as encode_batch
 from relflow.data.processors import (
@@ -30,7 +32,7 @@ from relflow.distributed import all_reduce_max
 from relflow.logging import logger
 from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
-from relflow.structs.tree import Address
+from relflow.structs.tree import Address, Node
 from relflow.tensorfields.base import (
     TENSORFIELDS,
     DecoderBase,
@@ -40,14 +42,13 @@ from relflow.tensorfields.base import (
     TensorFieldBase,
     Write,
 )
-from relflow.tensorfields.output import STATE, embedding, inferred, shape, state, struct
+from relflow.tensorfields.output import STATE, embedding, inferred, state, struct
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
 
-Retain = tuple[str, ...] | Literal["*"]
 PredictionInput: TypeAlias = pa.Table | pa.RecordBatch | Sequence[Mapping[str, object]]
-RESERVED = frozenset({TensorKey.state.name, TensorKey.inferred.name, TensorKey.embedding.name})
+RESERVED = frozenset({TensorKey.state.name, TensorKey.inferred.name})
 
 
 class Output(TypedDict):
@@ -134,13 +135,24 @@ class OutputEntry:
     """Frozen output contract for one expected forward address."""
 
     address: Address
-    axes: tuple[int, ...]
+    axes: tuple[int | None, ...]
+    branches: tuple[Address, ...]
+    passthrough: bool
     decoded: pa.StructType | None
     writer: Write | None
     embed: bool
-    extension: str | None
     coordinate: pa.StructType | None
-    output: pa.DataType | None
+    path: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class OutputNode:
+    """Selected decoded children and their shared Arrow record geometry."""
+
+    address: Address
+    name: str | None
+    datatype: pa.DataType
+    children: tuple[OutputNode, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +163,8 @@ class OutputPlan:
     retain: Retain
     expected: frozenset[Address]
     entries: tuple[OutputEntry, ...]
+    tree: OutputNode | None
+    representations: pa.ListType | None
 
 
 def ingress(source: PredictionInput) -> pa.Table | pa.RecordBatch:
@@ -171,25 +185,40 @@ def ingress(source: PredictionInput) -> pa.Table | pa.RecordBatch:
         raise TypeError(f"Python prediction observations are not Arrow-compatible: {error}") from error
 
 
-def retention(names: Retain) -> Retain:
-    """Validate and normalize one retained-input selection."""
+def observations(
+    module: Model,
+    batch: pa.Table | pa.RecordBatch,
+    *,
+    preprocess: PreprocessorInput,
+    strata: Strata,
+) -> pa.Table:
+    """Produce the canonical Arrow observations before encoding or batching."""
 
-    if names == "*":
-        return names
-    if not isinstance(names, tuple):
-        raise TypeError("retain must be a tuple of column names or '*'")
-    if any(not isinstance(name, str) or not name for name in names):
-        raise TypeError("retain entries must be non-empty strings")
-    if len(set(names)) != len(names):
-        raise ValueError("retain entries must be unique")
-    return names
+    from relflow.data.datasets.arrow import convert, merge, process
+
+    source = convert(batch)
+    processors = Preprocessor.normalize(preprocess)
+    if not processors:
+        return source
+
+    source = merge(
+        process(
+            (source,),
+            preprocessor=processors,
+            strata=strata,
+            schema=module.schema,
+            encoding_context=module.interprocess_encoding_context,
+        )
+    )
+    if source is None:
+        raise ValueError("preprocessor pipeline returned no observations")
+    return source
 
 
 def project(source: pa.Table, names: Retain) -> pa.Array:
-    """Build the canonical retained-input value for each source row."""
+    """Project a validated column selection into one struct per source row."""
 
-    normalized = retention(names)
-    selected = tuple(source.column_names) if normalized == "*" else normalized
+    selected = tuple(source.column_names) if names == "*" else names
 
     missing = [name for name in selected if name not in source.column_names]
     if missing:
@@ -203,7 +232,7 @@ def project(source: pa.Table, names: Retain) -> pa.Array:
     return pa.StructArray.from_arrays(arrays, fields=fields)
 
 
-def axes(module: Model, address: Address) -> tuple[int, ...]:
+def axes(module: Model, address: Address) -> tuple[int | None, ...]:
     """Return repeated model axes represented inside one output row."""
 
     if address in module.schema.requests:
@@ -214,212 +243,329 @@ def axes(module: Model, address: Address) -> tuple[int, ...]:
         )
         structural = lengths[1:-1]
         outputs = module.schema.branch_outputs[address]
-        return (*structural, outputs) if outputs > 1 else structural
+        return (*structural, outputs) if outputs is None or outputs > 1 else structural
     raise KeyError(f"prediction address {str(address)!r} is absent from the model schema")
 
 
+def metadata(module: Model) -> dict[bytes, bytes]:
+    """Identify the public output contract and model's recorded package version."""
+
+    return {b"relflow.prediction_format": b"2", b"relflow.model_version": module.version.encode()}
+
+
+def check_output_type(datatype: pa.DataType, address: Address) -> None:
+    """Require portable list element names at the extension declaration boundary."""
+
+    if pa.types.is_list(datatype) or pa.types.is_large_list(datatype) or pa.types.is_fixed_size_list(datatype):
+        if datatype.value_field.name != "element":
+            raise ValueError(
+                f"extension output at {address} requires list children named 'element'; "
+                f"got {datatype.value_field.name!r}; declare pa.field('element', value_type)"
+            )
+        check_output_type(datatype.value_type, address)
+    elif pa.types.is_struct(datatype):
+        for field in datatype:
+            check_output_type(field.type, address)
+    elif pa.types.is_map(datatype):
+        check_output_type(datatype.key_type, address)
+        check_output_type(datatype.item_type, address)
+
+
+def output_tree(node: Node, entries: Mapping[Address, OutputEntry]) -> OutputNode | None:
+    """Select rich leaf results while retaining their schema-owned nesting."""
+
+    address = Address(str(node.address))
+    entry = entries.get(address)
+    if entry is not None and entry.coordinate is not None:
+        return OutputNode(address, node.name, entry.coordinate)
+    children = tuple(child for item in node.children if (child := output_tree(item, entries)) is not None)
+    if not children:
+        return None
+    record = pa.struct(
+        [pa.field(cast(str, child.name), child.datatype, nullable=bool(child.children)) for child in children]
+    )
+    datatype = record if address == Address() else pa.list_(pa.field("element", record))
+    return OutputNode(address, node.name, datatype, children)
+
+
 def plan(module: Model, retain: Retain = (), *, refresh: bool = False) -> OutputPlan:
-    """Compile and cache the exact prediction contract for this model generation."""
+    """Compile one exact, nested Arrow output contract per model generation."""
 
     generation = int(getattr(module, "_contract_generation", 0))
     retained = retention(retain)
-    plans = getattr(module, "output_plans", None)
-    if not isinstance(plans, dict):
-        plans = {}
-        module.output_plans = plans
     key = (generation, retained)
-    cached = plans.get(key)
+    cached = module.output_plans.get(key)
     if not refresh and isinstance(cached, OutputPlan):
         return cached
 
     embeds = set(module.schema.embed)
-    expected = frozenset(Address(str(address)) for address in (*module.schema.decodes, *embeds))
+    decodes = set(module.schema.decodes)
+    expected = frozenset(Address(str(address)) for address in (*decodes, *embeds))
     entries: list[OutputEntry] = []
-    visited: set[Address] = set()
     for node in (module.schema.fields, *module.schema.fields.descendants):
         address = Address(str(node.address))
         if address not in expected:
             continue
-
-        visited.add(address)
         decoded: pa.StructType | None = None
         writer: Write | None = None
-        extension_name: str | None = None
-        if address in module.schema.requests:
+        if address in decodes:
             extension = TENSORFIELDS[module.schema.requests[address].type]
-            extension_name = extension.name
             declared = extension.output(module=module, address=address)
             if declared is not None and not isinstance(declared, pa.StructType):
-                raise TypeError(f"extension output for {address!s} must return a pyarrow StructType or None")
+                raise TypeError(f"extension output for {address} must return a pyarrow StructType or None")
             if declared is not None:
                 conflicts = RESERVED.intersection(field.name for field in declared)
                 if conflicts:
-                    names = ", ".join(sorted(conflicts))
-                    raise ValueError(f"extension output for {address!s} uses reserved field(s): {names}")
-                decoded = declared
-                writer = extension.write
+                    raise ValueError(
+                        f"extension output for {address} uses reserved field(s): {', '.join(sorted(conflicts))}"
+                    )
+                check_output_type(declared, address)
+                decoded, writer = declared, extension.write
 
-        coordinate_fields: list[pa.Field] = []
-        if decoded is not None:
-            coordinate_fields.append(pa.field(TensorKey.state.name, STATE, nullable=False))
-            coordinate_fields.extend(decoded)
-            coordinate_fields.append(pa.field(TensorKey.inferred.name, pa.bool_(), nullable=False))
-        if address in embeds:
-            coordinate_fields.append(
-                pa.field(
-                    TensorKey.embedding.name,
-                    pa.list_(pa.float32(), module.schema.d_model),
-                    nullable=False,
-                )
+        coordinate_type = (
+            None
+            if decoded is None
+            else pa.struct(
+                [
+                    pa.field(TensorKey.state.name, STATE, nullable=False),
+                    *decoded,
+                    pa.field(TensorKey.inferred.name, pa.bool_(), nullable=False),
+                ]
             )
-        coordinate_type = pa.struct(coordinate_fields) if coordinate_fields else None
-        model_axes = axes(module, address)
-        output_type: pa.DataType | None = coordinate_type
-        if output_type is not None:
-            for size in reversed(model_axes):
-                output_type = pa.list_(output_type, size)
-
+        )
         entries.append(
             OutputEntry(
                 address=address,
-                axes=model_axes,
+                axes=axes(module, address),
+                branches=tuple(
+                    owner.address
+                    for owner in node.path
+                    if getattr(owner, "type", None) == "branch"
+                    and owner.address != Address()
+                    and (address in module.schema.requests or owner.address != address)
+                ),
+                passthrough=address in module.schema.branches and module.schema.branches[address].reduction is None,
                 decoded=decoded,
                 writer=writer,
                 embed=address in embeds,
-                extension=extension_name,
                 coordinate=coordinate_type,
-                output=output_type,
+                path=tuple(
+                    owner.name
+                    for owner in node.path
+                    if owner.name is not None and owner.address and owner.address != Address()
+                ),
             )
         )
 
-    absent = expected - visited
+    absent = expected - {entry.address for entry in entries}
     if absent:
-        formatted = ", ".join(str(address) for address in sorted(absent, key=str))
-        raise ValueError(f"configured prediction address(es) are absent from schema traversal: {formatted}")
-
-    compiled = OutputPlan(generation=generation, retain=retained, expected=expected, entries=tuple(entries))
-    plans[key] = compiled
+        raise ValueError(
+            f"configured prediction address(es) are absent from schema traversal: {', '.join(sorted(absent))}"
+        )
+    tree = output_tree(module.schema.fields, {entry.address: entry for entry in entries})
+    representations = None
+    if embeds:
+        representations = pa.list_(
+            pa.field(
+                "element",
+                pa.struct(
+                    [
+                        pa.field("path", pa.list_(pa.field("element", pa.string(), nullable=False)), nullable=False),
+                        pa.field("parents", pa.list_(pa.field("element", pa.int32(), nullable=False)), nullable=False),
+                        pa.field("output_index", pa.int32(), nullable=False),
+                        pa.field(
+                            "embedding",
+                            pa.list_(pa.field("element", pa.float32()), module.schema.d_model),
+                            nullable=False,
+                        ),
+                    ]
+                ),
+                nullable=False,
+            )
+        )
+    if tree is None and representations is None:
+        raise ValueError("model has no public prediction outputs; configure a reconstructing field or embed=True")
+    compiled = OutputPlan(generation, retained, expected, tuple(entries), tree, representations)
+    module.output_plans[key] = compiled
     return compiled
 
 
-def coordinate(module: Model, entry: OutputEntry, prediction: Prediction, rows: int) -> pa.Array | None:
-    """Assemble and shape one address-level prediction array."""
+def coordinate(module: Model, entry: OutputEntry, prediction: Prediction, expected: int) -> pa.StructArray | None:
+    """Write one extension's flat rich results without interpreting its values."""
 
-    address = entry.address
-    fields: list[pa.Field] = []
-    arrays: dict[str, pa.Array] = {}
-    expected = rows * math.prod(entry.axes)
-
-    if address in module.schema.requests:
-        if TensorKey.state not in prediction.payload or TensorKey.inferred not in prediction.payload:
-            raise ValueError(f"decoded prediction for {address!s} is missing shared state or inferred tensors")
-        state_tensor = cast(torch.Tensor, prediction.payload[TensorKey.state])
-        inferred_tensor = cast(torch.Tensor, prediction.payload[TensorKey.inferred])
-        if state_tensor.ndim == 0 or state_tensor.shape[-1] != len(Tokens):
-            raise ValueError(f"prediction state at {address!s} must end with {len(Tokens)} logits")
-        if state_tensor.numel() != expected * len(Tokens) or inferred_tensor.numel() != expected:
-            raise ValueError(
-                f"prediction at {address!s} contains the wrong coordinate count; expected {expected} "
-                f"for {rows} rows and model axes {entry.axes}"
-            )
-
-        if entry.decoded is not None:
-            if entry.writer is None:
-                raise RuntimeError(f"compiled output for {address!s} has no extension writer")
-            written = entry.writer(module=module, prediction=prediction, datatype=entry.decoded)
-            if not isinstance(written, pa.StructArray):
-                raise TypeError(f"extension write for {address!s} must return a pyarrow StructArray")
-            if written.type != entry.decoded:
-                raise TypeError(f"extension write for {address!s} returned {written.type}; expected {entry.decoded}")
-
-            state_values = state(state_tensor)
-            fields.append(pa.field(TensorKey.state.name, state_values.type, nullable=False))
-            arrays[TensorKey.state.name] = state_values
-            for index, field in enumerate(entry.decoded):
-                fields.append(field)
-                arrays[field.name] = written.field(index)
-
-            inferred_values = inferred(inferred_tensor)
-            fields.append(pa.field(TensorKey.inferred.name, inferred_values.type, nullable=False))
-            arrays[TensorKey.inferred.name] = inferred_values
-
-    if entry.embed and TensorKey.embedding not in prediction.payload:
-        raise ValueError(f"prediction for configured embedding address {address!s} has no embedding tensor")
-    if not entry.embed and TensorKey.embedding in prediction.payload:
-        raise ValueError(f"prediction for {address!s} returned an unplanned embedding tensor")
-    if entry.embed:
-        embedding_tensor = cast(torch.Tensor, prediction.payload[TensorKey.embedding])
-        if embedding_tensor.ndim == 0 or embedding_tensor.shape[-1] != module.schema.d_model:
-            raise ValueError(f"prediction embedding at {address!s} must end with model width {module.schema.d_model}")
-        embedding_values = embedding(embedding_tensor)
-        fields.append(pa.field(TensorKey.embedding.name, embedding_values.type, nullable=False))
-        arrays[TensorKey.embedding.name] = embedding_values
-
-    if not fields:
+    if entry.decoded is None:
         return None
-
-    dtype = pa.struct(fields)
-    if dtype != entry.coordinate:
-        raise TypeError(f"prediction at {address!s} produced coordinate type {dtype}; expected {entry.coordinate}")
-    values = struct(arrays, dtype)
+    address = entry.address
+    if TensorKey.state not in prediction.payload or TensorKey.inferred not in prediction.payload:
+        raise ValueError(f"decoded prediction for {address} is missing shared state or inferred tensors")
+    state_tensor = cast(torch.Tensor, prediction.payload[TensorKey.state])
+    inferred_tensor = cast(torch.Tensor, prediction.payload[TensorKey.inferred])
+    if state_tensor.ndim == 0 or state_tensor.shape[-1] != len(Tokens):
+        raise ValueError(f"prediction state at {address} must end with {len(Tokens)} logits")
+    if state_tensor.numel() != expected * len(Tokens) or inferred_tensor.numel() != expected:
+        raise ValueError(f"prediction at {address} contains the wrong coordinate count; expected {expected}")
+    if entry.writer is None:
+        raise RuntimeError(f"compiled output for {address} has no extension writer")
+    written = entry.writer(module=module, prediction=prediction, datatype=entry.decoded)
+    if not isinstance(written, pa.StructArray):
+        raise TypeError(f"extension write for {address} must return a pyarrow StructArray")
+    if not written.type.equals(entry.decoded, check_metadata=True):
+        raise TypeError(f"extension write for {address} returned {written.type}; expected {entry.decoded}")
+    values = struct(
+        {
+            TensorKey.state.name: state(state_tensor),
+            **{field.name: written.field(index) for index, field in enumerate(entry.decoded)},
+            TensorKey.inferred.name: inferred(inferred_tensor),
+        },
+        cast(pa.StructType, entry.coordinate),
+    )
     if len(values) != expected:
+        raise ValueError(f"prediction at {address} wrote {len(values)} coordinates; expected {expected}")
+    return values
+
+
+def records(node: OutputNode, leaves: Mapping[Address, pa.Array], layouts: Mapping[Address, Layout]) -> pa.Array:
+    """Merge sibling results into one record collection for each schema branch."""
+
+    if not node.children:
+        return leaves[node.address]
+    arrays = [records(child, leaves, layouts) for child in node.children]
+    root = node.address == Address()
+    datatype = cast(pa.StructType, node.datatype if root else cast(pa.ListType, node.datatype).value_type)
+    layout = None if root else layouts[node.address]
+    values = pa.StructArray.from_arrays(
+        arrays,
+        fields=list(datatype),
+        mask=None if layout is None else pa.array(~layout.slots),
+    )
+    if layout is None:
+        return values
+    return pa.ListArray.from_arrays(
+        pa.array(layout.offsets, type=pa.int32()),
+        values,
+        type=node.datatype,
+        mask=pa.array(~layout.valid),
+    )
+
+
+def representation(
+    entry: OutputEntry, prediction: Prediction, projected: Projection, datatype: pa.StructType
+) -> pa.StructArray:
+    """Write selected embedding coordinates with schema paths and local ordinals."""
+
+    tensor = cast(torch.Tensor, prediction.payload[TensorKey.embedding])
+    vector = cast(pa.FixedSizeListType, datatype.field("embedding").type)
+    if tensor.ndim == 0 or tensor.shape[-1] != vector.list_size:
+        raise ValueError(f"prediction embedding at {entry.address} must end with model width {vector.list_size}")
+    values = embedding(tensor, datatype=vector)
+    if len(values) != projected.size:
         raise ValueError(
-            f"prediction at {address!s} wrote {len(values)} coordinates; expected {expected} "
-            f"for {rows} rows and model axes {entry.axes}"
+            f"prediction embedding at {entry.address} contains {len(values)} coordinates; expected {projected.size}"
         )
+    retained = projected.indices >= 0
+    count = int(retained.sum())
+    depth = len(projected.parents)
+    if count * max(len(entry.path), depth) > np.iinfo(np.int32).max:
+        raise OverflowError(f"representation coordinates at {entry.address} exceed the Arrow int32 offset limit")
+    path_type = datatype.field("path").type
+    paths = pa.ListArray.from_arrays(
+        pa.array(np.arange(count + 1, dtype=np.int64) * len(entry.path), type=pa.int32()),
+        pc.take(
+            pa.array(entry.path, type=pa.string()),
+            pa.array(np.tile(np.arange(len(entry.path)), count), type=pa.int64()),
+        ),
+        type=path_type,
+    )
+    parents = (
+        np.column_stack([axis[retained] for axis in projected.parents]).reshape(-1)
+        if depth
+        else np.empty(0, dtype=np.int32)
+    )
+    parent_values = pa.ListArray.from_arrays(
+        pa.array(np.arange(count + 1, dtype=np.int64) * depth, type=pa.int32()),
+        pa.array(parents, type=pa.int32()),
+        type=datatype.field("parents").type,
+    )
+    return struct(
+        {
+            "path": paths,
+            "parents": parent_values,
+            "output_index": pa.array(projected.outputs[retained], type=pa.int32()),
+            "embedding": pc.take(values, pa.array(projected.indices[retained], type=pa.int64())),
+        },
+        datatype,
+    )
 
-    shaped = shape(values, entry.axes)
-    if shaped.type != entry.output:
-        raise TypeError(f"prediction at {address!s} produced output type {shaped.type}; expected {entry.output}")
-    if len(shaped) != rows:
-        raise ValueError(f"prediction at {address!s} produced {len(shaped)} output rows; expected {rows}")
-    return shaped
 
+def envelope(module: Model, predictions: list[Prediction], rows: int, compiled: OutputPlan) -> dict[str, pa.Array]:
+    """Assemble the natural prediction tree and separately indexed representations."""
 
-def envelope(module: Model, predictions: list[Prediction], rows: int, compiled: OutputPlan | None = None) -> pa.Array:
-    """Assemble address arrays in schema traversal order."""
-
-    active = plan(module, refresh=True) if compiled is None else compiled
     indexed: dict[Address, Prediction] = {}
     for prediction in predictions:
         address = Address(str(prediction.address))
         if address in indexed:
-            raise ValueError(f"forward returned duplicate prediction address {address!s}")
+            raise ValueError(f"forward returned duplicate prediction address {address}")
         indexed[address] = prediction
-
-    missing = active.expected - indexed.keys()
+    missing = compiled.expected - indexed.keys()
     if missing:
-        formatted = ", ".join(str(address) for address in sorted(missing, key=str))
-        raise ValueError(f"forward omitted configured prediction address(es): {formatted}")
-
-    unplanned = indexed.keys() - active.expected
+        raise ValueError(f"forward omitted configured prediction address(es): {', '.join(sorted(missing))}")
+    unplanned = indexed.keys() - compiled.expected
     if unplanned:
-        formatted = ", ".join(str(address) for address in sorted(unplanned, key=str))
-        raise ValueError(f"forward returned unplanned prediction address(es): {formatted}")
+        raise ValueError(f"forward returned unplanned prediction address(es): {', '.join(sorted(unplanned))}")
 
-    fields: list[pa.Field] = []
-    arrays: list[pa.Array] = []
-    for entry in active.entries:
-        values = coordinate(module, entry, indexed[entry.address], rows)
-        if values is None:
-            continue
-        fields.append(pa.field(str(entry.address), values.type, nullable=False))
-        arrays.append(values)
+    leaves: dict[Address, pa.Array] = {}
+    layouts: dict[Address, Layout] = {}
+    embeddings: list[pa.Array] = []
+    root_rows: list[np.ndarray] = []
+    for entry in compiled.entries:
+        prediction = indexed[entry.address]
+        projected = projection(entry, prediction, rows)
+        decoded = coordinate(module, entry, prediction, projected.size)
+        if decoded is not None:
+            # Record masks own structural holes; keep their nonnullable child buffers populated.
+            leaves[entry.address] = pc.take(decoded, pa.array(np.maximum(projected.indices, 0), type=pa.int64()))
+            for address, layout in zip(entry.branches, projected.axes, strict=True):
+                prior = layouts.get(address)
+                if prior is not None and any(
+                    not np.array_equal(getattr(prior, name), getattr(layout, name))
+                    for name in ("offsets", "valid", "slots")
+                ):
+                    raise ValueError(f"prediction siblings disagree on structural geometry for branch {address}")
+                layouts[address] = layout
+        if entry.embed != (TensorKey.embedding in prediction.payload):
+            raise ValueError(
+                f"prediction embedding at {entry.address} does not match its configured embed={entry.embed}"
+            )
+        if entry.embed:
+            datatype = cast(pa.ListType, compiled.representations).value_type
+            embeddings.append(representation(entry, prediction, projected, datatype))
+            root_rows.append(projected.rows[projected.indices >= 0])
 
-    if not arrays:
-        return pa.nulls(rows)
-    return pa.StructArray.from_arrays(arrays, fields=fields)
+    columns: dict[str, pa.Array] = {}
+    if compiled.tree is not None:
+        columns["predictions"] = records(compiled.tree, leaves, layouts)
+    if compiled.representations is not None:
+        if sum(map(len, embeddings)) > np.iinfo(np.int32).max:
+            raise OverflowError("prediction representations exceed the Arrow int32 offset limit")
+        row_ids = np.concatenate(root_rows)
+        values = pa.concat_arrays(embeddings)
+        values = pc.take(values, pa.array(np.argsort(row_ids, kind="stable"), type=pa.int64()))
+        offsets = np.concatenate(([0], np.bincount(row_ids, minlength=rows).cumsum()))
+        columns["representations"] = pa.ListArray.from_arrays(
+            pa.array(offsets, type=pa.int32()), values, type=compiled.representations
+        )
+    return columns
 
 
-def vacant(compiled: OutputPlan) -> pa.Array:
-    """Build the planned public prediction type for a zero-row source."""
+def vacant(compiled: OutputPlan) -> dict[str, pa.Array]:
+    """Build selected columns with the planned types for a zero-row source."""
 
-    entries = [entry for entry in compiled.entries if entry.output is not None]
-    if not entries:
-        return pa.nulls(0)
-    fields = [pa.field(str(entry.address), cast(pa.DataType, entry.output), nullable=False) for entry in entries]
-    arrays = [pa.array([], type=entry.output) for entry in entries]
-    return pa.StructArray.from_arrays(arrays, fields=fields)
+    columns: dict[str, pa.Array] = {}
+    if compiled.tree is not None:
+        columns["predictions"] = pa.array([], type=compiled.tree.datatype)
+    if compiled.representations is not None:
+        columns["representations"] = pa.array([], type=compiled.representations)
+    return columns
 
 
 class ModelRuntime:
@@ -461,12 +607,13 @@ class ModelRuntime:
         processed: dict[Address, list[Parcel]] = defaultdict(list)
         outgoing: dict[Address, Parcel] = {}
         predictions: list[Prediction] = []
+        geometry = cast(TensorDict, inputs[Address()]) if Address() in inputs.keys() else None
 
         for address in plan.requests:
             tensorfield = cast(TensorFieldBase, inputs[address])
             node_module = cast(NodeModule, module.nodes[address])
             embedder: EmbedderBase = node_module.embedder
-            embedded = embedder.embed(tensorfield)
+            embedded = locate(embedder.embed(tensorfield), schema=module.schema, geometry=geometry)
             if embedded.destination is None:
                 raise ValueError(f"parcel from '{embedded.origin}' has no destination")
             processed[embedded.destination].append(embedded)
@@ -479,13 +626,18 @@ class ModelRuntime:
 
                 node_module = cast(NodeModule, module.nodes[address])
                 encoder: BranchEncoder = node_module.encoder
-                encoded: Parcel = encoder(processed[address])
+                encoded: Parcel = encoder(processed[address], geometry=geometry)
                 if encoded.destination is None:
                     raise ValueError(f"parcel from '{encoded.origin}' has no destination")
                 processed[encoded.destination].append(encoded)
                 outgoing[encoded.origin] = encoded
 
                 if address in plan.embeds:
+                    positions, spans, slots = (
+                        sequence(processed[address], order=encoder.child_order)
+                        if encoder.reduction is None
+                        else (None, None, None)
+                    )
                     predictions.append(
                         Prediction(
                             address=encoded.origin,
@@ -493,6 +645,10 @@ class ModelRuntime:
                                 {TensorKey.embedding: encoded.payload},
                                 batch_size=encoded.payload.shape[0],
                             ),
+                            geometry=geometry,
+                            positions=positions,
+                            spans=spans,
+                            slots=slots,
                             batch_size=encoded.payload.shape[0],
                         )
                     )
@@ -511,8 +667,13 @@ class ModelRuntime:
                 batch_size=tensorfield.state.shape[0],
                 device=tensorfield.state.device,
                 embed=route.embed,
+                target_shape=tuple(tensorfield.state.shape[1:]),
+                geometry=geometry,
             )
-            prediction.payload[TensorKey.inferred] = tensorfield.inferred if predict else tensorfield.trainable
+            prediction.geometry = geometry
+            prediction.payload[TensorKey.inferred] = (
+                tensorfield.inferred if predict else tensorfield.trainable
+            ).flatten(start_dim=1)
             predictions.append(prediction)
 
         return predictions
@@ -664,6 +825,8 @@ class ModelRuntime:
             return Output(loss=anchor)
 
         loss = module.track((Metric.loss, strata), value=torch.stack(losses).sum() + anchor)
+        if strata == Strata.train:
+            module.track((Metric.loss, "train_epoch"), value=loss, on_step=False, on_epoch=True, logger=False)
         return Output(loss=loss)
 
     @staticmethod
@@ -680,20 +843,19 @@ class ModelRuntime:
         if not isinstance(source, pa.Table):
             raise TypeError(f"source must be a pyarrow.Table, got {type(source).__name__}")
         active = plan(module, retain, refresh=True) if compiled is None else compiled
-        if active.retain != retention(retain):
+        if active.retain != retain:
             raise ValueError(f"compiled output plan retain {active.retain!r} does not match write retain {retain!r}")
-        inputs = project(source, active.retain)
-        outputs = (
+        columns: dict[str, pa.Array] = {}
+        if active.retain:
+            columns["inputs"] = project(source, active.retain)
+        columns.update(
             vacant(active)
             if not source.num_rows and not predictions
             else envelope(module, predictions, source.num_rows, active)
         )
-        data = pa.Table.from_arrays(
-            [inputs, outputs],
-            names=["inputs", "predictions"],
-        )
-        if len(inputs) != source.num_rows:
-            raise ValueError("retained input output is not aligned with the canonical source")
+        data = pa.table(columns).replace_schema_metadata(metadata(module))
+        if data.num_rows != source.num_rows:
+            raise ValueError("prediction output is not aligned with the canonical source")
         return data
 
     @staticmethod
@@ -708,23 +870,7 @@ class ModelRuntime:
     ) -> Encoded:
         """Normalize Arrow input, preprocess it, and encode one table."""
 
-        from relflow.data.datasets.arrow import convert, merge, process
-
-        source = convert(batch)
-        processors = Preprocessor.normalize(preprocess)
-        if processors:
-            source = merge(
-                process(
-                    (source,),
-                    preprocessor=processors,
-                    strata=strata,
-                    schema=module.schema,
-                    encoding_context=module.interprocess_encoding_context,
-                )
-            )
-            if source is None:
-                raise ValueError("preprocessor pipeline returned no observations")
-
+        source = observations(module, batch, preprocess=preprocess, strata=strata)
         encoded = encode_batch(
             batch=source,
             schema=module.schema,
@@ -805,32 +951,46 @@ class ModelRuntime:
         preprocess: PreprocessorInput = (),
         postprocess: PostprocessorInput = (),
         retain: Retain = (),
+        *,
+        batch_size: int | None = None,
     ) -> pa.Table:
-        """Predict one Arrow input unit and return an Arrow table."""
+        """Preprocess once, predict bounded Arrow batches, and postprocess once."""
 
         postprocessors = Postprocessor.normalize(postprocess)
-        encoded = ModelRuntime.prepare(
+        source = observations(
             module,
             ingress(batch),
             preprocess=preprocess,
             strata=Strata.predict,
         )
-        source = encoded.source
-        inputs = encoded.tensors.to(module.device)
-        compiled = plan(module, retain, refresh=True)
-        raw: list[Prediction] = []
-        if source.num_rows:
-            was_training = module.training
-            module.eval()
-            try:
-                with torch.inference_mode():
-                    raw = module(inputs, strata=Strata.predict)
-            finally:
-                if was_training:
-                    module.train()
+        size = max(source.num_rows, 1) if batch_size is None else batch_size
+        written: list[pa.Table] = []
+        compiled: OutputPlan | None = None
+        for offset in range(0, max(source.num_rows, 1), size):
+            encoded = ModelRuntime.prepare(
+                module,
+                source.slice(offset, size),
+                preprocess=(),
+                strata=Strata.predict,
+            )
+            if compiled is None:
+                compiled = plan(module, retain, refresh=True)
+            raw: list[Prediction] = []
+            if encoded.source.num_rows:
+                was_training = module.training
+                module.eval()
+                try:
+                    with torch.inference_mode():
+                        raw = module(encoded.tensors.to(module.device), strata=Strata.predict)
+                finally:
+                    if was_training:
+                        module.train()
 
-        written = ModelRuntime.write(module, raw, source=source, retain=retain, compiled=compiled)
-        return apply(written, postprocessors)
+            written.append(ModelRuntime.write(module, raw, source=encoded.source, retain=retain, compiled=compiled))
+            del encoded, raw
+
+        combined = pa.concat_tables(written)
+        return apply(combined, postprocessors).replace_schema_metadata(combined.schema.metadata)
 
 
 step = ModelRuntime.step

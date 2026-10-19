@@ -227,7 +227,7 @@ def test_map_key_binding_is_exact():
 
 
 def test_root_and_branch_queries_feed_coalesce_from_arrow():
-    model = rf.Model(
+    model = rf.Model.xs(
         query="payload",
         events=rf.Branch(
             query="events[-2:]",
@@ -236,8 +236,6 @@ def test_root_and_branch_queries_feed_coalesce_from_arrow():
             risk=rf.Number(query='metrics["risk score"]'),
         ),
         d_model=8,
-        n_layers=1,
-        n_heads=2,
     )
     event = pa.struct(
         [
@@ -264,7 +262,7 @@ def test_root_and_branch_queries_feed_coalesce_from_arrow():
         }
     )
 
-    fields = coalesce(table, model.schema, Strata.predict)
+    fields = coalesce(table, model.schema, Strata.predict).fields
     sku = fields[rf.Address("/events/sku")].pristine
     risk = fields[rf.Address("/events/risk")].pristine
 
@@ -283,15 +281,13 @@ def test_root_and_branch_queries_feed_coalesce_from_arrow():
 
 
 def test_arrow_query_treats_mask_spelling_as_ordinary_content():
-    model = rf.Model(
+    model = rf.Model.xs(
         amount=rf.Number(query="payload.amount"),
         d_model=8,
-        n_layers=1,
-        n_heads=2,
     )
     table = pa.table({"payload": pa.array([{"amount": "<MASK>"}, {"amount": None}])})
 
-    field = coalesce(table, model.schema, Strata.predict)["/amount"].pristine
+    field = coalesce(table, model.schema, Strata.predict).fields["/amount"].pristine
 
     assert field.dense.tolist() == [[Tokens.valued.value], [Tokens.null.value]]
     assert field.values.to_pylist() == ["<MASK>"]

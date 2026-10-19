@@ -23,8 +23,6 @@ VALUES = ("pending", "complete", "rejected")
 def model(labels=VALUES, **options) -> rf.Model:
     return rf.Model.xs(
         d_model=8,
-        n_heads=2,
-        n_layers=1,
         batch_size=2,
         status=rf.Enum(values=labels, **{"p_unavailable": 0.0, **options}),
     )
@@ -144,8 +142,6 @@ def test_enum_repeated_masked_targets_preserve_nulls_padding_and_counts(owner):
     address = rf.Address("items", "status")
     configured = rf.Model.xs(
         d_model=8,
-        n_heads=2,
-        n_layers=1,
         mask=owner == "root",
         items=rf.Branch(
             length=3,
@@ -266,7 +262,11 @@ def test_enum_empty_prediction_and_single_class_are_well_defined():
     empty = configured.predict(records())
     assert empty.num_rows == 0
     assert (
-        empty.schema.field("predictions").type.field(str(ADDRESS)).type.field("content").type.field("value").type
+        empty.schema.field("predictions")
+        .type.field(str(ADDRESS).removeprefix("/"))
+        .type.field("content")
+        .type.field("value")
+        .type
         == pa.large_string()
     )
     field = configured.encode(records("only"), strata=rf.Strata.train)[ADDRESS]
@@ -358,13 +358,10 @@ def test_enum_lightning_training_preserves_fixed_classes_and_training_counts():
     torch.manual_seed(923)
     configured = rf.Model.xs(
         d_model=8,
-        n_heads=2,
-        n_layers=1,
         batch_size=64,
         amount=rf.Number,
         status=rf.Enum(values=VALUES, mask=True, topk=[2]),
     )
-    configured.optimizer = rf.adamw(learning_rate=0.01, weight_decay=0.0, fused=False)
     amounts = torch.linspace(0.0, 1.0, 64).numpy()
     train = pa.table({"amount": amounts, "status": ["pending"] * 32 + ["complete"] * 32})
     validate = pa.table({"amount": amounts, "status": ["rejected"] * 64})
@@ -391,7 +388,14 @@ def test_enum_lightning_training_preserves_fixed_classes_and_training_counts():
         persistent_workers=False,
         pin_memory=False,
     )
-    trainer = lit.Trainer(
+    configured.fit(
+        data,
+        learning_rate=0.01,
+        weight_decay=0.0,
+        fused=False,
+        early_stopping=False,
+        rollback=False,
+        precision="32-true",
         accelerator="cpu",
         devices=1,
         max_epochs=1,
@@ -404,7 +408,6 @@ def test_enum_lightning_training_preserves_fixed_classes_and_training_counts():
         enable_progress_bar=False,
         callbacks=[Audit()],
     )
-    trainer.fit(configured, datamodule=data)
 
     assert len(losses) == len(gradients) == 1
     assert torch.isfinite(losses[0])
@@ -417,7 +420,12 @@ def test_enum_lightning_training_preserves_fixed_classes_and_training_counts():
     assert rf.Enum.vocabulary(configured, ADDRESS) == VALUES
     expected_counts = {"pending": 32, "complete": 32, "rejected": 0}
     assert rf.Enum.counts(configured, ADDRESS) == expected_counts
-    output = configured.predict(validate)["predictions"].combine_chunks().field(str(ADDRESS)).field("content")
+    output = (
+        configured.predict(validate)["predictions"]
+        .combine_chunks()
+        .field(str(ADDRESS).removeprefix("/"))
+        .field("content")
+    )
     assert len(output) == 64
     assert set(output.field("value").to_pylist()) <= set(VALUES)
     probabilities = torch.from_numpy(output.field("probability").to_numpy().copy())

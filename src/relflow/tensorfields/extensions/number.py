@@ -17,7 +17,7 @@ from relflow.data.ragged import RaggedField
 from relflow.distributed import all_reduce_sum
 from relflow.helpers import Jitter
 from relflow.logging import logger
-from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
+from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
@@ -59,7 +59,7 @@ class Objective(enum.StrEnum):
                 return torch.nn.functional.huber_loss(input=input, target=target, reduction=reduction)
 
 
-@number.register
+@number.register(Component.Request)
 class Request(RequestBase):
     """Continuous numeric scalar with online normalization and Fourier features.
 
@@ -127,7 +127,7 @@ class Request(RequestBase):
         }
 
 
-@number.register
+@number.register(Component.observe)
 def observe(
     field: RaggedField,
     *,
@@ -153,7 +153,7 @@ def observe(
     )
 
 
-@number.register
+@number.register(Component.TensorField)
 @tensorclass
 class TensorField(TensorFieldBase[torch.Tensor]):
     content: torch.Tensor
@@ -322,7 +322,7 @@ class GlobalOnlineNormalizer(torch.nn.Module):
         return torch.where(finite_mask, normalized.reshape_as(inputs), inputs)
 
 
-@number.register
+@number.register(Component.Embedder)
 class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -404,7 +404,7 @@ class Embedder(EmbedderBase):
         weighted = content.unsqueeze(dim=1).mul(self.weights)
         fourier = torch.cat([torch.sin(weighted), torch.cos(weighted)], dim=1)
 
-        projection = torch.nn.functional.gelu(self.linear(fourier)).reshape(N, *dims, -1)
+        projection = torch.nn.functional.gelu(self.linear(fourier), approximate="tanh").reshape(N, *dims, -1)
 
         embeddings = self.embeddings(state).reshape(N, *dims, -1)
 
@@ -430,7 +430,7 @@ class Embedder(EmbedderBase):
         )
 
 
-@number.register
+@number.register(Component.learn)
 def learn(
     module: Model,
     observation: TensorDict,
@@ -447,7 +447,7 @@ def learn(
     embedder.normalizer.learn(cast(TensorDict, observation[TensorKey.content]))
 
 
-@number.register
+@number.register(Component.Decoder)
 class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -465,7 +465,7 @@ class Decoder(DecoderBase):
         )
 
 
-@number.register
+@number.register(Component.loss)
 def loss(
     module: Model,
     prediction: Prediction,
@@ -527,12 +527,12 @@ def loss(
     return loss
 
 
-@number.register
+@number.register(Component.output)
 def output(module: Model, address: Address) -> pa.StructType:
     return pa.struct([pa.field(TensorKey.content.name, pa.float64(), nullable=False)])
 
 
-@number.register
+@number.register(Component.write)
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
     content = array(cast(torch.Tensor, prediction.payload[TensorKey.content]), pa.float64())
     return struct({TensorKey.content.name: content}, datatype)

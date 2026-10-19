@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import functools
-from collections.abc import Generator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
-from typing import Annotated, Any, ClassVar, Literal, Self, TypeAlias, cast
+from dataclasses import dataclass
+from typing import Annotated, Any, ClassVar, Literal, Self, TypeAlias, TypeVar, cast
 
 import pydantic
 from anytree import LevelOrderGroupIter, PreOrderIter
-from rich.console import Console, ConsoleOptions
-from rich.text import Text
 
 from relflow.structs.enums import AttentionInput, AttentionMode, Component, Overflow, Strata
 from relflow.structs.reduction import Attention, ReductionConfig
@@ -19,14 +18,12 @@ from relflow.structs.selectors import (
     NodePredicate,
     NodeSelector,
     SchemaField,
-    SelectionCacheEntry,
-    SelectionKey,
     has_model_attribute,
     predicate,
     where,
 )
 from relflow.structs.structure import Branch, Mask, RequestTypes
-from relflow.structs.tree import Address, Leaf, MaskInput, Node, Rate, Selection
+from relflow.structs.tree import Address, Leaf, MaskInput, Node, Rate
 from relflow.tensorfields.base import TENSORFIELDS
 
 __all__ = [
@@ -35,22 +32,34 @@ __all__ = [
     "NodePredicate",
     "NodeSelector",
     "SchemaField",
-    "SelectionCacheEntry",
-    "SelectionKey",
     "TreeFieldInput",
     "predicate",
     "where",
 ]
 
 TreeFieldInput: TypeAlias = SchemaField | type[Leaf]
+Defaults: TypeAlias = Callable[[TreeFieldInput], Mapping[str, Any]]
 
 _MISSING = object()
 
 
-def bind_tree_field(name: str, value: TreeFieldInput) -> SchemaField:
+@dataclass(frozen=True, slots=True)
+class Roles:
+    """Fixed output roles derived once for the current schema tree."""
+
+    objectives: tuple[Address, ...]
+    decodes: tuple[Address, ...]
+    embed: tuple[Address, ...]
+
+
+def bind_tree_field(name: str, value: TreeFieldInput, *, defaults: Defaults | None = None) -> SchemaField:
     """Bind a fresh subtree without changing the reusable definition or its parent links."""
     if isinstance(value, type) and issubclass(value, Leaf):
-        value = value()
+        payload = {} if defaults is None else dict(defaults(value))
+        bound = value.model_validate({**payload, "name": name})
+        if defaults is not None:
+            object.__setattr__(bound, "__pydantic_fields_set__", set(type(bound).model_fields))
+        return bound
     if not isinstance(value, (Branch, Leaf)):
         raise TypeError(f"tree field {name!r} must be a Branch, Leaf, or Leaf class; got {type(value).__name__}")
 
@@ -59,19 +68,26 @@ def bind_tree_field(name: str, value: TreeFieldInput) -> SchemaField:
         excluded.add("fields")
     payload = value.model_dump(mode="python", round_trip=True, exclude=excluded)
     payload.update(name=name, mask=value.mask)
+    if defaults is not None:
+        payload.update(
+            {option: default for option, default in defaults(value).items() if option not in value.model_fields_set}
+        )
     if isinstance(value, Branch):
-        payload["fields"] = [bind_tree_field(cast(str, child.name), child) for child in value.fields]
+        payload["fields"] = [bind_tree_field(cast(str, child.name), child, defaults=defaults) for child in value.fields]
     constructor = TENSORFIELDS[value.type].Request if type(value) is Leaf else type(value)
     bound = constructor.model_validate(payload)
     # Cloning retains materialized defaults (including extension factories),
     # while preserving which options the reusable definition supplied.
-    object.__setattr__(bound, "__pydantic_fields_set__", value.model_fields_set | {"name"})
+    if defaults is None:
+        object.__setattr__(bound, "__pydantic_fields_set__", value.model_fields_set | {"name"})
     return bound
 
 
 def bind_fields(
     fields: Mapping[str, TreeFieldInput] | None,
     children: Mapping[str, TreeFieldInput],
+    *,
+    defaults: Defaults | None = None,
 ) -> list[SchemaField]:
     """Merge parent-owned names and reject duplicates before binding any children."""
     if fields is None:
@@ -81,7 +97,7 @@ def bind_fields(
     duplicates = fields.keys() & children.keys()
     if duplicates:
         raise ValueError(f"duplicate field name(s): {sorted(duplicates)}")
-    return [bind_tree_field(name, value) for name, value in (*fields.items(), *children.items())]
+    return [bind_tree_field(name, value, defaults=defaults) for name, value in (*fields.items(), *children.items())]
 
 
 class Schema(Node):
@@ -98,8 +114,7 @@ class Schema(Node):
 
     embed: ClassVar[None] = None  # pyrefly: ignore [bad-override]
     dropout: ClassVar[None] = None  # pyrefly: ignore [bad-override]
-
-    _selection_cache: dict[SelectionKey, SelectionCacheEntry] = pydantic.PrivateAttr(default_factory=dict)
+    ffnx: ClassVar[None] = None  # pyrefly: ignore [bad-override]
 
     @pydantic.model_validator(mode="before")
     @classmethod
@@ -121,6 +136,13 @@ class Schema(Node):
 
         if "fields" in values:
             values["fields"] = restore(values["fields"])
+            if isinstance(values["fields"], Mapping):
+                root = dict(values["fields"])
+                if root.get("length") is None:
+                    root["length"] = 1
+                if root.get("overflow") is None:
+                    root["overflow"] = Overflow.error
+                values["fields"] = root
         return values
 
     @classmethod
@@ -130,6 +152,7 @@ class Schema(Node):
         d_model: int,
         n_layers: int,
         n_heads: int,
+        ffnx: int = 8,
         fields: Mapping[str, TreeFieldInput] | None = None,
         query: str | None = None,
         description: str | None = None,
@@ -141,47 +164,26 @@ class Schema(Node):
         **field_kwargs: TreeFieldInput,
     ) -> Self:
         """Build schema from tree fields."""
-        root_fields = bind_fields(fields, field_kwargs)
-        if not root_fields:
-            raise ValueError("from_tree requires at least one field")
-        branch = Branch.model_validate(
-            dict(
+        return build(
+            cls,
+            d_model=d_model,
+            fields=fields,
+            children=field_kwargs,
+            options=dict(
                 query=query,
                 description=description,
                 embed=embed,
                 attention=attention,
                 n_layers=n_layers,
                 n_heads=n_heads,
+                ffnx=ffnx,
                 reduction=reduction,
-                length=1,
-                overflow=Overflow.error,
                 dropout=dropout,
                 mask=mask,
-                fields=root_fields,
-            )
+            ),
         )
-        return cls(d_model=d_model, fields=branch)
 
     def model_post_init(self, __context):
-        def materialize(branch: Branch) -> Branch:
-            fields: list[Branch | RequestTypes] = []
-            for field in list(branch.fields):
-                field.parent = None
-
-                if isinstance(field, Branch):
-                    fields.append(materialize(field))
-                elif type(field) is Leaf:
-                    fields.append(bind_tree_field(cast(str, field.name), field))
-                else:
-                    fields.append(field)
-
-            branch.fields = fields
-            for field in branch.fields:
-                field.parent = branch
-
-            return branch
-
-        self.fields = materialize(self.fields)
         self.fields.length = 1
         self.fields.overflow = Overflow.error
         self.fields.parent = self
@@ -195,45 +197,40 @@ class Schema(Node):
         payload.pop("name", None)
         return payload
 
+    @functools.cached_property
+    def roles(self) -> Roles:
+        objectives: list[Address] = []
+        decodes: list[Address] = []
+        embeds: list[Address] = []
+        for node in PreOrderIter(self.fields):
+            if isinstance(node, Leaf) and not node.active:
+                continue
+            if getattr(node, "embed", False) is True:
+                embeds.append(node.address)
+            if not isinstance(node, Leaf):
+                continue
+            policies = [policy for owner in node.path for policy in getattr(owner, "mask", ()) if policy.reconstruct]
+            if policies:
+                objectives.append(node.address)
+            if any(policy.rate is None for policy in policies):
+                decodes.append(node.address)
+        return Roles(tuple(objectives), tuple(decodes), tuple(embeds))
+
     @property
     def reconstruct(self) -> list[Address]:
-        role = NodePredicate(
-            func=lambda node: (
-                isinstance(node, Leaf)
-                and node.active
-                and any(policy.reconstruct for owner in node.path for policy in getattr(owner, "mask", ()))
-            ),
-            key=("role", "reconstruct"),
-        )
-        return [Address(str(node.address)) for node in self.select(role)]
+        return list(self.roles.objectives)
 
     @property
     def objectives(self) -> list[Address]:
-        return self.reconstruct
+        return list(self.roles.objectives)
 
     @property
     def decodes(self) -> list[Address]:
-        role = NodePredicate(
-            func=lambda node: (
-                isinstance(node, Leaf)
-                and node.active
-                and any(
-                    policy.reconstruct and policy.rate is None
-                    for owner in node.path
-                    for policy in getattr(owner, "mask", ())
-                )
-            ),
-            key=("role", "decodes"),
-        )
-        return [Address(str(node.address)) for node in self.select(role)]
+        return list(self.roles.decodes)
 
     @property
     def embed(self) -> list[Address]:  # noqa: F811
-        role = NodePredicate(
-            func=lambda node: getattr(node, "embed", False) is True and (not isinstance(node, Leaf) or node.active),
-            key=("role", "embed"),
-        )
-        return [Address(str(node.address)) for node in self.select(role)]
+        return list(self.roles.embed)
 
     @functools.cached_property
     def branches(self) -> dict[Address, Branch]:
@@ -248,29 +245,32 @@ class Schema(Node):
         return {node.address: node for node in self.requests.values() if node.active}
 
     @functools.cached_property
-    def shapes(self) -> dict[Address, tuple[int, ...]]:
+    def shapes(self) -> dict[Address, tuple[int | None, ...]]:
         return {request.address: request.shape for request in self.requests.values()}
 
     @functools.cached_property
-    def branch_outputs(self) -> dict[Address, int]:
-        """Static routed token width produced by every structurally active branch."""
+    def branch_outputs(self) -> dict[Address, int | None]:
+        """Symbolic routed widths; ``None`` depends on the observed collections."""
 
-        outputs: dict[Address, int] = {}
+        outputs: dict[Address, int | None] = {}
         for depth in reversed(self.depthwise):
             for address in depth:
                 branch = self.branches[address]
-                child_width = 0
+                widths: list[int | None] = []
                 for child in branch.fields:
                     if isinstance(child, Leaf):
-                        child_width += int(child.active)
+                        widths.append(int(child.active))
                     elif child.address in outputs:
-                        child_width += outputs[child.address]
+                        widths.append(outputs[child.address])
 
-                input_width = branch.length * child_width
-                if input_width == 0:
+                if not any(width != 0 for width in widths):
                     outputs[address] = 0
                 elif branch.reduction is None:
-                    outputs[address] = input_width
+                    outputs[address] = (
+                        None
+                        if branch.length is None or any(width is None for width in widths)
+                        else branch.length * sum(cast(int, width) for width in widths)
+                    )
                 elif isinstance(branch.reduction, Attention):
                     outputs[address] = branch.reduction.n_outputs
                 else:
@@ -278,7 +278,7 @@ class Schema(Node):
 
         return outputs
 
-    def overflows(self, address: Address) -> tuple[Overflow, ...]:
+    def overflows(self, address: Address) -> tuple[Overflow | None, ...]:
         return (Overflow.error, *self.requests[Address(str(address))].overflows)
 
     def masks_for(self, address: Address) -> tuple[tuple[Address, Mask], ...]:
@@ -303,41 +303,16 @@ class Schema(Node):
         return out
 
     def clear_tree_caches(self) -> None:
-        for name in ("branches", "requests", "active_requests", "shapes", "branch_outputs", "depthwise"):
+        for name in ("roles", "branches", "requests", "active_requests", "shapes", "branch_outputs", "depthwise"):
             self.__dict__.pop(name, None)
 
         for node in PreOrderIter(self.fields):
             for name in ("address", "heritage", "shape", "overflows"):
                 node.__dict__.pop(name, None)
 
-    def clear_selection_cache(self) -> None:
-        self._selection_cache.clear()
-
-    def __getstate__(self) -> dict[str, Any]:
-        """Serialize canonical schema state without derived predicate closures."""
-
-        state = super().__getstate__()
-        private = state.get("__pydantic_private__")
-        if private is not None:
-            state["__pydantic_private__"] = {**private, "_selection_cache": {}}
-        return state
-
-    def refresh_selection_cache(self) -> None:
-        self._selection_cache = {
-            key: entry.model_copy(
-                update={
-                    "nodes": tuple(
-                        node
-                        for node in PreOrderIter(self.fields)
-                        if (entry.include_root or node is not self.fields)
-                        if entry.predicate(node)
-                    )
-                }
-            )
-            for key, entry in self._selection_cache.items()
-        }
-
     def post_bind_validate(self) -> None:
+        if self.fields.length != 1 or self.fields.overflow != Overflow.error:
+            raise ValueError("model root must remain a singleton with length=1 and overflow='error'")
         if self.fields.name is not None:
             raise ValueError(
                 f"model root must be anonymous, got name {self.fields.name!r}; "
@@ -375,7 +350,7 @@ class Schema(Node):
             if request.address not in decoded or request.pooling != "query":
                 continue
             positional = (
-                any(length > 1 for length in request.shape)
+                any(length is None or length > 1 for length in request.shape)
                 if request.decoder_position is None
                 else request.decoder_position
             )
@@ -428,36 +403,14 @@ class Schema(Node):
         self,
         *predicates: NodeSelector,
         include_root: bool = True,
-        use_cache: bool = True,
     ) -> list[Node]:
-        if predicates:
-            normalized = tuple(NodePredicate.from_selector(item) for item in predicates)
-            combined = NodePredicate(
-                func=lambda node: all(item(node) for item in normalized),
-                key=("and", tuple(item.key for item in normalized)),
-                cacheable=all(item.cacheable for item in normalized),
-            )
-        else:
-            combined = NodePredicate(func=lambda node: True, key=("all",))
-
-        key = ("select", include_root, combined.key)
-
-        if use_cache and combined.cacheable and key in self._selection_cache:
-            return Selection(self._selection_cache[key].nodes)
-
-        nodes = tuple(
-            node for node in PreOrderIter(self.fields) if (include_root or node is not self.fields) if combined(node)
-        )
-
-        if use_cache and combined.cacheable:
-            self._selection_cache[key] = SelectionCacheEntry(
-                key=key,
-                predicate=combined,
-                include_root=include_root,
-                nodes=nodes,
-            )
-
-        return Selection(nodes)
+        normalized = tuple(NodePredicate.from_selector(item) for item in predicates)
+        return [
+            node
+            for node in PreOrderIter(self.fields)
+            if (include_root or node is not self.fields)
+            if all(predicate(node) for predicate in normalized)
+        ]
 
     def update(
         self,
@@ -465,14 +418,13 @@ class Schema(Node):
         strict: bool = True,
         include_root: bool = True,
         validate: bool = True,
-        use_cache: bool = False,
         **values: Any,
     ) -> None:
         """Mutate matching schema nodes."""
         if not values:
             raise ValueError("update requires at least one field value")
 
-        nodes = self.select(*predicates, include_root=include_root, use_cache=use_cache)
+        nodes = self.select(*predicates, include_root=include_root)
         if not strict and nodes:
             missing = [name for name in values if not any(has_model_attribute(node, name) for node in nodes)]
             if missing:
@@ -491,11 +443,18 @@ class Schema(Node):
                 applicable_values = {name: value for name, value in values.items() if has_model_attribute(node, name)}
 
                 if validate and applicable_values:
-                    payload = node.model_dump(mode="python", round_trip=True, exclude={"mask", *applicable_values})
+                    excluded = {"mask", *applicable_values}
+                    if isinstance(node, Branch):
+                        excluded.add("fields")
+                    payload = node.model_dump(mode="python", round_trip=True, exclude=excluded)
                     payload["mask"] = cast(SchemaField, node).mask
+                    if isinstance(node, Branch):
+                        payload["fields"] = [bind_tree_field(cast(str, child.name), child) for child in node.fields]
                     payload.update(applicable_values)
                     validated = type(node).model_validate(payload)
                     applicable_values = {name: getattr(validated, name) for name in applicable_values}
+                    if isinstance(node, Branch) and "length" in applicable_values:
+                        applicable_values["overflow"] = cast(Branch, validated).overflow
 
                 for name, value in applicable_values.items():
                     snapshots.append(
@@ -525,66 +484,62 @@ class Schema(Node):
                     else:
                         node.model_fields_set.discard(name)
             self.clear_tree_caches()
-            self.refresh_selection_cache()
             raise
-
-        self.refresh_selection_cache()
 
     def extend(
         self,
         *predicates: NodeSelector,
         fields: Mapping[str, TreeFieldInput] | None = None,
         include_root: bool = True,
-        use_cache: bool = True,
         **children: TreeFieldInput,
     ) -> None:
         """Append parent-named fields under the single branch selected by predicates."""
-        new_fields = bind_fields(fields, children)
-        if not new_fields:
+        self.graft(*predicates, fields=bind_fields(fields, children), include_root=include_root)
+
+    def graft(
+        self,
+        *predicates: NodeSelector,
+        fields: list[SchemaField],
+        include_root: bool = True,
+    ) -> None:
+        """Attach independent bound fields and restore the tree if validation fails."""
+        if not fields:
             raise ValueError("extend requires at least one schema field")
-        candidates = [
-            node
-            for node in self.select(*predicates, include_root=include_root, use_cache=use_cache)
-            if isinstance(node, Branch)
-        ]
+        candidates = [node for node in self.select(*predicates, include_root=include_root) if isinstance(node, Branch)]
         if len(candidates) != 1:
             raise ValueError(f"extend requires exactly one matching branch node, found {len(candidates)}")
         parent = candidates[0]
         existing_names = {field.name for field in parent.fields}
-        duplicate_names = sorted({cast(str, field.name) for field in new_fields if field.name in existing_names})
+        duplicate_names = sorted({cast(str, field.name) for field in fields if field.name in existing_names})
         if duplicate_names:
             raise ValueError(f"duplicate field name(s): {duplicate_names}")
 
         original_fields = list(parent.fields)
         try:
-            parent.fields.extend(new_fields)
-            for field in new_fields:
+            parent.fields.extend(fields)
+            for field in fields:
                 field.parent = parent
 
             self.clear_tree_caches()
             self.post_bind_validate()
         except Exception:
             parent.fields = original_fields
-            for field in new_fields:
+            for field in fields:
                 field.parent = None
             self.clear_tree_caches()
             self.post_bind_validate()
-            self.refresh_selection_cache()
             raise
-
-        self.refresh_selection_cache()
 
     def delete(
         self,
         *predicates: NodeSelector,
         include_root: bool = False,
-        use_cache: bool = True,
     ) -> None:
         """Permanently remove selected schema nodes from the tree."""
         if not predicates:
             raise ValueError("delete requires at least one predicate")
 
-        selected = self.select(*predicates, include_root=include_root, use_cache=use_cache)
+        selected = self.select(*predicates, include_root=include_root)
         if not selected:
             raise ValueError("delete matched no nodes")
         if self.fields in selected:
@@ -623,7 +578,6 @@ class Schema(Node):
 
         self.clear_tree_caches()
         self.post_bind_validate()
-        self.refresh_selection_cache()
 
     @contextmanager
     def override(
@@ -632,10 +586,9 @@ class Schema(Node):
         strict: bool = True,
         include_root: bool = True,
         validate: bool = True,
-        use_cache: bool = False,
         **values: Any,
     ) -> Generator[None, None, None]:
-        nodes = self.select(*predicates, include_root=include_root, use_cache=use_cache)
+        nodes = self.select(*predicates, include_root=include_root)
         snapshot = [
             (
                 node,
@@ -653,7 +606,6 @@ class Schema(Node):
             strict=strict,
             include_root=include_root,
             validate=validate,
-            use_cache=use_cache,
             **values,
         )
 
@@ -675,40 +627,24 @@ class Schema(Node):
 
             self.clear_tree_caches()
             self.post_bind_validate()
-            self.refresh_selection_cache()
 
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
-        heading = Text()
-        heading.append(self.name, style=self.RICH_NAME_STYLE)
-        heading.append(" ")
-        heading.append(f"[{self.type}]", style=self.RICH_TYPE_STYLE)
-        for name, value in (
-            ("d_model", self.d_model),
-            ("branches", len(self.branches)),
-            ("fields", len(self.active_requests)),
-            ("reconstruct", len(self.reconstruct)),
-            ("embeds", len(self.embed)),
-        ):
-            heading.append(" ")
-            heading.append(f"{name}=", style="dim")
-            heading.append(str(value), style="cyan")
-        yield heading
 
-        lines = list(self.fields.__rich_console__(console, options))
-        if not lines:
-            return
-        first = Text()
-        first.append("`-- ", style=self.RICH_TREE_STYLE)
-        if isinstance(lines[0], Text):
-            first.append_text(lines[0])
-        else:
-            first.append(str(lines[0]))
-        yield first
-        for line in lines[1:]:
-            nested = Text()
-            nested.append("    ", style=self.RICH_TREE_STYLE)
-            if isinstance(line, Text):
-                nested.append_text(line)
-            else:
-                nested.append(str(line))
-            yield nested
+S = TypeVar("S", bound=Schema)
+
+
+def build(
+    schema: type[S],
+    /,
+    *,
+    d_model: int,
+    fields: Mapping[str, TreeFieldInput] | None,
+    children: Mapping[str, TreeFieldInput],
+    options: Mapping[str, Any],
+    defaults: Defaults | None = None,
+) -> S:
+    """Bind named inputs once and validate their anonymous singleton root."""
+    bound = bind_fields(fields, children, defaults=defaults)
+    if not bound:
+        raise ValueError("from_tree requires at least one field")
+    root = Branch.model_validate({**options, "length": 1, "overflow": Overflow.error, "fields": bound})
+    return schema(d_model=d_model, fields=root)

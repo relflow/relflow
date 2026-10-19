@@ -82,7 +82,21 @@ model = rf.Model(
   `rf.Preprocessor`.
 - `transactions=rf.Branch(...)` reads the same-named child collection, and its
   leaves read keys such as `amount` from each child mapping.
-- `Branch(overflow="head")` is the default. Use `overflow="tail"` for recency-ordered histories and `overflow="error"` for strict schemas. The generated root branch uses internal `Overflow.error`.
+- `Branch.length` defaults to `None`: collection width follows the largest
+  retained collection in each batch, without changing the schema or parameters.
+  A positive integer sets a hard limit; omitted overflow then defaults to
+  `"head"`. Use `length=N, overflow="tail"` for recency-ordered histories or
+  `overflow="error"` to reject excess rows. Unbounded branches require
+  `overflow=None` and log one resource-exhaustion warning per model generation.
+  The anonymous root remains `length=1, overflow="error"`.
+- Bounded axes also compact execution to the observed batch width, up to their
+  cap. Prediction writes every record collection as a variable Arrow list,
+  even for bounded branches, without cap padding. Structural offsets and
+  validity preserve null collections, empty collections, and null items.
+  Tensorized input keeps branch `Geometry` under the reserved root address `/`
+  alongside leaf tensorfields, so cloning, device transfer, and row selection
+  preserve lengths and structural holes. Do not infer geometry from leaf values
+  or masks.
 - `mask=True` is shorthand for
   `Mask(skip=True, dropout=False, reconstruct=True)`: the field is never
   embedded and is decoded as a supervised reconstruction target.
@@ -90,6 +104,10 @@ model = rf.Model(
   masking; `Mask(query=...)` selects with an Arrow Boolean field; `skip=True`
   prevents tensorization and embedding; `reconstruct=True` adds an objective.
 - `embed=True` emits an embedding in prediction output. It does not make the field a supervised target.
+- `ffnx` is a positive integer feed-forward multiplier, defaulting to `8` on
+  each node. The model root, child branches, and tensorfield decoders configure
+  it independently. Hidden neural activations use tanh GELU and normalization
+  uses RMSNorm; these have no configuration knobs.
 - `Hash` represents large identifiers with batch-salted hashes, preserving equality across fields in one encoded batch without learning a persistent vocabulary.
 - `DateParts` is for calendar parts. If elapsed time or recency matters, derive a `Number`.
 - `rf.Jitter(add=..., multiply=..., normalize=...)` is a shared frozen
@@ -103,6 +121,11 @@ model = rf.Model(
   `Extension(types=...)`; custom Python atoms add extension-owned physical matchers
   with `Extension(..., arrow={Type: matcher})`. Keep datatype contracts out of
   `Request` and the shared ragged engine.
+- Register components by role, such as
+  `@extension.register(rf.Component.Request)` or
+  `extension.register(rf.Component.write, custom_writer)`. Python names are
+  independent of component roles; implementations follow the declared base-class
+  and callable protocols.
 - Preprocessors accept and return eager `polars.DataFrame` objects before
   query/coalescing. Use them for source renaming, expressions, windowing,
   joins, normalization, or row expansion/grouping. Their output is the
@@ -113,7 +136,22 @@ model = rf.Model(
 
 ## Data And Training
 
-Configure `model.optimizer = rf.adamw(learning_rate=1e-3)` before fitting.
+Configure AdamW directly on `model.fit(...)`, such as
+`model.fit(datamodule, batch_size=128, learning_rate=1e-4, weight_decay=0.01, max_epochs=30)`.
+Omitted options use sensible defaults. Each fit starts a new optimizer run
+bound to the current parameters; use `ckpt_path` to resume full training state.
+Supply any scheduler for that run through `fit(scheduler=...)`. Keep
+`rf.adamw(...)` factories for custom optimizers and direct `lit.Trainer` setup;
+ordinary examples do not assign `model.optimizer` before calling `fit`.
+
+Set `batch_size` on `fit`, `validate`, `test`, or `predict` to update the model's
+current positive integer batch size. Arrow data modules read it when creating
+loaders; custom Lightning data modules own their loader behavior. The size is per
+device under DDP. Constructor `batch_size` remains the initial/checkpoint value
+and supports native Trainer and Tuner workflows. Direct
+`model.predict(inputs, batch_size=N)` preprocesses the full input once, chunks
+processed Arrow rows before encoding, and postprocesses the combined output
+once. Omitting the direct-prediction override preserves whole-input execution.
 
 Use `ArrowDataModule(...)` for canonical examples. Documentation uses static
 illustrations; use tiny data only in executable tests and proofs:
@@ -138,8 +176,20 @@ without executing them.
 
 `model.predict(...)` returns a `pyarrow.Table`. It accepts Arrow inputs directly
 and retains a nonempty sequence of mappings as a small interactive convenience;
-pass a typed empty Arrow object when there are no rows. Canonical predictions
-are stored under the table's `"predictions"` column.
+pass a typed empty Arrow object when there are no rows. Canonical decoded
+results use actual schema child names under `predictions`, with branches stored
+as `list<struct<...>>`. Rich leaf results retain `state`, extension-owned output,
+and `inferred`. Requested embeddings are separate `representations` records:
+`path` segments (root `[]`), repeated ancestor `parents` ordinals, intrinsic
+`output_index`, and a fixed-width `embedding`. Omit unconfigured output columns;
+`inputs` appears only when retention is selected. Models with no public output
+reject prediction. Output format/version metadata travels with Arrow tables and
+HTTP headers. Extension output list children must be named `element`.
+
+PyArrow Parquet cannot round-trip fixed-size lists below null containers.
+`rf.Writer` rejects those batches before writing; use Arrow IPC for sparse
+vector results. Scalar rich results and nonnull representation vectors retain
+normal Parquet support.
 
 ## Inference
 
@@ -233,39 +283,20 @@ uv run ruff check
 uv run pyrefly check
 uv run pytest
 uv run pytest tests/test_public_api.py
-make render
 ```
 
-## Documentation Entry Points
+## Documentation And Learning Proofs
 
-- `docs/index.qmd`
-- `docs/getting-started.qmd`
-- `docs/core-concepts/model-tree.qmd`
-- `docs/core-concepts/binding-data.qmd`
-- `docs/core-concepts/querypaths.qmd`
-- `docs/core-concepts/data-types.qmd`
-- `docs/core-concepts/dynamic-masking.qmd`
-- `docs/guides/data-modules.qmd`
-- `docs/guides/preprocessors.qmd`
+User documentation, executable modeling proofs, recorded learning results, and
+branding assets live in the separate [relflow/docs repository](https://github.com/relflow/docs).
+The website is published at [relflow.github.io/docs](https://relflow.github.io/docs/).
+Follow that repository's agent guide for authoring, Typst diagrams, preview,
+validation, proof execution, and publication. This package has no documentation
+checkout, proof source, or site build dependency.
 
-Documentation is static. Use plain `python` fences and current public imports;
-do not execute Python, train models, load real data, or download model weights
-while building the site. Prefer realistic nested schemas and explicitly name
-application-supplied inputs. Use the shared Typst `node` and `tree` functions in
-`docs/assets/typst/model-tree.typ` for structural diagrams; see the authoring
-contract in `docs/assets/typst/README.md`. Show field roles and repeated contexts,
-not parameter counts or hyperparameters. Keep learning-behavior checks in tests
-and proofs rather than extracting and executing documentation snippets.
-Give diagram roots descriptive labels such as `order`, `customer`, or `record`.
-These are illustrative labels, not model options or schema-address prefixes;
-the actual root remains anonymous at `rf.Address()`.
-
-Show observation and prediction examples as one YAML record, with repeated
-values nested beneath their field names. Keep Arrow and Polars data-module
-snippets to `model` and named splits unless the page explains another option.
-Use `rf.Address("transactions", "amount")` with one argument per child name
-for schema addresses in Python documentation examples; use `rf.Address()` for the root.
-Keep ordinary data keys, query strings, metric names, and serialized keys as strings.
-Give each concept one home and link to it. Verify claims against source code
-when editing a page; existing prose is not evidence. Use the current branding
-under `docs/assets/branding` and Typst diagrams for visual explanations.
+Coordinate documentation and proof changes with public API changes. Verify
+claims against the implementation and use the current top-level imports.
+Package runtime and architectural tests belong in this repository's `tests/`;
+learning experiments and their canonical results belong in `relflow/docs`.
+Documentation builds remain static; learning proofs run only when explicitly
+invoked in that repository with RelFlow installed.

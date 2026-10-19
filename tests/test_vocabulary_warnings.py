@@ -5,7 +5,6 @@ from logging.handlers import BufferingHandler
 from pathlib import Path
 from types import SimpleNamespace
 
-import lightning.pytorch as lit
 import pyarrow as pa
 import pytest
 import torch
@@ -31,10 +30,8 @@ def records():
 
 
 def model():
-    return rf.Model(
+    return rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         batch_size=4,
         category=rf.Category(mask=True, p_unavailable=1.0),
         tags=rf.Set(mask=True, p_unavailable=1.0),
@@ -147,20 +144,18 @@ def test_warning_uses_shared_resources_without_a_builtin_field_type(records):
 
 
 @pytest.mark.parametrize("stage", ["validate", "test", "predict"])
-def test_lightning_warns_once_per_field_not_per_batch(records, stage):
+def test_loops_warn_once_per_field_not_per_batch(records, stage):
     module = model()
     module.encode(table(["rare"] * 9), strata="train")
     before = rf.Category.counts(module, "/category")
     data = rf.ArrowDataModule(model=module, **{stage: table(["rare"] * 8)})
-    trainer = lit.Trainer(
+    getattr(module, stage)(
+        data,
         accelerator="cpu",
         devices=1,
-        logger=False,
+        precision="32-true",
         enable_progress_bar=False,
-        enable_model_summary=False,
-        enable_checkpointing=False,
     )
-    getattr(trainer, stage)(module, datamodule=data)
     assert len(warnings(records)) == 3
     assert all(event["strata"] == stage for event in warnings(records))
     assert rf.Category.counts(module, "/category") == before
@@ -170,21 +165,21 @@ def test_validation_during_fit_warns_using_only_training_exposures(records):
     module = model()
     for vocabulary in OnlineVocabularyModel.from_model(module).values():
         vocabulary.state.reserve(["rare"], learn=True)
-    module.optimizer = rf.adamw(learning_rate=1e-3)
     data = rf.ArrowDataModule(model=module, train=table(["rare"] * 4), validate=table(["rare"] * 4))
-    trainer = lit.Trainer(
+    module.fit(
+        data,
+        learning_rate=1e-3,
+        early_stopping=False,
+        rollback=False,
         accelerator="cpu",
         devices=1,
+        precision="32-true",
         max_epochs=1,
         limit_train_batches=1,
         limit_val_batches=1,
         num_sanity_val_steps=1,
-        logger=False,
         enable_progress_bar=False,
-        enable_model_summary=False,
-        enable_checkpointing=False,
     )
-    trainer.fit(module, datamodule=data)
     events = warnings(records)
     assert len(events) == 6
     assert [event["minimum_observations"] for event in events] == [0, 0, 0, 4, 4, 4]
@@ -260,5 +255,6 @@ def distributed_warning(rank, directory):
         distributed.destroy_process_group()
 
 
+@pytest.mark.skipif(not distributed.is_available() or not distributed.is_gloo_available(), reason="requires CPU Gloo")
 def test_distributed_warning_uses_global_counts_and_logs_only_on_rank_zero(tmp_path):
     multiprocessing.spawn(distributed_warning, args=(str(tmp_path),), nprocs=2, join=True)

@@ -5,6 +5,7 @@ import pyarrow as pa
 import torch
 from tensordict import TensorDict
 
+import relflow as rf
 from relflow.data.ragged import coalesce
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
@@ -22,58 +23,45 @@ from relflow.tensorfields.extensions.category import (
     output as output_type,
 )
 from relflow.tensorfields.shared.vocabulary import OnlineVocabularyModel, VocabularyState
-from tests.arrow import batch as arrow_batch
+from tests.arrow import table as arrow_table
 from tests.tensorfields.helpers import tensorize
 
 ADDRESS = "/items/category"
 
 
-def _structure_payload(
+def build_schema(
     *,
     topk: list[int] | None = None,
     p_unavailable: float | None = None,
     mask: bool | Mask = False,
-) -> dict:
-    field: dict = {
-        "name": "category",
-        "type": "category",
-        "mask": mask,
-    }
+) -> Schema:
+    options = {}
     if topk is not None:
-        field["topk"] = topk
+        options["topk"] = topk
     if p_unavailable is not None:
-        field["p_unavailable"] = p_unavailable
-
-    return {
-        "d_model": 16,
-        "fields": {
-            "type": "branch",
-            "dropout": 0.1,
-            "fields": [
-                {
-                    "name": "items",
-                    "type": "branch",
-                    "length": 2,
-                    "fields": [field],
-                }
-            ],
-        },
-    }
+        options["p_unavailable"] = p_unavailable
+    return rf.Schema.from_tree(
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+        dropout=0.1,
+        items=rf.Branch(length=2, category=rf.Category(mask=mask, **options)),
+    )
 
 
-def _state(size: int = 8):
+def vocabulary_state(size: int = 8):
     return OnlineVocabularyModel(size=size).state
 
 
-def _tensorfield(
+def tensorfield(
     rows: list[list[Any]],
     *,
     schema: Schema,
     strata: Strata,
     state: VocabularyState,
 ) -> TensorField:
-    batch = arrow_batch([{"items": [{"category": value} for value in row]} for row in rows])
-    projection = coalesce(batch, schema=schema, strata=strata)[ADDRESS]
+    batch = arrow_table([{"items": [{"category": value} for value in row]} for row in rows])
+    projection = coalesce(batch, schema=schema, strata=strata).fields[ADDRESS]
     return tensorize(
         TensorField,
         projection,
@@ -130,11 +118,10 @@ def test_category_vocabulary_batch_dictionary_is_unique_per_call():
 
 
 def test_category_tensorfield_separates_state_and_content():
-    structure = Schema.model_validate(_structure_payload(p_unavailable=0.0))
-    schema = structure
-    state = _state()
+    schema = build_schema(p_unavailable=0.0)
+    state = vocabulary_state()
 
-    field = _tensorfield(
+    field = tensorfield(
         rows=[["ALPHA", None], ["BETA"]],
         schema=schema,
         strata=Strata.train,
@@ -164,18 +151,17 @@ def test_category_tensorfield_separates_state_and_content():
 
 
 def test_category_tensorfield_marks_oov_as_unavailable_without_changing_state():
-    structure = Schema.model_validate(_structure_payload(p_unavailable=0.0))
-    schema = structure
-    state = _state()
+    schema = build_schema(p_unavailable=0.0)
+    state = vocabulary_state()
 
-    _tensorfield(
+    tensorfield(
         rows=[["ALPHA"]],
         schema=schema,
         strata=Strata.train,
         state=state,
     )
 
-    field = _tensorfield(
+    field = tensorfield(
         rows=[["OMEGA"]],
         schema=schema,
         strata=Strata.validate,
@@ -184,20 +170,19 @@ def test_category_tensorfield_marks_oov_as_unavailable_without_changing_state():
 
     assert torch.equal(
         field.state,
-        torch.tensor([[[Tokens.valued.value, Tokens.padded.value]]], dtype=torch.int64),
+        torch.tensor([[[Tokens.valued.value]]], dtype=torch.int64),
     )
     assert torch.equal(
         field.content,
-        torch.tensor([[[-1, 0]]], dtype=torch.int64),
+        torch.tensor([[[-1]]], dtype=torch.int64),
     )
 
 
 def test_category_tensorfield_can_simulate_unavailable_during_training():
-    structure = Schema.model_validate(_structure_payload(p_unavailable=1.0))
-    schema = structure
-    state = _state()
+    schema = build_schema(p_unavailable=1.0)
+    state = vocabulary_state()
 
-    field = _tensorfield(
+    field = tensorfield(
         rows=[["ALPHA", None], ["BETA"]],
         schema=schema,
         strata=Strata.train,
@@ -217,9 +202,9 @@ def test_category_tensorfield_can_simulate_unavailable_during_training():
 
 
 def test_category_embedder_and_decoder_use_real_vocab_width():
-    structure = Schema.model_validate(_structure_payload(p_unavailable=0.0))
-    embedder = Embedder(schema=structure, address=ADDRESS)
-    decoder = Decoder(schema=structure, address=ADDRESS)
+    schema = build_schema(p_unavailable=0.0)
+    embedder = Embedder(schema=schema, address=ADDRESS)
+    decoder = Decoder(schema=schema, address=ADDRESS)
 
     assert embedder.embeddings[TensorKey.content.name].num_embeddings == embedder.vocab.size
     assert embedder.counters[TensorKey.content.name].size == embedder.vocab.size
@@ -227,8 +212,8 @@ def test_category_embedder_and_decoder_use_real_vocab_width():
 
 
 def test_category_embedder_zeroes_unavailable_and_non_valued_content_contributions():
-    structure = Schema.model_validate(_structure_payload(p_unavailable=0.0))
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    schema = build_schema(p_unavailable=0.0)
+    embedder = Embedder(schema=schema, address=ADDRESS)
     unavailable = -1
     field = TensorField(
         state=torch.tensor(
@@ -274,14 +259,14 @@ class _DummyNode:
         self.embedder = _DummyEmbedder()
 
 
-class _DummyModule:
+class DummyModule:
     def __init__(self):
         self.nodes = {ADDRESS: _DummyNode()}
         self.schema = SimpleNamespace(requests={ADDRESS: SimpleNamespace(topk=[2, 3, 5, 10])})
 
 
 def test_category_write_emits_arrow_content_and_candidates():
-    module = _DummyModule()
+    module = DummyModule()
     state_logits = torch.zeros(2, 1, len(Tokens))
     state_logits[0, 0, Tokens.valued.value] = 10.0
     state_logits[1, 0, Tokens.padded.value] = 10.0
@@ -316,7 +301,7 @@ def test_category_write_emits_arrow_content_and_candidates():
 
 
 def test_category_write_ignores_logits_beyond_vocabulary_snapshot():
-    module = _DummyModule()
+    module = DummyModule()
     state_logits = torch.zeros(1, 1, len(Tokens))
     content_logits = torch.tensor([[[0.1, 0.2, 0.3, 0.4, 0.5, 0.0, 0.0, 100.0]]])
     prediction = Prediction(
@@ -337,7 +322,7 @@ def test_category_write_ignores_logits_beyond_vocabulary_snapshot():
 
 
 def test_category_empty_vocabulary_keeps_declared_schema():
-    module = _DummyModule()
+    module = DummyModule()
     module.nodes[ADDRESS].embedder.vocab = OnlineVocabularyModel(size=8)
     prediction = Prediction(
         address=ADDRESS,
@@ -360,7 +345,7 @@ def test_category_empty_vocabulary_keeps_declared_schema():
     assert content.field(TensorKey.topk.name).to_pylist() == [[]]
 
 
-class _TrackingModule:
+class TrackingModule:
     def __init__(self, schema: Schema, embedder: Embedder, decoder: Decoder):
         self.schema = schema
         self.nodes = {ADDRESS: SimpleNamespace(embedder=embedder, decoder=decoder)}
@@ -372,20 +357,19 @@ class _TrackingModule:
 
 
 def test_category_loss_does_not_mutate_counters():
-    structure = Schema.model_validate(_structure_payload(p_unavailable=0.0, mask=Mask(reconstruct=True)))
-    schema = structure
-    state = _state()
+    schema = build_schema(p_unavailable=0.0, mask=Mask(reconstruct=True))
+    state = vocabulary_state()
 
-    field = _tensorfield(
+    field = tensorfield(
         rows=[["ALPHA", None], ["BETA"]],
         schema=schema,
         strata=Strata.train,
         state=state,
     )
-    embedder = Embedder(schema=structure, address=ADDRESS)
+    embedder = Embedder(schema=schema, address=ADDRESS)
     embedder.vocab.load_snapshot(state.vocab)
-    decoder = Decoder(schema=structure, address=ADDRESS)
-    module = _TrackingModule(schema=structure, embedder=embedder, decoder=decoder)
+    decoder = Decoder(schema=schema, address=ADDRESS)
+    module = TrackingModule(schema=schema, embedder=embedder, decoder=decoder)
 
     prediction = Prediction(
         address=ADDRESS,
@@ -411,24 +395,24 @@ def test_category_loss_does_not_mutate_counters():
 
 
 def test_category_loss_retains_state_supervision_for_unavailable_content():
-    structure = Schema.model_validate(_structure_payload(p_unavailable=0.0, mask=True))
-    state = _state()
+    schema = build_schema(p_unavailable=0.0, mask=True)
+    state = vocabulary_state()
 
-    _tensorfield(
+    tensorfield(
         rows=[["ALPHA"]],
-        schema=structure,
+        schema=schema,
         strata=Strata.train,
         state=state,
     )
-    field = _tensorfield(
+    field = tensorfield(
         rows=[["OMEGA"]],
-        schema=structure,
+        schema=schema,
         strata=Strata.validate,
         state=state,
     )
-    embedder = Embedder(schema=structure, address=ADDRESS)
-    decoder = Decoder(schema=structure, address=ADDRESS)
-    module = _TrackingModule(schema=structure, embedder=embedder, decoder=decoder)
+    embedder = Embedder(schema=schema, address=ADDRESS)
+    decoder = Decoder(schema=schema, address=ADDRESS)
+    module = TrackingModule(schema=schema, embedder=embedder, decoder=decoder)
     prediction = Prediction(
         address=ADDRESS,
         payload=TensorDict(

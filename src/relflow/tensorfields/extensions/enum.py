@@ -17,7 +17,7 @@ from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
 from relflow.helpers.state import compatible
-from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
+from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
@@ -45,7 +45,7 @@ enum = Extension(name="enum", types=(bool, int, float, str, bytes))
 enum.callback(CounterUpdateCallback, Metrics)
 
 
-@enum.register
+@enum.register(Component.Request)
 class Request(RequestBase):
     """One label from a required, nonempty tuple of unique scalar values.
 
@@ -220,7 +220,7 @@ class Classes(torch.nn.Module):
         return compatible(self.state_dict(), previous.state_dict())
 
 
-@enum.register
+@enum.register(Component.observe)
 def observe(
     field: RaggedField, *, address: Address, schema: Schema, state: object | None, learn: bool
 ) -> TensorDict | None:
@@ -237,7 +237,7 @@ def observe(
     )
 
 
-@enum.register
+@enum.register(Component.TensorField)
 @tensorclass
 class TensorField(TensorFieldBase[torch.Tensor]):
     state: torch.Tensor
@@ -293,7 +293,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         )
 
 
-@enum.register
+@enum.register(Component.Embedder)
 class Embedder(Classes, EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -329,7 +329,7 @@ class Embedder(Classes, EmbedderBase):
         )
 
 
-@enum.register
+@enum.register(Component.bind)
 def bind(
     module: Model,
     field: TensorFieldBase,
@@ -345,7 +345,7 @@ def bind(
         raise ValueError(f"Enum batch at '{address}' has a different values declaration; encode it again")
 
 
-@enum.register
+@enum.register(Component.learn)
 def learn(module: Model, observation: TensorDict, *, address: Address, strata: Strata) -> None:
     if strata != Strata.train:
         raise ValueError(f"Enum learner at '{address}' requires train strata, got {strata}")
@@ -354,7 +354,7 @@ def learn(module: Model, observation: TensorDict, *, address: Address, strata: S
         cast(Counter, embedder.counters[key.name]).learn(cast(torch.Tensor, observation[key]))
 
 
-@enum.register
+@enum.register(Component.Decoder)
 class Decoder(Classes, DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -372,7 +372,7 @@ class Decoder(Classes, DecoderBase):
         return TensorDict({key: linear(pooled) for key, linear in self.linears.items()})
 
 
-@enum.register
+@enum.register(Component.loss)
 def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: Strata) -> torch.Tensor:
     address = prediction.address
     selected = batch.trainable.reshape(-1)
@@ -398,11 +398,16 @@ def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: 
     with torch.no_grad():
         correct = content.argmax(-1).eq(targets).sum()
         topk = [content.topk(min(k, size), dim=-1).indices.eq(targets.unsqueeze(-1)).any(-1).sum() for k in metric.topk]
-        metric.update(torch.stack((valued.sum(), valued.sum(), correct, *topk)), torch.stack((objective, objective)))
+        decoder.metrics.record(
+            module,
+            strata,
+            torch.stack((valued.sum(), valued.sum(), correct, *topk)),
+            torch.stack((objective, objective)),
+        )
     return result + objective / valued.sum().clamp_min(1)
 
 
-@enum.register
+@enum.register(Component.output)
 def output(module: Model, address: Address) -> pa.StructType:
     candidate = pa.struct(
         [
@@ -414,13 +419,13 @@ def output(module: Model, address: Address) -> pa.StructType:
         [
             pa.field(TensorKey.value.name, pa.large_string()),
             pa.field(TensorKey.probability.name, pa.float32(), nullable=False),
-            pa.field(TensorKey.topk.name, pa.list_(candidate), nullable=False),
+            pa.field(TensorKey.topk.name, pa.list_(pa.field("element", candidate)), nullable=False),
         ]
     )
     return pa.struct([pa.field(TensorKey.content.name, content, nullable=False)])
 
 
-@enum.register
+@enum.register(Component.write)
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
     request = cast(Request, module.schema.requests[prediction.address])
     content_type = datatype.field(TensorKey.content.name).type
@@ -442,7 +447,11 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
         {
             TensorKey.value.name: pc.take(vocabulary, array(best_indices, pa.int64())),
             TensorKey.probability.name: array(best_probabilities, pa.float32()),
-            TensorKey.topk.name: variable(candidates, torch.full((len(logits),), width, dtype=torch.int64)),
+            TensorKey.topk.name: variable(
+                candidates,
+                torch.full((len(logits),), width, dtype=torch.int64),
+                datatype=content_type.field(TensorKey.topk.name).type,
+            ),
         },
         content_type,
     )

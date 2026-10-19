@@ -9,18 +9,17 @@ import torch
 import relflow as rf
 from relflow.architecture.encoder import BranchEncoder
 from relflow.architecture.mutations import MutationLockCallback
+from relflow.architecture.packed import pack
 from relflow.architecture.pool import LearnedQueryCrossAttention
 
 
 @pytest.fixture
 def model():
-    return rf.Model(
+    return rf.Model.xs(
         value=rf.Number,
         history=rf.Branch(length=2, attention=None, value=rf.Number),
         label=rf.Boolean(mask=True),
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         dropout=0.0,
         batch_size=2,
     )
@@ -88,7 +87,7 @@ def test_inductor_defaults_and_explicit_options_are_forwarded_without_mutating_i
     }
     assert compiler
     assert all(
-        record["options"] == {"backend": "inductor", "fullgraph": True, "dynamic": None, "options": defaults}
+        record["options"] == {"backend": "inductor", "fullgraph": True, "dynamic": True, "options": defaults}
         for record in compiler
     )
 
@@ -114,6 +113,7 @@ def test_recompiling_replaces_the_policy_and_both_disabled_restores_eager(model,
     assert all(module.compute == eager[module] for module in encoder_bindings)
     assert all(record["function"].__self__ in eager for record in compiler)
     assert all(record["options"]["options"] is None for record in compiler)
+    assert all(record["options"]["dynamic"] is False for record in compiler)
 
     compiler.clear()
     model.compile(encoders=False, pools=False)
@@ -268,17 +268,52 @@ def test_copy_and_pickle_drop_compilation_and_bind_the_new_owners(model, compile
     torch.testing.assert_close(restored.state_dict(), model.state_dict(), rtol=0, atol=0)
 
 
+def test_changing_packed_groups_stays_eager_without_disabling_dense_compilation(model, compiler):
+    encoder = model.nodes["/"].encoder
+    eager = encoder.compute
+    model.eval().compile(pools=False)
+    record = next(record for record in compiler if record["function"].__self__ is encoder)
+    with torch.no_grad():
+        for lengths in ((1, 3), (2, 2), (1, 2, 4)):
+            inputs = torch.randn(len(lengths), max(lengths), 8)
+            present = torch.arange(max(lengths)).unsqueeze(0) < torch.tensor(lengths).unsqueeze(1)
+            values, packing = pack(inputs, present)
+            torch.testing.assert_close(
+                encoder.compute(values, present, packing=packing),
+                eager(values, present, packing=packing),
+                rtol=0,
+                atol=0,
+            )
+        assert record["executions"] == 0
+        encoder.compute(torch.randn(2, 3, 8), torch.ones(2, 3, dtype=torch.bool))
+        assert record["executions"] == 1
+
+
+def test_dynamic_dense_region_reuses_a_graph_across_collection_extents(model):
+    encoder = model.nodes["/"].encoder
+    eager = encoder.compute
+    graphs = []
+
+    def backend(graph, inputs):
+        graphs.append(graph)
+        return graph.forward
+
+    torch._dynamo.reset()
+    try:
+        model.eval().compile(pools=False, backend=backend)
+        with torch.no_grad():
+            for width in (5, 7, 9, 3):
+                inputs = torch.randn(2, width, 8)
+                present = torch.ones(2, width, dtype=torch.bool)
+                torch.testing.assert_close(encoder.compute(inputs, present), eager(inputs, present), rtol=0, atol=0)
+        assert len(graphs) == 1
+    finally:
+        torch._dynamo.reset()
+
+
 @pytest.mark.parametrize("dropout", [0.0, 0.2])
 def test_real_graph_backend_reaches_training_step_and_preserves_accumulation(monkeypatch, dropout):
-    eager = rf.Model(
-        value=rf.Number,
-        label=rf.Boolean(mask=True),
-        d_model=8,
-        n_layers=1,
-        n_heads=2,
-        dropout=dropout,
-        batch_size=2,
-    )
+    eager = rf.Model.xs(value=rf.Number, label=rf.Boolean(mask=True), d_model=8, dropout=dropout, batch_size=2)
     batch = eager.encode(pa.table({"value": [1.0, 5.0], "label": [False, True]}), strata="train")
     compiled = deepcopy(eager)
     graphs = []

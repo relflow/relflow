@@ -6,28 +6,26 @@ from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from copy import deepcopy
 from functools import partialmethod, wraps
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 import lightning.pytorch as lit
-import pydantic
 import torch
 from lightning.pytorch import Callback
 
 from relflow.architecture.graph import ModelGraph
 from relflow.logging import logger
-from relflow.presets.base import subtree
 from relflow.structs.enums import Strata
 from relflow.structs.experiment import NodeAttribute, NodePredicate, TreeFieldInput, bind_fields
-from relflow.structs.structure import Branch
 from relflow.structs.tree import Node
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
 
-_MISSING = object()
+
+F = TypeVar("F", bound=Callable[..., object])
 
 
-def immutable[F: Callable[..., object]](name: str | Strata) -> Callable[[F], F]:
+def immutable(name: str | Strata) -> Callable[[F], F]:
     """Hold a model mutation lock without changing the decorated call signature."""
 
     def decorator(method: F) -> F:
@@ -117,20 +115,6 @@ class RuntimePlacementCallback(Callback):
         on_predict_start = partialmethod(on_loop_start, strata=Strata.predict)
 
 
-class AttributeChange(pydantic.BaseModel):
-    model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
-
-    node: Node
-    name: str
-    original: Any
-    definition_attribute: bool
-    address: str
-    node_name: str | None
-    node_type: str
-    changed: Any = _MISSING
-    changed_address: Any = _MISSING
-
-
 class SchemaEditor:
     """Coordinate schema mutations with runtime graph rebuilds."""
 
@@ -162,12 +146,10 @@ class SchemaEditor:
         self,
         *predicates: NodePredicate | NodeAttribute | Callable[[Node], bool],
         include_root: bool = True,
-        use_cache: bool = True,
     ) -> list[Node]:
         return self.module.schema.select(
             *predicates,
             include_root=include_root,
-            use_cache=use_cache,
         )
 
     def update(
@@ -176,107 +158,66 @@ class SchemaEditor:
         strict: bool = True,
         include_root: bool = True,
         validate: bool = True,
-        use_cache: bool = False,
         **values: Any,
     ) -> None:
         self.assert_mutation_allowed("update")
-        changes = self.attribute_changes(
-            values=values,
-            predicates=predicates,
-            include_root=include_root,
-            use_cache=use_cache,
-        )
         with self.transaction():
             self.module.schema.update(
                 *predicates,
                 strict=strict,
                 include_root=include_root,
                 validate=validate,
-                use_cache=use_cache,
                 **values,
             )
             ModelGraph.rebuild(self.module)
         self.module.reset_contracts()
-        self.log_attribute_changes("update", changes)
+        logger.bind(component="schema_mutation", action="update").info("updated model schema")
 
     def extend(
         self,
         *predicates: NodePredicate | NodeAttribute | Callable[[Node], bool],
         fields: Mapping[str, TreeFieldInput] | None = None,
         include_root: bool = True,
-        use_cache: bool = True,
         **children: TreeFieldInput,
     ) -> None:
         self.assert_mutation_allowed("extend")
-        parent = self.extend_target(*predicates, include_root=include_root, use_cache=use_cache)
-        field_count = len(parent.fields)
-        if self.module.preset is not None:
-            definitions = bind_fields(fields, children)
-            fields = {
-                cast(str, field.name): subtree(self.module.preset, cast(str, field.name), field)
-                for field in definitions
-            }
-            children = {}
+        defaults = None if self.module.preset is None else self.module.preset.defaults
+        definitions = bind_fields(fields, children, defaults=defaults)
         with self.transaction():
-            self.module.schema.extend(
-                *predicates, fields=fields, include_root=include_root, use_cache=use_cache, **children
-            )
+            self.module.schema.graft(*predicates, fields=definitions, include_root=include_root)
             ModelGraph.rebuild(self.module)
         self.module.reset_contracts()
-        for field in parent.fields[field_count:]:
-            self.log_node_mutation(
-                action="extend",
-                message="extended schema node",
-                node=field,
-                parent=parent,
-            )
+        logger.bind(component="schema_mutation", action="extend").info("extended model schema")
 
     def delete(
         self,
         *predicates: NodePredicate | NodeAttribute | Callable[[Node], bool],
         include_root: bool = False,
-        use_cache: bool = True,
     ) -> None:
         self.assert_mutation_allowed("delete")
-        roots = self.delete_roots(*predicates, include_root=include_root, use_cache=use_cache)
         with self.transaction():
-            self.module.schema.delete(*predicates, include_root=include_root, use_cache=use_cache)
+            self.module.schema.delete(*predicates, include_root=include_root)
             ModelGraph.rebuild(self.module)
         self.module.reset_contracts()
-        for node in roots:
-            self.log_node_mutation(
-                action="delete",
-                message="deleted schema node",
-                node=node,
-                descendants=len(getattr(node, "descendants", ())),
-            )
+        logger.bind(component="schema_mutation", action="delete").info("deleted model schema nodes")
 
     def reset(
         self,
         *predicates: NodePredicate | NodeAttribute | Callable[[Node], bool],
         include_root: bool = True,
-        use_cache: bool = True,
         descendants: bool = False,
     ) -> None:
         self.assert_mutation_allowed("reset")
         selected = self.module.schema.select(
             *predicates,
             include_root=include_root,
-            use_cache=use_cache,
         )
         if not selected:
             raise ValueError("reset matched no nodes")
 
-        nodes = self.runtime_reset_nodes(selected, descendants=descendants)
         ModelGraph.reset_selected(self.module, selected, descendants=descendants)
         self.module.reset_contracts()
-        for node in nodes:
-            self.log_node_mutation(
-                action="reset",
-                message="reset runtime node",
-                node=node,
-                descendants=descendants,
-            )
+        logger.bind(component="schema_mutation", action="reset").info("reset model nodes")
 
     @contextmanager
     def override(
@@ -285,16 +226,9 @@ class SchemaEditor:
         strict: bool = True,
         include_root: bool = True,
         validate: bool = True,
-        use_cache: bool = False,
         **values: Any,
     ) -> Generator[None, None, None]:
         self.assert_mutation_allowed("override")
-        changes = self.attribute_changes(
-            values=values,
-            predicates=predicates,
-            include_root=include_root,
-            use_cache=use_cache,
-        )
         entered = False
         try:
             with self.module.schema.override(
@@ -302,167 +236,15 @@ class SchemaEditor:
                 strict=strict,
                 include_root=include_root,
                 validate=validate,
-                use_cache=use_cache,
                 **values,
             ):
                 entered = True
                 ModelGraph.rebuild(self.module)
                 self.module.reset_contracts()
-                self.log_attribute_changes("override", changes)
+                logger.bind(component="schema_mutation", action="override").info("overrode model schema")
                 yield
         finally:
             ModelGraph.rebuild(self.module)
             self.module.reset_contracts()
             if entered:
-                self.log_attribute_changes("override_restore", changes, restored=True)
-
-    def attribute_changes(
-        self,
-        *,
-        values: dict[str, Any],
-        predicates: tuple[NodePredicate | NodeAttribute | Callable[[Node], bool], ...],
-        include_root: bool,
-        use_cache: bool,
-    ) -> list[AttributeChange]:
-        nodes = self.module.schema.select(*predicates, include_root=include_root, use_cache=use_cache)
-        changes: list[AttributeChange] = []
-        for node in nodes:
-            for name in values:
-                if not has_node_attribute(node, name):
-                    continue
-
-                changes.append(
-                    AttributeChange(
-                        node=node,
-                        name=name,
-                        original=getattr(node, name, _MISSING),
-                        definition_attribute=is_definition_attribute(node, name),
-                        address=str(node.address),
-                        node_name=node.name,
-                        node_type=node.type,
-                    )
-                )
-
-        return changes
-
-    def extend_target(
-        self,
-        *predicates: NodePredicate | NodeAttribute | Callable[[Node], bool],
-        include_root: bool,
-        use_cache: bool,
-    ) -> Branch:
-        candidates = [
-            node
-            for node in self.module.schema.select(*predicates, include_root=include_root, use_cache=use_cache)
-            if isinstance(node, Branch)
-        ]
-        if len(candidates) != 1:
-            raise ValueError(f"extend requires exactly one matching branch node, found {len(candidates)}")
-
-        return candidates[0]
-
-    def delete_roots(
-        self,
-        *predicates: NodePredicate | NodeAttribute | Callable[[Node], bool],
-        include_root: bool,
-        use_cache: bool,
-    ) -> list[Node]:
-        selected = self.module.schema.select(*predicates, include_root=include_root, use_cache=use_cache)
-        selected_ids = {id(node) for node in selected}
-        return [
-            node
-            for node in selected
-            if not any(
-                id(ancestor) in selected_ids
-                for ancestor in getattr(node, "ancestors", ())
-                if ancestor is not self.module.schema
-            )
-        ]
-
-    def runtime_reset_nodes(self, selected: list[Node], *, descendants: bool) -> list[Node]:
-        nodes: dict[str, Node] = {}
-        for node in selected:
-            if node.address in self.module.nodes:
-                nodes[str(node.address)] = node
-
-            if descendants:
-                for descendant in getattr(node, "descendants", ()):
-                    if descendant.address in self.module.nodes:
-                        nodes[str(descendant.address)] = descendant
-
-        return list(nodes.values())
-
-    def log_attribute_changes(self, action: str, changes: list[AttributeChange], *, restored: bool = False) -> None:
-        for change in changes:
-            current_address = str(change.node.address)
-            value = change.original if restored else getattr(change.node, change.name, _MISSING)
-            if not restored:
-                change.changed = value
-                change.changed_address = current_address
-            previous_value = change.changed if restored else change.original
-            previous_address = change.changed_address if restored else change.address
-            if previous_address is _MISSING:
-                previous_address = change.address
-            address_context = (
-                current_address if previous_address == current_address else f"{previous_address} -> {current_address}"
-            )
-            value_text = format_log_value(value)
-            previous_value_text = format_log_value(previous_value)
-            logger.bind(
-                component="schema_mutation",
-                action=action,
-                address=current_address,
-                previous_address=previous_address,
-                node_name=change.node.name,
-                previous_node_name=change.node_name,
-                node_type=change.node_type,
-                attribute=change.name,
-                definition_attribute=change.definition_attribute,
-                value=value_text,
-                previous_value=previous_value_text,
-                change=f"{change.name}: {previous_value_text} -> {value_text}",
-            ).info(
-                f"{'restored' if restored else 'mutated'} {address_context}: "
-                f"{change.name} {previous_value_text} -> {value_text}"
-            )
-
-    def log_node_mutation(self, *, action: str, message: str, node: Node, **kwargs: Any) -> None:
-        extra = {key: str(value.address) if isinstance(value, Node) else value for key, value in kwargs.items()}
-        context = format_node_log_context(node, extra)
-        logger.bind(
-            component="schema_mutation",
-            action=action,
-            address=str(node.address),
-            node_type=node.type,
-            node_name=node.name,
-            attribute=None,
-            definition_attribute=None,
-            **extra,
-        ).info(f"{message} {context}")
-
-
-def has_node_attribute(node: Node, name: str) -> bool:
-    fields = getattr(type(node), "model_fields", {})
-    return name in fields or hasattr(type(node), name)
-
-
-def is_definition_attribute(node: Node, name: str) -> bool:
-    return name in getattr(type(node), "model_fields", {})
-
-
-def format_log_value(value: Any) -> str:
-    if value is _MISSING:
-        return "<missing>"
-
-    text = repr(value)
-    return text if len(text) <= 160 else f"{text[:157]}..."
-
-
-def format_node_log_context(node: Node, extra: dict[str, Any]) -> str:
-    parts = [str(node.address)]
-    if parent := extra.get("parent"):
-        parts.append(f"under {parent}")
-    if "descendants" in extra:
-        parts.append(f"descendants={extra['descendants']}")
-
-    return " ".join(parts)
+                logger.bind(component="schema_mutation", action="override_restore").info("restored model schema")

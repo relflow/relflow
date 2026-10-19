@@ -1,9 +1,8 @@
 """Arrow builders shared by tensorfield output extensions and the model runtime.
 
-Extensions return flat coordinate arrays. The runtime later wraps model axes with
-``shape`` and combines extension fragments with ``state``, ``inferred``, and
-``embedding``. None of these helpers materialize prediction rows as Python
-objects.
+Extensions return flat coordinate arrays. The runtime assembles their record
+geometry and separately writes requested embeddings. List builders retain the
+declared element field so Arrow IPC and compliant Parquet share one schema.
 """
 
 from __future__ import annotations
@@ -38,14 +37,28 @@ def array(values: torch.Tensor, dtype: pa.DataType) -> pa.Array:
     return pa.array(numpy, type=dtype, from_pandas=False)
 
 
-def fixed(values: pa.Array, size: int) -> pa.FixedSizeListArray:
-    """Wrap flat values in one fixed-width Arrow list axis."""
+def fixed(
+    values: pa.Array,
+    size: int,
+    *,
+    datatype: pa.FixedSizeListType | None = None,
+) -> pa.FixedSizeListArray:
+    """Wrap values in a canonical fixed-width list, retaining its declared field."""
     if size <= 0:
         raise ValueError("fixed list size must be positive")
     if len(values) % size:
         raise ValueError(f"cannot wrap {len(values)} values in fixed lists of size {size}")
-    # pyarrow-stubs spells list_size as limit_size and omits this valid keyword.
-    return pa.FixedSizeListArray.from_arrays(values, list_size=size)  # pyrefly: ignore [no-matching-overload]
+    declared = pa.list_(pa.field("element", values.type), size) if datatype is None else datatype
+    if not isinstance(declared, pa.FixedSizeListType):
+        raise TypeError(f"fixed list output requires a FixedSizeListType, got {declared}")
+    if declared.list_size != size or declared.value_type != values.type:
+        raise TypeError(f"fixed list output requires {size} elements of {values.type}, got {declared}")
+    if declared.value_field.name != "element":
+        raise ValueError(f"fixed list output child must be named 'element', got {declared.value_field.name!r}")
+    if not declared.value_field.nullable and values.null_count:
+        raise ValueError("fixed list output has null values but its element field is non-nullable")
+    # pyarrow-stubs omits the supported declared-type overload.
+    return pa.FixedSizeListArray.from_arrays(values, type=declared)  # pyrefly: ignore [no-matching-overload]
 
 
 def shape(values: pa.Array, axes: tuple[int, ...]) -> pa.Array:
@@ -87,12 +100,19 @@ def offsets(counts: torch.Tensor) -> pa.Int32Array:
     return cast(pa.Int32Array, array(cumulative, pa.int32()))
 
 
-def variable(values: pa.Array, counts: torch.Tensor) -> pa.ListArray:
-    """Wrap values in variable-length lists described by coordinate counts."""
+def variable(values: pa.Array, counts: torch.Tensor, *, datatype: pa.ListType | None = None) -> pa.ListArray:
+    """Wrap values in canonical lists, retaining the declared element field."""
     boundaries = offsets(counts)
     if boundaries[-1].as_py() != len(values):
         raise ValueError("list counts do not consume the supplied values")
-    return pa.ListArray.from_arrays(boundaries, values)
+    declared = pa.list_(pa.field("element", values.type)) if datatype is None else datatype
+    if not isinstance(declared, pa.ListType) or declared.value_type != values.type:
+        raise TypeError(f"list output requires elements of {values.type}, got {declared}")
+    if declared.value_field.name != "element":
+        raise ValueError(f"list output child must be named 'element', got {declared.value_field.name!r}")
+    if not declared.value_field.nullable and values.null_count:
+        raise ValueError("list output has null values but its element field is non-nullable")
+    return pa.ListArray.from_arrays(boundaries, values, type=declared)
 
 
 def labels(vocabulary: OnlineVocabularyModel) -> pa.Array:
@@ -120,12 +140,12 @@ def inferred(values: torch.Tensor) -> pa.BooleanArray:
     return cast(pa.BooleanArray, array(values.bool(), pa.bool_()))
 
 
-def embedding(values: torch.Tensor) -> pa.FixedSizeListArray:
+def embedding(values: torch.Tensor, *, datatype: pa.FixedSizeListType | None = None) -> pa.FixedSizeListArray:
     """L2-normalize embeddings and preserve their final fixed-width axis."""
     if values.ndim == 0 or values.shape[-1] <= 0:
         raise ValueError("embedding output requires a non-empty final dimension")
     normalized = torch.nn.functional.normalize(values.detach().float(), p=2, dim=-1, eps=1e-12)
-    return fixed(array(normalized, pa.float32()), normalized.shape[-1])
+    return fixed(array(normalized, pa.float32()), normalized.shape[-1], datatype=datatype)
 
 
 __all__ = [

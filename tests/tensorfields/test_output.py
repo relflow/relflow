@@ -1,4 +1,6 @@
 import pyarrow as pa
+import pyarrow.ipc as ipc
+import pyarrow.parquet as pq
 import pytest
 import torch
 
@@ -34,8 +36,10 @@ def test_fixed_and_shape_preserve_singleton_axes():
     once = fixed(values, 3)
     nested = shape(values, (1, 2, 3))
 
-    assert once.type == pa.list_(pa.int64(), 3)
-    assert nested.type == pa.list_(pa.list_(pa.list_(pa.int64(), 3), 2), 1)
+    assert once.type == pa.list_(pa.field("element", pa.int64()), 3)
+    assert nested.type == pa.list_(
+        pa.field("element", pa.list_(pa.field("element", pa.list_(pa.field("element", pa.int64()), 3)), 2)), 1
+    )
     assert len(nested) == 1
 
 
@@ -107,8 +111,79 @@ def test_inferred_flattens_boolean_mask():
 def test_embedding_normalizes_and_preserves_width_one():
     result = embedding(torch.tensor([[[3.0]], [[0.0]]]))
 
-    assert result.type == pa.list_(pa.float32(), 1)
+    assert result.type == pa.list_(pa.field("element", pa.float32()), 1)
     assert result.to_pylist() == [[1.0], [0.0]]
+
+
+@pytest.mark.parametrize("kind", ["fixed", "variable", "embedding"])
+@pytest.mark.parametrize("nullable", [True, False])
+def test_list_builders_preserve_declared_fields_across_transports(kind, nullable):
+    element = pa.field("element", pa.float32(), nullable=nullable, metadata={b"unit": b"score"})
+    datatype = pa.list_(element) if kind == "variable" else pa.list_(element, 2)
+    if kind == "embedding":
+        result = embedding(torch.tensor([[3.0, 4.0], [0.0, 0.0]]), datatype=datatype)
+    else:
+        values = pa.array([1.0, 2.0, 3.0, 4.0], type=pa.float32())
+        result = (
+            variable(values, torch.tensor([2, 0, 2]), datatype=datatype)
+            if kind == "variable"
+            else fixed(values, 2, datatype=datatype)
+        )
+    table = pa.table({"result": result}).replace_schema_metadata({b"output-format": b"1"})
+    assert result.type.value_field.equals(element, check_metadata=True)
+
+    sink = pa.BufferOutputStream()
+    with ipc.new_stream(sink, table.schema) as writer:
+        writer.write_table(table)
+    streamed = ipc.open_stream(sink.getvalue()).read_all()
+    sink = pa.BufferOutputStream()
+    pq.write_table(table, sink)
+    persisted = pq.read_table(pa.BufferReader(sink.getvalue()))
+    for restored in (streamed, persisted):
+        assert restored.schema.equals(table.schema, check_metadata=True)
+        assert restored.equals(table, check_metadata=True)
+
+
+def test_fixed_nullable_vector_components_roundtrip_without_changing_width():
+    datatype = pa.list_(pa.field("element", pa.float32(), nullable=True), 3)
+    values = pa.array([1.0, None, 3.0, None, None, None], type=pa.float32())
+    vectors = fixed(values, 3, datatype=datatype)
+    table = pa.table({"vectors": vectors})
+    sink = pa.BufferOutputStream()
+    pq.write_table(table, sink)
+    restored = pq.read_table(pa.BufferReader(sink.getvalue()))
+
+    assert restored.schema.equals(table.schema, check_metadata=True)
+    assert restored["vectors"].to_pylist() == [[1.0, None, 3.0], [None, None, None]]
+
+
+@pytest.mark.parametrize("kind", ["fixed", "variable"])
+def test_list_builders_reject_violations_of_declared_element_fields(kind):
+    values = pa.array([1.0, None], type=pa.float32())
+    declared = pa.field("element", pa.float32(), nullable=False)
+    datatype = pa.list_(declared) if kind == "variable" else pa.list_(declared, 2)
+    with pytest.raises(ValueError, match="element field is non-nullable"):
+        if kind == "fixed":
+            fixed(values, 2, datatype=datatype)
+        else:
+            variable(values, torch.tensor([2]), datatype=datatype)
+
+    values = pa.array([1.0, 2.0], type=pa.float32())
+    datatype = pa.list_(pa.float32()) if kind == "variable" else pa.list_(pa.float32(), 2)
+    with pytest.raises(ValueError, match="child must be named 'element'"):
+        if kind == "fixed":
+            fixed(values, 2, datatype=datatype)
+        else:
+            variable(values, torch.tensor([2]), datatype=datatype)
+
+
+@pytest.mark.parametrize("name", ["category", "enum", "set"])
+def test_builtin_candidate_lists_declare_canonical_element_names(name):
+    datatype = TENSORFIELDS[name].output(module=object(), address=object())
+    content = datatype.field("content").type
+    candidates = content if name == "set" else content.field("topk").type
+
+    assert candidates.value_field.name == "element"
 
 
 def test_vocabulary_labels_are_large_strings_cached_by_revision():

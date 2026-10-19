@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import importlib.util
-import inspect
 import math
 import re
 import shlex
 import sys
 import warnings
-from abc import abstractmethod
-from collections.abc import Generator, Iterator, Mapping
+from abc import ABC, abstractmethod
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+from functools import partial
 from types import MappingProxyType, UnionType
 from typing import (
     TYPE_CHECKING,
@@ -34,16 +34,15 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import torch
 from lightning.pytorch import Callback
-from rich.console import Console, ConsoleOptions
-from rich.text import Text
 from tensordict import TensorClass, TensorDict
 from typing_extensions import TypeVar as DefaultTypeVar
 
 from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool
-from relflow.data.arrow import variants
-from relflow.structs.enums import Component, Strata, TensorKey, Tokens
+from relflow.architecture.rotary import coordinates, flatten, signal
+from relflow.data.arrow import Geometry, variants
+from relflow.structs.enums import Component, Strata, TensorKey
 from relflow.structs.packages import Parcel, Prediction
-from relflow.structs.tree import Address, Leaf, Renderable
+from relflow.structs.tree import Address, Leaf
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
@@ -56,6 +55,7 @@ RequestBase: TypeAlias = Leaf
 CallbackFactory: TypeAlias = type[Callback] | Callable[[], Callback]
 ComponentValue: TypeAlias = Callable[..., Any] | type[Any]
 RegisterT = TypeVar("RegisterT", bound=ComponentValue)
+OMITTED = object()
 ValueTypeFamily: TypeAlias = type[Any] | UnionType
 ArrowMatcher: TypeAlias = Callable[[pa.DataType], bool]
 ContentT = DefaultTypeVar(
@@ -278,11 +278,28 @@ class DecoderBase(torch.nn.Module):
         self.register_buffer("anchor", torch.zeros(()), persistent=False)
 
         request = schema.requests[address]
-        n_context = 1
-        for dimension in schema.shapes[address]:
-            n_context *= dimension
+        self.shape = schema.shapes[address]
+        self.axes = tuple(node.address for node in request.path if getattr(node, "type", None) == "branch")
+        n_context = math.prod(dimension if dimension is not None else 1 for dimension in self.shape)
         self.n_context = n_context
         self.d_model = schema.d_model
+        self.memory_coordinates: dict[Address, tuple[tuple[Address, ...], tuple[int | None, ...], int | None]] = {}
+        for origin in request.heritage:
+            node = schema.requests[origin] if origin in schema.requests else schema.branches[origin]
+            path = tuple(cast("Branch", node) for node in node.path if getattr(node, "type", None) == "branch")
+            if isinstance(node, Leaf):
+                outer = path[:-1]
+                capacity = path[-1].length
+            else:
+                outer = path[:-2]
+                capacity = schema.branch_outputs[origin]
+                if len(path) > 1:
+                    capacity = None if path[-2].length is None or capacity is None else path[-2].length * capacity
+            self.memory_coordinates[origin] = (
+                tuple(node.address for node in outer),
+                tuple(node.length for node in outer),
+                capacity,
+            )
 
         def visible(node: Branch | Leaf) -> list[Address]:
             if isinstance(node, Leaf):
@@ -306,25 +323,40 @@ class DecoderBase(torch.nn.Module):
 
         def aligns(context_address: Address) -> bool:
             if context_address in schema.requests:
-                return math.prod(schema.shapes[context_address]) == n_context
+                shape = schema.shapes[context_address]
+                if any(dimension is None for dimension in (*self.shape, *shape)):
+                    axes = tuple(
+                        node.address
+                        for node in schema.requests[context_address].path
+                        if getattr(node, "type", None) == "branch"
+                    )
+                    return axes == self.axes
+                return math.prod(cast(tuple[int, ...], shape)) == n_context
 
             branch = schema.branches[context_address]
             lengths = tuple(node.length for node in branch.path if getattr(node, "type", None) == "branch")
-            return math.prod((*lengths[1:-1], schema.branch_outputs[context_address])) == n_context
+            output = schema.branch_outputs[context_address]
+            if any(dimension is None for dimension in (*self.shape, *lengths, output)):
+                axes = tuple(node.address for node in branch.path if getattr(node, "type", None) == "branch")
+                return axes[:-1] == self.axes and output == 1
+            return math.prod(cast(tuple[int, ...], (*lengths[1:-1], output))) == n_context
+
+        self.aligned_addresses = frozenset(item for item in self.context_addresses if aligns(item))
 
         self.context_projection = (
             torch.nn.Sequential(
-                torch.nn.LayerNorm(schema.d_model),
-                torch.nn.Linear(schema.d_model, schema.d_model),
-                torch.nn.GELU(),
-                torch.nn.Linear(schema.d_model, schema.d_model),
+                torch.nn.RMSNorm(schema.d_model, eps=1e-5),
+                torch.nn.Linear(schema.d_model, schema.d_model * request.ffnx),
+                torch.nn.GELU(approximate="tanh"),
+                torch.nn.Linear(schema.d_model * request.ffnx, schema.d_model),
             )
-            if any(aligns(item) for item in self.context_addresses) and request.pooling == "query"
+            if self.aligned_addresses and request.pooling == "query"
             else None
         )
         match request.pooling:
             case "query":
                 self.pool = LearnedQueryCrossAttention(
+                    ffnx=request.ffnx,
                     n_context=n_context,
                     d_model=schema.d_model,
                     nhead=request.n_heads,
@@ -334,7 +366,9 @@ class DecoderBase(torch.nn.Module):
                     # an otherwise unordered evidence set, while repeated
                     # targets retain position as one routing signal. Ordered
                     # scalar tasks can opt in explicitly.
-                    position=n_context > 1 if request.decoder_position is None else request.decoder_position,
+                    position=(n_context > 1 or None in self.shape)
+                    if request.decoder_position is None
+                    else request.decoder_position,
                 )
             case "mean":
                 self.pool = MeanPool(n_context=n_context)
@@ -356,13 +390,35 @@ class DecoderBase(torch.nn.Module):
         batch_size: int,
         device: torch.device,
         embed: bool = False,
+        target_shape: tuple[int, ...] | None = None,
+        geometry: TensorDict | None = None,
     ) -> Prediction:
         if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size < 0:
             raise ValueError(f"decoder batch_size must be a non-negative integer, got {batch_size!r}")
 
+        shape = (
+            target_shape
+            if target_shape is not None
+            else tuple(dimension if dimension is not None else 0 for dimension in self.shape)
+        )
+        count = math.prod(shape)
+        lengths = tuple(cast(Geometry, geometry[axis]).lengths if geometry is not None else None for axis in self.axes)
+        positions = coordinates((batch_size, *shape), self.shape, lengths, device=device).reshape(batch_size, count)
+        queries = None
+        if isinstance(self.pool, LearnedQueryCrossAttention) and (shape != self.shape or None in self.shape):
+            indices = torch.zeros(shape, dtype=torch.int64, device=device)
+            for axis, capacity in enumerate(self.shape):
+                if capacity is not None:
+                    axis_shape = [1] * len(shape)
+                    axis_shape[axis] = shape[axis]
+                    indices = indices * capacity + torch.arange(shape[axis], device=device).reshape(axis_shape)
+            queries = self.pool.queries.index_select(0, indices.reshape(-1)).unsqueeze(0).expand(batch_size, -1, -1)
+            if None in self.shape:
+                queries = queries + signal(positions, self.d_model, dtype=queries.dtype)
+
         if not parcels:
             pooled = torch.zeros(
-                (batch_size, self.n_context, self.d_model),
+                (batch_size, count, self.d_model),
                 device=device,
                 dtype=self.anchor.dtype,
             )
@@ -383,15 +439,53 @@ class DecoderBase(torch.nn.Module):
                     )
 
             stacked = torch.cat(
-                [parcel.payload.reshape(batch_size, -1, self.d_model) for parcel in parcels],
+                [
+                    parcel.payload.reshape(batch_size, math.prod(parcel.payload.shape[1:-1]), self.d_model)
+                    for parcel in parcels
+                ],
                 dim=1,
             )
-            present = torch.cat([parcel.present.reshape(batch_size, -1) for parcel in parcels], dim=1)
-            context = self.context(contexts or (), batch_size=batch_size)
+            present = torch.cat(
+                [parcel.present.reshape(batch_size, math.prod(parcel.present.shape[1:])) for parcel in parcels], dim=1
+            )
+            memory_positions = []
+            offset = torch.zeros(batch_size, dtype=torch.int64, device=device)
+            for parcel in parcels:
+                size = math.prod(parcel.present.shape[1:])
+                if parcel.positions is None or parcel.spans is None:
+                    ranks = torch.arange(size, device=device).expand(batch_size, size)
+                    span = torch.full((batch_size,), size, device=device, dtype=torch.int64)
+                else:
+                    axes, capacities, capacity = self.memory_coordinates[parcel.origin]
+                    lengths = tuple(
+                        cast(Geometry, geometry[axis]).lengths if geometry is not None else None for axis in axes
+                    )
+                    ranks, span = flatten(
+                        parcel.positions.reshape(parcel.present.shape)
+                        if parcel.present.ndim > 1
+                        else parcel.positions.reshape(batch_size, 1),
+                        parcel.spans,
+                        capacities=capacities,
+                        lengths=lengths,
+                        capacity=capacity,
+                    )
+                memory_positions.append(ranks + offset.unsqueeze(-1))
+                offset = offset + span
+            memory_positions = torch.cat(memory_positions, dim=1)
+            context = self.context(contexts or (), batch_size=batch_size, n_context=count)
             if isinstance(self.pool, LearnedQueryCrossAttention):
-                pooled = self.pool(stacked, present=present, context=context)
+                pooled = self.pool(
+                    stacked,
+                    present=present,
+                    context=context,
+                    queries=queries,
+                    positions=positions,
+                    memory_positions=memory_positions,
+                )
             else:
                 pooled = self.pool(stacked, present=present)
+                if count != self.n_context:
+                    pooled = pooled[:, :1].expand(batch_size, count, self.d_model)
             if context is not None:
                 pooled = pooled + context * 0.0
 
@@ -405,7 +499,9 @@ class DecoderBase(torch.nn.Module):
             batch_size=pooled.shape[0],
         )
 
-    def context(self, parcels: tuple[Parcel, ...] | list[Parcel], *, batch_size: int) -> torch.Tensor | None:
+    def context(
+        self, parcels: tuple[Parcel, ...] | list[Parcel], *, batch_size: int, n_context: int | None = None
+    ) -> torch.Tensor | None:
         """Build one data-conditioned decoder query per target coordinate."""
 
         if self.context_projection is None:
@@ -413,10 +509,13 @@ class DecoderBase(torch.nn.Module):
 
         aligned: list[torch.Tensor] = []
         presence: list[torch.Tensor] = []
-        expected = (batch_size, self.n_context, self.d_model)
+        n_context = self.n_context if n_context is None else n_context
+        expected = (batch_size, n_context, self.d_model)
         for parcel in parcels:
-            payload = parcel.payload.reshape(batch_size, -1, self.d_model)
-            present = parcel.present.reshape(batch_size, -1)
+            if parcel.origin not in self.aligned_addresses:
+                continue
+            payload = parcel.payload.reshape(batch_size, math.prod(parcel.payload.shape[1:-1]), self.d_model)
+            present = parcel.present.reshape(batch_size, math.prod(parcel.present.shape[1:]))
             if tuple(payload.shape) != expected:
                 continue
             aligned.append(payload)
@@ -434,28 +533,12 @@ class DecoderBase(torch.nn.Module):
         return combined.masked_fill(~present.any(dim=2).unsqueeze(-1), 0.0)
 
 
-class TensorFieldBase(Renderable, Generic[ContentT]):
+class TensorFieldBase(ABC, Generic[ContentT]):
     """Tensorized values and targets with an extension-owned content type.
 
     Consumers read content through this base interface. Concrete tensorclasses
     declare its storage as either a Tensor or a TensorDict and own replacement.
     """
-
-    STATE_PREVIEW_LIMIT: int = 80
-    STATE_LABELS: dict[int, str] = {
-        Tokens.valued.value: "V",
-        Tokens.null.value: "N",
-        Tokens.padded.value: "P",
-        Tokens.masked.value: "M",
-        Tokens.other.value: "O",
-    }
-    STATE_STYLES: dict[int, str] = {
-        Tokens.valued.value: "bold green",
-        Tokens.null.value: "bold yellow",
-        Tokens.padded.value: "dim",
-        Tokens.masked.value: "bold magenta",
-        Tokens.other.value: "bold cyan",
-    }
 
     if TYPE_CHECKING:
 
@@ -528,94 +611,6 @@ class TensorFieldBase(Renderable, Generic[ContentT]):
             batch_size=[count],
         )
 
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> Generator[Text, None, None]:
-        state = getattr(self, TensorKey.state, None)
-        trainable = getattr(self, TensorKey.trainable, None)
-        targets = getattr(self, TensorKey.targets, None)
-
-        heading = Text()
-        heading.append(type(self).__name__, style=self.RICH_NAME_STYLE)
-        heading.append(" ")
-        heading.append("[tensorfield]", style=self.RICH_TYPE_STYLE)
-
-        if torch.is_tensor(state):
-            heading.append(" ")
-            heading.append("state=", style="dim")
-            heading.append(str(tuple(state.shape)), style="cyan")
-            heading.append(" ")
-            heading.append("device=", style="dim")
-            heading.append(str(state.device), style="cyan")
-
-        if torch.is_tensor(trainable):
-            heading.append(" ")
-            heading.append("trainable=", style="dim")
-            heading.append(str(int(trainable.sum().item())), style="cyan")
-
-        yield heading
-
-        if torch.is_tensor(state):
-            yield self.state_counts_text(state)
-            yield self.state_preview_text(state)
-
-        if isinstance(targets, TensorDict) and targets.keys():
-            text = Text(" targets=", style="dim")
-            text.append(", ".join(str(key) for key in sorted(targets.keys(), key=str)), style="cyan")
-            yield text
-
-    def state_counts_text(self, state: torch.Tensor) -> Text:
-        values = state.detach().reshape(-1).to(device="cpu", dtype=torch.int64)
-        text = Text(" counts ", style="dim")
-        for token in Tokens:
-            count = int(values.eq(token.value).sum().item())
-            text.append(self.STATE_LABELS[token.value], style=self.STATE_STYLES[token.value])
-            text.append(f"={count} ", style="dim")
-
-        return text
-
-    def state_preview_text(self, state: torch.Tensor) -> Text:
-        preview = self.first_root_slice(state)
-        text = Text(" state ", style="dim")
-
-        if preview.ndim <= 1:
-            rows = preview.reshape(1, -1)
-            row_prefix = " "
-        else:
-            rows = preview.reshape(-1, preview.shape[-1])
-            row_prefix = "\n       "
-
-        limit = min(preview.numel(), self.STATE_PREVIEW_LIMIT)
-        count = 0
-
-        for row_index, row in enumerate(rows):
-            if count >= limit:
-                break
-            if row_index:
-                text.append(row_prefix, style="dim")
-
-            for column_index, value in enumerate(row.tolist()):
-                if count >= limit:
-                    break
-                if column_index:
-                    text.append(" ")
-
-                token = int(value)
-                text.append(self.STATE_LABELS.get(token, str(token)), style=self.STATE_STYLES.get(token, "bold red"))
-                count += 1
-
-        if preview.numel() > limit:
-            text.append(" ...", style="dim")
-
-        return text
-
-    def first_root_slice(self, tensor: torch.Tensor) -> torch.Tensor:
-        values = tensor.detach().to(device="cpu")
-        if values.ndim > 0:
-            values = values[0]
-        if values.ndim > 0:
-            values = values[0]
-
-        return values.to(dtype=torch.int64)
-
 
 TENSORFIELDS: dict[str, "Extension"] = {}
 
@@ -624,7 +619,8 @@ class Extension:
     """Registry object for a tensorfield implementation.
 
     Register request, tensorfield, embedder, decoder, loss, output, and write
-    components with `@extension.register`. ``types`` names the Python equivalents
+    components with ``@extension.register(Component.Request)`` or another explicit
+    role. ``types`` names the Python equivalents
     of accepted canonical Arrow terminal families. Separate tuple entries are
     incompatible; types joined in one PEP 604 union may share one Arrow column.
     ``arrow`` supplies a physical-type matcher for custom Python atoms or
@@ -883,8 +879,9 @@ class Extension:
                 indices = offsets[selected] if offsets is not None else positions
                 child = pc.take(values.field(index), pa.array(indices, type=pa.int64()))
                 normalized = self.normalize(child, datatype)
-                # Arrow exposes scatter dynamically; pyarrow-stubs omits it.
-                placed = pc.scatter(normalized, pa.array(positions, type=pa.int64()), max_index=len(values) - 1)  # pyrefly: ignore [missing-attribute]
+                gather = np.zeros(len(values), dtype=np.int64)
+                gather[positions] = np.arange(len(positions))
+                placed = pc.take(normalized, pa.array(gather, type=pa.int64(), mask=~selected))
                 result = pc.coalesce(result, placed)
             return result
         if (
@@ -942,164 +939,56 @@ class Extension:
             ) from error
 
     @overload
-    def register(self, obj: None, component: Component | str) -> None: ...
+    def register(self, component: Component | str) -> Callable[[RegisterT], RegisterT]: ...
 
     @overload
-    def register(self, obj: RegisterT, component: Component | str | None = None) -> RegisterT: ...
+    def register(self, component: Component | str, obj: RegisterT) -> RegisterT: ...
+
+    @overload
+    def register(self, component: Component | str, obj: None) -> None: ...
 
     def register(
         self,
-        obj: RegisterT | None,
-        component: Component | str | None = None,
-    ) -> RegisterT | None:
-        """Register one tensorfield component with this extension."""
-        if obj is None:
-            if component is None:
-                raise TypeError("component must be provided when registering None")
+        component: Component | str,
+        obj: RegisterT | None | object = OMITTED,
+    ) -> Callable[[RegisterT], RegisterT] | RegisterT | None:
+        """Register an explicit role directly or return its identity decorator.
 
-            key = Component(component)
-            if key not in {Component.output, Component.write}:
-                raise TypeError("only output and write may be registered as None")
-
-            if key in self.components:
-                raise ValueError(f"Component '{key}' already registered in extension '{self.name}'")
-
-            self.components[key] = None
-            return None
-
-        if not hasattr(obj, "__name__"):
-            raise NameError(f"Object {obj} does not have a name")
-
-        # Extension registration also accepts unchecked callable objects.
-        name = str(obj.__name__)  # pyrefly: ignore [unnecessary-type-conversion]
-        try:
-            key = Component(name)
-        except ValueError:
-            raise ValueError(f"Component '{name}' is not a valid Component enum value") from None
-
+        Class roles require their corresponding extension base class. Hooks
+        follow the declared protocols without constraining callable names,
+        annotations, or introspectable signatures. Only output and write may
+        explicitly register None, retaining their optional no-op behavior.
+        """
+        key = Component(component)
+        if obj is OMITTED:
+            return partial(self.register, key)
         if key in self.components:
             raise ValueError(f"Component '{key}' already registered in extension '{self.name}'")
-
-        match key:
-            case Component.Request:
-                if not isinstance(obj, type):
-                    raise TypeError("Request must be a class type")
-
-                if not issubclass(obj, Leaf):
-                    raise TypeError("Request must be a subclass of RequestBase")
-
-            case Component.TensorField:
-                if not isinstance(obj, type):
-                    raise TypeError("TensorField must be a class type")
-
-                if not issubclass(obj, TensorFieldBase):
-                    raise TypeError("TensorField must be a subclass of TensorFieldBase")
-
-                new_params = inspect.signature(cast(type[TensorFieldBase], obj).new).parameters
-                required = {
-                    "input",
-                    "target",
-                    "present",
-                    "trainable",
-                    "inferred",
-                    "address",
-                    "schema",
-                    "strata",
-                    "context",
-                }
-                if not required.issubset(new_params):
-                    names = ", ".join(sorted(required))
-                    raise TypeError(f"TensorField.new must accept these parameters: {names}")
-
-            case Component.Embedder:
-                if not isinstance(obj, type):
-                    raise TypeError("Embedder must be a class type")
-
-                if not issubclass(obj, EmbedderBase):
-                    raise TypeError("Embedder must be a subclass of EmbedderBase")
-
-                init_params = list(obj.__init__.__annotations__.keys())
-                if "schema" not in init_params or "address" not in init_params:
-                    raise TypeError("Embedder __init__ method must accept 'schema' and 'address' parameters")
-
-                forward_params = inspect.signature(cast(type[EmbedderBase], obj).forward).parameters
-                if "inputs" not in forward_params:
-                    raise TypeError("Embedder.forward must accept a compact 'inputs' parameter")
-
-            case Component.Decoder:
-                if not isinstance(obj, type):
-                    raise TypeError("Decoder must be a class type")
-
-                if not issubclass(obj, DecoderBase):
-                    raise TypeError("Decoder must be a subclass of DecoderBase")
-
-                init_params = list(obj.__init__.__annotations__.keys())
-                if "schema" not in init_params or "address" not in init_params:
-                    raise TypeError("Decoder __init__ method must accept 'schema' and 'address' parameters")
-
-            case Component.loss:
-                if not callable(obj):
-                    raise TypeError("Loss must be a callable function")
-
-                expected_params: list[str] = ["module", "prediction", "batch", "strata"]
-                func_params: list[str] = list(obj.__annotations__.keys())
-
-                if not set(expected_params).issubset(set(func_params)):
+        if obj is None:
+            if key not in {Component.output, Component.write}:
+                raise TypeError(
+                    f"extension '{self.name}' component '{key}' cannot be None; "
+                    "only output and write may be registered as None"
+                )
+        else:
+            base = {
+                Component.Request: RequestBase,
+                Component.TensorField: TensorFieldBase,
+                Component.Embedder: EmbedderBase,
+                Component.Decoder: DecoderBase,
+            }.get(key)
+            if base is not None:
+                if not isinstance(obj, type) or not issubclass(obj, base):
+                    actual = obj.__name__ if isinstance(obj, type) else type(obj).__name__
                     raise TypeError(
-                        f"Loss function must accept the following parameters: {expected_params}, got {func_params}"
+                        f"extension '{self.name}' component '{key}' must be a subclass of {key}Base, got {actual}"
                     )
+            elif not callable(obj):
+                raise TypeError(f"extension '{self.name}' component '{key}' must be callable, got {type(obj).__name__}")
 
-            case Component.observe:
-                expected_params = ["field", "address", "schema", "state", "learn"]
-                func_params = list(inspect.signature(obj).parameters)
-                if func_params != expected_params:
-                    raise TypeError(
-                        f"Observe function must accept the following parameters: {expected_params}, got {func_params}"
-                    )
-
-            case Component.learn:
-                expected_params = ["module", "observation", "address", "strata"]
-                func_params = list(inspect.signature(obj).parameters)
-                if func_params != expected_params:
-                    raise TypeError(
-                        f"Learn function must accept the following parameters: {expected_params}, got {func_params}"
-                    )
-
-            case Component.bind:
-                expected_params = ["module", "field", "observation", "binding", "address", "strata", "resize"]
-                func_params = list(inspect.signature(obj).parameters)
-                if func_params != expected_params:
-                    raise TypeError(
-                        f"Bind function must accept the following parameters: {expected_params}, got {func_params}"
-                    )
-
-            case Component.write:
-                if obj is not None and not callable(obj):
-                    raise TypeError("Write must be a callable function")
-
-                expected_params: list[str] = ["module", "prediction", "datatype"]
-                func_params = list(inspect.signature(obj).parameters)
-
-                if func_params != expected_params:
-                    raise TypeError(
-                        f"Write function must accept the following parameters: {expected_params}, got {func_params}"
-                    )
-
-            case Component.output:
-                if not callable(obj):
-                    raise TypeError("Output must be a callable function")
-
-                expected_params = ["module", "address"]
-                func_params = list(inspect.signature(obj).parameters)
-
-                if func_params != expected_params:
-                    raise TypeError(
-                        f"Output function must accept the following parameters: {expected_params}, got {func_params}"
-                    )
-
-        self.components[key] = obj
-
-        return obj
+        value = cast(ComponentValue | None, obj)
+        self.components[key] = value
+        return cast(RegisterT | None, value)
 
     @overload
     def callback(self, factory: CallbackFactory, /) -> CallbackFactory: ...
@@ -1181,11 +1070,3 @@ class Extension:
     @property
     def write(self) -> Write:
         return cast(Write, self.component(Component.write))
-
-    def __getattr__(self, key: str) -> ComponentValue:
-        try:
-            component = Component(key)
-        except ValueError:
-            raise ValueError(f"Component '{key}' is not a valid Component enum value") from None
-
-        return self.component(component)

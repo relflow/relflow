@@ -9,16 +9,13 @@ import relflow as rf
 
 
 def model(merchant=rf.Category):
-    configured = rf.Model(
+    return rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         amount=rf.Number,
         merchant=merchant,
         label=rf.Boolean(mask=True),
+        optimizer=rf.adamw(learning_rate=1e-3, fused=None),
     )
-    configured.optimizer = rf.adamw(learning_rate=1e-3, fused=None)
-    return configured
 
 
 def data(configured):

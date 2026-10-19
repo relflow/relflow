@@ -1,16 +1,19 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/branding/banners/banner.dark.svg" />
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/branding/banners/banner.light.svg" />
-    <img alt="relflow" src="docs/assets/branding/banners/banner.light.svg" width="100%" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/relflow/docs/main/docs/assets/branding/banners/banner.dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/relflow/docs/main/docs/assets/branding/banners/banner.light.svg" />
+    <img alt="relflow" src="https://raw.githubusercontent.com/relflow/docs/main/docs/assets/branding/banners/banner.light.svg" width="100%" />
   </picture>
 </p>
 
 <p align="center">
   <a href="https://pypi.org/project/relflow/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/relflow?logo=pypi&amp;logoColor=white" /></a>
-  <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&amp;logoColor=white" />
+  <a href="https://github.com/relflow/relflow/actions/workflows/tests.yml?query=branch%3Amain"><img alt="Tests" src="https://github.com/relflow/relflow/actions/workflows/tests.yml/badge.svg?branch=main&amp;event=push" /></a>
+  <a href="https://github.com/relflow/relflow/actions/workflows/tests.yml?query=branch%3Amain"><img alt="Line coverage" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frelflow%2Frelflow%2Fbadges%2Fcoverage.json" /></a>
+  <a href="https://github.com/relflow/relflow/actions/workflows/compatibility.yml?query=branch%3Amain"><img alt="Dependency compatibility" src="https://github.com/relflow/relflow/actions/workflows/compatibility.yml/badge.svg?branch=main" /></a>
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&amp;logoColor=white" />
   <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-2E8B57" /></a>
-  <a href="https://relflow.github.io/relflow/"><img alt="Documentation" src="https://img.shields.io/badge/docs-Quarto-39729E?logo=quarto&amp;logoColor=white" /></a>
+  <a href="https://relflow.github.io/docs/"><img alt="Documentation build" src="https://github.com/relflow/docs/actions/workflows/docs.yml/badge.svg?branch=main&amp;event=push" /></a>
   <!-- discord-invite:start -->
   <a href="https://discord.gg/DVyZUkvTFA"><img alt="Discord channel invite" src="https://img.shields.io/badge/discord-join%20the%20channel-5865F2?logo=discord&amp;logoColor=white" /></a>
   <!-- discord-invite:end -->
@@ -22,7 +25,7 @@ contexts; decoders learn to predict selected fields from the available context.
 
 ## Install
 
-Python 3.12 or newer:
+Python 3.11 or newer:
 
 ```bash
 uv add relflow
@@ -33,89 +36,75 @@ HTTP runtime.
 
 ## Describe One Record
 
-```yaml
-line_items:
-  - sku: A12
-    quantity: 2
-    price: 19.99
-  - sku: B07
-    quantity: 1
-    price: 45.50
-returned: false
-```
+For example, predict whether a payment will be disputed:
 
-YAML illustrates one observation. Store these records as nested Arrow structs
-and lists in Parquet datasets; relflow scans them in batches.
+```yaml
+payment_id: payment-42
+amount: 86.50
+merchant: grocery
+disputed: false
+```
 
 ```python
 import relflow as rf
 
-model = rf.Model(
-    d_model=64,
-    n_layers=2,
-    n_heads=4,
-    batch_size=128,
-    line_items=rf.Branch(
-        length=32,
-        sku=rf.Category,
-        quantity=rf.Number,
-        price=rf.Number,
-    ),
-    returned=rf.Boolean(mask=True),
+model = rf.Model.xs(
+    amount=rf.Number,
+    merchant=rf.Category,
+    disputed=rf.Boolean(mask=True),
 )
 ```
 
-Parent keywords name each field. `mask=True` makes `returned` a supervised
-target whose value never enters the encoder. The branch builds line-item
-context before its reduced representation reaches the order root.
+Parent keywords name each field. `mask=True` makes `disputed` a supervised
+prediction target whose label is excluded from the inputs. `payment_id` remains
+available as application metadata. Add repeated contexts with `rf.Branch(...)`
+when a prediction needs transaction history or other related records.
 
-## Stream Training And Prediction
+## Train And Predict
 
-The paths below are application-supplied Parquet datasets. Training and
-validation records include `returned`; request records omit it.
+The application supplies Arrow tables named `train_table`, `validation_table`,
+and `request_table`. Training and validation include the dispute label;
+prediction requests omit it.
 
 ```python
-import lightning.pytorch as lit
-import pyarrow.dataset as ds
-
-train = ds.dataset("warehouse/train", format="parquet")
-validation = ds.dataset("warehouse/validation", format="parquet")
-requests = ds.dataset("warehouse/requests", format="parquet")
-
-model.optimizer = rf.adamw(learning_rate=1e-3)
 data = rf.ArrowDataModule(
-    model=model, train=train, validate=validation, predict=requests
+    model=model,
+    train=train_table,
+    validate=validation_table,
 )
-trainer = lit.Trainer(
-    max_epochs=30, devices=1, callbacks=[rf.Writer("predictions")]
-)
-trainer.fit(model=model, datamodule=data)
-trainer.predict(model=model, datamodule=data, return_predictions=False)
+model.fit(data, batch_size=128, learning_rate=1e-4, weight_decay=0.01, max_epochs=30)
 
-predictions = ds.dataset("predictions", format="parquet")
+predictions = model.predict(request_table, batch_size=256, retain=("payment_id",))
+model.save("artifacts/payment.rf")
 ```
 
-`ArrowDataModule` opens a fresh scan for each pass and prepares model batches
-as records arrive. `rf.Writer` writes prediction batches to
-`predictions/rank-0.parquet`; `return_predictions=False` avoids collecting
-all outputs in memory. Open the output as an Arrow dataset for further batch
-processing. Decoded values live under its `predictions` column at addresses
-such as `/returned`.
+Fitting includes early stopping and restoration of the best validation model.
+Configure AdamW directly on `fit`; each call starts with the current model
+parameters and fresh optimization state. Hardware, logging, and Lightning
+options can also be supplied to the model methods.
+Predictions are an Arrow table: decoded results use schema field names such as
+`predictions.disputed`, and repeated branches become lists of records. Requested
+embeddings appear separately in `representations`. Retention adds an `inputs`
+column. For larger file-backed jobs, use an Arrow data module with `rf.Writer`
+to stream predictions to Parquet.
 
 ## Documentation
 
-- [Getting started](https://relflow.github.io/relflow/getting-started.html)
-- [Model structure](https://relflow.github.io/relflow/core-concepts/model-tree.html)
-- [Data types](https://relflow.github.io/relflow/core-concepts/data-types.html)
-- [Arrow data loading](https://relflow.github.io/relflow/guides/data-modules.html)
-- [Preprocessing](https://relflow.github.io/relflow/guides/preprocessors.html)
-- [Training and checkpoints](https://relflow.github.io/relflow/guides/lightning.html)
-- [Batch inference](https://relflow.github.io/relflow/guides/batch-inference.html)
-- [Prediction output](https://relflow.github.io/relflow/guides/prediction-output.html)
+- [Getting started](https://relflow.github.io/docs/getting-started.html)
+- [Add transaction history](https://relflow.github.io/docs/tutorials/transaction-history.html)
+- [Model structure](https://relflow.github.io/docs/core-concepts/model-tree.html)
+- [Data types](https://relflow.github.io/docs/core-concepts/data-types.html)
+- [Arrow data loading](https://relflow.github.io/docs/guides/data-modules.html)
+- [Preprocessing](https://relflow.github.io/docs/guides/preprocessors.html)
+- [Training and checkpoints](https://relflow.github.io/docs/guides/lightning.html)
+- [Batch inference](https://relflow.github.io/docs/guides/batch-inference.html)
+- [Prediction output](https://relflow.github.io/docs/guides/prediction-output.html)
 
-Docs use static examples and Typst model diagrams. Build them with `make render`;
-run `make check-docs` to validate the render in a temporary directory. Package
-checks use `uv run pytest`; synthetic learning checks use `make proofs`.
+Documentation, modeling proofs, and branding sources live in the separate
+[relflow/docs repository](https://github.com/relflow/docs). Its website uses
+static examples and Typst diagrams and builds independently of this package.
+Run package checks here with `uv run pytest`; follow the documentation
+repository's instructions to run learning experiments explicitly.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development conventions.
 
 [Community](https://discord.gg/DVyZUkvTFA) · [Apache 2.0 license](LICENSE)

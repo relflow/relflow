@@ -14,7 +14,7 @@ from beartype import beartype
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
-from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
+from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
@@ -62,7 +62,7 @@ def seeds(salt: int, lane: int, family: int) -> tuple[int, int, int, int]:
     )
 
 
-@hashable.register
+@hashable.register(Component.Request)
 class Request(RequestBase):
     """Hash-based tensorfield with no learned identity vocabulary.
 
@@ -107,7 +107,7 @@ class Request(RequestBase):
         ) -> None: ...
 
 
-@hashable.register
+@hashable.register(Component.TensorField)
 @tensorclass
 class TensorField(TensorFieldBase[torch.Tensor]):
     state: torch.Tensor
@@ -171,11 +171,16 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             series = pl.from_arrow(values, rechunk=False)
             if not isinstance(series, pl.Series):
                 raise TypeError(f"hash field at '{address}' could not construct a Polars Series from {values.type}")
+            frame = series.to_frame()
             hashes = np.empty((len(values), n_hashes), dtype=np.int64)
             for lane in range(n_hashes):
                 seed, seed_1, seed_2, seed_3 = seeds(context.salt, lane, family)
+                # Execute the expression directly; Series' generated wrappers depend on Python bytecode.
                 hashes[:, lane] = (
-                    series.hash(seed=seed, seed_1=seed_1, seed_2=seed_2, seed_3=seed_3).to_numpy().view(np.int64)
+                    frame.select(pl.all().hash(seed=seed, seed_1=seed_1, seed_2=seed_2, seed_3=seed_3))
+                    .to_series()
+                    .to_numpy()
+                    .view(np.int64)
                 )
             return torch.from_numpy(field.place(hashes, fill=0, value_shape=(n_hashes,)))
 
@@ -200,7 +205,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         )
 
 
-@hashable.register
+@hashable.register(Component.Embedder)
 class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -247,7 +252,7 @@ class Embedder(EmbedderBase):
         )
 
 
-@hashable.register
+@hashable.register(Component.Decoder)
 class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -272,7 +277,7 @@ class Decoder(DecoderBase):
         )
 
 
-@hashable.register
+@hashable.register(Component.loss)
 def loss(
     module: Model,
     prediction: Prediction,

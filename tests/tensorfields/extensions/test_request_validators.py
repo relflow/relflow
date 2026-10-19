@@ -1,77 +1,30 @@
 import pytest
 
-from relflow.structs.experiment import Schema
-
-
-def _structure_with_field(field: dict) -> dict:
-    return {
-        "d_model": 16,
-        "fields": {
-            "type": "branch",
-            "dropout": 0.1,
-            "length": 2,
-            "fields": [field],
-        },
-    }
+import relflow as rf
 
 
 def test_category_topk_rejects_non_positive():
-    payload = _structure_with_field(
-        {
-            "name": "cat",
-            "type": "category",
-            "topk": [0],
-        }
-    )
     with pytest.raises(ValueError, match="topk values must be positive"):
-        Schema.model_validate(payload)
+        rf.Category(topk=[0])
 
 
 def test_category_topk_is_independent_of_vocabulary_storage():
-    payload = _structure_with_field(
-        {
-            "name": "cat",
-            "type": "category",
-            "topk": [10000, 8, 10000],
-        }
-    )
-    assert Schema.model_validate(payload).requests["/cat"].topk == [8, 10000]
+    assert rf.Category(topk=[10000, 8, 10000]).topk == [8, 10000]
 
 
 def test_category_rejects_number_only_n_bands_option():
-    payload = _structure_with_field(
-        {
-            "name": "cat",
-            "type": "category",
-            "n_bands": 8,
-        }
-    )
     with pytest.raises(ValueError, match="n_bands"):
-        Schema.model_validate(payload)
+        rf.Category(n_bands=8)
 
 
 def test_set_threshold_rejects_values_above_one():
-    payload = _structure_with_field(
-        {
-            "name": "tags",
-            "type": "set",
-            "threshold": 1.1,
-        }
-    )
     with pytest.raises(ValueError, match="less than or equal to 1"):
-        Schema.model_validate(payload)
+        rf.Set(threshold=1.1)
 
 
 def test_boolean_threshold_rejects_values_above_one():
-    payload = _structure_with_field(
-        {
-            "name": "enabled",
-            "type": "boolean",
-            "threshold": 1.1,
-        }
-    )
     with pytest.raises(ValueError, match="less than or equal to 1"):
-        Schema.model_validate(payload)
+        rf.Boolean(threshold=1.1)
 
 
 @pytest.mark.parametrize(
@@ -83,40 +36,18 @@ def test_boolean_threshold_rejects_values_above_one():
     ],
 )
 def test_boolean_threshold_rejects_invalid_lists(threshold: list[float], match: str):
-    payload = _structure_with_field(
-        {
-            "name": "enabled",
-            "type": "boolean",
-            "threshold": threshold,
-        }
-    )
 
     with pytest.raises(ValueError, match=match):
-        Schema.model_validate(payload)
+        rf.Boolean(threshold=threshold)
 
 
 def test_dateparts_dateparts_reject_duplicates():
-    payload = _structure_with_field(
-        {
-            "name": "ts",
-            "type": "dateparts",
-            "dateparts": ["day_of_week", "day_of_week"],
-        }
-    )
     with pytest.raises(ValueError, match="dateparts must be unique"):
-        Schema.model_validate(payload)
+        rf.DateParts(dateparts=["day_of_week", "day_of_week"])
 
 
 def test_dateparts_normalizes_friendly_datepart_names():
-    payload = _structure_with_field(
-        {
-            "name": "ts",
-            "type": "dateparts",
-            "dateparts": ["Day Of Week", "month-of-year", "HourOfDay"],
-        }
-    )
-    structure = Schema.model_validate(payload)
-    request = structure.requests["/ts"]
+    request = rf.DateParts(dateparts=["Day Of Week", "month-of-year", "HourOfDay"])
 
     assert [datepart.value for datepart in request.dateparts] == [
         "day_of_week",
@@ -126,38 +57,15 @@ def test_dateparts_normalizes_friendly_datepart_names():
 
 
 def test_dateparts_unknown_name_suggests_canonical_value():
-    payload = _structure_with_field(
-        {
-            "name": "ts",
-            "type": "dateparts",
-            "dateparts": ["day of wek"],
-        }
-    )
     with pytest.raises(ValueError, match="did you mean 'day_of_week'"):
-        Schema.model_validate(payload)
+        rf.DateParts(dateparts=["day of wek"])
 
 
 def test_dateparts_pattern_rejects_invalid_tokens():
-    payload = _structure_with_field(
-        {
-            "name": "ts",
-            "type": "dateparts",
-            "dateparts": ["day_of_week"],
-            "pattern": "%Q-%m-%d",
-        }
-    )
     with pytest.raises(ValueError, match="is not a valid format pattern"):
-        Schema.model_validate(payload)
+        rf.DateParts(dateparts=["day_of_week"], pattern="%Q-%m-%d")
 
 
 def test_dateparts_pattern_accepts_valid_format():
-    payload = _structure_with_field(
-        {
-            "name": "ts",
-            "type": "dateparts",
-            "dateparts": ["day_of_week", "month_of_year"],
-            "pattern": "%Y-%m-%d",
-        }
-    )
-    structure = Schema.model_validate(payload)
-    assert "/ts" in structure.requests
+    request = rf.DateParts(dateparts=["day_of_week", "month_of_year"], pattern="%Y-%m-%d")
+    assert request.pattern == "%Y-%m-%d"

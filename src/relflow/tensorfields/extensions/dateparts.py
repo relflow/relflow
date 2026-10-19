@@ -19,7 +19,7 @@ from tensordict import TensorDict, tensorclass
 from relflow.data.arrow import variants
 from relflow.data.ragged import RaggedField
 from relflow.helpers import Jitter
-from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
+from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
@@ -211,17 +211,14 @@ def parse(
             continue
         indices = offsets[selected] if offsets is not None else positions
         child = pc.take(values.field(index), pa.array(indices, type=pa.int64()))
-        # Arrow exposes scatter dynamically; pyarrow-stubs omits it.
-        placed = pc.scatter(  # pyrefly: ignore [missing-attribute]
-            parse(child, pattern),
-            pa.array(positions, type=pa.int64()),
-            max_index=len(values) - 1,
-        )
+        gather = np.zeros(len(values), dtype=np.int64)
+        gather[positions] = np.arange(len(positions))
+        placed = pc.take(parse(child, pattern), pa.array(gather, type=pa.int64(), mask=~selected))
         result = pc.coalesce(result, placed)
     return result
 
 
-@dateparts.register
+@dateparts.register(Component.Request)
 class Request(RequestBase):
     """Calendar components represented as cyclical sine/cosine pairs.
 
@@ -304,7 +301,7 @@ class Request(RequestBase):
         return v
 
 
-@dateparts.register
+@dateparts.register(Component.TensorField)
 @tensorclass
 class TensorField(TensorFieldBase[TensorDict]):
     state: torch.Tensor
@@ -383,7 +380,7 @@ class TensorField(TensorFieldBase[TensorDict]):
         )
 
 
-@dateparts.register
+@dateparts.register(Component.Embedder)
 class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -429,7 +426,7 @@ class Embedder(EmbedderBase):
         )
 
 
-@dateparts.register
+@dateparts.register(Component.Decoder)
 class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -459,7 +456,7 @@ class Decoder(DecoderBase):
         )
 
 
-@dateparts.register
+@dateparts.register(Component.loss)
 def loss(
     module: Model,
     prediction: Prediction,

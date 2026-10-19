@@ -19,7 +19,7 @@ import torch
 from torch.utils.data import DataLoader, IterableDataset, get_worker_info
 
 import relflow
-from relflow.data.arrow import Encoded
+from relflow.data.arrow import Encoded, Retain, retention
 from relflow.data.datasets.base import InterprocessEncodingContext, StratumConfig
 from relflow.data.iterables import encode
 from relflow.data.processors import Preprocessor, PreprocessorInput, arrow, polars
@@ -34,7 +34,6 @@ Default = TypeVar("Default")
 
 ArrowUnit: TypeAlias = pa.Table | pa.RecordBatch
 ArrowStream: TypeAlias = pa.RecordBatchReader | Iterable[ArrowUnit]
-Retain: TypeAlias = tuple[str, ...] | Literal["*"]
 
 
 ArrowSource: TypeAlias = ArrowUnit | ds.Dataset | Source | Callable[[], ArrowStream]
@@ -47,6 +46,23 @@ class Schemas:
 
     source: pa.Schema | None = None
     processed: pa.Schema | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Options:
+    """Validated settings for one split, shared by its module and workers."""
+
+    preprocessors: tuple[Preprocessor, ...]
+    shuffle: bool
+    sample: float
+    epoch_size: int | None
+    shuffle_rows: int
+    drop_last: bool
+    num_workers: int
+    persistent_workers: bool
+    pin_memory: bool
+    prefetch_factor: int
+    retain: Retain
 
 
 def lock(schemas: Schemas, stage: Literal["source", "processed"], actual: pa.Schema, *, context: str) -> None:
@@ -138,8 +154,11 @@ def scan(source: ArrowSource | ArrowStream, *, schemas: Schemas | None = None) -
         yield current
         return
 
+    declared = None
     if isinstance(source, ds.Dataset):
-        stream = source.scanner().to_reader()
+        declared = source.schema
+        # RecordBatchReader can block JSON scans through Python filesystems.
+        stream = source.scanner().to_batches()
     elif isinstance(source, pa.RecordBatchReader):
         stream = source
     elif callable(source):
@@ -156,7 +175,7 @@ def scan(source: ArrowSource | ArrowStream, *, schemas: Schemas | None = None) -
 
     iterator = iter(stream)
     try:
-        declared = stream.schema if isinstance(stream, pa.RecordBatchReader) else None
+        declared = stream.schema if isinstance(stream, pa.RecordBatchReader) else declared
         if declared is not None:
             lock(schemas, "source", declared, context="Arrow source schema changed")
 
@@ -386,22 +405,15 @@ class ArrowDataset(IterableDataset[Encoded]):
         *,
         source: ArrowSource,
         schema: Schema,
-        preprocessors: tuple[Preprocessor, ...],
+        options: Options,
         encoding_context: InterprocessEncodingContext,
         batch_size: int,
         strata: Strata,
         seed: int,
-        shuffle_data: bool,
-        sample_rate: float,
-        epoch_size: int | None,
-        shuffle_rows: int,
-        drop_last: bool,
-        retain: Retain,
         schemas: Schemas,
         epochs: dict[Strata, int],
         distributed_rank: int,
         distributed_world_size: int,
-        workers: int,
         epoch: Any = None,
         epoch_snapshot: Any = None,
         epoch_barrier: Any = None,
@@ -409,22 +421,15 @@ class ArrowDataset(IterableDataset[Encoded]):
         super().__init__()
         self.source = source
         self.schema = schema
-        self.preprocessors = preprocessors
+        self.options = options
         self.encoding_context = encoding_context
         self.batch_size = batch_size
         self.strata = strata
         self.seed = seed
-        self.shuffle_data = shuffle_data
-        self.sample_rate = sample_rate
-        self.epoch_size = epoch_size
-        self.shuffle_rows = shuffle_rows
-        self.drop_last = drop_last
-        self.retain = retain
         self.schemas = schemas
         self.epochs = epochs
         self.distributed_rank = distributed_rank
         self.distributed_world_size = distributed_world_size
-        self.workers = workers
         self.epoch = epoch
         self.epoch_snapshot = epoch_snapshot
         self.epoch_barrier = epoch_barrier
@@ -439,8 +444,8 @@ class ArrowDataset(IterableDataset[Encoded]):
                 self.epochs[self.strata] += 1
             return epoch, 0, 1
 
-        if worker.num_workers != self.workers:
-            raise RuntimeError(f"expected {self.workers} Arrow workers, got {worker.num_workers}")
+        if worker.num_workers != self.options.num_workers:
+            raise RuntimeError(f"expected {self.options.num_workers} Arrow workers, got {worker.num_workers}")
 
         if self.strata == Strata.train:
             if self.epoch is None or self.epoch_snapshot is None or self.epoch_barrier is None:
@@ -460,52 +465,58 @@ class ArrowDataset(IterableDataset[Encoded]):
     def __iter__(self) -> Iterator[Encoded]:
         epoch, worker, workers = self.iteration()
         scanned: Iterable[pa.Table] = scan(self.source, schemas=self.schemas)
-        batches: Iterable[pa.Table] = process(
-            scanned,
-            preprocessor=self.preprocessors,
-            strata=self.strata,
-            schema=self.schema,
-            encoding_context=self.encoding_context,
-            schemas=self.schemas,
-        )
-        batches = sample(
-            batches,
-            rate=self.sample_rate,
-            random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="sample"),
-        )
+        try:
+            batches: Iterable[pa.Table] = process(
+                scanned,
+                preprocessor=self.options.preprocessors,
+                strata=self.strata,
+                schema=self.schema,
+                encoding_context=self.encoding_context,
+                schemas=self.schemas,
+            )
+            batches = sample(
+                batches,
+                rate=self.options.sample,
+                random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="sample"),
+            )
 
-        if isinstance(self.source, (pa.Table, pa.RecordBatch)):
-            materialized = merge(batches)
-            batches = () if materialized is None else (materialized,)
-            if self.shuffle_data and materialized is not None:
-                materialized = arrange(
-                    materialized,
-                    random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="shuffle"),
-                )
-                batches = (materialized,)
-            batches = limit(batches, size=self.epoch_size)
-        else:
-            if callable(self.source):
-                batches = limit(batches, size=self.epoch_size)
-            if self.shuffle_data:
-                batches = shuffle(
-                    batches,
-                    rows=self.shuffle_rows,
-                    random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="shuffle"),
-                )
-            batches = limit(batches, size=self.epoch_size)
+            if isinstance(self.source, (pa.Table, pa.RecordBatch)):
+                materialized = merge(batches)
+                batches = () if materialized is None else (materialized,)
+                if self.options.shuffle and materialized is not None:
+                    materialized = arrange(
+                        materialized,
+                        random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="shuffle"),
+                    )
+                    batches = (materialized,)
+                batches = limit(batches, size=self.options.epoch_size)
+            else:
+                if callable(self.source):
+                    batches = limit(batches, size=self.options.epoch_size)
+                if self.options.shuffle:
+                    batches = shuffle(
+                        batches,
+                        rows=self.options.shuffle_rows,
+                        random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="shuffle"),
+                    )
+                batches = limit(batches, size=self.options.epoch_size)
 
-        distributed = distribute(
-            batches,
-            size=self.batch_size,
-            global_rank=self.distributed_rank,
-            world_size=self.distributed_world_size,
-            drop_last=self.drop_last,
-        )
-        # Only distributed ranks require equal steps. Local workers own complete
-        # rank batches, including a partial tail that would otherwise be lost.
-        assigned = (batch for index, batch in enumerate(distributed) if index % workers == worker)
-        yield from self.encode(assigned, epoch=epoch)
+            distributed = distribute(
+                batches,
+                size=self.batch_size,
+                global_rank=self.distributed_rank,
+                world_size=self.distributed_world_size,
+                drop_last=self.options.drop_last,
+            )
+            # Only distributed ranks require equal steps. Local workers own complete
+            # rank batches, including a partial tail that would otherwise be lost.
+            assigned = (batch for index, batch in enumerate(distributed) if index % workers == worker)
+            yield from self.encode(assigned, epoch=epoch)
+        finally:
+            # Downstream failures and epoch limits must release suspended scans,
+            # even when callers keep the loader or exception traceback alive.
+            if isinstance(scanned, Generator):
+                scanned.close()
 
     def encode(self, batches: Iterable[pa.Table], *, epoch: int) -> Iterator[Encoded]:
         """Encode one consumer's final model batches."""
@@ -518,7 +529,7 @@ class ArrowDataset(IterableDataset[Encoded]):
                 interprocess_encoding_context=self.encoding_context,
                 seed=self.seed,
                 epoch=epoch,
-                retain=self.retain,
+                retain=self.options.retain,
             )
 
 
@@ -526,23 +537,13 @@ def loader(
     *,
     source: ArrowSource,
     schema: Schema,
-    preprocessors: tuple[Preprocessor, ...],
+    options: Options,
     encoding_context: InterprocessEncodingContext,
     batch_size: int,
     strata: Strata,
     seed: int,
-    shuffle_data: bool,
-    sample_rate: float,
-    epoch_size: int | None,
-    shuffle_rows: int,
-    drop_last: bool,
-    retain: Retain,
-    pin_memory: bool,
     schemas: Schemas,
     epochs: dict[Strata, int],
-    workers: int,
-    persistent_workers: bool,
-    prefetch_factor: int,
     multiprocessing_context: Any,
     epoch: Any = None,
 ) -> DataLoader[Encoded]:
@@ -558,7 +559,7 @@ def loader(
             try:
                 manifest = source.manifest
                 if manifest is None:
-                    if workers and multiprocessing_context.get_start_method() == "fork":
+                    if options.num_workers and multiprocessing_context.get_start_method() == "fork":
                         with ProcessPoolExecutor(max_workers=1, mp_context=mp.get_context("spawn")) as planner:
                             manifest = planner.submit(source.discover).result()
                     else:
@@ -569,40 +570,33 @@ def loader(
         if isinstance(manifest, Exception):
             raise manifest
         source.manifest = manifest
-    epoch_snapshot = multiprocessing_context.Value("q", 0) if workers else None
-    epoch_barrier = multiprocessing_context.Barrier(workers) if workers else None
+    epoch_snapshot = multiprocessing_context.Value("q", 0) if options.num_workers else None
+    epoch_barrier = multiprocessing_context.Barrier(options.num_workers) if options.num_workers else None
 
     return DataLoader(
         dataset=ArrowDataset(
             source=source,
             schema=schema,
-            preprocessors=preprocessors,
+            options=options,
             encoding_context=encoding_context,
             batch_size=batch_size,
             strata=strata,
             seed=seed,
-            shuffle_data=shuffle_data,
-            sample_rate=sample_rate,
-            epoch_size=epoch_size,
-            shuffle_rows=shuffle_rows,
-            drop_last=drop_last,
-            retain=retain,
             schemas=schemas,
             epochs=epochs,
             distributed_rank=distributed_rank,
             distributed_world_size=distributed_world_size,
-            workers=workers,
             epoch=epoch,
             epoch_snapshot=epoch_snapshot,
             epoch_barrier=epoch_barrier,
         ),
         batch_size=None,
         collate_fn=passthrough,
-        num_workers=workers,
-        persistent_workers=persistent_workers,
-        pin_memory=pin_memory and strata != Strata.predict and torch.cuda.is_available(),
-        multiprocessing_context=multiprocessing_context if workers else None,
-        prefetch_factor=prefetch_factor if workers else None,
+        num_workers=options.num_workers,
+        persistent_workers=options.persistent_workers,
+        pin_memory=options.pin_memory and strata != Strata.predict and torch.cuda.is_available(),
+        multiprocessing_context=multiprocessing_context if options.num_workers else None,
+        prefetch_factor=options.prefetch_factor if options.num_workers else None,
     )
 
 
@@ -641,7 +635,6 @@ class ArrowDataModule(lit.LightningDataModule):
         seed: int = 0,
         shuffle: StratumConfig[bool | None] = None,
         sample: StratumConfig[float] = 1.0,
-        replacement: StratumConfig[bool] = False,
         epoch_size: StratumConfig[int | None] = None,
         shuffle_rows: StratumConfig[int | None] = None,
         drop_last: StratumConfig[bool] = False,
@@ -674,97 +667,91 @@ class ArrowDataModule(lit.LightningDataModule):
                 if extra:
                     details.append("extra " + ", ".join(sorted(str(item) for item in extra)))
                 raise ValueError("retain mapping must match configured splits exactly: " + "; ".join(details))
-            self.retain = normalized
+            retained = normalized
         else:
-            self.retain = {strata: retain for strata in self.sources}
-        for strata, names in self.retain.items():
-            if names != "*" and (
-                not isinstance(names, tuple)
-                or any(not isinstance(name, str) or not name for name in names)
-                or len(set(names)) != len(names)
-            ):
-                raise ValueError(f"retain for {strata} must be '*', or a tuple of unique non-empty column names")
+            retained = {strata: retain for strata in self.sources}
+        retained = {strata: retention(names, context=f"retain for {strata}") for strata, names in retained.items()}
         configured_preprocessors = expand(preprocessor, default=())
-        self.preprocessors = {
+        preprocessors = {
             strata: Preprocessor.normalize(processors) for strata, processors in configured_preprocessors.items()
         }
-        for strata, processors in self.preprocessors.items():
+        for strata, processors in preprocessors.items():
             if any(processor.scope == "dataset" for processor in processors) and callable(self.sources.get(strata)):
                 raise NotImplementedError(
                     "dataset-scoped preprocessing of an Arrow factory requires the deferred coordinated cache"
                 )
 
         configured_shuffle = expand(shuffle, default=None)
-        self.shuffle = {
+        shuffled = {
             strata: strata == Strata.train if enabled is None else enabled
             for strata, enabled in configured_shuffle.items()
         }
-        if any(not isinstance(value, bool) for value in self.shuffle.values()):
+        if any(not isinstance(value, bool) for value in shuffled.values()):
             raise TypeError("shuffle must contain booleans or None")
 
         configured_sample = expand(sample, default=1.0)
         if any(isinstance(rate, bool) or not isinstance(rate, (int, float)) for rate in configured_sample.values()):
             raise TypeError("sample must contain numeric probabilities")
-        self.sample = {strata: float(rate) for strata, rate in configured_sample.items()}
-        if any(not 0.0 < rate <= 1.0 for rate in self.sample.values()):
+        rates = {strata: float(rate) for strata, rate in configured_sample.items()}
+        if any(not 0.0 < rate <= 1.0 for rate in rates.values()):
             raise ValueError("sample must be greater than zero and at most one")
 
-        self.replacement = expand(replacement, default=False)
-        if any(not isinstance(value, bool) for value in self.replacement.values()):
-            raise TypeError("replacement must contain booleans")
-        if any(self.replacement.values()):
-            raise NotImplementedError("replacement sampling is not implemented")
-
-        self.epoch_size = expand(epoch_size, default=None)
+        sizes = expand(epoch_size, default=None)
         if any(
             size is not None and (not isinstance(size, int) or isinstance(size, bool) or size < 1)
-            for size in self.epoch_size.values()
+            for size in sizes.values()
         ):
             raise ValueError("epoch_size must contain positive integers or None")
 
         configured_rows = expand(shuffle_rows, default=None)
-        self.shuffle_rows = {
+        windows = {
             strata: max(model.batch_size * 32, 4096) if rows is None else rows
             for strata, rows in configured_rows.items()
         }
-        if any(not isinstance(rows, int) or isinstance(rows, bool) or rows < 1 for rows in self.shuffle_rows.values()):
+        if any(not isinstance(rows, int) or isinstance(rows, bool) or rows < 1 for rows in windows.values()):
             raise ValueError("shuffle_rows must contain positive integers or None")
 
-        self.drop_last = expand(drop_last, default=False)
-        if any(not isinstance(value, bool) for value in self.drop_last.values()):
+        dropped = expand(drop_last, default=False)
+        if any(not isinstance(value, bool) for value in dropped.values()):
             raise TypeError("drop_last must contain booleans")
 
-        self.num_workers = expand(num_workers, default=0)
-        if any(
-            not isinstance(workers, int) or isinstance(workers, bool) or workers < 0
-            for workers in self.num_workers.values()
-        ):
+        workers = expand(num_workers, default=0)
+        if any(not isinstance(count, int) or isinstance(count, bool) or count < 0 for count in workers.values()):
             raise ValueError("num_workers must contain non-negative integers")
-        self.persistent_workers = expand(persistent_workers, default=False)
-        self.pin_memory = expand(pin_memory, default=False)
-        if any(not isinstance(value, bool) for value in (*self.persistent_workers.values(), *self.pin_memory.values())):
+        persistent = expand(persistent_workers, default=False)
+        pinned = expand(pin_memory, default=False)
+        if any(not isinstance(value, bool) for value in (*persistent.values(), *pinned.values())):
             raise TypeError("persistent_workers and pin_memory must contain booleans")
-        invalid_persistent = [
-            strata
-            for strata, persistent in self.persistent_workers.items()
-            if persistent and not self.num_workers[strata]
-        ]
+        invalid_persistent = [strata for strata, enabled in persistent.items() if enabled and not workers[strata]]
         if invalid_persistent:
             names = ", ".join(map(str, invalid_persistent))
             raise ValueError(f"persistent_workers requires num_workers > 0 for: {names}")
 
-        self.prefetch_factor = expand(prefetch_factor, default=2)
-        if any(
-            not isinstance(value, int) or isinstance(value, bool) or value < 1
-            for value in self.prefetch_factor.values()
-        ):
+        prefetch = expand(prefetch_factor, default=2)
+        if any(not isinstance(value, int) or isinstance(value, bool) or value < 1 for value in prefetch.values()):
             raise ValueError("prefetch_factor must contain positive integers")
 
         if multiprocessing_context is not None and not isinstance(multiprocessing_context, str):
             raise TypeError("multiprocessing_context must be a start-method string or None")
+        self.options = {
+            strata: Options(
+                preprocessors=preprocessors[strata],
+                shuffle=shuffled[strata],
+                sample=rates[strata],
+                epoch_size=sizes[strata],
+                shuffle_rows=windows[strata],
+                drop_last=dropped[strata],
+                num_workers=workers[strata],
+                persistent_workers=persistent[strata],
+                pin_memory=pinned[strata],
+                prefetch_factor=prefetch[strata],
+                retain=retained.get(strata, ()),
+            )
+            for strata in Strata
+        }
         self.worker_context = None
         self.worker_epochs: dict[Strata, Any] = {}
-        if any(self.num_workers.values()):
+        if any(options.num_workers for options in self.options.values()):
             method = "spawn" if multiprocessing_context is None else multiprocessing_context
             try:
                 self.worker_context = mp.get_context(method)
@@ -772,7 +759,9 @@ class ArrowDataModule(lit.LightningDataModule):
                 available = ", ".join(mp.get_all_start_methods())
                 raise ValueError(f"unsupported multiprocessing_context {method!r}; choose from: {available}") from error
             self.worker_epochs = {
-                strata: self.worker_context.Value("q", 0) for strata, workers in self.num_workers.items() if workers
+                strata: self.worker_context.Value("q", 0)
+                for strata, options in self.options.items()
+                if options.num_workers
             }
         self.seed = seed
 
@@ -811,9 +800,9 @@ class ArrowDataModule(lit.LightningDataModule):
             if not required:
                 return None
             raise ValueError(f"no source configured for strata: {normalized}")
-        workers = self.num_workers[normalized]
+        options = self.options[normalized]
         encoding_context = self.encoding_context
-        if workers:
+        if options.num_workers:
             for context in encoding_context.values():
                 share = getattr(context, "share", None)
                 if callable(share):
@@ -822,23 +811,13 @@ class ArrowDataModule(lit.LightningDataModule):
         return loader(
             source=self.sources[normalized],
             schema=self.schema,
-            preprocessors=self.preprocessors[normalized],
+            options=options,
             encoding_context=encoding_context,
             batch_size=self.batch_size,
             strata=normalized,
             seed=self.seed,
-            shuffle_data=self.shuffle[normalized],
-            sample_rate=self.sample[normalized],
-            epoch_size=self.epoch_size[normalized],
-            shuffle_rows=self.shuffle_rows[normalized],
-            drop_last=self.drop_last[normalized],
-            retain=self.retain[normalized],
-            pin_memory=self.pin_memory[normalized],
             schemas=self.schemas[normalized],
             epochs=self.epochs,
-            workers=workers,
-            persistent_workers=self.persistent_workers[normalized],
-            prefetch_factor=self.prefetch_factor[normalized],
             multiprocessing_context=self.worker_context,
             epoch=self.worker_epochs.get(normalized),
         )

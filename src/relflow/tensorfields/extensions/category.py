@@ -13,7 +13,7 @@ from beartype import beartype
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
-from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
+from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 category: Extension = Extension(name="category", types=(bool, int, float, str, bytes))
 
 
-@category.register
+@category.register(Component.Request)
 class Request(RequestBase):
     """One scalar label represented by an online vocabulary.
 
@@ -168,7 +168,7 @@ class Request(RequestBase):
         return self
 
 
-@category.register
+@category.register(Component.observe)
 def observe(
     field: RaggedField,
     *,
@@ -194,7 +194,7 @@ def observe(
     )
 
 
-@category.register
+@category.register(Component.TensorField)
 @tensorclass
 class TensorField(TensorFieldBase[torch.Tensor]):
     state: torch.Tensor
@@ -272,7 +272,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         )
 
 
-@category.register
+@category.register(Component.Embedder)
 class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -341,7 +341,7 @@ class Embedder(EmbedderBase):
         return self.vocab.state
 
 
-@category.register
+@category.register(Component.bind)
 def bind(
     module: Model,
     field: TensorFieldBase,
@@ -374,7 +374,7 @@ def bind(
         )
 
 
-@category.register
+@category.register(Component.learn)
 def learn(
     module: Model,
     observation: TensorDict,
@@ -391,7 +391,7 @@ def learn(
     cast(Counter, embedder.counters[TensorKey.content.name]).learn(cast(torch.Tensor, observation[TensorKey.content]))
 
 
-@category.register
+@category.register(Component.Decoder)
 class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -422,7 +422,7 @@ class Decoder(DecoderBase):
         )
 
 
-@category.register
+@category.register(Component.loss)
 def loss(
     module: Model,
     prediction: Prediction,
@@ -489,14 +489,16 @@ def loss(
                 candidates.topk(k=min(k, size), dim=-1).indices.eq(known_targets.unsqueeze(-1)).any(dim=-1).sum()
                 for k in metric.topk
             ]
-        metric.update(torch.stack((known.sum(), valued.sum(), correct, *topk)), torch.stack((objective, nll)))
+        decoder.metrics.record(
+            module, strata, torch.stack((known.sum(), valued.sum(), correct, *topk)), torch.stack((objective, nll))
+        )
     return loss + objective / known.sum().clamp_min(1)
 
 
 category.callback(VocabularySyncCallback, CounterUpdateCallback, Metrics)
 
 
-@category.register
+@category.register(Component.output)
 def output(module: Model, address: Address) -> pa.StructType:
     candidate = pa.struct(
         [
@@ -508,13 +510,13 @@ def output(module: Model, address: Address) -> pa.StructType:
         [
             pa.field(TensorKey.value.name, pa.large_string()),
             pa.field(TensorKey.probability.name, pa.float32(), nullable=False),
-            pa.field(TensorKey.topk.name, pa.list_(candidate), nullable=False),
+            pa.field(TensorKey.topk.name, pa.list_(pa.field("element", candidate)), nullable=False),
         ]
     )
     return pa.struct([pa.field(TensorKey.content.name, content, nullable=False)])
 
 
-@category.register
+@category.register(Component.write)
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
     content_type = datatype.field(TensorKey.content.name).type
     candidate_type = content_type.field(TensorKey.topk.name).type.value_type
@@ -562,7 +564,9 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
         {
             TensorKey.value.name: best_labels,
             TensorKey.probability.name: array(best_probabilities, pa.float32()),
-            TensorKey.topk.name: variable(candidates, candidate_counts),
+            TensorKey.topk.name: variable(
+                candidates, candidate_counts, datatype=content_type.field(TensorKey.topk.name).type
+            ),
         },
         content_type,
     )

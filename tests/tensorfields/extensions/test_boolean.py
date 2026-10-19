@@ -7,6 +7,7 @@ import torch
 from tensordict import TensorDict
 from torchmetrics import Metric as TorchMetric
 
+import relflow as rf
 from relflow.data.ragged import coalesce
 from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
@@ -24,53 +25,32 @@ from relflow.tensorfields.extensions.boolean import (
 from relflow.tensorfields.extensions.boolean import (
     output as output_type,
 )
-from tests.arrow import batch as arrow_batch
+from tests.arrow import table as arrow_table
 from tests.tensorfields.helpers import tensorize
 
 ADDRESS = "/groups/items/enabled"
 
 
-def _schema(*, threshold: float | list[float] = 0.5, mask: bool | Mask = False) -> Schema:
-    return Schema.model_validate(
-        {
-            "d_model": 8,
-            "fields": {
-                "type": "branch",
-                "fields": [
-                    {
-                        "name": "groups",
-                        "type": "branch",
-                        "length": 2,
-                        "fields": [
-                            {
-                                "name": "items",
-                                "type": "branch",
-                                "length": 3,
-                                "fields": [
-                                    {
-                                        "name": "enabled",
-                                        "type": "boolean",
-                                        "threshold": threshold,
-                                        "mask": mask,
-                                    }
-                                ],
-                            }
-                        ],
-                    }
-                ],
-            },
-        }
+def build_schema(*, threshold: float | list[float] = 0.5, mask: bool | Mask = False) -> Schema:
+    return rf.Schema.from_tree(
+        d_model=8,
+        n_layers=1,
+        n_heads=4,
+        groups=rf.Branch(
+            length=2,
+            items=rf.Branch(length=3, enabled=rf.Boolean(threshold=threshold, mask=mask)),
+        ),
     )
 
 
-def _tensorfield(groups: list[list[list[Any]]], *, schema: Schema, strata: Strata) -> TensorField:
-    batch = arrow_batch(
+def tensorfield(groups: list[list[list[Any]]], *, schema: Schema, strata: Strata) -> TensorField:
+    batch = arrow_table(
         [
             {"groups": [{"items": [{"enabled": value} for value in items]} for items in observation]}
             for observation in groups
         ]
     )
-    projection = coalesce(batch, schema=schema, strata=strata)[ADDRESS]
+    projection = coalesce(batch, schema=schema, strata=strata).fields[ADDRESS]
     return tensorize(
         TensorField,
         projection,
@@ -82,8 +62,8 @@ def _tensorfield(groups: list[list[list[Any]]], *, schema: Schema, strata: Strat
 
 
 def test_boolean_tensorfield_encodes_nested_values_without_vocabulary():
-    schema = _schema()
-    field = _tensorfield(
+    schema = build_schema()
+    field = tensorfield(
         groups=[[[False, True, None], [np.bool_(True)]]],
         schema=schema,
         strata=Strata.train,
@@ -102,15 +82,15 @@ def test_boolean_tensorfield_encodes_nested_values_without_vocabulary():
 
 def test_boolean_tensorfield_rejects_integer_lookalikes():
     with pytest.raises(TypeError, match="does not accept Arrow type int64.*compatible with bool"):
-        _tensorfield(
+        tensorfield(
             groups=[[[1]]],
-            schema=_schema(),
+            schema=build_schema(),
             strata=Strata.train,
         )
 
 
 def test_boolean_embedder_is_vocabulary_free_and_registers_fixed_value_buffer():
-    schema = _schema()
+    schema = build_schema()
     embedder = Embedder(schema=schema, address=ADDRESS)
 
     assert not hasattr(embedder, "vocab")
@@ -124,9 +104,9 @@ def test_boolean_embedder_is_vocabulary_free_and_registers_fixed_value_buffer():
 
 
 def test_boolean_embedder_maps_false_zero_and_true_to_initialized_rows():
-    schema = _schema()
+    schema = build_schema()
     embedder = Embedder(schema=schema, address=ADDRESS)
-    field = _tensorfield(
+    field = tensorfield(
         groups=[[[False, True, None]]],
         schema=schema,
         strata=Strata.train,
@@ -139,7 +119,7 @@ def test_boolean_embedder_maps_false_zero_and_true_to_initialized_rows():
     assert torch.allclose(content_only[0, 0, 0, 2], torch.zeros(schema.d_model))
 
 
-class _TrackingModule:
+class TrackingModule:
     def __init__(self, schema: Schema, embedder: Embedder, decoder: Decoder):
         self.schema = schema
         self.nodes = {ADDRESS: SimpleNamespace(embedder=embedder, decoder=decoder)}
@@ -150,14 +130,15 @@ class _TrackingModule:
         return value
 
 
-def test_boolean_loss_tracks_binary_torchmetrics():
-    schema = _schema(threshold=[0.25, 0.75], mask=True)
-    field = _tensorfield(
+@pytest.mark.parametrize("strata", [Strata.train, Strata.validate])
+def test_boolean_loss_tracks_batch_scores_for_training_and_stateful_evaluation_metrics(strata):
+    schema = build_schema(threshold=[0.25, 0.75], mask=True)
+    field = tensorfield(
         groups=[[[False, True]], [[True, False]]],
         schema=schema,
-        strata=Strata.train,
+        strata=strata,
     )
-    module = _TrackingModule(schema, Embedder(schema, ADDRESS), Decoder(schema, ADDRESS))
+    module = TrackingModule(schema, Embedder(schema, ADDRESS), Decoder(schema, ADDRESS))
     state_logits = torch.zeros(*field.state.shape, len(Tokens))
     content_logits = torch.zeros(*field.content.shape, 1)
     prediction = Prediction(
@@ -168,7 +149,7 @@ def test_boolean_loss_tracks_binary_torchmetrics():
         ),
     )
 
-    result = loss(module, prediction, field, Strata.train)
+    result = loss(module, prediction, field, strata)
 
     assert torch.isfinite(result)
     assert torch.equal(
@@ -193,12 +174,33 @@ def test_boolean_loss_tracks_binary_torchmetrics():
         ),
     }
     for metric_name in expected_names:
-        tracked = module.tracked[(ADDRESS, Strata.train, metric_name, TensorKey.content)]
-        assert isinstance(tracked, TorchMetric)
+        tracked = module.tracked[(ADDRESS, strata, metric_name, TensorKey.content)]
+        assert isinstance(tracked, torch.Tensor if strata == Strata.train else TorchMetric)
+
+
+def test_boolean_training_without_valued_targets_does_not_repeat_previous_batch_scores():
+    schema = build_schema(mask=True)
+    module = TrackingModule(schema, Embedder(schema, ADDRESS), Decoder(schema, ADDRESS))
+    for groups, missing in [([[[False, True]]], False), ([[[None]]], True)]:
+        field = tensorfield(groups=groups, schema=schema, strata=Strata.train)
+        prediction = Prediction(
+            address=ADDRESS,
+            payload=TensorDict(
+                {
+                    TensorKey.state: torch.zeros(*field.state.shape, len(Tokens)),
+                    TensorKey.content: torch.zeros(*field.content.shape, 1),
+                },
+                batch_size=field.batch_size,
+            ),
+        )
+        assert torch.isfinite(loss(module, prediction, field, Strata.train))
+        for metric_name, _ in module.nodes[ADDRESS].decoder.content_metrics(Strata.train):
+            tracked = module.tracked[(ADDRESS, Strata.train, metric_name, TensorKey.content)]
+            assert torch.isnan(tracked) if missing else torch.isfinite(tracked)
 
 
 def test_boolean_embedder_has_state_and_content_counters():
-    embedder = Embedder(schema=_schema(), address=ADDRESS)
+    embedder = Embedder(schema=build_schema(), address=ADDRESS)
 
     assert embedder.counters[TensorKey.state.name].size == len(Tokens)
     assert isinstance(embedder.counters[TensorKey.content.name], BooleanCounter)
@@ -224,13 +226,13 @@ def test_boolean_request_normalizes_scalar_and_ordered_unique_thresholds(
     threshold: float | list[float],
     expected: tuple[float, ...],
 ):
-    request = _schema(threshold=threshold).requests[ADDRESS]
+    request = build_schema(threshold=threshold).requests[ADDRESS]
 
     assert request.thresholds == expected
 
 
 def test_boolean_thresholds_configure_unique_metrics_and_one_auc():
-    decoder = Decoder(_schema(threshold=[0.8, 0.2, 0.8]), ADDRESS)
+    decoder = Decoder(build_schema(threshold=[0.8, 0.2, 0.8]), ADDRESS)
 
     metrics = decoder.metrics[f"{Strata.train.value}_metrics"]
     assert set(metrics) == {Metric.auc.value, "threshold_0", "threshold_1"}
@@ -258,14 +260,14 @@ def test_boolean_thresholds_configure_unique_metrics_and_one_auc():
 
 
 def test_boolean_metrics_ignore_null_and_padded_targets():
-    schema = _schema(mask=True)
-    field = _tensorfield(
+    schema = build_schema(mask=True)
+    field = tensorfield(
         groups=[[[False, True, None]]],
         schema=schema,
         strata=Strata.train,
     )
     decoder = Decoder(schema, ADDRESS)
-    module = _TrackingModule(schema, Embedder(schema, ADDRESS), decoder)
+    module = TrackingModule(schema, Embedder(schema, ADDRESS), decoder)
     content_logits = torch.full((*field.content.shape, 1), 20.0)
     content_logits[..., 0, 0, 0, 0] = -20.0
     prediction = Prediction(
@@ -293,14 +295,14 @@ def test_boolean_metrics_ignore_null_and_padded_targets():
 
 
 def test_boolean_non_valued_batch_only_trains_state_and_does_not_update_content_metrics():
-    schema = _schema(threshold=[0.25, 0.75], mask=True)
-    field = _tensorfield(
+    schema = build_schema(threshold=[0.25, 0.75], mask=True)
+    field = tensorfield(
         groups=[[[None]]],
         schema=schema,
         strata=Strata.train,
     )
     decoder = Decoder(schema, ADDRESS)
-    module = _TrackingModule(schema, Embedder(schema, ADDRESS), decoder)
+    module = TrackingModule(schema, Embedder(schema, ADDRESS), decoder)
     prediction = Prediction(
         address=ADDRESS,
         payload=TensorDict(
@@ -323,7 +325,7 @@ def test_boolean_non_valued_batch_only_trains_state_and_does_not_update_content_
 
 
 def test_boolean_write_preserves_nested_shape_and_emits_true_probability():
-    schema = _schema()
+    schema = build_schema()
     module = SimpleNamespace(schema=schema)
     datatype = output_type(module, ADDRESS)
     state_logits = torch.zeros(1, 1, 2, 3, len(Tokens))
@@ -358,7 +360,7 @@ def test_boolean_write_preserves_nested_shape_and_emits_true_probability():
     ],
 )
 def test_boolean_write_is_independent_of_evaluation_thresholds(thresholds: list[float]):
-    schema = _schema(threshold=thresholds)
+    schema = build_schema(threshold=thresholds)
     module = SimpleNamespace(schema=schema)
     output = write(
         module,

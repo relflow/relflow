@@ -8,6 +8,8 @@ mutation predicates, and the `@preprocess` and `@postprocess` decorators.
 
 from typing import TYPE_CHECKING, Any
 
+from lightning.pytorch.callbacks import EarlyStopping
+
 from relflow import presets as presets
 from relflow._version import __version__
 from relflow.architecture.checkpoint import RollbackCheckpoint
@@ -154,6 +156,7 @@ __all__ = [
     "DuckDBDataModule",
     "DateParts",
     "Enum",
+    "EarlyStopping",
     "DecoderBase",
     "Deployment",
     "EmbedderBase",

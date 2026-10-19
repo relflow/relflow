@@ -14,14 +14,13 @@ from relflow.tensorfields.extensions.hashable import (
     TensorField,
     hashable,
 )
-from tests.arrow import batch as arrow_batch
 from tests.arrow import table
 from tests.tensorfields.helpers import tensorize
 
 ADDRESS = "/items/identifier"
 
 
-def _structure_payload(
+def build_schema(
     *,
     length: int = 2,
     n_hashes: int = 4,
@@ -29,42 +28,28 @@ def _structure_payload(
     offset: int = 2,
     n_buckets: int = 4,
     mask: bool | Mask = False,
-) -> dict:
-    field: dict = {
-        "name": "identifier",
-        "type": "hash",
-        "n_hashes": n_hashes,
-        "n_bands": n_bands,
-        "offset": offset,
-        "n_buckets": n_buckets,
-        "mask": mask,
-    }
-    return {
-        "d_model": 16,
-        "fields": {
-            "type": "branch",
-            "dropout": 0.1,
-            "fields": [
-                {
-                    "name": "items",
-                    "type": "branch",
-                    "length": length,
-                    "fields": [field],
-                }
-            ],
-        },
-    }
+) -> Schema:
+    return rf.Schema.from_tree(
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+        dropout=0.1,
+        items=rf.Branch(
+            length=length,
+            identifier=rf.Hash(n_hashes=n_hashes, n_bands=n_bands, offset=offset, n_buckets=n_buckets, mask=mask),
+        ),
+    )
 
 
-def _new_tensorfield(
+def tensorfield(
     *,
     values: list,
     schema: Schema,
     strata: Strata,
     salt: int = 0,
 ) -> TensorField:
-    batch = arrow_batch([{"items": [{"identifier": value} for value in root]} for (root,) in values])
-    projection = coalesce(batch, schema=schema, strata=strata)[ADDRESS]
+    batch = table([{"items": [{"identifier": value} for value in root]} for (root,) in values])
+    projection = coalesce(batch, schema=schema, strata=strata).fields[ADDRESS]
     return tensorize(
         TensorField,
         projection,
@@ -80,13 +65,7 @@ def _new_tensorfield(
 
 
 def test_hashable_request_defaults_load():
-    payload = _structure_payload()
-    del payload["fields"]["fields"][0]["fields"][0]["n_hashes"]
-    del payload["fields"]["fields"][0]["fields"][0]["n_bands"]
-    del payload["fields"]["fields"][0]["fields"][0]["offset"]
-    del payload["fields"]["fields"][0]["fields"][0]["n_buckets"]
-
-    schema = Schema.model_validate(payload)
+    schema = rf.Schema.from_tree(d_model=16, n_layers=1, n_heads=4, items=rf.Branch(length=2, identifier=rf.Hash))
     request = schema.requests[ADDRESS]
 
     assert request.type == "hash"
@@ -98,19 +77,19 @@ def test_hashable_request_defaults_load():
 
 def test_hashable_request_rejects_non_positive_config():
     with pytest.raises(ValueError):
-        Schema.model_validate(_structure_payload(n_hashes=0))
+        build_schema(n_hashes=0)
     with pytest.raises(ValueError):
-        Schema.model_validate(_structure_payload(n_bands=0))
+        build_schema(n_bands=0)
     with pytest.raises(ValueError):
-        Schema.model_validate(_structure_payload(offset=0))
+        build_schema(offset=0)
     with pytest.raises(ValueError):
-        Schema.model_validate(_structure_payload(n_buckets=1))
+        build_schema(n_buckets=1)
 
 
 def test_hashable_allows_single_slot_length():
     # Hash has no local-vocabulary reidentification objective, so a single
     # slot is a legal configuration.
-    schema = Schema.model_validate(_structure_payload(length=1))
+    schema = build_schema(length=1)
     assert schema.shapes[ADDRESS] == (1, 1)
 
 
@@ -122,21 +101,21 @@ def test_hashable_accepts_only_identifier_atoms():
 
 
 def test_hash_vector_is_deterministic_int64():
-    outputs = _hash_matrix(["alice"], n_hashes=8)[0]
+    outputs = hash_matrix(["alice"], n_hashes=8)[0]
 
     assert outputs.dtype == torch.int64
-    assert torch.equal(outputs, _hash_matrix(["alice"], n_hashes=8)[0])
+    assert torch.equal(outputs, hash_matrix(["alice"], n_hashes=8)[0])
 
 
 def test_hash_vector_channels_are_independent():
-    outputs = _hash_matrix(["alice"], n_hashes=8)[0]
+    outputs = hash_matrix(["alice"], n_hashes=8)[0]
     assert outputs.unique().numel() == outputs.numel()
 
 
 def test_hash_value_preserves_identifier_type_across_batches():
-    integer = _hash_matrix([1], n_hashes=4)[0]
-    string = _hash_matrix(["1"], n_hashes=4)[0]
-    binary = _hash_matrix([b"1"], n_hashes=4)[0]
+    integer = hash_matrix([1], n_hashes=4)[0]
+    string = hash_matrix(["1"], n_hashes=4)[0]
+    binary = hash_matrix([b"1"], n_hashes=4)[0]
 
     assert not torch.equal(integer, string)
     assert not torch.equal(binary, integer)
@@ -144,12 +123,10 @@ def test_hash_value_preserves_identifier_type_across_batches():
 
 
 def test_hash_value_is_consistent_across_arrow_integer_widths():
-    model = rf.Model(
+    model = rf.Model.xs(
         narrow=rf.Hash,
         wide=rf.Hash,
         d_model=8,
-        n_layers=1,
-        n_heads=2,
     )
     inputs = model.encode(
         pa.table(
@@ -167,20 +144,20 @@ def test_hash_value_is_consistent_across_arrow_integer_widths():
 @pytest.mark.parametrize("value", [True, 1.0])
 def test_hashable_rejects_non_identifier_scalars(value):
     with pytest.raises(TypeError, match="extension 'hash'.*does not accept Arrow type"):
-        _hash_matrix([value], n_hashes=4)
+        hash_matrix([value], n_hashes=4)
 
 
 # --- tensorfield content behaviour ------------------------------------------------
 
 
 def test_hashable_tensorfield_content_is_deterministic_across_observations():
-    schema = Schema.model_validate(_structure_payload(n_hashes=4))
+    schema = build_schema(n_hashes=4)
     values = [
         [["alice", "bob"]],
         [["alice", "carol"]],
     ]
 
-    field = _new_tensorfield(
+    field = tensorfield(
         values=values,
         schema=schema,
         strata=Strata.train,
@@ -193,13 +170,13 @@ def test_hashable_tensorfield_content_is_deterministic_across_observations():
 
 
 def test_hashable_tensorfield_zero_pads_nulls_and_padding():
-    schema = Schema.model_validate(_structure_payload(n_hashes=4))
+    schema = build_schema(n_hashes=4)
     values = [
         [["alice", None]],
         [["alice"]],
     ]
 
-    field = _new_tensorfield(
+    field = tensorfield(
         values=values,
         schema=schema,
         strata=Strata.train,
@@ -214,14 +191,14 @@ def test_hashable_tensorfield_zero_pads_nulls_and_padding():
 
 
 def test_hashable_tensorfield_rejects_non_scalar_values():
-    schema = Schema.model_validate(_structure_payload())
+    schema = build_schema()
     values = [
         [[[1, 2], [3, 4]]],
         [[[5, 6], [7, 8]]],
     ]
 
     with pytest.raises(ValueError, match="expects scalar Arrow values"):
-        _new_tensorfield(
+        tensorfield(
             values=values,
             schema=schema,
             strata=Strata.train,
@@ -229,28 +206,28 @@ def test_hashable_tensorfield_rejects_non_scalar_values():
 
 
 def test_hashable_rejects_arrow_struct_values():
-    schema = Schema.model_validate(_structure_payload())
+    schema = build_schema()
     values = [[[{"key": 1}, {"key": 2}]], [[{"key": 3}, {"key": 4}]]]
 
     with pytest.raises(TypeError, match="/items/identifier.*does not accept Arrow type"):
-        _new_tensorfield(values=values, schema=schema, strata=Strata.train)
+        tensorfield(values=values, schema=schema, strata=Strata.train)
 
 
 def test_hashable_reconstruction_projects_targets_before_zeroing_input():
-    schema = Schema.model_validate(_structure_payload(n_hashes=4, mask=Mask(reconstruct=True)))
+    schema = build_schema(n_hashes=4, mask=Mask(reconstruct=True))
     values = [
         [["a", "b"]],
         [["c", "d"]],
     ]
 
-    field = _new_tensorfield(
+    field = tensorfield(
         values=values,
         schema=schema,
         strata=Strata.train,
     )
-    visible = _new_tensorfield(
+    visible = tensorfield(
         values=values,
-        schema=Schema.model_validate(_structure_payload(n_hashes=4)),
+        schema=build_schema(n_hashes=4),
         strata=Strata.train,
     )
 
@@ -263,10 +240,10 @@ def test_hashable_reconstruction_projects_targets_before_zeroing_input():
 # --- injectivity probes -----------------------------------------------------------
 
 
-def _hash_matrix(values, n_hashes: int, *, salt: int = 0) -> torch.Tensor:
+def hash_matrix(values, n_hashes: int, *, salt: int = 0) -> torch.Tensor:
     """Tensorize values into a `(len(values), n_hashes)` integer matrix."""
-    schema = Schema.model_validate(_structure_payload(length=len(values), n_hashes=n_hashes))
-    field = _new_tensorfield(
+    schema = build_schema(length=len(values), n_hashes=n_hashes)
+    field = tensorfield(
         values=[[values]],
         schema=schema,
         strata=Strata.test,
@@ -275,7 +252,7 @@ def _hash_matrix(values, n_hashes: int, *, salt: int = 0) -> torch.Tensor:
     return field.content.reshape(len(values), n_hashes)
 
 
-def _bucket_ids(content: torch.Tensor, n_buckets: int) -> torch.Tensor:
+def bucket_ids(content: torch.Tensor, n_buckets: int) -> torch.Tensor:
     return (
         content.to(dtype=torch.get_default_dtype())
         .div(1 << 63)
@@ -296,7 +273,7 @@ def test_hashable_hashes_never_collide_over_10000_distinct_strings():
     n_hashes = 4
     values = [f"user-{index}" for index in range(10_000)]
 
-    matrix = _hash_matrix(values, n_hashes=n_hashes)
+    matrix = hash_matrix(values, n_hashes=n_hashes)
 
     # Convert each row to a fingerprint tuple; count uniques.
     fingerprints = {tuple(row.tolist()) for row in matrix}
@@ -307,8 +284,8 @@ def test_hashable_hashes_are_stable_across_calls():
     n_hashes = 3
     values = ["alpha", "bravo", "charlie", "delta"]
 
-    matrix_a = _hash_matrix(values, n_hashes=n_hashes)
-    matrix_b = _hash_matrix(values, n_hashes=n_hashes)
+    matrix_a = hash_matrix(values, n_hashes=n_hashes)
+    matrix_b = hash_matrix(values, n_hashes=n_hashes)
 
     assert torch.equal(matrix_a, matrix_b)
 
@@ -322,9 +299,9 @@ def test_hashable_sign_fingerprint_has_bounded_capacity():
     n_buckets = 2
     values = [f"user-{index}" for index in range(500)]
 
-    matrix = _hash_matrix(values, n_hashes=n_hashes)
-    bucket_ids = _bucket_ids(matrix, n_buckets=n_buckets)
-    fingerprints = {tuple(row.tolist()) for row in bucket_ids}
+    matrix = hash_matrix(values, n_hashes=n_hashes)
+    encoded = bucket_ids(matrix, n_buckets=n_buckets)
+    fingerprints = {tuple(row.tolist()) for row in encoded}
 
     assert len(fingerprints) <= n_buckets**n_hashes
     # With 500 inputs into 2**4 = 16 buckets we necessarily observe collisions.
@@ -335,8 +312,8 @@ def test_hashable_more_hashes_increase_sign_fingerprint_capacity():
     values = [f"user-{index}" for index in range(2_000)]
     n_buckets = 2
 
-    small = _bucket_ids(_hash_matrix(values, n_hashes=4), n_buckets=n_buckets)
-    large = _bucket_ids(_hash_matrix(values, n_hashes=16), n_buckets=n_buckets)
+    small = bucket_ids(hash_matrix(values, n_hashes=4), n_buckets=n_buckets)
+    large = bucket_ids(hash_matrix(values, n_hashes=16), n_buckets=n_buckets)
 
     small_uniques = len({tuple(row.tolist()) for row in small})
     large_uniques = len({tuple(row.tolist()) for row in large})
@@ -349,8 +326,8 @@ def test_hashable_more_buckets_increase_fingerprint_capacity():
     values = [f"user-{index}" for index in range(4_000)]
     n_hashes = 4
 
-    coarse = _bucket_ids(_hash_matrix(values, n_hashes=n_hashes), n_buckets=2)
-    fine = _bucket_ids(_hash_matrix(values, n_hashes=n_hashes), n_buckets=16)
+    coarse = bucket_ids(hash_matrix(values, n_hashes=n_hashes), n_buckets=2)
+    fine = bucket_ids(hash_matrix(values, n_hashes=n_hashes), n_buckets=16)
 
     coarse_uniques = len({tuple(row.tolist()) for row in coarse})
     fine_uniques = len({tuple(row.tolist()) for row in fine})
@@ -361,9 +338,9 @@ def test_hashable_more_buckets_increase_fingerprint_capacity():
 
 
 def test_hashable_bucketize_range_is_valid():
-    matrix = _hash_matrix([f"v-{i}" for i in range(2_000)], n_hashes=4)
+    matrix = hash_matrix([f"v-{i}" for i in range(2_000)], n_hashes=4)
     for k in (2, 4, 8, 16):
-        buckets = _bucket_ids(matrix, n_buckets=k)
+        buckets = bucket_ids(matrix, n_buckets=k)
         assert int(buckets.min().item()) >= 0
         assert int(buckets.max().item()) < k
 
@@ -372,11 +349,9 @@ def test_hashable_bucketize_range_is_valid():
 
 
 def test_hashable_embedder_only_learns_state_embeddings():
-    model = rf.Model(
+    model = rf.Model.xs(
         items=rf.Branch(id=rf.Hash(n_hashes=4, n_bands=4, offset=2), length=2),
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         batch_size=2,
     )
     embedder = model.nodes["/items/id"].embedder
@@ -388,7 +363,7 @@ def test_hashable_embedder_only_learns_state_embeddings():
 
 
 def test_hashable_embedder_forward_produces_finite_projections():
-    model = rf.Model(items=rf.Branch(id=rf.Hash(n_hashes=4), length=3), d_model=8, n_layers=1, n_heads=2, batch_size=2)
+    model = rf.Model.xs(items=rf.Branch(id=rf.Hash(n_hashes=4), length=3), d_model=8, batch_size=2)
     inputs = model.encode(
         table(
             [
@@ -409,11 +384,9 @@ def test_hashable_training_loss_covers_state_and_content_heads():
     torch.manual_seed(0)
     n_hashes = 4
     n_buckets = 4
-    model = rf.Model(
+    model = rf.Model.xs(
         items=rf.Branch(id=rf.Hash(n_hashes=n_hashes, n_buckets=n_buckets, mask=rf.Mask(reconstruct=True)), length=3),
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         batch_size=2,
     )
     address = "/items/id"
@@ -438,18 +411,18 @@ def test_hashable_training_loss_covers_state_and_content_heads():
 
 
 def test_hashable_content_target_matches_deterministic_recomputation():
-    schema = Schema.model_validate(_structure_payload(n_hashes=5, length=2, mask=Mask(reconstruct=True)))
+    schema = build_schema(n_hashes=5, length=2, mask=Mask(reconstruct=True))
     values = [[["alice", "bob"]], [["carol", "dave"]]]
 
-    field = _new_tensorfield(
+    field = tensorfield(
         values=values,
         schema=schema,
         strata=Strata.train,
     )
 
-    fresh = _new_tensorfield(
+    fresh = tensorfield(
         values=values,
-        schema=Schema.model_validate(_structure_payload(n_hashes=5, length=2)),
+        schema=build_schema(n_hashes=5, length=2),
         strata=Strata.train,
     )
 
@@ -457,7 +430,7 @@ def test_hashable_content_target_matches_deterministic_recomputation():
 
 
 def test_hashable_decoder_content_head_width_matches_n_hashes():
-    schema = Schema.model_validate(_structure_payload(n_hashes=7, n_buckets=5))
+    schema = build_schema(n_hashes=7, n_buckets=5)
     decoder = Decoder(schema=schema, address=ADDRESS)
 
     assert decoder.n_hashes == 7
@@ -467,9 +440,9 @@ def test_hashable_decoder_content_head_width_matches_n_hashes():
 
 
 def test_hashable_embedder_uses_raw_sinusoidal_content_and_state_embeddings():
-    schema = Schema.model_validate(_structure_payload(n_hashes=3, n_bands=4, offset=2))
+    schema = build_schema(n_hashes=3, n_bands=4, offset=2)
     embedder = Embedder(schema=schema, address=ADDRESS)
-    field = _new_tensorfield(
+    field = tensorfield(
         values=[[["alice", "bob"]]],
         schema=schema,
         strata=Strata.test,
@@ -489,19 +462,17 @@ def test_hashable_embedder_uses_raw_sinusoidal_content_and_state_embeddings():
 # --- identity across fields -------------------------------------------------------
 
 
-def _hashable_model(**kwargs) -> "rf.Model":
-    return rf.Model(
+def hashable_model(**kwargs) -> "rf.Model":
+    return rf.Model.xs(
         items=rf.Branch(id=rf.Hash(n_hashes=4, n_buckets=4, **kwargs), length=2),
         owner=rf.Hash(n_hashes=4, n_buckets=4, **kwargs),
         d_model=16,
-        n_layers=1,
-        n_heads=2,
         batch_size=2,
     )
 
 
 def test_hashable_fields_keep_state_embeddings_and_decoders_local():
-    model = _hashable_model(mask=True)
+    model = hashable_model(mask=True)
     items = model.nodes["/items/id"]
     owner = model.nodes["/owner"]
 
@@ -511,7 +482,7 @@ def test_hashable_fields_keep_state_embeddings_and_decoders_local():
 
 
 def test_hashable_gives_same_input_value_identical_raw_embeddings_across_fields():
-    model = _hashable_model()
+    model = hashable_model()
     inputs = model.encode(
         table(
             [
@@ -533,19 +504,19 @@ def test_hashable_gives_same_input_value_identical_raw_embeddings_across_fields(
 
 
 def test_hash_matrix_rotates_with_salt():
-    baseline = _hash_matrix(["alice", "bob"], n_hashes=4)
-    rotated = _hash_matrix(["alice", "bob"], n_hashes=4, salt=1)
+    baseline = hash_matrix(["alice", "bob"], n_hashes=4)
+    rotated = hash_matrix(["alice", "bob"], n_hashes=4, salt=1)
     assert not torch.equal(baseline, rotated)
-    assert torch.equal(baseline, _hash_matrix(["alice", "bob"], n_hashes=4, salt=0))
+    assert torch.equal(baseline, hash_matrix(["alice", "bob"], n_hashes=4, salt=0))
 
 
 def test_tensorfield_content_reflects_explicit_salt():
-    schema = Schema.model_validate(_structure_payload(length=2, n_hashes=4))
+    schema = build_schema(length=2, n_hashes=4)
     values = [[["alice", "bob"]]]
 
-    field_a = _new_tensorfield(values=values, schema=schema, strata=Strata.train, salt=0)
-    field_b = _new_tensorfield(values=values, schema=schema, strata=Strata.train, salt=1)
-    field_c = _new_tensorfield(values=values, schema=schema, strata=Strata.train, salt=0)
+    field_a = tensorfield(values=values, schema=schema, strata=Strata.train, salt=0)
+    field_b = tensorfield(values=values, schema=schema, strata=Strata.train, salt=1)
+    field_c = tensorfield(values=values, schema=schema, strata=Strata.train, salt=0)
 
     assert not torch.equal(field_a.content, field_b.content)
     assert torch.equal(field_a.content, field_c.content)
@@ -554,7 +525,7 @@ def test_tensorfield_content_reflects_explicit_salt():
 def test_equal_values_stay_matched_within_each_rotating_batch(monkeypatch: pytest.MonkeyPatch):
     from relflow.data import iterables
 
-    model = _hashable_model()
+    model = hashable_model()
     records = table([{"items": [{"id": "alice"}, {"id": "bob"}], "owner": "alice"}])
     salts = iter((1, 2, 3))
     monkeypatch.setattr(iterables.random, "getrandbits", lambda bits: next(salts))
@@ -577,7 +548,7 @@ def test_equal_values_stay_matched_within_each_rotating_batch(monkeypatch: pytes
 def test_inference_uses_stable_unsalted_hashes(strata: Strata, monkeypatch: pytest.MonkeyPatch):
     from relflow.data import iterables
 
-    model = _hashable_model()
+    model = hashable_model()
     records = table([{"items": [{"id": "alice"}, {"id": "bob"}], "owner": "alice"}])
 
     def unexpected_random_salt(bits: int) -> int:

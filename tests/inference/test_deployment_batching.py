@@ -12,7 +12,6 @@ import torch
 
 import relflow as rf
 import relflow.inference.deployment as deployment_module
-from relflow import Model, Number, where
 from relflow.data.processors import apply
 from relflow.inference.deployment import Deployment, ErrorItem
 
@@ -21,20 +20,23 @@ class PredictModel:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
-    def predict(self, source, *, preprocess, postprocess, retain):
+    def predict(self, source, *, preprocess, postprocess, retain, batch_size=None):
         self.calls.append(
             {
                 "source": source,
                 "preprocess": preprocess,
                 "postprocess": postprocess,
                 "retain": retain,
+                "batch_size": batch_size,
             }
         )
         ids = source["id"].combine_chunks()
         inputs = pa.StructArray.from_arrays([ids], names=["id"])
         labels = pa.array([str(value) for value in ids.to_pylist()], type=pa.large_string())
         predictions = pa.StructArray.from_arrays([labels], names=["label"])
-        result = pa.table({"inputs": inputs, "predictions": predictions})
+        result = pa.table({"predictions": predictions})
+        if retain == "*" or "id" in retain:
+            result = result.append_column("inputs", inputs)
         return apply(result, postprocess)
 
 
@@ -99,11 +101,9 @@ def test_batcher_runs_processors_once_for_one_collated_arrow_batch():
         return frame.select("value")
 
     async def run():
-        model = Model(
-            value=Number,
+        model = rf.Model.xs(
+            value=rf.Number,
             d_model=8,
-            n_layers=1,
-            n_heads=2,
             embed=True,
         )
         server = deployment_module.FastAPIRuntime(
@@ -156,8 +156,8 @@ def test_runtime_converts_valid_requests_to_one_arrow_prediction_call():
     assert call["postprocess"] == ()
     assert call["retain"] == ("id",)
     assert outputs == [
-        {"predictions": {"label": "3"}},
-        {"predictions": {"label": "1"}},
+        {"predictions": {"label": "3"}, "inputs": {"id": 3}},
+        {"predictions": {"label": "1"}, "inputs": {"id": 1}},
     ]
 
 
@@ -165,13 +165,52 @@ def test_runtime_predicts_an_arrow_table_without_python_rows():
     model = PredictModel()
     server = runtime(model=model)
 
-    output = server.predict_table(pa.table({"id": [3, 1]}))
+    output = server.predict_table(pa.table({"id": [3, 1]}), batch_size=2)
 
     assert output.to_pylist() == [
         {"predictions": {"label": "3"}},
         {"predictions": {"label": "1"}},
     ]
     assert len(model.calls) == 1
+    assert model.calls[0]["batch_size"] == 2
+
+
+def test_runtime_preserves_embedding_only_outputs_and_invalid_request_slots():
+    vector = pa.list_(pa.field("element", pa.float32(), nullable=False), 4)
+    representation = pa.struct(
+        [
+            ("path", pa.list_(pa.field("element", pa.string()))),
+            ("parents", pa.list_(pa.field("element", pa.int32()))),
+            ("output_index", pa.int32()),
+            pa.field("embedding", vector, nullable=False),
+        ]
+    )
+
+    class EmbeddingModel:
+        def predict(self, source, **kwargs):
+            rows = [
+                [{"path": [], "parents": [], "output_index": 0, "embedding": [float(value), 0.0, 0.0, 0.0]}]
+                for value in source["id"].to_pylist()
+            ]
+            return pa.table({"representations": pa.array(rows, type=pa.list_(pa.field("element", representation)))})
+
+    server = runtime(model=EmbeddingModel())
+
+    outputs = server.predict_payloads([{"id": 2}, "invalid", {"id": 4}])
+
+    assert "predictions" not in outputs[0]
+    assert outputs[0]["representations"][0]["embedding"] == [2.0, 0.0, 0.0, 0.0]
+    assert outputs[1]["predictions"] is None
+    assert outputs[1]["error"]["status_code"] == 422
+    assert outputs[2]["representations"][0]["embedding"] == [4.0, 0.0, 0.0, 0.0]
+
+
+def test_runtime_keeps_user_postprocessor_columns_without_reserved_model_name():
+    @rf.postprocess
+    def rename(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.select(model=pl.col("predictions").struct.field("label"))
+
+    assert runtime(postprocessor=rename).predict_payloads([{"id": 1}]) == [{"model": "1"}]
 
 
 def test_runtime_preserves_request_fields_introduced_after_the_first_row():
@@ -201,7 +240,7 @@ def test_runtime_preserves_request_order_around_validation_errors():
     assert outputs[1]["error"]["status_code"] == 422
     assert "greater than 0" in outputs[1]["error"]["message"]
     assert outputs[2] == {
-        "predictions": {},
+        "predictions": None,
         "error": {"status_code": 422, "message": "each request must be a JSON object, got str"},
     }
     assert outputs[3] == {"predictions": {"label": "4"}}
@@ -209,13 +248,14 @@ def test_runtime_preserves_request_order_around_validation_errors():
 
 def test_runtime_uses_model_output_order_positionally():
     class ReorderingModel(PredictModel):
-        def predict(self, source, *, preprocess, postprocess, retain):
+        def predict(self, source, *, preprocess, postprocess, retain, batch_size=None):
             reversed_source = source.take(pa.array([1, 0], type=pa.int64()))
             return super().predict(
                 reversed_source,
                 preprocess=preprocess,
                 postprocess=postprocess,
                 retain=retain,
+                batch_size=batch_size,
             )
 
     server = runtime(model=ReorderingModel())
@@ -226,13 +266,12 @@ def test_runtime_uses_model_output_order_positionally():
     ]
 
 
-def test_default_response_never_exposes_retained_inputs():
+def test_response_preserves_explicitly_retained_inputs():
     server = runtime(retain=("id",))
 
     output = server.predict_payloads([{"id": 8}])[0]
 
-    assert output == {"predictions": {"label": "8"}}
-    assert "inputs" not in output
+    assert output == {"predictions": {"label": "8"}, "inputs": {"id": 8}}
     assert "identity" not in output
 
 
@@ -328,6 +367,9 @@ def test_runtime_setup_applies_updates_before_device_placement(monkeypatch):
             calls.append(("update", predicates, values))
             return self
 
+        def warn_unbounded(self):
+            calls.append(("warn",))
+
         def to(self, device):
             calls.append(("to", str(device)))
             return self
@@ -338,7 +380,7 @@ def test_runtime_setup_applies_updates_before_device_placement(monkeypatch):
 
     loaded = LoadedModel()
     monkeypatch.setattr(deployment_module.Model, "load", classmethod(lambda cls, checkpoint: loaded))
-    predicate = where("name") == "label"
+    predicate = rf.where("name") == "label"
     server = deployment_module.FastAPIRuntime(
         checkpoint="unused",
         accelerator=deployment_module.Accelerator.cpu,
@@ -349,13 +391,14 @@ def test_runtime_setup_applies_updates_before_device_placement(monkeypatch):
 
     assert calls == [
         ("update", (predicate,), {"target": False}),
+        ("warn",),
         ("to", "cpu"),
         ("eval",),
     ]
 
 
 def test_runtime_setup_uses_an_in_memory_model(monkeypatch):
-    model = Model(amount=Number(), d_model=8, n_layers=1, n_heads=2)
+    model = rf.Model.xs(amount=rf.Number, d_model=8)
     monkeypatch.setattr(
         deployment_module.Model,
         "load",
@@ -416,7 +459,7 @@ def test_deployment_builder_replaces_processor_collections():
     assert deployment._postprocessors == (finish,)
 
 
-@pytest.mark.parametrize("retain", [("id", "id"), ("",), ["id"]])
+@pytest.mark.parametrize("retain", [("id", "id"), ("",), (1,), ([],), "id", ["id"]])
 def test_deployment_rejects_invalid_retention(retain):
     with pytest.raises((TypeError, ValueError, pydantic.ValidationError)):
         Deployment(checkpoint="unused", retain=retain)
@@ -449,72 +492,64 @@ def test_deployment_forge_registers_openapi_signatures():
         "application/json, application/vnd.apache.arrow.stream"
     )
     assert "DeploymentError" in schema["components"]["schemas"]
-    assert schema["components"]["schemas"]["ModelProvenance"] == {
-        "type": "object",
-        "required": ["version", "checkpoint"],
-        "properties": {
-            "version": {
-                "type": "string",
-                "description": "RelFlow version stored in the loaded model checkpoint.",
-            },
-            "checkpoint": {
-                "type": ["string", "null"],
-                "description": "Configured checkpoint filename without its path, or null for an in-memory model.",
-            },
-        },
-    }
+    assert "ModelProvenance" not in schema["components"]["schemas"]
     response_schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
-    assert response_schema["anyOf"][0]["required"] == ["predictions", "model"]
-    assert response_schema["anyOf"][0]["properties"]["model"] == {"$ref": "#/components/schemas/ModelProvenance"}
+    assert response_schema["anyOf"][0]["required"] == ["predictions"]
+    assert "model" not in response_schema["anyOf"][0]["properties"]
+    assert operation["responses"]["200"]["headers"]["X-RelFlow-Prediction-Format"]["example"] == "2"
+    assert "X-RelFlow-Model-Version" in operation["responses"]["200"]["headers"]
+    assert schema["components"]["schemas"]["DeploymentError"]["properties"]["predictions"] == {"type": "null"}
 
 
-def test_runtime_annotates_responses_with_model_provenance():
-    server = runtime()
-    server.model.version = "1.2.3"
-    server.checkpoint = "fraud-model.ckpt"
+def test_runtime_headers_mirror_canonical_metadata_without_checkpoint_paths():
+    server = runtime(model=SimpleNamespace(version="1.2.3"))
 
-    assert server.annotate({"predictions": {"label": "yes"}}) == {
-        "predictions": {"label": "yes"},
-        "model": {"version": "1.2.3", "checkpoint": "fraud-model.ckpt"},
+    assert server.headers() == {
+        "X-RelFlow-Prediction-Format": "2",
+        "X-RelFlow-Model-Version": "1.2.3",
     }
-    output = server.annotate_table(pa.table({"score": [0.75]}))
-    assert output.to_pylist() == [
-        {
-            "score": 0.75,
-            "model": {"version": "1.2.3", "checkpoint": "fraud-model.ckpt"},
-        }
-    ]
 
 
-def test_runtime_reports_only_the_checkpoint_basename_and_null_for_an_in_memory_model():
-    path_server = deployment_module.FastAPIRuntime(
-        checkpoint="/private/models/releases/fraud-v7.ckpt",
-        accelerator=deployment_module.Accelerator.cpu,
-    )
-    path_server.model = SimpleNamespace(version="7.0.0")
-    model = Model(value=Number, d_model=8, n_layers=1, n_heads=2)
-    memory_server = deployment_module.FastAPIRuntime(
-        checkpoint=model,
-        accelerator=deployment_module.Accelerator.cpu,
-    )
-    memory_server.model = model
-
-    assert path_server.provenance() == {"version": "7.0.0", "checkpoint": "fraud-v7.ckpt"}
-    assert memory_server.provenance() == {"version": model.version, "checkpoint": None}
-
-
-def test_deployment_predict_dispatches_arrow_ipc_and_respects_max_batch_size(monkeypatch):
+@pytest.mark.parametrize("empty", [False, True])
+def test_arrow_deployment_batches_processed_rows_and_runs_global_processors_once(monkeypatch, empty):
+    processed = []
+    postprocessed = []
     batches = []
 
-    def predict_table(runtime, source):
-        batches.append(source)
-        runtime.model = SimpleNamespace(version="1.2.3")
-        labels = pa.array([str(value) for value in source["id"].to_pylist()], type=pa.large_string())
-        return pa.table({"predictions": pa.StructArray.from_arrays([labels], names=["label"])})
+    @rf.preprocess(scope="dataset")
+    def prepare(frame: pl.DataFrame) -> pl.DataFrame:
+        processed.append(frame.height)
+        centered = frame.with_columns(value=pl.col("id") - pl.col("id").mean())
+        return pl.concat([centered, centered])
 
-    monkeypatch.setattr(deployment_module.FastAPIRuntime, "predict_table", predict_table)
-    app = Deployment(checkpoint="unused", accelerator="cpu", max_batch_size=2).app()
+    @rf.postprocess
+    def finish(frame: pl.DataFrame) -> pl.DataFrame:
+        postprocessed.append(frame.height)
+        return (
+            frame.select(
+                request_id=pl.col("inputs").struct.field("id"),
+                value=pl.col("inputs").struct.field("value"),
+            )
+            .unique(subset="request_id", maintain_order=True)
+            .with_row_index("row")
+        )
+
+    model = rf.Model.xs(value=rf.Number, d_model=8, embed=True)
+    hook = model.register_forward_pre_hook(lambda module, inputs: batches.append(inputs[0]["/value"].state.shape[0]))
+    monkeypatch.setattr(
+        deployment_module,
+        "mappings",
+        lambda *args, **kwargs: pytest.fail("Arrow deployment entered the Python mapping adapter"),
+    )
+    app = (
+        Deployment(checkpoint=model, accelerator="cpu", max_batch_size=2, retain=("id", "value"))
+        .preprocess(prepare)
+        .postprocess(finish)
+        .app()
+    )
     source = pa.table({"id": [3, 1, 8]})
+    if empty:
+        source = source.slice(0, 0)
     sink = pa.BufferOutputStream()
     with pa.ipc.new_stream(sink, source.schema) as writer:
         writer.write_table(source)
@@ -526,17 +561,69 @@ def test_deployment_predict_dispatches_arrow_ipc_and_respects_max_batch_size(mon
             return sink.getvalue().to_pybytes()
 
     endpoint = next(route.endpoint for route in app.routes if route.path == "/predict")
-    response = asyncio.run(endpoint(Request()))
+
+    async def run():
+        async with app.router.lifespan_context(app):
+            return await endpoint(Request())
+
+    try:
+        response = asyncio.run(run())
+    finally:
+        hook.remove()
 
     assert response.status_code == 200
     assert response.media_type == "application/vnd.apache.arrow.stream"
     output = pa.ipc.open_stream(pa.BufferReader(response.body)).read_all()
-    assert output.to_pylist() == [
-        {"predictions": {"label": "3"}, "model": {"version": "1.2.3", "checkpoint": "unused"}},
-        {"predictions": {"label": "1"}, "model": {"version": "1.2.3", "checkpoint": "unused"}},
-        {"predictions": {"label": "8"}, "model": {"version": "1.2.3", "checkpoint": "unused"}},
-    ]
-    assert [len(batch) for batch in batches] == [2, 1]
+    assert output.select(["row", "request_id", "value"]).to_pydict() == {
+        "row": [] if empty else [0, 1, 2],
+        "request_id": [] if empty else [3, 1, 8],
+        "value": [] if empty else [-1.0, -3.0, 4.0],
+    }
+    assert "model" not in output.column_names
+    assert response.headers["x-relflow-prediction-format"] == "2"
+    assert response.headers["x-relflow-model-version"] == model.version
+    assert processed == [source.num_rows]
+    assert postprocessed == [2 * source.num_rows]
+    assert batches == ([] if empty else [2, 2, 2])
+    assert model.batch_size == 2
+
+
+@pytest.mark.parametrize("stage", ["preprocess", "postprocess"])
+def test_arrow_deployment_rejects_final_prediction_cardinality_drift(stage):
+    @rf.preprocess
+    def drop_inputs(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.head(2)
+
+    @rf.postprocess
+    def drop_outputs(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.head(2)
+
+    model = rf.Model.xs(value=rf.Number, d_model=8, embed=True)
+    deployment = Deployment(checkpoint=model, accelerator="cpu", max_batch_size=2)
+    if stage == "preprocess":
+        deployment.preprocess(drop_inputs)
+    else:
+        deployment.postprocess(drop_outputs)
+    app = deployment.app()
+    source = pa.table({"value": [1.0, 2.0, 3.0]})
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_stream(sink, source.schema) as writer:
+        writer.write_table(source)
+
+    class Request:
+        headers = {"content-type": "application/vnd.apache.arrow.stream"}
+
+        async def body(self):
+            return sink.getvalue().to_pybytes()
+
+    endpoint = next(route.endpoint for route in app.routes if route.path == "/predict")
+
+    async def run():
+        async with app.router.lifespan_context(app):
+            return await endpoint(Request())
+
+    with pytest.raises(ValueError, match="returned 2 rows for 3 valid deployment requests"):
+        asyncio.run(run())
 
 
 def test_deployment_predict_rejects_an_invalid_arrow_stream(monkeypatch):
@@ -621,7 +708,7 @@ def test_multiworker_deployment_rejects_in_process_builder_configuration():
 
 
 def test_deployment_rejects_explicit_checkpoint_and_model():
-    model = Model(amount=Number(), d_model=8, n_layers=1, n_heads=2)
+    model = rf.Model.xs(amount=rf.Number, d_model=8)
 
     with pytest.raises(ValueError, match="pass either checkpoint or model"):
         Deployment(checkpoint="model.ckpt", model=model)
@@ -631,6 +718,6 @@ def test_error_item_is_stable():
     error = ErrorItem(status_code=422, message="bad input")
 
     assert runtime().failure(error) == {
-        "predictions": {},
+        "predictions": None,
         "error": {"status_code": 422, "message": "bad input"},
     }

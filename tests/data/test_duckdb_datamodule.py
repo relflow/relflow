@@ -17,7 +17,7 @@ duckdb = pytest.importorskip("duckdb")
 
 
 def model(batch_size: int = 2) -> rf.Model:
-    return rf.Model(id=rf.Number, d_model=8, n_layers=1, n_heads=4, batch_size=batch_size)
+    return rf.Model.xs(id=rf.Number, d_model=8, batch_size=batch_size)
 
 
 @pytest.fixture
@@ -35,12 +35,10 @@ def database(tmp_path: Path) -> Path:
 
 
 def test_named_splits_bind_parameters_and_preserve_nested_arrow_values(database: Path):
-    configured = rf.Model(
+    configured = rf.Model.xs(
         id=rf.Number,
         line_items=rf.Branch(length=2, amount=rf.Number),
         d_model=8,
-        n_layers=1,
-        n_heads=4,
         batch_size=2,
     )
     data = rf.DuckDBDataModule(
@@ -68,7 +66,7 @@ def test_named_splits_bind_parameters_and_preserve_nested_arrow_values(database:
         assert table["line_items"].to_pylist() == [
             [{"amount": float(value)}, {"amount": value + 0.5}] for value in expected
         ]
-        assert all(set(batch.tensors.keys()) == {"/id", "/line_items/amount"} for batch in batches)
+        assert all(set(batch.tensors.keys()) == {"/", "/id", "/line_items/amount"} for batch in batches)
 
 
 def test_arrow_ingress_chunks_are_rebatched_for_the_model(database: Path):

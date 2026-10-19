@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal, Self, TypeAlias, TypeVar, cast
+from typing import Any, Self, TypeAlias, TypeVar, cast
 
 import fastapi
 import orjson
@@ -25,14 +25,14 @@ from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from relflow.architecture.root import Model
-from relflow.data.arrow import mappings
+from relflow.architecture.runtime import metadata
+from relflow.data.arrow import Retain, mappings, retention
 from relflow.data.processors import Postprocessor, PostprocessorInput, Preprocessor, PreprocessorInput
 from relflow.structs.experiment import NodeAttribute, NodePredicate
 from relflow.structs.tree import Node
 
 Input: TypeAlias = dict[str, Any]
 ModelSource: TypeAlias = str | Path | Model
-Retain: TypeAlias = tuple[str, ...] | Literal["*"]
 UpdateOperation: TypeAlias = tuple[tuple[NodePredicate | NodeAttribute | Callable[[Node], bool], ...], dict[str, Any]]
 DeploymentType = TypeVar("DeploymentType", bound="Deployment")
 JSON_MEDIA_TYPE = "application/json"
@@ -82,22 +82,8 @@ class ErrorItem(pydantic.BaseModel):
     message: str
 
 
-def retention(value: Retain) -> Retain:
-    """Validate the deployment's processed-input retention projection."""
-
-    if value == "*":
-        return value
-    if not isinstance(value, tuple):
-        raise TypeError("retain must be a tuple of top-level column names or '*'")
-    if any(not isinstance(name, str) or not name for name in value):
-        raise TypeError("retain entries must be non-empty strings")
-    if len(set(value)) != len(value):
-        raise ValueError("retain entries must be unique")
-    return value
-
-
 class FastAPIRuntime:
-    """Load one model and predict one valid Arrow microbatch at a time."""
+    """Load one model and predict Arrow inputs for HTTP requests."""
 
     def __init__(
         self,
@@ -112,7 +98,6 @@ class FastAPIRuntime:
         response_signature: type[pydantic.BaseModel] | None = None,
     ) -> None:
         self.model_source = checkpoint
-        self.checkpoint = None if isinstance(checkpoint, Model) else Path(checkpoint).name
         self.accelerator = accelerator
         self.preprocessors = Preprocessor.normalize(preprocessor)
         self.postprocessors = Postprocessor.normalize(postprocessor)
@@ -137,6 +122,7 @@ class FastAPIRuntime:
         model = self.model_source if isinstance(self.model_source, Model) else Model.load(self.model_source)
         for predicates, values in self.update_operations:
             model.update(*predicates, **values)
+        model.warn_unbounded()
 
         self.model = model.to(self.device)
         self.model.eval()
@@ -162,48 +148,29 @@ class FastAPIRuntime:
         """Encode one request-local error using the stable response envelope."""
 
         return {
-            "predictions": {},
+            "predictions": None,
             "error": {
                 "status_code": error.status_code,
                 "message": error.message,
             },
         }
 
-    def provenance(self) -> dict[str, str | None]:
-        """Describe the loaded model without exposing its checkpoint path."""
+    def headers(self) -> dict[str, str]:
+        """Mirror the canonical prediction metadata without repeating it in rows."""
 
+        values = metadata(self.model)
         return {
-            "version": self.model.version,
-            "checkpoint": self.checkpoint,
+            "X-RelFlow-Prediction-Format": values[b"relflow.prediction_format"].decode("utf-8"),
+            "X-RelFlow-Model-Version": values[b"relflow.model_version"].decode("utf-8"),
         }
 
-    def annotate(self, content: dict[str, Any] | list[dict[str, Any]]) -> dict[str, Any] | list[dict[str, Any]]:
-        """Add model provenance to successful JSON response rows."""
+    def predict_table(self, data: pa.Table, *, batch_size: int | None = None) -> pa.Table:
+        """Predict Arrow inputs without changing the selected output columns.
 
-        rows = content if isinstance(content, list) else [content]
-        if any("model" in row for row in rows):
-            raise ValueError("deployment response cannot use reserved field 'model'")
-        provenance = self.provenance()
-        annotated = [{**row, "model": provenance} for row in rows]
-        return annotated if isinstance(content, list) else annotated[0]
-
-    def annotate_table(self, data: pa.Table) -> pa.Table:
-        """Add model provenance to successful Arrow response rows."""
-
-        if "model" in data.column_names:
-            raise ValueError("deployment response cannot use reserved column 'model'")
-        provenance = self.provenance()
-        model = pa.StructArray.from_arrays(
-            [
-                pa.array([provenance["version"]] * data.num_rows, type=pa.string()),
-                pa.array([provenance["checkpoint"]] * data.num_rows, type=pa.string()),
-            ],
-            names=["version", "checkpoint"],
-        )
-        return data.append_column("model", model)
-
-    def predict_table(self, data: pa.Table) -> pa.Table:
-        """Predict one Arrow microbatch without crossing the Python-row boundary."""
+        Serving processors must preserve request identity and order, with one
+        final output row per valid request. The row-count guard detects changed
+        cardinality; processors remain responsible for identity and order.
+        """
 
         if not isinstance(data, pa.Table):
             raise TypeError(f"deployment prediction input must be a pyarrow.Table, got {type(data).__name__}")
@@ -213,6 +180,7 @@ class FastAPIRuntime:
             preprocess=self.preprocessors,
             postprocess=self.postprocessors,
             retain=self.retain,
+            batch_size=batch_size,
         )
         if not isinstance(result, pa.Table):
             raise TypeError(f"Model.predict must return a pyarrow.Table, got {type(result).__name__}")
@@ -220,10 +188,6 @@ class FastAPIRuntime:
             raise ValueError(
                 f"Model.predict returned {result.num_rows} rows for {data.num_rows} valid deployment requests"
             )
-        if not self.postprocessors:
-            if "predictions" not in result.column_names:
-                raise ValueError("canonical model output is missing its 'predictions' column")
-            result = result.select(["predictions"])
         return result
 
     def predict_payloads(self, payloads: list[Any]) -> list[dict[str, Any]]:
@@ -372,8 +336,9 @@ class Deployment(BaseSettings):
 
     Pydantic request signatures validate each item before the valid rows are
     converted into one Arrow table. ``retain`` controls which processed input
-    columns are available to a Polars postprocessor. Deployment responses add
-    loaded-model provenance after application response validation.
+    columns appear in the canonical output and are available to a Polars
+    postprocessor. Model provenance is carried in Arrow metadata and HTTP
+    headers. Processors must preserve request identity, order and cardinality.
 
     Set ``checkpoint`` to a path or provide an in-memory ``model``. Configure
     ``max_batch_size`` and ``batch_timeout`` for microbatching; ``workers`` selects
@@ -576,21 +541,14 @@ class Deployment(BaseSettings):
                         status_code=400,
                     )
 
-                chunks = [
-                    table.slice(offset, self.max_batch_size) for offset in range(0, table.num_rows, self.max_batch_size)
-                ]
-                if not chunks:
-                    chunks = [table]
-                predicted = await asyncio.to_thread(
-                    lambda: pa.concat_tables([runtime.predict_table(chunk) for chunk in chunks])
-                )
-                predicted = runtime.annotate_table(predicted)
+                predicted = await asyncio.to_thread(runtime.predict_table, table, batch_size=self.max_batch_size)
                 sink = pa.BufferOutputStream()
                 with ipc.new_stream(sink, predicted.schema) as writer:
                     writer.write_table(predicted)
                 return fastapi.Response(
                     content=memoryview(sink.getvalue()),
                     media_type=ARROW_MEDIA_TYPE,
+                    headers=runtime.headers(),
                 )
 
             if media_type != JSON_MEDIA_TYPE:
@@ -619,9 +577,9 @@ class Deployment(BaseSettings):
                 )
 
             if isinstance(payload, dict):
-                return json_response(runtime.annotate(await batcher.submit(payload)))
+                return json_response(await batcher.submit(payload), headers=runtime.headers())
             if isinstance(payload, list):
-                return json_response(runtime.annotate(await batcher.submit_many(payload)))
+                return json_response(await batcher.submit_many(payload), headers=runtime.headers())
             return json_response(
                 self.error(
                     status_code=422,
@@ -639,7 +597,7 @@ class Deployment(BaseSettings):
         """Build a transport-level error response."""
 
         return {
-            "predictions": {},
+            "predictions": None,
             "error": {
                 "status_code": status_code,
                 "message": message,
@@ -648,8 +606,6 @@ class Deployment(BaseSettings):
 
     def register(self, app: fastapi.FastAPI) -> None:
         """Register both wire formats and optional Pydantic signatures in OpenAPI."""
-
-        provenance = {"$ref": "#/components/schemas/ModelProvenance"}
 
         def register_model(openapi_schema: dict[str, Any], model: type[pydantic.BaseModel]) -> str:
             schema = model.model_json_schema(ref_template="#/components/schemas/{model}")
@@ -663,17 +619,6 @@ class Deployment(BaseSettings):
 
         def cardinality(item: dict[str, Any]) -> dict[str, Any]:
             return {"anyOf": [item, {"type": "array", "items": item}]}
-
-        def result(item: dict[str, Any]) -> dict[str, Any]:
-            required = list(item.get("required", []))
-            if "model" not in required:
-                required.append("model")
-            return {
-                **item,
-                "type": "object",
-                "required": required,
-                "properties": {**item.get("properties", {}), "model": provenance},
-            }
 
         def schema() -> dict[str, Any]:
             if app.openapi_schema is not None:
@@ -720,36 +665,32 @@ class Deployment(BaseSettings):
             success = operation.setdefault("responses", {}).setdefault("200", {})
             success["description"] = (
                 "Prediction output in the request's media type. JSON output preserves object/array cardinality; "
-                "Arrow output is an IPC stream whose rows remain in input order. Every output row includes the "
-                "loaded model version and checkpoint filename in `model`."
+                "Arrow output is an IPC stream whose rows remain in input order. Selected canonical columns "
+                "are preserved. Model provenance and the prediction format are carried in HTTP headers "
+                "and Arrow schema metadata."
             )
+            success["headers"] = {
+                "X-RelFlow-Prediction-Format": {
+                    "description": "Version of the canonical RelFlow prediction layout.",
+                    "schema": {"type": "string"},
+                    "example": "2",
+                },
+                "X-RelFlow-Model-Version": {
+                    "description": (
+                        "RelFlow version stored in the loaded model. This describes the package/checkpoint "
+                        "version and is not a unique weights fingerprint."
+                    ),
+                    "schema": {"type": "string"},
+                },
+            }
             responses = success.setdefault("content", {})
             components = openapi_schema.setdefault("components", {}).setdefault("schemas", {})
-            components.setdefault(
-                "ModelProvenance",
-                {
-                    "type": "object",
-                    "required": ["version", "checkpoint"],
-                    "properties": {
-                        "version": {
-                            "type": "string",
-                            "description": "RelFlow version stored in the loaded model checkpoint.",
-                        },
-                        "checkpoint": {
-                            "type": ["string", "null"],
-                            "description": (
-                                "Configured checkpoint filename without its path, or null for an in-memory model."
-                            ),
-                        },
-                    },
-                },
-            )
             if self._response_signature is not None:
                 response_name = register_model(openapi_schema, self._response_signature)
                 item = components[response_name]
             else:
                 item = {"type": "object"}
-            response_schema = cardinality(result(item))
+            response_schema = cardinality(item)
             responses[JSON_MEDIA_TYPE] = {"schema": response_schema}
             responses[ARROW_MEDIA_TYPE] = {}
 
@@ -759,7 +700,7 @@ class Deployment(BaseSettings):
                     "type": "object",
                     "required": ["predictions", "error"],
                     "properties": {
-                        "predictions": {"type": "object", "maxProperties": 0},
+                        "predictions": {"type": "null"},
                         "error": {
                             "type": "object",
                             "required": ["status_code", "message"],

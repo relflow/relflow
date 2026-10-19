@@ -25,10 +25,8 @@ def build(kind):
         field = rf.Cluster(bounds=3, revive_temperature=0, **options)
     else:
         field = {"category": rf.Category, "set": rf.Set}[kind](**options)
-    model = rf.Model(
+    model = rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         attention=None,
         reduction=rf.Mean(),
         value=field,
@@ -148,12 +146,12 @@ def test_third_party_resource_owns_subtree_rebuild_without_architecture_changes(
     name = f"growth_mutation_{uuid4().hex}"
     extension = Extension(name=name, types=(float,))
 
-    @extension.register
+    @extension.register(rf.Component.Request)
     class Request(number.Request):
         type: Literal[name] = name
         allocation: int = 2
 
-    @extension.register
+    @extension.register(rf.Component.TensorField)
     class TensorField(number.TensorField):
         pass
 
@@ -168,14 +166,14 @@ def test_third_party_resource_owns_subtree_rebuild_without_architecture_changes(
                 self.table = torch.nn.Embedding(previous.table.num_embeddings, 3)
             return compatible(self.state_dict(), previous.state_dict())
 
-    @extension.register
+    @extension.register(rf.Component.Embedder)
     class Embedder(number.Embedder):
         def __init__(self, schema: rf.Schema, address: rf.Address):
             super().__init__(schema=schema, address=address)
             self.resource = Resource(schema.requests[address].allocation)
 
     try:
-        model = rf.Model(d_model=8, n_layers=1, n_heads=2, value=Request())
+        model = rf.Model.xs(d_model=8, value=Request())
         old = model.nodes[ADDRESS].embedder.resource
         assert isinstance(old, Rebuild)
         old.table = torch.nn.Embedding(7, 3)

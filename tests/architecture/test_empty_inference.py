@@ -7,7 +7,6 @@ import torch
 
 import relflow as rf
 from relflow.architecture.attention import RotaryMultiheadAttention
-from relflow.architecture.encoder import BranchEncoder
 from relflow.architecture.pool import LearnedQueryCrossAttention
 from relflow.structs.enums import TensorKey, Tokens
 from relflow.structs.packages import Parcel
@@ -21,13 +20,8 @@ class Field(TensorFieldBase):
 
 
 def empty_path(kind, batch_size):
-    model = rf.Model(
-        value=rf.Number,
-        answer=rf.Number(mask=True),
-        d_model=8,
-        n_layers=1,
-        n_heads=2,
-    )
+    if kind in {"embedder", "decoder", "branch"}:
+        model = rf.Model.xs(d_model=8, value=rf.Number, answer=rf.Number(mask=True))
     memory = torch.full((batch_size, 3, 8), torch.nan)
     present = torch.zeros(batch_size, 3, dtype=torch.bool)
     match kind:
@@ -56,7 +50,7 @@ def empty_path(kind, batch_size):
             # parameters have never participated in this backward path.
             parameters = tuple(module.pool.parameters())
         case "branch":
-            module = BranchEncoder(model.schema, "/")
+            module = model.nodes["/"].encoder
             parcel = Parcel(
                 payload=memory,
                 present=present,

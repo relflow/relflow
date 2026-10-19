@@ -9,8 +9,8 @@ import pytest
 import relflow as rf
 from relflow.structs.experiment import bind_tree_field
 
-BRANCH_OPTIONS = {"attention", "n_layers", "n_heads", "reduction", "dropout"}
-LEAF_OPTIONS = {"pooling", "n_heads", "n_linear", "dropout", "decoder_position"}
+BRANCH_OPTIONS = {"attention", "n_layers", "n_heads", "ffnx", "reduction", "dropout"}
+LEAF_OPTIONS = {"pooling", "n_heads", "ffnx", "n_linear", "dropout", "decoder_position"}
 
 
 def test_branch_omissions_retain_ordinary_defaults_without_becoming_explicit():
@@ -34,6 +34,8 @@ def test_branch_omissions_retain_ordinary_defaults_without_becoming_explicit():
         ("attention", None),
         ("n_layers", 1),
         ("n_heads", 4),
+        ("ffnx", 8),
+        ("ffnx", 3),
         ("reduction", rf.Attention()),
         ("reduction", rf.Mean()),
         ("reduction", None),
@@ -51,7 +53,7 @@ def test_branch_binding_preserves_explicit_defaults_and_none(option, value):
 
 
 def test_binding_nested_definitions_preserves_leaf_intent_and_original_parents():
-    leaf = rf.Number(pooling="query", n_heads=4, n_linear=1, dropout=None, decoder_position=None)
+    leaf = rf.Number(pooling="query", n_heads=4, ffnx=8, n_linear=1, dropout=None, decoder_position=None)
     inner = rf.Branch(n_layers=1, value=leaf)
     outer = rf.Branch(length=3, entries=inner, category=rf.Category)
     original = outer.model_dump(mode="python")
@@ -80,7 +82,7 @@ def test_extension_subclasses_keep_custom_defaults_and_intent_when_bound():
     generations = count()
     try:
 
-        @extension.register
+        @extension.register(rf.Component.Request)
         class Request(rf.RequestBase):
             type: Literal["field_intent"] = "field_intent"
             generation: int = pydantic.Field(default_factory=lambda: next(generations))
@@ -102,3 +104,22 @@ def test_extension_subclasses_keep_custom_defaults_and_intent_when_bound():
         assert definition.scales == branch.fields[0].scales == [1.0]
     finally:
         rf.TENSORFIELDS.pop("field_intent", None)
+
+
+@pytest.mark.parametrize("constructor", [rf.Model, rf.Model.xs])
+@pytest.mark.parametrize("kind", ["number", "branch", "custom"])
+def test_binding_revalidates_corrupted_reusable_definitions(constructor, kind):
+    class PositiveNumber(rf.Number):
+        scale: float = pydantic.Field(default=1.0, gt=0)
+
+    if kind == "number":
+        definition, option = rf.Number(), "n_bands"
+    elif kind == "branch":
+        definition, option = rf.Branch(value=rf.Number), "length"
+    else:
+        definition, option = PositiveNumber(), "scale"
+    setattr(definition, option, 0)
+
+    with pytest.raises(ValueError, match=option):
+        constructor(d_model=8, n_layers=1, n_heads=2, value=definition)
+    assert getattr(definition, option) == 0

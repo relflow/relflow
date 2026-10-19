@@ -24,10 +24,8 @@ def build(kind):
     request = (
         rf.Cluster(bounds=3, revive_temperature=0.0, **options) if kind == "cluster" else REQUESTS[kind](**options)
     )
-    return rf.Model(
+    return rf.Model.xs(
         d_model=8,
-        n_layers=1,
-        n_heads=2,
         attention=None,
         reduction=rf.Mean(),
         batch_size=2,
@@ -354,15 +352,15 @@ def test_late_registered_category_subclass_uses_its_registered_bind_component():
     calls = []
     try:
 
-        @extension.register
+        @extension.register(rf.Component.Request)
         class Request(rf.Category):
             type: Literal["vocabulary_growth_label"] = "vocabulary_growth_label"
 
         for component, implementation in category.components.items():
             if component not in {rf.Component.Request, rf.Component.bind}:
-                extension.register(implementation, component)
+                extension.register(component, implementation)
 
-        @extension.register
+        @extension.register(rf.Component.bind)
         def bind(module, field, observation, binding, *, address, strata, resize):
             assert module.schema.requests[address].type == name
             assert isinstance(binding, VocabularyBatch)
@@ -371,10 +369,8 @@ def test_late_registered_category_subclass_uses_its_registered_bind_component():
                 module, field, observation, binding, address=address, strata=strata, resize=resize
             )
 
-        model = rf.Model(
+        model = rf.Model.xs(
             d_model=8,
-            n_layers=1,
-            n_heads=2,
             value=Request(p_unavailable=0.0, mask=True),
         )
         fields = model.encode(table("category", ["a", "b", "c"]), strata="train")
@@ -436,7 +432,6 @@ class TrainingTrace(Callback):
 @pytest.mark.parametrize("workers", [0, 2], ids=["main-process", "persistent-workers"])
 def test_one_fit_admits_late_labels_without_restarting_epoch_or_optimizer(kind, workers, tmp_path):
     model = build(kind)
-    model.optimizer = rf.adamw(learning_rate=1e-3)
     labels = ["a", "b", "c", "a", "d", "e", "f", "b"]
     data = rf.ArrowDataModule(
         model=model,
@@ -448,24 +443,24 @@ def test_one_fit_admits_late_labels_without_restarting_epoch_or_optimizer(kind, 
         pin_memory=False,
     )
     trace = TrainingTrace(kind)
-    trainer = Trainer(
+    model.fit(
+        data,
+        learning_rate=1e-3,
+        early_stopping=False,
+        rollback=False,
         accelerator="cpu",
         devices=1,
+        precision="32-true",
         max_epochs=1,
         limit_train_batches=4,
         limit_val_batches=1,
         num_sanity_val_steps=0,
         reload_dataloaders_every_n_epochs=0,
-        logger=False,
-        enable_checkpointing=False,
         enable_progress_bar=False,
-        enable_model_summary=False,
         callbacks=[trace],
         default_root_dir=tmp_path,
     )
-    trainer.fit(model, datamodule=data)
-
-    assert trainer.global_step == 4
+    assert model.trainer.global_step == 4
     assert [(epoch, index) for epoch, index, _ in trace.batches] == [(0, index) for index in range(4)]
     consumed = [label for _, _, batch_labels in trace.batches for label in batch_labels]
     assert Counter(consumed) == Counter(labels)

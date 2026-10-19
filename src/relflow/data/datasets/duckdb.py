@@ -11,7 +11,8 @@ from typing import Any, TypeAlias
 import pyarrow as pa
 
 import relflow
-from relflow.data.datasets.arrow import ArrowDataModule, ArrowUnit, Retain, splits
+from relflow.data.arrow import Retain
+from relflow.data.datasets.arrow import ArrowDataModule, ArrowUnit, splits
 from relflow.data.datasets.base import StratumConfig
 from relflow.data.processors import PreprocessorInput
 from relflow.structs.enums import Strata
@@ -48,7 +49,7 @@ class Query:
                 statements = connection.extract_statements(self.sql)
                 if len(statements) != 1 or statements[0].type != duckdb.StatementType.SELECT:
                     raise ValueError(f"{self.strata} DuckDB source requires exactly one SELECT query, including a CTE")
-                with connection.execute(self.sql, self.parameters).to_arrow_reader(self.rows) as reader:
+                with connection.sql(self.sql, params=self.parameters).to_arrow_reader(self.rows) as reader:
                     emitted = False
                     for batch in reader:
                         emitted = True
@@ -92,7 +93,6 @@ class DuckDBDataModule(ArrowDataModule):
         seed: int = 0,
         shuffle: StratumConfig[bool | None] = None,
         sample: StratumConfig[float] = 1.0,
-        replacement: StratumConfig[bool] = False,
         epoch_size: StratumConfig[int | None] = None,
         shuffle_rows: StratumConfig[int | None] = None,
         drop_last: StratumConfig[bool] = False,
@@ -154,7 +154,6 @@ class DuckDBDataModule(ArrowDataModule):
             seed=seed,
             shuffle=shuffle,
             sample=sample,
-            replacement=replacement,
             epoch_size=epoch_size,
             shuffle_rows=shuffle_rows,
             drop_last=drop_last,
