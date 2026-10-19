@@ -82,6 +82,11 @@ Fitting includes early stopping and restoration of the best validation model.
 Configure AdamW directly on `fit`; each call starts with the current model
 parameters and fresh optimization state. Hardware, logging, and Lightning
 options can also be supplied to the model methods.
+Add `callbacks=[rf.EMA(decay=0.99)]` to `fit` to evaluate and select checkpoints
+using averaged learned parameters. Full checkpoints retain live weights and
+optimizer state for resuming with the same callback through `ckpt_path`.
+Parameter replacement starts a new average for that tensor, so vocabulary row
+growth and reordering preserve the extension's current values.
 Predictions are an Arrow table: decoded results use schema field names such as
 `predictions.disputed`, and repeated branches become lists of records. Requested
 embeddings appear separately in `representations`. Retention adds an `inputs`
