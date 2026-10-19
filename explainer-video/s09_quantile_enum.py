@@ -3,11 +3,21 @@ from __future__ import annotations
 import math
 
 import numpy as np
-
 from explainer import *  # noqa: F403
 from videos.ml.relflow.common import (
-    D, Mono, Plot, chip, code, label, mtex, note, proof_tag, real_tag, show_episode_card, tile,
+    D,
+    Mono,
+    Plot,
+    code,
+    label,
+    mtex,
+    proof_tag,
+    real_tag,
+    show_episode_card,
+    tile,
+    vector_strip,
 )
+from videos.ml.relflow.story import transmit
 
 
 def ordinal(n: int) -> str:
@@ -33,8 +43,18 @@ class QuantileEnum(VoiceoverScene):
     def problem(self):
         q = self.d["quantile"]
         vals = np.array(q["values_sample"])
-        pl = Plot((0.5, 1e5), (0, 1), width=11.0, height=1.2, log_x=True, x_ticks=[1, 10, 100, 1e3, 1e4, 1e5],
-                  y_ticks=[], x_fmt=log_ticks, font_size=24, grid=False).move_to(UP * 1.6)
+        pl = Plot(
+            (0.5, 1e5),
+            (0, 1),
+            width=11.0,
+            height=1.2,
+            log_x=True,
+            x_ticks=[1, 10, 100, 1e3, 1e4, 1e5],
+            y_ticks=[],
+            x_fmt=log_ticks,
+            font_size=24,
+            grid=False,
+        ).move_to(UP * 1.6)
         pl.y_axis.set_opacity(0)
         rng = np.random.default_rng(0)
         dots = VGroup(*[pl.dot(v, 0.15 + 0.7 * rng.random(), color=C.NUMBER, radius=0.03, opacity=0.6) for v in vals])
@@ -43,14 +63,32 @@ class QuantileEnum(VoiceoverScene):
         zl = NumberLine(x_range=[-1, 40, 5], length=11.0, include_numbers=True, font_size=22, color=GREY_B)
         zl.move_to(DOWN * 1.7)
         z = (vals - q["number_mean"]) / q["number_std"]
-        zdots = VGroup(*[Dot(zl.n2p(min(v, 40)), radius=0.03, color=C.NUMBER, fill_opacity=0.5)
-                         .shift(UP * (0.12 + 0.4 * rng.random())) for v in z])
+        zdots = VGroup(
+            *[
+                Dot(zl.n2p(min(v, 40)), radius=0.03, color=C.NUMBER, fill_opacity=0.5).shift(
+                    UP * (0.12 + 0.4 * rng.random())
+                )
+                for v in z
+            ]
+        )
         zt = label(r"the same amounts as \texttt{rf.Number} sees them: $(x - \mu)/\sigma$", font_size=24, color=GREY_A)
         zt.next_to(zl, DOWN, buff=0.45)
-        stats = label(rf"$\mu = {q['number_mean']:.0f}$, $\sigma = {q['number_std']:,.0f}$".replace(",", "{,}"),
-                      font_size=28).next_to(zl, UP, buff=0.9).to_edge(RIGHT, buff=0.6)
-        crowd = label(rf"{q['share_within_tenth_sd'] * 100:.0f}\% within $0.1\,\sigma$ of the mean", font_size=26,
-                      color=YELLOW).next_to(zl.n2p(0), UP, buff=0.75).shift(RIGHT * 2.2)
+        stats = (
+            label(
+                rf"$\mu = {q['number_mean']:.0f}$, $\sigma = {q['number_std']:,.0f}$".replace(",", "{,}"), font_size=28
+            )
+            .next_to(zl, UP, buff=0.9)
+            .to_edge(RIGHT, buff=0.6)
+        )
+        crowd = (
+            label(
+                rf"{q['share_within_tenth_sd'] * 100:.0f}\% within $0.1\,\sigma$ of the mean",
+                font_size=26,
+                color=YELLOW,
+            )
+            .next_to(zl.n2p(0), UP, buff=0.75)
+            .shift(RIGHT * 2.2)
+        )
         tag = real_tag(r"real field statistics from a trained model, relflow 0.2.3")
         with self.voiceover(
             "Some numbers are badly behaved. <bookmark mark='a'/> Here are four thousand amounts, spread over five "
@@ -77,21 +115,43 @@ class QuantileEnum(VoiceoverScene):
     def ranks(self):
         q = self.d["quantile"]
         probe, ranks = np.array(q["probe"]), np.array(q["ranks"])
-        pl = Plot((0.5, 1e5), (0, 1), width=8.0, height=4.4, log_x=True, x_ticks=[1, 10, 100, 1e3, 1e4, 1e5],
-                  y_ticks=[0, 0.25, 0.5, 0.75, 1.0], x_fmt=log_ticks, font_size=22).move_to(LEFT * 1.9 + DOWN * 0.35)
+        pl = Plot(
+            (0.5, 1e5),
+            (0, 1),
+            width=8.0,
+            height=4.4,
+            log_x=True,
+            x_ticks=[1, 10, 100, 1e3, 1e4, 1e5],
+            y_ticks=[0, 0.25, 0.5, 0.75, 1.0],
+            x_fmt=log_ticks,
+            font_size=22,
+        ).move_to(LEFT * 1.9 + DOWN * 0.35)
         curve = pl.line(probe, ranks, C.NUMBER, 4)
         xt = pl.x_title(r"amount", font_size=22)
         yt = label(r"\texttt{rf.Quantile}: the amount's percentile", font_size=24, color=C.NUMBER)
         yt.next_to(pl, UP, buff=0.2).align_to(pl, LEFT)
-        rows = VGroup(*[
-            VGroup(Mono(f"{m:>6,}", font_size=22), Mono("->", font_size=22, color=GREY_B),
-                   Mono(f"{r:.2f}", font_size=22, color=C.NUMBER),
-                   Mono(f"(Number: {zv:+.3f})", font_size=18, color=GREY_B)).arrange(RIGHT, buff=0.2)
-            for m, r, zv in zip(q["marks"], q["mark_ranks"], q["mark_standardized"])
-        ]).arrange(DOWN, aligned_edge=LEFT, buff=0.2).to_edge(RIGHT, buff=0.35).shift(DOWN * 0.2)
+        rows = (
+            VGroup(
+                *[
+                    VGroup(
+                        Mono(f"{m:>6,}", font_size=22),
+                        Mono("->", font_size=22, color=GREY_B),
+                        Mono(f"{r:.2f}", font_size=22, color=C.NUMBER),
+                        Mono(f"(Number: {zv:+.3f})", font_size=18, color=GREY_B),
+                    ).arrange(RIGHT, buff=0.2)
+                    for m, r, zv in zip(q["marks"], q["mark_ranks"], q["mark_standardized"])
+                ]
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.2)
+            .to_edge(RIGHT, buff=0.35)
+            .shift(DOWN * 0.2)
+        )
         dots = VGroup(*[pl.dot(m, r, color=YELLOW, radius=0.06) for m, r in zip(q["marks"], q["mark_ranks"])])
-        digest = label(rf"a t-digest of the training values, kept as Arrow data: compression {q['compression']}",
-                       font_size=22, color=GREY_A).to_edge(DOWN, buff=0.35)
+        digest = label(
+            rf"a t-digest of the training values, kept as Arrow data: compression {q['compression']}",
+            font_size=22,
+            color=GREY_A,
+        ).to_edge(DOWN, buff=0.35)
         clip = label(r"beyond the largest value seen: 1", font_size=20, color=GREY_A).next_to(dots[-1], UP, buff=0.2)
         tag = real_tag(r"real percentiles from relflow's digest", corner=UR)
         assert abs(q["mark_ranks"][2] - 0.5) < 0.05 and q["mark_ranks"][-1] == 1.0
@@ -110,8 +170,11 @@ class QuantileEnum(VoiceoverScene):
             vo.wait_until("d")
             self.play(FadeIn(digest))
             vo.wait_until("m")
-            self.play(LaggedStart(*[FadeIn(r, shift=LEFT * 0.1) for r in rows[:4]], lag_ratio=0.3),
-                      FadeIn(dots[:4]), run_time=1.6)
+            self.play(
+                LaggedStart(*[FadeIn(r, shift=LEFT * 0.1) for r in rows[:4]], lag_ratio=0.3),
+                FadeIn(dots[:4]),
+                run_time=1.6,
+            )
             vo.wait_until("o")
             self.play(FadeIn(rows[4:]), FadeIn(dots[4:]), FadeIn(clip))
         self.wait(0.4)
@@ -122,14 +185,33 @@ class QuantileEnum(VoiceoverScene):
         q = self.d["quantile"]
         freqs = q["frequencies"]
         assert len(freqs) == 8 and abs(freqs[0] - math.pi) < 1e-5
-        pl = Plot((0, 1), (-1, 1), width=9.0, height=3.4, x_ticks=[0, 0.25, 0.5, 0.75, 1], y_ticks=[-1, 0, 1],
-                  font_size=22).move_to(DOWN * 0.6)
+        pl = Plot(
+            (0, 1), (-1, 1), width=9.0, height=3.4, x_ticks=[0, 0.25, 0.5, 0.75, 1], y_ticks=[-1, 0, 1], font_size=22
+        ).move_to(DOWN * 0.6)
         xs = np.linspace(0, 1, 300)
-        waves = VGroup(*[pl.line(xs, np.sin(f * xs), interpolate_color(ManimColor(C.NUMBER), ManimColor(C.EMBED), k / 7),
-                                 2.2) for k, f in enumerate(freqs)])
-        f = mtex(r"p \;\mapsto\; \big[\,p,\ \sin(k\pi p),\ \cos(k\pi p)\,\big]_{k=1}^{8}"
-                 r"\;\to\; \text{linear} + \text{state}", font_size=34).to_edge(UP, buff=0.6)
+        waves = VGroup(
+            *[
+                pl.line(xs, np.sin(f * xs), interpolate_color(ManimColor(C.NUMBER), ManimColor(C.EMBED), k / 7), 2.2)
+                for k, f in enumerate(freqs)
+            ]
+        )
+        f = mtex(
+            r"p \;\mapsto\; \big[\,p,\ \sin(k\pi p),\ \cos(k\pi p)\,\big]_{k=1}^{8}"
+            r"\;\to\; \text{linear} + \text{state}",
+            font_size=34,
+        ).to_edge(UP, buff=0.6)
         xt = pl.x_title(r"percentile $p$", font_size=22)
+        marker = Line(pl.c2p(0.2, -1), pl.c2p(0.2, 1), color=YELLOW, stroke_width=2)
+        samples = VGroup(*[Dot(pl.c2p(0.2, np.sin(f * 0.2)), radius=0.045, color=YELLOW) for f in freqs])
+        features = vector_strip(
+            np.r_[0.2, np.sin(np.array(freqs) * 0.2), np.cos(np.array(freqs) * 0.2)],
+            C.EMBED,
+            cell=0.17,
+            gap=0.025,
+            direction=RIGHT,
+            vmax=1,
+        ).move_to(UP * 2.0)
+        readout = Mono("p = 0.20", font_size=21, color=YELLOW).next_to(features, RIGHT, buff=0.3)
         with self.voiceover(
             "Then the percentile becomes a vector, much like a Number does: <bookmark mark='f'/> the percentile "
             "itself, plus eight sine and cosine pairs at frequencies of one to eight times pi, <bookmark mark='w'/> "
@@ -141,26 +223,64 @@ class QuantileEnum(VoiceoverScene):
             vo.wait_until("w")
             self.play(Create(pl), FadeIn(xt))
             self.play(LaggedStart(*[Create(w) for w in waves], lag_ratio=0.15), run_time=2.0)
-        self.play(FadeOut(VGroup(f, pl, xt, waves)))
+            self.play(Create(marker), FadeIn(samples), FadeIn(features), FadeIn(readout))
+            for value in (0.5, 0.8):
+                readout.become(Mono(f"p = {value:.2f}", font_size=21, color=YELLOW).move_to(readout))
+                self.play(
+                    Transform(marker, Line(pl.c2p(value, -1), pl.c2p(value, 1), color=YELLOW, stroke_width=2)),
+                    Transform(
+                        samples,
+                        VGroup(*[Dot(pl.c2p(value, np.sin(f * value)), radius=0.045, color=YELLOW) for f in freqs]),
+                    ),
+                    Transform(
+                        features,
+                        vector_strip(
+                            np.r_[value, np.sin(np.array(freqs) * value), np.cos(np.array(freqs) * value)],
+                            C.EMBED,
+                            cell=0.17,
+                            gap=0.025,
+                            direction=RIGHT,
+                            vmax=1,
+                        ).move_to(features),
+                    ),
+                    run_time=1.2,
+                )
+        self.play(FadeOut(VGroup(f, pl, xt, waves, marker, samples, features, readout)))
 
     # ------------------------------------------------------------------
     def tradeoff(self):
         m = D("proofs")["metrics"]["P077"]["input_tasks"]
         nc, qc = m["amount_number_contaminated"], m["amount_quantile_contaminated"]
         head = label(r"P077: predict an amount from a contaminated input", font_size=28).to_edge(UP, buff=0.7)
-        rows = [(r"error, central values", nc["central_rmse"], qc["central_rmse"]),
-                (r"error, the tails", nc["tail_rmse"], qc["tail_rmse"])]
+        rows = [
+            (r"error, central values", nc["central_rmse"], qc["central_rmse"]),
+            (r"error, the tails", nc["tail_rmse"], qc["tail_rmse"]),
+        ]
         g = VGroup()
         for i, (t, a, b) in enumerate(rows):
-            g.add(VGroup(label(t, font_size=26, color=GREY_A).move_to([-4.0, 1.0 - 0.9 * i, 0], aligned_edge=LEFT),
-                         label(f"{a:.2f}", font_size=30, color=C.NUMBER if a < b else GREY_B).move_to([1.2, 1.0 - 0.9 * i, 0]),
-                         label(f"{b:.2f}", font_size=30, color=C.CATEGORY if b < a else GREY_B).move_to([4.0, 1.0 - 0.9 * i, 0])))
-        heads = VGroup(label(r"\texttt{rf.Number}", font_size=26, color=C.NUMBER).move_to([1.2, 1.9, 0]),
-                       label(r"\texttt{rf.Quantile}", font_size=26, color=C.CATEGORY).move_to([4.0, 1.9, 0]))
-        rule = VGroup(
-            label(r"Quantile: when a value's position matters more than its size", font_size=26),
-            label(r"Number: when magnitude matters, including beyond anything seen", font_size=26),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.2).to_edge(DOWN, buff=0.9)
+            g.add(
+                VGroup(
+                    label(t, font_size=26, color=GREY_A).move_to([-4.0, 1.0 - 0.9 * i, 0], aligned_edge=LEFT),
+                    label(f"{a:.2f}", font_size=30, color=C.NUMBER if a < b else GREY_B).move_to(
+                        [1.2, 1.0 - 0.9 * i, 0]
+                    ),
+                    label(f"{b:.2f}", font_size=30, color=C.CATEGORY if b < a else GREY_B).move_to(
+                        [4.0, 1.0 - 0.9 * i, 0]
+                    ),
+                )
+            )
+        heads = VGroup(
+            label(r"\texttt{rf.Number}", font_size=26, color=C.NUMBER).move_to([1.2, 1.9, 0]),
+            label(r"\texttt{rf.Quantile}", font_size=26, color=C.CATEGORY).move_to([4.0, 1.9, 0]),
+        )
+        rule = (
+            VGroup(
+                label(r"Quantile: when a value's position matters more than its size", font_size=26),
+                label(r"Number: when magnitude matters, including beyond anything seen", font_size=26),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.2)
+            .to_edge(DOWN, buff=0.9)
+        )
         tag = proof_tag(r"P077, P068")
         assert qc["central_rmse"] < nc["central_rmse"] and qc["tail_rmse"] > nc["tail_rmse"]
         with self.voiceover(
@@ -183,25 +303,38 @@ class QuantileEnum(VoiceoverScene):
     def enum(self):
         e = self.d["enum"]
         c = code('tier=rf.Enum(values=("bronze", "silver", "gold"))', font_size=22).to_edge(UP, buff=0.6)
+
         def table(labels, counts, color, title_):
             rows = VGroup()
             for lab in labels:
                 n = counts.get(lab) if counts else None
-                rows.add(VGroup(tile(color, 0.34, fill=0.85 if (n is None or n) else 0.3),
-                                Mono(lab, font_size=22, color=WHITE if (n is None or n) else GREY_B),
-                                Mono("" if n is None else f"{n} seen", font_size=18, color=GREY_A))
-                         .arrange(RIGHT, buff=0.2))
+                rows.add(
+                    VGroup(
+                        tile(color, 0.34, fill=0.85 if (n is None or n) else 0.3),
+                        Mono(lab, font_size=22, color=WHITE if (n is None or n) else GREY_B),
+                        Mono("" if n is None else f"{n} seen", font_size=18, color=GREY_A),
+                    ).arrange(RIGHT, buff=0.2)
+                )
             rows.arrange(DOWN, aligned_edge=LEFT, buff=0.18)
             t = label(title_, font_size=24, color=color).next_to(rows, UP, buff=0.3)
             return VGroup(t, rows)
+
         enum_t = table(e["values"], e["counts"], C.CATEGORY, r"\texttt{Enum}: rows fixed by the declaration")
         cat_t = table(e["category_labels"], {}, C.CATEGORY, r"\texttt{Category}: rows only for labels seen")
         VGroup(enum_t, cat_t).arrange(RIGHT, buff=1.6, aligned_edge=UP).move_to(UP * 0.1)
         first, _, rest = e["error"].partition("; ")
-        err = VGroup(label(r"an undeclared value is an error, not an unknown:", font_size=24),
-                     Mono(first + ";", font_size=17, color=RED_B), Mono(rest, font_size=17, color=RED_B))
+        err = VGroup(
+            label(r"an undeclared value is an error, not an unknown:", font_size=24),
+            Mono(first + ";", font_size=17, color=RED_B),
+            Mono(rest, font_size=17, color=RED_B),
+        )
         err.arrange(DOWN, aligned_edge=LEFT, buff=0.12).to_edge(DOWN, buff=0.6)
         tag = real_tag(r"real model trained on bronze and silver only", corner=UR)
+        observations = (
+            VGroup(Mono("bronze", font_size=22, color=C.CATEGORY), Mono("silver", font_size=22, color=C.CATEGORY))
+            .arrange(RIGHT, buff=0.6)
+            .move_to(DOWN * 1.75)
+        )
         assert e["counts"]["gold"] == 0 and e["rows"] == 3 and "gold" not in e["category_labels"]
         with self.voiceover(
             "Labels have a similar choice. A Category learns its vocabulary while it trains, so new labels can "
@@ -216,21 +349,31 @@ class QuantileEnum(VoiceoverScene):
             vo.wait_until("e")
             self.play(Indicate(c, color=WHITE, scale_factor=1.03))
             vo.wait_until("t")
-            self.play(FadeIn(enum_t, lag_ratio=0.1), FadeIn(tag))
+            self.play(FadeIn(enum_t, lag_ratio=0.1), FadeIn(tag), FadeIn(observations))
+            for i in range(2):
+                transmit(self, [observations[i]], enum_t[1][i], C.CATEGORY, run_time=0.5)
             vo.wait_until("c")
             self.play(FadeIn(cat_t, lag_ratio=0.1))
+            for i in range(2):
+                transmit(self, [observations[i]], cat_t[1][i], C.CATEGORY, run_time=0.5)
             vo.wait_until("x")
             self.play(FadeIn(err, shift=UP * 0.1))
-        self.play(FadeOut(VGroup(c, enum_t, cat_t, err, tag)))
+        self.play(FadeOut(VGroup(c, enum_t, cat_t, err, tag, observations)))
 
     # ------------------------------------------------------------------
     def enum_evidence(self):
         text = VGroup(
             label(r"a declared label is structural support, not knowledge", font_size=30),
-            label(r"P070: a class withheld from training is never predicted correctly at first;", font_size=24,
-                  color=GREY_A),
-            label(r"after training continues with its examples, it is, and the output head never changes", font_size=24,
-                  color=GREY_A),
+            label(
+                r"P070: a class withheld from training is never predicted correctly at first;",
+                font_size=24,
+                color=GREY_A,
+            ),
+            label(
+                r"after training continues with its examples, it is, and the output head never changes",
+                font_size=24,
+                color=GREY_A,
+            ),
         ).arrange(DOWN, buff=0.3)
         tag = proof_tag(r"P070")
         with self.voiceover(

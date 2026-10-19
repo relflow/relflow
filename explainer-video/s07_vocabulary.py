@@ -1,10 +1,18 @@
 from __future__ import annotations
 
-import numpy as np
-
 from explainer import *  # noqa: F403
 from videos.ml.relflow.common import (
-    D, Mono, Plot, chip, label, mtex, note, real_tag, schematic_tag, show_episode_card, state_tile,
+    D,
+    Mono,
+    Plot,
+    chip,
+    label,
+    mtex,
+    note,
+    real_tag,
+    schematic_tag,
+    show_episode_card,
+    state_tile,
 )
 
 
@@ -12,8 +20,16 @@ def table_rows(n, filled, cell_w=1.7, cell_h=0.3, color=C.CATEGORY) -> VGroup:
     rows = VGroup()
     for i in range(n):
         on = i < filled
-        rows.add(Rectangle(width=cell_w, height=cell_h, stroke_color=color if on else GREY_D, stroke_width=1,
-                           fill_color=color, fill_opacity=0.55 if on else 0.05))
+        rows.add(
+            Rectangle(
+                width=cell_w,
+                height=cell_h,
+                stroke_color=color if on else GREY_D,
+                stroke_width=1,
+                fill_color=color,
+                fill_opacity=0.55 if on else 0.05,
+            )
+        )
     rows.arrange(DOWN, buff=0.03)
     return rows
 
@@ -23,6 +39,9 @@ class Vocabulary(VoiceoverScene):
         show_episode_card(self)
         self.v = D("vocab")
         self.online()
+        from videos.ml.relflow.story import embedding_lookup
+
+        embedding_lookup(self)
         self.binding()
         self.growth()
         self.optimizer()
@@ -30,14 +49,22 @@ class Vocabulary(VoiceoverScene):
 
     # ------------------------------------------------------------------
     def online(self):
-        old = VGroup(
-            label(r"the classic recipe:", font_size=28),
-            label(r"1. scan the whole dataset", font_size=26, color=GREY_A),
-            label(r"2. collect every label", font_size=26, color=GREY_A),
-            label(r"3. allocate a table of exactly the right size", font_size=26, color=GREY_A),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.18).to_corner(UL, buff=0.7)
-        cross = VGroup(*[Line(r.get_left() + LEFT * 0.08, r.get_right() + RIGHT * 0.08, color=RED, stroke_width=3)
-                         for r in old[1:]])
+        old = (
+            VGroup(
+                label(r"the classic recipe:", font_size=28),
+                label(r"1. scan the whole dataset", font_size=26, color=GREY_A),
+                label(r"2. collect every label", font_size=26, color=GREY_A),
+                label(r"3. allocate a table of exactly the right size", font_size=26, color=GREY_A),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.18)
+            .to_corner(UL, buff=0.7)
+        )
+        cross = VGroup(
+            *[
+                Line(r.get_left() + LEFT * 0.08, r.get_right() + RIGHT * 0.08, color=RED, stroke_width=3)
+                for r in old[1:]
+            ]
+        )
         stream = ["grocery", "books", "grocery", "garden", "books", "toys"]
         chips = VGroup(*[chip(s, color=C.CATEGORY, font_size=24, mono=True) for s in stream]).arrange(RIGHT, buff=0.25)
         chips.move_to(DOWN * 0.4)
@@ -46,10 +73,20 @@ class Vocabulary(VoiceoverScene):
         for s in stream:
             if s not in seen:
                 seen.append(s)
-        rows = VGroup(*[VGroup(Mono(str(i), font_size=22, color=GREY_B), Mono(s, font_size=24, color=C.CATEGORY))
-                        .arrange(RIGHT, buff=0.3) for i, s in enumerate(seen)]).arrange(DOWN, aligned_edge=LEFT, buff=0.12)
+        rows = VGroup(
+            *[
+                VGroup(Mono(str(i), font_size=22, color=GREY_B), Mono(s, font_size=24, color=C.CATEGORY)).arrange(
+                    RIGHT, buff=0.3
+                )
+                for i, s in enumerate(seen)
+            ]
+        ).arrange(DOWN, aligned_edge=LEFT, buff=0.12)
         rows.to_corner(DR, buff=0.9)
-        vt = label(r"the field's vocabulary", font_size=24, color=GREY_A).next_to(rows, UP, buff=0.25).align_to(rows, LEFT)
+        vt = (
+            label(r"the field's vocabulary", font_size=24, color=GREY_A)
+            .next_to(rows, UP, buff=0.25)
+            .align_to(rows, LEFT)
+        )
         with self.voiceover(
             "Categories are labels: SKUs, merchants, countries. <bookmark mark='c'/> The classic recipe is to scan the "
             "whole dataset first, collect every label, and allocate an embedding table of exactly the right size. "
@@ -74,28 +111,59 @@ class Vocabulary(VoiceoverScene):
 
     # ------------------------------------------------------------------
     def binding(self):
-        worker = RoundedRectangle(width=4.4, height=3.4, corner_radius=0.15, stroke_color=GREY_B, stroke_width=2,
-                                  fill_color=GREY_B, fill_opacity=0.06).move_to(LEFT * 4.2 + DOWN * 0.2)
+        worker = RoundedRectangle(
+            width=4.4,
+            height=3.4,
+            corner_radius=0.15,
+            stroke_color=GREY_B,
+            stroke_width=2,
+            fill_color=GREY_B,
+            fill_opacity=0.06,
+        ).move_to(LEFT * 4.2 + DOWN * 0.2)
         wt = label(r"data worker (no model access)", font_size=24, color=GREY_A).next_to(worker, UP, buff=0.15)
-        local = VGroup(*[Mono(f"{s} → {i}", font_size=24, color=C.CATEGORY) for i, s in
-                         enumerate(["A12", "B07", "C33", "D01", "E90"])]).arrange(DOWN, aligned_edge=LEFT, buff=0.12)
+        local = VGroup(
+            *[
+                Mono(f"{s} → {i}", font_size=24, color=C.CATEGORY)
+                for i, s in enumerate(["A12", "B07", "C33", "D01", "E90"])
+            ]
+        ).arrange(DOWN, aligned_edge=LEFT, buff=0.12)
         local.move_to(worker)
         lt = note(r"a dictionary local to this batch", font_size=22).next_to(local, DOWN, buff=0.2)
-        model = RoundedRectangle(width=4.4, height=3.4, corner_radius=0.15, stroke_color=C.CATEGORY, stroke_width=2,
-                                 fill_color=C.CATEGORY, fill_opacity=0.06).move_to(RIGHT * 4.2 + DOWN * 0.2)
+        model = RoundedRectangle(
+            width=4.4,
+            height=3.4,
+            corner_radius=0.15,
+            stroke_color=C.CATEGORY,
+            stroke_width=2,
+            fill_color=C.CATEGORY,
+            fill_opacity=0.06,
+        ).move_to(RIGHT * 4.2 + DOWN * 0.2)
         mt = label(r"the model's vocabulary", font_size=24, color=C.CATEGORY).next_to(model, UP, buff=0.15)
-        glob = VGroup(*[Mono(f"{i:>2}  {s}", font_size=24, color=WHITE if s != "E90" else C.VALUED) for i, s in
-                        [(16, "B07"), (17, "A12"), (18, "D01"), (19, "C33"), (20, "E90")]]).arrange(DOWN, aligned_edge=LEFT,
-                                                                                                buff=0.12)
+        glob = VGroup(
+            *[
+                Mono(f"{i:>2}  {s}", font_size=24, color=WHITE if s != "E90" else C.VALUED)
+                for i, s in [(16, "B07"), (17, "A12"), (18, "D01"), (19, "C33"), (20, "E90")]
+            ]
+        ).arrange(DOWN, aligned_edge=LEFT, buff=0.12)
         glob.move_to(model)
         new = note(r"E90 is new: admitted as row 20", font_size=22, color=C.VALUED).next_to(glob, DOWN, buff=0.2)
         bind = Arrow(worker.get_right(), model.get_left(), buff=0.15, color=YELLOW, stroke_width=4)
         bl = label(r"bind, just before forward", font_size=26, color=YELLOW).next_to(bind, UP, buff=0.15)
-        remap = VGroup(*[Mono(f"{a}→{b}", font_size=22, color=YELLOW) for a, b in
-                         ((0, 17), (1, 16), (2, 19), (3, 18), (4, 20))]).arrange(DOWN, buff=0.08).next_to(bind, DOWN, buff=0.2)
+        remap = (
+            VGroup(
+                *[
+                    Mono(f"{a}→{b}", font_size=22, color=YELLOW)
+                    for a, b in ((0, 17), (1, 16), (2, 19), (3, 18), (4, 20))
+                ]
+            )
+            .arrange(DOWN, buff=0.08)
+            .next_to(bind, DOWN, buff=0.2)
+        )
         sch = schematic_tag(corner=UR)
-        dist = note(r"with several GPUs, every rank gathers the new labels in rank order and admits them identically",
-                    font_size=22).to_edge(DOWN, buff=0.35)
+        dist = note(
+            r"with several GPUs, every rank gathers the new labels in rank order and admits them identically",
+            font_size=22,
+        ).to_edge(DOWN, buff=0.35)
         with self.voiceover(
             "There's a subtlety. <bookmark mark='w'/> Batches are encoded in data-loader worker processes, and a worker "
             "can't touch the model. So a worker numbers labels with a dictionary that's local to its own batch: "
@@ -125,21 +193,38 @@ class Vocabulary(VoiceoverScene):
         labels_ = [e["labels_after"] for e in ev]
         rows = [e["rows_after"] for e in ev]
         assert sorted(set(rows)) == [1, 4, 8, 16, 32, 64]
-        pl = Plot((0, 14), (0, 70), width=7.0, height=4.4, x_ticks=[0, 2, 4, 6, 8, 10, 12, 14],
-                  y_ticks=[0, 16, 32, 48, 64], font_size=22).move_to(LEFT * 2.4 + DOWN * 0.3)
+        pl = Plot(
+            (0, 14),
+            (0, 70),
+            width=7.0,
+            height=4.4,
+            x_ticks=[0, 2, 4, 6, 8, 10, 12, 14],
+            y_ticks=[0, 16, 32, 48, 64],
+            font_size=22,
+        ).move_to(LEFT * 2.4 + DOWN * 0.3)
         step_pts = []
         for i, (x, r) in enumerate(zip(xs, rows)):
             step_pts += [pl.c2p(x, r), pl.c2p(x + 1, r)]
         step = VMobject().set_points_as_corners(step_pts).set_stroke(C.CATEGORY, 4)
-        fill = Polygon(*([pl.c2p(0, 0)] + step_pts + [pl.c2p(14, 0)]), stroke_width=0, fill_color=C.CATEGORY,
-                       fill_opacity=0.15)
+        fill = Polygon(
+            *([pl.c2p(0, 0)] + step_pts + [pl.c2p(14, 0)]), stroke_width=0, fill_color=C.CATEGORY, fill_opacity=0.15
+        )
         dots = VGroup(*[pl.dot(x + 0.5, l_, color=WHITE, radius=0.06) for x, l_ in zip(xs, labels_)])
         xt = pl.x_title(r"training batch", font_size=24)
-        leg = VGroup(
-            VGroup(Square(0.25, stroke_width=0, fill_color=C.CATEGORY, fill_opacity=0.8),
-                   label(r"rows allocated", font_size=26, color=C.CATEGORY)).arrange(RIGHT, buff=0.15),
-            VGroup(Dot(radius=0.07, color=WHITE), label(r"labels admitted", font_size=26)).arrange(RIGHT, buff=0.15),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.2).next_to(pl, RIGHT, buff=0.6).shift(UP * 1.2)
+        leg = (
+            VGroup(
+                VGroup(
+                    Square(0.25, stroke_width=0, fill_color=C.CATEGORY, fill_opacity=0.8),
+                    label(r"rows allocated", font_size=26, color=C.CATEGORY),
+                ).arrange(RIGHT, buff=0.15),
+                VGroup(Dot(radius=0.07, color=WHITE), label(r"labels admitted", font_size=26)).arrange(
+                    RIGHT, buff=0.15
+                ),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.2)
+            .next_to(pl, RIGHT, buff=0.6)
+            .shift(UP * 1.2)
+        )
         seq = mtex(r"1 \to 4 \to 8 \to 16 \to 32 \to 64", font_size=40, color=C.CATEGORY).next_to(leg, DOWN, buff=0.6)
         seq.align_to(leg, LEFT)
         rule = label(r"capacity: the next power of two\\that holds every label", font_size=24, color=GREY_A)
@@ -168,26 +253,57 @@ class Vocabulary(VoiceoverScene):
         assert all(e["moments_kept"] and e["new_moments_zero"] and e["weights_kept"] for e in grows)
 
         def block(n_rows, filled, color, w=1.3):
-            g = VGroup(*[Rectangle(width=w, height=0.19, stroke_width=0.8, stroke_color=GREY_D,
-                                   fill_color=color if i < filled else BACKGROUND, fill_opacity=0.65 if i < filled else 1)
-                         for i in range(n_rows)]).arrange(DOWN, buff=0.025)
+            g = VGroup(
+                *[
+                    Rectangle(
+                        width=w,
+                        height=0.19,
+                        stroke_width=0.8,
+                        stroke_color=GREY_D,
+                        fill_color=color if i < filled else BACKGROUND,
+                        fill_opacity=0.65 if i < filled else 1,
+                    )
+                    for i in range(n_rows)
+                ]
+            ).arrange(DOWN, buff=0.025)
             return g
 
         cols = [(r"weights", C.CATEGORY), (r"Adam $m$", C.ADAMW), (r"Adam $v$", C.ADAMW)]
         before = VGroup(*[block(8, 7, c) for _, c in cols]).arrange(RIGHT, buff=0.25)
         after = VGroup(*[block(16, 7, c) for _, c in cols]).arrange(RIGHT, buff=0.25)
+        for row in before[0]:
+            row.set_fill(C.CATEGORY, 0.65)
+        for row in after[0][:8]:
+            row.set_fill(C.CATEGORY, 0.65)
+        for row in after[0][8:]:
+            row.set_fill(C.CATEGORY, 0.22)
         before.move_to(LEFT * 3.9 + UP * 1.35)
         after.move_to(RIGHT * 2.6).to_edge(UP, buff=1.0)
-        heads_b = VGroup(*[label(t, font_size=22, color=c).next_to(b, UP, buff=0.15) for (t, c), b in zip(cols, before)])
+        heads_b = VGroup(
+            *[label(t, font_size=22, color=c).next_to(b, UP, buff=0.15) for (t, c), b in zip(cols, before)]
+        )
         heads_a = VGroup(*[label(t, font_size=22, color=c).next_to(b, UP, buff=0.15) for (t, c), b in zip(cols, after)])
         tb = label(r"8 rows, 7 labels", font_size=24, color=GREY_A).next_to(before, DOWN, buff=0.3)
-        ta = label(r"16 rows: old rows copied, new moments zero", font_size=24, color=GREY_A).next_to(after, DOWN, buff=0.3)
+        ta = label(r"16 rows: old rows copied, new moments zero", font_size=24, color=GREY_A).next_to(
+            after, DOWN, buff=0.3
+        )
         arrow = Arrow(before.get_right(), after.get_left(), buff=0.3, color=GREY_B, stroke_width=3)
         new_bracket = Brace(VGroup(*[after[0][i] for i in range(7, 16)]), RIGHT, buff=0.1, color=C.VALUED)
-        checks = VGroup(label(r"at every growth in the run: old rows and Adam moments\\identical bit for bit, new moments exactly 0",
-                              font_size=22, color=GREY_A),
-                        *[label(rf"batch {e['batch']}: {e['rows_before']} $\to$ {e['rows_after']} rows \checkmark", font_size=24,
-                                color=C.VALUED) for e in grows]).arrange(DOWN, aligned_edge=LEFT, buff=0.12)
+        checks = VGroup(
+            label(
+                r"at every growth in the run: old rows and Adam moments\\identical bit for bit, new moments exactly 0",
+                font_size=22,
+                color=GREY_A,
+            ),
+            *[
+                label(
+                    rf"batch {e['batch']}: {e['rows_before']} $\to$ {e['rows_after']} rows \checkmark",
+                    font_size=24,
+                    color=C.VALUED,
+                )
+                for e in grows
+            ],
+        ).arrange(DOWN, aligned_edge=LEFT, buff=0.12)
         checks.to_corner(DL, buff=0.5)
         tag = real_tag(r"checked inside the real run, at every growth", corner=UR)
         with self.voiceover(
@@ -207,25 +323,42 @@ class Vocabulary(VoiceoverScene):
             self.play(TransformFromCopy(before, VGroup(*[VGroup(*col[:8]) for col in after])), FadeIn(heads_a))
             self.play(FadeIn(VGroup(*[VGroup(*col[8:]) for col in after])), FadeIn(ta), GrowFromCenter(new_bracket))
             vo.wait_until("v")
-            self.play(FadeIn(tag), LaggedStart(*[FadeIn(c, shift=UP * 0.1) for c in checks], lag_ratio=0.25), run_time=2)
+            self.play(
+                FadeIn(tag), LaggedStart(*[FadeIn(c, shift=UP * 0.1) for c in checks], lag_ratio=0.25), run_time=2
+            )
         self.play(FadeOut(VGroup(before, after, heads_b, heads_a, tb, ta, arrow, new_bracket, checks, tag)))
 
     # ------------------------------------------------------------------
     def unknown(self):
-        entries = [(r"training", r"admits new labels, grows storage"),
-                   (r"validation, test", r"reuse the mapping: unseen labels stay unknown"),
-                   (r"prediction, serving", r"requests never teach new labels")]
+        entries = [
+            (r"training", r"admits new labels, grows storage"),
+            (r"validation, test", r"reuse the mapping: unseen labels stay unknown"),
+            (r"prediction, serving", r"requests never teach new labels"),
+        ]
         table = VGroup()
         for i, (a, b) in enumerate(entries):
             y = 2.3 - 0.6 * i
-            table.add(VGroup(label(a, font_size=28).move_to([-1.6, y, 0], aligned_edge=RIGHT),
-                             label(b, font_size=26, color=GREY_A).move_to([-1.1, y, 0], aligned_edge=LEFT)))
-        unk = VGroup(Mono("sku: Z99", font_size=28), state_tile(0, 0.48), label(r"valued, zero content", font_size=26,
-                                                                                  color=GREY_A)).arrange(RIGHT, buff=0.3)
+            table.add(
+                VGroup(
+                    label(a, font_size=28).move_to([-1.6, y, 0], aligned_edge=RIGHT),
+                    label(b, font_size=26, color=GREY_A).move_to([-1.1, y, 0], aligned_edge=LEFT),
+                )
+            )
+        unk = VGroup(
+            Mono("sku: Z99", font_size=28),
+            state_tile(0, 0.48),
+            label(r"valued, zero content", font_size=26, color=GREY_A),
+        ).arrange(RIGHT, buff=0.3)
         unk.move_to(DOWN * 0.9)
-        pu = VGroup(Mono("p_unavailable=0.01", font_size=26, color=C.CATEGORY),
-                    label(r"during training, 1\% of known labels are hidden on purpose,\\so the model learns to lean on "
-                          r"the rest of the context", font_size=26, color=GREY_A)).arrange(DOWN, buff=0.2)
+        pu = VGroup(
+            Mono("p_unavailable=0.01", font_size=26, color=C.CATEGORY),
+            label(
+                r"during training, 1\% of known labels are hidden on purpose,\\so the model learns to lean on "
+                r"the rest of the context",
+                font_size=26,
+                color=GREY_A,
+            ),
+        ).arrange(DOWN, buff=0.2)
         pu.next_to(unk, DOWN, buff=0.5)
         with self.voiceover(
             "Only training admits labels. <bookmark mark='v'/> Validation and testing reuse the mapping, so a label "

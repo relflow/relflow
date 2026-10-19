@@ -4,7 +4,12 @@ from collections import Counter
 
 from explainer import *  # noqa: F403
 from videos.ml.relflow.common import (
-    D, Mono, label, logo, mtex, note, proof_tag, show_episode_card, wordmark,
+    D,
+    label,
+    logo,
+    proof_tag,
+    show_episode_card,
+    wordmark,
 )
 
 STATUS_COLOR = {"Passing": "#3FBF8F", "Limited": "#FFD166", "Partial": "#FF8FA3"}
@@ -32,8 +37,18 @@ class Evidence(VoiceoverScene):
         rows = VGroup()
         for f in fams:
             items = [c for c in cat if c["family"] == f]
-            sq = VGroup(*[Square(0.3, stroke_width=1.5 if c["latest_full"] == "not_met" else 0, stroke_color=WHITE,
-                                 fill_color=STATUS_COLOR[c["status"]], fill_opacity=0.9) for c in items])
+            sq = VGroup(
+                *[
+                    Square(
+                        0.3,
+                        stroke_width=1.5 if c["latest_full"] == "not_met" else 0,
+                        stroke_color=WHITE,
+                        fill_color=STATUS_COLOR[c["status"]],
+                        fill_opacity=0.9,
+                    )
+                    for c in items
+                ]
+            )
             sq.arrange(RIGHT, buff=0.06)
             name = label(f.replace("_", " "), font_size=20, color=GREY_A)
             rows.add(VGroup(name, sq))
@@ -47,11 +62,20 @@ class Evidence(VoiceoverScene):
         rows.move_to(LEFT * 2.0 + DOWN * 0.15)
         if rows.height > 6.6:
             rows.scale_to_fit_height(6.6)
-        leg = VGroup(*[VGroup(Square(0.28, stroke_width=0, fill_color=c, fill_opacity=0.9),
-                              label(rf"{k}: {st[k]}", font_size=26)).arrange(RIGHT, buff=0.2)
-                       for k, c in STATUS_COLOR.items()])
-        leg.add(VGroup(Square(0.28, stroke_width=1.5, stroke_color=WHITE, fill_opacity=0),
-                       label(rf"missed its own gates\\in the latest run: {runs['not_met']}", font_size=24)).arrange(RIGHT, buff=0.2))
+        leg = VGroup(
+            *[
+                VGroup(
+                    Square(0.28, stroke_width=0, fill_color=c, fill_opacity=0.9), label(rf"{k}: {st[k]}", font_size=26)
+                ).arrange(RIGHT, buff=0.2)
+                for k, c in STATUS_COLOR.items()
+            ]
+        )
+        leg.add(
+            VGroup(
+                Square(0.28, stroke_width=1.5, stroke_color=WHITE, fill_opacity=0),
+                label(rf"missed its own gates\\in the latest run: {runs['not_met']}", font_size=24),
+            ).arrange(RIGHT, buff=0.2)
+        )
         leg.arrange(DOWN, aligned_edge=LEFT, buff=0.3).to_edge(RIGHT, buff=0.6)
         tag = proof_tag(r"\texttt{proofs/results.yaml}, all 78 entries")
         with self.voiceover(
@@ -63,7 +87,9 @@ class Evidence(VoiceoverScene):
             "missed their own gates, and that's recorded too."
         ) as vo:
             vo.wait_until("c")
-            self.play(LaggedStart(*[FadeIn(r, shift=RIGHT * 0.1) for r in rows], lag_ratio=0.06), FadeIn(tag), run_time=2.4)
+            self.play(
+                LaggedStart(*[FadeIn(r, shift=RIGHT * 0.1) for r in rows], lag_ratio=0.06), FadeIn(tag), run_time=2.4
+            )
             for mark, i in (("s", 0), ("l", 1), ("p", 2), ("m", 3)):
                 vo.wait_until(mark)
                 self.play(FadeIn(leg[i], shift=LEFT * 0.1))
@@ -76,18 +102,33 @@ class Evidence(VoiceoverScene):
         assert abs(p40["recovered_pair_delta_fraction"] - 0.906) < 0.01
         assert abs(p76["informative"]["anomaly_auc"] - 0.962) < 0.01 and p76["marginal_auc"] == 0.5
         cards = VGroup(
-            VGroup(label(r"P040 \; counts survive nesting", font_size=31, color=STATUS_COLOR["Passing"]),
-                   label(r"the same six amounts, grouped into different sessions:", font_size=27, color=GREY_A),
-                   label(rf"{100 * p40['recovered_pair_delta_fraction']:.0f}\% of the true difference between paired records "
-                         r"recovered", font_size=27)),
-            VGroup(label(r"P076 \; spotting contradictions", font_size=31, color=STATUS_COLOR["Passing"]),
-                   label(r"every field normal on its own, the combination wrong:", font_size=27, color=GREY_A),
-                   label(rf"reconstruction error flags it with AUC {p76['informative']['anomaly_auc']:.2f}; "
-                         rf"any single field: {p76['marginal_auc']:.1f}", font_size=27)),
-            VGroup(label(r"P044 \; calendar phase", font_size=31, color=STATUS_COLOR["Passing"]),
-                   label(r"the month from the day of the year:", font_size=27, color=GREY_A),
-                   label(rf"accuracy {p44['periodic_accuracy']:.2f}, against {p44['permuted_accuracy']:.2f} with the "
-                         r"days shuffled", font_size=27)),
+            VGroup(
+                label(r"P040 \; counts survive nesting", font_size=31, color=STATUS_COLOR["Passing"]),
+                label(r"the same six amounts, grouped into different sessions:", font_size=27, color=GREY_A),
+                label(
+                    rf"{100 * p40['recovered_pair_delta_fraction']:.0f}\% of the true difference between paired records "
+                    r"recovered",
+                    font_size=27,
+                ),
+            ),
+            VGroup(
+                label(r"P076 \; spotting contradictions", font_size=31, color=STATUS_COLOR["Passing"]),
+                label(r"every field normal on its own, the combination wrong:", font_size=27, color=GREY_A),
+                label(
+                    rf"reconstruction error flags it with AUC {p76['informative']['anomaly_auc']:.2f}; "
+                    rf"any single field: {p76['marginal_auc']:.1f}",
+                    font_size=27,
+                ),
+            ),
+            VGroup(
+                label(r"P044 \; calendar phase", font_size=31, color=STATUS_COLOR["Passing"]),
+                label(r"the month from the day of the year:", font_size=27, color=GREY_A),
+                label(
+                    rf"accuracy {p44['periodic_accuracy']:.2f}, against {p44['permuted_accuracy']:.2f} with the "
+                    r"days shuffled",
+                    font_size=27,
+                ),
+            ),
         )
         for c in cards:
             c.arrange(DOWN, aligned_edge=LEFT, buff=0.1)
@@ -110,15 +151,26 @@ class Evidence(VoiceoverScene):
     # ------------------------------------------------------------------
     def limits(self):
         cards = VGroup(
-            VGroup(label(r"P028 \; identity across summarized collections", font_size=31, color=STATUS_COLOR["Limited"]),
-                   label(r"equality is lost once each collection has been reduced: chance", font_size=27, color=GREY_A)),
-            VGroup(label(r"P066 \; admitting a new label mid-training", font_size=31, color=STATUS_COLOR["Partial"]),
-                   label(r"its fresh row is random, and can jolt predictions before it has learned anything;", font_size=27,
-                         color=GREY_A),
-                   label(r"the obvious fixes regressed other proofs, so they weren't adopted", font_size=27, color=GREY_A)),
-            VGroup(label(r"P071 \; familiar instructions, unseen combinations", font_size=31, color=STATUS_COLOR["Partial"]),
-                   label(r"one of three seeds failed a withheld group--operation pair:", font_size=27, color=GREY_A),
-                   label(r"reliable transfer to every unseen pair remains unproven", font_size=27, color=GREY_A)),
+            VGroup(
+                label(r"P028 \; identity across summarized collections", font_size=31, color=STATUS_COLOR["Limited"]),
+                label(r"equality is lost once each collection has been reduced: chance", font_size=27, color=GREY_A),
+            ),
+            VGroup(
+                label(r"P066 \; admitting a new label mid-training", font_size=31, color=STATUS_COLOR["Partial"]),
+                label(
+                    r"its fresh row is random, and can jolt predictions before it has learned anything;",
+                    font_size=27,
+                    color=GREY_A,
+                ),
+                label(r"the obvious fixes regressed other proofs, so they weren't adopted", font_size=27, color=GREY_A),
+            ),
+            VGroup(
+                label(
+                    r"P071 \; familiar instructions, unseen combinations", font_size=31, color=STATUS_COLOR["Partial"]
+                ),
+                label(r"one of three seeds failed a withheld group--operation pair:", font_size=27, color=GREY_A),
+                label(r"reliable transfer to every unseen pair remains unproven", font_size=27, color=GREY_A),
+            ),
         )
         for c in cards:
             c.arrange(DOWN, aligned_edge=LEFT, buff=0.1)
@@ -149,14 +201,57 @@ class Evidence(VoiceoverScene):
         ]
         boxes = VGroup()
         for t, sub, col in stages:
-            r = RoundedRectangle(width=2.45, height=2.1, corner_radius=0.14, stroke_color=col, stroke_width=2.2,
-                                 fill_color=col, fill_opacity=0.1)
+            r = RoundedRectangle(
+                width=2.45,
+                height=2.1,
+                corner_radius=0.14,
+                stroke_color=col,
+                stroke_width=2.2,
+                fill_color=col,
+                fill_opacity=0.1,
+            )
             tt = label(t, font_size=26, color=col).move_to(r.get_top() + DOWN * 0.4)
             ss = label(sub, font_size=19, color=GREY_A).move_to(r.get_center() + DOWN * 0.3)
             boxes.add(VGroup(r, tt, ss))
         boxes.arrange(RIGHT, buff=0.22).move_to(UP * 0.3)
-        arrows = VGroup(*[Arrow(a.get_right(), b.get_left(), buff=0.03, stroke_width=2.5, color=GREY_B,
-                                max_tip_length_to_length_ratio=0.5, tip_length=0.12) for a, b in zip(boxes[:-1], boxes[1:])])
+        arrows = VGroup(
+            *[
+                Arrow(
+                    a.get_right(),
+                    b.get_left(),
+                    buff=0.03,
+                    stroke_width=2.5,
+                    color=GREY_B,
+                    max_tip_length_to_length_ratio=0.5,
+                    tip_length=0.12,
+                )
+                for a, b in zip(boxes[:-1], boxes[1:])
+            ]
+        )
+        forms = [
+            VGroup(
+                *[
+                    RoundedRectangle(width=0.8, height=0.2, corner_radius=0.03, stroke_color=C.ARROW_BUF)
+                    for _ in range(3)
+                ]
+            ).arrange(DOWN, buff=0.06),
+            VGroup(
+                *[
+                    Square(0.17, fill_color=c, fill_opacity=0.8, stroke_width=0)
+                    for c in [C.NUMBER, C.CATEGORY, C.HASH] * 3
+                ]
+            ).arrange_in_grid(3, 3, buff=0.05),
+            VGroup(
+                *[Square(0.17, fill_color=C.RF_BRANCH, fill_opacity=0.65, stroke_width=0) for _ in range(9)]
+            ).arrange_in_grid(3, 3, buff=0.05),
+            VGroup(*[Square(0.22, fill_color=C.MASS, fill_opacity=0.8, stroke_width=0) for _ in range(4)]).arrange(
+                RIGHT, buff=0.06
+            ),
+            VGroup(*[Square(0.22, fill_color=C.RF_TARGET, fill_opacity=0.8, stroke_width=0) for _ in range(2)]).arrange(
+                RIGHT, buff=0.12
+            ),
+        ]
+        carrier = forms[0].copy().move_to(boxes[0].get_bottom() + DOWN * 0.8)
         with self.voiceover(
             "So, the journey of one batch. <bookmark mark='a'/> Nested Arrow records are laid into batch sized rectangles by "
             "a single placement rule, with a state beside every value. <bookmark mark='b'/> Each field becomes vectors "
@@ -172,13 +267,18 @@ class Evidence(VoiceoverScene):
                 if i:
                     anims.append(GrowArrow(arrows[i - 1]))
                 self.play(*anims)
+                if i == 0:
+                    self.play(FadeIn(carrier))
+                else:
+                    self.play(
+                        Transform(carrier, forms[i].copy().move_to(boxes[i].get_bottom() + DOWN * 0.8)), run_time=0.9
+                    )
+        self.play(FadeOut(carrier))
         mark_ = logo(1.4)
         word = wordmark(80)
         brand = VGroup(mark_, word).arrange(RIGHT, buff=0.35).move_to(DOWN * 2.4)
         line = label(r"the schema you write is the network you get", font_size=32, color=GREY_A)
-        with self.voiceover(
-            "The schema you write is the network you get. Thanks for watching."
-        ):
+        with self.voiceover("The schema you write is the network you get. Thanks for watching."):
             self.play(boxes.animate.shift(UP * 0.6), arrows.animate.shift(UP * 0.6), FadeIn(brand, shift=UP * 0.2))
         line.next_to(boxes, DOWN, buff=0.45)
         self.play(FadeIn(line))

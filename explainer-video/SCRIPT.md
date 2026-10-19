@@ -107,9 +107,11 @@ Only finite, valued training coordinates move. Nulls, padding, masks and target 
 
 ## 9. A vocabulary that grows while it trains
 
-_API: relflow 0.3.2; measured examples: archived 0.2.3_
+_0.3.2 tensor traces; 0.2.3 archived experiments_
 
 Categories are labels: SKUs, merchants, countries. The classic recipe is to scan the whole dataset first, collect every label, and allocate an embedding table of exactly the right size. relflow streams, so it can't scan first. Instead, every Category field learns its vocabulary online. The first time a training batch contains a new label, that label gets the next free row. Labels are never evicted and never renumbered.
+
+Let's make the embedding table tangible. These are six rows from an actual trained SKU field. Every label owns a vector, with sixteen of its sixty four coordinates visible here. S eleven selects its row, and that vector enters the model. A second S eleven reads the same row. The row is a learned parameter, not a new random vector for each observation. Attention will give that shared identity different context in different items.
 
 There's a subtlety. Batches are encoded in data-loader worker processes, and a worker can't touch the model. So a worker numbers labels with a dictionary that's local to its own batch: zero, one, two, and so on. Then, in the training process, just before the forward pass, relflow binds those local numbers to the model's vocabulary, admits any new labels, and remaps the batch's tensors. With several GPUs, every rank gathers the batch's new labels in rank order, so all of them admit the same labels in the same order.
 
@@ -157,13 +159,13 @@ Cluster adds shared learned groups to persistent label identities. The lines her
 
 ## 13. Time, vectors and text
 
-_API: relflow 0.3.2; measured examples: archived 0.2.3_
+_0.3.2 tensor traces; 0.2.3 archived experiments_
 
 Time has two faces. How long ago something happened is a number. But where it falls in a cycle, the hour, the weekday, the month, is a position on a circle. That's what DateParts encodes. Each part becomes a sine and a cosine, so the hours of a day go around a real circle. On a number line, 23:30 and 1:30 are twenty-two hours apart. On the circle they're neighbors, and noon is on the opposite side.
 
 There are nine parts to choose from, from the day of the year down to the second of the minute, and you list the ones your task needs. They answer different questions: half past eleven on Thursday and half past twelve on Friday are neighbors by the hour, and a day apart by the weekday. relflow's proofs test both sides: a model recovers the month from the day of the year on years it never trained on, and picking too few parts can leave the answer ambiguous.
 
-Sometimes another system has already turned something into numbers: an embedding, or a window of sensor readings. That's a Vector: a fixed number of floats. relflow projects it to the model's width and adds the state. A missing vector gets the null state, not a row of zeros. relflow doesn't rescale vectors, so put them on a sensible scale upstream, and a vector of the wrong length is rejected.
+Sometimes another system has already turned something into numbers: an embedding, or a window of sensor readings. That's a Vector: a fixed number of floats. relflow uses a learned projection and GELU, then adds the state. This strip shows sixteen coordinates of an actual untrained token. A missing vector gets the null state, not a row of zeros. relflow doesn't rescale vectors, so put them on a sensible scale upstream, and a vector of the wrong length is rejected.
 
 And text. A Text field runs each string through a small, frozen language model from Hugging Face. By default it's a two-layer BERT with about 4 million weights, and relflow never trains them. What relflow learns is how to use the result: a projection of the pooled vector, added to the state. Here are four real support messages through the frozen encoder. The two about a missing transfer are the closest pair, at 0.81; the transfer and the password question are farther apart, at 0.67. Text is for meaning that's in the words. relflow doesn't fine-tune the encoder or generate text, and the encoder's files aren't stored in the checkpoint, so ship them with the model.
 
@@ -171,7 +173,7 @@ So: a position in a cycle is DateParts, and elapsed time is a Number you derive.
 
 ## 14. Inside a branch
 
-_API: relflow 0.3.2; measured examples: archived 0.2.3_
+_0.3.2 tensor traces; 0.2.3 archived experiments_
 
 Every field has been embedded: one vector per field, per slot. Let's step inside a branch, an order's line items, and see what its encoder does with them. Arrange the tokens in a grid: one row per field, one column per slot. For this capped branch, assume another order fills all eight slots in the batch. Our order has five items, so its last three columns are padding.
 
@@ -181,7 +183,9 @@ Next, the grid is unrolled into a single sequence: all eight SKU slots, then all
 
 How does a token know where it sits? With rotary position embeddings. Every query and every key is rotated by an angle that grows with its position. Rotate both, and the score between two tokens depends only on how far apart they are. Here are real scores from relflow's rotary module, for one query and one key placed at every pair of positions: every diagonal is constant. And look what that buys inside a branch. An item's SKU and its own quantity are always exactly eight positions apart, whichever item it is. So 'my own quantity' is one fixed offset, the same for every item, and attention can learn it once.
 
-Each of those layers is the standard pre-norm block: normalize, attend, add the result back; RMS normalize, expand channels by f f n x, apply tanh GELU, project back, and add. The default multiplier is eight, independently configurable at each node. Padding is zeroed on the way in and on the way out, and it's masked out of every attention. Each branch can also choose how many key and value heads to keep: one per query head, one per pair, one shared by all, or no attention at all.
+Each transformer layer has a direct path for the existing vector. First, R M S normalization feeds attention. Attention contributes a change, which is added to the original vector. The blue shortcut carries that original information around the read operation. Then another R M S normalization feeds the feed forward network: expand by f f n x, apply tanh GELU, project back, and add. The default multiplier is eight, independently configurable at each node. These strips are real intermediate vectors from the trained SKU token. Padding is zeroed before and after a layer and excluded from attention. A branch can keep one key and value head per query head, share them in groups, share one across all heads, or turn attention off. The residual path remains the route for existing information.
+
+An embedding starts with identity, then acquires context. These two items have the same product code, S eleven. Before attention, their SKU lookup vectors are identical. One item has quantity four, the other quantity one. Local coordinate attention lets the SKU read its own item's fields. Now the contextualized SKU vectors differ. We show the same sixteen coordinates with one shared scale. This is how a product token can carry information about quantity before the branch reads across the whole order.
 
 Does that pairing really matter? Here's a real test. We trained a small relflow model on synthetic orders, where an order comes back only if it contains a fragile SKU, bought three or more at a time. So S11 times four, next to S07 times one, comes back. Swap the quantities, and it doesn't. On new orders, the model is perfect: an AUC of one. Now take the same test orders and shuffle the quantities among each order's items. Same SKUs, same quantities, wrong pairs. The AUC drops to 0.90. The model wasn't counting SKUs and quantities separately. It was reading them as pairs.
 
@@ -201,9 +205,9 @@ A little fine print. Grouping needs one trip from the GPU back to the host per e
 
 ## 16. Why softmax can't count
 
-_API: relflow 0.3.2; measured examples: archived 0.2.3_
+_0.3.2 tensor traces; 0.2.3 archived experiments_
 
-After its encoder, a branch still holds one token per field and slot: twenty-four of them, for an order with room for eight items of three fields each. The parent doesn't want twenty-four. It wants a summary. relflow's default reduction is cross-attention from learned queries: a few vectors, trained like any other weights, each of which asks the collection a question, and comes back with a weighted average of the answers. One summary vector per query.
+Let's open an actual trained attention head. The query and keys produce eighteen scores: six product tokens, six quantities, six prices. Softmax turns the signed scores into positive weights that add to one. The first head puts almost all its weight on S eleven, bought four at a time. But attention does not send the weight itself onward. Each token also supplies a value vector. Here are the leading contributions, with eight coordinates visible. Multiply each value vector by its weight, and add all eighteen. The result is this head's context vector. Other heads read separately, then their outputs are projected and combined. This is one measured read, not an explanation of the entire prediction.
 
 Look closely at those weights. Softmax makes every weight positive, and makes them add up to one. So the output is always an average of the values. And averages have a blind spot: they can't count. One token carrying 1.25 gets all the weight. Six identical tokens split it, a sixth each, and add back up to exactly the same output. To the parent, one item and six items look identical.
 
@@ -233,7 +237,7 @@ _current API traces and model census: relflow 0.3.2_
 
 In a relflow model, encoders carry information up the tree, from the leaves to the root. Decoders read it back down. Each target's decoder looks at the representations along its own path to the root: its heritage. For churned, that's simply the root's four vectors. For a field deep in the tree, like a line item's SKU, it's the root, the order summaries, the item summaries of every order, and the field's own slots.
 
-The decoder doesn't average its heritage. It lays it out as one long memory, and it brings learned queries aligned to the current target positions: a single query for churned, or one for each item slot for SKU. A fully populated capped example has 64 times 16 positions. Automatic axes reuse learned query parameters as their widths change. Each query cross-attends into the memory and pulls out what it needs. And before it does, each query is nudged by the visible siblings at its own coordinate. When the decoder predicts an item's SKU, the query for that slot starts out knowing the item's quantity.
+A decoder lays its heritage out as one long memory. Root vectors, order summaries, item summaries and the field's available own slots remain distinct sources. Learned queries align to the current target positions. The same learned question is reused: one for churned, or one per runtime item position for SKU. A fully populated capped example has sixty four times sixteen positions. Before reading, each query receives the visible siblings at its own coordinate. The quantity four belongs to item two; it does not get mixed into item one's question. Now cross-attention gathers values from the heritage into each query. Shared parameters can produce different reads because the local context differs. These routes illustrate the mechanism; they are not measured attention weights.
 
 Then a small head for each datatype. Every decoder predicts the five-way state, so the model can say that a value will be null. A Number adds a value, a Boolean a probability, and a Category a distribution over the labels it has discovered so far. The loss adds the state's cross-entropy and the content's own loss, counted only on the coordinates selected for reconstruction, and each field's total can be weighted.
 
@@ -252,6 +256,8 @@ Explicit batch size on direct prediction preprocesses the full input once, chunk
 _API: relflow 0.3.2; measured examples: archived 0.2.3_
 
 In relflow, every objective comes from one mechanism: the mask. A mask selects some values, hides them from the encoder, and, if you ask, makes the model reconstruct them. That one idea gives you supervised targets, dropout, self-supervised pretraining, and ablations.
+
+Follow one hidden value through the learning objective. The original four is kept as a target. It travels on a separate route to the loss. The encoder receives a mask token at that position, plus the visible context. The hidden number itself does not enter that read. With skip enabled, even the mask token would be absent. A decoder asks for the missing value, and its prediction is compared with the pristine target. The reconstruction error can train the representations that made that prediction possible.
 
 Here are the policies you'll actually write. mask equals True makes a supervised target: the value is never embedded, and always reconstructed. mask equals 0.15 is training-only dropout: fifteen percent of values hide behind a learned mask token. Add skip equals True, and they're removed instead. A Mask with a rate and reconstruct equals True is self-supervised learning: hide a sample, and learn to predict it from the rest. A Mask with a query lets a Boolean column in the data decide, and a mask on a branch makes one decision for its entire subtree.
 
@@ -273,7 +279,9 @@ Labels are expensive. Records usually aren't: for every order someone labeled, t
 
 Here's a synthetic shop with 200 products, secretly arranged in 8 groups. Each order buys mostly from one group. An order comes back if it holds a group-A product bought three or more at a time. And group A costs about the same as group B, so the price can't give it away. To predict returns, a model has to learn which products are in group A. We have 20,000 orders without labels, and only a few with them.
 
-After six epochs of pretraining on those unlabeled orders, what has it learned? Asked to name a hidden SKU, it gets 2.9 percent right. That sounds poor, but a random guess gets 0.5, and even a model that knew each product's group perfectly, but not which item, would get about 3. It has learned the groups. You can see it in the SKU embedding table: products from the same group point in similar directions, and products from different groups don't. Nobody told it the groups existed.
+Let's inspect what the embedding directions mean. Each dot is one SKU at the end of the archived pretraining run. Horizontal position is its cosine similarity to the first SKU, shown as the anchor. Rows and colors organize the known synthetic groups for display; group labels were never training inputs. Highlight the four nearest other labels. These neighbors include several other groups. Individual neighborhoods overlap. This comparison uses all embedding coordinates, so it does not depend on a two-dimensional projection. Next we will repeat that comparison for every group.
+
+After six epochs of pretraining on those unlabeled orders, what has it learned? Asked to name a hidden SKU, it gets 2.9 percent right. That sounds poor, but a random guess gets 0.5, and even a model that knew each product's group perfectly, but not which item, would get about 3. It has picked up group structure. Compare distinct products, excluding each vector's trivial similarity to itself. Same-group pairs are more aligned on average, although individual neighborhoods overlap. Violet is positive cosine, cyan is negative, with one shared scale. Nobody supplied the group labels as inputs.
 
 Fine-tuning takes a few lines. Load the pretrained model, turn the reconstructed fields back into ordinary inputs, add the label you care about as a new target, call fit with fresh optimization state. Weights whose names and shapes still match carry over; the new decoder starts fresh.
 
@@ -339,4 +347,4 @@ So, the journey of one batch. Nested Arrow records are laid into batch sized rec
 
 The schema you write is the network you get. Thanks for watching.
 
-9,081 narrated words.
+9,528 narrated words.

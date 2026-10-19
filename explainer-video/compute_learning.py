@@ -26,6 +26,117 @@ import relflow as rf
 HERE = Path(__file__).resolve().parent
 
 
+def vector_trace():
+    from relflow.tensorfields.base import TensorInput
+
+    with torch.random.fork_rng():
+        torch.manual_seed(73)
+        model = rf.Model.xs(d_model=64, embedding=rf.Vector(n_dim=4, embed=True))
+        embedder = model.nodes["/embedding"].embedder.eval()
+        values = torch.tensor([[0.12, -0.03, 0.44, 0.08]])
+        with torch.inference_mode():
+            token = embedder(
+                TensorInput(state=torch.zeros(1, dtype=torch.long), content=values, batch_size=[1])
+            ).payload[0]
+            projected = embedder.linear(values)[0]
+            state = embedder.embeddings(torch.zeros(1, dtype=torch.long))[0]
+        encoded = model.encode(
+            pa.Table.from_pylist([{"embedding": values[0].tolist()}, {"embedding": None}]), strata="predict"
+        )
+        states = encoded["/embedding"].state.reshape(-1).tolist()
+        try:
+            model.encode(pa.Table.from_pylist([{"embedding": [1.0, 2.0, 3.0]}]), strata="predict")
+        except ValueError as error:
+            message = str(error)
+        else:
+            raise AssertionError("Vector accepted an incorrect width")
+        return {
+            "input": values[0].tolist(),
+            "projected": projected.tolist(),
+            "state_vector": state.tolist(),
+            "token": token.tolist(),
+            "error": message,
+            "projection": [4, 64],
+            "states": states,
+            "meaning": "untrained fixed-seed Vector embedder; seed 73; relflow 0.3.2",
+        }
+
+
+def flow(model, probes, provenance):
+    """Follow a fixed order through real intermediate tensors, without updating it."""
+    model.eval()
+    branch = model.nodes["/line_items"].encoder
+    modules = {
+        "coordinate": branch.coordinate_encoder,
+        "sequence": branch.encoder[0],
+        "reduction": branch.pool.blocks[0],
+    }
+    traces = []
+    for probe in probes:
+        trace, handles = {}, []
+
+        def read(name):
+            def capture(module, args, kwargs):
+                with torch.inference_mode():
+                    q = module.rotate(
+                        module.splitheads(module.q_proj(args[0]), module.nhead), kwargs.get("query_positions")
+                    )
+                    k = module.rotate(
+                        module.splitheads(module.k_proj(args[1]), module.n_kv_heads), kwargs.get("key_positions")
+                    )
+                    v = module.splitheads(module.v_proj(args[2]), module.n_kv_heads)
+                    scores = q @ k.transpose(-1, -2) / math.sqrt(module.head_dim)
+                    mask = kwargs.get("key_padding_mask")
+                    if mask is not None:
+                        scores = scores.masked_fill(mask[:, None, None, :], -torch.inf)
+                    weights = scores.softmax(-1)
+                    trace[name] = {
+                        "weights": weights.tolist(),
+                        "q": q.tolist(),
+                        "k": k.tolist(),
+                        "v": v.tolist(),
+                        "context": (weights @ v).tolist(),
+                    }
+
+            return capture
+
+        def stage(name):
+            def capture(module, args, output):
+                value = output.payload if hasattr(output, "payload") else output
+                trace[name] = value.detach().reshape(-1, 64).tolist()
+
+            return capture
+
+        for name, module in modules.items():
+            handles.append(module.attention.register_forward_pre_hook(read(name), with_kwargs=True))
+        stages = {
+            "sku_vectors": model.nodes["/line_items/sku"].embedder,
+            "coordinate_vectors": branch.coordinate_encoder,
+            "sequence_vectors": branch.encoder[0],
+            "summary_vectors": branch.pool,
+            "attention_delta": branch.encoder[0].attention,
+            "ffn_delta": branch.encoder[0].ffn,
+            "root_vectors": model.nodes["/"].encoder,
+        }
+        for name, module in stages.items():
+            handles.append(module.register_forward_hook(stage(name)))
+        output = model.predict(pa.Table.from_pylist([probe])).to_pylist()[0]
+        trace["probability"] = output["predictions"]["returned"]["content"]["probability"]
+        trace["root_export"] = output["representations"][0]["embedding"]
+        for handle in handles:
+            handle.remove()
+        traces.append(trace)
+    payload = {
+        "provenance": provenance,
+        "probes": probes,
+        "traces": traces,
+        "vector": vector_trace(),
+        "layout": "coordinate: six items x (sku, quantity, price); sequence: six sku, six quantity, six price",
+        "meaning": "actual post-training eval tensors; first block, all heads; no optimizer updates",
+    }
+    (HERE / "data/flow_current.json").write_text(json.dumps(payload, indent=1, allow_nan=False) + "\n")
+
+
 def order(rng):
     items = [
         {
@@ -194,6 +305,7 @@ def record():
         "optimizer": {"name": "AdamW", "learning_rate": 0.002, "weight_decay": 0.01, "batch_size": 128},
     }
     (HERE / "data/learning_current.json").write_text(json.dumps(payload, indent=1, allow_nan=False) + "\n")
+    flow(model, probes, payload["provenance"])
 
 
 if __name__ == "__main__":

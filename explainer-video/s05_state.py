@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import numpy as np
-
 from explainer import *  # noqa: F403
 from videos.ml.relflow.common import (
-    D, Mono, Plot, label, mtex, note, proof_tag, show_episode_card, state_tile, tile, vector_strip,
+    D,
+    Mono,
+    Plot,
+    label,
+    mtex,
+    note,
+    proof_tag,
+    show_episode_card,
+    state_tile,
+    vector_strip,
 )
+from videos.ml.relflow.story import transmit
 
 
 class ValueState(VoiceoverScene):
@@ -57,8 +66,9 @@ class ValueState(VoiceoverScene):
         rows = VGroup()
         for k, n in enumerate(names):
             t = state_tile(k, 0.42)
-            v = vector_strip(np.random.default_rng(10 + k).normal(0, 1, 12), color=C.ATTN, cell=0.17, gap=0.025,
-                             direction=RIGHT)
+            v = vector_strip(
+                np.random.default_rng(10 + k).normal(0, 1, 12), color=C.ATTN, cell=0.17, gap=0.025, direction=RIGHT
+            )
             lab = label(n, font_size=26, color=GREY_A)
             rows.add(VGroup(t, lab, v))
         for r in rows:
@@ -71,20 +81,31 @@ class ValueState(VoiceoverScene):
         head.align_to(rows, LEFT)
         other_note = note(r"(reserved for extensions)", font_size=20).next_to(rows[4][2], RIGHT, buff=0.2)
 
-        state_v = rows[1][2].copy()
-        content_v = vector_strip(np.random.default_rng(3).normal(0, 1, 12), color=C.NUMBER, cell=0.17, gap=0.025,
-                                 direction=RIGHT)
+        state_values = np.random.default_rng(0).normal(0, 1, 12)
+        content_values = np.random.default_rng(3).normal(0, 1, 12)
+        shared_scale = max(abs(state_values).max(), abs(content_values).max(), abs(state_values + content_values).max())
+        state_v = vector_strip(state_values, color=C.ATTN, cell=0.17, gap=0.025, direction=RIGHT, vmax=shared_scale)
+        content_v = vector_strip(
+            content_values, color=C.NUMBER, cell=0.17, gap=0.025, direction=RIGHT, vmax=shared_scale
+        )
         plus = mtex("+", font_size=44)
         eq = mtex("=", font_size=44)
-        result = vector_strip(np.random.default_rng(4).normal(0, 1, 12), color=WHITE, cell=0.17, gap=0.025,
-                              direction=RIGHT)
+        result = vector_strip(
+            state_values + content_values, color=WHITE, cell=0.17, gap=0.025, direction=RIGHT, vmax=shared_scale
+        )
         sum_row = VGroup(content_v, plus, state_v, eq, result).arrange(RIGHT, buff=0.25)
         sum_row.move_to(DOWN * 1.75)
         lab_c = label(r"from the content", font_size=24, color=C.NUMBER).next_to(content_v, UP, buff=0.2)
         lab_s = label(r"from the state", font_size=24, color=C.ATTN).next_to(state_v, UP, buff=0.2)
         lab_r = label(r"the token", font_size=24).next_to(result, UP, buff=0.2)
-        z_note = label(r"content and state are separate inputs: a zero never has to mean null or padding",
-                       font_size=26, color=GREY_A).next_to(sum_row, DOWN, buff=0.45)
+        z_note = label(
+            r"content and state are separate inputs: a zero never has to mean null or padding",
+            font_size=26,
+            color=GREY_A,
+        ).next_to(sum_row, DOWN, buff=0.45)
+        schematic = note("schematic learned vectors; shared scale in the addition", font_size=18).to_corner(
+            DR, buff=0.2
+        )
         with self.voiceover(
             "So relflow keeps two separate inputs for every slot. One is the content: the number, the label, the "
             "hash. <bookmark mark='s'/> The other is a state, one of five tokens: valued, null, padded, masked, and a "
@@ -93,15 +114,21 @@ class ValueState(VoiceoverScene):
             "<bookmark mark='z'/> So a zero never has to stand in for null, or for padding."
         ) as vo:
             vo.wait_until("s")
-            self.play(FadeIn(head), LaggedStart(*[FadeIn(r, shift=RIGHT * 0.1) for r in rows], lag_ratio=0.15),
-                      FadeIn(other_note), run_time=2)
+            self.play(
+                FadeIn(head),
+                LaggedStart(*[FadeIn(r, shift=RIGHT * 0.1) for r in rows], lag_ratio=0.15),
+                FadeIn(other_note),
+                run_time=2,
+            )
             vo.wait_until("e")
             self.play(FadeIn(content_v), FadeIn(lab_c))
-            self.play(TransformFromCopy(rows[1][2], state_v), FadeIn(plus), FadeIn(lab_s))
-            self.play(FadeIn(eq), FadeIn(result), FadeIn(lab_r))
+            self.play(TransformFromCopy(rows[0][2], state_v), FadeIn(plus), FadeIn(lab_s))
+            self.play(FadeIn(eq), FadeIn(result), FadeIn(lab_r), FadeIn(schematic))
+            transmit(self, [content_v], result, C.NUMBER, run_time=0.7)
+            transmit(self, [state_v], result, C.ATTN, run_time=0.7)
             vo.wait_until("z")
             self.play(FadeIn(z_note, shift=UP * 0.1))
-        self.play(FadeOut(VGroup(rows, head, other_note, sum_row, lab_c, lab_s, lab_r, z_note)))
+        self.play(FadeOut(VGroup(rows, head, other_note, sum_row, lab_c, lab_s, lab_r, z_note, schematic)))
 
     # ------------------------------------------------------------------
     def proof(self):
@@ -123,11 +150,15 @@ class ValueState(VoiceoverScene):
         vals = VGroup(*[label(f"{v:.2f}", font_size=28).next_to(r, UP, buff=0.1) for r, (_, v, _) in zip(rects, bars)])
         yt = label(r"held-out AUC", font_size=24, color=GREY_A).next_to(pl, UP, buff=0.25).align_to(pl, LEFT)
         chance = pl.hline(0.5, color=GREY_C)
-        setup = VGroup(
-            label(r"relflow's proof P038:", font_size=28),
-            label(r"every present measurement is 0.0", font_size=26, color=GREY_A),
-            label(r"only missingness predicts the label", font_size=26, color=GREY_A),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.2).to_corner(UL, buff=0.7)
+        setup = (
+            VGroup(
+                label(r"relflow's proof P038:", font_size=28),
+                label(r"every present measurement is 0.0", font_size=26, color=GREY_A),
+                label(r"only missingness predicts the label", font_size=26, color=GREY_A),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.2)
+            .to_corner(UL, buff=0.7)
+        )
         tag = proof_tag(r"P038, null versus zero")
         with self.voiceover(
             "relflow's own test suite checks exactly this. <bookmark mark='s'/> In proof P038, every measurement "
@@ -151,31 +182,51 @@ class ValueState(VoiceoverScene):
     def padding(self):
         states = [0, 0, 1, 0, 2, 2, 2, 2]
         toks = VGroup(*[state_tile(s, 0.62) for s in states]).arrange(RIGHT, buff=0.3).move_to(UP * 1.5)
-        idx = VGroup(*[Mono(str(i), font_size=20, color=GREY_B).next_to(t, DOWN, buff=0.12) for i, t in enumerate(toks)])
+        idx = VGroup(
+            *[Mono(str(i), font_size=20, color=GREY_B).next_to(t, DOWN, buff=0.12) for i, t in enumerate(toks)]
+        )
         idx.add(label(r"slot", font_size=22, color=GREY_B).next_to(idx[0], LEFT, buff=0.3))
         live = [i for i, s in enumerate(states) if s != 2]
         arcs = VGroup()
         for a in live:
             for b in live:
                 if a < b:
-                    arcs.add(ArcBetweenPoints(toks[a].get_top() + UP * 0.05, toks[b].get_top() + UP * 0.05,
-                                              angle=-PI / 2.2, color=C.ATTN, stroke_width=2).set_stroke(opacity=0.8))
+                    arcs.add(
+                        ArcBetweenPoints(
+                            toks[a].get_top() + UP * 0.05,
+                            toks[b].get_top() + UP * 0.05,
+                            angle=-PI / 2.2,
+                            color=C.ATTN,
+                            stroke_width=2,
+                        ).set_stroke(opacity=0.8)
+                    )
         # the attention mask, as a matrix: rows attend over columns
         n = len(states)
         mat = VGroup()
         for i in range(n):
             for j in range(n):
                 on = states[i] != 2 and states[j] != 2
-                mat.add(Square(0.36, stroke_width=0.6, stroke_color=GREY_D, fill_color=C.ATTN if on else BACKGROUND,
-                               fill_opacity=0.85 if on else 1))
+                mat.add(
+                    Square(
+                        0.36,
+                        stroke_width=0.6,
+                        stroke_color=GREY_D,
+                        fill_color=C.ATTN if on else BACKGROUND,
+                        fill_opacity=0.85 if on else 1,
+                    )
+                )
         mat.arrange_in_grid(n, n, buff=0.02).move_to(DOWN * 1.55 + LEFT * 2.8)
         mlab = label(r"who may attend to whom", font_size=24, color=GREY_A).next_to(mat, UP, buff=0.15)
-        notes = VGroup(
-            label(r"null: a real coordinate, visible to attention", font_size=26, color=C.NULL_STATE),
-            label(r"padding: no coordinate at all", font_size=26, color=GREY_A),
-            label(r"zeroed, excluded from every attention", font_size=24, color=GREY_B),
-            label(r"and every average", font_size=24, color=GREY_B),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.18).next_to(mat, RIGHT, buff=0.9)
+        notes = (
+            VGroup(
+                label(r"null: a real coordinate, visible to attention", font_size=26, color=C.NULL_STATE),
+                label(r"padding: no coordinate at all", font_size=26, color=GREY_A),
+                label(r"zeroed, excluded from every attention", font_size=24, color=GREY_B),
+                label(r"and every average", font_size=24, color=GREY_B),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.18)
+            .next_to(mat, RIGHT, buff=0.9)
+        )
         with self.voiceover(
             "Null and padding are different, too. <bookmark mark='n'/> A null is a real coordinate: the item exists, "
             "its quantity is null, and attention can see that. <bookmark mark='p'/> Padding is no coordinate at all. "

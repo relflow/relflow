@@ -12,23 +12,23 @@ The series cut into 25 standalone videos, one per scene, each ending on a card t
 | 6 | Null is not zero (`06-null-is-not-zero.mp4`) | 2:08 | [`core-concepts/data-types.qmd`](https://relflow.github.io/docs/core-concepts/data-types.html) |
 | 7 | How a number becomes a vector (`07-numbers.mp4`) | 2:44 | [`data-types/number.qmd`](https://relflow.github.io/docs/data-types/number.html) |
 | 8 | Teach tolerance, keep the target (`08-jitter.mp4`) | 1:11 | [`core-concepts/jitter.qmd`](https://relflow.github.io/docs/core-concepts/jitter.html) |
-| 9 | A vocabulary that grows while it trains (`09-vocabulary.mp4`) | 2:40 | [`core-concepts/vocabulary.qmd`](https://relflow.github.io/docs/core-concepts/vocabulary.html), [`data-types/category.qmd`](https://relflow.github.io/docs/data-types/category.html) |
+| 9 | A vocabulary that grows while it trains (`09-vocabulary.mp4`) | 3:08 | [`core-concepts/vocabulary.qmd`](https://relflow.github.io/docs/core-concepts/vocabulary.html), [`data-types/category.qmd`](https://relflow.github.io/docs/data-types/category.html) |
 | 10 | Equality without identity (`10-hash.mp4`) | 2:09 | [`data-types/hash.qmd`](https://relflow.github.io/docs/data-types/hash.html) |
 | 11 | Ranks and fixed labels (`11-quantile-and-enum.mp4`) | 3:03 | [`data-types/quantile.qmd`](https://relflow.github.io/docs/data-types/quantile.html), [`data-types/enum.qmd`](https://relflow.github.io/docs/data-types/enum.html) |
 | 12 | Membership and learned groups (`12-sets-and-clusters.mp4`) | 1:24 | [`data-types/set.qmd`](https://relflow.github.io/docs/data-types/set.html), [`data-types/cluster.qmd`](https://relflow.github.io/docs/data-types/cluster.html) |
-| 13 | Time, vectors and text (`13-time-vectors-text.mp4`) | 2:26 | [`data-types/dateparts.qmd`](https://relflow.github.io/docs/data-types/dateparts.html), [`data-types/vector.qmd`](https://relflow.github.io/docs/data-types/vector.html), [`data-types/text.qmd`](https://relflow.github.io/docs/data-types/text.html) |
-| 14 | Inside a branch (`14-inside-a-branch.mp4`) | 3:05 | [`data-types/branch.qmd`](https://relflow.github.io/docs/data-types/branch.html) |
+| 13 | Time, vectors and text (`13-time-vectors-text.mp4`) | 2:29 | [`data-types/dateparts.qmd`](https://relflow.github.io/docs/data-types/dateparts.html), [`data-types/vector.qmd`](https://relflow.github.io/docs/data-types/vector.html), [`data-types/text.qmd`](https://relflow.github.io/docs/data-types/text.html) |
+| 14 | Inside a branch (`14-inside-a-branch.mp4`) | 4:02 | [`data-types/branch.qmd`](https://relflow.github.io/docs/data-types/branch.html) |
 | 15 | Don't pay for padding (`15-packing.mp4`) | 2:10 | [`guides/performance.qmd`](https://relflow.github.io/docs/guides/performance.html) |
-| 16 | Why softmax can't count (`16-softmax-cant-count.mp4`) | 3:20 | [`data-types/branch.qmd`](https://relflow.github.io/docs/data-types/branch.html) |
-| 17 | Climbing the tree (`17-climbing-the-tree.mp4`) | 1:49 | [`core-concepts/model-tree.qmd`](https://relflow.github.io/docs/core-concepts/model-tree.html) |
-| 18 | Asking the tree a question (`18-decoders.mp4`) | 1:40 | [`guides/prediction-output.qmd`](https://relflow.github.io/docs/guides/prediction-output.html) |
+| 16 | Why softmax can't count (`16-softmax-cant-count.mp4`) | 3:38 | [`data-types/branch.qmd`](https://relflow.github.io/docs/data-types/branch.html) |
+| 17 | Climbing the tree (`17-climbing-the-tree.mp4`) | 1:50 | [`core-concepts/model-tree.qmd`](https://relflow.github.io/docs/core-concepts/model-tree.html) |
+| 18 | Asking the tree a question (`18-decoders.mp4`) | 1:50 | [`guides/prediction-output.qmd`](https://relflow.github.io/docs/guides/prediction-output.html) |
 | 19 | A prediction keeps its place (`19-prediction-output.mp4`) | 1:51 | [`guides/prediction-output.qmd`](https://relflow.github.io/docs/guides/prediction-output.html), [`core-concepts/embeddings.qmd`](https://relflow.github.io/docs/core-concepts/embeddings.html) |
-| 20 | One mask, many objectives (`20-masks.mp4`) | 3:15 | [`core-concepts/dynamic-masking.qmd`](https://relflow.github.io/docs/core-concepts/dynamic-masking.html) |
-| 21 | Learning without labels (`21-pretraining.mp4`) | 2:58 | [`guides/pretraining.qmd`](https://relflow.github.io/docs/guides/pretraining.html) |
+| 20 | One mask, many objectives (`20-masks.mp4`) | 3:47 | [`core-concepts/dynamic-masking.qmd`](https://relflow.github.io/docs/core-concepts/dynamic-masking.html) |
+| 21 | Learning without labels (`21-pretraining.mp4`) | 3:44 | [`guides/pretraining.qmd`](https://relflow.github.io/docs/guides/pretraining.html) |
 | 22 | Before and after the model (`22-processors.mp4`) | 2:31 | [`guides/preprocessors.qmd`](https://relflow.github.io/docs/guides/preprocessors.html), [`guides/postprocessors.qmd`](https://relflow.github.io/docs/guides/postprocessors.html) |
 | 23 | Watching it learn (`23-watching-it-learn.mp4`) | 3:37 | [`guides/evaluation.qmd`](https://relflow.github.io/docs/guides/evaluation.html), [`core-concepts/embeddings.qmd`](https://relflow.github.io/docs/core-concepts/embeddings.html) |
 | 24 | What it costs: time and memory (`24-benchmarks.mp4`) | 2:41 | [`guides/performance.qmd`](https://relflow.github.io/docs/guides/performance.html) |
-| 25 | What the proofs show, and what they don't (`25-proofs.mp4`) | 2:25 | [`proofs.qmd`](https://relflow.github.io/docs/proofs.html) |
+| 25 | What the proofs show, and what they don't (`25-proofs.mp4`) | 2:26 | [`proofs.qmd`](https://relflow.github.io/docs/proofs.html) |
 
 ## 1. Records have shape
 

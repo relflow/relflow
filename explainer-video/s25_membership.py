@@ -3,6 +3,7 @@ from __future__ import annotations
 from explainer import *  # noqa: F403
 from videos.ml.relflow.common import C, Mono, box, label, show_episode_card
 from videos.ml.relflow.current_visuals import heading, trace_tag
+from videos.ml.relflow.story import transmit
 
 
 class Membership(VoiceoverScene):
@@ -34,7 +35,14 @@ class Membership(VoiceoverScene):
             .arrange(RIGHT, buff=0.3)
             .move_to(UP * 0.1)
         )
-        bits = Mono("[ grocery: 1, essential: 1 ]", font_size=30, color=C.HASH).move_to(DOWN * 1.4)
+        bits = (
+            VGroup(
+                box("grocery = 1", color=C.HASH, width=3.1, height=0.7, font_size=25),
+                box("essential = 1", color=C.HASH, width=3.1, height=0.7, font_size=25),
+            )
+            .arrange(RIGHT, buff=0.4)
+            .move_to(DOWN * 1.4)
+        )
         foot = label(r"empty set $\ne$ null set $\ne$ unavailable membership", font_size=27).move_to(DOWN * 2.4)
         tag = trace_tag("schematic; Set and Cluster semantics verified against current source")
         with self.voiceover(
@@ -48,7 +56,9 @@ class Membership(VoiceoverScene):
             self.play(FadeIn(head), FadeIn(options), FadeIn(tags), FadeIn(tag))
             vo.wait_until("a")
             self.play(Swap(tags[0], tags[1]))
-            self.play(FadeOut(tags[2]), FadeIn(bits))
+            self.play(TransformFromCopy(tags[0], bits[0]), TransformFromCopy(tags[1], bits[1]), run_time=1.3)
+            transmit(self, [tags[2]], bits[0], C.HASH, run_time=0.9)
+            self.play(FadeOut(tags[2]))
             vo.wait_until("b")
             self.play(FadeIn(foot))
         self.clear_scene()
@@ -81,6 +91,9 @@ class Membership(VoiceoverScene):
             self.play(FadeIn(head), FadeIn(labels), FadeIn(groups), FadeIn(tag))
             vo.wait_until("a")
             self.play(FadeIn(objective), *[GrowArrow(a) for a in routes], run_time=1.5)
+            for i, g in enumerate(groups):
+                transmit(self, list(labels[2 * i : 2 * i + 2]), g, C.CATEGORY, run_time=0.65)
+            transmit(self, list(groups), objective, C.MASKED, run_time=0.9)
             vo.wait_until("b")
             self.play(FadeIn(warning))
         self.clear_scene()

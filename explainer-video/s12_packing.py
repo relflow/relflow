@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-import numpy as np
-
 from explainer import *  # noqa: F403
 from videos.ml.relflow.common import (
-    D, Mono, Plot, fmt_int, label, mtex, note, real_tag, show_episode_card,
+    D,
+    Mono,
+    Plot,
+    fmt_int,
+    label,
+    mtex,
+    real_tag,
+    show_episode_card,
 )
+from videos.ml.relflow.story import transmit
 
 
 def sq(color, size=0.24, fill=0.9) -> Square:
@@ -32,15 +38,25 @@ class Packing(VoiceoverScene):
                 cells.add(sq(C.LIVE if j < n else C.PADDED, fill=0.9 if j < n else 0.35))
         cells.arrange_in_grid(len(lengths), cap, buff=0.04).move_to(LEFT * 3.3 + DOWN * 0.1)
         self.cells = cells
+        # One colored token retains its original row/position through gather and scatter.
+        self.tracked = (3, 1)
+        cells[3 * cap + 1].set_fill(C.NUMBER, 1).set_stroke(C.NUMBER, 1.5)
         rl = label(r"16 rows, room for 12 tokens each", font_size=24, color=GREY_A).next_to(cells, UP, buff=0.25)
         assert sm["pairs_dense"] == 16 * 12 * 12 and sm["pairs_packed"] == sum(n * n for n in lengths)
-        cost = VGroup(
-            label(r"attention compares every pair of positions:", font_size=26),
-            mtex(rf"\text{{dense: }} 16 \times 12^2 = {fmt_int(sm['pairs_dense'])} \text{{ pairs}}", font_size=34),
-            mtex(rf"\text{{live tokens only: }} \textstyle\sum_i \ell_i^2 = {sm['pairs_packed']} \text{{ pairs}}",
-                 font_size=34, color=C.LIVE),
-            label(rf"72\% of the work would multiply padding", font_size=28, color=RED),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.3).next_to(cells, RIGHT, buff=0.8)
+        cost = (
+            VGroup(
+                label(r"attention compares every pair of positions:", font_size=26),
+                mtex(rf"\text{{dense: }} 16 \times 12^2 = {fmt_int(sm['pairs_dense'])} \text{{ pairs}}", font_size=34),
+                mtex(
+                    rf"\text{{live tokens only: }} \textstyle\sum_i \ell_i^2 = {sm['pairs_packed']} \text{{ pairs}}",
+                    font_size=34,
+                    color=C.LIVE,
+                ),
+                label(rf"72\% of the work would multiply padding", font_size=28, color=RED),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.3)
+            .next_to(cells, RIGHT, buff=0.8)
+        )
         frac = 1 - sm["pairs_packed"] / sm["pairs_dense"]
         assert abs(frac - 0.72) < 0.01
         with self.voiceover(
@@ -51,8 +67,14 @@ class Packing(VoiceoverScene):
         ) as vo:
             self.play(FadeIn(cells, lag_ratio=0.003), FadeIn(rl), run_time=1.5)
             vo.wait_until("d")
-            self.play(Indicate(VGroup(*[cells[i * cap + j] for i, n in enumerate(lengths) for j in range(n, cap)]),
-                               color=GREY_A, scale_factor=1.0), run_time=1.2)
+            self.play(
+                Indicate(
+                    VGroup(*[cells[i * cap + j] for i, n in enumerate(lengths) for j in range(n, cap)]),
+                    color=GREY_A,
+                    scale_factor=1.0,
+                ),
+                run_time=1.2,
+            )
             vo.wait_until("c")
             self.play(FadeIn(cost[0]), Write(cost[1]))
             self.play(Write(cost[2]))
@@ -79,6 +101,8 @@ class Packing(VoiceoverScene):
             for k, r in enumerate(rows):
                 for j in range(ln):
                     targets[(r, j)] = block[k][j]
+                    if (r, j) == self.tracked:
+                        block[k][j].set_fill(C.NUMBER, 1).set_stroke(C.NUMBER, 1.5)
         rects.arrange(DOWN, aligned_edge=RIGHT, buff=0.16).to_edge(RIGHT, buff=0.6)
         if rects.height > 6.6:
             rects.scale_to_fit_height(6.6)
@@ -87,8 +111,12 @@ class Packing(VoiceoverScene):
         if head.get_top()[1] > 3.9:
             head.to_edge(UP, buff=0.15)
         flat = VGroup(*[sq(C.LIVE, 0.11) for _ in range(sm["live"])]).arrange(RIGHT, buff=0.014).move_to(DOWN * 3.4)
-        fl = label(rf"the {sm['live']} live tokens, gathered once (with their original positions)", font_size=20,
-                   color=GREY_A).next_to(flat, UP, buff=0.1)
+        tracked_index = sum(lengths[: self.tracked[0]]) + self.tracked[1]
+        flat[tracked_index].set_fill(C.NUMBER, 1)
+        identity = Mono("cyan token: row 3, original position 1", font_size=19, color=C.NUMBER).to_edge(DOWN, buff=0.15)
+        fl = label(
+            rf"the {sm['live']} live tokens, gathered once (with their original positions)", font_size=20, color=GREY_A
+        ).next_to(flat, UP, buff=0.1)
         movers = []
         anims = []
         for i, n in enumerate(lengths):
@@ -104,8 +132,13 @@ class Packing(VoiceoverScene):
             "perfect rectangle again, with no mask and no padding at all."
         ) as vo:
             vo.wait_until("g")
-            self.play(FadeIn(fl), TransformFromCopy(VGroup(*[cells[i * cap + j] for i, n in enumerate(lengths)
-                                                             for j in range(n)]), flat), run_time=1.4)
+            self.play(
+                FadeIn(fl),
+                TransformFromCopy(VGroup(*[cells[i * cap + j] for i, n in enumerate(lengths) for j in range(n)]), flat),
+                run_time=1.4,
+            )
+            self.play(FadeIn(identity))
+            transmit(self, [cells[3 * cap + 1]], flat[tracked_index], C.NUMBER, run_time=0.75)
             vo.wait_until("r")
             self.play(FadeIn(head), FadeIn(VGroup(*[r[0] for r in rects])))
             cells.save_state()
@@ -116,26 +149,47 @@ class Packing(VoiceoverScene):
             vo.wait_until("a")
             boxes = VGroup(*[SurroundingRectangle(r.block, buff=0.05, color=C.ATTN, stroke_width=2) for r in rects])
             self.play(Create(boxes), run_time=1.0)
+            transmit(self, [flat[tracked_index]], targets[self.tracked], C.NUMBER, run_time=0.75)
+        self.identity = identity
+        self.tracked_target = targets[self.tracked]
         self.rects, self.flat, self.fl, self.head, self.boxes = rects, flat, fl, head, boxes
 
     # ------------------------------------------------------------------
     def unpack(self):
         t = self.p["timing"]
         worst = max(x["max_abs_diff"] for x in t)
-        exact = VGroup(
-            label(r"then every token goes back to its own slot;", font_size=26),
-            label(r"padding is restored as zeros", font_size=26),
-            label(r"largest difference from the dense result: about $10^{-6}$ (float rounding)", font_size=26,
-                  color=C.LIVE),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.18).to_corner(UL, buff=0.5)
+        exact = (
+            VGroup(
+                label(r"then every token goes back to its own slot;", font_size=26),
+                label(r"padding is restored as zeros", font_size=26),
+                label(
+                    r"largest difference from the dense result: about $10^{-6}$ (float rounding)",
+                    font_size=26,
+                    color=C.LIVE,
+                ),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.18)
+            .to_corner(UL, buff=0.5)
+        )
         assert worst < 2e-6
         with self.voiceover(
             "Afterwards, every token is scattered back to its own slot, and the padding is restored as zeros. "
             "<bookmark mark='x'/> The rotary positions are the original ones, so the result is the same as the dense "
             "computation. We checked: the largest difference is about one part in a million, floating-point rounding."
         ) as vo:
-            self.play(FadeOut(self.boxes), FadeOut(self.head), FadeOut(self.flat), FadeOut(self.fl),
-                      Restore(self.cells), FadeOut(self.rects), run_time=1.4)
+            transmit(
+                self, [self.tracked_target], self.cells[3 * self.p["small"]["capacity"] + 1], C.NUMBER, run_time=0.9
+            )
+            self.play(
+                FadeOut(self.identity),
+                FadeOut(self.boxes),
+                FadeOut(self.head),
+                FadeOut(self.flat),
+                FadeOut(self.fl),
+                Restore(self.cells),
+                FadeOut(self.rects),
+                run_time=1.4,
+            )
             self.play(FadeIn(exact[:2]))
             vo.wait_until("x")
             self.play(FadeIn(exact[2]))
@@ -161,14 +215,21 @@ class Packing(VoiceoverScene):
             bars.add(VGroup(b1, b2, v1, v2, sp, xl))
         yt = label(r"milliseconds", font_size=22, color=GREY_A).next_to(pl, UP, buff=0.15).align_to(pl, LEFT)
         leg = VGroup(
-            VGroup(Square(0.25, stroke_width=0, fill_color=C.PADDED, fill_opacity=0.9), label(r"dense, masked", font_size=24)),
+            VGroup(
+                Square(0.25, stroke_width=0, fill_color=C.PADDED, fill_opacity=0.9),
+                label(r"dense, masked", font_size=24),
+            ),
             VGroup(Square(0.25, stroke_width=0, fill_color=C.LIVE, fill_opacity=0.9), label(r"packed", font_size=24)),
         )
         for g in leg:
             g.arrange(RIGHT, buff=0.15)
         leg.arrange(DOWN, aligned_edge=LEFT, buff=0.2).next_to(pl, RIGHT, buff=0.6).shift(UP * 1.0)
-        setup = label(rf"two encoder layers, {p['rows']} rows $\times$ {p['capacity']} slots,\\"
-                      rf"$d_{{\mathrm{{model}}}}={p['d_model']}$, {p['threads']} CPU threads", font_size=22, color=GREY_A)
+        setup = label(
+            rf"two encoder layers, {p['rows']} rows $\times$ {p['capacity']} slots,\\"
+            rf"$d_{{\mathrm{{model}}}}={p['d_model']}$, {p['threads']} CPU threads",
+            font_size=22,
+            color=GREY_A,
+        )
         setup.next_to(leg, DOWN, buff=0.5).align_to(leg, LEFT)
         tag = real_tag(r"timed with relflow's own packing code on an M1, relflow 0.2.3 (archive)")
         sp0 = t[0]["dense_ms"] / t[0]["packed_ms"]
@@ -193,17 +254,33 @@ class Packing(VoiceoverScene):
 
     # ------------------------------------------------------------------
     def fine_print(self):
-        items = VGroup(
-            label(r"the fine print", font_size=30),
-            label(r"$\cdot$ the grouping costs one trip from the GPU to the host per encoder stack, to read the lengths",
-                  font_size=24, color=GREY_A),
-            label(r"$\cdot$ packing steps aside when dropout is active, so random draws match the dense schedule",
-                  font_size=24, color=GREY_A),
-            label(r"$\cdot$ and when anyone has hooked into or replaced the modules, so they still see dense tensors",
-                  font_size=24, color=GREY_A),
-            label(r"$\cdot$ rows with no live tokens at all are skipped entirely, in every encoder and pool",
-                  font_size=24, color=GREY_A),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.3).move_to(ORIGIN)
+        items = (
+            VGroup(
+                label(r"the fine print", font_size=30),
+                label(
+                    r"$\cdot$ the grouping costs one trip from the GPU to the host per encoder stack, to read the lengths",
+                    font_size=24,
+                    color=GREY_A,
+                ),
+                label(
+                    r"$\cdot$ packing steps aside when dropout is active, so random draws match the dense schedule",
+                    font_size=24,
+                    color=GREY_A,
+                ),
+                label(
+                    r"$\cdot$ and when anyone has hooked into or replaced the modules, so they still see dense tensors",
+                    font_size=24,
+                    color=GREY_A,
+                ),
+                label(
+                    r"$\cdot$ rows with no live tokens at all are skipped entirely, in every encoder and pool",
+                    font_size=24,
+                    color=GREY_A,
+                ),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.3)
+            .move_to(ORIGIN)
+        )
         with self.voiceover(
             "A little fine print. <bookmark mark='a'/> Grouping needs one trip from the GPU back to the host per "
             "encoder stack, to read the lengths. <bookmark mark='b'/> Packing steps aside when dropout is active, so "

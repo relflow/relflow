@@ -37,14 +37,55 @@ measured illustrations state their version.
 | Representation learning | 512 persistent dots move in a common final PCA basis, center and axis ranges | actual exported 64-d root vectors at every checkpoint |
 | Controlled input changes | freeze parameters; change only S11 quantity 4→1, restore it, then move that same item to the first slot | three fixed label-free probes; measured final probabilities |
 
-The earlier Arrow-buffer, Fourier, rotary, token-packing, mass/count reduction,
-animations are retained. Their learning experiments remain tied to the original
-0.2.3 data. Episode 23's attention and embedding footage is now replaced by the
-fresh synchronized 0.3.2 learning microscope. Capped examples that reach their limits
+The Arrow-buffer, Fourier, rotary, token-packing and mass/count explanations
+retain their empirical foundations, with added identity and flow cues. Their
+learning experiments remain tied to the original 0.2.3 data. Episode 23's
+attention and embedding footage uses the synchronized 0.3.2 learning microscope.
+Capped examples that reach their limits
 remain valid worked shapes; they no longer imply every batch executes at the
 cap. The output scene replaces slash-keyed examples with format-2 records.
 The processor example reads `struct.field("flagged")`; fine-tuning configures
 the next run through `fit`.
+
+## Series-wide storytelling pass
+
+All 24 chapters outside the already polished training episode were revised.
+Use the same semantic colors across a hand-off. Move an existing item or its
+copy when identity matters; avoid replacing it with an unrelated glyph. Packets
+show information access and direction, without asserting neural latency or
+physical travel. Numerical cells and captions carry their stated scales.
+
+| Episode | Visual story |
+|---|---|
+| 1 | Leaf messages aggregate by depth; root context reaches the target decoders. |
+| 2 | Visible payment fields enter the model; a forward pass reaches the loss and AdamW updates the tree. |
+| 3 | Address traversal follows the actual schema edges; the preset introduction stays visible during its setup. |
+| 4 | The same source token reaches placement 13 before all retained values scatter. |
+| 5 | Query selection follows source routes while whole records preserve alignment. |
+| 6 | Content and valued-state vectors actually add to the illustrated result, using a shared scale. |
+| 7 | Moving the numeric probe changes its analytic Fourier fingerprint; the scalar lane remains explicit. |
+| 8 | Jitter moves a point on the training rail while evaluation rails remain fixed. |
+| 9 | A real trained SKU row is looked up twice; resized weight rows remain distinct from zero-initialized Adam moments. |
+| 10 | One identifier becomes salted lanes, then a deterministic vector. |
+| 11 | A percentile probe changes its features; observed labels feed Enum and Category differently. |
+| 12 | A duplicate arrives at an existing membership without increasing it; Cluster's reconstruction objective receives the group signal. |
+| 13 | A real untrained Vector token replaces a decorative strip; frozen Text features feed the learned projection. |
+| 14 | A measured residual block keeps the old vector on its shortcut; identical SKU lookups become distinct item-context vectors. |
+| 15 | One cyan token keeps row 3, position 1 through gather, grouping and scatter. |
+| 16 | Real scaled query/key scores become softmax weights, then gather value vectors; equal averages still lose count. |
+| 17 | Child summaries become parent fields; only present root inputs enter the final reduction. |
+| 18 | Queries receive their own siblings before reading heritage; shared parameters can produce different reads. |
+| 19 | Nulls, empty lists, holes and ancestor ordinals retain their identity through output writing. |
+| 20 | A pristine target takes a separate route to loss; copied batch grids show exactly which tokens become masked or absent. |
+| 21 | Full-vector cosine neighborhoods reveal overlap; signed group means exclude self-comparisons. |
+| 22 | Actual payer/payee identities move to their corresponding party records; the amount changes units. |
+| 24 | Throughput bars grow from their common baselines while recorded values and memory remain legible. |
+| 25 | One batch visibly changes representation through records, embedders, encoders, summaries and decoders. |
+
+The reusable vector instruments live in `story.py`. The attention, embedding
+lookup, residual and contextualization views consume actual 0.3.2 tensors.
+Architectural routes, packet motion, the mask-learning diagram and the closing
+batch glyph are schematic. No random cells are presented as trained weights.
 
 ## Measurement boundaries
 
@@ -91,6 +132,30 @@ Numeric readouts switch directly to the destination checkpoint during each
 transition; glyphs never morph into unreadable intermediate numbers.
 The recorder was run twice: all 256 losses, 11 snapshots, three probes and the
 recorded gradient/update tensors matched exactly on this environment.
+
+`data/flow_current.json` records three additional eval-only forward passes after
+that same fit. Hooks capture raw SKU lookup vectors, local coordinate outputs,
+sequence attention and FFN deltas, branch summaries and root representations.
+All heads' actual rotated Q/K projections, V projections, softmax weights and
+weighted contexts are retained for the coordinate, sequence and reduction blocks.
+The source checker independently reconstructs softmax and weighted contexts, and
+verifies each displayed residual addition. The two quantity probes have identical
+raw SKU lookup vectors and different contextualized SKU vectors.
+The contextual difference readout is the Euclidean norm over all 64 coordinates;
+the cropped strips display 16 coordinates on one shared scale.
+
+The Vector fixture has its own seed (73), untrained parameters and explicit
+0.3.2 label. Its projected features plus state equal its emitted token; an actual
+encoder call records valued/null states and rejects an incorrect input width.
+
+Pretraining geometry is derived from the unchanged archived embedding rows.
+The neighborhood view places other SKUs by full-vector cosine to the first
+vocabulary label; categorical rows and colors are display organization. The four
+nearest labels span several groups. Group averages exclude the diagonal of
+each within-group pair matrix, removing trivial self-similarity. A common signed
+scale shows positive and negative cosine. These views show useful aggregate
+structure and overlapping individual neighborhoods, without asserting perfect
+group recovery or inventing an unrecorded training trajectory.
 
 ## Build and QA
 
@@ -157,13 +222,19 @@ its package version separately from `compute_current.py`.
 
 ## Validation of this refresh
 
-The full narrated cut is 58:48.174 at 1920×1080, with audio, subtitles and 25
+The full narrated cut is 62:03.905 at 1920×1080, with audio, subtitles and 25
 chapters. All 25 standalone episodes have audio, subtitles and two chapters
 (content and end card); FFprobe reports no container errors. Contact sheets
 were inspected for the full cut and the revised scenes. The current API recorder
 and source/docs/provenance checker pass, as do 21 targeted runtime tests for
 automatic lengths and record-shaped prediction output. All 17 historical data
 files retain their original SHA-256 hashes.
+
+The series-wide storytelling pass re-rendered all 24 revised content scenes at
+1080p30 and retained the previously polished training scene. Dense mechanism
+frames and a fresh 25-chapter contact sheet were inspected. The additional
+tensor checks reconstruct every captured head's softmax and value mixture and
+verify the measured residual additions and Vector token composition.
 
 Static end cards are captured at the requested output resolution before fading,
 and each process gets its own SVG logo cache copy. The build sets MP4 movie

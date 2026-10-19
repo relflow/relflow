@@ -3,6 +3,7 @@ from __future__ import annotations
 from explainer import *  # noqa: F403
 from videos.ml.relflow.common import C, D, Mono, box, label, show_episode_card
 from videos.ml.relflow.current_visuals import heading, trace_tag
+from videos.ml.relflow.story import stream
 
 
 class Output(VoiceoverScene):
@@ -57,8 +58,10 @@ class Output(VoiceoverScene):
             self.play(FadeIn(head), FadeIn(left), FadeIn(captions), FadeIn(tag))
             vo.wait_until("a")
             self.play(FadeIn(right[:2]), *[GrowArrow(a) for a in arrows[:2]])
+            stream(self, list(arrows[:2]), C.RF_BRANCH, run_time=1.0)
             vo.wait_until("b")
             self.play(GrowArrow(arrows[2]), FadeIn(right[2]))
+            stream(self, [arrows[2]], C.RF_TARGET, run_time=0.9)
             vo.wait_until("c")
             self.play(FadeIn(foot))
         self.clear_scene()
@@ -113,6 +116,7 @@ class Output(VoiceoverScene):
             self.play(FadeIn(path, lag_ratio=0.2), FadeIn(slots))
             vo.wait_until("b")
             self.play(Create(hl), GrowArrow(link))
+            stream(self, [link], C.RF_TARGET, run_time=0.8)
             vo.wait_until("c")
             self.play(FadeIn(norms))
         self.clear_scene()

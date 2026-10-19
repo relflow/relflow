@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import numpy as np
-
 from explainer import *  # noqa: F403
 from videos.ml.relflow.common import (
-    D, Mono, Plot, chip, label, mtex, note, proof_tag, real_tag, show_episode_card, vector_strip,
+    D,
+    Mono,
+    Plot,
+    chip,
+    label,
+    proof_tag,
+    real_tag,
+    show_episode_card,
+    vector_strip,
 )
+from videos.ml.relflow.story import transmit
 
 
 def sim_grid(sim, ids, cell=0.36, color=C.HASH) -> VGroup:
@@ -17,8 +25,15 @@ def sim_grid(sim, ids, cell=0.36, color=C.HASH) -> VGroup:
             v = sim[i, j]
             same = abs(v - 1) < 1e-5
             a = 1.0 if same else max(0.0, (v - 0.5) / 0.5) * 0.45
-            sq.add(Square(cell, stroke_width=1.5 if same else 0.4, stroke_color=WHITE if same else GREY_D,
-                          fill_color=color, fill_opacity=0.08 + 0.92 * a))
+            sq.add(
+                Square(
+                    cell,
+                    stroke_width=1.5 if same else 0.4,
+                    stroke_color=WHITE if same else GREY_D,
+                    fill_color=color,
+                    fill_opacity=0.08 + 0.92 * a,
+                )
+            )
     sq.arrange_in_grid(n, n, buff=0.02)
     g = VGroup(sq)
     g.sq = sq
@@ -39,22 +54,41 @@ class Hashing(VoiceoverScene):
         ids = self.h["ids"]
         acct = VGroup(Mono("account_id:", font_size=28, color=C.RF_FIELD), Mono(ids[0], font_size=28, color=YELLOW))
         acct.arrange(RIGHT, buff=0.2)
-        rows = VGroup(*[VGroup(Mono("- counterparty_id:", font_size=26, color=C.RF_FIELD),
-                               Mono(c, font_size=26, color=YELLOW if c == ids[0] else WHITE)).arrange(RIGHT, buff=0.2)
-                        for c in ids[1:]])
+        rows = VGroup(
+            *[
+                VGroup(
+                    Mono("- counterparty_id:", font_size=26, color=C.RF_FIELD),
+                    Mono(c, font_size=26, color=YELLOW if c == ids[0] else WHITE),
+                ).arrange(RIGHT, buff=0.2)
+                for c in ids[1:]
+            ]
+        )
         rows.arrange(DOWN, aligned_edge=LEFT, buff=0.1)
         tr = Mono("transfers:", font_size=28, color=C.RF_BRANCH)
-        block = VGroup(acct, tr, rows).arrange(DOWN, aligned_edge=LEFT, buff=0.15).to_edge(LEFT, buff=0.8).shift(UP * 0.4)
+        block = (
+            VGroup(acct, tr, rows).arrange(DOWN, aligned_edge=LEFT, buff=0.15).to_edge(LEFT, buff=0.8).shift(UP * 0.4)
+        )
         rows.shift(RIGHT * 0.4)
         q = label(r"did this account send money to itself?", font_size=30, color=YELLOW).next_to(block, DOWN, buff=0.5)
         q.align_to(block, LEFT)
-        pts = VGroup(
-            label(r"millions of IDs, most seen once or twice", font_size=28, color=GREY_A),
-            label(r"a vocabulary row per ID memorizes noise", font_size=28, color=GREY_A),
-            label(r"and knows nothing about tomorrow's new IDs", font_size=28, color=GREY_A),
-            label(r"often only \emph{equality} matters", font_size=30),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.25).to_edge(RIGHT, buff=0.6).shift(UP * 0.4)
-        same = VGroup(*[SurroundingRectangle(r[1], buff=0.05, color=YELLOW, stroke_width=2) for r, c in zip(rows, ids[1:]) if c == ids[0]])
+        pts = (
+            VGroup(
+                label(r"millions of IDs, most seen once or twice", font_size=28, color=GREY_A),
+                label(r"a vocabulary row per ID memorizes noise", font_size=28, color=GREY_A),
+                label(r"and knows nothing about tomorrow's new IDs", font_size=28, color=GREY_A),
+                label(r"often only \emph{equality} matters", font_size=30),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.25)
+            .to_edge(RIGHT, buff=0.6)
+            .shift(UP * 0.4)
+        )
+        same = VGroup(
+            *[
+                SurroundingRectangle(r[1], buff=0.05, color=YELLOW, stroke_width=2)
+                for r, c in zip(rows, ids[1:])
+                if c == ids[0]
+            ]
+        )
         with self.voiceover(
             "Some values are identifiers: account numbers, device IDs, card numbers. <bookmark mark='m'/> There can be "
             "millions of them, and most show up once or twice. A vocabulary row for each one would memorize noise, and "
@@ -68,7 +102,9 @@ class Hashing(VoiceoverScene):
             vo.wait_until("e")
             self.play(FadeIn(pts[3], shift=LEFT * 0.1))
             vo.wait_until("q")
-            self.play(FadeIn(q), Create(same), Create(SurroundingRectangle(acct[1], buff=0.05, color=YELLOW, stroke_width=2)))
+            self.play(
+                FadeIn(q), Create(same), Create(SurroundingRectangle(acct[1], buff=0.05, color=YELLOW, stroke_width=2))
+            )
         self.play(*[FadeOut(m) for m in self.mobjects])
 
     # ------------------------------------------------------------------
@@ -80,7 +116,9 @@ class Hashing(VoiceoverScene):
         h = VGroup(*[Mono(f"lane {k}: {v:+.3f}", font_size=24, color=C.HASH) for k, v in enumerate(lanes)])
         h.arrange(DOWN, aligned_edge=LEFT, buff=0.15).move_to(LEFT * 2.3 + UP * 0.4)
         a1 = Arrow(idt.get_right(), h.get_left(), buff=0.15, color=GREY_B, stroke_width=3)
-        l1 = label(r"two salted 64-bit hashes,\\scaled to $[-1,1)$", font_size=22, color=GREY_A).next_to(h, DOWN, buff=0.45)
+        l1 = label(r"two salted 64-bit hashes,\\scaled to $[-1,1)$", font_size=22, color=GREY_A).next_to(
+            h, DOWN, buff=0.45
+        )
         strip = vector_strip(vec, color=C.HASH, cell=0.13, gap=0.018, direction=RIGHT)
         strip.scale_to_fit_width(5.6).move_to(RIGHT * 3.75 + UP * 0.4)
         a2 = Arrow(h.get_right(), strip.get_left(), buff=0.15, color=GREY_B, stroke_width=3)
@@ -97,8 +135,10 @@ class Hashing(VoiceoverScene):
             self.play(FadeIn(idt), FadeIn(tag))
             vo.wait_until("h")
             self.play(GrowArrow(a1), FadeIn(h, lag_ratio=0.3), FadeIn(l1))
+            transmit(self, [idt], h, C.HASH, run_time=0.7)
             vo.wait_until("f")
             self.play(GrowArrow(a2), FadeIn(strip, lag_ratio=0.01), FadeIn(l2), run_time=1.4)
+            transmit(self, list(h), strip, C.HASH, run_time=1.0)
             vo.wait_until("t")
             self.play(FadeIn(l3))
         self.play(*[FadeOut(m) for m in self.mobjects])
@@ -121,13 +161,24 @@ class Hashing(VoiceoverScene):
             g = sim_grid(bs[k]["similarity"], ids, cell=0.3)
             grids.add(g)
         grids.arrange(RIGHT, buff=0.9).next_to(strips, DOWN, buff=0.8)
-        labs = VGroup(*[label(names[k], font_size=22, color=GREY_A).next_to(grids[k], DOWN, buff=0.15) for k in range(3)])
+        labs = VGroup(
+            *[label(names[k], font_size=22, color=GREY_A).next_to(grids[k], DOWN, buff=0.15) for k in range(3)]
+        )
         ticks = VGroup()
         for i, t in enumerate(["17", "17", "92", "17", "5", "92", "33"]):
-            ticks.add(Mono(t, font_size=14, color=YELLOW if t == "17" else GREY_B).next_to(grids[0].sq[i * 7], LEFT, buff=0.08))
-        gl = label(r"cosine similarity between the 7 IDs of one observation: equal IDs give identical vectors (outlined)",
-                   font_size=22, color=GREY_A).next_to(labs, DOWN, buff=0.25)
-        pred = label(r"test and prediction: salt $= 0$, deterministic", font_size=24, color=GREY_A).to_edge(DOWN, buff=0.2)
+            ticks.add(
+                Mono(t, font_size=14, color=YELLOW if t == "17" else GREY_B).next_to(
+                    grids[0].sq[i * 7], LEFT, buff=0.08
+                )
+            )
+        gl = label(
+            r"cosine similarity between the 7 IDs of one observation: equal IDs give identical vectors (outlined)",
+            font_size=22,
+            color=GREY_A,
+        ).next_to(labs, DOWN, buff=0.25)
+        pred = label(r"test and prediction: salt $= 0$, deterministic", font_size=24, color=GREY_A).to_edge(
+            DOWN, buff=0.2
+        )
         for k in range(3):
             sim = np.array(bs[k]["similarity"])
             assert abs(sim[0, 1] - 1) < 1e-5 and abs(sim[0, 3] - 1) < 1e-5 and abs(sim[2, 5] - 1) < 1e-5
@@ -158,9 +209,14 @@ class Hashing(VoiceoverScene):
         p = D("proofs")["metrics"]
         m21, m28 = p["P021"], p["P028"]
         assert m21["hash_auc"] > 0.999 and m21["category_oov_auc"] == 0.5 and m28["intact_auc"] < 0.5
-        pl = Plot((0, 3), (0, 1), width=5.4, height=3.4, y_ticks=[0, 0.5, 1.0], font_size=22).move_to(LEFT * 3.2 + DOWN * 0.5)
-        bars = [(r"Hash", m21["hash_auc"], C.HASH), (r"Category\\(unseen IDs)", m21["category_oov_auc"], C.CATEGORY),
-                (r"control: labels\\shuffled", m21["shuffled_auc"], GREY_B)]
+        pl = Plot((0, 3), (0, 1), width=5.4, height=3.4, y_ticks=[0, 0.5, 1.0], font_size=22).move_to(
+            LEFT * 3.2 + DOWN * 0.5
+        )
+        bars = [
+            (r"Hash", m21["hash_auc"], C.HASH),
+            (r"Category\\(unseen IDs)", m21["category_oov_auc"], C.CATEGORY),
+            (r"control: labels\\shuffled", m21["shuffled_auc"], GREY_B),
+        ]
         rects, texts, vals = VGroup(), VGroup(), VGroup()
         for i, (t, v, c) in enumerate(bars):
             r = pl.bar(i + 0.5, v, 0.6, c)
@@ -170,14 +226,19 @@ class Hashing(VoiceoverScene):
         head = label(r"P021: does a pair of \emph{never seen} IDs match?", font_size=26).next_to(pl, UP, buff=0.95)
         yt = label(r"held-out AUC", font_size=22, color=GREY_A).next_to(pl, UP, buff=0.5).align_to(pl, LEFT)
 
-        lim = VGroup(
-            label(r"the limit (P028, recorded as \emph{Limited}):", font_size=26, color=RED),
-            label(r"compare two sibling collections", font_size=26, color=GREY_A),
-            label(r"after each has been summarized:", font_size=26, color=GREY_A),
-            label(rf"AUC {m28['intact_auc']:.2f}, chance", font_size=30, color=RED),
-            label(r"equality helps only while the tokens\\can still attend to each other", font_size=26),
-            Mono("transfers=rf.Branch(reduction=None, ...)", font_size=20, color=C.RF_BRANCH),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.18).to_edge(RIGHT, buff=0.5).shift(UP * 0.2)
+        lim = (
+            VGroup(
+                label(r"the limit (P028, recorded as \emph{Limited}):", font_size=26, color=RED),
+                label(r"compare two sibling collections", font_size=26, color=GREY_A),
+                label(r"after each has been summarized:", font_size=26, color=GREY_A),
+                label(rf"AUC {m28['intact_auc']:.2f}, chance", font_size=30, color=RED),
+                label(r"equality helps only while the tokens\\can still attend to each other", font_size=26),
+                Mono("transfers=rf.Branch(reduction=None, ...)", font_size=20, color=C.RF_BRANCH),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.18)
+            .to_edge(RIGHT, buff=0.5)
+            .shift(UP * 0.2)
+        )
         tag = proof_tag(r"P021 and P028")
         with self.voiceover(
             "Does it work? <bookmark mark='p'/> In relflow's proof P021, the answer depends only on whether two IDs "

@@ -2,8 +2,16 @@ from __future__ import annotations
 
 from explainer import *  # noqa: F403
 from videos.ml.relflow.common import (
-    D, Mono, label, mtex, note, real_tag, show_episode_card, state_tile,
+    D,
+    Mono,
+    label,
+    mtex,
+    note,
+    real_tag,
+    show_episode_card,
+    state_tile,
 )
+from videos.ml.relflow.story import transmit
 
 ORDER_HUES = ["#8ECAE6", "#F4A261", "#CDB4DB", "#90BE6D"]
 
@@ -11,8 +19,15 @@ ORDER_HUES = ["#8ECAE6", "#F4A261", "#CDB4DB", "#90BE6D"]
 def item_chip(sku, qty, hue, font_size=20) -> VGroup:
     q = "null" if qty is None else str(qty)
     t = Mono(f"{sku}·{q}", font_size=font_size, color=WHITE)
-    r = RoundedRectangle(width=t.width + 0.22, height=t.height + 0.16, corner_radius=0.07, stroke_color=hue,
-                         stroke_width=1.6, fill_color=hue, fill_opacity=0.18)
+    r = RoundedRectangle(
+        width=t.width + 0.22,
+        height=t.height + 0.16,
+        corner_radius=0.07,
+        stroke_color=hue,
+        stroke_width=1.6,
+        fill_color=hue,
+        fill_opacity=0.18,
+    )
     t.move_to(r)
     g = VGroup(r, t)
     g.box, g.text = r, t
@@ -56,13 +71,16 @@ class RaggedToDense(VoiceoverScene):
             rows.add(row)
             self.chips.append(items)
         rows.arrange(DOWN, aligned_edge=LEFT, buff=0.22).to_corner(UL, buff=0.6)
-        hint = note(r"each chip: SKU $\cdot$ quantity", font_size=22).next_to(rows, DOWN, buff=0.25).align_to(rows, LEFT)
+        hint = (
+            note(r"each chip: SKU $\cdot$ quantity", font_size=22).next_to(rows, DOWN, buff=0.25).align_to(rows, LEFT)
+        )
         with self.voiceover(
             "How does a batch of records become a tensor? Let's follow a real batch. Here are four orders: two items, one item with a missing quantity, no items at "
             "all, and five items."
         ):
-            self.play(LaggedStart(*[FadeIn(r, shift=RIGHT * 0.15) for r in rows], lag_ratio=0.25), FadeIn(hint),
-                      run_time=2.2)
+            self.play(
+                LaggedStart(*[FadeIn(r, shift=RIGHT * 0.15) for r in rows], lag_ratio=0.25), FadeIn(hint), run_time=2.2
+            )
         self.rows, self.hint = rows, hint
 
     # ------------------------------------------------------------------
@@ -74,8 +92,16 @@ class RaggedToDense(VoiceoverScene):
             for it in r["line_items"]:
                 flat.append((it, i))
         skus = VGroup(*[cell(it["sku"], color=ORDER_HUES[i]) for it, i in flat]).arrange(RIGHT, buff=0)
-        qtys = VGroup(*[cell("null" if it["quantity"] is None else str(it["quantity"]), color=ORDER_HUES[i],
-                             text_color=C.NULL_STATE if it["quantity"] is None else WHITE) for it, i in flat])
+        qtys = VGroup(
+            *[
+                cell(
+                    "null" if it["quantity"] is None else str(it["quantity"]),
+                    color=ORDER_HUES[i],
+                    text_color=C.NULL_STATE if it["quantity"] is None else WHITE,
+                )
+                for it, i in flat
+            ]
+        )
         qtys.arrange(RIGHT, buff=0)
         lab_o = label(r"offsets", font_size=26, color=GOLD)
         lab_s = label(r"sku", font_size=26, color=C.ARROW_BUF)
@@ -101,12 +127,23 @@ class RaggedToDense(VoiceoverScene):
                 br = Brace(VGroup(*skus[a:b]), DOWN, buff=0.05, color=ORDER_HUES[i])
                 br.next_to(qtys, DOWN, buff=0.08).match_x(VGroup(*qtys[a:b]))
                 br.stretch_to_fit_width(VGroup(*qtys[a:b]).width)
-                spans.add(VGroup(br, Mono(f"order {i}", font_size=18, color=ORDER_HUES[i]).next_to(br, DOWN, buff=0.06)))
+                spans.add(
+                    VGroup(br, Mono(f"order {i}", font_size=18, color=ORDER_HUES[i]).next_to(br, DOWN, buff=0.06))
+                )
         ptr = VGroup()
         for i, o in enumerate(e["offsets"]):
             x = skus[o].get_left()[0] if o < len(skus) else skus[-1].get_right()[0]
-            ptr.add(Arrow(offs[i].get_bottom(), [x, skus.get_top()[1] + 0.25, 0], buff=0.06, stroke_width=2, color=GOLD,
-                          max_tip_length_to_length_ratio=0.2, tip_length=0.12))
+            ptr.add(
+                Arrow(
+                    offs[i].get_bottom(),
+                    [x, skus.get_top()[1] + 0.25, 0],
+                    buff=0.06,
+                    stroke_width=2,
+                    color=GOLD,
+                    max_tip_length_to_length_ratio=0.2,
+                    tip_length=0.12,
+                )
+            )
         with self.voiceover(
             "In memory, Apache Arrow doesn't store lists the way Python does. <bookmark mark='c'/> Every item of every "
             "order goes into one long column per field: all the SKUs, back to back, and all the quantities. "
@@ -116,8 +153,12 @@ class RaggedToDense(VoiceoverScene):
         ) as vo:
             vo.wait_until("c")
             src = VGroup(*[c for ch in self.chips for c in ch if hasattr(c, "box")])
-            self.play(FadeIn(lab_s), FadeIn(lab_q),
-                      *[TransformFromCopy(s_, VGroup(skus[k], qtys[k])) for k, s_ in enumerate(src)], run_time=1.8)
+            self.play(
+                FadeIn(lab_s),
+                FadeIn(lab_q),
+                *[TransformFromCopy(s_, VGroup(skus[k], qtys[k])) for k, s_ in enumerate(src)],
+                run_time=1.8,
+            )
             self.play(FadeIn(idx))
             vo.wait_until("o")
             self.play(FadeIn(lab_o), FadeIn(offs, lag_ratio=0.1))
@@ -131,11 +172,23 @@ class RaggedToDense(VoiceoverScene):
         cells = VGroup()
         for r in range(4):
             for s in range(4):
-                cells.add(Rectangle(width=0.95, height=0.5, stroke_color=GREY_C, stroke_width=1.2, fill_color=C.PADDED,
-                                    fill_opacity=0.25))
+                cells.add(
+                    Rectangle(
+                        width=0.95,
+                        height=0.5,
+                        stroke_color=GREY_C,
+                        stroke_width=1.2,
+                        fill_color=C.PADDED,
+                        fill_opacity=0.25,
+                    )
+                )
         cells.arrange_in_grid(4, 4, buff=0.06)
-        rl = VGroup(*[Mono(f"order {r}", font_size=18, color=ORDER_HUES[r]).next_to(cells[4 * r], LEFT, buff=0.2)
-                      for r in range(4)])
+        rl = VGroup(
+            *[
+                Mono(f"order {r}", font_size=18, color=ORDER_HUES[r]).next_to(cells[4 * r], LEFT, buff=0.2)
+                for r in range(4)
+            ]
+        )
         cl = VGroup(*[Mono(f"slot {s}", font_size=16, color=GREY_B).next_to(cells[s], UP, buff=0.12) for s in range(4)])
         g = VGroup(cells, rl, cl)
         g.cells = cells
@@ -171,6 +224,7 @@ class RaggedToDense(VoiceoverScene):
             hl = SurroundingRectangle(self.skus[4], buff=0.03, color=YELLOW, stroke_width=3)
             ex = mtex(r"3 \times 4 + 1 = 13", font_size=34, color=YELLOW).next_to(formula, DOWN, buff=0.25)
             self.play(Create(hl), Write(ex))
+            transmit(self, [self.skus[4]], grid.cells[13], YELLOW, run_time=0.9)
             vo.wait_until("a")
             anims = []
             for k, p in enumerate(head["placement"]):
@@ -179,8 +233,13 @@ class RaggedToDense(VoiceoverScene):
                 movers.append(c)
                 anims.append(c.animate.move_to(tgt).set_opacity(1))
             self.play(LaggedStart(*anims, lag_ratio=0.12), run_time=2.0)
-            self.play(FadeIn(nums), *[grid.cells[p].animate.set_fill(ORDER_HUES[parents[k]], 0.25)
-                                      for k, p in enumerate(head["placement"])])
+            self.play(
+                FadeIn(nums),
+                *[
+                    grid.cells[p].animate.set_fill(ORDER_HUES[parents[k]], 0.25)
+                    for k, p in enumerate(head["placement"])
+                ],
+            )
             self.play(FadeOut(hl), FadeOut(ex))
         self.grid, self.movers, self.formula, self.gtitle, self.nums = grid, movers, formula, title, nums
 
@@ -189,10 +248,14 @@ class RaggedToDense(VoiceoverScene):
         e = self.e
         f11 = self.skus[7]
         drop = VGroup(Cross(f11, stroke_color=RED, stroke_width=3).scale(0.7))
-        head_t = VGroup(Mono('overflow="head"', font_size=22, color=C.RF_BRANCH),
-                        label(r"(bounded default): keep the first 4", font_size=24, color=GREY_A)).arrange(RIGHT, buff=0.15)
-        tail_t = VGroup(Mono('overflow="tail"', font_size=22, color=C.RF_BRANCH),
-                        label(r": keep the last 4", font_size=24, color=GREY_A)).arrange(RIGHT, buff=0.1)
+        head_t = VGroup(
+            Mono('overflow="head"', font_size=22, color=C.RF_BRANCH),
+            label(r"(bounded default): keep the first 4", font_size=24, color=GREY_A),
+        ).arrange(RIGHT, buff=0.15)
+        tail_t = VGroup(
+            Mono('overflow="tail"', font_size=22, color=C.RF_BRANCH),
+            label(r": keep the last 4", font_size=24, color=GREY_A),
+        ).arrange(RIGHT, buff=0.1)
         head_t.next_to(self.formula, DOWN, buff=0.35)
         tail_t.move_to(head_t)
         row3 = [self.grid.cells[12 + s] for s in range(4)]
@@ -210,19 +273,31 @@ class RaggedToDense(VoiceoverScene):
             vo.wait_until("t")
             new = VGroup(*[cell(s_, color=ORDER_HUES[3]).move_to(row3[k]) for k, s_ in enumerate(tail_skus)])
             old = VGroup(*self.movers[3:7])
-            self.play(FadeOut(drop), ReplacementTransform(head_t, tail_t),
-                      old.animate.shift(LEFT * 1.0).set_opacity(0), FadeIn(new, shift=LEFT * 1.0), run_time=1.4)
+            self.play(
+                FadeOut(drop),
+                ReplacementTransform(head_t, tail_t),
+                old.animate.shift(LEFT * 1.0).set_opacity(0),
+                FadeIn(new, shift=LEFT * 1.0),
+                run_time=1.4,
+            )
             self.wait(0.8)
-            back = VGroup(*[cell(s_, color=ORDER_HUES[3]).move_to(row3[k]) for k, s_ in
-                            enumerate(e["head"]["retained_skus"][-4:])])
+            back = VGroup(
+                *[
+                    cell(s_, color=ORDER_HUES[3]).move_to(row3[k])
+                    for k, s_ in enumerate(e["head"]["retained_skus"][-4:])
+                ]
+            )
             self.play(FadeOut(new), FadeIn(back), FadeOut(tail_t))
         self.remove(*old)
         self.movers = self.movers[:3] + list(back)
 
     # ------------------------------------------------------------------
     def nested(self):
-        f = mtex(r"\text{line item placement} = (\underbrace{\text{customer} \times 64 + \text{order}}_{\text{the order's own placement}})"
-                 r" \times 16 + \text{item}", font_size=32)
+        f = mtex(
+            r"\text{line item placement} = (\underbrace{\text{customer} \times 64 + \text{order}}_{\text{the order's own placement}})"
+            r" \times 16 + \text{item}",
+            font_size=32,
+        )
         f.to_edge(DOWN, buff=0.55)
         vec = label(r"all of it NumPy over Arrow buffers: no Python loop walks the records", font_size=24, color=GREY_A)
         vec.next_to(f, UP, buff=0.3)
@@ -253,17 +328,24 @@ class RaggedToDense(VoiceoverScene):
                 t = state_tile(q_state[r][s], size=0.44).move_to(grid.cells[4 * r + s])
                 tiles.add(t)
         head = label(r"state of \texttt{quantity}, as relflow encoded it", font_size=26).move_to(self.gtitle)
-        legend = VGroup(*[VGroup(state_tile(k, 0.34), label(t, font_size=24, color=GREY_A)).arrange(RIGHT, buff=0.15)
-                          for k, t in ((0, r"valued"), (1, r"null"), (2, r"padded"))]).arrange(RIGHT, buff=0.5)
+        legend = VGroup(
+            *[
+                VGroup(state_tile(k, 0.34), label(t, font_size=24, color=GREY_A)).arrange(RIGHT, buff=0.15)
+                for k, t in ((0, r"valued"), (1, r"null"), (2, r"padded"))
+            ]
+        ).arrange(RIGHT, buff=0.5)
         legend.next_to(self.formula, DOWN, buff=0.2).match_x(grid)
         ids = VGroup()
         for r in range(4):
             for s in range(4):
                 if sku_state[r][s] == 0:
                     ids.add(Mono(str(sku_ids[r][s]), font_size=22, color=C.CATEGORY).move_to(grid.cells[4 * r + s]))
-        dictionary = label(r"SKUs became small integers from a batch-local dictionary:\\"
-                           r"\texttt{A12}$\to$0, \texttt{B07}$\to$1, \texttt{C33}$\to$2, \texttt{D01}$\to$3, \texttt{E90}$\to$4",
-                           font_size=26, color=C.CATEGORY).to_corner(UL, buff=0.6)
+        dictionary = label(
+            r"SKUs became small integers from a batch-local dictionary:\\"
+            r"\texttt{A12}$\to$0, \texttt{B07}$\to$1, \texttt{C33}$\to$2, \texttt{D01}$\to$3, \texttt{E90}$\to$4",
+            font_size=26,
+            color=C.CATEGORY,
+        ).to_corner(UL, buff=0.6)
         tag = real_tag(r"real \texttt{model.encode(...)} output, relflow 0.2.3")
         with self.voiceover(
             "Alongside the values, every slot also gets a state. <bookmark mark='g'/> Here's the real state grid relflow "
@@ -272,14 +354,22 @@ class RaggedToDense(VoiceoverScene):
             "where there was no item at all. <bookmark mark='s'/> And the SKUs came out as small integers, looked up "
             "in a dictionary that's local to this batch. We'll see later how those meet the model's own vocabulary."
         ) as vo:
-            self.play(FadeOut(VGroup(*self.movers)), FadeOut(self.nums), ReplacementTransform(self.gtitle, head),
-                      FadeIn(tag))
+            self.play(
+                FadeOut(VGroup(*self.movers)), FadeOut(self.nums), ReplacementTransform(self.gtitle, head), FadeIn(tag)
+            )
             vo.wait_until("g")
             self.play(LaggedStart(*[FadeIn(t, scale=0.6) for t in tiles], lag_ratio=0.04), run_time=1.4)
             for mark, k in (("v", 0), ("n", 1), ("p", 2)):
                 vo.wait_until(mark)
-                self.play(FadeIn(legend[k]), *[Indicate(t, color=WHITE, scale_factor=1.15) for t, st in
-                                               zip(tiles, [x for row in q_state for x in row]) if st == k], run_time=0.8)
+                self.play(
+                    FadeIn(legend[k]),
+                    *[
+                        Indicate(t, color=WHITE, scale_factor=1.15)
+                        for t, st in zip(tiles, [x for row in q_state for x in row])
+                        if st == k
+                    ],
+                    run_time=0.8,
+                )
             vo.wait_until("s")
             self.play(FadeOut(tiles), FadeIn(ids), FadeIn(dictionary))
         self.wait(0.5)

@@ -2,10 +2,17 @@ from __future__ import annotations
 
 from explainer import *  # noqa: F403
 from videos.ml.relflow.common import (
-    D, Mono, box, code, label, note, real_tag, show_episode_card,
+    D,
+    Mono,
+    box,
+    code,
+    label,
+    real_tag,
+    show_episode_card,
 )
+from videos.ml.relflow.story import transmit
 
-PRE = '''
+PRE = """
 @rf.preprocess
 def prepare(frame: pl.DataFrame, *, scale: float = 100.0) -> pl.DataFrame:
     accounts = pl.col("accounts")
@@ -16,18 +23,18 @@ def prepare(frame: pl.DataFrame, *, scale: float = 100.0) -> pl.DataFrame:
             pl.struct(account=accounts.struct.field("payee"), role=pl.lit("payee")),
         ),
     ).drop("accounts", "amount_minor")
-'''
+"""
 
-MODEL = '''
+MODEL = """
 model = rf.Model.sm(
     parties=rf.Branch(length=2, overflow="error", account=rf.Category, role=rf.Category),
     amount=rf.Number,
     flagged=rf.Boolean(mask=True),
 )
 data = rf.ArrowDataModule(model=model, train=train, validate=validate, preprocessor=prepare)
-'''
+"""
 
-POST = '''
+POST = """
 @rf.postprocess
 def decision(frame: pl.DataFrame, *, threshold: float) -> pl.DataFrame:
     flagged = pl.col("predictions").struct.field("flagged")
@@ -40,7 +47,7 @@ def decision(frame: pl.DataFrame, *, threshold: float) -> pl.DataFrame:
 
 model.predict(requests, preprocess=prepare, retain=("transfer_id",),
               postprocess=decision.partial(threshold=0.5))
-'''
+"""
 
 
 def yaml_lines(rows, font_size=20, color=WHITE) -> VGroup:
@@ -64,16 +71,38 @@ class Processors(VoiceoverScene):
 
     # ------------------------------------------------------------------
     def pipeline(self):
-        stages = [(r"your\\data", C.ARROW_BUF), (r"preprocess\\Polars", C.NUMBER),
-                  (r"bind to\\the schema", C.RF_FIELD), (r"the model", C.RF_BRANCH), (r"prediction\\table", C.RF_TARGET),
-                  (r"postprocess\\Polars", C.NUMBER)]
-        boxes = VGroup(*[box(t, color=c, width=2.0, height=1.25, font_size=21) for t, c in stages]).arrange(RIGHT, buff=0.3)
+        stages = [
+            (r"your\\data", C.ARROW_BUF),
+            (r"preprocess\\Polars", C.NUMBER),
+            (r"bind to\\the schema", C.RF_FIELD),
+            (r"the model", C.RF_BRANCH),
+            (r"prediction\\table", C.RF_TARGET),
+            (r"postprocess\\Polars", C.NUMBER),
+        ]
+        boxes = VGroup(*[box(t, color=c, width=2.0, height=1.25, font_size=21) for t, c in stages]).arrange(
+            RIGHT, buff=0.3
+        )
         boxes.move_to(UP * 0.4)
-        arrows = VGroup(*[Arrow(a.get_right(), b.get_left(), buff=0.05, stroke_width=3, color=GREY_B,
-                                max_tip_length_to_length_ratio=0.4) for a, b in zip(boxes[:-1], boxes[1:])])
+        arrows = VGroup(
+            *[
+                Arrow(
+                    a.get_right(),
+                    b.get_left(),
+                    buff=0.05,
+                    stroke_width=3,
+                    color=GREY_B,
+                    max_tip_length_to_length_ratio=0.4,
+                )
+                for a, b in zip(boxes[:-1], boxes[1:])
+            ]
+        )
         under = VGroup(
-            label(r"rename, derive, filter, join, reshape", font_size=22, color=C.NUMBER).next_to(boxes[1], DOWN, buff=0.4),
-            label(r"thresholds, business rules, API shapes", font_size=22, color=C.NUMBER).next_to(boxes[5], DOWN, buff=0.4),
+            label(r"rename, derive, filter, join, reshape", font_size=22, color=C.NUMBER).next_to(
+                boxes[1], DOWN, buff=0.4
+            ),
+            label(r"thresholds, business rules, API shapes", font_size=22, color=C.NUMBER).next_to(
+                boxes[5], DOWN, buff=0.4
+            ),
         )
         under[0].align_to(boxes[1], LEFT)
         under[1].align_to(boxes[5], RIGHT)
@@ -83,8 +112,11 @@ class Processors(VoiceoverScene):
             "Polars function that can rename, derive, filter, join, or reshape. <bookmark mark='o'/> A postprocessor "
             "runs after prediction, and turns relflow's prediction table into whatever your application needs."
         ) as vo:
-            self.play(LaggedStart(*[FadeIn(b, shift=RIGHT * 0.1) for b in boxes], lag_ratio=0.12),
-                      LaggedStart(*[GrowArrow(a) for a in arrows], lag_ratio=0.12), run_time=2.0)
+            self.play(
+                LaggedStart(*[FadeIn(b, shift=RIGHT * 0.1) for b in boxes], lag_ratio=0.12),
+                LaggedStart(*[GrowArrow(a) for a in arrows], lag_ratio=0.12),
+                run_time=2.0,
+            )
             vo.wait_until("p")
             self.play(Indicate(boxes[1], color=WHITE, scale_factor=1.06), FadeIn(under[0]))
             vo.wait_until("o")
@@ -95,11 +127,24 @@ class Processors(VoiceoverScene):
     def reshape(self):
         d = self.d
         s, pr = d["source"], d["processed"]
-        src = yaml_lines([f"transfer_id: {s['transfer_id']}", "accounts:", f"  payer: {s['accounts']['payer']}",
-                          f"  payee: {s['accounts']['payee']}", f"amount_minor: {s['amount_minor']}"])
-        out = yaml_lines([f"transfer_id: {pr['transfer_id']}", f"amount: {pr['amount']:.2f}", "parties:",
-                          *[ln for p in pr["parties"] for ln in (f"  - account: {p['account']}", f"    role: {p['role']}")]],
-                         color=C.NUMBER)
+        src = yaml_lines(
+            [
+                f"transfer_id: {s['transfer_id']}",
+                "accounts:",
+                f"  payer: {s['accounts']['payer']}",
+                f"  payee: {s['accounts']['payee']}",
+                f"amount_minor: {s['amount_minor']}",
+            ]
+        )
+        out = yaml_lines(
+            [
+                f"transfer_id: {pr['transfer_id']}",
+                f"amount: {pr['amount']:.2f}",
+                "parties:",
+                *[ln for p in pr["parties"] for ln in (f"  - account: {p['account']}", f"    role: {p['role']}")],
+            ],
+            color=C.NUMBER,
+        )
         src_t = label(r"as it arrives", font_size=24, color=GREY_A)
         out_t = label(r"after \texttt{prepare}", font_size=24, color=C.NUMBER)
         left = VGroup(src_t, src).arrange(DOWN, aligned_edge=LEFT, buff=0.25)
@@ -122,6 +167,8 @@ class Processors(VoiceoverScene):
             self.play(FadeIn(c, shift=DOWN * 0.1))
             vo.wait_until("o")
             self.play(GrowArrow(arr), FadeIn(right, lag_ratio=0.1))
+            self.play(TransformFromCopy(src[2], out[3]), TransformFromCopy(src[3], out[5]), run_time=1.3)
+            transmit(self, [src[4]], out[1], C.NUMBER, run_time=0.8)
             vo.wait_until("w")
             self.play(Indicate(VGroup(*out[3:]), color=WHITE, scale_factor=1.03))
         self.play(FadeOut(VGroup(left, right, arr, c, tag)))
@@ -131,17 +178,36 @@ class Processors(VoiceoverScene):
         d = self.d
         st = d["stats"]
         c = code(MODEL, font_size=19).to_edge(UP, buff=0.5)
-        rule = label(rf"flagged $\iff$ the payee is on an {d['watchlist_size']}-account watchlist, or the amount is over"
-                     r" 2{,}500", font_size=24, color=C.RF_TARGET).next_to(c, DOWN, buff=0.45)
-        rows = VGroup(
-            label(rf"{d['train_rows']:,} training transfers, {d['seconds']:.0f} seconds; {d['test_rows']:,} test"
-                  .replace(",", "{,}"), font_size=24, color=GREY_A),
-            label(rf"accuracy {st['accuracy'] * 100:.2f}\%", font_size=28),
-            label(rf"watchlisted \emph{{payees}} flagged: {st['watched_payee_recall'] * 100:.0f}\%", font_size=28,
-                  color=C.RF_TARGET),
-            label(rf"the same accounts as \emph{{payers}} flagged: {st['watched_payer_flag_rate'] * 100:.0f}\%",
-                  font_size=28, color=C.VALUED),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.22).next_to(rule, DOWN, buff=0.45)
+        rule = label(
+            rf"flagged $\iff$ the payee is on an {d['watchlist_size']}-account watchlist, or the amount is over"
+            r" 2{,}500",
+            font_size=24,
+            color=C.RF_TARGET,
+        ).next_to(c, DOWN, buff=0.45)
+        rows = (
+            VGroup(
+                label(
+                    rf"{d['train_rows']:,} training transfers, {d['seconds']:.0f} seconds; {d['test_rows']:,} test".replace(
+                        ",", "{,}"
+                    ),
+                    font_size=24,
+                    color=GREY_A,
+                ),
+                label(rf"accuracy {st['accuracy'] * 100:.2f}\%", font_size=28),
+                label(
+                    rf"watchlisted \emph{{payees}} flagged: {st['watched_payee_recall'] * 100:.0f}\%",
+                    font_size=28,
+                    color=C.RF_TARGET,
+                ),
+                label(
+                    rf"the same accounts as \emph{{payers}} flagged: {st['watched_payer_flag_rate'] * 100:.0f}\%",
+                    font_size=28,
+                    color=C.VALUED,
+                ),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.22)
+            .next_to(rule, DOWN, buff=0.45)
+        )
         tag = real_tag(r"real training run with the preprocessor attached")
         assert st["watched_payee_recall"] == 1.0 and st["watched_payer_flag_rate"] == 0.0
         with self.voiceover(
@@ -178,10 +244,15 @@ class Processors(VoiceoverScene):
         table.add(head)
         for i, r in enumerate(d["result"]):
             y = -1.65 - 0.42 * i
-            table.add(VGroup(Mono(r["transfer_id"], font_size=19).move_to([xs[0], y, 0], aligned_edge=LEFT),
-                             Mono(f"{r['flag_probability']:.4f}", font_size=19).move_to([xs[1], y, 0], aligned_edge=LEFT),
-                             Mono(str(r["review"]).lower(), font_size=19,
-                                  color=C.RF_TARGET if r["review"] else GREY_B).move_to([xs[2], y, 0], aligned_edge=LEFT)))
+            table.add(
+                VGroup(
+                    Mono(r["transfer_id"], font_size=19).move_to([xs[0], y, 0], aligned_edge=LEFT),
+                    Mono(f"{r['flag_probability']:.4f}", font_size=19).move_to([xs[1], y, 0], aligned_edge=LEFT),
+                    Mono(str(r["review"]).lower(), font_size=19, color=C.RF_TARGET if r["review"] else GREY_B).move_to(
+                        [xs[2], y, 0], aligned_edge=LEFT
+                    ),
+                )
+            )
         tag = real_tag(r"real output of \texttt{model.predict} with both processors")
         assert [r["review"] for r in d["result"]] == d["truth"]
         with self.voiceover(
@@ -206,18 +277,36 @@ class Processors(VoiceoverScene):
             (r"batch jobs", r'\texttt{rf.Writer("predictions", postprocessor=decision)}'),
             (r"serving", r"\texttt{rf.Deployment(model=model).postprocess(decision)}"),
         ]
-        g = VGroup(*[VGroup(label(a, font_size=24, color=GREY_A), label(b, font_size=22)).arrange(RIGHT, buff=0.4)
-                     for a, b in rows]).arrange(DOWN, aligned_edge=LEFT, buff=0.3).move_to(UP * 0.9)
+        g = (
+            VGroup(
+                *[
+                    VGroup(label(a, font_size=24, color=GREY_A), label(b, font_size=22)).arrange(RIGHT, buff=0.4)
+                    for a, b in rows
+                ]
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.3)
+            .move_to(UP * 0.9)
+        )
         for r in g:
             r[1].set_x(-2.6, LEFT)
             r[0].set_x(-2.9, RIGHT)
-        facts = VGroup(
-            label(r"processors are not saved in the model: pass them again when you predict", font_size=24),
-            label(r'by default each runs per partition, streamed; \texttt{scope="dataset"} gathers a whole split',
-                  font_size=24, color=GREY_A),
-            label(r"keep a key with \texttt{retain}: relflow won't restore the original rows or order", font_size=24,
-                  color=GREY_A),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.2).to_edge(DOWN, buff=0.6)
+        facts = (
+            VGroup(
+                label(r"processors are not saved in the model: pass them again when you predict", font_size=24),
+                label(
+                    r'by default each runs per partition, streamed; \texttt{scope="dataset"} gathers a whole split',
+                    font_size=24,
+                    color=GREY_A,
+                ),
+                label(
+                    r"keep a key with \texttt{retain}: relflow won't restore the original rows or order",
+                    font_size=24,
+                    color=GREY_A,
+                ),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.2)
+            .to_edge(DOWN, buff=0.6)
+        )
         with self.voiceover(
             "The same two functions plug into every path: <bookmark mark='t'/> training, <bookmark mark='p'/> direct "
             "prediction, <bookmark mark='b'/> batch jobs that write Parquet, <bookmark mark='s'/> and an HTTP "

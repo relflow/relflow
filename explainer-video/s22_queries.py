@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from explainer import *  # noqa: F403
-from videos.ml.relflow.common import C, D, Mono, box, code, label, show_episode_card
+from videos.ml.relflow.common import C, D, Mono, box, label, show_episode_card
 from videos.ml.relflow.current_visuals import heading, trace_tag
+from videos.ml.relflow.story import stream
 
 
 class QueryPaths(VoiceoverScene):
@@ -52,8 +53,10 @@ class QueryPaths(VoiceoverScene):
             self.play(FadeIn(head), FadeIn(source), FadeIn(tag))
             vo.wait_until("r")
             self.play(FadeIn(nodes[0]), GrowArrow(routes[0]))
+            stream(self, [routes[0]], C.RF_ROOT, run_time=0.65)
             vo.wait_until("b")
             self.play(FadeIn(nodes[1]), GrowArrow(routes[1]), Create(selected))
+            stream(self, [routes[1]], C.RF_BRANCH, run_time=0.65)
             vo.wait_until("f")
             self.play(FadeIn(nodes[2]), TransformFromCopy(source[3:], output), run_time=1.5)
         self.clear_scene()

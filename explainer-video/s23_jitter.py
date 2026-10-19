@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 from explainer import *  # noqa: F403
-from videos.ml.relflow.common import C, D, Mono, Plot, label, mtex, show_episode_card
+from videos.ml.relflow.common import C, D, Mono, label, mtex, show_episode_card
 from videos.ml.relflow.current_visuals import heading, trace_tag
 
 
@@ -51,14 +51,12 @@ class Jitter(VoiceoverScene):
             self.play(Write(formula))
         self.clear_scene()
         head = heading("Only the visible training lane moves")
-        lanes = VGroup(
-            *[
-                VGroup(
-                    Mono(name, font_size=25, color=col), Line(LEFT * 2, RIGHT * 2, color=col), Dot(ORIGIN, color=col)
-                ).arrange(RIGHT, buff=0.45)
-                for name, col in [("training", C.MASKED), ("validation", C.VALUED), ("prediction", C.RF_TARGET)]
-            ]
-        )
+        lanes = VGroup()
+        for name, col in [("training", C.MASKED), ("validation", C.VALUED), ("prediction", C.RF_TARGET)]:
+            line = Line(LEFT * 1.6, RIGHT * 2.8, color=col)
+            title = Mono(name, font_size=25, color=col).next_to(line, LEFT, buff=0.45)
+            point = Dot(line.get_center(), color=col, radius=0.09)
+            lanes.add(VGroup(title, line, point))
         lanes.arrange(DOWN, aligned_edge=LEFT, buff=0.65).move_to(UP * 0.5)
         spaces = label(
             r"Number: raw or standardized\\Vector: supplied coordinates\\DateParts: sine/cosine pairs\\Text: pooled frozen-encoder features",

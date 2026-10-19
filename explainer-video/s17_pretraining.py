@@ -1,15 +1,20 @@
 from __future__ import annotations
 
-import math
-
 import numpy as np
-
 from explainer import *  # noqa: F403
 from videos.ml.relflow.common import (
-    D, Mono, Plot, code, heat_grid, label, note, proof_tag, real_tag, show_episode_card, tile,
+    D,
+    Mono,
+    Plot,
+    code,
+    label,
+    proof_tag,
+    real_tag,
+    show_episode_card,
+    tile,
 )
 
-PRETRAIN = '''
+PRETRAIN = """
 pretrain = rf.Model(
     d_model=64, n_layers=2, n_heads=4,
     line_items=rf.Branch(
@@ -19,15 +24,15 @@ pretrain = rf.Model(
         price=rf.Number(mask=rf.Mask(rate=0.15, reconstruct=True)),
     ),
 )
-'''
+"""
 
-FINETUNE = '''
+FINETUNE = """
 sku, price = rf.Address("line_items", "sku"), rf.Address("line_items", "price")
 model = rf.Model.load("pretrained.rf")
 model.update(rf.where("address").is_in([sku, price]), mask=False)
 model.extend(rf.where("address") == rf.Address(), returned=rf.Boolean(mask=True))
 model.fit(labeled_data, batch_size=128, learning_rate=1e-3, max_epochs=20)
-'''
+"""
 
 GROUP_COLORS = [C.RF_TARGET, C.NUMBER, C.CATEGORY, C.HASH, C.BOOLEAN, C.VALUED, C.MASS, C.RF_BRANCH]
 
@@ -38,6 +43,9 @@ class Pretraining(VoiceoverScene):
         self.d = D("pretraining")
         self.idea()
         self.data()
+        from videos.ml.relflow.story import pretraining_geometry
+
+        pretraining_geometry(self)
         self.learned()
         self.finetune()
         self.results()
@@ -46,10 +54,13 @@ class Pretraining(VoiceoverScene):
     # ------------------------------------------------------------------
     def idea(self):
         c = code(PRETRAIN, font_size=20).move_to(UP * 0.4)
-        hl = [SurroundingRectangle(c.code_lines[i], buff=0.04, color=C.MASKED, stroke_width=2, corner_radius=0.04)
-              for i in (4, 6)]
-        none = label(r"no target at all: every objective comes from the records themselves", font_size=26,
-                     color=GREY_A).next_to(c, DOWN, buff=0.5)
+        hl = [
+            SurroundingRectangle(c.code_lines[i], buff=0.04, color=C.MASKED, stroke_width=2, corner_radius=0.04)
+            for i in (4, 6)
+        ]
+        none = label(
+            r"no target at all: every objective comes from the records themselves", font_size=26, color=GREY_A
+        ).next_to(c, DOWN, buff=0.5)
         with self.voiceover(
             "Labels are expensive. Records usually aren't: for every order someone labeled, there may be a hundred "
             "that nobody did. <bookmark mark='m'/> Masks let a model learn from those too. Hide a sample of the values "
@@ -74,14 +85,26 @@ class Pretraining(VoiceoverScene):
             lab = label("ABCDEFGH"[g], font_size=22, color=GROUP_COLORS[g]).next_to(dots, UP, buff=0.1)
             groups.add(VGroup(lab, dots))
         groups.arrange(RIGHT, buff=0.42).move_to(UP * 1.5)
-        head = label(rf"{d['catalog']} products in {d['groups']} hidden groups", font_size=28).next_to(groups, UP, buff=0.35)
-        facts = VGroup(
-            label(r"an order mostly buys from one group", font_size=26, color=GREY_A),
-            label(r"returned $\iff$ a group-A product is bought 3 or more at a time", font_size=26, color=C.RF_TARGET),
-            label(r"group A costs the same as group B, so price alone can't tell", font_size=26, color=GREY_A),
-            label(rf"{d['unlabeled_rows']:,} orders without labels; a few dozen to a thousand with them".replace(",", "{,}", 1),
-                  font_size=26),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.22).next_to(groups, DOWN, buff=0.6)
+        head = label(rf"{d['catalog']} products in {d['groups']} hidden groups", font_size=28).next_to(
+            groups, UP, buff=0.35
+        )
+        facts = (
+            VGroup(
+                label(r"an order mostly buys from one group", font_size=26, color=GREY_A),
+                label(
+                    r"returned $\iff$ a group-A product is bought 3 or more at a time", font_size=26, color=C.RF_TARGET
+                ),
+                label(r"group A costs the same as group B, so price alone can't tell", font_size=26, color=GREY_A),
+                label(
+                    rf"{d['unlabeled_rows']:,} orders without labels; a few dozen to a thousand with them".replace(
+                        ",", "{,}", 1
+                    ),
+                    font_size=26,
+                ),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.22)
+            .next_to(groups, DOWN, buff=0.6)
+        )
         with self.voiceover(
             f"Here's a synthetic shop with {d['catalog']} products, secretly arranged in {d['groups']} groups. "
             "<bookmark mark='o'/> Each order buys mostly from one group. <bookmark mark='r'/> An order comes back if "
@@ -104,37 +127,81 @@ class Pretraining(VoiceoverScene):
         unit = w / np.linalg.norm(w, axis=1, keepdims=True)
         groups = np.array([s[0] for s in e["labels"]])
         letters = "ABCDEFGH"
-        m = np.array([[np.mean(unit[groups == a] @ unit[groups == b].T) for b in letters] for a in letters])
-        grid = heat_grid(np.clip(m, 0, None), C.EMBED, cell=0.55, vmin=0.0, vmax=m.max()).move_to(LEFT * 3.2 + DOWN * 0.4)
-        rl = VGroup(*[label(letters[i], font_size=20, color=GROUP_COLORS[i]).next_to(grid[i], LEFT, buff=0.15)
-                      for i in range(8)])
-        cl = VGroup(*[label(letters[j], font_size=20, color=GROUP_COLORS[j]).next_to(grid[0][j], UP, buff=0.12)
-                      for j in range(8)])
+        m = np.zeros((8, 8))
+        for i, a in enumerate(letters):
+            for j, b in enumerate(letters):
+                pairs = unit[groups == a] @ unit[groups == b].T
+                if a == b:
+                    pairs = pairs[~np.eye(len(pairs), dtype=bool)]
+                m[i, j] = pairs.mean()
+        limit = float(abs(m).max())
+        grid = (
+            VGroup(
+                *[
+                    VGroup(
+                        *[
+                            Square(
+                                0.55,
+                                stroke_width=0,
+                                fill_color="#B197FC" if v >= 0 else "#5CD0F0",
+                                fill_opacity=0.06 + 0.94 * abs(float(v)) / limit,
+                            )
+                            for v in row
+                        ]
+                    ).arrange(RIGHT, buff=0.03)
+                    for row in m
+                ]
+            )
+            .arrange(DOWN, buff=0.03)
+            .move_to(LEFT * 3.2 + DOWN * 0.4)
+        )
+        legend = Mono(f"violet + / cyan − | ±{limit:.3f} | self-pairs excluded", font_size=15, color=GREY_A).next_to(
+            grid, DOWN, buff=0.22
+        )
+        rl = VGroup(
+            *[
+                label(letters[i], font_size=20, color=GROUP_COLORS[i]).next_to(grid[i], LEFT, buff=0.15)
+                for i in range(8)
+            ]
+        )
+        cl = VGroup(
+            *[
+                label(letters[j], font_size=20, color=GROUP_COLORS[j]).next_to(grid[0][j], UP, buff=0.12)
+                for j in range(8)
+            ]
+        )
         gt = label(r"mean cosine similarity of the\\learned SKU vectors, by group", font_size=22, color=GREY_A)
         gt.next_to(VGroup(grid, cl), UP, buff=0.25)
         curve = d["pretrain_curve"][-1]
         acc = curve[".line_items.sku/validate.accuracy.content"]
         chance = 1 / d["catalog"]
         ceiling = 0.8 / 25 + 0.2 / d["catalog"]
-        side = VGroup(
-            label(r"reconstructing a hidden SKU:", font_size=26),
-            label(rf"random guess: {chance * 100:.1f}\%", font_size=24, color=GREY_A),
-            label(rf"the model, after pretraining: {acc * 100:.1f}\%", font_size=24, color=C.EMBED),
-            label(rf"knowing the group but not the item: about {ceiling * 100:.1f}\%", font_size=24, color=GREY_A),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.2).move_to(RIGHT * 3.0 + UP * 0.6)
+        side = (
+            VGroup(
+                label(r"reconstructing a hidden SKU:", font_size=26),
+                label(rf"random guess: {chance * 100:.1f}\%", font_size=24, color=GREY_A),
+                label(rf"the model, after pretraining: {acc * 100:.1f}\%", font_size=24, color=C.EMBED),
+                label(rf"knowing the group but not the item: about {ceiling * 100:.1f}\%", font_size=24, color=GREY_A),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.2)
+            .move_to(RIGHT * 3.0 + UP * 0.6)
+        )
         diag = float(np.mean(np.diag(m)))
         off = float(np.mean(m[~np.eye(8, dtype=bool)]))
         verdict = label(rf"same group: {diag:.2f} $\quad$ different groups: {off:+.2f}", font_size=24, color=YELLOW)
         verdict.next_to(side, DOWN, buff=0.6).align_to(side, LEFT)
-        tag = real_tag(rf"real pretraining run: 6 epochs over {d['unlabeled_rows']:,} unlabeled orders".replace(",", "{,}"))
+        tag = real_tag(
+            rf"real pretraining run: 6 epochs over {d['unlabeled_rows']:,} unlabeled orders".replace(",", "{,}")
+        )
         assert diag > 5 * abs(off) and acc > 4 * chance
         with self.voiceover(
             "After six epochs of pretraining on those unlabeled orders, what has it learned? <bookmark mark='a'/> "
             f"Asked to name a hidden SKU, it gets {acc * 100:.1f} percent right. That sounds poor, but a random guess "
             f"gets {chance * 100:.1f}, and even a model that knew each product's group perfectly, but not which item, "
-            f"would get about {ceiling * 100:.0f}. <bookmark mark='g'/> It has learned the groups. "
-            "<bookmark mark='s'/> You can see it in the SKU embedding table: products from the same group point in "
-            "similar directions, and products from different groups don't. Nobody told it the groups existed."
+            f"would get about {ceiling * 100:.0f}. <bookmark mark='g'/> It has picked up group structure. "
+            "<bookmark mark='s'/> Compare distinct products, excluding each vector's trivial similarity to itself. "
+            "Same-group pairs are more aligned on average, although individual neighborhoods overlap. Violet is "
+            "positive cosine, cyan is negative, with one shared scale. Nobody supplied the group labels as inputs."
         ) as vo:
             self.play(FadeIn(tag))
             vo.wait_until("a")
@@ -142,19 +209,23 @@ class Pretraining(VoiceoverScene):
             vo.wait_until("g")
             self.play(Indicate(side[2], color=WHITE))
             vo.wait_until("s")
-            self.play(FadeIn(grid, lag_ratio=0.01), FadeIn(rl), FadeIn(cl), FadeIn(gt))
+            self.play(FadeIn(grid, lag_ratio=0.01), FadeIn(rl), FadeIn(cl), FadeIn(gt), FadeIn(legend))
             self.play(FadeIn(verdict))
-        self.play(FadeOut(VGroup(grid, rl, cl, gt, side, verdict, tag)))
+        self.play(FadeOut(VGroup(grid, rl, cl, gt, side, verdict, tag, legend)))
 
     # ------------------------------------------------------------------
     def finetune(self):
         c = code(FINETUNE, font_size=21).move_to(UP * 0.6)
-        notes = VGroup(
-            label(r"load the pretrained weights, vocabularies and normalizers", font_size=24, color=GREY_A),
-            label(r"SKU and price become ordinary inputs again", font_size=24, color=GREY_A),
-            label(r"add the label as a new target at the root", font_size=24, color=C.RF_TARGET),
-            label(r"a fresh optimizer; then fit as usual", font_size=24, color=GREY_A),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.18).next_to(c, DOWN, buff=0.5)
+        notes = (
+            VGroup(
+                label(r"load the pretrained weights, vocabularies and normalizers", font_size=24, color=GREY_A),
+                label(r"SKU and price become ordinary inputs again", font_size=24, color=GREY_A),
+                label(r"add the label as a new target at the root", font_size=24, color=C.RF_TARGET),
+                label(r"a fresh optimizer; then fit as usual", font_size=24, color=GREY_A),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.18)
+            .next_to(c, DOWN, buff=0.5)
+        )
         with self.voiceover(
             "Fine-tuning takes a few lines. <bookmark mark='l'/> Load the pretrained model, <bookmark mark='u'/> turn "
             "the reconstructed fields back into ordinary inputs, <bookmark mark='e'/> add the label you care about as a "
@@ -172,22 +243,43 @@ class Pretraining(VoiceoverScene):
         d = self.d
         budgets = d["budgets"]
         res = {a: [np.array(d["results"][a][str(b)]) for b in budgets] for a in ("scratch", "pretrained")}
-        pl = Plot((24, 1400), (0.7, 1.0), width=8.6, height=4.6, log_x=True, x_ticks=budgets,
-                  y_ticks=[0.7, 0.8, 0.9, 1.0], x_fmt=lambda v: f"{int(v)}", font_size=22).move_to(LEFT * 1.6 + DOWN * 0.3)
+        pl = Plot(
+            (24, 1400),
+            (0.7, 1.0),
+            width=8.6,
+            height=4.6,
+            log_x=True,
+            x_ticks=budgets,
+            y_ticks=[0.7, 0.8, 0.9, 1.0],
+            x_fmt=lambda v: f"{int(v)}",
+            font_size=22,
+        ).move_to(LEFT * 1.6 + DOWN * 0.3)
         xt = pl.x_title(r"labeled orders used for fine-tuning", font_size=22)
-        yt = label(r"test AUC, 2{,}000 new orders", font_size=22, color=GREY_A).next_to(pl, UP, buff=0.15).align_to(pl, LEFT)
+        yt = (
+            label(r"test AUC, 2{,}000 new orders", font_size=22, color=GREY_A)
+            .next_to(pl, UP, buff=0.15)
+            .align_to(pl, LEFT)
+        )
         series = {}
         for arm, col in (("scratch", GREY_B), ("pretrained", C.EMBED)):
             means = [r.mean() for r in res[arm]]
             line = pl.line(budgets, means, col, 3.5)
-            dots = VGroup(*[pl.dot(b, v, color=col, radius=0.035, opacity=0.7) for b, r in zip(budgets, res[arm]) for v in r])
+            dots = VGroup(
+                *[pl.dot(b, v, color=col, radius=0.035, opacity=0.7) for b, r in zip(budgets, res[arm]) for v in r]
+            )
             series[arm] = VGroup(line, dots)
-        leg = VGroup(
-            VGroup(Dot(color=GREY_B), label(r"from scratch", font_size=24, color=GREY_B)).arrange(RIGHT, buff=0.15),
-            VGroup(Dot(color=C.EMBED), label(r"pretrained, then fine-tuned", font_size=24, color=C.EMBED))
-            .arrange(RIGHT, buff=0.15),
-            label(r"3 seeds each (dots), mean (line), 300 steps", font_size=20, color=GREY_A),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.15).to_corner(UR, buff=0.4).shift(DOWN * 0.6)
+        leg = (
+            VGroup(
+                VGroup(Dot(color=GREY_B), label(r"from scratch", font_size=24, color=GREY_B)).arrange(RIGHT, buff=0.15),
+                VGroup(Dot(color=C.EMBED), label(r"pretrained, then fine-tuned", font_size=24, color=C.EMBED)).arrange(
+                    RIGHT, buff=0.15
+                ),
+                label(r"3 seeds each (dots), mean (line), 300 steps", font_size=20, color=GREY_A),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.15)
+            .to_corner(UR, buff=0.4)
+            .shift(DOWN * 0.6)
+        )
         i64 = budgets.index(64)
         s64, p64 = res["scratch"][i64].mean(), res["pretrained"][i64].mean()
         last = len(budgets) - 1
@@ -195,10 +287,20 @@ class Pretraining(VoiceoverScene):
         seen32 = d["skus_seen"]["32"]
         note1 = label(rf"64 labels: {s64:.2f} $\to$ {p64:.2f}", font_size=26, color=YELLOW).next_to(leg, DOWN, buff=0.5)
         note1.align_to(leg, LEFT)
-        note2 = label(rf"32 labeled orders show only {seen32:.0f}\\of the {d['catalog']} products", font_size=22,
-                      color=GREY_A).next_to(note1, DOWN, buff=0.35).align_to(leg, LEFT)
-        note3 = label(rf"{budgets[-1]:,} labels: {s_last:.2f} vs {p_last:.2f}".replace(",", "{,}"), font_size=24,
-                      color=GREY_A).next_to(note2, DOWN, buff=0.35).align_to(leg, LEFT)
+        note2 = (
+            label(
+                rf"32 labeled orders show only {seen32:.0f}\\of the {d['catalog']} products", font_size=22, color=GREY_A
+            )
+            .next_to(note1, DOWN, buff=0.35)
+            .align_to(leg, LEFT)
+        )
+        note3 = (
+            label(
+                rf"{budgets[-1]:,} labels: {s_last:.2f} vs {p_last:.2f}".replace(",", "{,}"), font_size=24, color=GREY_A
+            )
+            .next_to(note2, DOWN, buff=0.35)
+            .align_to(leg, LEFT)
+        )
         tag = real_tag(r"real fine-tuning runs, relflow 0.2.3")
         assert p64 - s64 > 0.05 and abs(p_last - s_last) < 0.02
         assert all(p.mean() >= s.mean() - 0.005 for p, s in zip(res["pretrained"], res["scratch"]))
@@ -232,8 +334,9 @@ class Pretraining(VoiceoverScene):
             label(r"compare against the same task trained from scratch, on the same held-out data", font_size=25),
             label(r"keep pretraining data on the right side of your evaluation boundary", font_size=25),
             label(r"vocabularies and normalizers keep learning while you fine-tune", font_size=25),
-            label(r"for large vocabularies, watch coverage: how many targets the model can even name (P062)",
-                  font_size=25),
+            label(
+                r"for large vocabularies, watch coverage: how many targets the model can even name (P062)", font_size=25
+            ),
         ).arrange(DOWN, aligned_edge=LEFT, buff=0.3)
         tag = proof_tag(r"P062")
         with self.voiceover(

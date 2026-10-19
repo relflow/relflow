@@ -3,6 +3,7 @@ from __future__ import annotations
 from explainer import *  # noqa: F403
 from videos.ml.relflow.common import C, D, Mono, box, code, label, show_episode_card
 from videos.ml.relflow.current_visuals import heading, trace_tag
+from videos.ml.relflow.story import stream, transmit
 
 THREE = """
 model = rf.Model.xs(amount=rf.Number, merchant=rf.Category, disputed=rf.Boolean(mask=True))
@@ -54,6 +55,8 @@ class ThreeLines(VoiceoverScene):
             self.play(FadeIn(fields, lag_ratio=0.25))
             vo.wait_until("b")
             self.play(Transform(fields[2], hidden), FadeIn(model), FadeIn(caption), *[GrowArrow(a) for a in arrows])
+            transmit(self, [fields[0]], model, C.NUMBER, run_time=0.65)
+            transmit(self, [fields[1]], model, C.CATEGORY, run_time=0.65)
         self.clear_scene()
 
     def history(self):
@@ -140,6 +143,22 @@ class ThreeLines(VoiceoverScene):
             self.play(
                 LaggedStart(*[FadeIn(s) for s in stages], lag_ratio=0.18), *[GrowArrow(a) for a in arrows], run_time=2
             )
+            stream(self, list(arrows[:3]), C.RF_BRANCH, run_time=1.4)
+            stream(self, [arrows[3]], C.MASKED, run_time=0.6)
+            update = (
+                VMobject()
+                .set_points_as_corners(
+                    [
+                        stages[4].get_bottom(),
+                        stages[4].get_bottom() + DOWN * 0.6,
+                        stages[2].get_bottom() + DOWN * 0.6,
+                        stages[2].get_bottom(),
+                    ]
+                )
+                .set_stroke(C.MASKED, 2)
+            )
+            self.play(Create(update))
+            stream(self, [update], C.MASKED, run_time=1.0)
             self.play(FadeIn(settings))
             vo.wait_until("c")
             self.play(FadeIn(policy))

@@ -13,6 +13,13 @@ unchanged model. The training episode now follows one real 0.3.2 run through
 11 checkpoints: attention, learned parameters, paired predictions, gradients,
 AdamW updates and moving representations, followed by controlled input changes.
 
+The visual storytelling pass now spans all 24 other chapters. Records and tokens
+retain their identity through placement, packing and output; messages visibly
+travel through encoders and decoder heritage. New measured views show SKU lookup,
+local contextualization, residual additions, and query/key scores becoming
+softmax weights and weighted values. Pretraining compares full-vector cosine
+neighborhoods and group means, excluding self-pairs and showing their overlap.
+
 ## Build from this branch
 
 Use the current [explainer-videos toolkit](https://github.com/Sir-Teo/explainer-videos)
@@ -53,6 +60,10 @@ music bed, which the current shared toolkit no longer provides.
   summary heads on three fixed probes, one fixed 8×8 parameter slice, measured
   gradients/updates and root embeddings in a common final PCA basis. Animated
   transitions interpolate recorded checkpoints; they are not extra measurements.
+- `data/flow_current.json`: post-training **0.3.2** intermediate tensors on the
+  same three probes: coordinate/sequence/reduction attention, raw SKU vectors,
+  residual deltas, summaries and root vectors. Also includes a separate seed-73
+  **untrained** Vector projection fixture. `compute_learning.py` records both.
 - The original 17 experiment JSON files: unchanged **0.2.3** recordings on an Apple M1.
   They remain useful learning illustrations, with archive labels on episode
   cards and measured charts. Their throughput, parameter counts and learning

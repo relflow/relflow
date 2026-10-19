@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import numpy as np
-
 from explainer import *  # noqa: F403
 from videos.ml.relflow.common import (
-    D, Mono, Plot, code, label, note, real_tag, show_episode_card,
+    D,
+    Mono,
+    Plot,
+    code,
+    label,
+    note,
+    real_tag,
+    show_episode_card,
 )
 
 PRESETS = ["xs", "sm", "md", "lg", "xl"]
@@ -30,28 +36,47 @@ class Benchmarks(VoiceoverScene):
         self.advice()
 
     def run(self, preset, mode, device="cpu", length=64):
-        return next(r for r in self.runs if r["preset"] == preset and r["mode"] == mode and r["device"] == device
-                    and r["length"] == length)
+        return next(
+            r
+            for r in self.runs
+            if r["preset"] == preset and r["mode"] == mode and r["device"] == device and r["length"] == length
+        )
 
     # ------------------------------------------------------------------
     def workload(self):
         d = self.d
         m = d["machine"]
-        c = code('''model = rf.Model.md(            # and .xs, .sm, .lg, .xl
+        c = code(
+            """model = rf.Model.md(            # and .xs, .sm, .lg, .xl
     tenure_days=rf.Number,
     orders=rf.Branch(length=64, overflow="tail", age_days=rf.Number,
                      line_items=rf.Branch(length=16, sku=rf.Category, quantity=rf.Number)),
     churned=rf.Boolean(mask=True),
     next_month_spend=rf.Number(mask=True),
-)''', font_size=19).to_edge(UP, buff=0.5)
-        facts = VGroup(
-            label(rf"{m['chip']}, {m['memory_gib']:.0f} GB, {m['threads']} CPU threads, PyTorch {m['torch']}",
-                  font_size=26),
-            label(rf"batches of {d['batch']} customers, about 10 orders of 1 to 6 items each", font_size=24,
-                  color=GREY_A),
-            label(rf"median of {d['steps'] - d['warmup']} batches after {d['warmup']} warm-up; peak memory of a fresh"
-                  r" process", font_size=24, color=GREY_A),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.2).next_to(c, DOWN, buff=0.55)
+)""",
+            font_size=19,
+        ).to_edge(UP, buff=0.5)
+        facts = (
+            VGroup(
+                label(
+                    rf"{m['chip']}, {m['memory_gib']:.0f} GB, {m['threads']} CPU threads, PyTorch {m['torch']}",
+                    font_size=26,
+                ),
+                label(
+                    rf"batches of {d['batch']} customers, about 10 orders of 1 to 6 items each",
+                    font_size=24,
+                    color=GREY_A,
+                ),
+                label(
+                    rf"median of {d['steps'] - d['warmup']} batches after {d['warmup']} warm-up; peak memory of a fresh"
+                    r" process",
+                    font_size=24,
+                    color=GREY_A,
+                ),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.2)
+            .next_to(c, DOWN, buff=0.55)
+        )
         with self.voiceover(
             "What does a relflow model cost? Here's a measurement on an M1, relflow 0.2.3 (archive): "
             f"<bookmark mark='m'/> an Apple {m['chip'].replace('Apple ', '')} laptop with {m['memory_gib']:.0f} "
@@ -80,20 +105,33 @@ class Benchmarks(VoiceoverScene):
         for i, p in enumerate(PRESETS):
             tr, pr = self.run(p, "train"), self.run(p, "predict")
             y = 1.55 - 0.78 * i
-            bt = Rectangle(width=2.4 * tr["rows_per_s"] / tmax, height=0.26, stroke_width=0, fill_color=C.EMBED,
-                           fill_opacity=0.5).move_to([xs[2] - 1.2, y - 0.24, 0], aligned_edge=LEFT)
-            bp = Rectangle(width=2.4 * pr["rows_per_s"] / pmax, height=0.26, stroke_width=0, fill_color=C.RF_TARGET,
-                           fill_opacity=0.5).move_to([xs[3] - 1.2, y - 0.24, 0], aligned_edge=LEFT)
-            rows.add(VGroup(
-                Mono(p, font_size=24, color=WHITE).move_to([xs[0], y, 0]),
-                label(params_text(tr["params"]), font_size=26).move_to([xs[1], y, 0]),
-                bt, label(f"{tr['rows_per_s']:,.0f}".replace(",", "{,}"), font_size=26).move_to([xs[2], y + 0.06, 0]),
-                bp, label(f"{pr['rows_per_s']:,.0f}".replace(",", "{,}"), font_size=26).move_to([xs[3], y + 0.06, 0]),
-                label(gib(tr["peak_mib"]), font_size=26).move_to([xs[4], y, 0]),
-            ))
+            bt = Rectangle(
+                width=2.4 * tr["rows_per_s"] / tmax, height=0.26, stroke_width=0, fill_color=C.EMBED, fill_opacity=0.5
+            ).move_to([xs[2] - 1.2, y - 0.24, 0], aligned_edge=LEFT)
+            bp = Rectangle(
+                width=2.4 * pr["rows_per_s"] / pmax,
+                height=0.26,
+                stroke_width=0,
+                fill_color=C.RF_TARGET,
+                fill_opacity=0.5,
+            ).move_to([xs[3] - 1.2, y - 0.24, 0], aligned_edge=LEFT)
+            rows.add(
+                VGroup(
+                    Mono(p, font_size=24, color=WHITE).move_to([xs[0], y, 0]),
+                    label(params_text(tr["params"]), font_size=26).move_to([xs[1], y, 0]),
+                    bt,
+                    label(f"{tr['rows_per_s']:,.0f}".replace(",", "{,}"), font_size=26).move_to([xs[2], y + 0.06, 0]),
+                    bp,
+                    label(f"{pr['rows_per_s']:,.0f}".replace(",", "{,}"), font_size=26).move_to([xs[3], y + 0.06, 0]),
+                    label(gib(tr["peak_mib"]), font_size=26).move_to([xs[4], y, 0]),
+                )
+            )
         base = np.median([r["baseline_mib"] for r in self.runs])
-        foot = label(rf"about {gib(base)} of that is Python, PyTorch and relflow before any model exists",
-                     font_size=22, color=GREY_A).to_edge(DOWN, buff=0.45)
+        foot = label(
+            rf"about {gib(base)} of that is Python, PyTorch and relflow before any model exists",
+            font_size=22,
+            color=GREY_A,
+        ).to_edge(DOWN, buff=0.45)
         tag = real_tag(r"measured on this computer; CPU only", corner=UR)
         xs_, md_, xl_ = (self.run(p, "train") for p in ("xs", "md", "xl"))
         mdp = self.run("md", "predict")
@@ -111,11 +149,27 @@ class Benchmarks(VoiceoverScene):
         ) as vo:
             self.play(FadeIn(head), Create(line), FadeIn(tag))
             vo.wait_until("x")
-            self.play(FadeIn(rows[0], shift=RIGHT * 0.1))
+            self.play(
+                FadeIn(VGroup(*[m for j, m in enumerate(rows[0]) if j not in (2, 4)])),
+                GrowFromEdge(rows[0][2], LEFT),
+                GrowFromEdge(rows[0][4], LEFT),
+            )
             vo.wait_until("m")
-            self.play(FadeIn(rows[1:3], shift=RIGHT * 0.1, lag_ratio=0.3))
+            for row in rows[1:3]:
+                self.play(
+                    FadeIn(VGroup(*[m for j, m in enumerate(row) if j not in (2, 4)])),
+                    GrowFromEdge(row[2], LEFT),
+                    GrowFromEdge(row[4], LEFT),
+                    run_time=0.8,
+                )
             vo.wait_until("l")
-            self.play(FadeIn(rows[3:], shift=RIGHT * 0.1, lag_ratio=0.3))
+            for row in rows[3:]:
+                self.play(
+                    FadeIn(VGroup(*[m for j, m in enumerate(row) if j not in (2, 4)])),
+                    GrowFromEdge(row[2], LEFT),
+                    GrowFromEdge(row[4], LEFT),
+                    run_time=0.8,
+                )
             vo.wait_until("f")
             self.play(FadeIn(foot))
         self.play(FadeOut(VGroup(head, line, rows, foot, tag)))
@@ -128,8 +182,9 @@ class Benchmarks(VoiceoverScene):
         presets = [p for p in PRESETS if any(r["preset"] == p for r in mps)]
         groups = [(p, mode) for p in presets for mode in ("train", "predict")]
         ymax = max(max(self.run(p, m)["rows_per_s"], self.run(p, m, "mps")["rows_per_s"]) for p, m in groups) * 1.15
-        pl = Plot((0, len(groups)), (0, ymax), width=10.5, height=4.0, x_ticks=[], y_ticks=[], font_size=20,
-                  grid=False).move_to(DOWN * 0.4)
+        pl = Plot(
+            (0, len(groups)), (0, ymax), width=10.5, height=4.0, x_ticks=[], y_ticks=[], font_size=20, grid=False
+        ).move_to(DOWN * 0.4)
         bars = VGroup()
         for i, (p, m) in enumerate(groups):
             cpu, gpu = self.run(p, m), self.run(p, m, "mps")
@@ -140,10 +195,14 @@ class Benchmarks(VoiceoverScene):
             xl = label(rf"\texttt{{{p}}}, {m}", font_size=20, color=GREY_A).next_to(pl.c2p(i + 0.5, 0), DOWN, buff=0.15)
             bars.add(VGroup(b1, b2, t1, t2, xl))
         yt = label(r"rows per second", font_size=22, color=GREY_A).next_to(pl, UP, buff=0.1).align_to(pl, LEFT)
-        leg = VGroup(VGroup(Square(0.22, stroke_width=0, fill_color=C.EMBED, fill_opacity=0.85),
-                            label(r"CPU", font_size=22)).arrange(RIGHT, buff=0.12),
-                     VGroup(Square(0.22, stroke_width=0, fill_color=C.HASH, fill_opacity=0.85),
-                            label(r"M1 GPU (MPS)", font_size=22)).arrange(RIGHT, buff=0.12)).arrange(RIGHT, buff=0.5)
+        leg = VGroup(
+            VGroup(
+                Square(0.22, stroke_width=0, fill_color=C.EMBED, fill_opacity=0.85), label(r"CPU", font_size=22)
+            ).arrange(RIGHT, buff=0.12),
+            VGroup(
+                Square(0.22, stroke_width=0, fill_color=C.HASH, fill_opacity=0.85), label(r"M1 GPU (MPS)", font_size=22)
+            ).arrange(RIGHT, buff=0.12),
+        ).arrange(RIGHT, buff=0.5)
         leg.to_corner(UR, buff=0.5)
         cpu_wins = [(p, m) for p, m in groups if self.run(p, m)["rows_per_s"] > self.run(p, m, "mps")["rows_per_s"]]
         md_t = self.run("md", "train")["rows_per_s"] / self.run("md", "train", "mps")["rows_per_s"]
@@ -152,14 +211,18 @@ class Benchmarks(VoiceoverScene):
         gpu_wins = [(p, m) for p, m in groups if (p, m) not in cpu_wins]
         names = {"xs": "extra-small", "sm": "small", "md": "medium", "lg": "large", "xl": "extra-large"}
         if not gpu_wins:
-            verdict = ("On every one of them, the CPU wins. For the medium model it trains "
-                       f"{md_t:.1f} times faster. These models do many small operations, and on the recorded M1 the "
-                       "overhead of launching each one on the GPU outweighs its speed.")
+            verdict = (
+                "On every one of them, the CPU wins. For the medium model it trains "
+                f"{md_t:.1f} times faster. These models do many small operations, and on the recorded M1 the "
+                "overhead of launching each one on the GPU outweighs its speed."
+            )
         else:
             wins = " and ".join(f"{m}ing the {names[p]} model" for p, m in gpu_wins)
-            verdict = (f"The CPU wins {len(cpu_wins)} of the {len(groups)}. The medium model trains {md_t:.1f} times "
-                       f"faster on the CPU. The GPU only edges ahead {wins}: it pays off once each operation is big "
-                       "enough to cover the cost of launching it.")
+            verdict = (
+                f"The CPU wins {len(cpu_wins)} of the {len(groups)}. The medium model trains {md_t:.1f} times "
+                f"faster on the CPU. The GPU only edges ahead {wins}: it pays off once each operation is big "
+                "enough to cover the cost of launching it."
+            )
         assert len(cpu_wins) >= len(groups) - 1
         with self.voiceover(
             "Lightning picks the GPU automatically when there is one, and on a Mac that's the M1's GPU. Is it "
@@ -177,17 +240,37 @@ class Benchmarks(VoiceoverScene):
 
     # ------------------------------------------------------------------
     def context(self):
-        sweep = sorted((r for r in self.runs if r["preset"] == "sm" and r["mode"] == "train" and r["device"] == "cpu"),
-                       key=lambda r: r["length"])
+        sweep = sorted(
+            (r for r in self.runs if r["preset"] == "sm" and r["mode"] == "train" and r["device"] == "cpu"),
+            key=lambda r: r["length"],
+        )
         lengths = [r["length"] for r in sweep]
         ms = [r["ms_per_batch"] for r in sweep]
         mem = [r["peak_mib"] for r in sweep]
-        pl = Plot((12, 340), (0, max(ms) * 1.25), width=5.6, height=3.6, log_x=True, x_ticks=lengths,
-                  y_ticks=list(np.linspace(0, max(ms) * 1.2, 4).round(-1)), x_fmt=lambda v: f"{int(v)}",
-                  y_fmt=lambda v: f"{v:.0f}", font_size=20).move_to(LEFT * 3.5 + DOWN * 0.4)
-        pm = Plot((12, 340), (0, max(mem) * 1.25), width=5.6, height=3.6, log_x=True, x_ticks=lengths,
-                  y_ticks=list(np.linspace(0, max(mem) * 1.2, 4).round(-2)), x_fmt=lambda v: f"{int(v)}",
-                  y_fmt=lambda v: f"{v / 1024:.1f}", font_size=20).move_to(RIGHT * 3.4 + DOWN * 0.4)
+        pl = Plot(
+            (12, 340),
+            (0, max(ms) * 1.25),
+            width=5.6,
+            height=3.6,
+            log_x=True,
+            x_ticks=lengths,
+            y_ticks=list(np.linspace(0, max(ms) * 1.2, 4).round(-1)),
+            x_fmt=lambda v: f"{int(v)}",
+            y_fmt=lambda v: f"{v:.0f}",
+            font_size=20,
+        ).move_to(LEFT * 3.5 + DOWN * 0.4)
+        pm = Plot(
+            (12, 340),
+            (0, max(mem) * 1.25),
+            width=5.6,
+            height=3.6,
+            log_x=True,
+            x_ticks=lengths,
+            y_ticks=list(np.linspace(0, max(mem) * 1.2, 4).round(-2)),
+            x_fmt=lambda v: f"{int(v)}",
+            y_fmt=lambda v: f"{v / 1024:.1f}",
+            font_size=20,
+        ).move_to(RIGHT * 3.4 + DOWN * 0.4)
         l1, l2 = pl.line(lengths, ms, C.EMBED, 4), pm.line(lengths, mem, C.RF_TARGET, 4)
         d1 = VGroup(*[pl.dot(x, y, color=C.EMBED, radius=0.06) for x, y in zip(lengths, ms)])
         d2 = VGroup(*[pm.dot(x, y, color=C.RF_TARGET, radius=0.06) for x, y in zip(lengths, mem)])
@@ -195,8 +278,9 @@ class Benchmarks(VoiceoverScene):
         t2 = label(r"peak memory, GB", font_size=22, color=C.RF_TARGET).next_to(pm, UP, buff=0.15)
         x1 = pl.x_title(r"room for orders (\texttt{length})", font_size=20)
         x2 = pm.x_title(r"room for orders (\texttt{length})", font_size=20)
-        head = label(r"the same customers, with more and more room: \texttt{orders=rf.Branch(length=...)}",
-                     font_size=24).to_edge(UP, buff=0.45)
+        head = label(
+            r"the same customers, with more and more room: \texttt{orders=rf.Branch(length=...)}", font_size=24
+        ).to_edge(UP, buff=0.45)
         growth_t, growth_m = ms[-1] / ms[0], mem[-1] / mem[0]
         factor = lengths[-1] // lengths[0]
         assert factor == 16 and growth_t < 4 and growth_m < 4

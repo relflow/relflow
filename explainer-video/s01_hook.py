@@ -2,19 +2,43 @@ from __future__ import annotations
 
 from explainer import *  # noqa: F403
 from videos.ml.relflow.common import (
-    BRAND_INK, D, Card, Mono, Tree, chip, code, fmt_int, label, logo, note, real_tag, wordmark,
+    D,
+    Mono,
+    Tree,
+    chip,
+    code,
+    fmt_int,
+    label,
+    logo,
+    note,
+    real_tag,
+    wordmark,
 )
+from videos.ml.relflow.story import stream, tree_up
 
 CUSTOMER_TREE = (
-    "customer", "root", "Branch", [
+    "customer",
+    "root",
+    "Branch",
+    [
         ("tenure_days", "field", "Number", []),
-        ("orders", "branch", "Branch", [
-            ("age_days", "field", "Number", []),
-            ("line_items", "branch", "Branch", [
-                ("sku", "field", "Category", []),
-                ("quantity", "field", "Number", []),
-            ]),
-        ]),
+        (
+            "orders",
+            "branch",
+            "Branch",
+            [
+                ("age_days", "field", "Number", []),
+                (
+                    "line_items",
+                    "branch",
+                    "Branch",
+                    [
+                        ("sku", "field", "Category", []),
+                        ("quantity", "field", "Number", []),
+                    ],
+                ),
+            ],
+        ),
         ("churned", "target", "Boolean", []),
         ("next_month_spend", "target", "Number", []),
     ],
@@ -38,20 +62,42 @@ YAML = [
 ]
 
 SHAPES = [
-    ("a support ticket", [
-        ("subject: Delayed transfer", "field"), ("messages:", "branch"), ("  - author: customer", "field"),
-        ("    body: Not arrived", "field"), ("  - author: agent", "field"), ("    body: In review", "field"),
-        ("escalated: true", "target"),
-    ]),
-    ("a transfer", [
-        ("amount: 120.00", "field"), ("parties:", "branch"), ("  - account: acct-17", "field"),
-        ("    role: payer", "field"), ("  - account: acct-83", "field"), ("    role: payee", "field"),
-        ("flagged: false", "target"),
-    ]),
-    ("a sensor", [
-        ("site: north-7", "field"), ("readings:", "branch"), ("  - hour: 0", "field"), ("    temp_c: 4.1", "field"),
-        ("  - hour: 1", "field"), ("    temp_c: 3.8", "field"), ("fault: false", "target"),
-    ]),
+    (
+        "a support ticket",
+        [
+            ("subject: Delayed transfer", "field"),
+            ("messages:", "branch"),
+            ("  - author: customer", "field"),
+            ("    body: Not arrived", "field"),
+            ("  - author: agent", "field"),
+            ("    body: In review", "field"),
+            ("escalated: true", "target"),
+        ],
+    ),
+    (
+        "a transfer",
+        [
+            ("amount: 120.00", "field"),
+            ("parties:", "branch"),
+            ("  - account: acct-17", "field"),
+            ("    role: payer", "field"),
+            ("  - account: acct-83", "field"),
+            ("    role: payee", "field"),
+            ("flagged: false", "target"),
+        ],
+    ),
+    (
+        "a sensor",
+        [
+            ("site: north-7", "field"),
+            ("readings:", "branch"),
+            ("  - hour: 0", "field"),
+            ("    temp_c: 4.1", "field"),
+            ("  - hour: 1", "field"),
+            ("    temp_c: 3.8", "field"),
+            ("fault: false", "target"),
+        ],
+    ),
 ]
 
 CODE = """
@@ -134,10 +180,20 @@ class Hook(VoiceoverScene):
             cap = label(name, font_size=26, color=GREY_A).next_to(y, UP, buff=0.3).align_to(y, LEFT)
             blocks.add(VGroup(cap, y))
         blocks.arrange(RIGHT, buff=0.75, aligned_edge=UP).move_to(UP * 0.2)
-        lists = VGroup(*[SurroundingRectangle(VGroup(*b[1][2:6]), buff=0.08, color=C.RF_BRANCH, stroke_width=1.8,
-                                              corner_radius=0.06) for b in blocks])
-        answers = VGroup(*[SurroundingRectangle(b[1][6], buff=0.06, color=C.RF_TARGET, stroke_width=1.8,
-                                                corner_radius=0.06) for b in blocks])
+        lists = VGroup(
+            *[
+                SurroundingRectangle(
+                    VGroup(*b[1][2:6]), buff=0.08, color=C.RF_BRANCH, stroke_width=1.8, corner_radius=0.06
+                )
+                for b in blocks
+            ]
+        )
+        answers = VGroup(
+            *[
+                SurroundingRectangle(b[1][6], buff=0.06, color=C.RF_TARGET, stroke_width=1.8, corner_radius=0.06)
+                for b in blocks
+            ]
+        )
         with self.voiceover(
             "Most data worth learning from has shape. <bookmark mark='a'/> A support ticket, with its thread of "
             "messages. <bookmark mark='b'/> A transfer, between two parties. <bookmark mark='c'/> A sensor, with its "
@@ -162,9 +218,17 @@ class Hook(VoiceoverScene):
         orders = VGroup(*y[2:12])
         items = [VGroup(*y[4:6]), VGroup(*y[6:8]), VGroup(*y[10:12])]
         b_orders = SurroundingRectangle(orders, buff=0.1, color=C.RF_BRANCH, stroke_width=2, corner_radius=0.08)
-        b_items = VGroup(*[SurroundingRectangle(it, buff=0.06, color=C.RF_BRANCH, stroke_width=1.5, corner_radius=0.06)
-                           .set_stroke(opacity=0.7) for it in items])
-        b_targets = SurroundingRectangle(VGroup(*y[12:]), buff=0.1, color=C.RF_TARGET, stroke_width=2, corner_radius=0.08)
+        b_items = VGroup(
+            *[
+                SurroundingRectangle(it, buff=0.06, color=C.RF_BRANCH, stroke_width=1.5, corner_radius=0.06).set_stroke(
+                    opacity=0.7
+                )
+                for it in items
+            ]
+        )
+        b_targets = SurroundingRectangle(
+            VGroup(*y[12:]), buff=0.1, color=C.RF_TARGET, stroke_width=2, corner_radius=0.08
+        )
         t_orders = label(r"a list of orders\\each with its own list of items", font_size=28, color=C.RF_BRANCH)
         t_orders.next_to(b_orders, RIGHT, buff=0.6)
         t_targets = label(r"what happens next month:\\the answers we want to predict", font_size=28, color=C.RF_TARGET)
@@ -176,7 +240,9 @@ class Hook(VoiceoverScene):
             "a product SKU, and how many were bought. <bookmark mark='a'/> The last two fields are what we'd like to "
             "predict: did this customer leave the next month, and how much did they spend?"
         ) as vo:
-            self.play(FadeIn(head), LaggedStart(*[FadeIn(r, shift=RIGHT * 0.1) for r in y], lag_ratio=0.06), run_time=2.4)
+            self.play(
+                FadeIn(head), LaggedStart(*[FadeIn(r, shift=RIGHT * 0.1) for r in y], lag_ratio=0.06), run_time=2.4
+            )
             vo.wait_until("t")
             self.play(Indicate(y[0], color=C.RF_FIELD, scale_factor=1.05))
             vo.wait_until("o")
@@ -190,8 +256,14 @@ class Hook(VoiceoverScene):
     # ------------------------------------------------------------------
     def flatten(self):
         y = self.yaml
-        cols = [("tenure", "420"), ("number of orders", "2"), ("number of items", "3"), ("mean quantity", "2.67"),
-                ("distinct SKUs", "3"), ("days since last order", "3")]
+        cols = [
+            ("tenure", "420"),
+            ("number of orders", "2"),
+            ("number of items", "3"),
+            ("mean quantity", "2.67"),
+            ("distinct SKUs", "3"),
+            ("days since last order", "3"),
+        ]
         rows = VGroup()
         for h, v in cols:
             hc = label(h, font_size=28, color=GREY_A)
@@ -202,8 +274,14 @@ class Hook(VoiceoverScene):
             r[1].move_to(RIGHT * 4.3, aligned_edge=RIGHT)
         rows.arrange(DOWN, buff=0.32, aligned_edge=LEFT)
         frame = SurroundingRectangle(rows, buff=0.3, color=GREY_B, stroke_width=1.5, corner_radius=0.06)
-        seps = VGroup(*[Line(frame.get_left(), frame.get_right(), color=GREY_D, stroke_width=1)
-                        .set_y((a.get_bottom()[1] + b.get_top()[1]) / 2) for a, b in zip(rows[:-1], rows[1:])])
+        seps = VGroup(
+            *[
+                Line(frame.get_left(), frame.get_right(), color=GREY_D, stroke_width=1).set_y(
+                    (a.get_bottom()[1] + b.get_top()[1]) / 2
+                )
+                for a, b in zip(rows[:-1], rows[1:])
+            ]
+        )
         table = VGroup(frame, seps, rows).move_to(RIGHT * 3.2 + DOWN * 0.35)
         cap = label(r"the usual move: one row per customer,\\one hand-made feature per column", font_size=28)
         cap.next_to(table, UP, buff=0.35)
@@ -219,8 +297,10 @@ class Hook(VoiceoverScene):
             self.play(y.animate.scale(0.85).to_edge(LEFT, buff=0.8), run_time=1.0)
             self.play(Create(frame), FadeIn(cap), run_time=0.8)
             vo.wait_until("c")
-            for row, src in zip(rows, [y[0], y[1], VGroup(y[4], y[6], y[10]), VGroup(y[5], y[7], y[11]),
-                                       VGroup(y[4], y[6], y[10]), y[2]]):
+            for row, src in zip(
+                rows,
+                [y[0], y[1], VGroup(y[4], y[6], y[10]), VGroup(y[5], y[7], y[11]), VGroup(y[4], y[6], y[10]), y[2]],
+            ):
                 ghost = src.copy().set_opacity(0.6)
                 self.play(ReplacementTransform(ghost, row), run_time=0.55)
             self.play(Create(seps), run_time=0.4)
@@ -234,9 +314,16 @@ class Hook(VoiceoverScene):
     def schema(self):
         c = code(CODE, font_size=19).to_edge(LEFT, buff=0.35)
         tree = Tree(CUSTOMER_TREE, font_size=19, x_gap=0.42).to_edge(RIGHT, buff=0.35)
-        rows = {"/tenure_days": 1, "/orders": 2, "/orders/age_days": 4, "/orders/line_items": 5,
-                "/orders/line_items/sku": 7, "/orders/line_items/quantity": 8, "/churned": 11,
-                "/next_month_spend": 12}
+        rows = {
+            "/tenure_days": 1,
+            "/orders": 2,
+            "/orders/age_days": 4,
+            "/orders/line_items": 5,
+            "/orders/line_items/sku": 7,
+            "/orders/line_items/quantity": 8,
+            "/churned": 11,
+            "/next_month_spend": 12,
+        }
         root_card = tree.cards["/"]
         with self.voiceover(
             "relflow takes the opposite road. You describe the record's shape once, in Python, <bookmark mark='s'/> "
@@ -247,10 +334,25 @@ class Hook(VoiceoverScene):
         ) as vo:
             self.play(FadeIn(c, shift=RIGHT * 0.2), run_time=1.0)
             vo.wait_until("s")
-            self.play(FadeIn(root_card), Create(SurroundingRectangle(c.code_lines[0], buff=0.05, color=C.RF_ROOT,
-                                                                     stroke_width=1.5).set_stroke(opacity=0)), run_time=0.6)
-            for addr in ("/tenure_days", "/orders", "/orders/age_days", "/orders/line_items", "/orders/line_items/sku",
-                         "/orders/line_items/quantity", "/churned", "/next_month_spend"):
+            self.play(
+                FadeIn(root_card),
+                Create(
+                    SurroundingRectangle(c.code_lines[0], buff=0.05, color=C.RF_ROOT, stroke_width=1.5).set_stroke(
+                        opacity=0
+                    )
+                ),
+                run_time=0.6,
+            )
+            for addr in (
+                "/tenure_days",
+                "/orders",
+                "/orders/age_days",
+                "/orders/line_items",
+                "/orders/line_items/sku",
+                "/orders/line_items/quantity",
+                "/churned",
+                "/next_month_spend",
+            ):
                 line = c.code_lines[rows[addr]]
                 card = tree.cards[addr]
                 hl = SurroundingRectangle(line, buff=0.04, color=card.role_color, stroke_width=1.6, corner_radius=0.04)
@@ -258,11 +360,15 @@ class Hook(VoiceoverScene):
                 self.remove(hl)
                 if addr == "/orders/line_items/quantity":
                     vo.wait_until("b")
-                    self.play(Indicate(tree.cards["/orders"], color=C.RF_BRANCH),
-                              Indicate(tree.cards["/orders/line_items"], color=C.RF_BRANCH), run_time=1.2)
+                    self.play(
+                        Indicate(tree.cards["/orders"], color=C.RF_BRANCH),
+                        Indicate(tree.cards["/orders/line_items"], color=C.RF_BRANCH),
+                        run_time=1.2,
+                    )
             vo.wait_until("m")
-            self.play(*[Indicate(tree.cards[a], color=C.RF_TARGET) for a in ("/churned", "/next_month_spend")],
-                      run_time=1.2)
+            self.play(
+                *[Indicate(tree.cards[a], color=C.RF_TARGET) for a in ("/churned", "/next_month_spend")], run_time=1.2
+            )
         self.code_block, self.tree = c, tree
 
     # ------------------------------------------------------------------
@@ -285,8 +391,9 @@ class Hook(VoiceoverScene):
             chips.add(ch)
         s = D("schema_current")["customer"]
         total = s["total_params"]
-        count = label(rf"this model: {fmt_int(total)} parameters, before it has seen one label", font_size=26,
-                      color=GREY_A).to_edge(DOWN, buff=0.45)
+        count = label(
+            rf"this model: {fmt_int(total)} parameters, before it has seen one label", font_size=26, color=GREY_A
+        ).to_edge(DOWN, buff=0.45)
         tag = real_tag(r"counted from the real model, relflow 0.3.2", corner=UR)
         with self.voiceover(
             "From that tree, relflow builds the network. <bookmark mark='e'/> Every input field gets a small embedding "
@@ -300,8 +407,10 @@ class Hook(VoiceoverScene):
             self.play(LaggedStart(*[FadeIn(c, shift=LEFT * 0.1) for c in leaf_chips], lag_ratio=0.15))
             vo.wait_until("b")
             self.play(LaggedStart(*[FadeIn(c, shift=UP * 0.1) for c in branch_chips], lag_ratio=0.2))
+            tree_up(self, tree)
             vo.wait_until("d")
             self.play(LaggedStart(*[FadeIn(c, shift=LEFT * 0.1) for c in target_chips], lag_ratio=0.2))
+            stream(self, [tree.edge_to[a] for a in ("/churned", "/next_month_spend")], C.RF_TARGET)
             vo.wait_until("n")
             self.play(FadeIn(count), FadeIn(tag))
         self.wait(0.5)
@@ -310,29 +419,61 @@ class Hook(VoiceoverScene):
     # ------------------------------------------------------------------
     def roadmap(self):
         stages = [
-            (r"Arrow\\records", C.ARROW_BUF), (r"dense\\tensors", C.VALUED), (r"embed\\each field", C.EMBED),
-            (r"encode\\each branch", C.RF_BRANCH), (r"reduce\\and route up", C.MASS), (r"decode\\the targets", C.RF_TARGET),
+            (r"Arrow\\records", C.ARROW_BUF),
+            (r"dense\\tensors", C.VALUED),
+            (r"embed\\each field", C.EMBED),
+            (r"encode\\each branch", C.RF_BRANCH),
+            (r"reduce\\and route up", C.MASS),
+            (r"decode\\the targets", C.RF_TARGET),
         ]
         boxes = VGroup()
         for text, col in stages:
-            r = RoundedRectangle(width=1.85, height=1.2, corner_radius=0.12, stroke_color=col, stroke_width=2.2,
-                                 fill_color=col, fill_opacity=0.12)
+            r = RoundedRectangle(
+                width=1.85,
+                height=1.2,
+                corner_radius=0.12,
+                stroke_color=col,
+                stroke_width=2.2,
+                fill_color=col,
+                fill_opacity=0.12,
+            )
             t = label(text, font_size=24).move_to(r)
             boxes.add(VGroup(r, t))
         boxes.arrange(RIGHT, buff=0.38).move_to(UP * 1.2)
-        arrows = VGroup(*[Arrow(a.get_right(), b.get_left(), buff=0.06, stroke_width=3, color=GREY_B,
-                                max_tip_length_to_length_ratio=0.4) for a, b in zip(boxes[:-1], boxes[1:])])
+        arrows = VGroup(
+            *[
+                Arrow(
+                    a.get_right(),
+                    b.get_left(),
+                    buff=0.06,
+                    stroke_width=3,
+                    color=GREY_B,
+                    max_tip_length_to_length_ratio=0.4,
+                )
+                for a, b in zip(boxes[:-1], boxes[1:])
+            ]
+        )
         first = label(r"next: the whole thing in three lines of code", font_size=28, color=WHITE)
         first.next_to(boxes, UP, buff=0.5)
-        topics = VGroup(
-            label(r"records $\rightarrow$ rectangles \;$\cdot$\; null is not zero", font_size=25, color=GREY_A),
-            label(r"numbers, labels, identifiers, ranks, time, vectors, text", font_size=25, color=GREY_A),
-            label(r"inside a branch \;$\cdot$\; padding costs nothing \;$\cdot$\; why softmax can't count", font_size=25,
-                  color=GREY_A),
-            label(r"decoders \;$\cdot$\; masks \;$\cdot$\; learning without labels", font_size=25, color=GREY_A),
-            label(r"preprocessing \;$\cdot$\; a real run \;$\cdot$\; time and memory \;$\cdot$\; the proofs",
-                  font_size=25, color=GREY_A),
-        ).arrange(DOWN, buff=0.22).next_to(boxes, DOWN, buff=0.55)
+        topics = (
+            VGroup(
+                label(r"records $\rightarrow$ rectangles \;$\cdot$\; null is not zero", font_size=25, color=GREY_A),
+                label(r"numbers, labels, identifiers, ranks, time, vectors, text", font_size=25, color=GREY_A),
+                label(
+                    r"inside a branch \;$\cdot$\; padding costs nothing \;$\cdot$\; why softmax can't count",
+                    font_size=25,
+                    color=GREY_A,
+                ),
+                label(r"decoders \;$\cdot$\; masks \;$\cdot$\; learning without labels", font_size=25, color=GREY_A),
+                label(
+                    r"preprocessing \;$\cdot$\; a real run \;$\cdot$\; time and memory \;$\cdot$\; the proofs",
+                    font_size=25,
+                    color=GREY_A,
+                ),
+            )
+            .arrange(DOWN, buff=0.22)
+            .next_to(boxes, DOWN, buff=0.55)
+        )
         tag = real_tag()
         with self.voiceover(
             "Each episode stands on its own, and together they follow one batch of records through that whole "
@@ -345,14 +486,20 @@ class Hook(VoiceoverScene):
             "it costs in time and memory, and what relflow's own proofs show. <bookmark mark='f'/> Every grid, curve "
             "and number in the series comes from running relflow itself, on the computer that rendered it."
         ) as vo:
-            self.play(LaggedStart(*[FadeIn(b, shift=UP * 0.15) for b in boxes], lag_ratio=0.12),
-                      LaggedStart(*[GrowArrow(a) for a in arrows], lag_ratio=0.12), run_time=2.0)
+            self.play(
+                LaggedStart(*[FadeIn(b, shift=UP * 0.15) for b in boxes], lag_ratio=0.12),
+                LaggedStart(*[GrowArrow(a) for a in arrows], lag_ratio=0.12),
+                run_time=2.0,
+            )
             vo.wait_until("n")
             self.play(FadeIn(first, shift=UP * 0.1))
             for mark, i, box_idx in (("a", 0, (0, 1)), ("b", 1, (2,)), ("c", 2, (3, 4)), ("d", 3, (5,)), ("e", 4, ())):
                 vo.wait_until(mark)
-                self.play(FadeIn(topics[i], shift=UP * 0.1),
-                          *[Indicate(boxes[j], color=WHITE, scale_factor=1.06) for j in box_idx], run_time=0.9)
+                self.play(
+                    FadeIn(topics[i], shift=UP * 0.1),
+                    *[Indicate(boxes[j], color=WHITE, scale_factor=1.06) for j in box_idx],
+                    run_time=0.9,
+                )
             vo.wait_until("f")
             self.play(FadeIn(tag))
         self.wait(0.6)

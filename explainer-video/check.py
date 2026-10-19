@@ -99,6 +99,30 @@ def main():
     assert update["after"] != update["before"]
     assert [max(range(18), key=lambda i: h[i]) for h in snapshots[0]["attention"][0][:2]] == [15, 15]
     assert [max(range(18), key=lambda i: h[i]) for h in snapshots[-1]["attention"][0][:2]] == [2, 2]
+    import numpy as np
+
+    flow = json.loads((HERE / "data/flow_current.json").read_text())
+    assert flow["provenance"] == learning["provenance"] and flow["probes"] == learning["probes"]
+    for i, trace in enumerate(flow["traces"]):
+        assert math.isclose(trace["probability"], snapshots[-1]["prob"][i], abs_tol=1e-5)
+        for phase in ("coordinate", "sequence", "reduction"):
+            p = trace[phase]
+            q, k, v, w = (np.asarray(p[name]) for name in ("q", "k", "v", "weights"))
+            logits = q @ k.swapaxes(-1, -2) / math.sqrt(q.shape[-1])
+            ex = np.exp(logits - logits.max(axis=-1, keepdims=True))
+            assert np.allclose(ex / ex.sum(axis=-1, keepdims=True), w, atol=1e-5)
+            assert np.allclose(w @ v, p["context"], atol=1e-5)
+        initial = np.asarray(trace["coordinate_vectors"])[6]
+        assert np.allclose(
+            initial + np.asarray(trace["attention_delta"])[2] + np.asarray(trace["ffn_delta"])[2],
+            trace["sequence_vectors"][2],
+            atol=2e-5,
+        )
+    assert np.allclose(flow["traces"][0]["sku_vectors"][2], flow["traces"][1]["sku_vectors"][2])
+    assert not np.allclose(flow["traces"][0]["coordinate_vectors"][6], flow["traces"][1]["coordinate_vectors"][6])
+    vector = flow["vector"]
+    assert vector["projection"] == [4, 64] and vector["states"] == [0, 1]
+    assert np.allclose(np.array(vector["projected"]) + vector["state_vector"], vector["token"], atol=1e-6)
     print(
         f"Validated {len(EPISODES)} scene imports/end cards, docs mappings, bookmarks, {len(provenance['archived_files'])} archived files and current traces."
     )

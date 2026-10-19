@@ -2,14 +2,27 @@ from __future__ import annotations
 
 from explainer import *  # noqa: F403
 from videos.ml.relflow.common import (
-    D, Mono, Plot, Tree, chip, fmt_int, label, mtex, note, real_tag, show_episode_card,
+    D,
+    Mono,
+    Tree,
+    chip,
+    fmt_int,
+    label,
+    real_tag,
+    show_episode_card,
 )
 from videos.ml.relflow.s01_hook import CUSTOMER_TREE
+from videos.ml.relflow.story import stream
 
 ADDRESSES = {
-    "/": "/", "/tenure_days": "/tenure_days", "/orders": "/orders", "/orders/age_days": "/orders/age_days",
-    "/orders/line_items": "/orders/line_items", "/orders/line_items/sku": "/orders/line_items/sku",
-    "/orders/line_items/quantity": "/orders/line_items/quantity", "/churned": "/churned",
+    "/": "/",
+    "/tenure_days": "/tenure_days",
+    "/orders": "/orders",
+    "/orders/age_days": "/orders/age_days",
+    "/orders/line_items": "/orders/line_items",
+    "/orders/line_items/sku": "/orders/line_items/sku",
+    "/orders/line_items/quantity": "/orders/line_items/quantity",
+    "/churned": "/churned",
     "/next_month_spend": "/next_month_spend",
 }
 
@@ -32,9 +45,18 @@ class SchemaIsArchitecture(VoiceoverScene):
             addr[a] = t
         root_note = label(r"the root: anonymous,\\always exactly\\one observation", font_size=24, color=C.RF_ROOT)
         root_note.next_to(tree.cards["/"], UP, buff=0.5).align_to(tree.cards["/"], LEFT)
-        uses = VGroup(*[label(t, font_size=26, color=GREY_A) for t in
-                        (r"addresses name:", r"$\cdot$ predictions", r"$\cdot$ metrics", r"$\cdot$ exported embeddings",
-                         r"$\cdot$ edits to a trained model")]).arrange(DOWN, aligned_edge=LEFT, buff=0.14)
+        uses = VGroup(
+            *[
+                label(t, font_size=26, color=GREY_A)
+                for t in (
+                    r"addresses name:",
+                    r"$\cdot$ predictions",
+                    r"$\cdot$ metrics",
+                    r"$\cdot$ exported embeddings",
+                    r"$\cdot$ edits to a trained model",
+                )
+            ]
+        ).arrange(DOWN, aligned_edge=LEFT, buff=0.14)
         uses.to_corner(UR, buff=0.5)
         sku = tree.cards["/orders/line_items/sku"]
         path_nodes = ["/", "/orders", "/orders/line_items", "/orders/line_items/sku"]
@@ -54,8 +76,14 @@ class SchemaIsArchitecture(VoiceoverScene):
             self.play(FadeIn(root_note), Indicate(tree.cards["/"], color=C.RF_ROOT))
             vo.wait_until("p")
             self.play(FadeOut(root_note))
-            self.play(LaggedStart(*[Indicate(tree.cards[a], color=WHITE, scale_factor=1.08) for a in path_nodes],
-                                  lag_ratio=0.35), Indicate(addr["/orders/line_items/sku"], color=YELLOW), run_time=2.0)
+            self.play(
+                LaggedStart(
+                    *[Indicate(tree.cards[a], color=WHITE, scale_factor=1.08) for a in path_nodes], lag_ratio=0.35
+                ),
+                Indicate(addr["/orders/line_items/sku"], color=YELLOW),
+                run_time=2.0,
+            )
+            stream(self, [tree.edge_to[a] for a in path_nodes[1:]], C.RF_TARGET, run_time=1.3)
             vo.wait_until("u")
             self.play(FadeIn(uses, shift=LEFT * 0.2))
         self.tree, self.addr = tree, addr
@@ -65,6 +93,7 @@ class SchemaIsArchitecture(VoiceoverScene):
     def shapes(self):
         self.play(FadeOut(self.tree))
         from videos.ml.relflow.current_visuals import dynamic_widths
+
         dynamic_widths(self)
 
     # ------------------------------------------------------------------
@@ -87,13 +116,32 @@ class SchemaIsArchitecture(VoiceoverScene):
         ]
         stack = VGroup()
         for text, colr in parts:
-            r = RoundedRectangle(width=8.2, height=0.7, corner_radius=0.1, stroke_color=colr, stroke_width=2,
-                                 fill_color=colr, fill_opacity=0.12)
+            r = RoundedRectangle(
+                width=8.2,
+                height=0.7,
+                corner_radius=0.1,
+                stroke_color=colr,
+                stroke_width=2,
+                fill_color=colr,
+                fill_opacity=0.12,
+            )
             t = label(text, font_size=27).move_to(r)
             stack.add(VGroup(r, t))
         stack.arrange(UP, buff=0.12)
-        arrows = VGroup(*[Arrow(a.get_top(), b.get_bottom(), buff=0.02, stroke_width=2.5, color=GREY_B,
-                                max_tip_length_to_length_ratio=0.5, tip_length=0.12) for a, b in zip(stack[:-1], stack[1:])])
+        arrows = VGroup(
+            *[
+                Arrow(
+                    a.get_top(),
+                    b.get_bottom(),
+                    buff=0.02,
+                    stroke_width=2.5,
+                    color=GREY_B,
+                    max_tip_length_to_length_ratio=0.5,
+                    tip_length=0.12,
+                )
+                for a, b in zip(stack[:-1], stack[1:])
+            ]
+        )
         enc = VGroup(stack, arrows)
         branch = VGroup(bc, enc.next_to(bc, RIGHT, buff=0.5)).move_to(DOWN * 1.2)
         with self.voiceover(
@@ -150,9 +198,12 @@ class SchemaIsArchitecture(VoiceoverScene):
             g[0].next_to(g[1], LEFT, buff=0.3)
             g[2].next_to(g[1], RIGHT, buff=0.2)
         bars.move_to(DOWN * 0.2 + RIGHT * 0.6)
-        head = label(rf"where the customer model's {fmt_int(total)} parameters live", font_size=34).to_edge(UP, buff=0.6)
-        sku_note = label(rf"the SKU embedder: {fmt_int(sku)} parameters, its vocabulary still empty", font_size=26,
-                         color=C.CATEGORY).next_to(bars, DOWN, buff=0.5)
+        head = label(rf"where the customer model's {fmt_int(total)} parameters live", font_size=34).to_edge(
+            UP, buff=0.6
+        )
+        sku_note = label(
+            rf"the SKU embedder: {fmt_int(sku)} parameters, its vocabulary still empty", font_size=26, color=C.CATEGORY
+        ).next_to(bars, DOWN, buff=0.5)
         tag = real_tag(r"counted from the real model (preset md, $d_{\mathrm{model}}=256$), relflow 0.3.2")
         with self.voiceover(
             f"Here is where the current customer model's {total / 1e6:.1f} million parameters live. <bookmark mark='b'/> "
@@ -162,8 +213,13 @@ class SchemaIsArchitecture(VoiceoverScene):
         ) as vo:
             self.play(FadeIn(head), FadeIn(tag))
             vo.wait_until("b")
-            self.play(LaggedStart(*[AnimationGroup(FadeIn(g[0]), GrowFromEdge(g[1], LEFT), FadeIn(g[2]))
-                                    for g in bars[:5]], lag_ratio=0.25), run_time=2.4)
+            self.play(
+                LaggedStart(
+                    *[AnimationGroup(FadeIn(g[0]), GrowFromEdge(g[1], LEFT), FadeIn(g[2])) for g in bars[:5]],
+                    lag_ratio=0.25,
+                ),
+                run_time=2.4,
+            )
             vo.wait_until("e")
             self.play(FadeIn(bars[5][0]), GrowFromEdge(bars[5][1], LEFT), FadeIn(bars[5][2]))
             vo.wait_until("s")
@@ -173,27 +229,45 @@ class SchemaIsArchitecture(VoiceoverScene):
     # ------------------------------------------------------------------
     def presets(self):
         ps = D("schema_current")["presets"]
-        head = [r"preset", r"$d_{\mathrm{model}}$", r"root layers", r"branch layers", r"heads", r"root outputs",
-                r"branch outputs"]
+        head = [
+            r"preset",
+            r"$d_{\mathrm{model}}$",
+            r"root layers",
+            r"branch layers",
+            r"heads",
+            r"root outputs",
+            r"branch outputs",
+        ]
         cells = [[label(h, font_size=26, color=GREY_A) for h in head]]
         for p in ps:
-            cells.append([Mono(f"rf.Model.{p['name']}", font_size=22, color=C.RF_ROOT if p["name"] == "md" else WHITE)] +
-                         [label(str(p[k]), font_size=28) for k in ("d_model", "root_layers", "branch_layers", "heads",
-                                                                    "root_outputs", "branch_outputs")])
-        table = MobjectTable(cells, include_outer_lines=False, h_buff=0.45, v_buff=0.28,
-                             line_config={"stroke_color": GREY_D, "stroke_width": 1})
+            cells.append(
+                [Mono(f"rf.Model.{p['name']}", font_size=22, color=C.RF_ROOT if p["name"] == "md" else WHITE)]
+                + [
+                    label(str(p[k]), font_size=28)
+                    for k in ("d_model", "root_layers", "branch_layers", "heads", "root_outputs", "branch_outputs")
+                ]
+            )
+        table = MobjectTable(
+            cells,
+            include_outer_lines=False,
+            h_buff=0.45,
+            v_buff=0.28,
+            line_config={"stroke_color": GREY_D, "stroke_width": 1},
+        )
         table.scale_to_fit_width(12.4).move_to(UP * 0.2)
         md_row = table.get_rows()[3]
         hl = SurroundingRectangle(md_row, buff=0.06, color=C.RF_ROOT, stroke_width=2, corner_radius=0.06)
         override = Mono("rf.Model.md(n_layers=4, ...)  # only the root gets 4 layers", font_size=22, color=GREY_A)
         override.next_to(table, DOWN, buff=0.55)
         tag = real_tag(r"read from \texttt{rf.presets}, relflow 0.3.2")
+        title = label("Five consistent model sizes", font_size=34).to_edge(UP, buff=0.35)
         with self.voiceover(
             "Those sizes come from a preset. <bookmark mark='t'/> relflow ships five, from extra small to extra large. "
             "Each one sets the width, the depth of the root and of every branch, the number of attention heads, and "
             "how many summary vectors each branch passes to its parent. <bookmark mark='m'/> Our customer model used "
             "medium. <bookmark mark='o'/> Anything you set yourself wins, but only at the node where you set it."
         ) as vo:
+            self.play(FadeIn(title))
             vo.wait_until("t")
             self.play(FadeIn(table, lag_ratio=0.02), FadeIn(tag), run_time=1.5)
             vo.wait_until("m")
@@ -201,4 +275,4 @@ class SchemaIsArchitecture(VoiceoverScene):
             vo.wait_until("o")
             self.play(FadeIn(override, shift=UP * 0.1))
         self.wait(0.4)
-        self.play(FadeOut(VGroup(table, hl, override, tag)))
+        self.play(FadeOut(VGroup(table, hl, override, tag, title)))

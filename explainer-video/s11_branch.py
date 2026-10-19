@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import numpy as np
-
 from explainer import *  # noqa: F403
 from videos.ml.relflow.common import (
-    D, Mono, Plot, chip, label, mtex, note, real_tag, schematic_tag, show_episode_card, tile,
+    D,
+    Mono,
+    Plot,
+    label,
+    real_tag,
+    show_episode_card,
+    tile,
 )
 
 FIELDS = [("sku", C.CATEGORY), ("quantity", C.NUMBER), ("price", C.NUMBER)]
@@ -24,6 +29,9 @@ class InsideABranch(VoiceoverScene):
         self.unroll()
         self.rope()
         self.layer()
+        from videos.ml.relflow.story import contextual_embeddings
+
+        contextual_embeddings(self)
         self.evidence()
 
     # ------------------------------------------------------------------
@@ -33,7 +41,9 @@ class InsideABranch(VoiceoverScene):
             rows.add(VGroup(*[token(col, live=j < LIVE) for j in range(N_SLOTS)]).arrange(RIGHT, buff=0.22))
         rows.arrange(DOWN, buff=0.28).move_to(RIGHT * 0.6 + UP * 0.2)
         names = VGroup(*[Mono(n, font_size=24, color=c).next_to(r, LEFT, buff=0.35) for (n, c), r in zip(FIELDS, rows)])
-        slots = VGroup(*[Mono(str(j), font_size=20, color=GREY_B).next_to(rows[0][j], UP, buff=0.15) for j in range(N_SLOTS)])
+        slots = VGroup(
+            *[Mono(str(j), font_size=20, color=GREY_B).next_to(rows[0][j], UP, buff=0.15) for j in range(N_SLOTS)]
+        )
         sl = label(r"slot", font_size=22, color=GREY_B).next_to(slots, LEFT, buff=0.3)
         pad = Brace(VGroup(*rows[2][LIVE:]), DOWN, color=GREY_B)
         pad_l = label(r"padding", font_size=22, color=GREY_B).next_to(pad, DOWN, buff=0.1)
@@ -52,18 +62,30 @@ class InsideABranch(VoiceoverScene):
     # ------------------------------------------------------------------
     def coordinate(self):
         rows = self.rows
-        boxes = VGroup(*[SurroundingRectangle(VGroup(rows[0][j], rows[2][j]), buff=0.08, color=C.RF_FIELD, stroke_width=2,
-                                              corner_radius=0.08) for j in range(LIVE)])
+        boxes = VGroup(
+            *[
+                SurroundingRectangle(
+                    VGroup(rows[0][j], rows[2][j]), buff=0.08, color=C.RF_FIELD, stroke_width=2, corner_radius=0.08
+                )
+                for j in range(LIVE)
+            ]
+        )
         arcs = VGroup()
         for j in range(LIVE):
             for a, b in ((0, 1), (1, 2), (0, 2)):
                 p, q = rows[a][j].get_right(), rows[b][j].get_right()
-                arcs.add(ArcBetweenPoints(p, q, angle=-PI / 1.6 if (a, b) != (0, 2) else -PI / 1.3, color=C.ATTN,
-                                          stroke_width=2).set_stroke(opacity=0.85))
+                arcs.add(
+                    ArcBetweenPoints(
+                        p, q, angle=-PI / 1.6 if (a, b) != (0, 2) else -PI / 1.3, color=C.ATTN, stroke_width=2
+                    ).set_stroke(opacity=0.85)
+                )
         head = label(r"step 1, coordinate attention: the fields of one item attend to each other", font_size=28)
         head.to_edge(UP, buff=0.45)
-        note1 = label(r"one transformer layer, run separately for every item:\\a sequence of just three tokens",
-                      font_size=24, color=GREY_A).to_edge(DOWN, buff=0.6)
+        note1 = label(
+            r"one transformer layer, run separately for every item:\\a sequence of just three tokens",
+            font_size=24,
+            color=GREY_A,
+        ).to_edge(DOWN, buff=0.6)
         with self.voiceover(
             "The first step is local. <bookmark mark='c'/> The SKU, the quantity and the price of one line item belong "
             "together. So each column, separately, goes through one small transformer layer: a sequence of just three "
@@ -76,8 +98,13 @@ class InsideABranch(VoiceoverScene):
             self.play(Create(arcs), FadeIn(note1), run_time=1.4)
             vo.wait_until("k")
             for j in range(LIVE):
-                self.play(*[rows[i][j].sq.animate.set_fill(interpolate_color(ManimColor(FIELDS[i][1]), WHITE, 0.25))
-                            for i in range(3)], run_time=0.25)
+                self.play(
+                    *[
+                        rows[i][j].sq.animate.set_fill(interpolate_color(ManimColor(FIELDS[i][1]), WHITE, 0.25))
+                        for i in range(3)
+                    ],
+                    run_time=0.25,
+                )
         self.play(FadeOut(boxes), FadeOut(arcs), FadeOut(head), FadeOut(note1))
 
     # ------------------------------------------------------------------
@@ -90,7 +117,7 @@ class InsideABranch(VoiceoverScene):
         pos = VGroup(*[Mono(str(k), font_size=14, color=GREY_B).next_to(seq[k], DOWN, buff=0.08) for k in range(24)])
         braces = VGroup()
         for i, (n, c) in enumerate(FIELDS):
-            b = Brace(VGroup(*seq[8 * i:8 * i + 8]), UP, color=c, buff=0.08)
+            b = Brace(VGroup(*seq[8 * i : 8 * i + 8]), UP, color=c, buff=0.08)
             braces.add(VGroup(b, Mono(n, font_size=20, color=c).next_to(b, UP, buff=0.08)))
         head = label(r"step 2: unroll into one sequence of 24 positions", font_size=28).to_edge(UP, buff=0.45)
         live = [k for k in range(24) if k % 8 < LIVE]
@@ -98,10 +125,21 @@ class InsideABranch(VoiceoverScene):
         rng = np.random.default_rng(1)
         for _ in range(26):
             a, b = sorted(rng.choice(live, 2, replace=False))
-            arcs.add(ArcBetweenPoints(seq[a].get_bottom() + DOWN * 0.3, seq[b].get_bottom() + DOWN * 0.3,
-                                      angle=PI / 2.4, color=C.ATTN, stroke_width=1.5).set_stroke(opacity=0.6))
-        stack = label(r"then $n_{\mathrm{layers}}$ ordinary transformer layers run across all of it:\\"
-                      r"every item can compare itself with every other item", font_size=26, color=GREY_A)
+            arcs.add(
+                ArcBetweenPoints(
+                    seq[a].get_bottom() + DOWN * 0.3,
+                    seq[b].get_bottom() + DOWN * 0.3,
+                    angle=PI / 2.4,
+                    color=C.ATTN,
+                    stroke_width=1.5,
+                ).set_stroke(opacity=0.6)
+            )
+        stack = label(
+            r"then $n_{\mathrm{layers}}$ ordinary transformer layers run across all of it:\\"
+            r"every item can compare itself with every other item",
+            font_size=26,
+            color=GREY_A,
+        )
         stack.to_edge(DOWN, buff=0.5)
         with self.voiceover(
             "Next, the grid is unrolled into a single sequence: <bookmark mark='u'/> all eight SKU slots, then all "
@@ -110,8 +148,14 @@ class InsideABranch(VoiceoverScene):
             "other item in the order."
         ) as vo:
             vo.wait_until("u")
-            self.play(FadeIn(head), FadeOut(self.names), FadeOut(self.slots), FadeOut(self.sl),
-                      ReplacementTransform(VGroup(*[t for r in rows for t in r]), seq), run_time=1.6)
+            self.play(
+                FadeIn(head),
+                FadeOut(self.names),
+                FadeOut(self.slots),
+                FadeOut(self.sl),
+                ReplacementTransform(VGroup(*[t for r in rows for t in r]), seq),
+                run_time=1.6,
+            )
             self.play(FadeIn(braces), FadeIn(pos))
             vo.wait_until("s")
             self.play(Create(arcs), FadeIn(stack), run_time=1.6)
@@ -130,9 +174,16 @@ class InsideABranch(VoiceoverScene):
         # a rotating query arrow
         circ = Circle(radius=0.8, color=GREY_D, stroke_width=1.5).move_to(LEFT * 4.6 + DOWN * 1.8)
         ang = ValueTracker(0.4)
-        arrow = always_redraw(lambda: Arrow(circ.get_center(), circ.get_center() + 0.8 * np.array(
-            [np.cos(ang.get_value()), np.sin(ang.get_value()), 0]), buff=0, color=C.QUERY, stroke_width=4,
-            max_tip_length_to_length_ratio=0.2))
+        arrow = always_redraw(
+            lambda: Arrow(
+                circ.get_center(),
+                circ.get_center() + 0.8 * np.array([np.cos(ang.get_value()), np.sin(ang.get_value()), 0]),
+                buff=0,
+                color=C.QUERY,
+                stroke_width=4,
+                max_tip_length_to_length_ratio=0.2,
+            )
+        )
         rl = label(r"rotate each query and key\\by an angle $\propto$ its position", font_size=24, color=GREY_A)
         rl.next_to(circ, UP, buff=0.25)
         vmax = np.abs(scores).max()
@@ -146,17 +197,25 @@ class InsideABranch(VoiceoverScene):
         cl = label(r"query position $\downarrow$, key position $\rightarrow$", font_size=20, color=GREY_A)
         cl.next_to(cells, UP, buff=0.12)
         diag = DashedLine(cells[8].get_center(), cells[(n - 9) * n + n - 1].get_center(), color=WHITE, stroke_width=2)
-        insight = VGroup(
-            label(r"every diagonal is constant:", font_size=24),
-            label(r"the score depends only on the distance", font_size=24, color=GREY_A),
-            label(r"an item's SKU and its own quantity:", font_size=24),
-            label(r"always exactly 8 positions apart", font_size=26, color=YELLOW),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.12).to_edge(RIGHT, buff=0.35).shift(DOWN * 1.4)
+        insight = (
+            VGroup(
+                label(r"every diagonal is constant:", font_size=24),
+                label(r"the score depends only on the distance", font_size=24, color=GREY_A),
+                label(r"an item's SKU and its own quantity:", font_size=24),
+                label(r"always exactly 8 positions apart", font_size=26, color=YELLOW),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.12)
+            .to_edge(RIGHT, buff=0.35)
+            .shift(DOWN * 1.4)
+        )
         pair = VGroup()
         for j in (1, 3):
             a, b = seq[j], seq[8 + j]
-            pair.add(ArcBetweenPoints(a.get_top() + UP * 0.05, b.get_top() + UP * 0.05, angle=-PI / 3, color=YELLOW,
-                                      stroke_width=3))
+            pair.add(
+                ArcBetweenPoints(
+                    a.get_top() + UP * 0.05, b.get_top() + UP * 0.05, angle=-PI / 3, color=YELLOW, stroke_width=3
+                )
+            )
         tag = real_tag(r"scores from relflow's \texttt{RotaryEmbedding} (head width 16)", corner=UR)
         with self.voiceover(
             "How does a token know where it sits? <bookmark mark='r'/> With rotary position embeddings. Every query and "
@@ -183,55 +242,37 @@ class InsideABranch(VoiceoverScene):
 
     # ------------------------------------------------------------------
     def layer(self):
-        x = mtex(r"x", font_size=40)
-        steps = [r"\mathrm{RMSNorm}", r"\text{attention}", r"+", r"\mathrm{RMSNorm}", r"\text{feed-forward}", r"+"]
-        f1 = mtex(r"x \leftarrow x + \text{Attention}\big(\mathrm{RMSNorm}(x)\big)", font_size=40)
-        f2 = mtex(r"x \leftarrow x + \text{FFN}\big(\mathrm{RMSNorm}(x)\big)", font_size=40)
-        f3 = mtex(r"x \leftarrow x \odot \text{present}", font_size=40)
-        fs = VGroup(f1, f2, f3).arrange(DOWN, aligned_edge=LEFT, buff=0.35).move_to(LEFT * 2.6 + UP * 0.8)
-        lab3 = label(r"padding zeroed going in and coming out,\\and masked out of every attention", font_size=24,
-                     color=GREY_A).next_to(f3, DOWN, buff=0.25).align_to(f3, LEFT)
-        modes = VGroup(
-            label(r"key/value heads per query head:", font_size=26),
-            VGroup(Mono('"mha"', font_size=24, color=C.KEY), label(r"one each", font_size=24, color=GREY_A)).arrange(RIGHT, buff=0.3),
-            VGroup(Mono('"gqa"', font_size=24, color=C.KEY), label(r"one per pair", font_size=24, color=GREY_A)).arrange(RIGHT, buff=0.3),
-            VGroup(Mono('"mqa"', font_size=24, color=C.KEY), label(r"one shared by all", font_size=24, color=GREY_A)).arrange(RIGHT, buff=0.3),
-            VGroup(Mono("None", font_size=24, color=C.KEY), label(r"no attention at all", font_size=24, color=GREY_A)).arrange(RIGHT, buff=0.3),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.2).to_edge(RIGHT, buff=0.7).shift(UP * 0.5)
-        with self.voiceover(
-            "Each of those layers is the standard pre-norm block: <bookmark mark='a'/> normalize, attend, add the result "
-            "back; <bookmark mark='f'/> RMS normalize, expand channels by f f n x, apply tanh GELU, project back, and add. The default multiplier is eight, independently configurable at each node. <bookmark mark='p'/> Padding is zeroed on the "
-            "way in and on the way out, and it's masked out of every attention. <bookmark mark='m'/> Each branch can "
-            "also choose how many key and value heads to keep: one per query head, one per pair, one shared by all, or "
-            "no attention at all."
-        ) as vo:
-            vo.wait_until("a")
-            self.play(Write(f1))
-            vo.wait_until("f")
-            self.play(Write(f2))
-            vo.wait_until("p")
-            self.play(Write(f3), FadeIn(lab3))
-            vo.wait_until("m")
-            self.play(FadeIn(modes, lag_ratio=0.2))
-        self.play(FadeOut(VGroup(fs, lab3, modes)))
+        from videos.ml.relflow.story import residual_block
+
+        residual_block(self)
 
     # ------------------------------------------------------------------
     def evidence(self):
         r = D("returns")
         res = r["results"]
         assert res["intact"]["auc"] > 0.999 and res["misaligned"]["auc"] < 0.95
-        rule = VGroup(
-            label(r"a real test of alignment", font_size=30),
-            label(r"an order comes back $\iff$ it has a fragile SKU (S03 or S11)", font_size=26, color=GREY_A),
-            label(r"bought three or more at a time", font_size=26, color=GREY_A),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.15).to_corner(UL, buff=0.6)
-        ex_a = VGroup(Mono("S11 · 4", font_size=26, color=WHITE), Mono("S07 · 1", font_size=26, color=WHITE)).arrange(DOWN, buff=0.1)
-        ex_b = VGroup(Mono("S11 · 1", font_size=26, color=WHITE), Mono("S07 · 4", font_size=26, color=WHITE)).arrange(DOWN, buff=0.1)
+        rule = (
+            VGroup(
+                label(r"a real test of alignment", font_size=30),
+                label(r"an order comes back $\iff$ it has a fragile SKU (S03 or S11)", font_size=26, color=GREY_A),
+                label(r"bought three or more at a time", font_size=26, color=GREY_A),
+            )
+            .arrange(DOWN, aligned_edge=LEFT, buff=0.15)
+            .to_corner(UL, buff=0.6)
+        )
+        ex_a = VGroup(Mono("S11 · 4", font_size=26, color=WHITE), Mono("S07 · 1", font_size=26, color=WHITE)).arrange(
+            DOWN, buff=0.1
+        )
+        ex_b = VGroup(Mono("S11 · 1", font_size=26, color=WHITE), Mono("S07 · 4", font_size=26, color=WHITE)).arrange(
+            DOWN, buff=0.1
+        )
         ta = label(r"returned", font_size=24, color=C.RF_TARGET).next_to(ex_a, DOWN, buff=0.15)
         tb = label(r"kept", font_size=24, color=GREY_A).next_to(ex_b, DOWN, buff=0.15)
         ga, gb = VGroup(ex_a, ta), VGroup(ex_b, tb)
         VGroup(ga, gb).arrange(RIGHT, buff=0.9).next_to(rule, DOWN, buff=0.5).align_to(rule, LEFT).shift(RIGHT * 0.4)
-        same = label(r"same SKUs, same quantities,\\different pairs", font_size=22, color=GREY_A).next_to(VGroup(ga, gb), DOWN, buff=0.3)
+        same = label(r"same SKUs, same quantities,\\different pairs", font_size=22, color=GREY_A).next_to(
+            VGroup(ga, gb), DOWN, buff=0.3
+        )
         pl = Plot((0, 2), (0.5, 1.0), width=4.6, height=3.6, y_ticks=[0.5, 0.75, 1.0], font_size=22)
         pl.to_edge(RIGHT, buff=0.9).shift(DOWN * 0.4)
         b1 = pl.bar(0.5, res["intact"]["auc"], 0.6, C.VALUED)
@@ -239,9 +280,13 @@ class InsideABranch(VoiceoverScene):
         v1 = label(f"{res['intact']['auc']:.3f}", font_size=26).next_to(b1, UP, buff=0.08)
         v2 = label(f"{res['misaligned']['auc']:.3f}", font_size=26).next_to(b2, UP, buff=0.08)
         x1 = label(r"test orders", font_size=22, color=GREY_A).next_to(pl.c2p(0.5, 0.5), DOWN, buff=0.15)
-        x2 = label(r"quantities shuffled\\within each order", font_size=22, color=GREY_A).next_to(pl.c2p(1.5, 0.5), DOWN, buff=0.15)
+        x2 = label(r"quantities shuffled\\within each order", font_size=22, color=GREY_A).next_to(
+            pl.c2p(1.5, 0.5), DOWN, buff=0.15
+        )
         yt = label(r"held-out AUC", font_size=22, color=GREY_A).next_to(pl, UP, buff=0.5).align_to(pl, LEFT)
-        tag = real_tag(rf"real run: {r['train_rows']:,} training orders, {r['test_rows']:,} test orders".replace(",", "{,}"))
+        tag = real_tag(
+            rf"real run: {r['train_rows']:,} training orders, {r['test_rows']:,} test orders".replace(",", "{,}")
+        )
         with self.voiceover(
             "Does that pairing really matter? <bookmark mark='t'/> Here's a real test. We trained a small relflow model "
             "on synthetic orders, where an order comes back only if it contains a fragile SKU, bought three or more at "
