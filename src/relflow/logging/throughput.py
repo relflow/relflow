@@ -6,7 +6,9 @@ from typing import TYPE_CHECKING, cast
 
 import torch
 from lightning import Callback, LightningModule, Trainer
+from tensordict import TensorDict
 
+from relflow.data.arrow import Encoded
 from relflow.structs.enums import Metric, Strata
 
 if TYPE_CHECKING:
@@ -14,7 +16,7 @@ if TYPE_CHECKING:
 
 
 class ThroughputLogger(Callback):
-    """Log each batch's estimated per-rank processing rate as a step metric."""
+    """Log actual rows per host batch-hook second, per rank and without CUDA synchronization."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -40,7 +42,13 @@ class ThroughputLogger(Callback):
         assert self.timestamp is not None
         elapsed = perf_counter() - self.timestamp
         self.timestamp = None
-        throughput = module.batch_size / elapsed if elapsed > 0.0 else 0.0
+        if isinstance(batch, Encoded):
+            rows = batch.source.num_rows
+        elif isinstance(batch, TensorDict) and batch.batch_size:
+            rows = batch.batch_size[0]
+        else:
+            rows = module.batch_size
+        throughput = rows / elapsed if elapsed > 0.0 else 0.0
         self.throughput[strata] = throughput
 
         # Lightning does not register a result collection for prediction hooks,
