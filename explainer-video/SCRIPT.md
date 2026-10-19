@@ -297,19 +297,19 @@ The same two functions plug into every path: training, direct prediction, batch 
 
 ## 23. Watching it learn
 
-_API: relflow 0.3.2; measured examples: archived 0.2.3_
+_recorded training checkpoints: relflow 0.3.2_
 
-Let's watch a real model learn. Here's the schema: orders with up to eight line items, each with a SKU, a quantity and a price, and one hidden Boolean: was the order returned? The rule, which the model never sees: an order comes back if it contains a fragile SKU, S03 or S11, bought three or more at a time.
+This time, don't just watch a loss curve. Watch the same order while the model learns. Six items. A fragile product, S eleven, bought four at a time. Another fragile product, S zero three, bought only once. Our synthetic rule says this order is returned. That label is hidden from the inputs. Four thousand and ninety six other orders provide the training signal. This order stays outside the training set.
 
-We train on four thousand synthetic orders, on the recorded M1's processor. The whole run takes about 5 seconds. The loss falls fast, and by the end of the second epoch, validation AUC has reached one, and it stays there. On two thousand fresh test orders, it ranks every returned order above every kept one. At a fifty percent threshold, 52 of them still land on the wrong side.
+At step zero, each row is one head of the first summary query, reading eighteen tokens: six products, six quantities, six prices. Bright means a larger share of attention. The first two heads start by reading the fourth item's price. The small signed matrix is different: learned query projection parameters. They persist between orders. Attention is computed anew from each order. Both versions of our order initially receive almost the same probability. Now advance the same clock for every panel.
 
-But how does it decide? We can open up the line items branch, and recompute the attention weights of its learned summary query. Here's an order that came back: S11, four at a time, in the fifth slot. Two of the four heads put essentially all of their weight on one single token: the SKU of exactly that item. And thanks to coordinate attention, that SKU token already knows its own quantity. Here's a second returned order, with the fragile item in the first slot: the same two heads go straight to that item again, though one of them now reads its quantity token rather than its SKU.
+The first updates are uncertain. Even the held-out loss can rise. Then the two predictions separate. The first two heads switch from that price to the S eleven token. Its vector already carries context from its own quantity. The learned projection changes too. We are watching recorded checkpoints from eight epochs, not inventing a smooth learning trajectory. The transitions between them are animated. Notice that the heads need not all settle on the same token. A bright square is a read operation, not proof that this token alone caused the answer.
 
-And here are two orders that were kept. Each one contains a fragile SKU, but bought only once. There's no single decisive item, and the attention spreads out and wanders: over quantities, over other products. The model says no, with 99 percent confidence.
+Where did those changes come from? A training batch flows forward: field vectors become context, summaries, and probabilities. The batch labels enter at the loss. Backward: derivatives reach the decoder, attention projections and input embeddings. The arrows are schematic. The matrices below are measured from training batch sixteen. Here is the same query projection slice before the update, its loss gradient, and the actual change applied by Adam W. Each panel states its own scale, so a tiny update stays visible. Adam W uses accumulated moments and weight decay. Its change is not simply a rescaled picture of this one gradient. Many small updates build the model we just watched.
 
-Because we set embed equals True, the model also exports its root vector for every order. Project six hundred test orders onto their two main directions, and the returned orders sit cleanly apart from the kept ones, along the very first direction. That vector is what a downstream model, or a nearest-neighbor search, would use.
+There is another way to see learning. Each dot is the exported root vector of one held-out order, projected into two dimensions. The same dot keeps its identity through every checkpoint. We fix the projection and the axis ranges, so the camera cannot manufacture separation. As training advances, the representations move. Returned and kept orders become easier to distinguish. This is a two-dimensional view of sixty four dimensions, not the classifier's complete decision boundary.
 
-A prediction belongs to a record, not just to a tensor slot. A null transaction collection stays null. An empty collection stays empty. A missing item inside a collection keeps its place. Two valid records around it receive two predictions. Sibling predictions share one record and one set of list boundaries. Even a branch with a finite cap writes variable Arrow lists. The output does not expose unused cap padding. These structures come from an actual untrained model. They demonstrate the contract, without claiming learned accuracy.
+Now test the story. Freeze every learned parameter. Keep the products, prices and positions identical. Change only S eleven's quantity, from four to one. The predicted return probability falls. The fragile product is still there; the conjunction is gone. Put four back, then move that whole item to the first slot. The prediction remains high. A controlled input change tells us more than one bright attention square. On five hundred and twelve held-out orders, this run gets 100.0 percent accuracy. It is a small synthetic learning demonstration. The useful picture is the whole loop: examples, prediction, error, parameter updates, and a new prediction.
 
 ## 24. What it costs: time and memory
 
@@ -339,4 +339,4 @@ So, the journey of one batch. Nested Arrow records are laid into batch sized rec
 
 The schema you write is the network you get. Thanks for watching.
 
-8,974 narrated words.
+9,081 narrated words.

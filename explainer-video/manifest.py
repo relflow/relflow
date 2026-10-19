@@ -45,7 +45,8 @@ _EPISODES = [
 EPISODES = [
     {"number": i, "slug": slug, "module": module, "cls": cls, "title": title, "docs": docs,
      "end": ("endcards", f"End{i:02d}"),
-     "provenance": ("current API traces and model census: relflow 0.3.2" if cls in {"Hook", "SchemaIsArchitecture", "Routing", "Decoders", "ThreeLines", "QueryPaths", "Jitter", "Output"}
+     "provenance": ("recorded training checkpoints: relflow 0.3.2" if cls == "RealRun"
+                    else "current API traces and model census: relflow 0.3.2" if cls in {"Hook", "SchemaIsArchitecture", "Routing", "Decoders", "ThreeLines", "QueryPaths", "Jitter", "Output"}
                     else "current semantics; schematic" if cls == "Membership"
                     else "API: relflow 0.3.2; measured examples: archived 0.2.3")}
     for i, (slug, module, cls, title, docs) in enumerate(_EPISODES, 1)

@@ -9,7 +9,9 @@ Arrow layout, parent-relative queries, value states, field representations,
 branch attention, reduction, output, masks, pretraining, and measured limits.
 The four new episodes cover query paths, jitter, Set/Cluster, and prediction
 format 2. The schema episode now animates changing batch widths around an
-unchanged model; the training episode uses `model.fit(...)`.
+unchanged model. The training episode now follows one real 0.3.2 run through
+11 checkpoints: attention, learned parameters, paired predictions, gradients,
+AdamW updates and moving representations, followed by controlled input changes.
 
 ## Build from this branch
 
@@ -46,7 +48,12 @@ music bed, which the current shared toolkit no longer provides.
   jitter traces, plus one train/validation batch exercising `fit`. The output
   example is explicitly **untrained**, and is evidence of shape and API behavior.
 - `data/schema_current.json`: current schema geometry, presets, and per-node parameter census (21.3M for the medium customer model).
-- Other `data/*.json`: unchanged **0.2.3** experiments recorded on an Apple M1.
+- `data/learning_current.json`: a fresh **0.3.2** training run, seed 0, 4,096
+  training orders, 512 held-out orders, 256 AdamW updates. Includes all four
+  summary heads on three fixed probes, one fixed 8×8 parameter slice, measured
+  gradients/updates and root embeddings in a common final PCA basis. Animated
+  transitions interpolate recorded checkpoints; they are not extra measurements.
+- The original 17 experiment JSON files: unchanged **0.2.3** recordings on an Apple M1.
   They remain useful learning illustrations, with archive labels on episode
   cards and measured charts. Their throughput, parameter counts and learning
   results are not new 0.3.2 measurements. See `data/provenance.json`.
@@ -55,6 +62,7 @@ music bed, which the current shared toolkit no longer provides.
 
 ```bash
 .venv/bin/python explainer-video/compute_current.py
+.venv/bin/python explainer-video/compute_learning.py
 ../explainer-videos/.venv/bin/python explainer-video/check.py --docs /path/to/relflow-docs
 ../explainer-videos/.venv/bin/python explainer-video/export.py
 ```

@@ -56,8 +56,9 @@ DESCRIPTIONS = {
     "and a real comparison against training from scratch.",
     "processors": "Polars preprocessors reshape records before the schema applies; postprocessors turn predictions "
     "into application output. A real model trained through both.",
-    "watching-it-learn": "A real training run, its reduction attention read out head by head, exported embeddings, "
-    "and the prediction envelope.",
+    "watching-it-learn": "A freshly recorded relflow 0.3.2 training run: four attention heads, learned query weights, "
+    "paired predictions and held-out loss on one checkpoint clock. Follow real gradients and AdamW changes, "
+    "watch exported embeddings move in a fixed PCA view, then freeze the weights and change quantity or position.",
     "benchmarks": "Archived relflow 0.2.3 training and inference speed and peak memory for every preset, CPU against the M1's GPU, and what "
     "longer contexts cost: measured on a laptop.",
     "proofs": "Archived relflow 0.2.3 proof catalog: what passes, what is limited, what is still missing, and a recap of the "

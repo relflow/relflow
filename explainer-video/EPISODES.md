@@ -26,7 +26,7 @@ The series cut into 25 standalone videos, one per scene, each ending on a card t
 | 20 | One mask, many objectives (`20-masks.mp4`) | 3:15 | [`core-concepts/dynamic-masking.qmd`](https://relflow.github.io/docs/core-concepts/dynamic-masking.html) |
 | 21 | Learning without labels (`21-pretraining.mp4`) | 2:58 | [`guides/pretraining.qmd`](https://relflow.github.io/docs/guides/pretraining.html) |
 | 22 | Before and after the model (`22-processors.mp4`) | 2:31 | [`guides/preprocessors.qmd`](https://relflow.github.io/docs/guides/preprocessors.html), [`guides/postprocessors.qmd`](https://relflow.github.io/docs/guides/postprocessors.html) |
-| 23 | Watching it learn (`23-watching-it-learn.mp4`) | 2:48 | [`guides/evaluation.qmd`](https://relflow.github.io/docs/guides/evaluation.html), [`core-concepts/embeddings.qmd`](https://relflow.github.io/docs/core-concepts/embeddings.html) |
+| 23 | Watching it learn (`23-watching-it-learn.mp4`) | 3:37 | [`guides/evaluation.qmd`](https://relflow.github.io/docs/guides/evaluation.html), [`core-concepts/embeddings.qmd`](https://relflow.github.io/docs/core-concepts/embeddings.html) |
 | 24 | What it costs: time and memory (`24-benchmarks.mp4`) | 2:41 | [`guides/performance.qmd`](https://relflow.github.io/docs/guides/performance.html) |
 | 25 | What the proofs show, and what they don't (`25-proofs.mp4`) | 2:25 | [`proofs.qmd`](https://relflow.github.io/docs/proofs.html) |
 
@@ -166,7 +166,7 @@ Polars preprocessors reshape records before the schema applies; postprocessors t
 
 **YouTube title:** Watching it learn | relflow, Visualized #23
 
-A real training run, its reduction attention read out head by head, exported embeddings, and the prediction envelope.
+A freshly recorded relflow 0.3.2 training run: four attention heads, learned query weights, paired predictions and held-out loss on one checkpoint clock. Follow real gradients and AdamW changes, watch exported embeddings move in a fixed PCA view, then freeze the weights and change quantity or position.
 
 ## 24. What it costs: time and memory
 

@@ -73,6 +73,32 @@ def main():
     assert all(math.isclose(a, b, abs_tol=1e-5) for a, b in zip(current["query"]["retained_values"], [56.2, 84.5]))
     assert current["fit"]["train_batches"] == current["fit"]["validation_batches"] == 1
     assert all(4.8 <= v <= 5.2 for v in current["jitter"]["samples"])
+    learning = json.loads((HERE / "data/learning_current.json").read_text())
+    assert learning["provenance"]["version"] == "0.3.2"
+    snapshots = learning["snapshots"]
+    assert [s["step"] for s in snapshots] == [0, 1, 4, 8, 16, 32, 64, 96, 128, 192, 256]
+    assert len(learning["loss"]) == 256
+    assert len(learning["labels"]) == learning["test_rows"] == 512
+    for snapshot in snapshots:
+        assert len(snapshot["xy"]) == 512
+        assert all(0 <= p <= 1 for p in snapshot["prob"])
+        for probe in snapshot["attention"]:
+            assert len(probe) == 4
+            assert all(len(h) == 18 and math.isclose(sum(h), 1, abs_tol=1e-5) for h in probe)
+    first, kept, moved = [p["line_items"] for p in learning["probes"]]
+    assert first[2]["quantity"] == 4 and kept[2]["quantity"] == 1
+    assert all(a == b for i, (a, b) in enumerate(zip(first, kept)) if i != 2)
+    assert {k: v for k, v in first[2].items() if k != "quantity"} == {
+        k: v for k, v in kept[2].items() if k != "quantity"
+    }
+    assert moved == [first[2], *first[:2], *first[3:]]
+    assert snapshots[-1]["prob"][0] > 0.95 and snapshots[-1]["prob"][1] < 0.05
+    assert abs(snapshots[-1]["prob"][2] - snapshots[-1]["prob"][0]) < 0.01
+    update = learning["update"]
+    assert all(v > 0 and math.isfinite(v) for v in update["gradient_norms"].values())
+    assert update["after"] != update["before"]
+    assert [max(range(18), key=lambda i: h[i]) for h in snapshots[0]["attention"][0][:2]] == [15, 15]
+    assert [max(range(18), key=lambda i: h[i]) for h in snapshots[-1]["attention"][0][:2]] == [2, 2]
     print(
         f"Validated {len(EPISODES)} scene imports/end cards, docs mappings, bookmarks, {len(provenance['archived_files'])} archived files and current traces."
     )

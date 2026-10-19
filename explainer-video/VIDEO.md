@@ -32,10 +32,15 @@ measured illustrations state their version.
 | Representations | highlight ordinal 2, then connect it to `parents: [2]`; separate three output planes | actual representation records with paths, ordinals, intrinsic index, normalized vectors |
 | Direct batching | preprocess once → chunk before encode → combine → postprocess once | runtime prediction contract and tests |
 | Branch blocks | RMSNorm and node-local `ffnx` (default 8), tanh GELU, residual connections | `architecture/blocks.py`, `encoder.py`, `presets/base.py` |
+| Learning microscope | same order, four attention rows, fixed signed parameter slice, paired prediction rails and held-out loss share one checkpoint clock | `compute_learning.py`; 11 current 0.3.2 snapshots |
+| Backpropagation | forward value pulse, reverse gradient arrows, same coordinate highlighted in before/gradient/actual AdamW-change grids | schematic route; actual update 16 tensors, each panel's stated scale |
+| Representation learning | 512 persistent dots move in a common final PCA basis, center and axis ranges | actual exported 64-d root vectors at every checkpoint |
+| Controlled input changes | freeze parameters; change only S11 quantity 4→1, restore it, then move that same item to the first slot | three fixed label-free probes; measured final probabilities |
 
 The earlier Arrow-buffer, Fourier, rotary, token-packing, mass/count reduction,
-attention heatmap and embedding PCA animations are retained. Their learning experiments
-remain tied to the original 0.2.3 data. Capped examples that reach their limits
+animations are retained. Their learning experiments remain tied to the original
+0.2.3 data. Episode 23's attention and embedding footage is now replaced by the
+fresh synchronized 0.3.2 learning microscope. Capped examples that reach their limits
 remain valid worked shapes; they no longer imply every batch executes at the
 cap. The output scene replaces slash-keyed examples with format-2 records.
 The processor example reads `struct.field("flagged")`; fine-tuning configures
@@ -57,6 +62,36 @@ Prediction values are from an untrained model and are not used to imply useful
 probabilities. The fit check uses one training and one validation batch; it
 makes no accuracy or throughput claim. No pretrained text model is downloaded.
 
+`data/learning_current.json` is a separate seeded 0.3.2 learning experiment,
+recorded by `compute_learning.py` using public `model.fit(...)`, CPU float32,
+batch size 128, learning rate 0.002, weight decay 0.01, eight epochs. All 4,096
+training examples and 512 test examples are synthetic. No test labels or probe
+labels enter the inputs or optimizer. Test data is observed at checkpoints,
+without tuning or early stopping. The final test accuracy is 100% on this
+small, deterministic task; no general performance or timing claim follows.
+
+Each of three probes has six live items, so the reducer reads 18 field-major
+tokens. Its actual projected/rotated queries and keys reconstruct all four
+softmax heads with the actual padding mask. Attention uses a fixed 0–1 scale.
+The unselected top-left 8×8 Q-projection slice uses a common signed scale over
+the whole training movie. Update 16's gradient and actual parameter delta use
+separately stated scales; neither is inferred from the other. The highlighted
+coordinate is the largest absolute gradient within the shown slice (zero-based
+indices). The backpropagation routing is schematic. Attention weights are
+read operations, not a causal decomposition of a prediction.
+
+All representation checkpoints use the final test embeddings' PCA basis and
+center, and a single range spanning all checkpoints. Labels only color the
+dots; PCA uses no labels. Transitions interpolate measurements. The quantity
+intervention changes only S11's quantity, while the position intervention moves
+its complete item. These test the model's input sensitivity, not real-world
+causality. Source inspiration: AI Built part 3's forward/backward graph, part 8's
+fixed examples during training, and part 10's persistent embedding trajectories.
+Numeric readouts switch directly to the destination checkpoint during each
+transition; glyphs never morph into unreadable intermediate numbers.
+The recorder was run twice: all 256 losses, 11 snapshots, three probes and the
+recorded gradient/update tensors matched exactly on this environment.
+
 ## Build and QA
 
 `render.py` delegates scene rendering, narration metadata, audio-length checks,
@@ -65,7 +100,7 @@ independent selections, full cuts, and per-episode end cards. Silent layout QA
 and narrated output use separate media directories. Each output has embedded
 subtitles and chapters, plus standalone SRT and chapter text.
 
-Run `compute_current.py` with the Relflow environment. Run `check.py` with the
+Run `compute_current.py` and `compute_learning.py` with the Relflow environment. Run `check.py` with the
 framework environment to check the manifest, imports, docs mappings, narration
 bookmarks, archived-data hashes and current-trace invariants. Generate contact
 sheets with the shared `tools/contact_sheet.py`, inspect dense frames, and
@@ -122,7 +157,7 @@ its package version separately from `compute_current.py`.
 
 ## Validation of this refresh
 
-The full narrated cut is 57:58.669 at 1920×1080, with audio, subtitles and 25
+The full narrated cut is 58:48.174 at 1920×1080, with audio, subtitles and 25
 chapters. All 25 standalone episodes have audio, subtitles and two chapters
 (content and end card); FFprobe reports no container errors. Contact sheets
 were inspected for the full cut and the revised scenes. The current API recorder
