@@ -6,6 +6,8 @@ refresh follows the [current docs](https://relflow.github.io/docs/) at
 
 [Watch the complete video (480p MP4)](relflow-narrated-480p.mp4), including
 narration, embedded subtitles and chapter markers.
+The [25 individual chapter videos](chapters-480p/README.md) are in a separate
+folder, with narration and subtitles preserved.
 
 Start with one payment and a hidden dispute label, then explore the model tree,
 Arrow layout, parent-relative queries, value states, field representations,
