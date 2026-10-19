@@ -300,6 +300,52 @@ def test_number_loss_does_not_mutate_counter():
     assert torch.equal(embedder.counter.counts, expected_counts)
 
 
+@pytest.mark.parametrize("batch_size", [1, 2, 3])
+def test_number_evaluation_metrics_count_valued_targets_across_unequal_batches(batch_size, tmp_path):
+    model = rf.Model.xs(d_model=8, target=rf.Number(mask=True))
+    decoder = model.nodes["/target"].decoder
+    with torch.no_grad():
+        decoder.regression.weight.zero_()
+        decoder.regression.bias.zero_()
+    rows = pa.table({"target": pa.array([3.0, 4.0, None], type=pa.float32())})
+    data = rf.ArrowDataModule(model, validate=rows)
+    values = model.validate(
+        data,
+        batch_size=batch_size,
+        accelerator="cpu",
+        devices=1,
+        precision="32-true",
+        enable_progress_bar=False,
+        default_root_dir=tmp_path,
+    )[0]
+    assert values[".target/validate.mae.content"] == pytest.approx(3.5)
+    assert values[".target/validate.rmse.content"] == pytest.approx((25 / 2) ** 0.5)
+
+
+def test_number_null_targets_train_state_without_fabricating_numeric_errors():
+    schema = build_schema(mask=Mask(reconstruct=True))
+    field = tensorfield(rows=[[None]], schema=schema, strata=Strata.train)
+    embedder = Embedder(schema=schema, address=ADDRESS)
+    decoder = Decoder(schema=schema, address=ADDRESS)
+    module = TrackingModule(schema=schema, embedder=embedder, decoder=decoder)
+    content = torch.full((*field.state.shape, 1), 100.0, requires_grad=True)
+    prediction = Prediction(
+        address=ADDRESS,
+        payload=TensorDict(
+            {
+                TensorKey.state: torch.zeros(*field.state.shape, len(Tokens), requires_grad=True),
+                TensorKey.content: content,
+            },
+            batch_size=field.batch_size,
+        ),
+    )
+    value = loss(module=module, prediction=prediction, batch=field, strata=Strata.train)
+    assert torch.isfinite(value)
+    value.backward()
+    assert content.grad is not None
+    assert torch.count_nonzero(content.grad) == 0
+
+
 def test_number_normalizer_ignores_nonfinite_values_when_updating():
     normalizer = GlobalOnlineNormalizer()
     normalizer.train()

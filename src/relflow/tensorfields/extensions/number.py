@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import enum
 import math
+from collections.abc import Iterator
 from dataclasses import InitVar
 from typing import TYPE_CHECKING, Annotated, Literal, Unpack, cast
 
@@ -12,6 +13,8 @@ import pydantic
 import torch
 from beartype import beartype
 from tensordict import TensorDict, tensorclass
+from torchmetrics import Metric as TorchMetric
+from torchmetrics.regression import MeanAbsoluteError, MeanSquaredError
 
 from relflow.data.ragged import RaggedField
 from relflow.distributed import all_reduce_sum
@@ -454,6 +457,18 @@ class Decoder(DecoderBase):
 
         self.classification = torch.nn.Linear(in_features=schema.d_model, out_features=len(Tokens))
         self.regression = torch.nn.Linear(in_features=schema.d_model, out_features=1)
+        self.metrics = torch.nn.ModuleDict(
+            {
+                f"{strata.value}_metrics": torch.nn.ModuleDict(
+                    {Metric.mae.value: MeanAbsoluteError(), Metric.rmse.value: MeanSquaredError(squared=False)}
+                )
+                for strata in (Strata.train, Strata.validate, Strata.test)
+            }
+        )
+
+    def content_metrics(self, strata: Strata) -> Iterator[tuple[str, TorchMetric]]:
+        for name, metric in cast(torch.nn.ModuleDict, self.metrics[f"{strata.value}_metrics"]).items():
+            yield name, cast(TorchMetric, metric)
 
     @beartype
     def decode(self, pooled: torch.Tensor) -> TensorDict:
@@ -499,30 +514,33 @@ def loss(
 
     target: torch.Tensor = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(N)
     inputs: torch.Tensor = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N)
-    diff: torch.Tensor = inputs.subtract(target)
-
-    loss += module.track(
-        (address, strata, Metric.loss, TensorKey.content),
-        value=request.objective.loss(
-            input=diff / normalizer.var.sqrt().clamp_min(normalizer.epsilon),
-            target=torch.zeros_like(diff),
-            reduction="none",
+    valued = trainable & state_targets.eq(Tokens.valued.value)
+    actual = inputs.masked_select(valued).float()
+    expected = target.masked_select(valued).float()
+    if actual.numel():
+        diff = actual.subtract(expected)
+        loss += module.track(
+            (address, strata, Metric.loss, TensorKey.content),
+            value=request.objective.loss(
+                input=diff / normalizer.var.sqrt().clamp_min(normalizer.epsilon),
+                target=torch.zeros_like(diff),
+                reduction="mean",
+            ),
         )
-        .masked_select(trainable)
-        .mean(),
-    )
+    else:
+        loss += inputs.sum() * 0.0
 
-    diff = diff.masked_select(trainable)
-
-    module.track(
-        (address, strata, Metric.mae, TensorKey.content),
-        value=diff.absolute().float().mean(),
-    )
-
-    module.track(
-        (address, strata, Metric.rmse, TensorKey.content),
-        value=diff.square().float().mean().sqrt(),
-    )
+    decoder = cast(Decoder, module.nodes[address].decoder)
+    for name, metric in decoder.content_metrics(strata):
+        if strata == Strata.train:
+            metric.reset()
+            value = metric(actual, expected) if actual.numel() else inputs.new_full((), float("nan"))
+            module.track((address, strata, name, TensorKey.content), value=cast(torch.Tensor, value))
+        else:
+            # Every rank registers the same sum/count metrics, including ranks
+            # with no valued targets. Global RMSE is not a mean of batch RMSEs.
+            metric.update(actual, expected)
+            module.track((address, strata, name, TensorKey.content), value=metric)
 
     return loss
 
