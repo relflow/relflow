@@ -79,12 +79,12 @@ class Request(RequestBase):
     decoder to identify the correct bucket. Effective identity fingerprint
     capacity is `n_buckets ** n_hashes`.
 
-    During training and validation, the hash input is salted independently for
+    During training, the hash input is salted independently for
     each encoded batch, so the network cannot memorize persistent
     value-specific representations. Every `hash` field in a batch
     receives the same salt, preserving equality relationships within an
-    observation and across fields. Test and predict use salt 0 for stable
-    inference.
+    observation and across fields. Validation, test, and predict use salt 0
+    so checkpoint selection and inference see the same representations.
     """
 
     type: Literal["hash"] = "hash"
