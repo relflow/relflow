@@ -68,7 +68,6 @@ prediction requests omit it.
 
 ```python
 data = rf.ArrowDataModule(
-    model=model,
     train=train_table,
     validate=validation_table,
 )
@@ -79,6 +78,9 @@ model.save("artifacts/payment.rf")
 ```
 
 Fitting includes early stopping and restoration of the best validation model.
+Data modules can be constructed before a model: `fit`, `validate`, `test`, and
+data-module `predict` bind them on first use. Passing `model=model` at
+construction remains supported; a bound module belongs to that model.
 Configure AdamW directly on `fit`; each call starts with the current model
 parameters and fresh optimization state. Hardware, logging, and Lightning
 options can also be supplied to the model methods.

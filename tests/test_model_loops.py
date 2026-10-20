@@ -21,6 +21,9 @@ class DistributedState(lit.Callback):
         self.path = path
         self.counts = Counter()
 
+    def setup(self, trainer, pl_module, stage):
+        assert trainer.datamodule.model is pl_module
+
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         self.counts["train"] += 1
 
@@ -140,6 +143,106 @@ def test_callbacks_and_prediction_overloads_keep_every_row(model, data, options)
     direct = model.predict(pa.table({"amount": [1.0], "id": [7]}), retain=("id",))
     assert direct.num_rows == 1
     assert model.predict(data, limit_predict_batches=2, **options).num_rows == 4
+
+
+@pytest.mark.parametrize("loop", ["fit", "validate", "test", "predict"])
+def test_each_loop_can_first_bind_a_data_module(model, options, loop):
+    table = pa.table({"amount": [1.0, 2.0, 3.0, 4.0], "label": [False, True, False, True], "id": [0, 1, 2, 3]})
+    data = rf.ArrowDataModule(train=table, validate=table, test=table, predict=table, retain=("id",))
+    assert data.model is None
+
+    class Bound(Events):
+        def setup(self, trainer, pl_module, stage):
+            assert trainer.datamodule.model is pl_module
+
+    callback = Bound()
+    settings = {**options, "batch_size": 256, "callbacks": [callback]}
+    if loop == "fit":
+        result = model.fit(data, max_epochs=1, limit_train_batches=1, limit_val_batches=1, **settings)
+        assert result is model
+        assert callback.counts == {"train": 1, "validate": 1}
+    elif loop == "validate":
+        result = model.validate(data, limit_val_batches=1, verbose=False, **settings)
+        assert "loss/validate" in result[0]
+        assert callback.counts == {"validate": 1}
+    elif loop == "test":
+        result = model.test(data, limit_test_batches=1, verbose=False, **settings)
+        assert "loss/test" in result[0]
+        assert callback.counts == {"test": 1}
+    else:
+        result = model.predict(data, **settings)
+        assert result.num_rows == 4
+        assert result["inputs"].combine_chunks().field("id").to_pylist() == [0, 1, 2, 3]
+        assert callback.counts == {"predict": 1}
+
+    assert data.model is model
+    assert data.batch_size == 256
+    assert data.options[rf.Strata.train].shuffle_rows == 8192
+
+
+def test_lazy_binding_keeps_model_ownership_across_loops(model, options):
+    table = pa.table({"amount": [1.0, 2.0], "label": [False, True]})
+    data = rf.ArrowDataModule(validate=table, predict=table)
+    model.validate(data, limit_val_batches=1, verbose=False, **options)
+    other = rf.Model.xs(d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
+    with pytest.raises(ValueError, match="different model"):
+        other.predict(data, **options)
+    assert data.model is model
+
+
+def test_invalid_loop_configuration_does_not_bind_data(model, options):
+    data = rf.ArrowDataModule(predict=pa.table({"amount": [1.0]}))
+    with pytest.raises(ValueError, match="validate split"):
+        model.validate(data, **options)
+    assert data.model is None
+    with pytest.raises(TypeError):
+        model.predict(data, invented_option=True, **options)
+    assert data.model is None
+
+
+def test_custom_lightning_data_module_can_own_lazy_binding(model, options):
+    table = pa.table({"amount": [1.0, 2.0], "label": [False, True]})
+
+    class Deferred(lit.LightningDataModule):
+        def __init__(self):
+            super().__init__()
+            self.model = None
+            self.bindings = 0
+
+        def bind(self, configured):
+            self.model = configured
+            self.bindings += 1
+
+        def val_dataloader(self):
+            return rf.ArrowDataModule(self.model, validate=table).val_dataloader()
+
+    data = Deferred()
+    result = model.validate(data, limit_val_batches=1, verbose=False, **options)
+    assert "loss/validate" in result[0]
+    assert data.model is model
+    assert data.bindings == 1
+    model.validate(data, limit_val_batches=1, verbose=False, **options)
+    assert data.bindings == 1
+    explicit = Deferred()
+    explicit.model = model
+    model.validate(explicit, limit_val_batches=1, verbose=False, **options)
+    assert explicit.bindings == 0
+    other = rf.Model.xs(d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
+    with pytest.raises(ValueError, match="different model"):
+        other.validate(data, **options)
+    assert data.model is model
+    assert data.bindings == 1
+
+
+def test_custom_model_owned_data_module_retains_ownership_guard(model, options):
+    class Owned(lit.LightningDataModule):
+        def __init__(self):
+            super().__init__()
+            self.model = model
+
+    other = rf.Model.xs(d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
+    with pytest.raises(ValueError, match="different model"):
+        other.validate(Owned(), **options)
 
 
 def test_streamed_prediction_does_not_collect_tables(model, data, options, tmp_path):
@@ -574,9 +677,14 @@ def test_arbitrary_data_module_evaluates_complete_validation_loaders(model, data
 @pytest.mark.skipif(
     not torch.distributed.is_available() or not torch.distributed.is_gloo_available(), reason="requires CPU Gloo"
 )
-def test_distributed_logging_and_rollback_complete_on_every_rank(model, data, options, tmp_path):
+@pytest.mark.parametrize("lazy", [False, True])
+def test_distributed_logging_and_rollback_complete_on_every_rank(model, data, options, tmp_path, lazy):
     from lightning.pytorch.strategies import DDPStrategy
 
+    if lazy:
+        data = rf.ArrowDataModule(
+            train=data.sources[rf.Strata.train], validate=data.sources[rf.Strata.validate], shuffle=False
+        )
     options["devices"] = 2
     logger = lit.loggers.CSVLogger(tmp_path / "logs")
     model.fit(

@@ -56,7 +56,7 @@ class Options:
     shuffle: bool
     sample: float
     epoch_size: int | None
-    shuffle_rows: int
+    shuffle_rows: int | None
     drop_last: bool
     num_workers: int
     persistent_workers: bool
@@ -494,6 +494,7 @@ class ArrowDataset(IterableDataset[Encoded]):
                 if callable(self.source):
                     batches = limit(batches, size=self.options.epoch_size)
                 if self.options.shuffle:
+                    assert self.options.shuffle_rows is not None
                     batches = shuffle(
                         batches,
                         rows=self.options.shuffle_rows,
@@ -621,11 +622,14 @@ class ArrowDataModule(lit.LightningDataModule):
     processed columns for prediction output and requires exact split keys when
     given as a mapping. Data loaders yield :class:`~relflow.data.arrow.Encoded`
     batches with Arrow source metadata and a TensorDict payload.
+
+    ``model`` may be omitted until a model loop or Lightning Trainer binds this
+    module. Direct data-loader access requires a bound model.
     """
 
     def __init__(
         self,
-        model: relflow.Model,
+        model: relflow.Model | None = None,
         *,
         train: ArrowInput | None = None,
         validate: ArrowInput | None = None,
@@ -649,7 +653,7 @@ class ArrowDataModule(lit.LightningDataModule):
         if not isinstance(seed, int) or isinstance(seed, bool):
             raise TypeError("seed must be an integer")
 
-        self.model = model
+        self.model: relflow.Model | None = None
         self.sources = {
             strata: accept(source, strata=strata)
             for strata, source in splits(train=train, validate=validate, test=test, predict=predict).items()
@@ -704,11 +708,10 @@ class ArrowDataModule(lit.LightningDataModule):
             raise ValueError("epoch_size must contain positive integers or None")
 
         configured_rows = expand(shuffle_rows, default=None)
-        windows = {
-            strata: max(model.batch_size * 32, 4096) if rows is None else rows
-            for strata, rows in configured_rows.items()
-        }
-        if any(not isinstance(rows, int) or isinstance(rows, bool) or rows < 1 for rows in windows.values()):
+        if any(
+            rows is not None and (not isinstance(rows, int) or isinstance(rows, bool) or rows < 1)
+            for rows in configured_rows.values()
+        ):
             raise ValueError("shuffle_rows must contain positive integers or None")
 
         dropped = expand(drop_last, default=False)
@@ -739,7 +742,7 @@ class ArrowDataModule(lit.LightningDataModule):
                 shuffle=shuffled[strata],
                 sample=rates[strata],
                 epoch_size=sizes[strata],
-                shuffle_rows=windows[strata],
+                shuffle_rows=configured_rows[strata],
                 drop_last=dropped[strata],
                 num_workers=workers[strata],
                 persistent_workers=persistent[strata],
@@ -764,24 +767,63 @@ class ArrowDataModule(lit.LightningDataModule):
                 if options.num_workers
             }
         self.seed = seed
+        if model is not None:
+            self.bind(model)
+
+    def bind(self, model: relflow.Model) -> None:
+        """Bind once to the model that owns encoding, schema, and batch size."""
+
+        if not isinstance(model, relflow.Model):
+            raise TypeError(f"data module requires a relflow.Model, got {type(model).__name__}")
+        if self.model is model:
+            return
+        if self.model is not None:
+            raise ValueError("data module belongs to a different model; construct a new data module for this model")
+        self.model = model
+        self.options = {
+            strata: replace(options, shuffle_rows=max(model.batch_size * 32, 4096))
+            if options.shuffle_rows is None
+            else options
+            for strata, options in self.options.items()
+        }
+
+    @property
+    def bound_model(self) -> relflow.Model:
+        """Require ownership before accessing model-dependent data settings."""
+
+        if self.model is None:
+            raise RuntimeError(
+                "data module is not bound to a model; pass model=, call bind(model), or pass it to "
+                "model.fit(), model.validate(), model.test(), or model.predict()"
+            )
+        return self.model
+
+    def setup(self, stage: str | None = None) -> None:
+        """Bind native Lightning loops to their attached RelFlow model."""
+
+        if self.trainer is not None:
+            model = self.trainer.lightning_module
+            if not isinstance(model, relflow.Model):
+                raise TypeError(f"data module requires a relflow.Model, got {type(model).__name__}")
+            self.bind(model)
 
     @property
     def schema(self) -> Schema:
         """The schema of the model whose batches this module prepares."""
-        return self.model.schema
+        return self.bound_model.schema
 
     @property
     def batch_size(self) -> int:
-        return self.model.batch_size
+        return self.bound_model.batch_size
 
     @batch_size.setter
     def batch_size(self, value: int) -> None:
         """Let Lightning's batch-size finder update the model-owned batch size."""
-        self.model.batch_size = value
+        self.bound_model.batch_size = value
 
     @property
     def encoding_context(self) -> InterprocessEncodingContext:
-        return self.model.interprocess_encoding_context
+        return self.bound_model.interprocess_encoding_context
 
     @overload
     def dataloader(self, strata: Strata | str, required: Literal[True] = True) -> DataLoader[Encoded]: ...

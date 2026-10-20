@@ -79,7 +79,7 @@ class DuckDBDataModule(ArrowDataModule):
 
     def __init__(
         self,
-        model: relflow.Model,
+        model: relflow.Model | None = None,
         *,
         database: str | os.PathLike[str] = ":memory:",
         train: str | None = None,

@@ -28,7 +28,7 @@ class SyntheticDataModule(ArrowDataModule):
 
     def __init__(
         self,
-        model: relflow.Model,
+        model: relflow.Model | None = None,
         *,
         train: Generator | None = None,
         validate: Generator | None = None,

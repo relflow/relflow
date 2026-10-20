@@ -67,6 +67,112 @@ def test_public_surface_has_five_modules_and_no_source_specific_datasets():
 
 
 @pytest.mark.parametrize(
+    "module_type,source",
+    [
+        (rf.ArrowDataModule, pa.table({"id": [1, 2]})),
+        (rf.PolarsDataModule, pl.DataFrame({"id": [1, 2]})),
+        (rf.CustomDataModule, Records([{"id": 1}, {"id": 2}])),
+        (rf.SyntheticDataModule, lambda: iter([{"id": 1}, {"id": 2}])),
+        (rf.DuckDBDataModule, "SELECT id FROM (VALUES (1), (2)) observations(id) ORDER BY id"),
+    ],
+)
+def test_all_data_modules_allow_deferred_model_binding(module_type, source):
+    module = module_type(validate=source, shuffle=False)
+    configured = model()
+
+    assert module.model is None
+    module.bind(configured)
+
+    assert module.model is configured
+    assert module.schema is configured.schema
+    assert module.encoding_context == configured.interprocess_encoding_context
+    batches = list(module.val_dataloader())
+    assert pa.concat_tables([batch.source for batch in batches])["id"].to_pylist() == [1, 2]
+
+
+@pytest.mark.parametrize("setting", ["schema", "batch_size", "encoding_context"])
+def test_unbound_model_settings_raise_an_actionable_error(setting):
+    module = rf.ArrowDataModule(model=None, train=pa.table({"id": [1]}))
+
+    with pytest.raises(RuntimeError, match=r"not bound.*model\.fit"):
+        getattr(module, setting)
+
+
+def test_unbound_loader_access_does_not_open_the_source():
+    calls = 0
+
+    def source():
+        nonlocal calls
+        calls += 1
+        yield pa.table({"id": [1]})
+
+    module = rf.ArrowDataModule(train=source)
+
+    with pytest.raises(RuntimeError, match="not bound"):
+        module.train_dataloader()
+    with pytest.raises(RuntimeError, match="not bound"):
+        module.batch_size = 2
+
+    assert calls == 0
+    assert module.val_dataloader() is None
+    module.bind(model())
+    assert calls == 0
+    assert len(list(module.train_dataloader())) == 1
+    assert calls == 1
+
+
+def test_binding_is_idempotent_and_rejects_a_different_model():
+    configured = model()
+    module = rf.ArrowDataModule(configured, train=pa.table({"id": [1]}))
+    original = module.options.copy()
+
+    module.bind(configured)
+    with pytest.raises(ValueError, match="different model"):
+        module.bind(model())
+
+    assert module.model is configured
+    assert module.options == original
+
+
+def test_binding_requires_a_relflow_model():
+    module = rf.ArrowDataModule(train=pa.table({"id": [1]}))
+
+    with pytest.raises(TypeError, match="requires a relflow.Model"):
+        module.bind(object())
+
+    assert module.model is None
+
+
+def test_lazy_binding_resolves_model_dependent_defaults_and_preserves_overrides():
+    source = pa.table({"id": [1]})
+    module = rf.ArrowDataModule(train=source, validate=source, shuffle_rows={"validate": 17})
+    configured = model(batch_size=256)
+    explicit = rf.ArrowDataModule(configured, train=source, validate=source, shuffle_rows={"validate": 17})
+
+    module.bind(configured)
+
+    assert module.options == explicit.options
+    assert module.options[Strata.train].shuffle_rows == 8192
+    assert module.options[Strata.validate].shuffle_rows == 17
+    configured.batch_size = 1
+    module.bind(configured)
+    assert module.options[Strata.train].shuffle_rows == 8192
+
+
+def test_native_trainer_setup_uses_the_same_binding_guard():
+    module = rf.ArrowDataModule(train=pa.table({"id": [1]}))
+    configured = model()
+    module.trainer = SimpleNamespace(lightning_module=configured)
+
+    module.setup("fit")
+
+    assert module.model is configured
+    module.trainer = SimpleNamespace(lightning_module=model())
+    with pytest.raises(ValueError, match="different model"):
+        module.setup("validate")
+
+
+@pytest.mark.parametrize(
     "source",
     [
         pa.table({"id": [1, 2]}),

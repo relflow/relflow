@@ -93,7 +93,7 @@ def test_data_module_constructor_annotations_resolve_at_runtime():
         relflow.SyntheticDataModule,
     ):
         hints = get_type_hints(module.__init__)
-        assert hints["model"] is relflow.Model
+        assert hints["model"] == relflow.Model | None
 
     writer_hints = get_type_hints(relflow.Writer.write_on_batch_end)
     assert writer_hints["output"] is pa.Table

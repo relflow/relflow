@@ -47,7 +47,8 @@ def processors(frame: pl.DataFrame) -> None:
 def modules(model: rf.Model, table: pa.Table, frame: pl.DataFrame) -> None:
     workers: StratumConfig[int] = {"train": 2, "validate": 0}
     data = rf.ArrowDataModule(model, train=table, validate=table, num_workers=workers, preprocessor=increase)
-    assert_type(data.model, rf.Model)
+    assert_type(data.model, rf.Model | None)
+    assert_type(data.bound_model, rf.Model)
     assert_type(data.dataloader("train"), DataLoader[Encoded])
     assert_type(data.dataloader("test", required=False), DataLoader[Encoded] | None)
     assert_type(data.train_dataloader(), DataLoader[Encoded] | None)
@@ -63,11 +64,17 @@ def modules(model: rf.Model, table: pa.Table, frame: pl.DataFrame) -> None:
         num_workers=workers,
         preprocessor=increase,
     )
-    assert_type(queries.model, rf.Model)
+    assert_type(queries.model, rf.Model | None)
     assert_type(queries.dataloader("train"), DataLoader[Encoded])
     writer = rf.Writer(Path("predictions"), postprocessor=prediction_columns)
     assert_type(writer.path, Path)
     assert_type(writer.close(), None)
+
+    unbound = rf.ArrowDataModule(train=table, validate=table, preprocessor=increase)
+    assert_type(unbound.model, rf.Model | None)
+    assert_type(unbound.bind(model), None)
+    rf.PolarsDataModule(train=frame)
+    rf.DuckDBDataModule(predict="SELECT 1.0 AS amount")
 
 
 class Records(IterableDataset[Mapping[str, Any]]):
@@ -78,6 +85,8 @@ class Records(IterableDataset[Mapping[str, Any]]):
 def adapters(model: rf.Model) -> None:
     rf.CustomDataModule(model, train=Records())
     rf.SyntheticDataModule(model, train=lambda: [{"amount": 1.0}])
+    rf.CustomDataModule(train=Records())
+    rf.SyntheticDataModule(train=lambda: [{"amount": 1.0}])
 
 
 class Service(rf.Deployment):
