@@ -27,7 +27,7 @@ defaults:
 
 jobs:
   checkpoint:
-    name: Produce 0.3.1 checkpoint
+    name: Produce current-release checkpoint
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -38,10 +38,8 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.0
         with:
           enable-cache: true
-      - name: Install previous release
-        run: |
-          uv venv
-          uv pip install 'relflow==0.3.1' --torch-backend=cpu
+      - name: Install locked dependencies and package wheel
+        run: uv sync --locked --all-extras --no-editable
       - name: Create trained checkpoint and expected predictions
         run: uv run --no-sync python scripts/checkpoint.py create --output checkpoint-baseline
       - uses: actions/upload-artifact@v4
@@ -111,7 +109,7 @@ jobs:
         with:
           name: checkpoint-baseline
           path: checkpoint-baseline
-      - name: Load, predict, resave, and resume previous checkpoint
+      - name: Load, predict, resave, and resume cross-platform checkpoint
         run: uv run --no-sync python scripts/checkpoint.py check --input checkpoint-baseline --output checkpoint-check
       - name: Run complete suite
         env:
@@ -179,7 +177,7 @@ jobs:
         with:
           name: checkpoint-baseline
           path: checkpoint-baseline
-      - name: Exercise previous checkpoint and complete suite
+      - name: Exercise cross-platform checkpoint and complete suite
         run: |
           uv run --no-sync python scripts/checkpoint.py check --input checkpoint-baseline --output checkpoint-check
           uv run --no-sync pytest -n 2 --junitxml=junit.xml

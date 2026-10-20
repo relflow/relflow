@@ -65,10 +65,18 @@ Linux/Python 3.12 also runs formatting, lint, typing, and coverage checks. Each
 job uploads its environment and JUnit results; the coverage job adds HTML, XML,
 and JSON reports and a workflow summary.
 
-Every environment loads a checkpoint trained with RelFlow 0.3.1 on Linux and
-Python 3.12. The check compares schema, learned state, prediction structure and
-values, then resaves the model and resumes one optimizer step. To reproduce the
-artifact exchange across two installed environments:
+Every environment loads a checkpoint trained from the current checkout on Linux
+and Python 3.12. The check compares schema, learned state, prediction structure
+and values, then resaves the model and resumes one optimizer step. This verifies
+checkpoint portability across operating systems and Python versions.
+
+RelFlow 0.3.5 adds per-head query/key normalization and learned query scales to
+attention. Attention checkpoints from earlier releases lack this state and are
+intentionally rejected by strict loading. Use their original package version to
+load them, or retrain with 0.3.5; the portability check does not promise loading
+an older attention architecture.
+
+To reproduce the artifact exchange across two installed environments:
 
 ```bash
 python scripts/checkpoint.py create --output checkpoint-baseline
