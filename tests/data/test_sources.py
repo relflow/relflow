@@ -416,6 +416,30 @@ def test_factory_generator_closes_on_early_stop_even_when_provider_retains_it():
     assert closed == [True]
 
 
+def test_file_sources_divide_their_manifest_between_workers(tmp_path):
+    for index in range(3):
+        pq.write_table(pa.table({"id": [index * 10, index * 10 + 1]}), tmp_path / f"part-{index}.parquet")
+    source = rf.source(tmp_path)
+
+    shares = [
+        sorted(value for batch in source(worker=worker, workers=3) for value in batch["id"].to_pylist())
+        for worker in range(3)
+    ]
+    assert sorted(value for share in shares for value in share) == [0, 1, 10, 11, 20, 21]
+    assert all(len(share) == 2 for share in shares)
+
+    # Fewer files than workers alternate units instead of dividing files.
+    shares = [
+        sorted(value for batch in source(worker=worker, workers=4) for value in batch["id"].to_pylist())
+        for worker in range(4)
+    ]
+    assert sorted(value for share in shares for value in share) == [0, 1, 10, 11, 20, 21]
+    assert sum(len(share) == 0 for share in shares) >= 1
+    assert sum(unit.num_rows for unit in arrow.scan(source, worker=1, workers=3)) == 2
+    with pytest.raises(ValueError, match="worker"):
+        list(source(worker=3, workers=3))
+
+
 @pytest.mark.parametrize("location", [[], [1], b"bytes", ""])
 def test_invalid_locations_fail_at_construction(location):
     with pytest.raises(TypeError, match="path"):

@@ -144,13 +144,24 @@ def convert(unit: ArrowUnit) -> pa.Table:
     return table
 
 
-def scan(source: ArrowSource | ArrowStream, *, schemas: Schemas | None = None) -> Iterator[pa.Table]:
-    """Read an in-memory unit or restartable Arrow factory without row conversion."""
+def scan(
+    source: ArrowSource | ArrowStream, *, schemas: Schemas | None = None, worker: int = 0, workers: int = 1
+) -> Iterator[pa.Table]:
+    """Read an in-memory unit or restartable Arrow factory without row conversion.
+
+    With several workers, each receives a disjoint share before any processing:
+    file sources divide their manifests, streams alternate units, and one
+    in-memory unit strides its rows.
+    """
 
     schemas = Schemas() if schemas is None else schemas
+    if not isinstance(worker, int) or not isinstance(workers, int) or workers < 1 or not 0 <= worker < workers:
+        raise ValueError(f"scan worker {worker!r} must index one of {workers!r} workers")
     if isinstance(source, (pa.Table, pa.RecordBatch)):
         current = convert(source)
         lock(schemas, "source", current.schema, context="Arrow source schema changed")
+        if workers > 1:
+            current = current.take(pa.array(np.arange(worker, current.num_rows, workers), type=pa.int64()))
         yield current
         return
 
@@ -161,6 +172,10 @@ def scan(source: ArrowSource | ArrowStream, *, schemas: Schemas | None = None) -
         stream = source.scanner().to_batches()
     elif isinstance(source, pa.RecordBatchReader):
         stream = source
+    elif isinstance(source, Source):
+        # The manifest divides itself; the remaining stream belongs to this worker.
+        stream = source(worker=worker, workers=workers)
+        worker, workers = 0, 1
     elif callable(source):
         stream = source()
     else:
@@ -180,9 +195,13 @@ def scan(source: ArrowSource | ArrowStream, *, schemas: Schemas | None = None) -
             lock(schemas, "source", declared, context="Arrow source schema changed")
 
         emitted = False
-        for unit in iterator:
+        for index, unit in enumerate(iterator):
             current = convert(unit)
             lock(schemas, "source", current.schema, context="Arrow source schema changed")
+            if declared is None:
+                declared = current.schema
+            if index % workers != worker:
+                continue
             emitted = True
             yield current
         if emitted:
@@ -464,7 +483,22 @@ class ArrowDataset(IterableDataset[Encoded]):
 
     def __iter__(self) -> Iterator[Encoded]:
         epoch, worker, workers = self.iteration()
-        scanned: Iterable[pa.Table] = scan(self.source, schemas=self.schemas)
+        # Dataset-scoped preprocessing and an exact epoch cap need the whole
+        # split, and prediction batches must reassemble in source order; any
+        # other loop lets every worker read, preprocess, sample, shuffle, and
+        # encode only its share.
+        sharded = (
+            workers > 1
+            and self.strata != Strata.predict
+            and self.options.epoch_size is None
+            and all(processor.scope != "dataset" for processor in self.options.preprocessors)
+        )
+        scanned: Iterable[pa.Table] = scan(
+            self.source,
+            schemas=self.schemas,
+            worker=worker if sharded else 0,
+            workers=workers if sharded else 1,
+        )
         try:
             batches: Iterable[pa.Table] = process(
                 scanned,
@@ -509,9 +543,14 @@ class ArrowDataset(IterableDataset[Encoded]):
                 world_size=self.distributed_world_size,
                 drop_last=self.options.drop_last,
             )
-            # Only distributed ranks require equal steps. Local workers own complete
-            # rank batches, including a partial tail that would otherwise be lost.
-            assigned = (batch for index, batch in enumerate(distributed) if index % workers == worker)
+            # Only distributed ranks require equal steps. A sharded worker already
+            # owns disjoint rows; replaying workers take turns on complete rank
+            # batches, including a partial tail that would otherwise be lost.
+            assigned = (
+                distributed
+                if sharded
+                else (batch for index, batch in enumerate(distributed) if index % workers == worker)
+            )
             yield from self.encode(assigned, epoch=epoch)
         finally:
             # Downstream failures and epoch limits must release suspended scans,
@@ -608,11 +647,17 @@ class ArrowDataModule(lit.LightningDataModule):
     shuffling, and model rebatching. A callable source must create a fresh
     ``RecordBatchReader`` or Arrow-unit iterable for every iteration.
 
-    Arrow Datasets are scanned afresh for each iteration. Distributed ranks and
-    data workers replay the same global stream. Ranks receive disjoint rows from
-    equal global superbatches; local workers take turns processing complete rank
-    batches. File sources freeze their manifest before workers start, then open
-    independent Arrow readers in each consuming process.
+    Arrow Datasets are scanned afresh for each iteration. Distributed ranks
+    replay the same stream and receive disjoint rows from equal global
+    superbatches. Local data workers divide the source before preprocessing:
+    file sources split their manifests, streams alternate units, and in-memory
+    tables stride rows, so each worker preprocesses, samples, shuffles, and
+    encodes only its share and may end with its own partial batch. Prediction,
+    a dataset-scoped preprocessor, or an ``epoch_size`` cap needs the whole
+    split, so each keeps every worker on the complete stream, taking turns on
+    finished batches that reassemble in source order. File sources
+    freeze their manifest before workers start, then open independent Arrow
+    readers in each consuming process.
 
     Pass at least one of ``train``, ``validate``, ``test`` or ``predict``.
     Configuration accepts one value for every split or a mapping keyed by
