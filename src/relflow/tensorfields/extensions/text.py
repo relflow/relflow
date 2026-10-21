@@ -8,6 +8,8 @@ from threading import RLock
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, TypeAlias, Unpack, cast
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.compute as pc
 import pydantic
 import torch
 from beartype import beartype
@@ -281,9 +283,19 @@ class TensorField(TensorFieldBase[TensorDict]):
             if len(field.values):
                 tokenizer = CachedModel.get_tokenizer(request.model)
                 placement = field.placement.to_numpy(zero_copy_only=False)
-                for start in range(0, len(field.values), request.tokenizer_batch_size):
-                    stop = min(start + request.tokenizer_batch_size, len(field.values))
-                    texts = field.values.slice(start, stop - start).to_numpy(zero_copy_only=False).tolist()
+                values = field.values
+                if pa.types.is_dictionary(values.type):
+                    values = values.cast(cast(pa.DictionaryType, values.type).value_type)
+                dictionary = pc.dictionary_encode(values)
+                if isinstance(dictionary, pa.ChunkedArray):
+                    dictionary = dictionary.combine_chunks()
+                dictionary = cast(pa.DictionaryArray, dictionary)
+                unique = dictionary.dictionary
+                inverse = dictionary.indices.to_numpy(zero_copy_only=False)
+                repeated = len(unique) != len(field.values)
+                for start in range(0, len(unique), request.tokenizer_batch_size):
+                    stop = min(start + request.tokenizer_batch_size, len(unique))
+                    texts = unique.slice(start, stop - start).to_numpy(zero_copy_only=False).tolist()
                     encoded = tokenizer(
                         texts,
                         padding="max_length",
@@ -291,7 +303,8 @@ class TensorField(TensorFieldBase[TensorDict]):
                         max_length=length,
                         return_tensors="np",
                     )
-                    positions = placement[start:stop]
+                    selected = np.flatnonzero((inverse >= start) & (inverse < stop)) if repeated else None
+                    positions = placement[selected] if repeated else placement[start:stop]
                     expected = (stop - start, length)
                     for name, destination in (
                         (INPUT_IDS, encoded_ids),
@@ -303,7 +316,7 @@ class TensorField(TensorFieldBase[TensorDict]):
                                 f"text tokenizer '{request.model}' returned {name} shape {values.shape}, "
                                 f"expected {expected}"
                             )
-                        destination[positions] = values
+                        destination[positions] = values[inverse[selected] - start] if repeated else values
 
             return TensorDict(
                 {
