@@ -84,14 +84,28 @@ def test_dateparts_jitters_its_only_continuous_boundary(
 
 def test_dateparts_jitters_unit_circle_inputs_without_mutating_targets(monkeypatch: pytest.MonkeyPatch):
     configured = Jitter(add=0.2)
-    model = build(configured)
+    model = rf.Model.xs(
+        created=rf.DateParts(
+            dateparts=["day_of_week"],
+            jitter=configured,
+            mask=rf.Mask(query="supervise", reconstruct=True),
+        ),
+        d_model=8,
+    )
     embedder: Embedder = model.nodes[ADDRESS].embedder
     field = model.encode(
-        pa.table({"created": [datetime(2026, 5, 28, 14, 30, 45)]}),
+        pa.table(
+            {
+                "created": [datetime(2026, 5, 28, 14, 30, 45), datetime(2026, 5, 29, 14, 30, 45)],
+                "supervise": [False, True],
+            }
+        ),
         strata=Strata.train,
     )[ADDRESS]
     content = field.content[DatePart.day_of_week].clone()
     targets = field.targets[TensorKey.content][DatePart.day_of_week].clone()
+    assert content[0].count_nonzero() > 0
+    assert targets[1].count_nonzero() > 0
     captured: list[torch.Tensor] = []
 
     def shift(self: Jitter, inputs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:

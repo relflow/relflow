@@ -56,6 +56,8 @@ def test_small_sets_do_not_allocate_per_vocabulary_member(objective):
         contents = [field.content]
         if objective:
             contents.append(field.targets[rf.TensorKey.content])
+        else:
+            assert field.targets.is_empty()
         for content in contents:
             assert set(content.keys()) == {"indices", "unavailable"}
             assert content["indices"].dtype == torch.int64
@@ -141,6 +143,8 @@ def test_nested_member_axis_survives_clone_device_transfer_and_coordinate_select
     assert copied.content["indices"].shape == (2, 1, 3, 2)
     if objective:
         assert copied.targets[rf.TensorKey.content]["indices"].shape == (2, 1, 3, 2)
+    else:
+        assert copied.targets.is_empty()
     torch.testing.assert_close(copied.content["indices"], field.content["indices"])
     assert copied.content["indices"].data_ptr() != field.content["indices"].data_ptr()
     coordinates = torch.tensor([5, 0, 3, 0])

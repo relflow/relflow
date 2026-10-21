@@ -229,14 +229,15 @@ class TensorField(TensorFieldBase[TensorDict]):
 
         state_tensor = torch.from_numpy(input.dense)
         content = encode(input)
-        target_content = encode(target)
-        # Input and target trees share coordinate geometry, including when
-        # masking hides every input member but retains reconstruction answers.
-        width = max(content["indices"].shape[-1], target_content["indices"].shape[-1])
-        for members in (content, target_content):
-            indices = cast(torch.Tensor, members["indices"])
-            if indices.shape[-1] < width:
-                members["indices"] = torch.nn.functional.pad(indices, (0, width - indices.shape[-1]), value=-1)
+        target_content = encode(target) if address in schema.objectives else None
+        # Only objectives retain answers. When present, targets and inputs share
+        # member width even when masking hides the complete input collection.
+        if target_content is not None:
+            width = max(content["indices"].shape[-1], target_content["indices"].shape[-1])
+            for members in (content, target_content):
+                indices = cast(torch.Tensor, members["indices"])
+                if indices.shape[-1] < width:
+                    members["indices"] = torch.nn.functional.pad(indices, (0, width - indices.shape[-1]), value=-1)
 
         if strata == Strata.train and request.p_unavailable > 0.0:
             indices = cast(torch.Tensor, content["indices"])
@@ -254,7 +255,9 @@ class TensorField(TensorFieldBase[TensorDict]):
                 {
                     TensorKey.state: torch.from_numpy(target.dense),
                     TensorKey.content: target_content,
-                },
+                }
+                if target_content is not None
+                else {},
                 batch_size=input.shape,
             ),
             batch_size=input.batch_size,
@@ -364,7 +367,10 @@ def bind(
         resize.linear(decoder.linears[TensorKey.content.name], size)
     field = cast(TensorField, field)
     mapping = mapping.to(field.state.device)
-    for content in (field.content, cast(TensorDict, field.targets[TensorKey.content])):
+    contents = [field.content]
+    if TensorKey.content in field.targets:
+        contents.append(cast(TensorDict, field.targets[TensorKey.content]))
+    for content in contents:
         previous = cast(torch.Tensor, content["indices"])
         indices = mapping[previous]
         content["unavailable"] = cast(torch.Tensor, content["unavailable"]) + (previous.ge(0) & indices.lt(0)).sum(
