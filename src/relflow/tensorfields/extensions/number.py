@@ -194,11 +194,14 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             ):
                 raise ValueError(f"number field at '{address}' expects scalar Arrow values, got {values.type}")
 
-            encoded = pc.cast(values, pa.float64(), safe=True)
+            # Integer conversion retains Arrow's existing float64 safety range.
+            datatype = pa.float32() if pa.types.is_floating(values.type) else pa.float64()
+            encoded = pc.cast(values, datatype, safe=True)
             if isinstance(encoded, pa.ChunkedArray):
                 encoded = encoded.combine_chunks()
-            data = field.place(encoded.to_numpy(zero_copy_only=False), fill=0.0)
-            return torch.from_numpy(np.nan_to_num(data, nan=0.0)).to(dtype=torch.float32)
+            data = field.place(encoded.to_numpy(zero_copy_only=False).astype(np.float32, copy=False), fill=0.0)
+            np.nan_to_num(data, copy=False, nan=0.0, posinf=np.inf, neginf=-np.inf)
+            return torch.from_numpy(data)
 
         state = torch.from_numpy(input.dense)
 
