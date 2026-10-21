@@ -179,11 +179,9 @@ class TensorField(TensorFieldBase[TensorDict]):
         state = context.state
         if state is not None and not isinstance(state, VocabularyState):
             raise TypeError(f"set field at '{address}' requires VocabularyState context, got {type(state).__name__}")
-        n_tokens = state.size if state is not None else INITIAL_CAPACITY
 
         def encode(field: RaggedField) -> TensorDict:
             values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
-            encoded = np.zeros((len(values), n_tokens), dtype=np.float32)
             unavailable = np.zeros(len(values), dtype=np.int64)
             if len(values) and state is None:
                 raise RuntimeError(f"set field at '{address}' requires a vocabulary encoding context")
@@ -202,21 +200,28 @@ class TensorField(TensorFieldBase[TensorDict]):
                 flattened = pc.filter(flattened, valid)
                 parents = pc.filter(parents, valid)
             indices = state.indices(flattened, learn=False) if state is not None else np.empty(0, dtype=np.int64)
+            pairs = np.empty((0, 2), dtype=np.int64)
             if len(indices):
                 rows = parents.to_numpy(zero_copy_only=False)
-                known = (indices >= 0) & (indices < n_tokens)
-                encoded[rows[known], indices[known]] = 1.0
+                known = indices >= 0
+                pairs = np.unique(np.column_stack((rows[known], indices[known])), axis=0)
                 if not known.all():
                     # Count distinct unknown members, not occurrences: order
                     # and duplicates must not change a set's representation.
                     unknown = cast(
                         pa.DictionaryArray, pc.dictionary_encode(pc.filter(flattened, pa.array(~known)))
                     ).indices.to_numpy()
-                    pairs = np.unique(np.column_stack((rows[~known], unknown)), axis=0)
-                    unavailable = np.bincount(pairs[:, 0], minlength=len(values))
+                    unknown_pairs = np.unique(np.column_stack((rows[~known], unknown)), axis=0)
+                    unavailable = np.bincount(unknown_pairs[:, 0], minlength=len(values))
+            counts = np.bincount(pairs[:, 0], minlength=len(values))
+            width = int(counts.max(initial=0))
+            encoded = np.full((len(values), width), -1, dtype=np.int64)
+            if len(pairs):
+                offsets = np.repeat(counts.cumsum() - counts, counts)
+                encoded[pairs[:, 0], np.arange(len(pairs)) - offsets] = pairs[:, 1]
             return TensorDict(
                 {
-                    "membership": torch.from_numpy(field.place(encoded, fill=0.0, value_shape=(n_tokens,))),
+                    "indices": torch.from_numpy(field.place(encoded, fill=-1, value_shape=(width,))),
                     "unavailable": torch.from_numpy(field.place(unavailable, fill=0)),
                 },
                 batch_size=field.shape,
@@ -225,11 +230,18 @@ class TensorField(TensorFieldBase[TensorDict]):
         state_tensor = torch.from_numpy(input.dense)
         content = encode(input)
         target_content = encode(target)
+        # Input and target trees share coordinate geometry, including when
+        # masking hides every input member but retains reconstruction answers.
+        width = max(content["indices"].shape[-1], target_content["indices"].shape[-1])
+        for members in (content, target_content):
+            indices = cast(torch.Tensor, members["indices"])
+            if indices.shape[-1] < width:
+                members["indices"] = torch.nn.functional.pad(indices, (0, width - indices.shape[-1]), value=-1)
 
         if strata == Strata.train and request.p_unavailable > 0.0:
-            membership = cast(torch.Tensor, content["membership"])
-            selected = torch.rand_like(membership).lt(request.p_unavailable) & membership.bool()
-            content["membership"] = membership.masked_fill(selected, 0.0)
+            indices = cast(torch.Tensor, content["indices"])
+            selected = torch.rand_like(indices, dtype=torch.float32).lt(request.p_unavailable) & indices.ge(0)
+            content["indices"] = indices.masked_fill(selected, -1)
             content["unavailable"] += selected.sum(dim=-1)
 
         return cls(
@@ -292,24 +304,28 @@ class Embedder(EmbedderBase):
         dims: list[int]
 
         content = cast(TensorDict, inputs.content)
-        membership = cast(torch.Tensor, content["membership"])
-        N, *dims, n_tokens = membership.shape
-        if n_tokens > self.size:
-            raise ValueError(f"Set in address {self.origin} has invalid vocabulary width")
-
+        indices = cast(torch.Tensor, content["indices"])
+        N, *dims, width = indices.shape
         state = inputs.state.reshape(-1)
-        membership = membership.reshape(-1, n_tokens)
+        indices = indices.reshape(state.numel(), width)
         valued = state.eq(Tokens.valued.value)
 
-        weights = cast(torch.nn.Embedding, self.embeddings[TensorKey.content.name]).weight[:n_tokens]
-        counts = membership.sum(dim=-1, keepdim=True).clamp_min(1.0)
-        content_embedding = membership.to(dtype=weights.dtype).matmul(weights) / counts
+        weights = cast(torch.nn.Embedding, self.embeddings[TensorKey.content.name]).weight
+        known = indices.ge(0)
+        if width:
+            # Zero-weight padding avoids CUDA compaction and a members-by-model
+            # embedding tensor; only the pooled result is materialized.
+            content_embedding = torch.nn.functional.embedding_bag(
+                indices.clamp_min(0), weights, mode="sum", per_sample_weights=known.to(weights.dtype)
+            ) / known.sum(dim=-1, keepdim=True).clamp_min(1)
+        else:
+            content_embedding = weights[0].expand(state.numel(), -1) * 0.0
         unavailable = cast(torch.Tensor, content["unavailable"]).reshape(-1, 1).gt(0)
         content_embedding = content_embedding + unavailable * self.unavailable
 
         embeddings: torch.Tensor = (
             self.embeddings[TensorKey.state.name](state) + content_embedding * valued.unsqueeze(-1)
-        ).reshape(N, *dims, -1)
+        ).reshape(N, *dims, self.d_model)
 
         return Parcel(
             payload=embeddings,
@@ -335,7 +351,7 @@ def bind(
     strata: Strata,
     resize: Resize,
 ) -> None:
-    """Move membership columns into the vocabulary current at batch consumption."""
+    """Resolve compact member IDs against the vocabulary at batch consumption."""
     if not isinstance(binding, VocabularyBatch):
         raise TypeError(f"set binding at '{address}' requires VocabularyBatch, got {type(binding).__name__}")
     node = module.nodes[address]
@@ -347,14 +363,16 @@ def bind(
     if decoder is not None:
         resize.linear(decoder.linears[TensorKey.content.name], size)
     field = cast(TensorField, field)
+    mapping = mapping.to(field.state.device)
     for content in (field.content, cast(TensorDict, field.targets[TensorKey.content])):
-        previous = cast(torch.Tensor, content["membership"])
-        indices = mapping[:-1].to(previous.device)
-        known = indices.ge(0) & indices.lt(size)
-        membership = previous.new_zeros((*previous.shape[:-1], size))
-        membership.index_add_(-1, indices[known], previous[..., known])
-        content["membership"] = membership
-        content["unavailable"] = cast(torch.Tensor, content["unavailable"]) + previous[..., ~known].sum(dim=-1).long()
+        previous = cast(torch.Tensor, content["indices"])
+        indices = mapping[previous]
+        content["unavailable"] = cast(torch.Tensor, content["unavailable"]) + (previous.ge(0) & indices.lt(0)).sum(
+            dim=-1
+        )
+        # Canonical global order makes pooling independent of worker-local IDs.
+        indices = indices.masked_fill(indices.lt(0), size).sort(dim=-1).values
+        content["indices"] = indices.masked_fill(indices.eq(size), -1)
     if observation is not None:
         observation[TensorKey.content] = binding.counts(
             cast(torch.Tensor, observation[TensorKey.content]), mapping, size
@@ -469,10 +487,11 @@ def loss(
     size = len(embedder.vocab.master)
     content_inputs = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N, -1)[valued, :size].float()
     targets = cast(TensorDict, batch.targets[TensorKey.content])
-    memberships = cast(torch.Tensor, targets["membership"]).reshape(N, -1)
-    if memberships.shape[-1] < size:
-        memberships = torch.nn.functional.pad(memberships, (0, size - memberships.shape[-1]))
-    content_targets = memberships[valued, :size]
+    indices = cast(torch.Tensor, targets["indices"])
+    indices = indices.reshape(N, indices.shape[-1])[valued]
+    rows, columns = (indices.ge(0) & indices.lt(size)).nonzero(as_tuple=True)
+    content_targets = torch.zeros_like(content_inputs)
+    content_targets[rows, indices[rows, columns]] = 1.0
     unavailable = cast(torch.Tensor, targets["unavailable"]).reshape(N)[valued]
     # Complete set annotations supervise all populated memberships, including
     # known negatives in partially/all-OOV sets. Unallocated slots are not
