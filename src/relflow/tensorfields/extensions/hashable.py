@@ -42,24 +42,9 @@ hashable: Extension = Extension(
 _HASH_NORMALIZER: float = float(1 << 63)
 _UINT64_MASK: int = (1 << 64) - 1
 _LANE_SEED: int = 0x9E3779B97F4A7C15
-_SEED_1: int = 0xBF58476D1CE4E5B9
-_SEED_2: int = 0x94D049BB133111EB
-_SEED_3: int = 0xD6E8FEB86659FD93
 _INTEGER_SEED: int = 0x69
 _STRING_SEED: int = 0x73
 _BINARY_SEED: int = 0x62
-
-
-def seeds(salt: int, lane: int, family: int) -> tuple[int, int, int, int]:
-    """Derive one Polars seed quartet from batch, lane, and Arrow family."""
-
-    seed = (salt ^ (family << 56) ^ ((lane + 1) * _LANE_SEED)) & _UINT64_MASK
-    return (
-        seed,
-        (seed + _SEED_1) & _UINT64_MASK,
-        (seed + _SEED_2) & _UINT64_MASK,
-        (seed + _SEED_3) & _UINT64_MASK,
-    )
 
 
 @hashable.register(Component.Request)
@@ -174,14 +159,10 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             frame = series.to_frame()
             hashes = np.empty((len(values), n_hashes), dtype=np.int64)
             for lane in range(n_hashes):
-                seed, seed_1, seed_2, seed_3 = seeds(context.salt, lane, family)
+                # Batch salt, lane, and Arrow family select an independent Polars hash per lane.
+                seed = (context.salt ^ (family << 56) ^ ((lane + 1) * _LANE_SEED)) & _UINT64_MASK
                 # Execute the expression directly; Series' generated wrappers depend on Python bytecode.
-                hashes[:, lane] = (
-                    frame.select(pl.all().hash(seed=seed, seed_1=seed_1, seed_2=seed_2, seed_3=seed_3))
-                    .to_series()
-                    .to_numpy()
-                    .view(np.int64)
-                )
+                hashes[:, lane] = frame.select(pl.all().hash(seed=seed)).to_series().to_numpy().view(np.int64)
             return torch.from_numpy(field.place(hashes, fill=0, value_shape=(n_hashes,)))
 
         state_tensor = torch.from_numpy(input.dense)
