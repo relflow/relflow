@@ -672,6 +672,8 @@ class ClusterRuntime:
 
 @cluster.register(Component.Decoder)
 class Decoder(DecoderBase):
+    coordinatewise = True
+
     def __init__(self, schema: Schema, address: Address):
         # Cluster assignments belong to stable identities. Row-varying sibling
         # values may supervise them through downstream objectives, but must not

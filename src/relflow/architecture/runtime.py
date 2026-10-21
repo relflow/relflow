@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Literal, TypeAlias, TypedDict, cast, overload
 
 import numpy as np
@@ -661,7 +662,8 @@ class ModelRuntime:
             node_module = cast(NodeModule, module.nodes[address])
             decoder: DecoderBase = node_module.decoder
             contexts = [outgoing[item] for item in decoder.context_addresses if item in outgoing]
-            prediction = decoder(
+            decode = decoder if predict else partial(decoder.objective, selection=tensorfield.trainable)
+            prediction = decode(
                 parcels,
                 contexts=contexts,
                 batch_size=tensorfield.state.shape[0],
@@ -787,7 +789,7 @@ class ModelRuntime:
             if strata == Strata.train and prediction.address in participating:
                 anchors.extend(
                     value.sum() * 0.0
-                    for value in prediction.payload.values()
+                    for value in prediction.payload.values(include_nested=True, leaves_only=True)
                     if torch.is_tensor(value) and value.requires_grad
                 )
             # Decoder participation is coordinated across ranks in forward.

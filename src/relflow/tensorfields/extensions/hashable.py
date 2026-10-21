@@ -254,6 +254,8 @@ class Embedder(EmbedderBase):
 
 @hashable.register(Component.Decoder)
 class Decoder(DecoderBase):
+    coordinatewise = True
+
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 
