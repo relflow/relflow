@@ -112,14 +112,15 @@ def test_attention_matches_selected_keys_and_gradients(device, mode, heads, quer
         assert actual_parameter.grad is not None
         assert expected_parameter.grad is not None
         assert torch.isfinite(actual_parameter.grad).all()
-        torch.testing.assert_close(actual_parameter.grad, expected_parameter.grad, rtol=3e-5, atol=3e-6)
+        # Near-zero gradients differ by reduction order on Windows BLAS; keep rtol tight and atol modest.
+        torch.testing.assert_close(actual_parameter.grad, expected_parameter.grad, rtol=3e-5, atol=1e-5)
     for actual_input, expected_input in zip(inputs, reference_inputs, strict=True):
         if expected_input.grad is None:
             assert actual_input.grad is None
         else:
             assert actual_input.grad is not None
             assert torch.isfinite(actual_input.grad).all()
-            torch.testing.assert_close(actual_input.grad, expected_input.grad, rtol=3e-5, atol=3e-6)
+            torch.testing.assert_close(actual_input.grad, expected_input.grad, rtol=3e-5, atol=1e-5)
     if mode != "self" and key_length:
         assert torch.count_nonzero(key.grad[padding]) == 0
         assert torch.count_nonzero(value.grad[padding]) == 0
