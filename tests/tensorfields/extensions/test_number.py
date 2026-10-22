@@ -41,14 +41,19 @@ from tests.tensorfields.helpers import tensorize
 ADDRESS = "/items/amount"
 
 
-def build_schema(*, mask: bool | Mask = False, jitter: Jitter | dict[str, object] | None = None) -> Schema:
+def build_schema(
+    *,
+    mask: bool | Mask = False,
+    jitter: Jitter | dict[str, object] | None = None,
+    lanes: tuple[str, ...] = ("raw", "log"),
+) -> Schema:
     options = {} if jitter is None else {"jitter": jitter}
     return rf.Schema.from_tree(
         d_model=16,
         n_layers=1,
         n_heads=4,
         dropout=0.1,
-        items=rf.Branch(length=2, amount=rf.Number(mask=mask, **options)),
+        items=rf.Branch(length=2, amount=rf.Number(mask=mask, lanes=lanes, **options)),
     )
 
 
@@ -117,18 +122,21 @@ def test_number_embedding_retains_standardized_value_in_monotone_lane():
     schema = build_schema()
     field = tensorfield(rows=[[8.0, 12.0]], schema=schema, strata=Strata.predict)
     embedder = Embedder(schema=schema, address=ADDRESS).eval()
-    embedder.normalizer.mean.fill_(10.0)
-    embedder.normalizer.var.fill_(4.0)
+    embedder.normalizers["raw"].mean.fill_(10.0)
+    embedder.normalizers["raw"].var.fill_(4.0)
 
     parcel = embedder.embed(field)
 
-    assert parcel.payload[0, 0, 0, -1].item() == pytest.approx(-1.0, abs=1e-4)
-    assert parcel.payload[0, 0, 1, -1].item() == pytest.approx(1.0, abs=1e-4)
+    # The raw lane's monotone channel precedes the log lane's; both are standardized.
+    assert parcel.payload[0, 0, 0, -2].item() == pytest.approx(-1.0, abs=1e-4)
+    assert parcel.payload[0, 0, 1, -2].item() == pytest.approx(1.0, abs=1e-4)
+    assert parcel.payload[0, 0, 0, -1].item() == pytest.approx(math.log1p(8.0), abs=1e-3)
+    assert parcel.payload[0, 0, 1, -1].item() == pytest.approx(math.log1p(12.0), abs=1e-3)
 
 
 def test_number_monotone_lane_retains_autograd_at_model_width_one():
     schema = rf.Schema.from_tree(
-        amount=rf.Number, d_model=1, n_layers=1, n_heads=2, attention=None, reduction=rf.Mean()
+        amount=rf.Number(lanes=("raw",)), d_model=1, n_layers=1, n_heads=2, attention=None, reduction=rf.Mean()
     )
     embedder = Embedder(schema=schema, address="/amount")
     inputs = TensorInput(
@@ -209,10 +217,10 @@ def test_number_jitter_respects_normalization_order(
     expected_perturb: float,
     expected_clamp: float,
 ):
-    schema = build_schema(jitter=Jitter(add=3.0, normalize=normalize))
+    schema = build_schema(jitter=Jitter(add=3.0, normalize=normalize), lanes=("raw",))
     embedder = Embedder(schema=schema, address=ADDRESS)
-    embedder.normalizer.mean.fill_(10.0)
-    embedder.normalizer.var.fill_(4.0)
+    embedder.normalizers["raw"].mean.fill_(10.0)
+    embedder.normalizers["raw"].var.fill_(4.0)
     field = tensorfield(rows=[[14.0]], schema=schema, strata=Strata.train)
     observed: dict[str, torch.Tensor] = {}
 
@@ -554,8 +562,9 @@ def test_number_embedder_outputs_finite_payload_for_extreme_outliers():
     embedder.train()
     parcel = embedder.embed(field)
 
-    assert torch.isfinite(embedder.normalizer.mean).all()
-    assert torch.isfinite(embedder.normalizer.var).all()
+    for normalizer in embedder.normalizers.values():
+        assert torch.isfinite(normalizer.mean).all()
+        assert torch.isfinite(normalizer.var).all()
     assert torch.isfinite(parcel.payload).all()
 
 
@@ -601,19 +610,92 @@ def log_prediction(field, scaled: torch.Tensor) -> Prediction:
 
 
 @pytest.mark.parametrize("mask", [False, True], ids=["input", "target"])
-def test_number_log_scale_compresses_values_and_normalization(mask):
+def test_number_log_scale_compresses_targets_and_normalization(mask):
     model = log_model(mask=mask)
     table = arrow_table([{"amount": 0.0}, {"amount": 99.0}, {"amount": -99.0}])
 
     field = model.encode(table, strata="train")[rf.Address("amount")]
 
-    expected = torch.tensor([0.0, math.log1p(99.0), -math.log1p(99.0)])
-    values = field.targets[TensorKey.content] if mask else field.content
-    torch.testing.assert_close(values.flatten(), expected)
+    compressed = torch.tensor([0.0, math.log1p(99.0), -math.log1p(99.0)])
+    # Inputs stay in source units for the lanes; only the supervised target is compressed.
+    if mask:
+        torch.testing.assert_close(field.targets[TensorKey.content].flatten(), compressed)
+    else:
+        torch.testing.assert_close(field.content.flatten(), torch.tensor([0.0, 99.0, -99.0]))
     stats = rf.Number.normalization(model, "amount")
     assert stats["count"] == 3 and stats["mean"] == pytest.approx(0.0, abs=1e-6)
     assert stats["std"] == pytest.approx(math.sqrt(2 * math.log1p(99.0) ** 2 / 3), rel=1e-4)
     assert model.schema.requests[rf.Address("amount")].log is True
+
+
+def test_number_observes_moments_for_both_scales():
+    model = rf.Model.xs(d_model=8, batch_size=2, amount=rf.Number)
+    table = arrow_table([{"amount": 0.0}, {"amount": 99.0}, {"amount": -99.0}])
+
+    model.encode(table, strata="train")
+
+    embedder = model.nodes[rf.Address("amount")].embedder
+    raw, log = embedder.normalizers["raw"], embedder.normalizers["log"]
+    assert raw.count.item() == log.count.item() == 3
+    assert raw.mean.item() == pytest.approx(0.0, abs=1e-6) and log.mean.item() == pytest.approx(0.0, abs=1e-6)
+    assert raw.var.item() == pytest.approx(2 * 99.0**2 / 3, rel=1e-5)
+    assert log.var.item() == pytest.approx(2 * math.log1p(99.0) ** 2 / 3, rel=1e-5)
+    assert rf.Number.normalization(model, "amount")["variance"] == pytest.approx(raw.var.item(), rel=1e-6)
+
+
+def test_number_lanes_default_to_both_scales_and_reject_empty_or_repeated_lanes():
+    assert rf.Number().lanes == ("raw", "log")
+    assert rf.Number(lanes=("log",)).lanes == ("log",)
+    with pytest.raises(pydantic.ValidationError, match="at least one"):
+        rf.Number(lanes=())
+    with pytest.raises(pydantic.ValidationError, match="must not repeat"):
+        rf.Number(lanes=("raw", "raw"))
+    with pytest.raises(pydantic.ValidationError):
+        rf.Number(lanes=("size",))
+
+
+def test_number_log_lane_embeds_standardized_compressed_values():
+    schema = build_schema(lanes=("log",))
+    field = tensorfield(rows=[[8.0, 12.0]], schema=schema, strata=Strata.predict)
+    embedder = Embedder(schema=schema, address=ADDRESS).eval()
+    embedder.normalizers["log"].mean.fill_(2.0)
+    embedder.normalizers["log"].var.fill_(0.25)
+
+    parcel = embedder.embed(field)
+
+    assert embedder.linear.in_features == 2 * embedder.weights.numel()
+    assert parcel.payload[0, 0, 0, -1].item() == pytest.approx((math.log1p(8.0) - 2.0) / 0.5, abs=1e-3)
+    assert parcel.payload[0, 0, 1, -1].item() == pytest.approx((math.log1p(12.0) - 2.0) / 0.5, abs=1e-3)
+
+
+def test_number_rejects_more_lanes_than_model_width():
+    schema = rf.Schema.from_tree(
+        amount=rf.Number, d_model=1, n_layers=1, n_heads=2, attention=None, reduction=rf.Mean()
+    )
+    with pytest.raises(ValueError, match="one payload channel per lane"):
+        Embedder(schema=schema, address="/amount")
+
+
+def test_number_jitter_perturbs_the_source_value_once_for_every_lane(monkeypatch: pytest.MonkeyPatch):
+    schema = build_schema(jitter=Jitter(add=3.0, normalize=True))
+    embedder = Embedder(schema=schema, address=ADDRESS)
+    embedder.normalizers["raw"].mean.fill_(10.0)
+    embedder.normalizers["raw"].var.fill_(4.0)
+    field = tensorfield(rows=[[14.0]], schema=schema, strata=Strata.train)
+    calls: list[torch.Tensor] = []
+
+    def add_three(self: Jitter, inputs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        calls.append(inputs.clone())
+        return inputs + mask.to(dtype=inputs.dtype).mul(3.0)
+
+    monkeypatch.setattr(Jitter, "apply", add_three)
+    embedder.train()
+    parcel = embedder.embed(field)
+
+    # One perturbation of the standardized raw value (2.0 -> 5.0, source 20.0) feeds both lanes.
+    assert len(calls) == 1 and calls[0].item() == pytest.approx(2.0, abs=1e-5)
+    assert parcel.payload[0, 0, 0, -2].item() == pytest.approx(5.0, abs=1e-4)
+    assert parcel.payload[0, 0, 0, -1].item() == pytest.approx(math.log1p(20.0), abs=1e-3)
 
 
 def test_number_log_scale_metrics_and_output_return_to_source_units(monkeypatch):

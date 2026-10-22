@@ -46,6 +46,8 @@ number.callback(CounterUpdateCallback)
 
 FOURIER_SAFE_MAX_ANGLE = float(1e4)
 
+Lane = Literal["raw", "log"]
+
 
 class Objective(enum.StrEnum):
     mae = "mae"
@@ -72,12 +74,17 @@ class Request(RequestBase):
     exponential updates. ``n_bands`` and ``offset`` bound Fourier exponents.
     ``jitter=rf.Jitter(...)`` perturbs training inputs while retaining pristine
     targets. ``mask=True`` makes the scalar a supervised, unembedded target.
-    ``log=True`` represents inputs and targets on a signed log scale,
-    ``sign(x) * ln(1 + |x|)``, so multiplicative structure becomes additive and
-    heavy tails stop dominating normalization; predictions and error metrics
-    still return to source units. The monotone map leaves the median-optimal
-    ``"mae"`` prediction unchanged, while ``"mse"`` and ``"huber"`` then
-    penalize relative rather than absolute error.
+
+    Inputs embed one standardized lane per entry of ``lanes``: ``"raw"`` is the
+    source value and ``"log"`` is its signed log scale ``sign(x) * ln(1 + |x|)``.
+    Each lane keeps its own online statistics, Fourier features, and monotone
+    channel, so the model reads additive structure from the raw lane and
+    multiplicative or heavy-tailed structure from the log lane without being
+    told which applies. ``log=True`` trains and decodes the target on the log
+    scale; predictions and error metrics still return to source units. The
+    monotone map leaves the median-optimal ``"mae"`` prediction unchanged,
+    while ``"mse"`` and ``"huber"`` then penalize relative rather than
+    absolute error.
     """
 
     type: Literal["number"] = "number"
@@ -86,7 +93,17 @@ class Request(RequestBase):
     offset: Annotated[int, pydantic.Field(gt=0, default=4)] = 4
     alpha: Annotated[float | None, pydantic.Field(gt=0.0, lt=1.0, default=None)] = None
     objective: Objective = Objective.mae
+    lanes: tuple[Lane, ...] = ("raw", "log")
     log: pydantic.StrictBool = False
+
+    @pydantic.field_validator("lanes")
+    @classmethod
+    def check_lanes(cls, lanes: tuple[Lane, ...]) -> tuple[Lane, ...]:
+        if not lanes:
+            raise ValueError("number lanes must name at least one of 'raw' and 'log'")
+        if len(set(lanes)) != len(lanes):
+            raise ValueError(f"number lanes must not repeat, got {lanes!r}")
+        return lanes
 
     if TYPE_CHECKING:
 
@@ -98,6 +115,7 @@ class Request(RequestBase):
             offset: int = 4,
             alpha: float | None = None,
             objective: Objective | Literal["mae", "mse", "huber"] = Objective.mae,
+            lanes: tuple[Lane, ...] = ("raw", "log"),
             log: bool = False,
             type: Literal["number"] = "number",
             **options: Unpack[FieldOptions],
@@ -124,7 +142,7 @@ class Request(RequestBase):
         if not isinstance(embedder, Embedder):
             raise TypeError(f"address {str(address)!r} is not a Number field (got {type(embedder).__name__})")
 
-        normalizer = embedder.normalizer
+        normalizer = cast(GlobalOnlineNormalizer, embedder.normalizers["log" if embedder.log else "raw"])
         mean = float(normalizer.mean.detach().cpu().item())
         variance = float(normalizer.var.detach().cpu().item())
         count = None if normalizer.alpha is not None else int(normalizer.count.detach().cpu().item())
@@ -169,12 +187,12 @@ def observe(
     if isinstance(values, pa.ChunkedArray):
         values = values.combine_chunks()
     content = torch.from_numpy(values.to_numpy(zero_copy_only=False).copy())
-    if cast(Request, schema.requests[address]).log:
-        content = compress(content)
+    # Both scales keep statistics: lanes read their own, and a log target scores on its own.
     return TensorDict(
         {
             TensorKey.state: tally(torch.from_numpy(field.dense.copy()), len(Tokens)),
             TensorKey.content: moments(content),
+            "log": moments(compress(content)),
         },
         batch_size=[],
     )
@@ -211,7 +229,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
     ) -> TensorField:
         request: Request = cast(Request, schema.requests[address])
 
-        def encode(field: RaggedField) -> torch.Tensor:
+        def encode(field: RaggedField, *, scale: bool) -> torch.Tensor:
             values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
             if (
                 pa.types.is_list(values.type)
@@ -228,12 +246,12 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             data = field.place(encoded.to_numpy(zero_copy_only=False).astype(np.float32, copy=False), fill=0.0)
             np.nan_to_num(data, copy=False, nan=0.0, posinf=np.inf, neginf=-np.inf)
             values = torch.from_numpy(data)
-            return compress(values) if request.log else values
+            return compress(values) if scale else values
 
         state = torch.from_numpy(input.dense)
 
         return cls(
-            content=encode(input),
+            content=encode(input, scale=False),
             state=state,
             present=present,
             trainable=trainable,
@@ -241,7 +259,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             targets=TensorDict(
                 {
                     TensorKey.state: torch.from_numpy(target.dense),
-                    TensorKey.content: encode(target),
+                    TensorKey.content: encode(target, scale=request.log),
                 }
                 if address in schema.objectives
                 else {},
@@ -369,10 +387,17 @@ class Embedder(EmbedderBase):
 
         n_bands = request.n_bands
         offset = request.offset
+        self.lanes: tuple[Lane, ...] = request.lanes
+        self.log: bool = request.log
+        if schema.d_model < len(self.lanes):
+            raise ValueError(
+                f"number field at '{address}' reserves one payload channel per lane; "
+                f"d_model={schema.d_model} cannot hold lanes {self.lanes!r}"
+            )
 
         weights = torch.logspace(start=-n_bands, end=offset, steps=n_bands + offset + 1, base=2)
-        self.linear = torch.nn.Linear(2 * len(weights), schema.d_model)
-        self.scalar = torch.nn.Linear(1, schema.d_model, bias=False)
+        self.linear = torch.nn.Linear(2 * len(weights) * len(self.lanes), schema.d_model)
+        self.scalar = torch.nn.Linear(len(self.lanes), schema.d_model, bias=False)
         self.register_buffer("weights", weights.mul(math.pi).unsqueeze(dim=0))
         self.register_buffer("max_fourier_input", torch.tensor(FOURIER_SAFE_MAX_ANGLE) / self.weights.abs().max())
 
@@ -380,7 +405,9 @@ class Embedder(EmbedderBase):
         self.weights: torch.Tensor
         self.max_fourier_input: torch.Tensor
 
-        self.normalizer: GlobalOnlineNormalizer = GlobalOnlineNormalizer(alpha=request.alpha)
+        self.normalizers = torch.nn.ModuleDict(
+            {name: GlobalOnlineNormalizer(alpha=request.alpha) for name in ("raw", "log")}
+        )
 
     def clamp(self, content: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
         bound = self.max_fourier_input.to(device=content.device, dtype=content.dtype)
@@ -415,6 +442,20 @@ class Embedder(EmbedderBase):
         clamped = content.clamp(min=-bound, max=bound)
         return torch.where(torch.isnan(clamped), torch.zeros_like(clamped), clamped)
 
+    def perturb(self, content: torch.Tensor, eligible: torch.Tensor) -> torch.Tensor:
+        """Jitter the measurement once, in source units, so every lane sees the same value.
+
+        ``normalize=True`` sizes the perturbation in standardized raw units and
+        returns to source units before the lanes derive their own scales.
+        """
+        if not self.jitter.normalize:
+            return self.jitter.apply(content, eligible)
+        raw = cast(GlobalOnlineNormalizer, self.normalizers["raw"])
+        std = torch.sqrt(raw.var + raw.epsilon).to(dtype=content.dtype)
+        mean = raw.mean.to(dtype=content.dtype)
+        standardized = self.jitter.apply((content - mean) / std, eligible)
+        return torch.where(eligible, standardized * std + mean, content)
+
     @beartype
     def forward(self, inputs: TensorInput) -> Parcel:
         N, *dims = inputs.state.shape
@@ -422,37 +463,39 @@ class Embedder(EmbedderBase):
 
         state = inputs.state.reshape(D)
         content = cast(torch.Tensor, inputs.content).reshape(D)
-        eligible = state.eq(Tokens.valued) & torch.isfinite(content)
+        valued = state.eq(Tokens.valued)
+        eligible = valued & torch.isfinite(content)
 
-        if self.training and not self.jitter.normalize:
-            content = self.jitter.apply(content, eligible)
+        if self.training:
+            content = self.perturb(content, eligible)
 
-        content = self.normalizer(inputs=content, mask=state.eq(Tokens.valued), update=False)
+        lanes: list[torch.Tensor] = []
+        for name in self.lanes:
+            values = compress(content) if name == "log" else content
+            values = cast(GlobalOnlineNormalizer, self.normalizers[name])(inputs=values, mask=valued, update=False)
+            lanes.append(self.clamp(content=values, state=state))
+        standardized = torch.stack(lanes, dim=1)
 
-        if self.training and self.jitter.normalize:
-            content = self.jitter.apply(content, eligible)
-
-        content = self.clamp(content=content, state=state)
-
-        weighted = content.unsqueeze(dim=1).mul(self.weights)
-        fourier = torch.cat([torch.sin(weighted), torch.cos(weighted)], dim=1)
+        weighted = standardized.unsqueeze(dim=2).mul(self.weights)
+        fourier = torch.cat([torch.sin(weighted), torch.cos(weighted)], dim=2).reshape(D, -1)
 
         projection = torch.nn.functional.gelu(self.linear(fourier), approximate="tanh").reshape(N, *dims, -1)
 
         embeddings = self.embeddings(state).reshape(N, *dims, -1)
 
-        payload = embeddings + projection + self.scalar(content.reshape(-1, 1)).reshape(N, *dims, -1)
-        # Keep one clamped monotone lane alongside the Fourier features.
-        # This gives downstream additive and multiplicative interactions direct
-        # access to numerical scale instead of forcing them to invert a periodic
-        # basis outside the values observed during fitting.
-        scalar = torch.where(
-            eligible.reshape(N, *dims),
-            content.reshape(N, *dims),
-            embeddings[..., -1],
+        payload = embeddings + projection + self.scalar(standardized).reshape(N, *dims, -1)
+        # Keep one clamped monotone channel per lane alongside the Fourier
+        # features. This gives downstream additive and multiplicative
+        # interactions direct access to numerical scale instead of forcing them
+        # to invert a periodic basis outside the values observed during fitting.
+        width = len(self.lanes)
+        monotone = torch.where(
+            eligible.reshape(N, *dims, 1),
+            standardized.reshape(N, *dims, width),
+            embeddings[..., -width:],
         )
-        scalar = scalar + payload[..., -1] * 0.0
-        payload = torch.cat((payload[..., :-1], scalar.unsqueeze(-1)), dim=-1)
+        monotone = monotone + payload[..., -width:] * 0.0
+        payload = torch.cat((payload[..., :-width], monotone), dim=-1)
 
         return Parcel(
             payload=payload,
@@ -477,7 +520,8 @@ def learn(
         raise ValueError(f"number learner at '{address}' requires train strata, got {strata}")
     embedder: Embedder = cast(Embedder, module.nodes[address].embedder)
     embedder.counter.learn(cast(torch.Tensor, observation[TensorKey.state]))
-    embedder.normalizer.learn(cast(TensorDict, observation[TensorKey.content]))
+    cast(GlobalOnlineNormalizer, embedder.normalizers["raw"]).learn(cast(TensorDict, observation[TensorKey.content]))
+    cast(GlobalOnlineNormalizer, embedder.normalizers["log"]).learn(cast(TensorDict, observation["log"]))
 
 
 @number.register(Component.Decoder)
@@ -531,7 +575,7 @@ def loss(
     request: Request = cast(Request, module.schema.requests[prediction.address])
 
     embedder: Embedder = cast(Embedder, module.nodes[address].embedder)
-    normalizer: GlobalOnlineNormalizer = embedder.normalizer
+    normalizer = cast(GlobalOnlineNormalizer, embedder.normalizers["log" if request.log else "raw"])
 
     N: int = cast(torch.Tensor, batch.targets[TensorKey.state]).numel()
 

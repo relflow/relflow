@@ -22,7 +22,7 @@ def build_model(*, alpha: float | None = None) -> rf.Model:
 
 def test_number_normalization_returns_cumulative_snapshot() -> None:
     model = build_model()
-    normalizer = model.nodes[ADDRESS].embedder.normalizer
+    normalizer = model.nodes[ADDRESS].embedder.normalizers["raw"]
     normalizer.update(torch.tensor([1.0, 3.0]))
 
     snapshot = rf.Number.normalization(model, ADDRESS)
@@ -44,7 +44,7 @@ def test_number_normalization_returns_cumulative_snapshot() -> None:
 
 def test_number_normalization_reports_ema_configuration_without_count() -> None:
     model = build_model(alpha=0.25)
-    normalizer = model.nodes[ADDRESS].embedder.normalizer
+    normalizer = model.nodes[ADDRESS].embedder.normalizers["raw"]
     normalizer.update(torch.tensor([2.0, 4.0]))
 
     snapshot = rf.Number.normalization(model, "/amount")
@@ -58,7 +58,7 @@ def test_number_normalization_reports_ema_configuration_without_count() -> None:
 
 def test_number_normalization_count_remains_exact_above_float32_limit() -> None:
     model = build_model()
-    normalizer = model.nodes[ADDRESS].embedder.normalizer
+    normalizer = model.nodes[ADDRESS].embedder.normalizers["raw"]
     normalizer.count.fill_(2**24)
 
     normalizer.update(torch.tensor([1.0]))
