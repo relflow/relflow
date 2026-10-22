@@ -41,6 +41,10 @@ if TYPE_CHECKING:
     from relflow.structs.experiment import Schema
 
 
+# Standardized lanes stay bounded so one extreme outlier cannot swamp the embedding.
+SPREAD_LIMIT: float = 64.0
+
+
 @dataclass(frozen=True)
 class Batch:
     """Pristine Arrow values; workers never commit distribution updates."""
@@ -135,8 +139,11 @@ class Request(RequestBase):
     """A finite scalar normalized to its estimated training percentile.
 
     The digest learns pristine consumed training values, including hidden targets.
-    Evaluation freezes the distribution. Predictions use its inverse transform
-    and remain in source units; values outside learned support clip to its tails.
+    Evaluation freezes the distribution. Each coordinate carries its percentile
+    rank and a robust standardized lane, so values beyond the learned support
+    still move the embedding. Predictions invert the learned quantiles inside
+    ``[0, 1]`` and continue linearly from the outer deciles beyond them, in
+    source units.
     """
 
     type: Literal["quantile"] = "quantile"
@@ -208,6 +215,41 @@ def percentiles(digest: Digest, raw: torch.Tensor, state: torch.Tensor) -> torch
     return torch.where(state.eq(Tokens.valued), ranks, 0.5)
 
 
+def quantiles(digest: Digest, probabilities: list[float]) -> list[float]:
+    """Read learned quantiles as floats; callers check that the digest has observed values."""
+    return [float(cast(float, value)) for value in digest.quantile(pa.array(probabilities)).to_pylist()]
+
+
+def lanes(digest: Digest, raw: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
+    """Pair each percentile rank with a robust standardized lane that keeps growing past the learned support."""
+    ranks = percentiles(digest, raw, state)
+    spread = torch.zeros_like(ranks)
+    if digest.count:
+        lower, median, upper = quantiles(digest, [0.25, 0.5, 0.75])
+        scale = upper - lower
+        if not scale > 0.0:
+            scale = max(digest.maximum - digest.minimum, 1.0)
+        floats = values(raw).to_numpy(zero_copy_only=False)
+        standardized = torch.from_numpy(((floats - median) / scale).copy()).reshape(raw.shape)
+        standardized = standardized.to(device=raw.device, dtype=torch.float32).clamp(-SPREAD_LIMIT, SPREAD_LIMIT)
+        spread = torch.where(state.eq(Tokens.valued), standardized, 0.0)
+    return torch.stack((ranks, spread), dim=-1)
+
+
+def inverse(digest: Digest, scores: torch.Tensor) -> torch.Tensor:
+    """Return source units: learned quantiles inside [0, 1], continued linearly from the outer deciles beyond."""
+    # Source units are output metadata; retain their float64 precision on CPU.
+    flat = scores.detach().cpu().to(torch.float64).reshape(-1)
+    raw = digest.quantile(array(flat.clamp(0.0, 1.0), pa.float64())).to_numpy(zero_copy_only=False).copy()
+    content = torch.from_numpy(raw)
+    if digest.count:
+        low, lower, upper, high = quantiles(digest, [0.0, 0.1, 0.9, 1.0])
+        below = flat.clamp(max=0.0) * ((lower - low) / 0.1)
+        above = (flat - 1.0).clamp(min=0.0) * ((high - upper) / 0.1)
+        content = content + below + above
+    return content.reshape(scores.shape)
+
+
 @quantile.register(Component.observe)
 def observe(
     field: RaggedField, *, address: Address, schema: Schema, state: object | None, learn: bool
@@ -264,13 +306,13 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             targets = TensorDict(
                 {
                     TensorKey.state: target_state,
-                    TensorKey.content: percentiles(digest, target_raw, target_state),
+                    TensorKey.content: lanes(digest, target_raw, target_state),
                     "raw": target_raw,
                 },
                 batch_size=input.shape,
             )
         return cls(
-            content=percentiles(digest, content, state),
+            content=lanes(digest, content, state),
             raw=content,
             state=state,
             present=present,
@@ -306,9 +348,9 @@ def bind(
         for payload in all_gather_object(delta.serialize()):
             digest.merge(Digest.deserialize(payload))
         resize.publish(partial(resource.state.publish, digest.serialize()))
-    field.content = percentiles(digest, field.raw, field.state)
+    field.content = lanes(digest, field.raw, field.state)
     if TensorKey.content in field.targets:
-        field.targets[TensorKey.content] = percentiles(
+        field.targets[TensorKey.content] = lanes(
             digest, cast(torch.Tensor, field.targets["raw"]), cast(torch.Tensor, field.targets[TensorKey.state])
         )
 
@@ -321,7 +363,7 @@ class Embedder(EmbedderBase):
         self.distribution = Distribution(request.compression)
         self.counter = Counter(address, len(Tokens))
         self.embeddings = torch.nn.Embedding(len(Tokens), schema.d_model)
-        self.linear = torch.nn.Linear(2 * request.n_bands + 1, schema.d_model)
+        self.linear = torch.nn.Linear(2 * request.n_bands + 2, schema.d_model)
         self.register_buffer("frequencies", torch.arange(1, request.n_bands + 1).float() * math.pi)
         self.frequencies: torch.Tensor
 
@@ -331,9 +373,10 @@ class Embedder(EmbedderBase):
 
     def forward(self, inputs: TensorInput) -> Parcel:
         state = inputs.state.reshape(-1)
-        ranks = cast(torch.Tensor, inputs.content).reshape(-1, 1)
+        content = cast(torch.Tensor, inputs.content).reshape(-1, 2)
+        ranks = content[:, :1]
         weighted = ranks * self.frequencies
-        features = torch.cat((ranks, weighted.sin(), weighted.cos()), dim=-1)
+        features = torch.cat((content, weighted.sin(), weighted.cos()), dim=-1)
         payload = self.embeddings(state) + torch.nn.functional.gelu(self.linear(features), approximate="tanh")
         lane = torch.where(state.eq(Tokens.valued), ranks[:, 0], payload[:, -1])
         payload = torch.cat((payload[:, :-1], (lane + payload[:, -1] * 0.0).unsqueeze(-1)), dim=-1)
@@ -369,12 +412,10 @@ class Decoder(DecoderBase):
         self.distribution = context
 
     def decode(self, pooled: torch.Tensor) -> TensorDict:
-        ranks = self.regression(pooled).sigmoid()
-        raw = self.distribution.snapshot().quantile(array(ranks, pa.float64())).to_numpy(zero_copy_only=False).copy()
-        # Source units are output metadata; retain their float64 precision on CPU.
-        content = torch.from_numpy(raw).reshape(ranks.shape)
+        scores = self.regression(pooled)
+        content = inverse(self.distribution.snapshot(), scores)
         return TensorDict(
-            {TensorKey.state: self.classification(pooled), TensorKey.content: content, "percentile": ranks}
+            {TensorKey.state: self.classification(pooled), TensorKey.content: content, "percentile": scores}
         )
 
 
@@ -397,7 +438,7 @@ def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: 
         )
     valued = selected & states.eq(Tokens.valued)
     if valued.any():
-        target = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(-1)
+        target = cast(torch.Tensor, batch.targets[TensorKey.content])[..., 0].reshape(-1)
         match request.objective:
             case "mae":
                 residual = (ranks - target).abs()
