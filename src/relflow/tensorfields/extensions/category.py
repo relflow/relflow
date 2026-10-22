@@ -13,6 +13,7 @@ from beartype import beartype
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
+from relflow.helpers.resize import SILENT_LOGIT
 from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
@@ -295,6 +296,10 @@ class Embedder(EmbedderBase):
                 ),
             }
         )
+        # Labels are admitted while training, so every content row starts at
+        # zero: an admitted label embeds exactly as it did while unknown until
+        # gradients move its row.
+        torch.nn.init.zeros_(cast(torch.nn.Embedding, self.embeddings[TensorKey.content.name]).weight)
 
         self.counters = torch.nn.ModuleDict(
             {
@@ -358,11 +363,11 @@ def bind(
     node = module.nodes[address]
     embedder = cast(Embedder, node.embedder)
     mapping, size = binding.resolve(embedder.vocab, learn=strata == Strata.train, device=module.device, resize=resize)
-    resize.embedding(cast(torch.nn.Embedding, embedder.embeddings[TensorKey.content.name]), size)
+    resize.embedding(cast(torch.nn.Embedding, embedder.embeddings[TensorKey.content.name]), size, zero=True)
     cast(Counter, embedder.counters[TensorKey.content.name]).resize(size, resize)
     decoder = getattr(node, "decoder", None)
     if decoder is not None:
-        resize.linear(decoder.linears[TensorKey.content.name], size)
+        resize.linear(decoder.linears[TensorKey.content.name], size, silent=True)
     field = cast(TensorField, field)
     field.content = mapping.to(field.content.device)[field.content]
     if TensorKey.content in field.targets:
@@ -412,6 +417,10 @@ class Decoder(DecoderBase):
                 ),
             }
         )
+        # Silent rows keep an admitted label out of the softmax until it learns.
+        content = cast(torch.nn.Linear, self.linears[TensorKey.content.name])
+        torch.nn.init.zeros_(content.weight)
+        torch.nn.init.constant_(content.bias, SILENT_LOGIT)
         self.metrics = Scores(address, partial(Reconstruction, cast(list[int], request.topk)))
 
     @beartype

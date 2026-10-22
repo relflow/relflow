@@ -11,6 +11,10 @@ from torch.optim import Optimizer
 __all__ = ["Resize"]
 
 
+# A silent output row contributes exp(-20) of softmax mass: invisible until it learns.
+SILENT_LOGIT: float = -20.0
+
+
 def growth(size: int, previous: int) -> None:
     if isinstance(size, bool) or not isinstance(size, int) or size < previous:
         raise ValueError(f"row size must be an integer >= {previous}, got {size!r}; shrinking is unsupported")
@@ -143,8 +147,12 @@ class Resize:
             raise ValueError(f"{type(owner).__name__}.{name} is a registered tensor; use parameter() or buffer()")
         self.stage(owner, name, value)
 
-    def embedding(self, module: nn.Embedding, size: int, *, tail: bool = False) -> None:
-        """Grow embedding rows, optionally moving the old last row to the new last."""
+    def embedding(self, module: nn.Embedding, size: int, *, tail: bool = False, zero: bool = False) -> None:
+        """Grow embedding rows, optionally moving the old last row to the new last.
+
+        ``zero`` starts the new rows at zero so a label admitted later embeds
+        exactly as it did while unknown.
+        """
         previous = module.num_embeddings
         growth(size, previous)
         if size == previous:
@@ -153,24 +161,33 @@ class Resize:
         if tail and previous:
             indices[-1] = size - 1
         values = module.weight.new_empty((size, module.embedding_dim))
-        nn.init.normal_(values)
+        if zero:
+            values.zero_()
+        else:
+            nn.init.normal_(values)
         self.parameter(module, "weight", values, indices)
         self.attribute(module, "num_embeddings", size)
         if tail and module.padding_idx == previous - 1:
             self.attribute(module, "padding_idx", size - 1)
 
-    def linear(self, module: nn.Linear, size: int) -> None:
-        """Grow output rows with PyTorch's ordinary fan-in initialization."""
+    def linear(self, module: nn.Linear, size: int, *, silent: bool = False) -> None:
+        """Grow output rows with fan-in initialization, or ``silent`` rows that leave existing probabilities intact."""
         growth(size, module.out_features)
         if size == module.out_features:
             return
         values = module.weight.new_empty((size, module.in_features))
-        nn.init.kaiming_uniform_(values, a=sqrt(5))
+        if silent:
+            values.zero_()
+        else:
+            nn.init.kaiming_uniform_(values, a=sqrt(5))
         self.parameter(module, "weight", values)
         if module.bias is not None:
             bias = module.bias.new_empty(size)
-            bound = 1 / sqrt(module.in_features) if module.in_features else 0
-            nn.init.uniform_(bias, -bound, bound)
+            if silent:
+                bias.fill_(SILENT_LOGIT)
+            else:
+                bound = 1 / sqrt(module.in_features) if module.in_features else 0
+                nn.init.uniform_(bias, -bound, bound)
             self.parameter(module, "bias", bias)
         self.attribute(module, "out_features", size)
 

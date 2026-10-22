@@ -12,6 +12,7 @@ from lightning.pytorch import Callback, Trainer
 import relflow as rf
 from relflow.architecture.binding import bind
 from relflow.data.iterables import encode
+from relflow.structs.enums import TensorKey
 from relflow.tensorfields.shared.vocabulary import VocabularyBatch
 
 ADDRESS = rf.Address("/value")
@@ -35,9 +36,11 @@ def build(kind):
     )
 
 
-def table(kind, labels, *, supervise=False):
+def table(kind, labels, *, supervise=False, distinct=False):
     values = [[label] if label is not None else None for label in labels] if kind == "set" else labels
-    return pa.table({"value": values, "signal": [1.0] * len(labels), "supervise": [supervise] * len(labels)})
+    # Distinct signals keep hidden states apart, so admitted rows that start at zero still receive gradient.
+    signal = [float(index + 1) if distinct else 1.0 for index in range(len(labels))]
+    return pa.table({"value": values, "signal": signal, "supervise": [supervise] * len(labels)})
 
 
 def assert_counts(model, kind, expected):
@@ -440,7 +443,7 @@ def test_one_fit_admits_late_labels_without_restarting_epoch_or_optimizer(kind, 
     labels = ["a", "b", "c", "a", "d", "e", "f", "b"]
     data = rf.ArrowDataModule(
         model=model,
-        train=table(kind, labels, supervise=True),
+        train=table(kind, labels, supervise=True, distinct=True),
         validate=table(kind, ["validation-only", "a"], supervise=True),
         shuffle=False,
         num_workers={"train": workers, "validate": 0},
@@ -631,3 +634,33 @@ def test_lightning_checkpoint_resume_restores_training_state_before_further_grow
     assert REQUESTS[kind].vocabulary(restored, ADDRESS) == tuple("abcdef")
     assert_counts(restored, kind, Counter(labels + more))
     assert restored.schema.model_dump(mode="json") == schema
+
+
+def test_category_admission_preserves_predictions_until_the_label_is_learned():
+    model = build("category")
+    model.encode(table("category", ["a", "b", "a"]), strata="train")
+    node = model.nodes[ADDRESS]
+    content = node.embedder.embeddings["content"]
+    head = node.decoder.linears["content"]
+    with torch.no_grad():
+        # Stand in for training that moved the admitted rows away from zero.
+        content.weight[:2].normal_()
+        head.weight[:2].normal_()
+        head.bias[:2].normal_()
+
+    def logits(labels):
+        encoded = model.encode(table("category", labels), strata="predict")
+        with torch.no_grad():
+            predicted = next(item for item in model(encoded, strata="predict") if item.address == ADDRESS)
+        return predicted.payload[TensorKey.content].reshape(len(labels), -1).clone()
+
+    before = logits(["a", "c"])
+    model.encode(table("category", ["c"]), strata="train")
+    assert node.embedder.vocab.size == 4
+    after = logits(["a", "c"])
+
+    # Grown rows change the matmul shape, so equality holds up to float reassociation.
+    torch.testing.assert_close(after[:, :2], before[:, :2])
+    assert torch.equal(content.weight[2], torch.zeros_like(content.weight[2]))
+    assert torch.equal(head.weight[2], torch.zeros_like(head.weight[2]))
+    assert head.bias[2].item() == -20.0
