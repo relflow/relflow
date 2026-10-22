@@ -3,6 +3,7 @@ from __future__ import annotations
 import enum
 import math
 from collections.abc import Iterator
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import InitVar
 from typing import TYPE_CHECKING, Annotated, Literal, Unpack, cast
 
@@ -47,6 +48,14 @@ number.callback(CounterUpdateCallback)
 FOURIER_SAFE_MAX_ANGLE = float(1e4)
 
 Lane = Literal["raw", "log"]
+LANES: tuple[Lane, ...] = ("raw", "log")
+
+
+def precise(device: torch.device) -> AbstractContextManager[object]:
+    """Disable mixed precision for source-value arithmetic; bf16 would quantize lanes and readouts."""
+    if device.type in {"cuda", "cpu"}:
+        return torch.autocast(device_type=device.type, enabled=False)
+    return nullcontext()
 
 
 class Objective(enum.StrEnum):
@@ -66,25 +75,27 @@ class Objective(enum.StrEnum):
 
 @number.register(Component.Request)
 class Request(RequestBase):
-    """Continuous numeric scalar with online normalization and Fourier features.
+    """Continuous numeric scalar with raw and signed-log lanes and a standardized readout.
 
-    ``objective`` selects ``"mae"``, ``"mse"``, or ``"huber"`` reconstruction
-    loss in normalized units; predictions and error metrics use source units.
-    ``alpha=None`` uses cumulative statistics; a value in ``(0, 1)`` uses
-    exponential updates. ``n_bands`` and ``offset`` bound Fourier exponents.
-    ``jitter=rf.Jitter(...)`` perturbs training inputs while retaining pristine
-    targets. ``mask=True`` makes the scalar a supervised, unembedded target.
+    Inputs embed two standardized lanes: the source value and its signed log
+    scale ``sign(x) * ln(1 + |x|)``. Each lane keeps its own online statistics,
+    Fourier features, and monotone channel, so additive structure reads from
+    the raw lane and multiplicative or heavy-tailed structure from the log lane
+    without a per-field choice. The embedder and the readout run in float32
+    under mixed precision so bf16 never quantizes source values.
 
-    Inputs embed one standardized lane per entry of ``lanes``: ``"raw"`` is the
-    source value and ``"log"`` is its signed log scale ``sign(x) * ln(1 + |x|)``.
-    Each lane keeps its own online statistics, Fourier features, and monotone
-    channel, so the model reads additive structure from the raw lane and
-    multiplicative or heavy-tailed structure from the log lane without being
-    told which applies. ``log=True`` trains and decodes the target on the log
-    scale; predictions and error metrics still return to source units. The
-    monotone map leaves the median-optimal ``"mae"`` prediction unchanged,
-    while ``"mse"`` and ``"huber"`` then penalize relative rather than
-    absolute error.
+    ``objective`` selects the reconstruction loss. ``"mae"`` trains on the
+    signed log scale, where the median-optimal prediction is unchanged, and
+    adds the source-unit absolute error so the bulk stays sharp; ``"mse"`` and
+    ``"huber"`` train in source units because their optimum is not
+    transform-invariant. The readout starts at the training mean of that
+    scale and predicts standardized deviations, so targets far from zero or
+    with heavy tails need no option. Predictions and error metrics return to
+    source units. ``alpha=None`` uses cumulative statistics; a value in
+    ``(0, 1)`` uses exponential updates. ``n_bands`` and ``offset`` bound
+    Fourier exponents. ``jitter=rf.Jitter(...)`` perturbs training inputs once
+    in source units while retaining pristine targets. ``mask=True`` makes the
+    scalar a supervised, unembedded target.
     """
 
     type: Literal["number"] = "number"
@@ -93,17 +104,6 @@ class Request(RequestBase):
     offset: Annotated[int, pydantic.Field(gt=0, default=4)] = 4
     alpha: Annotated[float | None, pydantic.Field(gt=0.0, lt=1.0, default=None)] = None
     objective: Objective = Objective.mae
-    lanes: tuple[Lane, ...] = ("raw", "log")
-    log: pydantic.StrictBool = False
-
-    @pydantic.field_validator("lanes")
-    @classmethod
-    def check_lanes(cls, lanes: tuple[Lane, ...]) -> tuple[Lane, ...]:
-        if not lanes:
-            raise ValueError("number lanes must name at least one of 'raw' and 'log'")
-        if len(set(lanes)) != len(lanes):
-            raise ValueError(f"number lanes must not repeat, got {lanes!r}")
-        return lanes
 
     if TYPE_CHECKING:
 
@@ -115,11 +115,14 @@ class Request(RequestBase):
             offset: int = 4,
             alpha: float | None = None,
             objective: Objective | Literal["mae", "mse", "huber"] = Objective.mae,
-            lanes: tuple[Lane, ...] = ("raw", "log"),
-            log: bool = False,
             type: Literal["number"] = "number",
             **options: Unpack[FieldOptions],
         ) -> None: ...
+
+    @property
+    def log(self) -> bool:
+        """Whether the target trains on the signed log scale: the median-preserving ``"mae"`` objective does."""
+        return self.objective == Objective.mae
 
     @classmethod
     def normalization(
@@ -128,7 +131,7 @@ class Request(RequestBase):
         address: Address | str,
         /,
     ) -> dict[str, float | int | None]:
-        """Return a CPU-native snapshot of one Number field's normalizer, in log units when ``log=True``."""
+        """Return a CPU-native snapshot of one Number field's source-unit normalizer."""
         from relflow.architecture.root import Model
 
         if not isinstance(model, Model):
@@ -142,7 +145,7 @@ class Request(RequestBase):
         if not isinstance(embedder, Embedder):
             raise TypeError(f"address {str(address)!r} is not a Number field (got {type(embedder).__name__})")
 
-        normalizer = cast(GlobalOnlineNormalizer, embedder.normalizers["log" if embedder.log else "raw"])
+        normalizer = cast(GlobalOnlineNormalizer, embedder.normalizers["raw"])
         mean = float(normalizer.mean.detach().cpu().item())
         variance = float(normalizer.var.detach().cpu().item())
         count = None if normalizer.alpha is not None else int(normalizer.count.detach().cpu().item())
@@ -227,9 +230,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         strata: Strata,
         context: Context,
     ) -> TensorField:
-        request: Request = cast(Request, schema.requests[address])
-
-        def encode(field: RaggedField, *, scale: bool) -> torch.Tensor:
+        def encode(field: RaggedField) -> torch.Tensor:
             values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
             if (
                 pa.types.is_list(values.type)
@@ -245,13 +246,12 @@ class TensorField(TensorFieldBase[torch.Tensor]):
                 encoded = encoded.combine_chunks()
             data = field.place(encoded.to_numpy(zero_copy_only=False).astype(np.float32, copy=False), fill=0.0)
             np.nan_to_num(data, copy=False, nan=0.0, posinf=np.inf, neginf=-np.inf)
-            values = torch.from_numpy(data)
-            return compress(values) if scale else values
+            return torch.from_numpy(data)
 
         state = torch.from_numpy(input.dense)
 
         return cls(
-            content=encode(input, scale=False),
+            content=encode(input),
             state=state,
             present=present,
             trainable=trainable,
@@ -259,7 +259,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             targets=TensorDict(
                 {
                     TensorKey.state: torch.from_numpy(target.dense),
-                    TensorKey.content: encode(target, scale=request.log),
+                    TensorKey.content: encode(target),
                 }
                 if address in schema.objectives
                 else {},
@@ -387,17 +387,15 @@ class Embedder(EmbedderBase):
 
         n_bands = request.n_bands
         offset = request.offset
-        self.lanes: tuple[Lane, ...] = request.lanes
-        self.log: bool = request.log
-        if schema.d_model < len(self.lanes):
+        if schema.d_model < len(LANES):
             raise ValueError(
                 f"number field at '{address}' reserves one payload channel per lane; "
-                f"d_model={schema.d_model} cannot hold lanes {self.lanes!r}"
+                f"d_model={schema.d_model} cannot hold {len(LANES)} lanes"
             )
 
         weights = torch.logspace(start=-n_bands, end=offset, steps=n_bands + offset + 1, base=2)
-        self.linear = torch.nn.Linear(2 * len(weights) * len(self.lanes), schema.d_model)
-        self.scalar = torch.nn.Linear(len(self.lanes), schema.d_model, bias=False)
+        self.linear = torch.nn.Linear(2 * len(weights) * len(LANES), schema.d_model)
+        self.scalar = torch.nn.Linear(len(LANES), schema.d_model, bias=False)
         self.register_buffer("weights", weights.mul(math.pi).unsqueeze(dim=0))
         self.register_buffer("max_fourier_input", torch.tensor(FOURIER_SAFE_MAX_ANGLE) / self.weights.abs().max())
 
@@ -405,9 +403,7 @@ class Embedder(EmbedderBase):
         self.weights: torch.Tensor
         self.max_fourier_input: torch.Tensor
 
-        self.normalizers = torch.nn.ModuleDict(
-            {name: GlobalOnlineNormalizer(alpha=request.alpha) for name in ("raw", "log")}
-        )
+        self.normalizers = torch.nn.ModuleDict({name: GlobalOnlineNormalizer(alpha=request.alpha) for name in LANES})
 
     def clamp(self, content: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
         bound = self.max_fourier_input.to(device=content.device, dtype=content.dtype)
@@ -458,11 +454,16 @@ class Embedder(EmbedderBase):
 
     @beartype
     def forward(self, inputs: TensorInput) -> Parcel:
+        with precise(inputs.state.device):
+            return self.project(inputs)
+
+    def project(self, inputs: TensorInput) -> Parcel:
+        """Embed both lanes of every value with Fourier features and monotone channels, in float32."""
         N, *dims = inputs.state.shape
         D = math.prod(tuple([N, *dims]))
 
         state = inputs.state.reshape(D)
-        content = cast(torch.Tensor, inputs.content).reshape(D)
+        content = cast(torch.Tensor, inputs.content).reshape(D).float()
         valued = state.eq(Tokens.valued)
         eligible = valued & torch.isfinite(content)
 
@@ -470,7 +471,7 @@ class Embedder(EmbedderBase):
             content = self.perturb(content, eligible)
 
         lanes: list[torch.Tensor] = []
-        for name in self.lanes:
+        for name in LANES:
             values = compress(content) if name == "log" else content
             values = cast(GlobalOnlineNormalizer, self.normalizers[name])(inputs=values, mask=valued, update=False)
             lanes.append(self.clamp(content=values, state=state))
@@ -481,14 +482,14 @@ class Embedder(EmbedderBase):
 
         projection = torch.nn.functional.gelu(self.linear(fourier), approximate="tanh").reshape(N, *dims, -1)
 
-        embeddings = self.embeddings(state).reshape(N, *dims, -1)
+        embeddings = self.embeddings(state).reshape(N, *dims, -1).float()
 
         payload = embeddings + projection + self.scalar(standardized).reshape(N, *dims, -1)
         # Keep one clamped monotone channel per lane alongside the Fourier
         # features. This gives downstream additive and multiplicative
         # interactions direct access to numerical scale instead of forcing them
         # to invert a periodic basis outside the values observed during fitting.
-        width = len(self.lanes)
+        width = len(LANES)
         monotone = torch.where(
             eligible.reshape(N, *dims, 1),
             standardized.reshape(N, *dims, width),
@@ -522,6 +523,9 @@ def learn(
     embedder.counter.learn(cast(torch.Tensor, observation[TensorKey.state]))
     cast(GlobalOnlineNormalizer, embedder.normalizers["raw"]).learn(cast(TensorDict, observation[TensorKey.content]))
     cast(GlobalOnlineNormalizer, embedder.normalizers["log"]).learn(cast(TensorDict, observation["log"]))
+    if address in module.schema.objectives:
+        decoder: Decoder = cast(Decoder, module.nodes[address].decoder)
+        decoder.normalizer.learn(cast(TensorDict, observation["log" if decoder.log else TensorKey.content]))
 
 
 @number.register(Component.Decoder)
@@ -531,9 +535,13 @@ class Decoder(DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 
+        request: Request = cast(Request, schema.requests[address])
         self.classification = torch.nn.Linear(in_features=schema.d_model, out_features=len(Tokens))
         self.regression = torch.nn.Linear(in_features=schema.d_model, out_features=1)
-        self.log: bool = cast(Request, schema.requests[address]).log
+        self.log: bool = request.log
+        # Target statistics in the training scale: the readout starts at their
+        # mean and predicts standardized deviations.
+        self.normalizer: GlobalOnlineNormalizer = GlobalOnlineNormalizer(alpha=request.alpha)
         self.metrics = torch.nn.ModuleDict(
             {
                 f"{strata.value}_metrics": torch.nn.ModuleDict(
@@ -549,12 +557,15 @@ class Decoder(DecoderBase):
 
     @beartype
     def decode(self, pooled: torch.Tensor) -> TensorDict:
-        scaled = self.regression(pooled)
-        content = scaled
-        if self.log:
-            # Content stays in source units for every consumer; the loss reads the log-unit lane.
-            content = expand(scaled.detach().clamp(-LOG_SAFE_MAGNITUDE, LOG_SAFE_MAGNITUDE).to(dtype=torch.float64))
-            content = content.to(dtype=scaled.dtype)
+        with precise(pooled.device):
+            deviation = self.regression(pooled.float())
+            std = torch.sqrt(self.normalizer.var + self.normalizer.epsilon)
+            scaled = self.normalizer.mean + std * deviation
+            content = scaled
+            if self.log:
+                # Content stays in source units for every consumer; the loss reads the training-scale lane.
+                content = expand(scaled.detach().clamp(-LOG_SAFE_MAGNITUDE, LOG_SAFE_MAGNITUDE).to(dtype=torch.float64))
+                content = content.to(dtype=scaled.dtype)
         return TensorDict(
             source={
                 TensorKey.state: self.classification(pooled),
@@ -562,6 +573,11 @@ class Decoder(DecoderBase):
                 "scaled": scaled,
             }
         )
+
+
+# The source-unit term of the ``"mae"`` loss ignores predictions this many
+# training-scale deviations past the mean, so its exponential gradient stays bounded.
+SOURCE_TERM_SPREAD: float = 6.0
 
 
 @number.register(Component.loss)
@@ -575,7 +591,7 @@ def loss(
     request: Request = cast(Request, module.schema.requests[prediction.address])
 
     embedder: Embedder = cast(Embedder, module.nodes[address].embedder)
-    normalizer = cast(GlobalOnlineNormalizer, embedder.normalizers["log" if request.log else "raw"])
+    decoder: Decoder = cast(Decoder, module.nodes[address].decoder)
 
     N: int = cast(torch.Tensor, batch.targets[TensorKey.state]).numel()
 
@@ -597,39 +613,41 @@ def loss(
     )
 
     target: torch.Tensor = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(N)
-    # Log-scale fields train on the log-unit lane; content stays in source units for every consumer.
-    lane = "scaled" if request.log else TensorKey.content
-    inputs: torch.Tensor = cast(torch.Tensor, prediction.payload[lane]).reshape(N)
+    scaled: torch.Tensor = cast(torch.Tensor, prediction.payload["scaled"]).reshape(N)
     valued = trainable & state_targets.eq(Tokens.valued.value)
-    actual = inputs.masked_select(valued).float()
-    expected = target.masked_select(valued).float()
+    actual = scaled.masked_select(valued).float()
+    observed = target.masked_select(valued).float()
     if actual.numel():
-        diff = actual.subtract(expected)
-        loss += module.track(
-            (address, strata, Metric.loss, TensorKey.content),
-            value=request.objective.loss(
-                input=diff / normalizer.var.sqrt().clamp_min(normalizer.epsilon),
-                target=torch.zeros_like(diff),
-                reduction="mean",
-            ),
+        expected = compress(observed) if request.log else observed
+        std = decoder.normalizer.var.sqrt().clamp_min(decoder.normalizer.epsilon)
+        value = request.objective.loss(
+            input=(actual - expected) / std,
+            target=torch.zeros_like(actual),
+            reduction="mean",
         )
+        if request.log:
+            # The median is invariant to the log scale, so the source-unit error
+            # sharpens the bulk without moving the optimum.
+            raw = cast(GlobalOnlineNormalizer, embedder.normalizers["raw"])
+            spread = SOURCE_TERM_SPREAD * std
+            bounded = actual.clamp(min=decoder.normalizer.mean - spread, max=decoder.normalizer.mean + spread)
+            value = value + (expand(bounded) - observed).abs().div(raw.var.sqrt().clamp_min(raw.epsilon)).mean()
+        loss += module.track((address, strata, Metric.loss, TensorKey.content), value=value)
     else:
-        loss += inputs.sum() * 0.0
+        loss += scaled.sum() * 0.0
 
-    decoder = cast(Decoder, module.nodes[address].decoder)
-    if request.log:
-        # Error metrics report source units even when the objective works in log units.
-        content = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N)
-        actual, expected = content.masked_select(valued).float(), expand(expected)
+    # Error metrics report source units whatever the training scale.
+    content = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N)
+    predicted = content.masked_select(valued).float()
     for name, metric in decoder.content_metrics(strata):
         if strata == Strata.train:
             metric.reset()
-            value = metric(actual, expected) if actual.numel() else inputs.new_full((), float("nan"))
+            value = metric(predicted, observed) if predicted.numel() else scaled.new_full((), float("nan"))
             module.track((address, strata, name, TensorKey.content), value=cast(torch.Tensor, value))
         else:
             # Every rank registers the same sum/count metrics, including ranks
             # with no valued targets. Global RMSE is not a mean of batch RMSEs.
-            metric.update(actual, expected)
+            metric.update(predicted, observed)
             module.track((address, strata, name, TensorKey.content), value=metric)
 
     return loss

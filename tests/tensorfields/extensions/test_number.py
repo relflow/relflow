@@ -41,19 +41,14 @@ from tests.tensorfields.helpers import tensorize
 ADDRESS = "/items/amount"
 
 
-def build_schema(
-    *,
-    mask: bool | Mask = False,
-    jitter: Jitter | dict[str, object] | None = None,
-    lanes: tuple[str, ...] = ("raw", "log"),
-) -> Schema:
+def build_schema(*, mask: bool | Mask = False, jitter: Jitter | dict[str, object] | None = None) -> Schema:
     options = {} if jitter is None else {"jitter": jitter}
     return rf.Schema.from_tree(
         d_model=16,
         n_layers=1,
         n_heads=4,
         dropout=0.1,
-        items=rf.Branch(length=2, amount=rf.Number(mask=mask, lanes=lanes, **options)),
+        items=rf.Branch(length=2, amount=rf.Number(mask=mask, **options)),
     )
 
 
@@ -134,9 +129,9 @@ def test_number_embedding_retains_standardized_value_in_monotone_lane():
     assert parcel.payload[0, 0, 1, -1].item() == pytest.approx(math.log1p(12.0), abs=1e-3)
 
 
-def test_number_monotone_lane_retains_autograd_at_model_width_one():
+def test_number_monotone_lanes_retain_autograd_at_model_width_two():
     schema = rf.Schema.from_tree(
-        amount=rf.Number(lanes=("raw",)), d_model=1, n_layers=1, n_heads=2, attention=None, reduction=rf.Mean()
+        amount=rf.Number, d_model=2, n_layers=1, n_heads=2, attention=None, reduction=rf.Mean()
     )
     embedder = Embedder(schema=schema, address="/amount")
     inputs = TensorInput(
@@ -217,7 +212,7 @@ def test_number_jitter_respects_normalization_order(
     expected_perturb: float,
     expected_clamp: float,
 ):
-    schema = build_schema(jitter=Jitter(add=3.0, normalize=normalize), lanes=("raw",))
+    schema = build_schema(jitter=Jitter(add=3.0, normalize=normalize))
     embedder = Embedder(schema=schema, address=ADDRESS)
     embedder.normalizers["raw"].mean.fill_(10.0)
     embedder.normalizers["raw"].var.fill_(4.0)
@@ -234,7 +229,8 @@ def test_number_jitter_respects_normalization_order(
         return inputs + mask.to(dtype=inputs.dtype).mul(3.0)
 
     def capture_clamp(self: Embedder, content: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
-        observed["clamp"] = content.clone()
+        # The raw lane is clamped first; the log lane follows from the same perturbed value.
+        observed.setdefault("clamp", content.clone())
         return content
 
     monkeypatch.setattr(Jitter, "apply", add_three)
@@ -298,6 +294,7 @@ def test_number_loss_does_not_mutate_counter():
             {
                 TensorKey.state: torch.zeros(*field.state.shape, len(Tokens)),
                 TensorKey.content: torch.zeros(*field.content.shape, 1),
+                "scaled": torch.zeros(*field.content.shape, 1),
             },
             batch_size=field.batch_size,
         ),
@@ -337,13 +334,14 @@ def test_number_null_targets_train_state_without_fabricating_numeric_errors():
     embedder = Embedder(schema=schema, address=ADDRESS)
     decoder = Decoder(schema=schema, address=ADDRESS)
     module = TrackingModule(schema=schema, embedder=embedder, decoder=decoder)
-    content = torch.full((*field.state.shape, 1), 100.0, requires_grad=True)
+    scaled = torch.full((*field.state.shape, 1), math.log1p(100.0), requires_grad=True)
     prediction = Prediction(
         address=ADDRESS,
         payload=TensorDict(
             {
                 TensorKey.state: torch.zeros(*field.state.shape, len(Tokens), requires_grad=True),
-                TensorKey.content: content,
+                TensorKey.content: torch.full((*field.state.shape, 1), 100.0),
+                "scaled": scaled,
             },
             batch_size=field.batch_size,
         ),
@@ -351,8 +349,8 @@ def test_number_null_targets_train_state_without_fabricating_numeric_errors():
     value = loss(module=module, prediction=prediction, batch=field, strata=Strata.train)
     assert torch.isfinite(value)
     value.backward()
-    assert content.grad is not None
-    assert torch.count_nonzero(content.grad) == 0
+    assert scaled.grad is not None
+    assert torch.count_nonzero(scaled.grad) == 0
 
 
 def test_number_normalizer_ignores_nonfinite_values_when_updating():
@@ -593,7 +591,7 @@ def test_number_write_emits_flat_arrow_content():
 
 
 def log_model(**options) -> rf.Model:
-    return rf.Model.xs(d_model=8, batch_size=2, amount=rf.Number(log=True, **options))
+    return rf.Model.xs(d_model=8, batch_size=2, amount=rf.Number(**options))
 
 
 def log_prediction(field, scaled: torch.Tensor) -> Prediction:
@@ -610,25 +608,98 @@ def log_prediction(field, scaled: torch.Tensor) -> Prediction:
 
 
 @pytest.mark.parametrize("mask", [False, True], ids=["input", "target"])
-def test_number_log_scale_compresses_targets_and_normalization(mask):
+def test_number_values_stay_in_source_units_and_the_readout_learns_the_log_scale(mask):
     model = log_model(mask=mask)
     table = arrow_table([{"amount": 0.0}, {"amount": 99.0}, {"amount": -99.0}])
 
     field = model.encode(table, strata="train")[rf.Address("amount")]
 
-    compressed = torch.tensor([0.0, math.log1p(99.0), -math.log1p(99.0)])
-    # Inputs stay in source units for the lanes; only the supervised target is compressed.
-    if mask:
-        torch.testing.assert_close(field.targets[TensorKey.content].flatten(), compressed)
-    else:
-        torch.testing.assert_close(field.content.flatten(), torch.tensor([0.0, 99.0, -99.0]))
+    source = torch.tensor([0.0, 99.0, -99.0])
+    torch.testing.assert_close((field.targets[TensorKey.content] if mask else field.content).flatten(), source)
     stats = rf.Number.normalization(model, "amount")
     assert stats["count"] == 3 and stats["mean"] == pytest.approx(0.0, abs=1e-6)
-    assert stats["std"] == pytest.approx(math.sqrt(2 * math.log1p(99.0) ** 2 / 3), rel=1e-4)
+    assert stats["std"] == pytest.approx(math.sqrt(2 * 99.0**2 / 3), rel=1e-4)
     assert model.schema.requests[rf.Address("amount")].log is True
+    if mask:
+        decoder = model.nodes[rf.Address("amount")].decoder
+        assert decoder.normalizer.count.item() == 3
+        assert decoder.normalizer.var.item() == pytest.approx(2 * math.log1p(99.0) ** 2 / 3, rel=1e-5)
 
 
-def test_number_observes_moments_for_both_scales():
+def test_number_rejects_the_removed_lanes_and_log_options():
+    with pytest.raises(pydantic.ValidationError):
+        rf.Number(log=True)
+    with pytest.raises(pydantic.ValidationError):
+        rf.Number(lanes=("raw",))
+
+
+def test_number_mse_and_huber_train_in_source_units():
+    assert rf.Number(objective="mse").log is False and rf.Number(objective="huber").log is False
+    model = rf.Model.xs(d_model=8, batch_size=2, amount=rf.Number(objective="mse", mask=True))
+    decoder = model.nodes[rf.Address("amount")].decoder
+    assert decoder.log is False
+    with torch.no_grad():
+        decoder.regression.weight.zero_()
+        decoder.regression.bias.zero_()
+        decoder.normalizer.mean.fill_(10.0)
+
+    payload = decoder.decode(torch.zeros(3, model.schema.d_model))
+
+    torch.testing.assert_close(payload[TensorKey.content].flatten(), torch.full((3,), 10.0))
+    torch.testing.assert_close(payload["scaled"].flatten(), torch.full((3,), 10.0))
+
+
+def test_number_readout_starts_at_the_training_mean():
+    model = log_model(mask=True)
+    model.encode(arrow_table([{"amount": 99.0}, {"amount": 99.0}]), strata="train")
+    decoder = model.nodes[rf.Address("amount")].decoder
+    with torch.no_grad():
+        decoder.regression.weight.zero_()
+        decoder.regression.bias.zero_()
+
+    payload = decoder.decode(torch.zeros(2, model.schema.d_model))
+
+    assert decoder.normalizer.mean.item() == pytest.approx(math.log1p(99.0), rel=1e-6)
+    torch.testing.assert_close(payload[TensorKey.content].flatten(), torch.full((2,), 99.0), rtol=1e-5, atol=1e-3)
+
+
+def test_number_mae_loss_adds_the_source_unit_error(monkeypatch):
+    model = log_model(mask=True)
+    field = model.encode(arrow_table([{"amount": 9.0}, {"amount": 99.0}]), strata="train")[rf.Address("amount")]
+    tracked = {}
+    monkeypatch.setattr(model, "track", lambda names, value: tracked.__setitem__(names[-2:], value) or value)
+    # The first row is exact; the second overshoots by one log unit, inside the bounded source-unit term.
+    predicted = log_prediction(field, torch.tensor([[math.log1p(9.0)], [math.log1p(99.0) + 1.0]]))
+
+    rf.TENSORFIELDS["number"].loss(model, predicted, field, rf.Strata.train)
+
+    decoder = model.nodes[rf.Address("amount")].decoder
+    std = max(math.sqrt(decoder.normalizer.var.item()), decoder.normalizer.epsilon)
+    raw = model.nodes[rf.Address("amount")].embedder.normalizers["raw"]
+    raw_std = max(math.sqrt(raw.var.item()), raw.epsilon)
+    expected = (1.0 / std + abs(math.expm1(math.log1p(99.0) + 1.0) - 99.0) / raw_std) / 2
+    assert float(tracked[Metric.loss, TensorKey.content]) == pytest.approx(expected, rel=1e-4)
+    assert float(tracked[Metric.mae, TensorKey.content]) == pytest.approx(
+        abs(math.expm1(math.log1p(99.0) + 1.0) - 99.0) / 2, rel=1e-4
+    )
+
+
+def test_number_embedder_and_readout_stay_float32_under_autocast():
+    schema = build_schema()
+    embedder = Embedder(schema=schema, address=ADDRESS).eval()
+    field = tensorfield(rows=[[8.0, 12.0]], schema=schema, strata=Strata.predict)
+    model = log_model(mask=True)
+    decoder = model.nodes[rf.Address("amount")].decoder
+
+    with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+        parcel = embedder.embed(field)
+        payload = decoder.decode(torch.zeros(3, model.schema.d_model))
+
+    assert parcel.payload.dtype == torch.float32
+    assert payload["scaled"].dtype == torch.float32 and payload[TensorKey.content].dtype == torch.float32
+
+
+def test_number_observes_moments_for_both_scales_and_the_readout_scale():
     model = rf.Model.xs(d_model=8, batch_size=2, amount=rf.Number)
     table = arrow_table([{"amount": 0.0}, {"amount": 99.0}, {"amount": -99.0}])
 
@@ -643,19 +714,8 @@ def test_number_observes_moments_for_both_scales():
     assert rf.Number.normalization(model, "amount")["variance"] == pytest.approx(raw.var.item(), rel=1e-6)
 
 
-def test_number_lanes_default_to_both_scales_and_reject_empty_or_repeated_lanes():
-    assert rf.Number().lanes == ("raw", "log")
-    assert rf.Number(lanes=("log",)).lanes == ("log",)
-    with pytest.raises(pydantic.ValidationError, match="at least one"):
-        rf.Number(lanes=())
-    with pytest.raises(pydantic.ValidationError, match="must not repeat"):
-        rf.Number(lanes=("raw", "raw"))
-    with pytest.raises(pydantic.ValidationError):
-        rf.Number(lanes=("size",))
-
-
 def test_number_log_lane_embeds_standardized_compressed_values():
-    schema = build_schema(lanes=("log",))
+    schema = build_schema()
     field = tensorfield(rows=[[8.0, 12.0]], schema=schema, strata=Strata.predict)
     embedder = Embedder(schema=schema, address=ADDRESS).eval()
     embedder.normalizers["log"].mean.fill_(2.0)
@@ -663,7 +723,7 @@ def test_number_log_lane_embeds_standardized_compressed_values():
 
     parcel = embedder.embed(field)
 
-    assert embedder.linear.in_features == 2 * embedder.weights.numel()
+    assert embedder.linear.in_features == 4 * embedder.weights.numel()
     assert parcel.payload[0, 0, 0, -1].item() == pytest.approx((math.log1p(8.0) - 2.0) / 0.5, abs=1e-3)
     assert parcel.payload[0, 0, 1, -1].item() == pytest.approx((math.log1p(12.0) - 2.0) / 0.5, abs=1e-3)
 
@@ -714,15 +774,17 @@ def test_number_log_scale_metrics_and_output_return_to_source_units(monkeypatch)
     assert output.field("content").to_pylist() == pytest.approx([199.0, 9.0], rel=1e-5)
 
 
-def test_number_log_scale_decoder_emits_source_units_and_a_scaled_lane():
+def test_number_decoder_emits_source_units_and_a_training_scale_lane():
     model = log_model(mask=True)
     decoder = model.nodes[rf.Address("amount")].decoder
     with torch.no_grad():
         decoder.regression.weight.zero_()
-        decoder.regression.bias.fill_(math.log1p(99.0))
+        decoder.regression.bias.zero_()
+        decoder.normalizer.mean.fill_(math.log1p(99.0))
+        decoder.normalizer.var.fill_(0.0)
 
     payload = decoder.decode(torch.zeros(3, model.schema.d_model))
 
-    torch.testing.assert_close(payload[TensorKey.content].flatten(), torch.full((3,), 99.0))
+    torch.testing.assert_close(payload[TensorKey.content].flatten(), torch.full((3,), 99.0), rtol=1e-5, atol=1e-3)
     torch.testing.assert_close(payload["scaled"].flatten(), torch.full((3,), math.log1p(99.0)))
     assert not payload[TensorKey.content].requires_grad and payload["scaled"].requires_grad
