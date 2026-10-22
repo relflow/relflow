@@ -142,6 +142,9 @@ class VocabularyState:
         ):
             array = pc.list_flatten(array)
         labels = pc.unique(pc.drop_null(array))
+        if len(labels) and pa.types.is_floating(labels.type):
+            # NaN is never equal to itself, so it cannot key a vocabulary; extensions give it a state instead.
+            labels = pc.filter(labels, pc.invert(pc.is_nan(labels)))
         size = max(1, len(labels))
         local = OnlineVocabularyModel(size=size)
         local.load_snapshot(labels.to_pylist())

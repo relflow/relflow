@@ -1,5 +1,7 @@
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
+import numpy as np
 import pyarrow as pa
 import pydantic
 import pytest
@@ -135,3 +137,29 @@ def test_default_dateparts_jitter_does_not_advance_rng_during_training():
     embedder.embed(field)
 
     assert torch.equal(torch.random.get_rng_state(), before)
+
+
+def recovered(pairs: torch.Tensor, period: int) -> list[int]:
+    """Read calendar values back from their (sin, cos) pairs."""
+    angles = np.arctan2(pairs[..., 0].numpy(), pairs[..., 1].numpy()) % (2 * np.pi)
+    return [int(round(value)) % period for value in angles.reshape(-1) / (2 * np.pi) * period]
+
+
+@pytest.mark.parametrize("zone", ["America/New_York", "Asia/Tokyo"])
+def test_dateparts_reads_zone_aware_timestamps_in_their_own_zone(zone: str):
+    tz = ZoneInfo(zone)
+    stamps = [datetime(2024, 3, 9, 18, 30, tzinfo=tz), datetime(2024, 3, 9, 23, 30, tzinfo=tz)]
+    model = rf.Model.xs(
+        d_model=8, when=rf.DateParts(dateparts=["day_of_week", "hour_of_day"]), label=rf.Boolean(mask=True)
+    )
+    aware = model.encode(pa.table({"when": pa.array(stamps, type=pa.timestamp("s", tz=zone))}), strata="predict")
+    naive = model.encode(pa.table({"when": pa.array([s.replace(tzinfo=None) for s in stamps])}), strata="predict")
+    content = aware[rf.Address("when")].content
+    expected = naive[rf.Address("when")].content
+
+    hour = [key for key in content.keys() if "hour" in str(key)][0]
+    week = [key for key in content.keys() if "week" in str(key)][0]
+    assert recovered(content[hour], 24) == [18, 23]
+    assert recovered(content[week], 7) == [6, 6]  # Saturday in both cases, Sunday being 0
+    torch.testing.assert_close(content[hour], expected[hour])
+    torch.testing.assert_close(content[week], expected[week])

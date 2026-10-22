@@ -431,3 +431,31 @@ def test_category_loss_retains_state_supervision_for_unavailable_content():
         module.tracked[(ADDRESS, Strata.validate, "vocabulary", "size")],
         torch.tensor(0.0),
     )
+
+
+def test_category_float_nan_labels_take_the_other_state_and_never_enter_the_vocabulary(tmp_path):
+    model = rf.Model.xs(d_model=8, code=rf.Category, label=rf.Boolean(mask=True))
+    rows = pa.table({"code": pa.array([1.0, float("nan"), 2.0, None, 1.0]), "label": [True, False, True, False, True]})
+    data = rf.ArrowDataModule(model, train=rows, validate=rows, shuffle=False)
+    model.fit(
+        data,
+        batch_size=5,
+        accelerator="cpu",
+        devices=1,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        num_sanity_val_steps=0,
+        early_stopping=False,
+        rollback=False,
+        enable_progress_bar=False,
+        logger=False,
+        enable_checkpointing=False,
+        default_root_dir=tmp_path,
+    )
+
+    assert rf.Category.vocabulary(model, "/code") == (1.0, 2.0)
+    field = model.encode(rows, strata="predict")[rf.Address("code")]
+    assert field.state.reshape(-1).tolist() == [Tokens.valued, Tokens.other, Tokens.valued, Tokens.null, Tokens.valued]
+    assert field.content.reshape(-1)[1].item() == -1
+    assert all(torch.isfinite(parameter).all() for parameter in model.parameters())

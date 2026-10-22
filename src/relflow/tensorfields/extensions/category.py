@@ -5,6 +5,7 @@ from dataclasses import InitVar
 from functools import partial
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Unpack, cast
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import pydantic
@@ -169,6 +170,29 @@ class Request(RequestBase):
         return self
 
 
+def admissible(field: RaggedField) -> tuple[pa.Array, np.ndarray]:
+    """Valued labels without float NaN, and the compact positions NaN occupied.
+
+    NaN is not a label: it cannot key a vocabulary, so its position takes the
+    ``other`` state instead of admitting or looking up a value.
+    """
+    values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
+    nan = np.zeros(len(values), dtype=bool)
+    if len(values) and pa.types.is_floating(values.type):
+        nan = pc.is_nan(values).to_numpy(zero_copy_only=False)
+        if nan.any():
+            values = pc.filter(values, pa.array(~nan))
+    return values, nan
+
+
+def states(field: RaggedField, nan: np.ndarray) -> np.ndarray:
+    """Dense state tokens with NaN positions marked ``other``."""
+    dense = field.dense.copy()
+    if nan.any():
+        dense[field.place(nan, fill=False)] = Tokens.other.value
+    return dense
+
+
 @category.register(Component.observe)
 def observe(
     field: RaggedField,
@@ -185,10 +209,11 @@ def observe(
     if not isinstance(state, VocabularyState):
         raise RuntimeError(f"category field at '{address}' requires a vocabulary encoding context")
 
-    indices = state.indices(field.values, learn=True)
+    values, nan = admissible(field)
+    indices = state.indices(values, learn=True)
     return TensorDict(
         {
-            TensorKey.state: tally(torch.from_numpy(field.dense.copy()), len(Tokens)),
+            TensorKey.state: tally(torch.from_numpy(states(field, nan)), len(Tokens)),
             TensorKey.content: tally(torch.from_numpy(indices.copy()), state.size),
         },
         batch_size=[],
@@ -230,19 +255,18 @@ class TensorField(TensorFieldBase[torch.Tensor]):
                 f"category field at '{address}' requires VocabularyState context, got {type(state).__name__}"
             )
 
-        def encode(field: RaggedField) -> torch.Tensor:
+        def encode(field: RaggedField) -> tuple[torch.Tensor, torch.Tensor]:
             if not len(field.values):
-                return torch.zeros(field.shape, dtype=torch.int64)
+                return torch.zeros(field.shape, dtype=torch.int64), torch.from_numpy(field.dense.copy())
             if state is None:
                 raise RuntimeError(f"category field at '{address}' requires a vocabulary encoding context")
-            tokens = state.indices(field.values, learn=False)
-            return torch.from_numpy(field.place(tokens, fill=0))
+            values, nan = admissible(field)
+            tokens = np.full(len(nan), -1, dtype=np.int64)
+            tokens[~nan] = state.indices(values, learn=False)
+            return torch.from_numpy(field.place(tokens, fill=0)), torch.from_numpy(states(field, nan))
 
-        content = encode(input)
-        target_content = encode(target)
-
-        state_tensor = torch.from_numpy(input.dense)
-        target_state = torch.from_numpy(target.dense)
+        content, state_tensor = encode(input)
+        target_content, target_state = encode(target)
         if strata == Strata.train:
             p_unavailable: float = cast(Request, schema.requests[address]).p_unavailable
             unavailable_index = -1

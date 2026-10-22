@@ -136,6 +136,9 @@ def observe(
         values = pc.list_flatten(values)
     if values.null_count:
         values = pc.filter(values, pc.is_valid(values))
+    if len(values) and pa.types.is_floating(values.type):
+        # NaN is not a member: drop it like a null element.
+        values = pc.filter(values, pc.invert(pc.is_nan(values)))
     indices = state.indices(values, learn=True)
     return TensorDict(
         {
@@ -199,6 +202,10 @@ class TensorField(TensorFieldBase[TensorDict]):
                 valid = pc.is_valid(flattened)
                 flattened = pc.filter(flattened, valid)
                 parents = pc.filter(parents, valid)
+            if len(flattened) and pa.types.is_floating(flattened.type):
+                finite = pc.invert(pc.is_nan(flattened))
+                flattened = pc.filter(flattened, finite)
+                parents = pc.filter(parents, finite)
             indices = state.indices(flattened, learn=False) if state is not None else np.empty(0, dtype=np.int64)
             pairs = np.empty((0, 2), dtype=np.int64)
             if len(indices):

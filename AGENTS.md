@@ -114,6 +114,9 @@ model = rf.Model(
   tensorizes as the `other` state, not as a value or a null; ±inf stays valued
   but is never a regression target. Integers beyond ±2^53 are rejected.
 - `DateParts` is for calendar parts. If elapsed time or recency matters, derive a `Number`.
+  Zone-aware timestamps describe their own wall clock; strings carrying an offset
+  are read as UTC. A `Vector` with a NaN or infinite element, and a float NaN label
+  in `Category`, take the `other` state; a NaN `Set` member is dropped like a null.
 - `rf.Jitter(add=..., multiply=..., normalize=...)` is a shared frozen
   configuration whose `apply(inputs, mask)` method owns the vectorized affine
   tensor operation. Consumers own training activation, eligible coordinates,
