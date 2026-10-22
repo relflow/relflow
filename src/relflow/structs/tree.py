@@ -289,6 +289,11 @@ class Leaf(Node):
     def check_mask(cls, value: Any) -> tuple[Mask, ...]:
         return Mask.normalize(value)
 
+    @property
+    def embedded(self) -> bool:
+        """Whether this leaf produces an encoder parcel: active and never skipped by its mask."""
+        return self.active and not any(mask.skip for mask in self.mask)
+
     @pydantic.field_validator("type")
     @classmethod
     def check_type(cls, value: str) -> str:

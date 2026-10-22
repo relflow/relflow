@@ -160,6 +160,15 @@ class BranchEncoder(torch.nn.Module):
         ]
         child_width = None if any(width is None for width in widths) else sum(cast(list[int], widths))
         self.input_width = None if branch.length is None or child_width is None else branch.length * child_width
+        # Skipped targets occupy slots but never carry a present token, so the
+        # count lanes normalize by embedded leaves only; adding a hidden target
+        # then leaves every existing prediction in place.
+        visible = [
+            int(child.embedded) if isinstance(child, Leaf) else schema.branch_outputs[child.address]
+            for child in branch.fields
+        ]
+        visible_width = None if any(width is None for width in visible) else sum(cast(list[int], visible))
+        self.visible_width = None if branch.length is None or visible_width is None else branch.length * visible_width
         self.parent_capacity = getattr(branch.parent, "length", 1)
         self.child_order = {child.address: index for index, child in enumerate(branch.fields)}
 
@@ -192,7 +201,7 @@ class BranchEncoder(torch.nn.Module):
                 self.pool: torch.nn.Module | None = None
             case Mean():
                 self.n_outputs = 1
-                self.pool = MeanPool(n_context=1)
+                self.pool = MeanPool(n_context=1, d_model=schema.d_model, mass_capacity=max(1, self.visible_width or 1))
             case Attention():
                 self.n_outputs = branch.reduction.n_outputs
                 self.pool = LearnedQueryCrossAttention(
@@ -202,7 +211,7 @@ class BranchEncoder(torch.nn.Module):
                     dropout=float(branch.reduction.dropout if branch.reduction.dropout is not None else dropout),
                     n_linear=branch.reduction.n_layers,
                     position=branch.reduction.position,
-                    mass_capacity=max(1, self.input_width or 1),
+                    mass_capacity=max(1, self.visible_width or 1),
                     ffnx=branch.ffnx,
                 )
             case _:
