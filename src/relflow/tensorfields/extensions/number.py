@@ -72,6 +72,12 @@ class Request(RequestBase):
     exponential updates. ``n_bands`` and ``offset`` bound Fourier exponents.
     ``jitter=rf.Jitter(...)`` perturbs training inputs while retaining pristine
     targets. ``mask=True`` makes the scalar a supervised, unembedded target.
+    ``log=True`` represents inputs and targets on a signed log scale,
+    ``sign(x) * ln(1 + |x|)``, so multiplicative structure becomes additive and
+    heavy tails stop dominating normalization; predictions and error metrics
+    still return to source units. The monotone map leaves the median-optimal
+    ``"mae"`` prediction unchanged, while ``"mse"`` and ``"huber"`` then
+    penalize relative rather than absolute error.
     """
 
     type: Literal["number"] = "number"
@@ -80,6 +86,7 @@ class Request(RequestBase):
     offset: Annotated[int, pydantic.Field(gt=0, default=4)] = 4
     alpha: Annotated[float | None, pydantic.Field(gt=0.0, lt=1.0, default=None)] = None
     objective: Objective = Objective.mae
+    log: pydantic.StrictBool = False
 
     if TYPE_CHECKING:
 
@@ -91,6 +98,7 @@ class Request(RequestBase):
             offset: int = 4,
             alpha: float | None = None,
             objective: Objective | Literal["mae", "mse", "huber"] = Objective.mae,
+            log: bool = False,
             type: Literal["number"] = "number",
             **options: Unpack[FieldOptions],
         ) -> None: ...
@@ -102,7 +110,7 @@ class Request(RequestBase):
         address: Address | str,
         /,
     ) -> dict[str, float | int | None]:
-        """Return a CPU-native snapshot of one Number field's normalizer."""
+        """Return a CPU-native snapshot of one Number field's normalizer, in log units when ``log=True``."""
         from relflow.architecture.root import Model
 
         if not isinstance(model, Model):
@@ -130,6 +138,16 @@ class Request(RequestBase):
         }
 
 
+def compress(values: torch.Tensor) -> torch.Tensor:
+    """Signed log scale ``sign(x) * ln(1 + |x|)``: the identity near zero and monotone everywhere."""
+    return values.sign() * values.abs().log1p()
+
+
+def expand(values: torch.Tensor) -> torch.Tensor:
+    """Invert ``compress`` back to source units."""
+    return values.sign() * values.abs().expm1()
+
+
 @number.register(Component.observe)
 def observe(
     field: RaggedField,
@@ -147,6 +165,8 @@ def observe(
     if isinstance(values, pa.ChunkedArray):
         values = values.combine_chunks()
     content = torch.from_numpy(values.to_numpy(zero_copy_only=False).copy())
+    if cast(Request, schema.requests[address]).log:
+        content = compress(content)
     return TensorDict(
         {
             TensorKey.state: tally(torch.from_numpy(field.dense.copy()), len(Tokens)),
@@ -185,6 +205,8 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         strata: Strata,
         context: Context,
     ) -> TensorField:
+        request: Request = cast(Request, schema.requests[address])
+
         def encode(field: RaggedField) -> torch.Tensor:
             values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
             if (
@@ -201,7 +223,8 @@ class TensorField(TensorFieldBase[torch.Tensor]):
                 encoded = encoded.combine_chunks()
             data = field.place(encoded.to_numpy(zero_copy_only=False).astype(np.float32, copy=False), fill=0.0)
             np.nan_to_num(data, copy=False, nan=0.0, posinf=np.inf, neginf=-np.inf)
-            return torch.from_numpy(data)
+            values = torch.from_numpy(data)
+            return compress(values) if request.log else values
 
         state = torch.from_numpy(input.dense)
 
@@ -536,6 +559,9 @@ def loss(
         loss += inputs.sum() * 0.0
 
     decoder = cast(Decoder, module.nodes[address].decoder)
+    if request.log:
+        # Error metrics report source units even when the objective works in log units.
+        actual, expected = expand(actual), expand(expected)
     for name, metric in decoder.content_metrics(strata):
         if strata == Strata.train:
             metric.reset()
@@ -557,5 +583,8 @@ def output(module: Model, address: Address) -> pa.StructType:
 
 @number.register(Component.write)
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
-    content = array(cast(torch.Tensor, prediction.payload[TensorKey.content]), pa.float64())
+    values = cast(torch.Tensor, prediction.payload[TensorKey.content])
+    if cast(Request, module.schema.requests[prediction.address]).log:
+        values = expand(values.to(dtype=torch.float64))
+    content = array(values, pa.float64())
     return struct({TensorKey.content.name: content}, datatype)

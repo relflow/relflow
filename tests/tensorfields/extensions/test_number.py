@@ -1,3 +1,4 @@
+import math
 from datetime import timedelta
 from logging.handlers import BufferingHandler
 from pathlib import Path
@@ -17,7 +18,7 @@ from relflow.data.ragged import coalesce
 from relflow.helpers import Jitter
 from relflow.logging import logger
 from relflow.logging.config import CONTEXT
-from relflow.structs.enums import Strata, TensorKey, Tokens
+from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
 from relflow.structs.tree import Mask
@@ -580,3 +581,48 @@ def test_number_write_emits_flat_arrow_content():
 
     assert output.type == datatype
     assert output.field(TensorKey.content.name).to_pylist() == [1.5, 2.5]
+
+
+def log_model(**options) -> rf.Model:
+    return rf.Model.xs(d_model=8, batch_size=2, amount=rf.Number(log=True, **options))
+
+
+def log_prediction(field, content: torch.Tensor) -> Prediction:
+    state = torch.full((*field.state.shape, len(Tokens)), -50.0)
+    state[..., Tokens.valued.value] = 50.0
+    return Prediction(
+        address=rf.Address("amount"),
+        payload=TensorDict({TensorKey.state: state, TensorKey.content: content}, batch_size=field.batch_size),
+    )
+
+
+@pytest.mark.parametrize("mask", [False, True], ids=["input", "target"])
+def test_number_log_scale_compresses_values_and_normalization(mask):
+    model = log_model(mask=mask)
+    table = arrow_table([{"amount": 0.0}, {"amount": 99.0}, {"amount": -99.0}])
+
+    field = model.encode(table, strata="train")[rf.Address("amount")]
+
+    expected = torch.tensor([0.0, math.log1p(99.0), -math.log1p(99.0)])
+    values = field.targets[TensorKey.content] if mask else field.content
+    torch.testing.assert_close(values.flatten(), expected)
+    stats = rf.Number.normalization(model, "amount")
+    assert stats["count"] == 3 and stats["mean"] == pytest.approx(0.0, abs=1e-6)
+    assert stats["std"] == pytest.approx(math.sqrt(2 * math.log1p(99.0) ** 2 / 3), rel=1e-4)
+    assert model.schema.requests[rf.Address("amount")].log is True
+
+
+def test_number_log_scale_metrics_and_output_return_to_source_units(monkeypatch):
+    model = log_model(mask=True)
+    field = model.encode(arrow_table([{"amount": 99.0}, {"amount": 9.0}]), strata="train")[rf.Address("amount")]
+    tracked = {}
+    monkeypatch.setattr(model, "track", lambda names, value: tracked.__setitem__(names[-2:], value) or value)
+    predicted = log_prediction(field, torch.tensor([[math.log1p(199.0)], [math.log1p(9.0)]]))
+
+    rf.TENSORFIELDS["number"].loss(model, predicted, field, rf.Strata.train)
+
+    assert float(tracked[Metric.mae, TensorKey.content]) == pytest.approx(50.0, rel=1e-4)
+    output = rf.TENSORFIELDS["number"].write(
+        model, predicted, rf.TENSORFIELDS["number"].output(model, rf.Address("amount"))
+    )
+    assert output.field("content").to_pylist() == pytest.approx([199.0, 9.0], rel=1e-5)
