@@ -108,6 +108,9 @@ model = rf.Model(
   each node. The model root, child branches, and tensorfield decoders configure
   it independently. Hidden neural activations use tanh GELU and normalization
   uses RMSNorm; these have no configuration knobs.
+- `Category`, `Set`, and `Enum` match string labels exactly; `strip=True` trims
+  surrounding whitespace and `cased=False` lowercases labels before lookup, and
+  the folded form is what vocabularies and predictions carry.
 - `Hash` represents large identifiers with batch-salted hashes, preserving equality across fields in one encoded batch without learning a persistent vocabulary.
 - `Number` keeps source values, statistics, and readouts in float64 (float32 on
   MPS, which has no float64), so large offsets keep their spread. A float NaN

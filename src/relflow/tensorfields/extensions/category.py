@@ -62,11 +62,17 @@ class Request(RequestBase):
     the discovered vocabulary when fewer than ``k`` labels are known.
     ``mask=True`` declares a supervised classification target. Predictions
     select populated vocabulary labels and exclude the unavailable sentinel.
+    ``strip=True`` trims surrounding whitespace from string labels and
+    ``cased=False`` lowercases them before vocabulary lookup, an escape hatch
+    for look-alike labels; vocabulary snapshots and written labels hold the
+    folded form. Other label types are unaffected.
     """
 
     type: Literal["category"] = "category"
     p_unavailable: Annotated[float, pydantic.Field(ge=0.0, le=1.0, default=0.01)] = 0.01
     topk: list[int] | None = None
+    strip: bool = False
+    cased: bool = True
 
     if TYPE_CHECKING:
 
@@ -75,6 +81,8 @@ class Request(RequestBase):
             *,
             p_unavailable: float = 0.01,
             topk: list[int] | None = None,
+            strip: bool = False,
+            cased: bool = True,
             type: Literal["category"] = "category",
             **options: Unpack[FieldOptions],
         ) -> None: ...
@@ -302,11 +310,11 @@ class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 
-        request = schema.requests[address]
+        request: Request = cast(Request, schema.requests[address])
         self.origin: Address = address
         self.destination: Address = cast("Branch", request.parent).address
 
-        self.vocab: OnlineVocabularyModel = OnlineVocabularyModel()
+        self.vocab: OnlineVocabularyModel = OnlineVocabularyModel(strip=request.strip, cased=request.cased)
 
         self.embeddings = torch.nn.ModuleDict(
             {

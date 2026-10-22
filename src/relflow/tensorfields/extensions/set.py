@@ -60,11 +60,17 @@ class Request(RequestBase):
     Predictions contain label/probability pairs for populated vocabulary
     entries. ``threshold`` in ``[0, 1]`` filters those pairs; ``None`` keeps
     all entries. This filter leaves the training loss and metrics unchanged.
+    ``strip=True`` trims surrounding whitespace from string labels and
+    ``cased=False`` lowercases them before vocabulary lookup, an escape hatch
+    for look-alike labels; vocabulary snapshots and written labels hold the
+    folded form. Other label types are unaffected.
     """
 
     type: Literal["set"] = "set"
     p_unavailable: Annotated[float, pydantic.Field(ge=0.0, le=1.0, default=0.01)] = 0.01
     threshold: Annotated[float | None, pydantic.Field(ge=0.0, le=1.0, default=None)] = None
+    strip: bool = False
+    cased: bool = True
 
     if TYPE_CHECKING:
 
@@ -73,6 +79,8 @@ class Request(RequestBase):
             *,
             p_unavailable: float = 0.01,
             threshold: float | None = None,
+            strip: bool = False,
+            cased: bool = True,
             type: Literal["set"] = "set",
             **options: Unpack[FieldOptions],
         ) -> None: ...
@@ -280,7 +288,7 @@ class Embedder(EmbedderBase):
         self.origin: Address = address
         self.destination: Address = cast("Branch", request.parent).address
 
-        self.vocab: OnlineVocabularyModel = OnlineVocabularyModel()
+        self.vocab: OnlineVocabularyModel = OnlineVocabularyModel(strip=request.strip, cased=request.cased)
         # A neutral fallback until real or simulated unavailable inputs teach
         # it; absence is not a randomly initialized pseudo-label.
         self.unavailable = torch.nn.Parameter(torch.zeros(schema.d_model))
