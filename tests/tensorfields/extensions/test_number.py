@@ -587,12 +587,16 @@ def log_model(**options) -> rf.Model:
     return rf.Model.xs(d_model=8, batch_size=2, amount=rf.Number(log=True, **options))
 
 
-def log_prediction(field, content: torch.Tensor) -> Prediction:
+def log_prediction(field, scaled: torch.Tensor) -> Prediction:
+    """A decoder-shaped payload: source-unit content plus the log-unit lane the loss reads."""
     state = torch.full((*field.state.shape, len(Tokens)), -50.0)
     state[..., Tokens.valued.value] = 50.0
+    content = scaled.sign() * scaled.abs().expm1()
     return Prediction(
         address=rf.Address("amount"),
-        payload=TensorDict({TensorKey.state: state, TensorKey.content: content}, batch_size=field.batch_size),
+        payload=TensorDict(
+            {TensorKey.state: state, TensorKey.content: content, "scaled": scaled}, batch_size=field.batch_size
+        ),
     )
 
 
@@ -626,3 +630,17 @@ def test_number_log_scale_metrics_and_output_return_to_source_units(monkeypatch)
         model, predicted, rf.TENSORFIELDS["number"].output(model, rf.Address("amount"))
     )
     assert output.field("content").to_pylist() == pytest.approx([199.0, 9.0], rel=1e-5)
+
+
+def test_number_log_scale_decoder_emits_source_units_and_a_scaled_lane():
+    model = log_model(mask=True)
+    decoder = model.nodes[rf.Address("amount")].decoder
+    with torch.no_grad():
+        decoder.regression.weight.zero_()
+        decoder.regression.bias.fill_(math.log1p(99.0))
+
+    payload = decoder.decode(torch.zeros(3, model.schema.d_model))
+
+    torch.testing.assert_close(payload[TensorKey.content].flatten(), torch.full((3,), 99.0))
+    torch.testing.assert_close(payload["scaled"].flatten(), torch.full((3,), math.log1p(99.0)))
+    assert not payload[TensorKey.content].requires_grad and payload["scaled"].requires_grad

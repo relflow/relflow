@@ -148,6 +148,10 @@ def expand(values: torch.Tensor) -> torch.Tensor:
     return values.sign() * values.abs().expm1()
 
 
+# Log-unit scores beyond this magnitude would overflow float32 source units; clamp before inverting.
+LOG_SAFE_MAGNITUDE: float = 80.0
+
+
 @number.register(Component.observe)
 def observe(
     field: RaggedField,
@@ -485,6 +489,7 @@ class Decoder(DecoderBase):
 
         self.classification = torch.nn.Linear(in_features=schema.d_model, out_features=len(Tokens))
         self.regression = torch.nn.Linear(in_features=schema.d_model, out_features=1)
+        self.log: bool = cast(Request, schema.requests[address]).log
         self.metrics = torch.nn.ModuleDict(
             {
                 f"{strata.value}_metrics": torch.nn.ModuleDict(
@@ -500,10 +505,17 @@ class Decoder(DecoderBase):
 
     @beartype
     def decode(self, pooled: torch.Tensor) -> TensorDict:
+        scaled = self.regression(pooled)
+        content = scaled
+        if self.log:
+            # Content stays in source units for every consumer; the loss reads the log-unit lane.
+            content = expand(scaled.detach().clamp(-LOG_SAFE_MAGNITUDE, LOG_SAFE_MAGNITUDE).to(dtype=torch.float64))
+            content = content.to(dtype=scaled.dtype)
         return TensorDict(
             source={
                 TensorKey.state: self.classification(pooled),
-                TensorKey.content: self.regression(pooled),
+                TensorKey.content: content,
+                "scaled": scaled,
             }
         )
 
@@ -541,7 +553,9 @@ def loss(
     )
 
     target: torch.Tensor = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(N)
-    inputs: torch.Tensor = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N)
+    # Log-scale fields train on the log-unit lane; content stays in source units for every consumer.
+    lane = "scaled" if request.log else TensorKey.content
+    inputs: torch.Tensor = cast(torch.Tensor, prediction.payload[lane]).reshape(N)
     valued = trainable & state_targets.eq(Tokens.valued.value)
     actual = inputs.masked_select(valued).float()
     expected = target.masked_select(valued).float()
@@ -561,7 +575,8 @@ def loss(
     decoder = cast(Decoder, module.nodes[address].decoder)
     if request.log:
         # Error metrics report source units even when the objective works in log units.
-        actual, expected = expand(actual), expand(expected)
+        content = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N)
+        actual, expected = content.masked_select(valued).float(), expand(expected)
     for name, metric in decoder.content_metrics(strata):
         if strata == Strata.train:
             metric.reset()
@@ -583,8 +598,5 @@ def output(module: Model, address: Address) -> pa.StructType:
 
 @number.register(Component.write)
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
-    values = cast(torch.Tensor, prediction.payload[TensorKey.content])
-    if cast(Request, module.schema.requests[prediction.address]).log:
-        values = expand(values.to(dtype=torch.float64))
-    content = array(values, pa.float64())
+    content = array(cast(torch.Tensor, prediction.payload[TensorKey.content]), pa.float64())
     return struct({TensorKey.content.name: content}, datatype)
