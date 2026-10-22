@@ -429,15 +429,15 @@ def test_number_normalizer_learns_precomputed_finite_moments():
 
 
 @pytest.mark.parametrize("values", [[1.0, 3.0], [], [float("nan"), float("inf")]])
-def test_number_moments_keep_float32_statistics_and_int64_counts(values):
+def test_number_moments_keep_float64_statistics_and_int64_counts(values):
     observation = moments(torch.tensor(values, dtype=torch.float64))
     assert observation["count"].dtype == torch.int64
-    assert observation["mean"].dtype == observation["var"].dtype == torch.float32
+    assert observation["mean"].dtype == observation["var"].dtype == torch.float64
     assert observation.batch_size == torch.Size([])
     assert all(torch.isfinite(observation[key]).all() for key in ("count", "mean", "var"))
 
 
-def test_number_float32_variance_preserves_small_differences_at_large_offsets():
+def test_number_float64_variance_preserves_small_differences_at_large_offsets():
     values = torch.tensor([1_000_000.0, 1_000_002.0, 1_000_004.0, 1_000_006.0])
     normalizer = GlobalOnlineNormalizer()
     normalizer.learn(moments(values[:2]))
@@ -445,7 +445,7 @@ def test_number_float32_variance_preserves_small_differences_at_large_offsets():
     assert normalizer.mean.item() == 1_000_003.0
     assert normalizer.var.item() == pytest.approx(5.0)
     assert normalizer.count.item() == 4
-    assert normalizer.mean.dtype == normalizer.var.dtype == torch.float32
+    assert normalizer.mean.dtype == normalizer.var.dtype == torch.float64
 
 
 def test_number_constant_large_values_do_not_overflow_squared_sums():
@@ -455,15 +455,15 @@ def test_number_constant_large_values_do_not_overflow_squared_sums():
     assert normalizer.var.item() == 0.0
 
 
-def test_number_observes_large_integers_in_float32():
+def test_number_observes_large_integers_in_float64():
     configured = rf.Model.xs(amount=rf.Number, d_model=8, batch_size=2)
     records = pa.table({"amount": [16_777_217, 16_777_219]})
     datamodule = rf.ArrowDataModule(configured, train=records, shuffle=False)
     encoded = next(iter(datamodule.train_dataloader()))
     observation = encoded.observations["/amount"][TensorKey.content]
-    assert observation["mean"].dtype == torch.float32
+    assert observation["mean"].dtype == torch.float64
     assert observation["count"].dtype == torch.int64
-    assert observation["mean"].item() == records["amount"].to_numpy().astype("float32").mean().item()
+    assert observation["mean"].item() == records["amount"].to_numpy().astype("float64").mean().item()
 
 
 def distributed_normalization(rank: int, directory: str, empty: bool) -> None:
@@ -483,7 +483,7 @@ def distributed_normalization(rank: int, directory: str, empty: bool) -> None:
         assert normalizer.count.item() == (3 if empty else 4)
         assert normalizer.mean.item() == (1_000_004.0 if empty else 1_000_003.0)
         assert normalizer.var.item() == pytest.approx(8 / 3 if empty else 5.0)
-        assert normalizer.mean.dtype == normalizer.var.dtype == torch.float32
+        assert normalizer.mean.dtype == normalizer.var.dtype == torch.float64
         normalizer.learn(moments(torch.empty(0)))
         assert normalizer.count.item() == (3 if empty else 4)
     finally:
@@ -492,7 +492,7 @@ def distributed_normalization(rank: int, directory: str, empty: bool) -> None:
 
 @pytest.mark.parametrize("empty", [False, True])
 @pytest.mark.skipif(not distributed.is_available() or not distributed.is_gloo_available(), reason="requires CPU Gloo")
-def test_number_float32_moments_merge_across_ranks(tmp_path, empty):
+def test_number_float64_moments_merge_across_ranks(tmp_path, empty):
     multiprocessing.spawn(distributed_normalization, args=(str(tmp_path), empty), nprocs=2, join=True)
 
 
@@ -614,7 +614,7 @@ def test_number_values_stay_in_source_units_and_the_readout_learns_the_log_scale
 
     field = model.encode(table, strata="train")[rf.Address("amount")]
 
-    source = torch.tensor([0.0, 99.0, -99.0])
+    source = torch.tensor([0.0, 99.0, -99.0], dtype=torch.float64)
     torch.testing.assert_close((field.targets[TensorKey.content] if mask else field.content).flatten(), source)
     stats = rf.Number.normalization(model, "amount")
     assert stats["count"] == 3 and stats["mean"] == pytest.approx(0.0, abs=1e-6)
@@ -645,8 +645,8 @@ def test_number_mse_and_huber_train_in_source_units():
 
     payload = decoder.decode(torch.zeros(3, model.schema.d_model))
 
-    torch.testing.assert_close(payload[TensorKey.content].flatten(), torch.full((3,), 10.0))
-    torch.testing.assert_close(payload["scaled"].flatten(), torch.full((3,), 10.0))
+    torch.testing.assert_close(payload[TensorKey.content].flatten(), torch.full((3,), 10.0, dtype=torch.float64))
+    torch.testing.assert_close(payload["scaled"].flatten(), torch.full((3,), 10.0, dtype=torch.float64))
 
 
 def test_number_readout_starts_at_the_training_mean():
@@ -660,7 +660,9 @@ def test_number_readout_starts_at_the_training_mean():
     payload = decoder.decode(torch.zeros(2, model.schema.d_model))
 
     assert decoder.normalizer.mean.item() == pytest.approx(math.log1p(99.0), rel=1e-6)
-    torch.testing.assert_close(payload[TensorKey.content].flatten(), torch.full((2,), 99.0), rtol=1e-5, atol=1e-3)
+    torch.testing.assert_close(
+        payload[TensorKey.content].flatten(), torch.full((2,), 99.0, dtype=torch.float64), rtol=1e-5, atol=1e-3
+    )
 
 
 def test_number_mae_loss_adds_the_source_unit_error(monkeypatch):
@@ -674,9 +676,9 @@ def test_number_mae_loss_adds_the_source_unit_error(monkeypatch):
     rf.TENSORFIELDS["number"].loss(model, predicted, field, rf.Strata.train)
 
     decoder = model.nodes[rf.Address("amount")].decoder
-    std = max(math.sqrt(decoder.normalizer.var.item()), decoder.normalizer.epsilon)
+    std = decoder.normalizer.scale.item()
     raw = model.nodes[rf.Address("amount")].embedder.normalizers["raw"]
-    raw_std = max(math.sqrt(raw.var.item()), raw.epsilon)
+    raw_std = raw.scale.item()
     expected = (1.0 / std + abs(math.expm1(math.log1p(99.0) + 1.0) - 99.0) / raw_std) / 2
     assert float(tracked[Metric.loss, TensorKey.content]) == pytest.approx(expected, rel=1e-4)
     assert float(tracked[Metric.mae, TensorKey.content]) == pytest.approx(
@@ -684,7 +686,7 @@ def test_number_mae_loss_adds_the_source_unit_error(monkeypatch):
     )
 
 
-def test_number_embedder_and_readout_stay_float32_under_autocast():
+def test_number_embedder_and_readout_stay_wide_under_autocast():
     schema = build_schema()
     embedder = Embedder(schema=schema, address=ADDRESS).eval()
     field = tensorfield(rows=[[8.0, 12.0]], schema=schema, strata=Strata.predict)
@@ -696,7 +698,7 @@ def test_number_embedder_and_readout_stay_float32_under_autocast():
         payload = decoder.decode(torch.zeros(3, model.schema.d_model))
 
     assert parcel.payload.dtype == torch.float32
-    assert payload["scaled"].dtype == torch.float32 and payload[TensorKey.content].dtype == torch.float32
+    assert payload["scaled"].dtype == torch.float64 and payload[TensorKey.content].dtype == torch.float64
 
 
 def test_number_observes_moments_for_both_scales_and_the_readout_scale():
@@ -785,6 +787,96 @@ def test_number_decoder_emits_source_units_and_a_training_scale_lane():
 
     payload = decoder.decode(torch.zeros(3, model.schema.d_model))
 
-    torch.testing.assert_close(payload[TensorKey.content].flatten(), torch.full((3,), 99.0), rtol=1e-5, atol=1e-3)
-    torch.testing.assert_close(payload["scaled"].flatten(), torch.full((3,), math.log1p(99.0)))
+    torch.testing.assert_close(
+        payload[TensorKey.content].flatten(), torch.full((3,), 99.0, dtype=torch.float64), rtol=1e-5, atol=1e-3
+    )
+    torch.testing.assert_close(payload["scaled"].flatten(), torch.full((3,), math.log1p(99.0), dtype=torch.float64))
     assert not payload[TensorKey.content].requires_grad and payload["scaled"].requires_grad
+
+
+def test_number_nan_tensorizes_as_the_other_state():
+    model = log_model(mask=False)
+    rows = arrow_table([{"amount": 9.0}, {"amount": float("nan")}, {"amount": None}, {"amount": float("inf")}])
+    field = model.encode(rows, strata="train")[rf.Address("amount")]
+
+    assert field.state.flatten().tolist() == [Tokens.valued, Tokens.other, Tokens.null, Tokens.valued]
+    assert field.content.dtype == torch.float64
+    assert field.content.flatten().tolist() == [9.0, 0.0, 0.0, math.inf]
+
+
+def test_number_nan_and_infinite_targets_are_not_regressed(monkeypatch):
+    model = log_model(mask=True)
+    rows = arrow_table([{"amount": 9.0}, {"amount": 99.0}, {"amount": float("nan")}, {"amount": float("inf")}])
+    field = model.encode(rows, strata="train")[rf.Address("amount")]
+    assert field.targets[TensorKey.state].flatten().tolist() == [Tokens.valued] * 2 + [Tokens.other, Tokens.valued]
+    tracked = {}
+    monkeypatch.setattr(model, "track", lambda names, value: tracked.__setitem__(names[-2:], value) or value)
+    # Only the exact finite rows are regression targets; the others would otherwise contribute enormous errors.
+    scaled = torch.tensor([[math.log1p(9.0)], [math.log1p(99.0)], [50.0], [-50.0]], dtype=torch.float64)
+    predicted = log_prediction(field, scaled)
+
+    rf.TENSORFIELDS["number"].loss(model, predicted, field, rf.Strata.train)
+
+    assert float(tracked[Metric.loss, TensorKey.content]) == pytest.approx(0.0, abs=1e-9)
+    assert float(tracked[Metric.mae, TensorKey.content]) == pytest.approx(0.0, abs=1e-9)
+
+
+def test_number_observation_counts_nan_as_other_and_excludes_it_from_moments():
+    configured = rf.Model.xs(amount=rf.Number, d_model=8, batch_size=3)
+    records = pa.table({"amount": pa.array([1.0, float("nan"), 3.0])})
+    datamodule = rf.ArrowDataModule(configured, train=records, shuffle=False)
+    encoded = next(iter(datamodule.train_dataloader()))
+    observation = encoded.observations["/amount"]
+
+    counts = observation[TensorKey.state].tolist()
+    assert counts[Tokens.valued] == 2 and counts[Tokens.other] == 1
+    assert observation[TensorKey.content]["count"].item() == 2
+    assert observation[TensorKey.content]["mean"].item() == pytest.approx(2.0)
+
+
+def test_number_keeps_float64_source_values_at_large_offsets():
+    model = log_model(mask=True)
+    rows = arrow_table([{"amount": 1e9 + 3.0}, {"amount": 1e9 + 5.0}])
+    field = model.encode(rows, strata="train")[rf.Address("amount")]
+
+    assert field.targets[TensorKey.content].dtype == torch.float64
+    assert field.targets[TensorKey.content].flatten().tolist() == [1e9 + 3.0, 1e9 + 5.0]
+
+
+def test_number_rejects_integers_beyond_float64_exactness():
+    model = log_model(mask=False)
+    with pytest.raises(ValueError, match=r"number field at '/amount' holds int64 values.*2\^53"):
+        model.encode(arrow_table([{"amount": 2**53 + 1}]), strata="train")
+
+
+def test_number_moments_stay_finite_beyond_float32_range():
+    values = torch.tensor([1e20, 3e20, -2e20], dtype=torch.float64)
+    observation = moments(values)
+
+    assert torch.isfinite(observation["var"]).all()
+    assert observation["var"].item() == pytest.approx(values.var(correction=0).item(), rel=1e-12)
+
+
+def test_number_scale_floor_is_relative_to_the_mean():
+    constant = GlobalOnlineNormalizer()
+    constant.learn(moments(torch.tensor([1e6, 1e6, 1e6])))
+    assert constant.var.item() == 0.0
+    assert constant.scale.item() == pytest.approx(1e-12 * (1e6 + 1))
+    assert constant(torch.tensor([1e6]), mask=torch.tensor([True]), update=False).item() == 0.0
+
+    narrow = GlobalOnlineNormalizer()
+    narrow.learn(moments(torch.tensor([1e6 - 3.0, 1e6 + 3.0])))
+    assert narrow.scale.item() == pytest.approx(3.0)
+    assert narrow(torch.tensor([1e6 + 3.0]), mask=torch.tensor([True]), update=False).item() == pytest.approx(1.0)
+
+
+@pytest.mark.skipif(not torch.backends.mps.is_available(), reason="MPS unavailable")
+def test_number_normalizer_keeps_float32_statistics_on_mps():
+    normalizer = GlobalOnlineNormalizer().to("mps")
+    assert normalizer.mean.dtype == normalizer.var.dtype == torch.float32
+    assert normalizer.mean.device.type == "mps"
+
+    normalizer.learn(moments(torch.tensor([1.0, 3.0], dtype=torch.float64)))
+
+    assert normalizer.count.item() == 2
+    assert normalizer.mean.item() == pytest.approx(2.0)

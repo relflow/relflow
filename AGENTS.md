@@ -109,6 +109,10 @@ model = rf.Model(
   it independently. Hidden neural activations use tanh GELU and normalization
   uses RMSNorm; these have no configuration knobs.
 - `Hash` represents large identifiers with batch-salted hashes, preserving equality across fields in one encoded batch without learning a persistent vocabulary.
+- `Number` keeps source values, statistics, and readouts in float64 (float32 on
+  MPS, which has no float64), so large offsets keep their spread. A float NaN
+  tensorizes as the `other` state, not as a value or a null; ±inf stays valued
+  but is never a regression target. Integers beyond ±2^53 are rejected.
 - `DateParts` is for calendar parts. If elapsed time or recency matters, derive a `Number`.
 - `rf.Jitter(add=..., multiply=..., normalize=...)` is a shared frozen
   configuration whose `apply(inputs, mask)` method owns the vectorized affine

@@ -53,9 +53,18 @@ LANES: tuple[Lane, ...] = ("raw", "log")
 
 def precise(device: torch.device) -> AbstractContextManager[object]:
     """Disable mixed precision for source-value arithmetic; bf16 would quantize lanes and readouts."""
-    if device.type in {"cuda", "cpu"}:
+    if device.type in {"cuda", "cpu", "mps"}:
         return torch.autocast(device_type=device.type, enabled=False)
     return nullcontext()
+
+
+def wide(device: torch.device) -> torch.dtype:
+    """The widest float the device holds.
+
+    Source values and their statistics stay float64 so that values far from
+    zero keep their spread; MPS has no float64 and keeps float32.
+    """
+    return torch.float32 if device.type == "mps" else torch.float64
 
 
 class Objective(enum.StrEnum):
@@ -81,8 +90,11 @@ class Request(RequestBase):
     scale ``sign(x) * ln(1 + |x|)``. Each lane keeps its own online statistics,
     Fourier features, and monotone channel, so additive structure reads from
     the raw lane and multiplicative or heavy-tailed structure from the log lane
-    without a per-field choice. The embedder and the readout run in float32
-    under mixed precision so bf16 never quantizes source values.
+    without a per-field choice. Source values, their statistics, and the
+    readout stay in the device's widest float (float64 on CPU and CUDA) and
+    outside mixed precision, so large offsets keep their spread and bf16 never
+    quantizes them. A float NaN is not a number: it tensorizes as the
+    ``other`` state, and ±inf is never a regression target.
 
     ``objective`` selects the reconstruction loss. ``"mae"`` trains on the
     signed log scale, where the median-optimal prediction is unchanged, and
@@ -131,7 +143,11 @@ class Request(RequestBase):
         address: Address | str,
         /,
     ) -> dict[str, float | int | None]:
-        """Return a CPU-native snapshot of one Number field's source-unit normalizer."""
+        """Return a CPU-native snapshot of one Number field's source-unit normalizer.
+
+        ``std`` is the standardizing scale: the standard deviation floored at
+        ``epsilon`` of the mean's magnitude.
+        """
         from relflow.architecture.root import Model
 
         if not isinstance(model, Model):
@@ -153,7 +169,7 @@ class Request(RequestBase):
         return {
             "mean": mean,
             "variance": variance,
-            "std": math.sqrt(variance + normalizer.epsilon),
+            "std": float(normalizer.scale.detach().cpu().item()),
             "count": count,
             "alpha": normalizer.alpha,
         }
@@ -186,19 +202,43 @@ def observe(
 
     if not learn:
         return None
-    values = pc.cast(field.values, pa.float32(), safe=False)
-    if isinstance(values, pa.ChunkedArray):
-        values = values.combine_chunks()
-    content = torch.from_numpy(values.to_numpy(zero_copy_only=False).copy())
+    content, state = encode(field, address=address)
+    values = content.masked_select(state.eq(Tokens.valued.value))
     # Both scales keep statistics: lanes read their own, and a log target scores on its own.
     return TensorDict(
         {
-            TensorKey.state: tally(torch.from_numpy(field.dense.copy()), len(Tokens)),
-            TensorKey.content: moments(content),
-            "log": moments(compress(content)),
+            TensorKey.state: tally(state, len(Tokens)),
+            TensorKey.content: moments(values),
+            "log": moments(compress(values)),
         },
         batch_size=[],
     )
+
+
+def encode(field: RaggedField, *, address: Address) -> tuple[torch.Tensor, torch.Tensor]:
+    """Dense float64 content and state tokens of one field.
+
+    A float NaN is not a number: its position takes the ``other`` state and
+    zero content, so it is neither embedded as a value nor regressed against.
+    Infinite values stay valued; the embedder clamps them and the loss skips them.
+    """
+    values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
+    if pa.types.is_list(values.type) or pa.types.is_large_list(values.type) or pa.types.is_fixed_size_list(values.type):
+        raise ValueError(f"number field at '{address}' expects scalar Arrow values, got {values.type}")
+    try:
+        encoded = pc.cast(values, pa.float64(), safe=True)
+    except pa.ArrowInvalid as error:
+        raise ValueError(
+            f"number field at '{address}' holds {values.type} values that float64 cannot represent exactly "
+            f"(integers beyond ±2^53): represent identifiers with Hash or rescale the measurement"
+        ) from error
+    if isinstance(encoded, pa.ChunkedArray):
+        encoded = encoded.combine_chunks()
+    data = field.place(encoded.to_numpy(zero_copy_only=False).astype(np.float64, copy=False), fill=0.0)
+    state = field.dense.copy()
+    state[np.isnan(data) & (state == Tokens.valued.value)] = Tokens.other.value
+    np.nan_to_num(data, copy=False, nan=0.0, posinf=np.inf, neginf=-np.inf)
+    return torch.from_numpy(data), torch.from_numpy(state)
 
 
 @number.register(Component.TensorField)
@@ -230,49 +270,29 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         strata: Strata,
         context: Context,
     ) -> TensorField:
-        def encode(field: RaggedField) -> torch.Tensor:
-            values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
-            if (
-                pa.types.is_list(values.type)
-                or pa.types.is_large_list(values.type)
-                or pa.types.is_fixed_size_list(values.type)
-            ):
-                raise ValueError(f"number field at '{address}' expects scalar Arrow values, got {values.type}")
-
-            # Integer conversion retains Arrow's existing float64 safety range.
-            datatype = pa.float32() if pa.types.is_floating(values.type) else pa.float64()
-            encoded = pc.cast(values, datatype, safe=True)
-            if isinstance(encoded, pa.ChunkedArray):
-                encoded = encoded.combine_chunks()
-            data = field.place(encoded.to_numpy(zero_copy_only=False).astype(np.float32, copy=False), fill=0.0)
-            np.nan_to_num(data, copy=False, nan=0.0, posinf=np.inf, neginf=-np.inf)
-            return torch.from_numpy(data)
-
-        state = torch.from_numpy(input.dense)
+        content, state = encode(input, address=address)
+        targets = TensorDict({}, batch_size=input.shape)
+        if address in schema.objectives:
+            target_content, target_state = encode(target, address=address)
+            targets = TensorDict(
+                {TensorKey.state: target_state, TensorKey.content: target_content}, batch_size=input.shape
+            )
 
         return cls(
-            content=encode(input),
+            content=content,
             state=state,
             present=present,
             trainable=trainable,
             inferred=inferred,
-            targets=TensorDict(
-                {
-                    TensorKey.state: torch.from_numpy(target.dense),
-                    TensorKey.content: encode(target),
-                }
-                if address in schema.objectives
-                else {},
-                batch_size=input.shape,
-            ),
+            targets=targets,
             batch_size=input.batch_size,
         )
 
 
 def moments(values: torch.Tensor) -> TensorDict:
-    """Summarize finite values with an exact count and centered float32 moments."""
+    """Summarize finite values with an exact count and centered moments in the device's widest float."""
 
-    finite = values.reshape(-1).to(dtype=torch.float32)
+    finite = values.reshape(-1).to(dtype=wide(values.device))
     finite = finite.masked_select(torch.isfinite(finite))
     if finite.numel():
         variance, mean = torch.var_mean(finite, correction=0)
@@ -289,15 +309,38 @@ def moments(values: torch.Tensor) -> TensorDict:
 
 
 class GlobalOnlineNormalizer(torch.nn.Module):
-    def __init__(self, alpha: float | None = None, epsilon: float = 1e-5):
+    """Running mean and variance of one lane.
+
+    Statistics stay float64 where the device allows, so values far from zero
+    keep their spread. ``epsilon`` floors the standardizing scale at that
+    fraction of ``|mean| + 1``: a constant lane standardizes to zero instead of
+    dividing by zero, and a narrow lane keeps its spread rather than meeting an
+    absolute floor.
+    """
+
+    def __init__(self, alpha: float | None = None, epsilon: float = 1e-12):
         super().__init__()
 
         self.epsilon: float = epsilon
         self.alpha: float | None = alpha
 
-        self.register_buffer("mean", torch.zeros(1, dtype=torch.float32))
-        self.register_buffer("var", torch.ones(1, dtype=torch.float32))
+        self.register_buffer("mean", torch.zeros(1, dtype=torch.float64))
+        self.register_buffer("var", torch.ones(1, dtype=torch.float64))
         self.register_buffer("count", torch.zeros(1, dtype=torch.int64))
+
+    @property
+    def scale(self) -> torch.Tensor:
+        """Standard deviation floored at ``epsilon`` of the mean's magnitude."""
+        return torch.sqrt(self.var).clamp_min(self.epsilon * (self.mean.abs() + 1.0))
+
+    def _apply(self, fn, recurse=True):
+        # MPS cannot hold float64: keep the statistics in float32 there.
+        try:
+            fn(self.mean)
+        except TypeError:
+            self.mean = self.mean.to(dtype=torch.float32)
+            self.var = self.var.to(dtype=torch.float32)
+        return super()._apply(fn, recurse)
 
     @torch.no_grad()
     def update(self, values: torch.Tensor):
@@ -309,6 +352,10 @@ class GlobalOnlineNormalizer(torch.nn.Module):
 
         if not isinstance(observation, TensorDict):
             raise TypeError(f"normalizer observation must be a TensorDict, got {type(observation).__name__}")
+        dtype = self.mean.dtype
+        observation = cast(
+            TensorDict, observation.apply(lambda value: value.to(dtype=dtype) if value.is_floating_point() else value)
+        )
         observation = observation.to(device=self.mean.device)
         local_count = cast(torch.Tensor, observation["count"])
         local_mean = cast(torch.Tensor, observation["mean"])
@@ -316,7 +363,7 @@ class GlobalOnlineNormalizer(torch.nn.Module):
         count = all_reduce_sum(local_count.clone())
         if not count:
             return
-        weight = local_count.to(dtype=torch.float32) / count
+        weight = local_count.to(dtype=dtype) / count
         mean = all_reduce_sum(local_mean * weight)
         # Center on the shared mean before reducing variance. Raw squared sums
         # lose small variances at large offsets in float32; empty ranks contribute zero.
@@ -368,8 +415,7 @@ class GlobalOnlineNormalizer(torch.nn.Module):
         if self.training and update:
             self.update(inputs[finite_mask])
 
-        std = torch.sqrt(self.var + self.epsilon)
-        normalized = (torch.atleast_1d(inputs) - self.mean) / std
+        normalized = (torch.atleast_1d(inputs) - self.mean) / self.scale
         return torch.where(finite_mask, normalized.reshape_as(inputs), inputs)
 
 
@@ -447,7 +493,7 @@ class Embedder(EmbedderBase):
         if not self.jitter.normalize:
             return self.jitter.apply(content, eligible)
         raw = cast(GlobalOnlineNormalizer, self.normalizers["raw"])
-        std = torch.sqrt(raw.var + raw.epsilon).to(dtype=content.dtype)
+        std = raw.scale.to(dtype=content.dtype)
         mean = raw.mean.to(dtype=content.dtype)
         standardized = self.jitter.apply((content - mean) / std, eligible)
         return torch.where(eligible, standardized * std + mean, content)
@@ -458,12 +504,17 @@ class Embedder(EmbedderBase):
             return self.project(inputs)
 
     def project(self, inputs: TensorInput) -> Parcel:
-        """Embed both lanes of every value with Fourier features and monotone channels, in float32."""
+        """Embed both lanes of every value with Fourier features and monotone channels.
+
+        Values standardize in the widest float the device holds; the Fourier
+        projection reads the standardized float32 lanes.
+        """
         N, *dims = inputs.state.shape
         D = math.prod(tuple([N, *dims]))
 
         state = inputs.state.reshape(D)
-        content = cast(torch.Tensor, inputs.content).reshape(D).float()
+        raw = cast(GlobalOnlineNormalizer, self.normalizers["raw"])
+        content = cast(torch.Tensor, inputs.content).reshape(D).to(dtype=raw.mean.dtype)
         valued = state.eq(Tokens.valued)
         eligible = valued & torch.isfinite(content)
 
@@ -475,7 +526,7 @@ class Embedder(EmbedderBase):
             values = compress(content) if name == "log" else content
             values = cast(GlobalOnlineNormalizer, self.normalizers[name])(inputs=values, mask=valued, update=False)
             lanes.append(self.clamp(content=values, state=state))
-        standardized = torch.stack(lanes, dim=1)
+        standardized = torch.stack(lanes, dim=1).float()
 
         weighted = standardized.unsqueeze(dim=2).mul(self.weights)
         fourier = torch.cat([torch.sin(weighted), torch.cos(weighted)], dim=2).reshape(D, -1)
@@ -558,14 +609,13 @@ class Decoder(DecoderBase):
     @beartype
     def decode(self, pooled: torch.Tensor) -> TensorDict:
         with precise(pooled.device):
-            deviation = self.regression(pooled.float())
-            std = torch.sqrt(self.normalizer.var + self.normalizer.epsilon)
-            scaled = self.normalizer.mean + std * deviation
+            scale = self.normalizer.scale
+            deviation = self.regression(pooled.float()).to(dtype=scale.dtype)
+            scaled = self.normalizer.mean + scale * deviation
             content = scaled
             if self.log:
                 # Content stays in source units for every consumer; the loss reads the training-scale lane.
-                content = expand(scaled.detach().clamp(-LOG_SAFE_MAGNITUDE, LOG_SAFE_MAGNITUDE).to(dtype=torch.float64))
-                content = content.to(dtype=scaled.dtype)
+                content = expand(scaled.detach().clamp(-LOG_SAFE_MAGNITUDE, LOG_SAFE_MAGNITUDE))
         return TensorDict(
             source={
                 TensorKey.state: self.classification(pooled),
@@ -614,12 +664,13 @@ def loss(
 
     target: torch.Tensor = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(N)
     scaled: torch.Tensor = cast(torch.Tensor, prediction.payload["scaled"]).reshape(N)
-    valued = trainable & state_targets.eq(Tokens.valued.value)
-    actual = scaled.masked_select(valued).float()
-    observed = target.masked_select(valued).float()
+    # NaN arrives as the ``other`` state; ±inf is valued but has no finite error to regress.
+    valued = trainable & state_targets.eq(Tokens.valued.value) & torch.isfinite(target)
+    actual = scaled.masked_select(valued)
+    observed = target.masked_select(valued).to(dtype=actual.dtype)
     if actual.numel():
         expected = compress(observed) if request.log else observed
-        std = decoder.normalizer.var.sqrt().clamp_min(decoder.normalizer.epsilon)
+        std = decoder.normalizer.scale
         value = request.objective.loss(
             input=(actual - expected) / std,
             target=torch.zeros_like(actual),
@@ -631,14 +682,14 @@ def loss(
             raw = cast(GlobalOnlineNormalizer, embedder.normalizers["raw"])
             spread = SOURCE_TERM_SPREAD * std
             bounded = actual.clamp(min=decoder.normalizer.mean - spread, max=decoder.normalizer.mean + spread)
-            value = value + (expand(bounded) - observed).abs().div(raw.var.sqrt().clamp_min(raw.epsilon)).mean()
-        loss += module.track((address, strata, Metric.loss, TensorKey.content), value=value)
+            value = value + (expand(bounded) - observed).abs().div(raw.scale).mean()
+        loss += module.track((address, strata, Metric.loss, TensorKey.content), value=value.to(dtype=loss.dtype))
     else:
-        loss += scaled.sum() * 0.0
+        loss += scaled.sum().to(dtype=loss.dtype) * 0.0
 
     # Error metrics report source units whatever the training scale.
     content = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N)
-    predicted = content.masked_select(valued).float()
+    predicted = content.masked_select(valued)
     for name, metric in decoder.content_metrics(strata):
         if strata == Strata.train:
             metric.reset()

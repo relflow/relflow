@@ -7,7 +7,7 @@ import torch
 
 import relflow as rf
 from relflow.data.ragged import coalesce
-from relflow.structs.enums import Strata, TensorKey
+from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.tensorfields.extensions.number import TensorField, number
 from tests.tensorfields.helpers import tensorize
 
@@ -55,7 +55,7 @@ def test_number_nullable_arrow_values_preserve_input_target_masks_and_source_sto
     original = buffers(values)
     selected = torch.tensor([False, True, False, True, False, True])
     field = tensorfield(values, selected.tolist())
-    expected = torch.tensor([1.25, 0.0, -2.5, -0.0, 3.75, 4.5], dtype=torch.float32).reshape(-1, 1)
+    expected = torch.tensor([1.25, 0.0, -2.5, -0.0, 3.75, 4.5], dtype=torch.float64).reshape(-1, 1)
     expected_inputs = expected.masked_fill(selected.unsqueeze(-1), 0.0)
     expected_targets = expected.masked_fill(~selected.unsqueeze(-1), 0.0)
     targets = field.targets[TensorKey.content]
@@ -64,7 +64,7 @@ def test_number_nullable_arrow_values_preserve_input_target_masks_and_source_sto
     torch.testing.assert_close(targets, expected_targets, rtol=0, atol=0)
     assert torch.equal(torch.signbit(targets), torch.signbit(expected_targets))
     assert torch.equal(field.trainable.flatten(), selected)
-    assert field.content.dtype == targets.dtype == torch.float32
+    assert field.content.dtype == targets.dtype == torch.float64
     assert field.content.numpy().flags.writeable and targets.numpy().flags.writeable
     assert not np.shares_memory(field.content.numpy(), targets.numpy())
     assert buffers(values) == original
@@ -82,31 +82,37 @@ def test_number_nonfinite_conversion_retains_infinities_and_signed_zero(datatype
     original = buffers(values)
     field = tensorfield(values, selected)
     actual = field.targets[TensorKey.content] if selected else field.content
-    expected = torch.tensor([0.0, float("inf"), -float("inf"), -0.0, 0.0, float("inf")]).reshape(-1, 1)
+    state = field.targets[TensorKey.state] if selected else field.state
+    large = 1e40 if datatype == pa.float64() else float("inf")
+    expected = torch.tensor([0.0, float("inf"), -float("inf"), -0.0, 0.0, large], dtype=torch.float64).reshape(-1, 1)
 
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
     assert torch.equal(torch.signbit(actual), torch.signbit(expected))
+    # NaN is not a number: it takes the ``other`` state; infinities stay valued.
+    assert state.flatten().tolist() == [Tokens.other, *([Tokens.valued] * 5)]
     assert buffers(values) == original
 
 
 @pytest.mark.parametrize("selected", [False, True])
-def test_number_float64_rounds_halfway_values_to_float32_even(selected):
+def test_number_keeps_float64_values_exactly(selected):
     halfway = 1.0 + 2.0**-24
-    values = pa.array([halfway, np.nextafter(halfway, np.inf), -halfway, np.nextafter(-halfway, -np.inf)])
-    field = tensorfield(values, selected)
+    content = [halfway, float(np.nextafter(halfway, np.inf)), -halfway, float(np.nextafter(-halfway, -np.inf))]
+    field = tensorfield(pa.array(content), selected)
     actual = field.targets[TensorKey.content] if selected else field.content
-    expected = torch.tensor([1.0, 1.0 + 2.0**-23, -1.0, -1.0 - 2.0**-23], dtype=torch.float32).reshape(-1, 1)
+    expected = torch.tensor(content, dtype=torch.float64).reshape(-1, 1)
 
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 
 
 @pytest.mark.parametrize("datatype", [pa.int64(), pa.uint64()])
 @pytest.mark.parametrize("selected", [False, True])
-def test_number_accepts_float64_safe_integer_range_before_float32_rounding(datatype, selected):
+def test_number_keeps_safe_integers_exactly(datatype, selected):
     values = pa.array([16_777_217, 16_777_219, 2**40, 2**53], type=datatype)
     field = tensorfield(values, selected)
     actual = field.targets[TensorKey.content] if selected else field.content
-    expected = torch.tensor([16_777_216.0, 16_777_220.0, float(2**40), float(2**53)]).reshape(-1, 1)
+    expected = torch.tensor([16_777_217.0, 16_777_219.0, float(2**40), float(2**53)], dtype=torch.float64).reshape(
+        -1, 1
+    )
 
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 
@@ -115,14 +121,14 @@ def test_number_accepts_float64_safe_integer_range_before_float32_rounding(datat
     "datatype,value", [(pa.int64(), 2**53 + 1), (pa.int64(), -(2**53) - 1), (pa.uint64(), 2**53 + 1)]
 )
 @pytest.mark.parametrize("selected", [False, True])
-def test_number_rejects_integers_outside_existing_safe_arrow_range(datatype, value, selected):
-    with pytest.raises(pa.ArrowInvalid, match="Integer value.*not in range"):
+def test_number_rejects_integers_beyond_float64_exactness(datatype, value, selected):
+    with pytest.raises(ValueError, match=r"number field at '/amount' holds u?int64 values.*2\^53"):
         tensorfield(pa.array([value], type=datatype), selected)
 
 
 @pytest.mark.parametrize("values", [pa.array([], type=pa.float32()), pa.array([None, None], type=pa.float64())])
-def test_number_empty_and_all_null_values_still_use_float32_storage(values):
+def test_number_empty_and_all_null_values_still_use_float64_storage(values):
     field = tensorfield(values, True)
-    assert field.content.dtype == field.targets[TensorKey.content].dtype == torch.float32
+    assert field.content.dtype == field.targets[TensorKey.content].dtype == torch.float64
     assert field.content.shape == field.targets[TensorKey.content].shape == (len(values), 1)
     assert not field.content.any() and not field.targets[TensorKey.content].any()

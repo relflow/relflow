@@ -569,6 +569,20 @@ def vacant(compiled: OutputPlan) -> dict[str, pa.Array]:
     return columns
 
 
+def transfer(value: TensorDict, device: torch.device) -> TensorDict:
+    """Move encoded tensors to ``device``.
+
+    MPS holds no float64, so tensorfields that keep source values wide
+    continue there in float32.
+    """
+    if device.type == "mps":
+        value = cast(
+            TensorDict,
+            value.apply(lambda tensor: tensor.to(dtype=torch.float32) if tensor.dtype == torch.float64 else tensor),
+        )
+    return value.to(device)
+
+
 class ModelRuntime:
     """Own runtime behavior that depends on an already-built model graph."""
 
@@ -918,7 +932,7 @@ class ModelRuntime:
                 continue
             learners[address].learn(
                 module=module,
-                observation=observations[address].to(module.device),
+                observation=transfer(observations[address], module.device),
                 address=address,
                 strata=normalized,
             )
@@ -983,7 +997,7 @@ class ModelRuntime:
                 module.eval()
                 try:
                     with torch.inference_mode():
-                        raw = module(encoded.tensors.to(module.device), strata=Strata.predict)
+                        raw = module(transfer(encoded.tensors, module.device), strata=Strata.predict)
                 finally:
                     if was_training:
                         module.train()
