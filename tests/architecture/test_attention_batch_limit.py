@@ -66,6 +66,29 @@ def test_packed_attention_chunks_whole_rows_and_preserves_values_and_gradients(m
         torch.testing.assert_close(parameter.grad, original_parameter.grad, rtol=1e-10, atol=1e-10)
 
 
+@pytest.mark.parametrize("kv_heads", [4, 1])
+@pytest.mark.parametrize("capacity", [0, 3])
+def test_packed_attention_accepts_no_live_groups(monkeypatch, kv_heads, capacity):
+    attention = RotaryMultiheadAttention(32, 4, 0.0, n_kv_heads=kv_heads).double()
+    inputs = torch.randn(4, capacity, 32, dtype=torch.float64, requires_grad=True)
+    values, packing = packed.pack(inputs, torch.zeros(4, capacity, dtype=torch.bool))
+
+    def unexpected_attention(*args, **kwargs):
+        pytest.fail("an empty packed sequence must not launch attention")
+
+    monkeypatch.setattr(F, "scaled_dot_product_attention", unexpected_attention)
+    output = attention(values, values, values, packing=packing)
+
+    assert not packing.groups
+    assert output.shape == (0, 32)
+    query_gradient, weight_gradient, bias_gradient = torch.autograd.grad(
+        output.sum(), (values, attention.out_proj.weight, attention.out_proj.bias), allow_unused=True
+    )
+    assert query_gradient is None
+    assert weight_gradient is not None and not weight_gradient.any()
+    assert bias_gradient is not None and not bias_gradient.any()
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
 def test_packed_flash_attention_exceeds_cuda_batch_grid_with_finite_gradients(monkeypatch):
     if not torch.cuda.is_bf16_supported() or not torch.backends.cuda.is_flash_attention_available():

@@ -4,6 +4,7 @@ from types import MethodType
 import pytest
 import torch
 import torch.nn.functional as F
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 import relflow as rf
 from relflow.architecture import compiler
@@ -64,6 +65,12 @@ def invoke(encoder, scope, values, present):
     return torch.stack([value.payload for value in encoder.contextualize(parcels)], dim=-2)
 
 
+def relative_error(actual, expected):
+    actual, expected = actual.float(), expected.float()
+    assert torch.isfinite(actual).all() and torch.isfinite(expected).all()
+    return (actual - expected).norm() / expected.norm().clamp_min(1e-12)
+
+
 @CUDA
 @pytest.mark.parametrize("scope", ["stack", "coordinate"])
 @pytest.mark.parametrize("attention", ["mha", "gqa", "mqa"])
@@ -76,8 +83,12 @@ def test_full_presence_removes_sdpa_mask_and_preserves_training(monkeypatch, sco
     encoder = branch(*fields, attention=attention, device="cuda", dtype=dtype)
     reference = deepcopy(encoder)
     masked(reference, scope)
+    oracle = deepcopy(encoder).float() if dtype == torch.bfloat16 else None
+    if oracle is not None:
+        masked(oracle, scope)
     values = [torch.randn(3, 5, 32, device="cuda", dtype=dtype, requires_grad=True) for _ in fields]
     originals = [value.detach().clone().requires_grad_() for value in values]
+    oracle_values = [value.detach().float().requires_grad_() for value in values] if oracle is not None else []
     present = torch.ones(3, 5, dtype=torch.bool, device="cuda")
     masks = []
     sdpa = F.scaled_dot_product_attention
@@ -98,24 +109,86 @@ def test_full_presence_removes_sdpa_mask_and_preserves_training(monkeypatch, sco
     weights = torch.randn_like(actual)
     (actual * weights).sum().backward()
     (expected * weights).sum().backward()
-    for value, original in zip(values, originals, strict=True):
+    if oracle is not None:
+        # CUDA chooses FlashAttention without a mask and math SDPA for masked
+        # grouped heads. Check both BF16 kernels against the same FP32 oracle;
+        # isolated near-zero gradient coordinates amplify their rounding error.
+        with sdpa_kernel(SDPBackend.MATH):
+            oracle_output = invoke(oracle, scope, oracle_values, present)
+            (oracle_output * weights.float()).sum().backward()
+        for output in (actual, expected):
+            torch.testing.assert_close(output.float(), oracle_output, rtol=tolerance[0], atol=tolerance[1])
+    for index, (value, original) in enumerate(zip(values, originals, strict=True)):
         assert value.grad is not None and original.grad is not None
-        torch.testing.assert_close(value.grad, original.grad, rtol=tolerance[0], atol=tolerance[1])
-    actual_gradients, expected_gradients = [], []
+        if oracle is None:
+            torch.testing.assert_close(value.grad, original.grad, rtol=tolerance[0], atol=tolerance[1])
+        else:
+            oracle_gradient = oracle_values[index].grad
+            assert oracle_gradient is not None
+            assert relative_error(value.grad, oracle_gradient) < 0.02
+            assert relative_error(original.grad, oracle_gradient) < 0.02
+    actual_gradients, expected_gradients, oracle_gradients = [], [], []
+    oracle_parameters = dict(oracle.named_parameters()) if oracle is not None else {}
     for (name, parameter), (other, original) in zip(
         encoder.named_parameters(), reference.named_parameters(), strict=True
     ):
         assert name == other
         if parameter.grad is None or original.grad is None:
             assert parameter.grad is None and original.grad is None
+            if oracle is not None:
+                assert oracle_parameters[name].grad is None
             continue
-        torch.testing.assert_close(parameter.grad, original.grad, rtol=tolerance[0], atol=tolerance[1])
+        if oracle is None:
+            torch.testing.assert_close(parameter.grad, original.grad, rtol=tolerance[0], atol=tolerance[1])
+        else:
+            oracle_gradient = oracle_parameters[name].grad
+            assert oracle_gradient is not None
+            assert torch.isfinite(parameter.grad).all() and torch.isfinite(original.grad).all()
+            oracle_gradients.append(oracle_gradient.flatten())
         actual_gradients.append(parameter.grad.flatten().float())
         expected_gradients.append(original.grad.flatten().float())
     actual_gradient = torch.cat(actual_gradients)
     expected_gradient = torch.cat(expected_gradients)
-    relative_error = (actual_gradient - expected_gradient).norm() / expected_gradient.norm()
-    assert relative_error < (0.02 if dtype == torch.bfloat16 else 2e-5)
+    assert relative_error(actual_gradient, expected_gradient) < (0.02 if dtype == torch.bfloat16 else 2e-5)
+    if oracle is not None:
+        oracle_gradient = torch.cat(oracle_gradients)
+        assert relative_error(actual_gradient, oracle_gradient) < 0.02
+        assert relative_error(expected_gradient, oracle_gradient) < 0.02
+
+
+@CUDA
+@pytest.mark.parametrize("scope", ["stack", "coordinate"])
+@pytest.mark.parametrize("attention", ["mha", "gqa", "mqa"])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+def test_full_presence_mask_preserves_exact_math_training(scope, attention, dtype):
+    if dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
+        pytest.skip("requires CUDA BF16 support")
+    torch.manual_seed(101)
+    fields = ("left", "middle", "right") if scope == "coordinate" else ("value",)
+    encoder = branch(*fields, attention=attention, device="cuda", dtype=dtype)
+    reference = deepcopy(encoder)
+    masked(reference, scope)
+    values = [torch.randn(3, 5, 32, device="cuda", dtype=dtype, requires_grad=True) for _ in fields]
+    originals = [value.detach().clone().requires_grad_() for value in values]
+    present = torch.ones(3, 5, dtype=torch.bool, device="cuda")
+    with sdpa_kernel(SDPBackend.MATH):
+        actual = invoke(encoder, scope, values, present)
+        expected = invoke(reference, scope, originals, present)
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+        weights = torch.randn_like(actual)
+        (actual * weights).sum().backward()
+        (expected * weights).sum().backward()
+    for value, original in zip(values, originals, strict=True):
+        assert value.grad is not None and original.grad is not None
+        torch.testing.assert_close(value.grad, original.grad, rtol=0, atol=0)
+    for (name, parameter), (other, original) in zip(
+        encoder.named_parameters(), reference.named_parameters(), strict=True
+    ):
+        assert name == other
+        if parameter.grad is None or original.grad is None:
+            assert parameter.grad is None and original.grad is None
+        else:
+            torch.testing.assert_close(parameter.grad, original.grad, rtol=0, atol=0)
 
 
 @CUDA

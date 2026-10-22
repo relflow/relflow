@@ -48,9 +48,16 @@ class BFloatPrecision(MixedPrecision):
 
 @runtime_checkable
 class ModelData(Protocol):
-    """Data modules whose encoding is bound to one model."""
+    """Data modules whose encoding belongs to one model once bound."""
 
-    model: Model
+    model: Model | None
+
+
+@runtime_checkable
+class ModelBinding(ModelData, Protocol):
+    """Data modules that can attach their model before a loop starts."""
+
+    def bind(self, model: Model) -> None: ...
 
 
 @runtime_checkable
@@ -115,7 +122,11 @@ def trainer(
     """Validate loop ownership and compose callbacks and framework settings."""
     if not isinstance(datamodule, lit.LightningDataModule):
         raise TypeError(f"{strata.value} requires a LightningDataModule, got {type(datamodule).__name__}")
-    if isinstance(datamodule, ModelData) and datamodule.model is not model:
+    if (
+        isinstance(datamodule, ModelData)
+        and datamodule.model is not model
+        and (datamodule.model is not None or not isinstance(datamodule, ModelBinding))
+    ):
         raise ValueError(f"{strata.value} data module belongs to a different model; construct it with model=self")
     if isinstance(datamodule, SplitData):
         if strata not in datamodule.sources:
@@ -145,6 +156,8 @@ def trainer(
     hardware(defaults)
     defaults.setdefault("enable_checkpointing", any(isinstance(callback, ModelCheckpoint) for callback in configured))
     runner = lit.Trainer(callbacks=configured, **defaults)
+    if isinstance(datamodule, ModelBinding) and datamodule.model is None:
+        datamodule.bind(model)
     precision = runner.precision_plugin
     if (
         type(precision) is MixedPrecision

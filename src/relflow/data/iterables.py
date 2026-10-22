@@ -51,7 +51,7 @@ def encode(
     observations: dict[Address, TensorDict] = {}
     bindings: dict[Address, object] = {}
 
-    salt = random.getrandbits(64) if strata in {Strata.train, Strata.validate} else 0
+    salt = random.getrandbits(64) if strata == Strata.train else 0
 
     coalesced = coalesce(batch, schema=schema, strata=strata, seed=seed, epoch=epoch)
 

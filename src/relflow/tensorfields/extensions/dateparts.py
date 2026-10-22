@@ -373,7 +373,9 @@ class TensorField(TensorFieldBase[TensorDict]):
                 {
                     TensorKey.state: torch.from_numpy(target.dense),
                     TensorKey.content: encode(target),
-                },
+                }
+                if address in schema.objectives
+                else {},
                 batch_size=input.shape,
             ),
             batch_size=input.batch_size,
@@ -428,6 +430,8 @@ class Embedder(EmbedderBase):
 
 @dateparts.register(Component.Decoder)
 class Decoder(DecoderBase):
+    coordinatewise = True
+
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 

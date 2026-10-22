@@ -172,10 +172,10 @@ class GrowthAudit(lit.Callback):
             assert field.state.reshape(-1)[0] == Tokens.valued.value
             if name == "tags":
                 for content, row in ((field.content, 0), (field.targets[TensorKey.content], 1)):
-                    membership = content["membership"].reshape(2, -1)
-                    assert membership.shape[-1] == resource["capacity"]
-                    assert membership[row, token] == 1
-                    assert membership[row].sum() == 1
+                    indices = content["indices"].reshape(2, -1)
+                    assert indices.dtype == torch.int64
+                    assert indices.shape[-1] == 1
+                    assert indices[row].tolist() == [token]
                     assert content["unavailable"].reshape(-1)[row] == 0
             else:
                 assert field.content.reshape(-1)[0] == token

@@ -12,6 +12,7 @@ from lightning.pytorch.callbacks import EarlyStopping
 
 from relflow import presets as presets
 from relflow._version import __version__
+from relflow.architecture.averaging import EMA
 from relflow.architecture.checkpoint import RollbackCheckpoint
 from relflow.architecture.mutations import MutationLockCallback, RuntimePlacementCallback
 from relflow.architecture.root import (
@@ -157,6 +158,7 @@ __all__ = [
     "DateParts",
     "Enum",
     "EarlyStopping",
+    "EMA",
     "DecoderBase",
     "Deployment",
     "EmbedderBase",

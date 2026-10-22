@@ -60,9 +60,10 @@ def test_input_augmentation_preserves_pristine_answers(kind):
         rf.TensorKey.content
     ]
     if kind == "set":
-        assert not field.content["membership"].any()
+        assert field.content["indices"].eq(-1).all()
         assert field.content["unavailable"].reshape(-1).tolist() == [2, 0, 0]
-        assert answers["membership"].sum() == 2
+        assert answers["indices"][0, 0].tolist() == [0, 1]
+        assert answers["indices"][1:].eq(-1).all()
         assert not answers["unavailable"].any()
     else:
         assert field.content.reshape(-1)[:2].tolist() == [-1, -1]
@@ -74,7 +75,9 @@ def test_set_unknown_counts_preserve_set_semantics_and_reach_encoder():
     labels = [["a", "new", "new", "other", None], ["other", "new", "a"], [], ["new"], None]
     batch = module.encode(pa.table({"x": [0.0] * 5, "label": labels}), strata="test")["/label"]
     assert batch.content["unavailable"].reshape(-1).tolist() == [2, 2, 0, 1, 0]
-    assert torch.equal(batch.content["membership"][0], batch.content["membership"][1])
+    indices = batch.content["indices"][0, 0]
+    assert indices[indices.ge(0)].tolist() == [0]
+    assert torch.equal(batch.content["indices"][0], batch.content["indices"][1])
     embedder = module.nodes["/label"].embedder
     with torch.no_grad():
         embedder.unavailable.fill_(1)
@@ -307,7 +310,9 @@ def test_set_unknown_members_are_distinct_within_each_arrow_atom_family(known, u
     module.encode(pa.table({"tags": [[known]]}), strata="train")
     field = module.encode(pa.table({"tags": [[known, unknown, unknown, None], [unknown], []]}), strata="test")["/tags"]
     assert field.content["unavailable"].reshape(-1).tolist() == [1, 1, 0]
-    assert field.content["membership"].sum(dim=-1).reshape(-1).tolist() == [1, 0, 0]
+    indices = field.content["indices"].reshape(3, -1)
+    assert indices[0][indices[0].ge(0)].tolist() == [0]
+    assert indices[1:].eq(-1).all()
 
 
 @pytest.mark.parametrize(

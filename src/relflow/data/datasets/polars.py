@@ -21,7 +21,7 @@ class PolarsDataModule(ArrowDataModule):
 
     def __init__(
         self,
-        model: relflow.Model,
+        model: relflow.Model | None = None,
         *,
         train: pl.DataFrame | None = None,
         validate: pl.DataFrame | None = None,

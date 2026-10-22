@@ -101,8 +101,7 @@ def test_set_owns_the_list_produced_by_a_traversal_query():
         [Tokens.padded.value],
     ]
     assert rf.Set.vocabulary(model, "/aliases") == ("Ada", "A")
-    assert encoded.content["membership"][0, 0].sum().item() == 2
-    assert encoded.content["membership"][1, 0].sum().item() == 0
+    assert encoded.content["indices"].tolist() == [[[0, 1]], [[-1, -1]], [[-1, -1]]]
 
 
 def test_vector_owns_the_list_produced_by_a_traversal_query():

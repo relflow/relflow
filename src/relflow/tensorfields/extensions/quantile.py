@@ -355,6 +355,8 @@ def learn(module: Model, observation: TensorDict, *, address: Address, strata: S
 
 @quantile.register(Component.Decoder)
 class Decoder(DecoderBase):
+    coordinatewise = True
+
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema, address)
         self.classification = torch.nn.Linear(schema.d_model, len(Tokens))

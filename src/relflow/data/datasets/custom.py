@@ -108,7 +108,7 @@ class CustomDataModule(ArrowDataModule):
 
     def __init__(
         self,
-        model: relflow.Model,
+        model: relflow.Model | None = None,
         *,
         train: IterableDataset[Mapping[str, Any]] | None = None,
         validate: IterableDataset[Mapping[str, Any]] | None = None,

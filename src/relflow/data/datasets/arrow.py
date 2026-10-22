@@ -56,7 +56,7 @@ class Options:
     shuffle: bool
     sample: float
     epoch_size: int | None
-    shuffle_rows: int
+    shuffle_rows: int | None
     drop_last: bool
     num_workers: int
     persistent_workers: bool
@@ -144,13 +144,24 @@ def convert(unit: ArrowUnit) -> pa.Table:
     return table
 
 
-def scan(source: ArrowSource | ArrowStream, *, schemas: Schemas | None = None) -> Iterator[pa.Table]:
-    """Read an in-memory unit or restartable Arrow factory without row conversion."""
+def scan(
+    source: ArrowSource | ArrowStream, *, schemas: Schemas | None = None, worker: int = 0, workers: int = 1
+) -> Iterator[pa.Table]:
+    """Read an in-memory unit or restartable Arrow factory without row conversion.
+
+    With several workers, each receives a disjoint share before any processing:
+    file sources divide their manifests, streams alternate units, and one
+    in-memory unit strides its rows.
+    """
 
     schemas = Schemas() if schemas is None else schemas
+    if not isinstance(worker, int) or not isinstance(workers, int) or workers < 1 or not 0 <= worker < workers:
+        raise ValueError(f"scan worker {worker!r} must index one of {workers!r} workers")
     if isinstance(source, (pa.Table, pa.RecordBatch)):
         current = convert(source)
         lock(schemas, "source", current.schema, context="Arrow source schema changed")
+        if workers > 1:
+            current = current.take(pa.array(np.arange(worker, current.num_rows, workers), type=pa.int64()))
         yield current
         return
 
@@ -161,6 +172,10 @@ def scan(source: ArrowSource | ArrowStream, *, schemas: Schemas | None = None) -
         stream = source.scanner().to_batches()
     elif isinstance(source, pa.RecordBatchReader):
         stream = source
+    elif isinstance(source, Source):
+        # The manifest divides itself; the remaining stream belongs to this worker.
+        stream = source(worker=worker, workers=workers)
+        worker, workers = 0, 1
     elif callable(source):
         stream = source()
     else:
@@ -180,9 +195,13 @@ def scan(source: ArrowSource | ArrowStream, *, schemas: Schemas | None = None) -
             lock(schemas, "source", declared, context="Arrow source schema changed")
 
         emitted = False
-        for unit in iterator:
+        for index, unit in enumerate(iterator):
             current = convert(unit)
             lock(schemas, "source", current.schema, context="Arrow source schema changed")
+            if declared is None:
+                declared = current.schema
+            if index % workers != worker:
+                continue
             emitted = True
             yield current
         if emitted:
@@ -464,7 +483,22 @@ class ArrowDataset(IterableDataset[Encoded]):
 
     def __iter__(self) -> Iterator[Encoded]:
         epoch, worker, workers = self.iteration()
-        scanned: Iterable[pa.Table] = scan(self.source, schemas=self.schemas)
+        # Dataset-scoped preprocessing and an exact epoch cap need the whole
+        # split, and prediction batches must reassemble in source order; any
+        # other loop lets every worker read, preprocess, sample, shuffle, and
+        # encode only its share.
+        sharded = (
+            workers > 1
+            and self.strata != Strata.predict
+            and self.options.epoch_size is None
+            and all(processor.scope != "dataset" for processor in self.options.preprocessors)
+        )
+        scanned: Iterable[pa.Table] = scan(
+            self.source,
+            schemas=self.schemas,
+            worker=worker if sharded else 0,
+            workers=workers if sharded else 1,
+        )
         try:
             batches: Iterable[pa.Table] = process(
                 scanned,
@@ -494,6 +528,7 @@ class ArrowDataset(IterableDataset[Encoded]):
                 if callable(self.source):
                     batches = limit(batches, size=self.options.epoch_size)
                 if self.options.shuffle:
+                    assert self.options.shuffle_rows is not None
                     batches = shuffle(
                         batches,
                         rows=self.options.shuffle_rows,
@@ -508,9 +543,14 @@ class ArrowDataset(IterableDataset[Encoded]):
                 world_size=self.distributed_world_size,
                 drop_last=self.options.drop_last,
             )
-            # Only distributed ranks require equal steps. Local workers own complete
-            # rank batches, including a partial tail that would otherwise be lost.
-            assigned = (batch for index, batch in enumerate(distributed) if index % workers == worker)
+            # Only distributed ranks require equal steps. A sharded worker already
+            # owns disjoint rows; replaying workers take turns on complete rank
+            # batches, including a partial tail that would otherwise be lost.
+            assigned = (
+                distributed
+                if sharded
+                else (batch for index, batch in enumerate(distributed) if index % workers == worker)
+            )
             yield from self.encode(assigned, epoch=epoch)
         finally:
             # Downstream failures and epoch limits must release suspended scans,
@@ -607,11 +647,17 @@ class ArrowDataModule(lit.LightningDataModule):
     shuffling, and model rebatching. A callable source must create a fresh
     ``RecordBatchReader`` or Arrow-unit iterable for every iteration.
 
-    Arrow Datasets are scanned afresh for each iteration. Distributed ranks and
-    data workers replay the same global stream. Ranks receive disjoint rows from
-    equal global superbatches; local workers take turns processing complete rank
-    batches. File sources freeze their manifest before workers start, then open
-    independent Arrow readers in each consuming process.
+    Arrow Datasets are scanned afresh for each iteration. Distributed ranks
+    replay the same stream and receive disjoint rows from equal global
+    superbatches. Local data workers divide the source before preprocessing:
+    file sources split their manifests, streams alternate units, and in-memory
+    tables stride rows, so each worker preprocesses, samples, shuffles, and
+    encodes only its share and may end with its own partial batch. Prediction,
+    a dataset-scoped preprocessor, or an ``epoch_size`` cap needs the whole
+    split, so each keeps every worker on the complete stream, taking turns on
+    finished batches that reassemble in source order. File sources
+    freeze their manifest before workers start, then open independent Arrow
+    readers in each consuming process.
 
     Pass at least one of ``train``, ``validate``, ``test`` or ``predict``.
     Configuration accepts one value for every split or a mapping keyed by
@@ -621,11 +667,14 @@ class ArrowDataModule(lit.LightningDataModule):
     processed columns for prediction output and requires exact split keys when
     given as a mapping. Data loaders yield :class:`~relflow.data.arrow.Encoded`
     batches with Arrow source metadata and a TensorDict payload.
+
+    ``model`` may be omitted until a model loop or Lightning Trainer binds this
+    module. Direct data-loader access requires a bound model.
     """
 
     def __init__(
         self,
-        model: relflow.Model,
+        model: relflow.Model | None = None,
         *,
         train: ArrowInput | None = None,
         validate: ArrowInput | None = None,
@@ -649,7 +698,7 @@ class ArrowDataModule(lit.LightningDataModule):
         if not isinstance(seed, int) or isinstance(seed, bool):
             raise TypeError("seed must be an integer")
 
-        self.model = model
+        self.model: relflow.Model | None = None
         self.sources = {
             strata: accept(source, strata=strata)
             for strata, source in splits(train=train, validate=validate, test=test, predict=predict).items()
@@ -704,11 +753,10 @@ class ArrowDataModule(lit.LightningDataModule):
             raise ValueError("epoch_size must contain positive integers or None")
 
         configured_rows = expand(shuffle_rows, default=None)
-        windows = {
-            strata: max(model.batch_size * 32, 4096) if rows is None else rows
-            for strata, rows in configured_rows.items()
-        }
-        if any(not isinstance(rows, int) or isinstance(rows, bool) or rows < 1 for rows in windows.values()):
+        if any(
+            rows is not None and (not isinstance(rows, int) or isinstance(rows, bool) or rows < 1)
+            for rows in configured_rows.values()
+        ):
             raise ValueError("shuffle_rows must contain positive integers or None")
 
         dropped = expand(drop_last, default=False)
@@ -739,7 +787,7 @@ class ArrowDataModule(lit.LightningDataModule):
                 shuffle=shuffled[strata],
                 sample=rates[strata],
                 epoch_size=sizes[strata],
-                shuffle_rows=windows[strata],
+                shuffle_rows=configured_rows[strata],
                 drop_last=dropped[strata],
                 num_workers=workers[strata],
                 persistent_workers=persistent[strata],
@@ -764,24 +812,63 @@ class ArrowDataModule(lit.LightningDataModule):
                 if options.num_workers
             }
         self.seed = seed
+        if model is not None:
+            self.bind(model)
+
+    def bind(self, model: relflow.Model) -> None:
+        """Bind once to the model that owns encoding, schema, and batch size."""
+
+        if not isinstance(model, relflow.Model):
+            raise TypeError(f"data module requires a relflow.Model, got {type(model).__name__}")
+        if self.model is model:
+            return
+        if self.model is not None:
+            raise ValueError("data module belongs to a different model; construct a new data module for this model")
+        self.model = model
+        self.options = {
+            strata: replace(options, shuffle_rows=max(model.batch_size * 32, 4096))
+            if options.shuffle_rows is None
+            else options
+            for strata, options in self.options.items()
+        }
+
+    @property
+    def bound_model(self) -> relflow.Model:
+        """Require ownership before accessing model-dependent data settings."""
+
+        if self.model is None:
+            raise RuntimeError(
+                "data module is not bound to a model; pass model=, call bind(model), or pass it to "
+                "model.fit(), model.validate(), model.test(), or model.predict()"
+            )
+        return self.model
+
+    def setup(self, stage: str | None = None) -> None:
+        """Bind native Lightning loops to their attached RelFlow model."""
+
+        if self.trainer is not None:
+            model = self.trainer.lightning_module
+            if not isinstance(model, relflow.Model):
+                raise TypeError(f"data module requires a relflow.Model, got {type(model).__name__}")
+            self.bind(model)
 
     @property
     def schema(self) -> Schema:
         """The schema of the model whose batches this module prepares."""
-        return self.model.schema
+        return self.bound_model.schema
 
     @property
     def batch_size(self) -> int:
-        return self.model.batch_size
+        return self.bound_model.batch_size
 
     @batch_size.setter
     def batch_size(self, value: int) -> None:
         """Let Lightning's batch-size finder update the model-owned batch size."""
-        self.model.batch_size = value
+        self.bound_model.batch_size = value
 
     @property
     def encoding_context(self) -> InterprocessEncodingContext:
-        return self.model.interprocess_encoding_context
+        return self.bound_model.interprocess_encoding_context
 
     @overload
     def dataloader(self, strata: Strata | str, required: Literal[True] = True) -> DataLoader[Encoded]: ...

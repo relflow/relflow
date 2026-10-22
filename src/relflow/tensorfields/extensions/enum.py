@@ -356,6 +356,8 @@ def learn(module: Model, observation: TensorDict, *, address: Address, strata: S
 
 @enum.register(Component.Decoder)
 class Decoder(Classes, DecoderBase):
+    coordinatewise = True
+
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
         request = cast(Request, schema.requests[address])

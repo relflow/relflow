@@ -80,7 +80,6 @@ def assert_shapes(model, kind, capacity):
 
 def assert_encoding(model, kind, field, labels, *, inputs=True):
     vocabulary = REQUESTS[kind].vocabulary(model, ADDRESS)
-    capacity = model.nodes[ADDRESS].embedder.vocab.size
     contents = [
         (field.targets[rf.TensorKey.content], field.targets[rf.TensorKey.state].reshape(-1).eq(rf.Tokens.valued))
     ]
@@ -88,15 +87,18 @@ def assert_encoding(model, kind, field, labels, *, inputs=True):
         contents.append((field.content, field.state.reshape(-1).eq(rf.Tokens.valued)))
         assert field.state.reshape(-1).eq(rf.Tokens.valued).all()
     if kind == "set":
-        membership = torch.zeros(len(labels), capacity)
         unavailable = torch.zeros(len(labels), dtype=torch.int64)
         for row, label in enumerate(labels):
-            if label in vocabulary:
-                membership[row, vocabulary.index(label)] = 1
-            else:
+            if label not in vocabulary:
                 unavailable[row] = 1
         for content, valued in contents:
-            torch.testing.assert_close(content["membership"].reshape(len(labels), capacity)[valued], membership[valued])
+            indices = content["indices"]
+            assert indices.dtype == torch.int64
+            assert indices.shape[:-1] == field.state.shape
+            rows = indices.reshape(len(labels), indices.shape[-1])
+            for row in valued.nonzero().flatten().tolist():
+                expected = [vocabulary.index(labels[row])] if labels[row] in vocabulary else []
+                assert rows[row][rows[row].ge(0)].tolist() == expected
             torch.testing.assert_close(content["unavailable"].reshape(-1)[valued], unavailable[valued])
     else:
         unavailable = model.interprocess_encoding_context[ADDRESS].unavailable_index
@@ -239,8 +241,9 @@ def test_set_rebinding_preserves_distinct_unknown_members_and_pristine_exposure(
     prefetched = encode(source, model.schema, rf.Strata.validate, model.interprocess_encoding_context)
     model.encode(table("set", ["c", "d", "e"]), strata="train")
     bound = bind(model, prefetched, rf.Strata.validate).tensors[ADDRESS]
-    assert bound.content["membership"].reshape(3, 8).sum(-1).tolist() == [1, 0, 0]
-    assert bound.content["membership"].reshape(3, 8)[0, 0] == 1
+    indices = bound.content["indices"].reshape(3, -1)
+    assert indices[0][indices[0].ge(0)].tolist() == [0]
+    assert indices[1:].eq(-1).all()
     assert bound.content["unavailable"].reshape(-1).tolist() == [2, 0, 0]
     assert bound.state.reshape(-1).tolist() == [rf.Tokens.valued, rf.Tokens.valued, rf.Tokens.null]
     assert_counts(model, "set", dict.fromkeys("abcde", 1))
@@ -306,8 +309,10 @@ def test_retained_encoded_unknown_still_forwards_as_unknown_after_growth(kind):
     model.encode(table(kind, ["c", "d", "e"]), strata="train")
     fresh = model.encode(source)
     if kind == "set":
-        assert retained[ADDRESS].content["membership"].shape[-1] == 2
-        assert fresh[ADDRESS].content["membership"].shape[-1] == 8
+        assert retained[ADDRESS].content["indices"].shape[-1] == 1
+        assert fresh[ADDRESS].content["indices"].shape[-1] == 1
+        assert retained[ADDRESS].content["indices"].tolist() == [[[-1]], [[0]]]
+        assert fresh[ADDRESS].content["indices"].tolist() == retained[ADDRESS].content["indices"].tolist()
     with torch.no_grad():
         after = model(retained, strata="predict")
         current = model(fresh, strata="predict")
@@ -322,13 +327,13 @@ def test_retained_encoded_unknown_still_forwards_as_unknown_after_growth(kind):
     assert "never-trained" not in REQUESTS[kind].vocabulary(model, ADDRESS)
 
 
-def test_retained_set_targets_still_train_after_membership_columns_grow():
+def test_retained_set_targets_still_train_after_vocabulary_grows():
     model = build("set")
     source = table("set", ["a", "b"], supervise=True)
     retained = model.encode(source, strata="train")
     pristine = retained.clone()
     model.encode(table("set", ["c", "d", "e"]), strata="train")
-    assert retained[ADDRESS].targets[rf.TensorKey.content]["membership"].shape[-1] == 2
+    assert retained[ADDRESS].targets[rf.TensorKey.content]["indices"].tolist() == [[[0]], [[1]]]
     fresh = model.encode(source, strata="validate")
 
     model.eval()

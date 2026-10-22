@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import enum
 import math
+import os
+import sys
 from collections import OrderedDict
 from dataclasses import InitVar, dataclass
 from threading import RLock
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, TypeAlias, Unpack, cast
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.compute as pc
 import pydantic
 import torch
 from beartype import beartype
@@ -101,6 +105,119 @@ class EmbeddingCache:
                 self.get(key)
 
 
+class TokenCache:
+    """Transient LRU token rows owned by one field and process.
+
+    Entry count and retained strings/array payload are bounded independently;
+    Python container overhead is outside the payload limit. Copies start cold.
+    """
+
+    def __init__(self, capacity: int, byte_limit: int = 64 * 1024 * 1024):
+        self.capacity = capacity
+        self.byte_limit = byte_limit
+        self.values: OrderedDict[str, tuple[np.ndarray, np.ndarray, int]] = OrderedDict()
+        self.retained_bytes = 0
+        self.hits = 0
+        self.misses = 0
+        self.evictions = 0
+        self.process = os.getpid()
+        self.signature: tuple[object, ...] | None = None
+        self.tokenizer: object | None = None
+        self.lock = RLock()
+
+    def __len__(self) -> int:
+        self.isolate()
+        with self.lock:
+            return len(self.values)
+
+    def __reduce__(self):
+        return type(self), (self.capacity, self.byte_limit)
+
+    def isolate(self) -> None:
+        if self.process != os.getpid():
+            # A fork must not inherit an acquired parent lock or input corpus.
+            self.__init__(self.capacity, self.byte_limit)
+
+    def clear(self) -> None:
+        self.isolate()
+        with self.lock:
+            self.values.clear()
+            self.retained_bytes = 0
+            self.hits = self.misses = self.evictions = 0
+
+    def encode(
+        self, texts: list[str], tokenizer: PreTrainedTokenizerBase, *, length: int, batch_size: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Tokenize unique strings, restoring cached rows in the caller's order."""
+        self.isolate()
+        backend = getattr(tokenizer, "backend_tokenizer", None)
+        processing = []
+        for name in ("normalizer", "pre_tokenizer", "post_processor"):
+            component = getattr(backend, name, None)
+            processing.append(component.__getstate__() if component is not None else None)
+        special = repr(getattr(tokenizer, "special_tokens_map", None))
+        signature = (
+            length,
+            getattr(tokenizer, "padding_side", "right"),
+            getattr(tokenizer, "truncation_side", "right"),
+            getattr(tokenizer, "pad_token_id", None),
+            special,
+            getattr(tokenizer, "vocab_size", None),
+            repr(getattr(tokenizer, "added_tokens_decoder", None)),
+            getattr(tokenizer, "do_lower_case", None),
+            getattr(tokenizer, "split_special_tokens", None),
+            tuple(processing),
+        )
+        ids = np.empty((len(texts), length), dtype=np.int64)
+        mask = np.empty_like(ids)
+        with self.lock:
+            if self.tokenizer is not tokenizer or self.signature != signature:
+                self.clear()
+                self.tokenizer = tokenizer
+                self.signature = signature
+            missing: list[int] = []
+            for index, value in enumerate(texts):
+                cached = self.values.get(value)
+                if cached is None:
+                    missing.append(index)
+                    self.misses += 1
+                else:
+                    self.values.move_to_end(value)
+                    ids[index], mask[index] = cached[:2]
+                    self.hits += 1
+            for start in range(0, len(missing), batch_size):
+                selected = missing[start : start + batch_size]
+                encoded = tokenizer(
+                    [texts[index] for index in selected],
+                    padding="max_length",
+                    truncation=True,
+                    max_length=length,
+                    return_tensors="np",
+                )
+                token_ids = np.asarray(encoded[INPUT_IDS], dtype=np.int64)
+                attention = np.asarray(encoded[ATTENTION_MASK], dtype=np.int64)
+                expected = (len(selected), length)
+                if token_ids.shape != expected or attention.shape != expected:
+                    raise ValueError(
+                        f"text tokenizer returned shapes {token_ids.shape}/{attention.shape}, expected {expected}"
+                    )
+                for offset, index in enumerate(selected):
+                    ids[index], mask[index] = token_ids[offset], attention[offset]
+                    text = texts[index]
+                    retained = sys.getsizeof(text) + token_ids[offset].nbytes + attention[offset].nbytes
+                    if retained > self.byte_limit:
+                        continue
+                    while self.values and (
+                        len(self.values) >= self.capacity or self.retained_bytes + retained > self.byte_limit
+                    ):
+                        _, (_, _, removed) = self.values.popitem(last=False)
+                        self.retained_bytes -= removed
+                        self.evictions += 1
+                    self.values[text] = (token_ids[offset].copy(), attention[offset].copy(), retained)
+                    self.retained_bytes += retained
+        return ids, mask
+
+
 class Pooling(enum.StrEnum):
     cls = "cls"
     mean = "mean"
@@ -185,8 +302,12 @@ class Request(RequestBase):
     tokenizer and encoder call. ``encoder_pooling`` selects ``"cls"``,
     ``"mean"``, or ``"pooler"``. ``cache=True`` retains pooled frozen encoder
     outputs in CPU memory; a positive integer bounds the cache with least-used
-    eviction. Caches are per field and process, exclude tokenization, and are
-    not checkpointed. ``jitter`` perturbs pooled training inputs.
+    eviction. Token rows use a separate LRU with 4,096 entries for ``True`` or
+    at most N entries for ``cache=N``, plus a 64 MiB string/array payload limit;
+    Python container overhead is additional. ``True`` leaves the frozen
+    embedding count unbounded. Both caches are per field/process and excluded from
+    checkpoints; token caches also start cold after copying or process changes.
+    ``jitter`` perturbs pooled training inputs.
     Reconstructing masks use ``"l1"`` or ``"l2"`` ``objective`` loss against
     pristine frozen embeddings. Prediction can export an embedding with
     ``embed=True``; this field does not generate text.
@@ -281,29 +402,51 @@ class TensorField(TensorFieldBase[TensorDict]):
             if len(field.values):
                 tokenizer = CachedModel.get_tokenizer(request.model)
                 placement = field.placement.to_numpy(zero_copy_only=False)
-                for start in range(0, len(field.values), request.tokenizer_batch_size):
-                    stop = min(start + request.tokenizer_batch_size, len(field.values))
-                    texts = field.values.slice(start, stop - start).to_numpy(zero_copy_only=False).tolist()
-                    encoded = tokenizer(
-                        texts,
-                        padding="max_length",
-                        truncation=True,
-                        max_length=length,
-                        return_tensors="np",
+                values = field.values
+                if pa.types.is_dictionary(values.type):
+                    values = values.cast(cast(pa.DictionaryType, values.type).value_type)
+                dictionary = pc.dictionary_encode(values)
+                if isinstance(dictionary, pa.ChunkedArray):
+                    dictionary = dictionary.combine_chunks()
+                dictionary = cast(pa.DictionaryArray, dictionary)
+                unique = dictionary.dictionary
+                inverse = dictionary.indices.to_numpy(zero_copy_only=False)
+                token_cache = context.state if request.cache and isinstance(context.state, TokenCache) else None
+                if token_cache is not None:
+                    cached_ids, cached_mask = token_cache.encode(
+                        unique.to_numpy(zero_copy_only=False).tolist(),
+                        tokenizer,
+                        length=length,
+                        batch_size=request.tokenizer_batch_size,
                     )
-                    positions = placement[start:stop]
-                    expected = (stop - start, length)
-                    for name, destination in (
-                        (INPUT_IDS, encoded_ids),
-                        (ATTENTION_MASK, encoded_mask),
-                    ):
-                        values = np.asarray(encoded[name], dtype=np.int64)
-                        if values.shape != expected:
-                            raise ValueError(
-                                f"text tokenizer '{request.model}' returned {name} shape {values.shape}, "
-                                f"expected {expected}"
-                            )
-                        destination[positions] = values
+                    encoded_ids[placement] = cached_ids[inverse]
+                    encoded_mask[placement] = cached_mask[inverse]
+                else:
+                    repeated = len(unique) != len(field.values)
+                    for start in range(0, len(unique), request.tokenizer_batch_size):
+                        stop = min(start + request.tokenizer_batch_size, len(unique))
+                        texts = unique.slice(start, stop - start).to_numpy(zero_copy_only=False).tolist()
+                        encoded = tokenizer(
+                            texts,
+                            padding="max_length",
+                            truncation=True,
+                            max_length=length,
+                            return_tensors="np",
+                        )
+                        selected = np.flatnonzero((inverse >= start) & (inverse < stop)) if repeated else None
+                        positions = placement[selected] if repeated else placement[start:stop]
+                        expected = (stop - start, length)
+                        for name, destination in (
+                            (INPUT_IDS, encoded_ids),
+                            (ATTENTION_MASK, encoded_mask),
+                        ):
+                            values = np.asarray(encoded[name], dtype=np.int64)
+                            if values.shape != expected:
+                                raise ValueError(
+                                    f"text tokenizer '{request.model}' returned {name} shape {values.shape}, "
+                                    f"expected {expected}"
+                                )
+                            destination[positions] = values[inverse[selected] - start] if repeated else values
 
             return TensorDict(
                 {
@@ -348,8 +491,8 @@ class Embedder(EmbedderBase):
         self.hidden_size: int = cached_model.hidden_size
         self.request = request
         self.cache = EmbeddingCache(None if request.cache is True else request.cache) if request.cache else None
+        self.tokens = TokenCache(4096 if request.cache is True else int(request.cache)) if request.cache else None
         self.jitter: Jitter = request.jitter
-        self.padding_side: str = getattr(CachedModel.get_tokenizer(request.model), "padding_side", "right")
 
         self.embeddings = torch.nn.Embedding(
             num_embeddings=len(Tokens),
@@ -360,6 +503,14 @@ class Embedder(EmbedderBase):
             torch.nn.Linear(in_features=self.hidden_size, out_features=schema.d_model),
             torch.nn.GELU(approximate="tanh"),
         )
+
+    @property
+    def context(self) -> TokenCache | None:
+        return self.tokens
+
+    @property
+    def padding_side(self) -> str:
+        return getattr(CachedModel.get_tokenizer(self.request.model), "padding_side", "right")
 
     @beartype
     def encode(
@@ -549,6 +700,8 @@ def learn(
 
 @text.register(Component.Decoder)
 class Decoder(DecoderBase):
+    coordinatewise = True
+
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 

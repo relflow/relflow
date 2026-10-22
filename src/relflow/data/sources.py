@@ -224,17 +224,23 @@ class Source:
             # Retained exception tracebacks must not extend client lifetimes.
             fragment = dataset = filesystem = None
 
-    def __call__(self) -> Iterator[pa.RecordBatch]:
+    def __call__(self, *, worker: int = 0, workers: int = 1) -> Iterator[pa.RecordBatch]:
+        """Scan the frozen manifest, reading only this worker's files when the manifest can be divided."""
         if self.manifest is None:
             self.manifest = self.discover()
         manifest = self.manifest
+        if not isinstance(worker, int) or not isinstance(workers, int) or workers < 1 or not 0 <= worker < workers:
+            raise ValueError(f"{self.label}: worker {worker!r} must index one of {workers!r} workers")
+        # Fewer files than workers cannot be divided by file; every worker then
+        # scans everything and the caller divides the stream instead.
+        files = manifest.files[worker::workers] if len(manifest.files) >= workers else manifest.files
         filesystem = None
         dataset = None
         batches = None
         try:
             filesystem, _ = self.connect()
             dataset = ds.dataset(
-                [item.path for item in manifest.files],
+                [item.path for item in files],
                 filesystem=filesystem,
                 format=manifest.format,
                 schema=manifest.schema,
@@ -242,8 +248,8 @@ class Source:
                 partition_base_dir=manifest.partition_base_dir,
                 exclude_invalid_files=False,
             )
-            current = filesystem.get_file_info([item.path for item in manifest.files])
-            for expected, actual in zip(manifest.files, current, strict=True):
+            current = filesystem.get_file_info([item.path for item in files])
+            for expected, actual in zip(files, current, strict=True):
                 if actual.type != fs.FileType.File or (actual.size, actual.mtime_ns) != (
                     expected.size,
                     expected.modified,
@@ -255,8 +261,11 @@ class Source:
             # Direct iteration avoids RecordBatchReader's native wait when
             # JSON scans need Python filesystem callbacks.
             batches = dataset.scanner().to_batches()
+            divided = len(files) < len(manifest.files)
             try:
-                for batch in batches:
+                for index, batch in enumerate(batches):
+                    if not divided and workers > 1 and index % workers != worker:
+                        continue
                     emitted = True
                     yield batch
             finally:

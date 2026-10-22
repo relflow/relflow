@@ -436,7 +436,7 @@ def test_set_accepts_arrow_lists_and_scalar_labels(value, expected_vocabulary):
 
     assert field.state.tolist() == [[Tokens.valued.value]]
     assert rf.Set.vocabulary(model, "/labels") == expected_vocabulary
-    assert field.content["membership"].sum(dim=-1).tolist() == [[float(len(expected_vocabulary))]]
+    assert field.content["indices"].tolist() == [[list(range(len(expected_vocabulary)))]]
 
 
 @pytest.mark.parametrize("query", [None, "source"], ids=["direct", "query"])
@@ -449,8 +449,7 @@ def test_set_treats_scalar_bytes_as_one_label(query):
     )[rf.Address("/identity")]
 
     assert rf.Set.vocabulary(model, "/identity") == (b"AB",)
-    assert field.content["membership"].sum(dim=-1).tolist() == [[1.0], [1.0]]
-    assert field.content["membership"][0].tolist() == field.content["membership"][1].tolist()
+    assert field.content["indices"].tolist() == [[[0]], [[0]]]
 
 
 def test_place_validates_encoded_count_and_value_shape():

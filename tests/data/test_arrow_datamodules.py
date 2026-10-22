@@ -67,6 +67,112 @@ def test_public_surface_has_five_modules_and_no_source_specific_datasets():
 
 
 @pytest.mark.parametrize(
+    "module_type,source",
+    [
+        (rf.ArrowDataModule, pa.table({"id": [1, 2]})),
+        (rf.PolarsDataModule, pl.DataFrame({"id": [1, 2]})),
+        (rf.CustomDataModule, Records([{"id": 1}, {"id": 2}])),
+        (rf.SyntheticDataModule, lambda: iter([{"id": 1}, {"id": 2}])),
+        (rf.DuckDBDataModule, "SELECT id FROM (VALUES (1), (2)) observations(id) ORDER BY id"),
+    ],
+)
+def test_all_data_modules_allow_deferred_model_binding(module_type, source):
+    module = module_type(validate=source, shuffle=False)
+    configured = model()
+
+    assert module.model is None
+    module.bind(configured)
+
+    assert module.model is configured
+    assert module.schema is configured.schema
+    assert module.encoding_context == configured.interprocess_encoding_context
+    batches = list(module.val_dataloader())
+    assert pa.concat_tables([batch.source for batch in batches])["id"].to_pylist() == [1, 2]
+
+
+@pytest.mark.parametrize("setting", ["schema", "batch_size", "encoding_context"])
+def test_unbound_model_settings_raise_an_actionable_error(setting):
+    module = rf.ArrowDataModule(model=None, train=pa.table({"id": [1]}))
+
+    with pytest.raises(RuntimeError, match=r"not bound.*model\.fit"):
+        getattr(module, setting)
+
+
+def test_unbound_loader_access_does_not_open_the_source():
+    calls = 0
+
+    def source():
+        nonlocal calls
+        calls += 1
+        yield pa.table({"id": [1]})
+
+    module = rf.ArrowDataModule(train=source)
+
+    with pytest.raises(RuntimeError, match="not bound"):
+        module.train_dataloader()
+    with pytest.raises(RuntimeError, match="not bound"):
+        module.batch_size = 2
+
+    assert calls == 0
+    assert module.val_dataloader() is None
+    module.bind(model())
+    assert calls == 0
+    assert len(list(module.train_dataloader())) == 1
+    assert calls == 1
+
+
+def test_binding_is_idempotent_and_rejects_a_different_model():
+    configured = model()
+    module = rf.ArrowDataModule(configured, train=pa.table({"id": [1]}))
+    original = module.options.copy()
+
+    module.bind(configured)
+    with pytest.raises(ValueError, match="different model"):
+        module.bind(model())
+
+    assert module.model is configured
+    assert module.options == original
+
+
+def test_binding_requires_a_relflow_model():
+    module = rf.ArrowDataModule(train=pa.table({"id": [1]}))
+
+    with pytest.raises(TypeError, match="requires a relflow.Model"):
+        module.bind(object())
+
+    assert module.model is None
+
+
+def test_lazy_binding_resolves_model_dependent_defaults_and_preserves_overrides():
+    source = pa.table({"id": [1]})
+    module = rf.ArrowDataModule(train=source, validate=source, shuffle_rows={"validate": 17})
+    configured = model(batch_size=256)
+    explicit = rf.ArrowDataModule(configured, train=source, validate=source, shuffle_rows={"validate": 17})
+
+    module.bind(configured)
+
+    assert module.options == explicit.options
+    assert module.options[Strata.train].shuffle_rows == 8192
+    assert module.options[Strata.validate].shuffle_rows == 17
+    configured.batch_size = 1
+    module.bind(configured)
+    assert module.options[Strata.train].shuffle_rows == 8192
+
+
+def test_native_trainer_setup_uses_the_same_binding_guard():
+    module = rf.ArrowDataModule(train=pa.table({"id": [1]}))
+    configured = model()
+    module.trainer = SimpleNamespace(lightning_module=configured)
+
+    module.setup("fit")
+
+    assert module.model is configured
+    module.trainer = SimpleNamespace(lightning_module=model())
+    with pytest.raises(ValueError, match="different model"):
+        module.setup("validate")
+
+
+@pytest.mark.parametrize(
     "source",
     [
         pa.table({"id": [1, 2]}),
@@ -243,7 +349,7 @@ def test_arrow_dataset_uses_distributed_rank_and_world_size(monkeypatch: pytest.
     assert dataset.distributed_world_size == 2
 
 
-def test_arrow_workers_take_complete_batches_from_the_parent_rank(monkeypatch: pytest.MonkeyPatch):
+def test_arrow_workers_shard_rows_before_ranks_divide_their_superbatches(monkeypatch: pytest.MonkeyPatch):
     module = rf.ArrowDataModule(
         model=model(),
         validate=pa.table({"id": list(range(24))}),
@@ -257,7 +363,52 @@ def test_arrow_workers_take_complete_batches_from_the_parent_rank(monkeypatch: p
 
     batches = collect(dataset, monkeypatch)
 
-    assert [batch["id"].to_pylist() for batch in batches] == [[5, 7], [17, 19]]
+    # Worker 1 strides rows 1, 4, 7, ...; rank 1 takes the odd positions of each superbatch of four.
+    assert [batch["id"].to_pylist() for batch in batches] == [[4, 10], [16, 22]]
+
+
+def test_arrow_workers_preprocess_disjoint_shares_of_a_stream(monkeypatch: pytest.MonkeyPatch):
+    seen: list[list[int]] = []
+
+    @rf.preprocess
+    def record(frame: pl.DataFrame) -> pl.DataFrame:
+        seen.append(frame["id"].to_list())
+        return frame
+
+    def units():
+        for start in range(0, 12, 2):
+            yield pa.table({"id": list(range(start, start + 2))})
+
+    module = rf.ArrowDataModule(model=model(), validate=units, preprocessor=record, shuffle=False, num_workers=3)
+    dataset = module.val_dataloader().dataset
+    values = []
+    for worker in range(3):
+        monkeypatch.setattr(arrow, "get_worker_info", lambda: SimpleNamespace(id=worker, num_workers=3))
+        values.extend(value for batch in collect(dataset, monkeypatch) for value in batch["id"].to_pylist())
+
+    assert sorted(values) == list(range(12))
+    assert sorted(seen) == [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11]]
+
+
+def test_dataset_scope_preprocessing_keeps_workers_on_the_complete_stream(monkeypatch: pytest.MonkeyPatch):
+    calls: list[int] = []
+
+    @rf.preprocess(scope="dataset")
+    def whole(frame: pl.DataFrame) -> pl.DataFrame:
+        calls.append(frame.height)
+        return frame
+
+    module = rf.ArrowDataModule(
+        model=model(), validate=pa.table({"id": list(range(6))}), preprocessor=whole, shuffle=False, num_workers=2
+    )
+    dataset = module.val_dataloader().dataset
+    batches = []
+    for worker in range(2):
+        monkeypatch.setattr(arrow, "get_worker_info", lambda: SimpleNamespace(id=worker, num_workers=2))
+        batches.extend(batch["id"].to_pylist() for batch in collect(dataset, monkeypatch))
+
+    assert calls == [6, 6]
+    assert sorted(batches) == [[0, 1], [2, 3], [4, 5]]
 
 
 @pytest.mark.parametrize(
@@ -288,6 +439,7 @@ def test_arrow_worker_count_preserves_distributed_rank_ownership_and_equal_tails
         num_workers=workers,
     )
     monkeypatch.setattr(arrow, "world_size", lambda: 2)
+    owned: dict[int, list[int]] = {}
     for rank in range(2):
         monkeypatch.setattr(arrow, "rank", lambda: rank)
         dataset = module.val_dataloader().dataset
@@ -297,7 +449,12 @@ def test_arrow_worker_count_preserves_distributed_rank_ownership_and_equal_tails
             batches.extend(collect(dataset, monkeypatch))
 
         assert sorted(len(batch) for batch in batches) == [1, 2, 2, 2, 2, 2]
-        assert sorted(value for batch in batches for value in batch["id"].to_pylist()) == list(range(rank, 22, 2))
+        owned[rank] = sorted(value for batch in batches for value in batch["id"].to_pylist())
+
+    assert owned[0] == list(range(0, 22, 2)) if workers == 1 else len(owned[0]) == 11
+    assert len(owned[1]) == 11
+    assert not set(owned[0]) & set(owned[1])
+    assert len(set(owned[0]) | set(owned[1])) == 22
 
 
 def test_arrow_dataset_source_scans_through_the_shared_pipeline(monkeypatch: pytest.MonkeyPatch):

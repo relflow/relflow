@@ -631,6 +631,9 @@ class Model(lit.LightningModule):
     ) -> Self:
         """Fit a data module and automatically restore its best saved model state.
 
+        RelFlow data modules may omit their model at construction; this loop
+        binds them to this model before setup and data loading.
+
         Unspecified hardware uses all available devices, DDP with unused-parameter
         detection across multiple devices or nodes, and BF16 mixed precision where supported. Native training-step
         metrics reach attached loggers every ``log_every_n_steps`` optimizer
@@ -732,7 +735,10 @@ class Model(lit.LightningModule):
         verbose: bool = True,
         **trainer_options: Any,
     ) -> list[dict[str, float]]:
-        """Evaluate validation metrics, optionally updating the per-device batch size."""
+        """Bind an unbound data module and evaluate validation metrics.
+
+        ``batch_size`` optionally updates the current per-device size.
+        """
         runner = training.trainer(
             self,
             datamodule,
@@ -756,7 +762,10 @@ class Model(lit.LightningModule):
         verbose: bool = True,
         **trainer_options: Any,
     ) -> list[dict[str, float]]:
-        """Evaluate test metrics, optionally updating the per-device batch size."""
+        """Bind an unbound data module and evaluate test metrics.
+
+        ``batch_size`` optionally updates the current per-device size.
+        """
         runner = training.trainer(
             self,
             datamodule,
@@ -909,7 +918,8 @@ class Model(lit.LightningModule):
         output. A supplied size also becomes the model's current batch size.
         Omission processes the direct input as one batch.
 
-        Data-module inference accepts Lightning callbacks and Trainer options.
+        Data-module inference accepts Lightning callbacks and Trainer options,
+        and binds an unbound RelFlow data module before loading its batches.
         ``batch_size`` updates the current per-device size for model-owned data
         loaders; omission retains the current size.
         Configure preprocessing/retention on the data module and postprocessing

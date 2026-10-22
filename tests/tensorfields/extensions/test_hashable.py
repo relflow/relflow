@@ -544,7 +544,7 @@ def test_equal_values_stay_matched_within_each_rotating_batch(monkeypatch: pytes
         assert not torch.allclose(projections_by_batch[0][0], later[0])
 
 
-@pytest.mark.parametrize("strata", [Strata.test, Strata.predict])
+@pytest.mark.parametrize("strata", [Strata.validate, Strata.test, Strata.predict])
 def test_inference_uses_stable_unsalted_hashes(strata: Strata, monkeypatch: pytest.MonkeyPatch):
     from relflow.data import iterables
 
@@ -561,6 +561,31 @@ def test_inference_uses_stable_unsalted_hashes(strata: Strata, monkeypatch: pyte
 
     assert torch.equal(first["/items/id"].content, second["/items/id"].content)
     assert torch.equal(first["/owner"].content, second["/owner"].content)
+
+
+def test_validation_and_prediction_preserve_identical_key_payload_context():
+    model = rf.Model.xs(
+        dropout=0.0,
+        owner=rf.Hash(n_hashes=4),
+        items=rf.Branch(length=4, id=rf.Hash(n_hashes=4), value=rf.Number, reduction=None),
+        target=rf.Number(mask=True),
+    ).eval()
+    records = table(
+        [
+            {"owner": "alice", "items": [{"id": "bob", "value": 2.0}, {"id": "alice", "value": 7.0}], "target": 7.0},
+            {"owner": "bob", "items": [{"id": "bob", "value": 3.0}], "target": 3.0},
+        ]
+    )
+    validation = model.encode(records, strata=Strata.validate)
+    prediction = model.encode(records.drop(["target"]), strata=Strata.predict)
+    for address in ("/owner", "/items/id", "/items/value"):
+        torch.testing.assert_close(validation[address].content, prediction[address].content, rtol=0, atol=0)
+    with torch.inference_mode():
+        actual = next(value for value in model(validation, strata=Strata.validate) if value.address == "/target")
+        expected = next(value for value in model(prediction, strata=Strata.predict) if value.address == "/target")
+    actual = actual.payload[TensorKey.content]
+    expected = expected.payload[TensorKey.content]
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 
 
 def test_hashable_does_not_register_a_salt_callback():

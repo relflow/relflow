@@ -127,13 +127,12 @@ def attend(
     value: torch.Tensor,
     packing: Packed,
 ) -> torch.Tensor:
-    q = attention.q_proj(query).reshape(-1, attention.nhead, attention.head_dim)
-    k = attention.k_proj(key).reshape(-1, attention.n_kv_heads, attention.head_dim)
-    v = attention.v_proj(value).reshape(-1, attention.n_kv_heads, attention.head_dim)
+    q, k, v = attention.project(query, key, value)
     if attention.rotary is not None:
         q = attention.rotary(q.transpose(0, 1), positions=packing.positions).transpose(0, 1)
         k = attention.rotary(k.transpose(0, 1), positions=packing.positions).transpose(0, 1)
-    context = torch.zeros_like(q)
+    outputs: list[torch.Tensor] = []
+    placements: list[torch.Tensor] = []
     for group in packing.groups:
         # FlashAttention's CUDA launch has a bounded batch dimension. Split
         # independent rows, keeping each row's tokens and rotary positions intact.
@@ -158,7 +157,14 @@ def attend(
                 selected_q, selected_k, selected_v, dropout_p=0.0, enable_gqa=attention.nhead != attention.n_kv_heads
             )
             attended = attended.transpose(1, 2).reshape(-1, attention.nhead, attention.head_dim)
-            context = context.index_copy(0, indices, attended)
+            outputs.append(attended)
+            placements.append(indices)
+    context = torch.zeros_like(q)
+    # One scatter also avoids a full-output gradient copy per length group.
+    if len(outputs) == 1:
+        context.index_copy_(0, placements[0], outputs[0])
+    elif outputs:
+        context.index_copy_(0, torch.cat(placements), torch.cat(outputs))
     return attention.out_proj(context.reshape(-1, attention.d_model))
 
 

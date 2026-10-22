@@ -315,10 +315,9 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             return torch.from_numpy(field.place(tokens, fill=0))
 
         content = encode(input)
-        target_content = encode(target)
+        target_content = encode(target) if address in schema.objectives else None
 
         state_tensor = torch.from_numpy(input.dense)
-        target_state = torch.from_numpy(target.dense)
         if strata == Strata.train:
             p_unavailable: float = cast(Request, schema.requests[address]).p_unavailable
             unavailable_index = -1
@@ -337,9 +336,11 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             inferred=inferred,
             targets=TensorDict(
                 {
-                    TensorKey.state: target_state,
+                    TensorKey.state: torch.from_numpy(target.dense),
                     TensorKey.content: target_content,
-                },
+                }
+                if target_content is not None
+                else {},
                 batch_size=input.shape,
             ),
             batch_size=input.batch_size,
@@ -558,8 +559,9 @@ def bind(
     embedder.resize(size, resize)
     field = cast(TensorField, field)
     field.content = mapping.to(field.content.device)[field.content]
-    values = cast(torch.Tensor, field.targets[TensorKey.content])
-    field.targets[TensorKey.content] = mapping.to(values.device)[values]
+    if TensorKey.content in field.targets:
+        values = cast(torch.Tensor, field.targets[TensorKey.content])
+        field.targets[TensorKey.content] = mapping.to(values.device)[values]
     if observation is not None:
         counter_mapping = mapping.clone()
         counter_mapping[-1] = size
@@ -670,6 +672,8 @@ class ClusterRuntime:
 
 @cluster.register(Component.Decoder)
 class Decoder(DecoderBase):
+    coordinatewise = True
+
     def __init__(self, schema: Schema, address: Address):
         # Cluster assignments belong to stable identities. Row-varying sibling
         # values may supervise them through downstream objectives, but must not

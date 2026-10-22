@@ -3,18 +3,20 @@ import sys
 from types import SimpleNamespace
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.compute as pc
 import pytest
 import torch
 from tensordict import TensorDict
 
 import relflow as rf
-from relflow.data.ragged import coalesce
+from relflow.data.ragged import RaggedField, coalesce
 from relflow.helpers import Jitter
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
 from relflow.structs.tree import Mask
-from relflow.tensorfields.base import TENSORFIELDS
+from relflow.tensorfields.base import TENSORFIELDS, Context
 from relflow.tensorfields.extensions.text import (
     ATTENTION_MASK,
     DEFAULT_TEXT_MODEL,
@@ -111,8 +113,9 @@ class FakeTokenizer:
         for text in texts:
             used = min(max_length, max(1, min(2, len(text))))
             tokens = list(range(len(text), len(text) + used))
-            token_rows.append(tokens + [0] * (max_length - used))
-            mask_rows.append([1] * used + [0] * (max_length - used))
+            padding = [0] * (max_length - used)
+            token_rows.append(padding + tokens if self.padding_side == "left" else tokens + padding)
+            mask_rows.append(padding + [1] * used if self.padding_side == "left" else [1] * used + padding)
 
         return {
             INPUT_IDS: np.asarray(token_rows, dtype=np.int64),
@@ -335,6 +338,81 @@ def test_text_tensorfield_tokenizes_bounded_numpy_batches(monkeypatch: pytest.Mo
     assert tokenizer.batches == [["a", "bb"], ["ccc", "dddd"], ["eeeee"]]
     assert field.content[INPUT_IDS].shape == (3, 1, 2, 4)
     assert torch.count_nonzero(field.content[INPUT_IDS][2, 0, 1]) == 0
+
+
+@pytest.mark.parametrize("storage", ["string", "large_string", "chunked", "dictionary", "chunked_dictionary"])
+@pytest.mark.parametrize("padding_side", ["left", "right"])
+@pytest.mark.parametrize("max_length", [1, 4])
+@pytest.mark.parametrize("objective", [False, True])
+def test_text_tokenizes_unique_strings_and_restores_sparse_coordinates(
+    monkeypatch: pytest.MonkeyPatch, storage: str, padding_side: str, max_length: int, objective: bool
+):
+    patch_hf(monkeypatch)
+    tokenizer = CachedModel.get_tokenizer("bert-base-uncased")
+    tokenizer.padding_side = padding_side
+    texts = ["alpha", "", "alpha", "bb", "bb"]
+    values = pa.array(texts, type=pa.large_string() if storage == "large_string" else pa.string())
+    if storage == "chunked":
+        values = pa.chunked_array([values.slice(0, 3), values.slice(3)])
+    elif storage == "dictionary":
+        values = pa.DictionaryArray.from_arrays(
+            pa.array([1, 0, 1, 2, 2], type=pa.int32()), pa.array(["", "alpha", "bb", "unobserved"])
+        )
+    elif storage == "chunked_dictionary":
+        values = pa.chunked_array([pc.dictionary_encode(values.slice(0, 3)), pc.dictionary_encode(values.slice(3))])
+    positions = np.array([0, 1, 3, 5, 7], dtype=np.int64)
+    states = np.array(
+        [
+            Tokens.valued,
+            Tokens.valued,
+            Tokens.null,
+            Tokens.valued,
+            Tokens.null,
+            Tokens.valued,
+            Tokens.padded,
+            Tokens.valued,
+        ],
+        dtype=np.int8,
+    )
+    target = RaggedField(values, pa.array(states), pa.array(positions), (4, 1, 2))
+    input = (
+        RaggedField(
+            pa.array([], type=pa.string()),
+            pa.array(np.where(states == Tokens.valued, Tokens.masked, states), type=pa.int8()),
+            pa.array([], type=pa.int64()),
+            target.shape,
+        )
+        if objective
+        else target
+    )
+    schema = build_schema(max_length=max_length, tokenizer_batch_size=2, mask=objective)
+    present = torch.from_numpy(states != Tokens.padded).reshape(target.shape)
+    field = TensorField.new(
+        input=input,
+        target=target,
+        present=present,
+        trainable=present.clone() if objective else torch.zeros_like(present),
+        inferred=torch.zeros_like(present),
+        address=ADDRESS,
+        schema=schema,
+        strata=Strata.train,
+        context=Context(),
+    )
+
+    reference = FakeTokenizer()
+    reference.padding_side = padding_side
+    expected = reference(texts, padding="max_length", truncation=True, max_length=max_length, return_tensors="np")
+    content = field.targets[TensorKey.content] if objective else field.content
+    for name in (INPUT_IDS, ATTENTION_MASK):
+        dense = np.zeros((8, max_length), dtype=np.int64)
+        dense[positions] = expected[name]
+        torch.testing.assert_close(content[name], torch.from_numpy(dense.reshape(4, 1, 2, max_length)))
+    assert tokenizer.batches == [["alpha", ""], ["bb"]]
+    assert torch.equal(field.state, torch.from_numpy(input.dense))
+    assert torch.equal(field.present, present)
+    if objective:
+        assert not field.content[INPUT_IDS].any()
+        assert not field.content[ATTENTION_MASK].any()
 
 
 def test_text_embedder_and_decoder_shapes(monkeypatch: pytest.MonkeyPatch):

@@ -18,6 +18,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
+    ClassVar,
     Generic,
     Protocol,
     Self,
@@ -34,7 +35,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import torch
 from lightning.pytorch import Callback
-from tensordict import TensorClass, TensorDict
+from tensordict import TensorClass, TensorDict, TensorDictBase
 from typing_extensions import TypeVar as DefaultTypeVar
 
 from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool
@@ -269,7 +270,16 @@ class EmbedderBase(torch.nn.Module):
 
 
 class DecoderBase(torch.nn.Module):
-    """Base class for tensorfield decoders."""
+    """Decode field coordinates with extension-owned output heads.
+
+    A concrete decoder may declare ``coordinatewise = True`` when ``decode``
+    treats every target coordinate independently. Objective execution can then
+    omit unselected queries while restoring the original tensor-tree geometry.
+    Custom forward/context methods, hooks, and active dropout keep dense shapes
+    and their original random-number schedule.
+    """
+
+    coordinatewise: ClassVar[bool] = False
 
     def __init__(self, schema: Schema, address: Address, *, conditioned: bool = True) -> None:
         super().__init__()
@@ -382,6 +392,75 @@ class DecoderBase(torch.nn.Module):
     def decode(self, pooled: torch.Tensor) -> TensorDict:
         raise NotImplementedError("decoder must implement decode(pooled)")
 
+    def objective(
+        self,
+        parcels: list[Parcel],
+        *,
+        selection: torch.Tensor,
+        contexts: list[Parcel] | None = None,
+        batch_size: int,
+        device: torch.device,
+        embed: bool = False,
+        target_shape: tuple[int, ...] | None = None,
+        geometry: TensorDict | None = None,
+    ) -> Prediction:
+        """Decode objectives without imposing selection on custom implementations."""
+        from relflow.architecture.compiler import canonical
+        from relflow.architecture.packed import customized
+        from relflow.architecture.pool import CrossAttentionBlock
+
+        arguments: dict[str, Any] = dict(
+            contexts=contexts,
+            batch_size=batch_size,
+            device=device,
+            embed=embed,
+            target_shape=target_shape,
+            geometry=geometry,
+        )
+        count = math.prod(target_shape) if target_shape is not None else self.n_context
+        # CUDA measurements found launch/synchronization overhead dominant below
+        # this query volume. Scalar/all-selected targets retain the dense path.
+        substantial = device.type != "cuda" or batch_size * count * self.d_model >= 1_048_576
+        original = (
+            type(self).__dict__.get("coordinatewise", False)
+            and getattr(self.forward, "__func__", None) is DecoderBase.forward
+            and getattr(self.context, "__func__", None) is DecoderBase.context
+        )
+        if not embed and count > 1 and substantial and original:
+            pool = self.pool
+            canonical_pool = (
+                isinstance(pool, LearnedQueryCrossAttention)
+                and type(pool).forward is LearnedQueryCrossAttention.forward
+                and type(pool).compute is LearnedQueryCrossAttention.compute
+                and canonical(pool, pool.compute)
+                and pool.mass_projection is None
+            ) or (isinstance(pool, MeanPool) and type(pool).forward is MeanPool.forward)
+            layers = [pool, *([self.context_projection] if self.context_projection is not None else [])]
+            hooks = ("_forward_pre_hooks", "_forward_hooks", "_backward_pre_hooks", "_backward_hooks")
+            observed = any(
+                "forward" in module.__dict__ or any(getattr(module, name) for name in hooks)
+                for module in self.modules()
+            )
+            stochastic = any(
+                isinstance(module, torch.nn.Dropout) and module.training and module.p > 0 for module in self.modules()
+            ) or (
+                isinstance(pool, LearnedQueryCrossAttention)
+                and any(
+                    block.attention.training and block.attention.dropout_p > 0
+                    for block in cast(Iterator[CrossAttentionBlock], iter(pool.blocks))
+                )
+            )
+            if (
+                canonical_pool
+                and not observed
+                and not stochastic
+                and not customized(
+                    layers, additional=(LearnedQueryCrossAttention, CrossAttentionBlock, MeanPool, torch.nn.ModuleList)
+                )
+            ):
+                arguments["selection"] = selection
+        return self(parcels, **arguments)
+
     def forward(
         self,
         parcels: list[Parcel],
@@ -392,6 +471,7 @@ class DecoderBase(torch.nn.Module):
         embed: bool = False,
         target_shape: tuple[int, ...] | None = None,
         geometry: TensorDict | None = None,
+        selection: torch.Tensor | None = None,
     ) -> Prediction:
         if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size < 0:
             raise ValueError(f"decoder batch_size must be a non-negative integer, got {batch_size!r}")
@@ -415,6 +495,33 @@ class DecoderBase(torch.nn.Module):
             queries = self.pool.queries.index_select(0, indices.reshape(-1)).unsqueeze(0).expand(batch_size, -1, -1)
             if None in self.shape:
                 queries = queries + signal(positions, self.d_model, dtype=queries.dtype)
+
+        selected_indices = None
+        selected_present = None
+        original_count = count
+        if embed:
+            selection = None
+        if selection is not None:
+            if (
+                selection.dtype != torch.bool
+                or selection.numel() != batch_size * count
+                or selection.device.type != device.type
+                or (device.index is not None and selection.device.index != device.index)
+            ):
+                raise ValueError(f"decoder selection at '{self.address}' requires bool shape {(batch_size, *shape)}")
+            selection = selection.reshape(batch_size, count)
+            width = int(selection.sum(dim=1).max().item()) if batch_size else 0
+            if width * 2 <= count:
+                ranks = torch.arange(count, device=device).expand(batch_size, count)
+                selected_indices = torch.where(selection, ranks, count).sort(dim=1).values[:, :width]
+                selected_present = selected_indices < count
+                selected_indices = selected_indices.clamp_max(max(count - 1, 0))
+                positions = positions.gather(1, selected_indices)
+                if isinstance(self.pool, LearnedQueryCrossAttention):
+                    if queries is None:
+                        queries = self.pool.queries.unsqueeze(0).expand(batch_size, -1, -1)
+                    queries = queries.gather(1, selected_indices.unsqueeze(-1).expand(-1, -1, self.d_model))
+                count = width
 
         if not parcels:
             pooled = torch.zeros(
@@ -472,7 +579,13 @@ class DecoderBase(torch.nn.Module):
                 memory_positions.append(ranks + offset.unsqueeze(-1))
                 offset = offset + span
             memory_positions = torch.cat(memory_positions, dim=1)
-            context = self.context(contexts or (), batch_size=batch_size, n_context=count)
+            context = (
+                self.context(contexts or (), batch_size=batch_size, n_context=original_count)
+                if selected_indices is None
+                else self.context(
+                    contexts or (), batch_size=batch_size, n_context=original_count, selection=selected_indices
+                )
+            )
             if isinstance(self.pool, LearnedQueryCrossAttention):
                 pooled = self.pool(
                     stacked,
@@ -492,6 +605,34 @@ class DecoderBase(torch.nn.Module):
         payload = self.decode(pooled)
         if embed:
             payload[TensorKey.embedding] = pooled
+        if selected_indices is not None:
+            rows = torch.arange(batch_size, device=device).unsqueeze(-1)
+            destination = (rows * original_count + selected_indices).reshape(-1)
+            selected_present = cast(torch.Tensor, selected_present)
+
+            def restore(source: TensorDictBase) -> TensorDict:
+                # Extensions may include the target axis in nested batch metadata.
+                batch = list(source.batch_size)
+                if len(batch) > 1:
+                    batch[1] = original_count
+                result = TensorDict({}, batch_size=batch, device=source.device, names=source.names)
+                for key, value in source.items():
+                    if isinstance(value, TensorDictBase):
+                        result[key] = restore(value)
+                        continue
+                    if not isinstance(value, torch.Tensor):
+                        raise TypeError(
+                            f"decoder payload at '{self.address}' requires tensor leaves, got {type(value).__name__}"
+                        )
+                    trailing = value.shape[2:]
+                    dense = value.new_zeros(batch_size * original_count, *trailing)
+                    active = selected_present.to(value.device).reshape(*selected_present.shape, *([1] * len(trailing)))
+                    values = value.masked_fill(~active, 0.0).reshape(batch_size * count, *trailing)
+                    dense.index_add_(0, destination.to(value.device), values)
+                    result[key] = dense.reshape(batch_size, original_count, *trailing)
+                return result
+
+            payload = restore(payload)
 
         return Prediction(
             payload=payload,
@@ -500,7 +641,12 @@ class DecoderBase(torch.nn.Module):
         )
 
     def context(
-        self, parcels: tuple[Parcel, ...] | list[Parcel], *, batch_size: int, n_context: int | None = None
+        self,
+        parcels: tuple[Parcel, ...] | list[Parcel],
+        *,
+        batch_size: int,
+        n_context: int | None = None,
+        selection: torch.Tensor | None = None,
     ) -> torch.Tensor | None:
         """Build one data-conditioned decoder query per target coordinate."""
 
@@ -518,6 +664,9 @@ class DecoderBase(torch.nn.Module):
             present = parcel.present.reshape(batch_size, math.prod(parcel.present.shape[1:]))
             if tuple(payload.shape) != expected:
                 continue
+            if selection is not None:
+                payload = payload.gather(1, selection.unsqueeze(-1).expand(-1, -1, self.d_model))
+                present = present.gather(1, selection)
             aligned.append(payload)
             presence.append(present)
 
