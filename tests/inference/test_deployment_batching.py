@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
+import decimal
 from types import SimpleNamespace
 
 import orjson
@@ -17,6 +19,8 @@ from relflow.inference.deployment import Deployment, ErrorItem
 
 
 class PredictModel:
+    batch_size = 1
+
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
@@ -312,7 +316,7 @@ def test_deployment_postprocessor_must_preserve_request_cardinality():
 
     server = runtime(postprocessor=discard)
 
-    with pytest.raises(ValueError, match="returned 0 rows for 1 valid"):
+    with pytest.raises(RuntimeError, match="returned 0 rows for 1 valid"):
         server.predict_payloads([{"id": 1}])
 
 
@@ -332,7 +336,7 @@ def test_runtime_rejects_non_arrow_model_output():
 
     server = runtime(model=BrokenModel())
 
-    with pytest.raises(TypeError, match="Model.predict must return a pyarrow.Table"):
+    with pytest.raises(RuntimeError, match="Model.predict must return a pyarrow.Table"):
         server.predict_payloads([{"id": 1}])
 
 
@@ -343,7 +347,7 @@ def test_runtime_rejects_prediction_row_count_drift():
 
     server = runtime(model=BrokenModel())
 
-    with pytest.raises(ValueError, match="returned 0 rows for 1 valid"):
+    with pytest.raises(RuntimeError, match="returned 0 rows for 1 valid"):
         server.predict_payloads([{"id": 1}])
 
 
@@ -459,10 +463,21 @@ def test_deployment_builder_replaces_processor_collections():
     assert deployment._postprocessors == (finish,)
 
 
-@pytest.mark.parametrize("retain", [("id", "id"), ("",), (1,), ([],), "id", ["id"]])
+@pytest.mark.parametrize("retain", [("id", "id"), ("",), (1,), ([],), "id", [1]])
 def test_deployment_rejects_invalid_retention(retain):
-    with pytest.raises((TypeError, ValueError, pydantic.ValidationError)):
+    with pytest.raises(pydantic.ValidationError, match="retain"):
         Deployment(checkpoint="unused", retain=retain)
+
+
+def test_deployment_accepts_list_retention():
+    assert Deployment(checkpoint="unused", retain=["id", "value"]).retain == ("id", "value")
+
+
+def test_deployment_validates_log_level_against_the_shared_vocabulary():
+    assert Deployment(checkpoint="unused", log_level=" TRACE ").log_level == "trace"
+
+    with pytest.raises(pydantic.ValidationError, match="log_level must be one of"):
+        Deployment(checkpoint="unused", log_level="verbose")
 
 
 def test_deployment_forge_registers_openapi_signatures():
@@ -585,7 +600,7 @@ def test_arrow_deployment_batches_processed_rows_and_runs_global_processors_once
     assert processed == [source.num_rows]
     assert postprocessed == [2 * source.num_rows]
     assert batches == ([] if empty else [2, 2, 2])
-    assert model.batch_size == 2
+    assert model.batch_size == 1
 
 
 @pytest.mark.parametrize("stage", ["preprocess", "postprocess"])
@@ -622,8 +637,17 @@ def test_arrow_deployment_rejects_final_prediction_cardinality_drift(stage):
         async with app.router.lifespan_context(app):
             return await endpoint(Request())
 
-    with pytest.raises(ValueError, match="returned 2 rows for 3 valid deployment requests"):
-        asyncio.run(run())
+    response = asyncio.run(run())
+
+    assert response.status_code == 500
+    assert response.headers["x-relflow-prediction-format"] == "2"
+    assert orjson.loads(response.body) == {
+        "predictions": None,
+        "error": {
+            "status_code": 500,
+            "message": "RuntimeError: Model.predict returned 2 rows for 3 valid deployment requests",
+        },
+    }
 
 
 def test_deployment_predict_rejects_an_invalid_arrow_stream(monkeypatch):
@@ -662,13 +686,14 @@ def test_deployment_predict_rejects_an_unsupported_content_type():
     assert all(route.path != "/predict-arrow" for route in app.routes)
 
 
-def test_deployment_serve_configures_uvicorn(monkeypatch):
+def test_deployment_serve_configures_uvicorn_and_relflow_logging(monkeypatch):
     captured = {}
 
     def run(app, *, host, port, log_level):
         captured.update(app=app, host=host, port=port, log_level=log_level)
 
     monkeypatch.setattr(deployment_module.uvicorn, "run", run)
+    monkeypatch.setattr(deployment_module, "configure", lambda *, level: captured.update(configured=level))
 
     Deployment(
         checkpoint="unused",
@@ -682,6 +707,7 @@ def test_deployment_serve_configures_uvicorn(monkeypatch):
     assert captured["host"] == "127.0.0.1"
     assert captured["port"] == 8765
     assert captured["log_level"] == "error"
+    assert captured["configured"] == "error"
 
 
 def test_multiworker_deployment_uses_the_importable_asgi_app(monkeypatch):
@@ -689,20 +715,30 @@ def test_multiworker_deployment_uses_the_importable_asgi_app(monkeypatch):
 
     def run(app, *, workers, host, port, log_level):
         captured.update(app=app, workers=workers, host=host, port=port, log_level=log_level)
+        captured["environment"] = {
+            name: value for name, value in deployment_module.os.environ.items() if name.startswith("RELFLOW_")
+        }
 
     monkeypatch.setattr(deployment_module.uvicorn, "run", run)
+    monkeypatch.setattr(deployment_module, "configure", lambda *, level: None)
+    monkeypatch.delenv("RELFLOW_RETAIN", raising=False)
 
-    Deployment(checkpoint="model.ckpt", workers=2).serve()
+    Deployment(checkpoint="model.ckpt", workers=2, retain=("id",), log_level="trace", max_queue_size=7).serve()
 
     assert captured["app"] == "relflow.inference.asgi:app"
     assert captured["workers"] == 2
+    assert captured["environment"]["RELFLOW_RETAIN"] == '["id"]'
+    assert captured["environment"]["RELFLOW_LOG_LEVEL"] == "trace"
+    assert captured["environment"]["RELFLOW_MAX_QUEUE_SIZE"] == "7"
+    assert "RELFLOW_RETAIN" not in deployment_module.os.environ
 
 
-def test_multiworker_deployment_rejects_in_process_builder_configuration():
+def test_multiworker_deployment_rejects_in_process_builder_configuration(monkeypatch):
     @rf.postprocess
     def compact(frame: pl.DataFrame) -> pl.DataFrame:
         return frame
 
+    monkeypatch.setattr(deployment_module, "configure", lambda *, level: None)
     with pytest.raises(ValueError, match="cannot serialize in-process"):
         Deployment(checkpoint="model.ckpt", workers=2).postprocess(compact).serve()
 
@@ -714,10 +750,259 @@ def test_deployment_rejects_explicit_checkpoint_and_model():
         Deployment(checkpoint="model.ckpt", model=model)
 
 
-def test_error_item_is_stable():
+def test_deployment_model_ignores_an_environment_checkpoint(monkeypatch):
+    model = rf.Model.xs(amount=rf.Number, d_model=8)
+    monkeypatch.setenv("RELFLOW_CHECKPOINT", "/srv/models/leftover.ckpt")
+
+    deployment = Deployment(model=model)
+
+    assert deployment.model is model
+    assert deployment.checkpoint == "/srv/models/leftover.ckpt"
+    with pytest.raises(ValueError, match="pass either checkpoint or model"):
+        Deployment(model=model, checkpoint="explicit.ckpt")
+
+
+def test_error_envelope_is_stable():
     error = ErrorItem(status_code=422, message="bad input")
 
-    assert runtime().failure(error) == {
+    assert deployment_module.envelope(error.status_code, error.message) == {
         "predictions": None,
         "error": {"status_code": 422, "message": "bad input"},
     }
+
+
+def test_runtime_isolates_data_errors_to_offending_requests():
+    groups = []
+
+    class PoisonModel(PredictModel):
+        def predict(self, source, **kwargs):
+            groups.append(source["id"].to_pylist())
+            if 13 in groups[-1]:
+                raise ValueError("id 13 is poison")
+            return super().predict(source, **kwargs)
+
+    server = runtime(model=PoisonModel())
+
+    outputs = server.predict_payloads([{"id": 1}, {"id": 13}, {"id": 2}, {"id": 3}])
+
+    assert outputs == [
+        {"predictions": {"label": "1"}},
+        {"predictions": None, "error": {"status_code": 422, "message": "id 13 is poison"}},
+        {"predictions": {"label": "2"}},
+        {"predictions": {"label": "3"}},
+    ]
+    assert groups == [[1, 13, 2, 3], [1, 13], [1], [13], [2, 3]]
+
+
+def test_runtime_isolates_arrow_incompatible_requests():
+    model = PredictModel()
+    server = runtime(model=model)
+
+    outputs = server.predict_payloads([{"id": 1}, {"id": object()}, {"id": 3}])
+
+    assert outputs[0] == {"predictions": {"label": "1"}}
+    assert outputs[1]["predictions"] is None
+    assert outputs[1]["error"]["status_code"] == 422
+    assert outputs[1]["error"]["message"].startswith("request is not Arrow-compatible:")
+    assert outputs[2] == {"predictions": {"label": "3"}}
+    assert [call["source"]["id"].to_pylist() for call in model.calls] == [[1], [3]]
+
+
+def test_batcher_reports_unexpected_failures_as_500_envelopes():
+    class BrokenModel:
+        def predict(self, source, **kwargs):
+            return [{"predictions": {}}]
+
+    async def run():
+        batcher = deployment_module.FastAPIBatcher(
+            runtime=runtime(model=BrokenModel()), max_batch_size=4, batch_timeout=0.0
+        )
+        batcher.task = asyncio.create_task(batcher.work())
+        try:
+            return await asyncio.gather(batcher.submit({"id": 1}), batcher.submit({"id": 2}))
+        finally:
+            await batcher.stop()
+
+    responses = asyncio.run(run())
+
+    failure = {
+        "predictions": None,
+        "error": {"status_code": 500, "message": "RuntimeError: Model.predict must return a pyarrow.Table, got list"},
+    }
+    assert responses == [failure, failure]
+
+
+def test_response_signature_failures_are_server_errors():
+    class Response(pydantic.BaseModel):
+        predictions: dict[str, list[int]]
+
+    async def run():
+        batcher = deployment_module.FastAPIBatcher(
+            runtime=runtime(response_signature=Response), max_batch_size=4, batch_timeout=0.0
+        )
+        batcher.task = asyncio.create_task(batcher.work())
+        try:
+            return await batcher.submit({"id": 7})
+        finally:
+            await batcher.stop()
+
+    response = asyncio.run(run())
+
+    assert response["predictions"] is None
+    assert response["error"]["status_code"] == 500
+    assert response["error"]["message"].startswith("ValidationError: 1 validation error")
+
+
+def test_json_rows_settle_durations_binary_decimals_and_nan():
+    class RichModel:
+        def predict(self, source, **kwargs):
+            predictions = pa.StructArray.from_arrays(
+                [
+                    pa.array([datetime.timedelta(seconds=1.5)]),
+                    pa.array([b"\xff\x00"], type=pa.binary()),
+                    pa.array([decimal.Decimal("1.50")]),
+                    pa.array([float("nan")]),
+                    pa.array([datetime.datetime(2024, 1, 2, 3, 4, 5)]),
+                ],
+                names=["elapsed", "raw", "amount", "score", "at"],
+            )
+            return pa.table({"predictions": predictions})
+
+    rows = runtime(model=RichModel()).predict_payloads([{"id": 1}])
+
+    assert rows == [
+        {
+            "predictions": {
+                "elapsed": "PT1.5S",
+                "raw": "_wA=",
+                "amount": "1.50",
+                "score": None,
+                "at": "2024-01-02T03:04:05",
+            }
+        }
+    ]
+    encoded = {
+        backend: Deployment(checkpoint="unused", json_backend=backend).encode(rows) for backend in ("orjson", "stdlib")
+    }
+    assert orjson.loads(encoded["orjson"]) == orjson.loads(encoded["stdlib"]) == rows
+
+
+def test_runtime_restores_the_model_batch_size_after_bounded_prediction():
+    model = rf.Model.xs(value=rf.Number, d_model=8, embed=True)
+    server = deployment_module.FastAPIRuntime(checkpoint=model, accelerator=deployment_module.Accelerator.cpu)
+    server.setup()
+
+    output = server.predict_table(pa.table({"value": [1.0, 2.0, 3.0]}), batch_size=2)
+
+    assert output.num_rows == 3
+    assert model.batch_size == 1
+
+
+def test_json_route_isolates_request_failures_within_one_microbatch():
+    model = rf.Model.xs(value=rf.Number, vector=rf.Vector(n_dim=2), d_model=8, embed=True)
+    app = Deployment(checkpoint=model, accelerator="cpu", max_batch_size=4).app()
+    good = {"value": 1.0, "vector": [0.1, 0.2]}
+    bad = {"value": 2.0, "vector": [0.1]}
+
+    class Request:
+        headers = {"content-type": "application/json"}
+
+        async def body(self):
+            return orjson.dumps([good, bad, good])
+
+    endpoint = next(route.endpoint for route in app.routes if route.path == "/predict")
+
+    async def run():
+        async with app.router.lifespan_context(app):
+            return await endpoint(Request())
+
+    response = asyncio.run(run())
+    body = orjson.loads(response.body)
+
+    assert response.status_code == 200
+    assert set(body[0]) == set(body[2]) == {"representations"}
+    assert body[1]["predictions"] is None
+    assert body[1]["error"]["status_code"] == 422
+    assert "'/vector'" in body[1]["error"]["message"]
+
+
+def test_arrow_route_reports_data_errors_as_422_envelopes():
+    model = rf.Model.xs(value=rf.Number, d_model=8, embed=True)
+    app = Deployment(checkpoint=model, accelerator="cpu").app()
+    source = pa.table({"value": ["not a number"]})
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_stream(sink, source.schema) as writer:
+        writer.write_table(source)
+
+    class Request:
+        headers = {"content-type": "application/vnd.apache.arrow.stream"}
+
+        async def body(self):
+            return sink.getvalue().to_pybytes()
+
+    endpoint = next(route.endpoint for route in app.routes if route.path == "/predict")
+
+    async def run():
+        async with app.router.lifespan_context(app):
+            return await endpoint(Request())
+
+    response = asyncio.run(run())
+    body = orjson.loads(response.body)
+
+    assert response.status_code == 422
+    assert response.media_type == "application/json"
+    assert response.headers["x-relflow-prediction-format"] == "2"
+    assert body["predictions"] is None
+    assert body["error"]["status_code"] == 422
+    assert "'/value'" in body["error"]["message"]
+
+
+@pytest.mark.parametrize("media_type", ["application/json", "application/vnd.apache.arrow.stream"])
+def test_predict_reports_a_missing_worker_as_503(media_type):
+    app = Deployment(checkpoint="unused", accelerator="cpu").app()
+    source = pa.table({"value": [1.0]})
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_stream(sink, source.schema) as writer:
+        writer.write_table(source)
+
+    class Request:
+        headers = {"content-type": media_type}
+
+        async def body(self):
+            return sink.getvalue().to_pybytes() if media_type.startswith("application/vnd") else b'{"value": 1.0}'
+
+    endpoint = next(route.endpoint for route in app.routes if route.path == "/predict")
+    response = asyncio.run(endpoint(Request()))
+
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "1"
+    assert orjson.loads(response.body) == {
+        "predictions": None,
+        "error": {"status_code": 503, "message": "deployment worker is not running; restart the server"},
+    }
+
+
+def test_batcher_rejects_requests_beyond_queue_capacity():
+    class Runtime:
+        def setup(self):
+            pass
+
+        def predict_payloads(self, payloads):
+            return [{"id": payload["id"]} for payload in payloads]
+
+    async def run():
+        batcher = deployment_module.FastAPIBatcher(
+            runtime=Runtime(), max_batch_size=2, batch_timeout=0.0, max_queue_size=2
+        )
+        await batcher.start()
+        try:
+            with pytest.raises(deployment_module.Unavailable, match="cannot take 3 more requests with 0 of 2 pending"):
+                await batcher.submit_many([{"id": 1}, {"id": 2}, {"id": 3}])
+            accepted = await batcher.submit_many([{"id": 1}, {"id": 2}])
+        finally:
+            await batcher.stop()
+        with pytest.raises(deployment_module.Unavailable, match="worker is not running"):
+            await batcher.submit({"id": 4})
+        return accepted
+
+    assert asyncio.run(run()) == [{"id": 1}, {"id": 2}]

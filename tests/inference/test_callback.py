@@ -88,20 +88,20 @@ def test_writer_accepts_postprocessor_row_changes(tmp_path):
     assert pq.read_table(tmp_path / "rank-0.parquet").to_pydict() == {"score": [0.75]}
 
 
-def test_writer_locks_the_exact_first_batch_schema_and_closes_on_drift(tmp_path):
+def test_writer_locks_the_exact_first_batch_schema_and_discards_on_drift(tmp_path):
     writer = Writer(tmp_path)
     write(writer, pa.table({"score": pa.array([1], type=pa.int64())}), batch_idx=0)
+    assert (tmp_path / "rank-0.parquet.partial").exists()
 
     with pytest.raises(ValueError, match="schema differs from the first batch"):
         write(writer, pa.table({"score": pa.array([1.0], type=pa.float64())}), batch_idx=1)
 
     assert writer.writer is None
-    table = pq.read_table(tmp_path / "rank-0.parquet")
-    assert table["score"].type == pa.int64()
-    assert table["score"].to_pylist() == [1]
+    assert writer.schema is None
+    assert list(tmp_path.iterdir()) == []
 
 
-def test_writer_locks_prediction_metadata_and_closes_on_provenance_drift(tmp_path):
+def test_writer_locks_prediction_metadata_and_discards_on_provenance_drift(tmp_path):
     writer = Writer(tmp_path)
     output = pa.table({"score": [0.25]}).replace_schema_metadata({b"relflow.model_version": b"first"})
     write(writer, output)
@@ -110,7 +110,7 @@ def test_writer_locks_prediction_metadata_and_closes_on_provenance_drift(tmp_pat
         write(writer, output.replace_schema_metadata({b"relflow.model_version": b"second"}), batch_idx=1)
 
     assert writer.writer is None
-    assert pq.read_table(tmp_path / "rank-0.parquet").schema.metadata == output.schema.metadata
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_writer_preserves_metadata_through_postprocessing(tmp_path):
@@ -198,3 +198,51 @@ def test_writer_requires_predict_step_to_return_arrow_table(tmp_path):
         write(writer, [{"score": 1.0}])
 
     assert writer.writer is None
+
+
+def test_writer_renames_the_partial_shard_when_prediction_ends(tmp_path):
+    writer = Writer(tmp_path)
+    write(writer, pa.table({"score": [0.5]}))
+
+    assert (tmp_path / "rank-0.parquet.partial").exists()
+    assert not (tmp_path / "rank-0.parquet").exists()
+
+    writer.on_predict_end(SimpleNamespace(), SimpleNamespace())
+
+    assert list(tmp_path.iterdir()) == [tmp_path / "rank-0.parquet"]
+    assert pq.read_table(tmp_path / "rank-0.parquet").to_pydict() == {"score": [0.5]}
+
+
+def test_writer_discards_the_partial_shard_on_exception_and_accepts_a_rerun(tmp_path):
+    writer = Writer(tmp_path)
+    write(writer, pa.table({"score": pa.array([1], type=pa.int64())}))
+
+    writer.on_exception(SimpleNamespace(), SimpleNamespace(), RuntimeError("interrupted"))
+
+    assert list(tmp_path.iterdir()) == []
+    assert writer.schema is None
+
+    write(writer, pa.table({"score": pa.array([0.5], type=pa.float64())}))
+    writer.on_predict_end(SimpleNamespace(), SimpleNamespace())
+
+    restored = pq.read_table(tmp_path / "rank-0.parquet")
+    assert restored["score"].type == pa.float64()
+    assert restored.to_pydict() == {"score": [0.5]}
+
+
+def test_writer_buffers_batches_into_whole_row_groups(tmp_path):
+    writer = Writer(tmp_path, row_group_size=4)
+
+    for start, pending in ((0, 3), (3, 2), (6, 1)):
+        write(writer, pa.table({"score": list(range(start, start + 3))}), batch_idx=start)
+        assert writer.rows == pending
+    writer.close()
+
+    shard = pq.ParquetFile(tmp_path / "rank-0.parquet")
+    assert [shard.metadata.row_group(index).num_rows for index in range(shard.num_row_groups)] == [4, 4, 1]
+    assert shard.read().to_pydict() == {"score": list(range(9))}
+
+
+def test_writer_rejects_a_non_positive_row_group_size(tmp_path):
+    with pytest.raises(ValueError, match="row_group_size must be a positive integer"):
+        Writer(tmp_path, row_group_size=0)
