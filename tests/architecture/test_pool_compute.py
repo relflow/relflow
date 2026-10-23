@@ -7,7 +7,7 @@ from relflow.architecture.pool import LearnedQueryCrossAttention
 
 
 def test_pool_compacts_and_sanitizes_inputs_before_compute(monkeypatch):
-    model = LearnedQueryCrossAttention(2, 8, 2, 0.0, mass_capacity=3)
+    model = LearnedQueryCrossAttention(2, 8, 2, 0.0, mass_capacity=3, mass=True)
     memory = torch.randn(3, 3, 8)
     present = torch.tensor([[True, False, True], [False, False, False], [False, True, False]])
     memory[~present] = torch.nan
@@ -38,7 +38,7 @@ def test_pool_compacts_and_sanitizes_inputs_before_compute(monkeypatch):
 @pytest.mark.parametrize("grad_enabled", [False, True])
 def test_pool_compute_captures_seeded_dropout_and_accumulated_gradients(monkeypatch, grad_enabled):
     torch.manual_seed(1729)
-    eager = LearnedQueryCrossAttention(2, 8, 2, 0.2, n_linear=2, mass_capacity=4).train()
+    eager = LearnedQueryCrossAttention(2, 8, 2, 0.2, n_linear=2, mass_capacity=4, mass=True).train()
     with torch.no_grad():
         eager.mass_projection.weight.normal_(std=0.1)
         eager.mass_direction.normal_(std=0.1)
@@ -75,7 +75,7 @@ def test_pool_compute_captures_seeded_dropout_and_accumulated_gradients(monkeypa
 
 
 def test_empty_pool_preserves_validation_order_and_skips_compute(monkeypatch):
-    model = LearnedQueryCrossAttention(2, 8, 2, 0.2, mass_capacity=3)
+    model = LearnedQueryCrossAttention(2, 8, 2, 0.2, mass_capacity=3, mass=True)
     memory = torch.full((2, 3, 8), torch.nan)
     present = torch.zeros(2, 3, dtype=torch.bool)
 

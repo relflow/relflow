@@ -87,12 +87,14 @@ def test_nested_variable_axes_and_pass_through_embeddings_preserve_structural_sl
     first = rows[0]["representations"]
     outer = [item for item in first if item["path"] == ["events"]]
     inner = [item for item in first if item["path"] == ["events", "items"]]
-    assert len(outer) == 5
-    assert len(inner) == 4
+    # The null item owns no tokens at either level; its slots stay reserved in the positions.
+    assert len(outer) == 3
+    assert len(inner) == 2
     assert all(item["parents"] == [] for item in outer)
     assert all(item["parents"] == [0] for item in inner)
-    assert [item["output_index"] for item in outer] == list(range(5))
-    assert [item["output_index"] for item in inner] == list(range(4))
+    assert [item["output_index"] for item in outer] == [0, 2, 4]
+    assert [item["output_index"] for item in inner] == [1, 3]
+    assert all(any(value != 0.0 for value in item["embedding"]) for item in outer[:1] + inner[:1])
     second_inner = [item for item in rows[1]["representations"] if item["path"] == ["events", "items"]]
     assert len(second_inner) == 2
     assert all(item["parents"] == [1] for item in second_inner)
@@ -123,10 +125,7 @@ def test_pass_through_outputs_keep_intrinsic_slots_separate_from_item_coordinate
     result = model.predict(observations([[], None, [None]]))
     assert result.column_names == ["representations"]
     rows = result["representations"].to_pylist()
-    assert rows[:2] == [[], []]
-    assert rows[2] == [
-        {"path": ["events"], "parents": [], "output_index": 0, "embedding": [0.0] * 8},
-    ]
+    assert rows == [[], [], []]
 
 
 def test_unbounded_warning_names_active_paths_once_per_generation(monkeypatch):
@@ -171,3 +170,18 @@ def test_third_party_tensorfields_follow_automatic_axes_without_shared_special_c
         assert [value["parents"] for value in representations[2]] == [[index] for index in range(5)]
     finally:
         rf.TENSORFIELDS.pop(extension.name, None)
+
+
+def test_pass_through_representations_skip_null_items_but_keep_their_slots():
+    model = rf.Model.xs(
+        d_model=8, events=rf.Branch(reduction=None, embed=True, amount=rf.Number(embed=True), tag=rf.Hash)
+    ).eval()
+    source = pa.Table.from_pylist([{"events": [{"amount": 1.0, "tag": "a"}, None, {"amount": 2.0, "tag": "b"}]}])
+    rows = model.predict(source)["representations"].to_pylist()[0]
+    tokens = [item for item in rows if item["path"] == ["events"]]
+    leaves = [item for item in rows if item["path"] == ["events", "amount"]]
+
+    # Field-major slots: amount at 0..2 and tag at 3..5; the null item's slots 1 and 4 own no token.
+    assert [item["output_index"] for item in tokens] == [0, 2, 3, 5]
+    assert all(any(value != 0.0 for value in item["embedding"]) for item in tokens)
+    assert [item["parents"] for item in leaves] == [[0], [2]]

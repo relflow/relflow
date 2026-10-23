@@ -131,6 +131,15 @@ def participation(
     )
 
 
+def rows(module: Model, inputs: EncodedInput) -> int:
+    """Count the observations in one forward batch."""
+
+    if inputs.batch_dims:
+        return int(inputs.batch_size[0])
+    address = next(iter(module.schema.active_requests), None)
+    return 0 if address is None else int(cast(TensorFieldBase, inputs[address]).state.shape[0])
+
+
 @dataclass(frozen=True, slots=True)
 class OutputEntry:
     """Frozen output contract for one expected forward address."""
@@ -830,6 +839,9 @@ class ModelRuntime:
             anchor = torch.stack(anchors).sum()
         else:
             anchor = torch.zeros((), device=inputs.device)
+        # Peer ranks reduce the loss metric, so a rank without local targets
+        # still emits it, weighted by zero observations.
+        weight = rows(module, inputs) if losses else 0
         if not losses:
             suffix = "anchored zero loss" if strata == Strata.train else "zero loss"
             logger.bind(
@@ -838,11 +850,19 @@ class ModelRuntime:
                 rank=module.global_rank,
                 batch=batch_idx,
             ).warning(f"reconstruction targets are present only on peer ranks, returning {suffix}")
-            return Output(loss=anchor)
 
-        loss = module.track((Metric.loss, strata), value=torch.stack(losses).sum() + anchor)
+        total = torch.stack(losses).sum() + anchor if losses else anchor
+        loss = module.track((Metric.loss, strata), value=total, rows=weight, uniform=True)
         if strata == Strata.train:
-            module.track((Metric.loss, "train_epoch"), value=loss, on_step=False, on_epoch=True, logger=False)
+            module.track(
+                (Metric.loss, "train_epoch"),
+                value=loss,
+                on_step=False,
+                on_epoch=True,
+                logger=False,
+                rows=weight,
+                uniform=True,
+            )
         return Output(loss=loss)
 
     @staticmethod
@@ -858,7 +878,7 @@ class ModelRuntime:
 
         if not isinstance(source, pa.Table):
             raise TypeError(f"source must be a pyarrow.Table, got {type(source).__name__}")
-        active = plan(module, retain, refresh=True) if compiled is None else compiled
+        active = plan(module, retain, refresh=module.training) if compiled is None else compiled
         if active.retain != retain:
             raise ValueError(f"compiled output plan retain {active.retain!r} does not match write retain {retain!r}")
         columns: dict[str, pa.Array] = {}
@@ -990,7 +1010,9 @@ class ModelRuntime:
                 strata=Strata.predict,
             )
             if compiled is None:
-                compiled = plan(module, retain, refresh=True)
+                # An evaluation model's contract is fixed per generation, so serving
+                # reuses it across calls; a training model may still grow resources.
+                compiled = plan(module, retain, refresh=module.training)
             raw: list[Prediction] = []
             if encoded.source.num_rows:
                 was_training = module.training
