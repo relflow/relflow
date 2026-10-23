@@ -37,6 +37,8 @@ from relflow.tensorfields.shared.vocabulary import (
     VocabularyBatch,
     VocabularyState,
     VocabularySyncCallback,
+    admissible,
+    states,
 )
 
 if TYPE_CHECKING:
@@ -176,29 +178,6 @@ class Request(RequestBase):
                 raise ValueError("topk values must not be 1")
 
         return self
-
-
-def admissible(field: RaggedField) -> tuple[pa.Array, np.ndarray]:
-    """Valued labels without float NaN, and the compact positions NaN occupied.
-
-    NaN is not a label: it cannot key a vocabulary, so its position takes the
-    ``other`` state instead of admitting or looking up a value.
-    """
-    values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
-    nan = np.zeros(len(values), dtype=bool)
-    if len(values) and pa.types.is_floating(values.type):
-        nan = pc.is_nan(values).to_numpy(zero_copy_only=False)
-        if nan.any():
-            values = pc.filter(values, pa.array(~nan))
-    return values, nan
-
-
-def states(field: RaggedField, nan: np.ndarray) -> np.ndarray:
-    """Dense state tokens with NaN positions marked ``other``."""
-    dense = field.dense.copy()
-    if nan.any():
-        dense[field.place(nan, fill=False)] = Tokens.other.value
-    return dense
 
 
 @category.register(Component.observe)
@@ -354,9 +333,6 @@ class Embedder(EmbedderBase):
         content = cast(torch.Tensor, inputs.content).reshape(-1)
         valued = state.eq(Tokens.valued.value)
 
-        if (valued & ((content < -1) | (content >= self.size))).any():
-            raise ValueError(f"Token in address {self.origin} exceeds vocabulary size of {self.size}")
-
         known = valued & content.ge(0)
         safe_content = content.masked_fill(~known, 0)
         content_embedding = self.embeddings[TensorKey.content.name](safe_content) * known.unsqueeze(-1)
@@ -401,10 +377,10 @@ def bind(
     if decoder is not None:
         resize.linear(decoder.linears[TensorKey.content.name], size, silent=True)
     field = cast(TensorField, field)
-    field.content = mapping.to(field.content.device)[field.content]
+    field.content = binding.translate(field.content, mapping, address=address)
     if TensorKey.content in field.targets:
         values = cast(torch.Tensor, field.targets[TensorKey.content])
-        field.targets[TensorKey.content] = mapping.to(values.device)[values]
+        field.targets[TensorKey.content] = binding.translate(values, mapping, address=address)
     if observation is not None:
         observation[TensorKey.content] = binding.counts(
             cast(torch.Tensor, observation[TensorKey.content]), mapping, size

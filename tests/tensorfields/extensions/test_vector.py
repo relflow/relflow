@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pyarrow as pa
 import pydantic
 import pytest
@@ -211,10 +213,11 @@ def test_vector_jitter_is_configuration_not_checkpoint_state():
 class DummyModule:
     def __init__(self, schema: Schema):
         self.schema = schema
-        self.logged: list[tuple[tuple[str, ...], float]] = []
+        self.nodes = {ADDRESS: SimpleNamespace(decoder=Decoder(schema=schema, address=ADDRESS))}
+        self.logged: list[tuple[tuple[str, ...], object]] = []
 
     def track(self, names: tuple[str, ...], value: torch.Tensor) -> torch.Tensor:
-        self.logged.append((names, float(value.detach().cpu())))
+        self.logged.append((names, float(value.detach().cpu()) if torch.is_tensor(value) else value))
         return value
 
 
@@ -244,6 +247,28 @@ def test_vector_loss_uses_selected_objective(objective: str, expected: float):
     module = DummyModule(schema)
     output = loss(module=module, prediction=prediction, batch=field, strata=Strata.train)
     assert torch.isclose(output, torch.tensor(expected, dtype=output.dtype))
+
+
+@pytest.mark.parametrize("batch_size", [1, 2, 3])
+def test_vector_evaluation_metrics_count_valued_targets_across_unequal_batches(batch_size, tmp_path):
+    model = rf.Model.xs(d_model=8, target=rf.Vector(n_dim=2, mask=True))
+    decoder = model.nodes["/target"].decoder
+    with torch.no_grad():
+        decoder.regression.weight.zero_()
+        decoder.regression.bias.zero_()
+    rows = pa.table({"target": pa.array([[3.0, 3.0], [4.0, 4.0], None], type=pa.list_(pa.float32()))})
+    data = rf.ArrowDataModule(model, validate=rows)
+    values = model.validate(
+        data,
+        batch_size=batch_size,
+        accelerator="cpu",
+        devices=1,
+        precision="32-true",
+        enable_progress_bar=False,
+        default_root_dir=tmp_path,
+    )[0]
+    assert values[".target/validate.mae.content"] == pytest.approx(3.5)
+    assert values[".target/validate.rmse.content"] == pytest.approx((25 / 2) ** 0.5)
 
 
 @pytest.mark.parametrize("nullable", [True, False])

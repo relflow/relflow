@@ -9,6 +9,7 @@ from functools import partial
 from multiprocessing import Manager
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Unpack, cast
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import pydantic
@@ -31,8 +32,10 @@ from relflow.tensorfields.base import (
     TensorFieldBase,
     TensorInput,
 )
+from relflow.tensorfields.extensions.number import precise
 from relflow.tensorfields.output import array, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
+from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
@@ -130,20 +133,22 @@ class Synchronize(Callback):
 
 
 quantile = Extension(name="quantile", types=(int | float,))
-quantile.callback(CounterUpdateCallback)
+quantile.callback(CounterUpdateCallback, Metrics)
 quantile.callback(Synchronize)
 
 
 @quantile.register(Component.Request)
 class Request(RequestBase):
-    """A finite scalar normalized to its estimated training percentile.
+    """A scalar normalized to its estimated training percentile.
 
     The digest learns pristine consumed training values, including hidden targets.
     Evaluation freezes the distribution. Each coordinate carries its percentile
     rank and a robust standardized lane, so values beyond the learned support
-    still move the embedding. Predictions invert the learned quantiles inside
-    ``[0, 1]`` and continue linearly from the outer deciles beyond them, in
-    source units.
+    still move the embedding. A NaN or infinite value has no percentile: it
+    tensorizes as the ``other`` state and is never a regression target.
+    Predictions invert the learned quantiles inside ``[0, 1]``, continue one
+    robust scale (the interquartile range) per unit of score beyond them, and
+    stay within ``SPREAD_LIMIT`` scales of the median, in source units.
     """
 
     type: Literal["quantile"] = "quantile"
@@ -194,14 +199,25 @@ class Request(RequestBase):
 
 
 def numeric(values: pa.Array | pa.ChunkedArray, address: Address) -> pa.Array:
-    """Preserve float64 distinctions and reject unordered or nonfinite scalars."""
+    """Preserve float64 distinctions and reject unordered scalars; the digest ignores nonfinite values."""
     if not (pa.types.is_integer(values.type) or pa.types.is_floating(values.type) or pa.types.is_null(values.type)):
-        raise ValueError(f"Quantile field at '{address}' expects finite scalar numbers, got {values.type}")
+        raise ValueError(f"Quantile field at '{address}' expects scalar numbers, got {values.type}")
     converted = pc.cast(values, pa.float64(), safe=True)
-    converted = converted.combine_chunks() if isinstance(converted, pa.ChunkedArray) else converted
-    if pc.any(pc.invert(pc.is_finite(converted))).as_py():
-        raise ValueError(f"Quantile field at '{address}' requires finite numbers; use null for missing values")
-    return converted
+    return converted.combine_chunks() if isinstance(converted, pa.ChunkedArray) else converted
+
+
+def encode(field: RaggedField, *, address: Address) -> tuple[torch.Tensor, torch.Tensor]:
+    """Source float64 bits and state tokens of one field.
+
+    A NaN or infinite value has no percentile: its position takes the ``other``
+    state and zero bits, so it is neither ranked nor regressed against. Integer
+    bits retain source precision on devices without float64 arithmetic.
+    """
+    data = field.place(numeric(field.values, address).to_numpy(zero_copy_only=False), fill=0.0)
+    state = field.dense.copy()
+    state[~np.isfinite(data) & (state == Tokens.valued.value)] = Tokens.other.value
+    np.nan_to_num(data, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+    return torch.from_numpy(data).view(torch.int64), torch.from_numpy(state)
 
 
 def values(raw: torch.Tensor) -> pa.Array:
@@ -220,33 +236,44 @@ def quantiles(digest: Digest, probabilities: list[float]) -> list[float]:
     return [float(cast(float, value)) for value in digest.quantile(pa.array(probabilities)).to_pylist()]
 
 
+def spread(digest: Digest) -> tuple[float, float]:
+    """Median and robust scale: the interquartile range, or the full range when the quartiles coincide."""
+    lower, median, upper = quantiles(digest, [0.25, 0.5, 0.75])
+    scale = upper - lower
+    if not scale > 0.0:
+        scale = max(digest.maximum - digest.minimum, 1.0)
+    return median, scale
+
+
 def lanes(digest: Digest, raw: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
     """Pair each percentile rank with a robust standardized lane that keeps growing past the learned support."""
     ranks = percentiles(digest, raw, state)
-    spread = torch.zeros_like(ranks)
+    deviations = torch.zeros_like(ranks)
     if digest.count:
-        lower, median, upper = quantiles(digest, [0.25, 0.5, 0.75])
-        scale = upper - lower
-        if not scale > 0.0:
-            scale = max(digest.maximum - digest.minimum, 1.0)
+        median, scale = spread(digest)
         floats = values(raw).to_numpy(zero_copy_only=False)
         standardized = torch.from_numpy(((floats - median) / scale).copy()).reshape(raw.shape)
         standardized = standardized.to(device=raw.device, dtype=torch.float32).clamp(-SPREAD_LIMIT, SPREAD_LIMIT)
-        spread = torch.where(state.eq(Tokens.valued), standardized, 0.0)
-    return torch.stack((ranks, spread), dim=-1)
+        deviations = torch.where(state.eq(Tokens.valued), standardized, 0.0)
+    return torch.stack((ranks, deviations), dim=-1)
 
 
 def inverse(digest: Digest, scores: torch.Tensor) -> torch.Tensor:
-    """Return source units: learned quantiles inside [0, 1], continued linearly from the outer deciles beyond."""
+    """Return source units: learned quantiles inside [0, 1], one robust scale per unit of score beyond.
+
+    The outer deciles are extreme-value statistics on heavy tails, so the
+    continuation uses the interquartile scale instead, and the result stays
+    within the spread the standardized lane represents: ``SPREAD_LIMIT``
+    scales around the median.
+    """
     # Source units are output metadata; retain their float64 precision on CPU.
     flat = scores.detach().cpu().to(torch.float64).reshape(-1)
     raw = digest.quantile(array(flat.clamp(0.0, 1.0), pa.float64())).to_numpy(zero_copy_only=False).copy()
     content = torch.from_numpy(raw)
     if digest.count:
-        low, lower, upper, high = quantiles(digest, [0.0, 0.1, 0.9, 1.0])
-        below = flat.clamp(max=0.0) * ((lower - low) / 0.1)
-        above = (flat - 1.0).clamp(min=0.0) * ((high - upper) / 0.1)
-        content = content + below + above
+        median, scale = spread(digest)
+        excess = (flat - 1.0).clamp(min=0.0) + flat.clamp(max=0.0)
+        content = (content + excess * scale).clamp(median - SPREAD_LIMIT * scale, median + SPREAD_LIMIT * scale)
     return content.reshape(scores.shape)
 
 
@@ -256,7 +283,8 @@ def observe(
 ) -> TensorDict | None:
     if not learn:
         return None
-    return TensorDict({TensorKey.state: tally(torch.from_numpy(field.dense.copy()), len(Tokens))}, batch_size=[])
+    _, states = encode(field, address=address)
+    return TensorDict({TensorKey.state: tally(states, len(Tokens))}, batch_size=[])
 
 
 @quantile.register(Component.TensorField)
@@ -291,18 +319,10 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         request = cast(Request, schema.requests[address])
         digest = context.state if isinstance(context.state, Digest) else Digest(request.compression)
 
-        def raw(field: RaggedField) -> torch.Tensor:
-            values = numeric(field.values, address).to_numpy(zero_copy_only=False)
-            # Float64 bits retain source precision without putting unsupported
-            # float64 arithmetic on devices such as MPS. Batch axes stay explicit.
-            return torch.from_numpy(field.place(values, fill=0.0).copy()).view(torch.int64)
-
-        state = torch.from_numpy(input.dense.copy())
-        content = raw(input)
+        content, state = encode(input, address=address)
         targets = TensorDict({}, batch_size=input.shape)
         if address in schema.objectives:
-            target_state = torch.from_numpy(target.dense.copy())
-            target_raw = raw(target)
+            target_raw, target_state = encode(target, address=address)
             targets = TensorDict(
                 {
                     TensorKey.state: target_state,
@@ -405,6 +425,7 @@ class Decoder(DecoderBase):
         self.classification = torch.nn.Linear(schema.d_model, len(Tokens))
         self.regression = torch.nn.Linear(schema.d_model, 1)
         self.distribution = State(cast(Request, schema.requests[address]).compression)
+        self.metrics = Scores(address, Errors)
 
     def attach(self, context: object | None) -> None:
         if not isinstance(context, State):
@@ -412,7 +433,9 @@ class Decoder(DecoderBase):
         self.distribution = context
 
     def decode(self, pooled: torch.Tensor) -> TensorDict:
-        scores = self.regression(pooled)
+        with precise(pooled.device):
+            # A percentile is a source-unit coordinate; bf16 would quantize it to 1/256.
+            scores = self.regression(pooled.float())
         content = inverse(self.distribution.snapshot(), scores)
         return TensorDict(
             {TensorKey.state: self.classification(pooled), TensorKey.content: content, "percentile": scores}
@@ -424,6 +447,7 @@ def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: 
     address = prediction.address
     request = cast(Request, module.schema.requests[address])
     embedder = cast(Embedder, module.nodes[address].embedder)
+    decoder = cast(Decoder, module.nodes[address].decoder)
     logits = cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(-1, len(Tokens))
     ranks = cast(torch.Tensor, prediction.payload["percentile"]).reshape(-1)
     selected = batch.trainable.reshape(-1)
@@ -447,15 +471,14 @@ def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: 
             case "huber":
                 residual = torch.nn.functional.huber_loss(ranks, target, reduction="none")
         result = result + module.track((address, strata, Metric.loss, TensorKey.content), residual[valued].mean())
-        raw = cast(torch.Tensor, prediction.payload[TensorKey.content]).detach().cpu().reshape(-1)
-        raw_target = (
-            cast(torch.Tensor, batch.targets["raw"]).detach().cpu().contiguous().view(torch.float64).reshape(-1)
-        )
-        valid = valued.cpu() & torch.isfinite(raw)
-        if valid.any():
-            error = (raw - raw_target)[valid]
-            module.track((address, strata, Metric.mae, TensorKey.content), error.abs().mean().to(ranks))
-            module.track((address, strata, Metric.rmse, TensorKey.content), error.square().mean().sqrt().to(ranks))
+
+    # Error metrics report source units on finite targets whose inverse is defined.
+    raw = cast(torch.Tensor, prediction.payload[TensorKey.content]).detach().cpu().reshape(-1)
+    raw_target = cast(torch.Tensor, batch.targets["raw"]).detach().cpu().contiguous().view(torch.float64).reshape(-1)
+    valid = valued.cpu() & torch.isfinite(raw)
+    predicted = raw.masked_select(valid).to(ranks)
+    observed = raw_target.masked_select(valid).to(ranks)
+    decoder.metrics.record(module, strata, *errors(predicted, observed))
     return result
 
 
@@ -481,10 +504,14 @@ __all__ = [
     "Embedder",
     "Decoder",
     "quantile",
+    "encode",
+    "inverse",
+    "lanes",
     "observe",
     "bind",
     "learn",
     "loss",
     "output",
+    "spread",
     "write",
 ]

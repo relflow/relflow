@@ -32,6 +32,7 @@ from relflow.tensorfields.base import (
     TensorInput,
 )
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
+from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
 if TYPE_CHECKING:
     from transformers import PreTrainedModel, PreTrainedTokenizerBase
@@ -46,7 +47,7 @@ text: Extension = Extension(
     types=(str,),
     requires={"transformers": "relflow[text]"},
 )
-text.callback(CounterUpdateCallback)
+text.callback(CounterUpdateCallback, Metrics)
 
 INPUT_IDS = "input_ids"
 ATTENTION_MASK = "attention_mask"
@@ -229,12 +230,13 @@ class Objective(enum.StrEnum):
     l2 = "l2"
 
     def loss(self, diff: torch.Tensor) -> torch.Tensor:
+        """Mean error over every coordinate of the selected embeddings."""
         if self == Objective.l1:
             diff = diff.absolute()
         else:
             diff = diff.square()
 
-        return diff.mean(dim=1)
+        return diff.mean()
 
 
 @dataclass
@@ -715,6 +717,7 @@ class Decoder(DecoderBase):
             in_features=schema.d_model,
             out_features=hidden_size,
         )
+        self.metrics = Scores(address, Errors)
 
     @beartype
     def decode(self, pooled: torch.Tensor) -> TensorDict:
@@ -736,6 +739,7 @@ def loss(
     address: Address = prediction.address
     request: Request = cast(Request, module.schema.requests[address])
     embedder: Embedder = cast(Embedder, module.nodes[address].embedder)
+    decoder: Decoder = cast(Decoder, module.nodes[address].decoder)
 
     trainable = batch.trainable.reshape(-1)
     state_targets = cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(-1)
@@ -761,31 +765,22 @@ def loss(
     )
 
     valued = trainable & state_targets.eq(Tokens.valued.value)
-    if not valued.any():
-        return loss
-
     inputs = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(-1, embedder.hidden_size)
-    if TensorKey.embedding not in batch.targets.keys():
-        batch.targets[TensorKey.embedding] = embedder.encode(
-            content=cast(TensorDict, batch.targets[TensorKey.content]),
-            state=cast(torch.Tensor, batch.targets[TensorKey.state]),
+    predicted = inputs[valued]
+    observed = inputs.new_zeros((0, embedder.hidden_size))
+    if predicted.numel():
+        if TensorKey.embedding not in batch.targets.keys():
+            batch.targets[TensorKey.embedding] = embedder.encode(
+                content=cast(TensorDict, batch.targets[TensorKey.content]),
+                state=cast(torch.Tensor, batch.targets[TensorKey.state]),
+            )
+        targets = cast(torch.Tensor, batch.targets[TensorKey.embedding]).reshape(-1, embedder.hidden_size)
+        observed = targets[valued]
+        loss += module.track(
+            (address, strata, Metric.loss, TensorKey.content),
+            value=request.objective.loss(predicted.subtract(observed)),
         )
-    targets = cast(torch.Tensor, batch.targets[TensorKey.embedding]).reshape(-1, embedder.hidden_size)
-    diff = inputs.subtract(targets)
 
-    loss += module.track(
-        (address, strata, Metric.loss, TensorKey.content),
-        value=request.objective.loss(diff).masked_select(valued).mean(),
-    )
-
-    module.track(
-        (address, strata, Metric.mae, TensorKey.content),
-        value=diff.absolute().mean(dim=1).masked_select(valued).mean(),
-    )
-
-    module.track(
-        (address, strata, Metric.rmse, TensorKey.content),
-        value=diff.square().mean(dim=1).sqrt().masked_select(valued).mean(),
-    )
+    decoder.metrics.record(module, strata, *errors(predicted, observed))
 
     return loss

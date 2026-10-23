@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import enum
 import math
-from collections.abc import Iterator
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import InitVar
 from typing import TYPE_CHECKING, Annotated, Literal, Unpack, cast
@@ -14,11 +13,9 @@ import pydantic
 import torch
 from beartype import beartype
 from tensordict import TensorDict, tensorclass
-from torchmetrics import Metric as TorchMetric
-from torchmetrics.regression import MeanAbsoluteError, MeanSquaredError
 
 from relflow.data.ragged import RaggedField
-from relflow.distributed import all_reduce_sum
+from relflow.distributed import all_gather
 from relflow.helpers import Jitter
 from relflow.logging import logger
 from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
@@ -35,6 +32,7 @@ from relflow.tensorfields.base import (
 )
 from relflow.tensorfields.output import array, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
+from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
@@ -43,7 +41,7 @@ if TYPE_CHECKING:
 
 
 number: Extension = Extension(name="number", types=(int | float,))
-number.callback(CounterUpdateCallback)
+number.callback(CounterUpdateCallback, Metrics)
 
 FOURIER_SAFE_MAX_ANGLE = float(1e4)
 
@@ -348,28 +346,30 @@ class GlobalOnlineNormalizer(torch.nn.Module):
 
     @torch.no_grad()
     def learn(self, observation: TensorDict) -> None:
-        """Synchronize and apply one pristine numeric observation."""
+        """Synchronize and apply one pristine numeric observation.
+
+        Ranks exchange their (count, mean, var) triples in one collective and
+        merge them centered on the shared mean, so small variances survive
+        large offsets. Counts travel in the statistics' float: exact below
+        2^53 on float64 devices and below 2^24 on MPS, which has no DDP.
+        """
 
         if not isinstance(observation, TensorDict):
             raise TypeError(f"normalizer observation must be a TensorDict, got {type(observation).__name__}")
         dtype = self.mean.dtype
-        observation = cast(
-            TensorDict, observation.apply(lambda value: value.to(dtype=dtype) if value.is_floating_point() else value)
-        )
-        observation = observation.to(device=self.mean.device)
-        local_count = cast(torch.Tensor, observation["count"])
-        local_mean = cast(torch.Tensor, observation["mean"])
-        local_var = cast(torch.Tensor, observation["var"])
-        count = all_reduce_sum(local_count.clone())
+        local = torch.stack(
+            [cast(torch.Tensor, observation[name]).reshape(()).to(dtype=dtype) for name in ("count", "mean", "var")]
+        ).to(device=self.mean.device)
+        counts, means, variances = all_gather(local).unbind(dim=1)
+        count = counts.sum()
         if not count:
             return
-        weight = local_count.to(dtype=dtype) / count
-        mean = all_reduce_sum(local_mean * weight)
-        # Center on the shared mean before reducing variance. Raw squared sums
-        # lose small variances at large offsets in float32; empty ranks contribute zero.
-        delta = torch.where(local_count > 0, local_mean - mean, 0.0)
-        variance = all_reduce_sum((local_var + delta.square()) * weight)
-        self.merge(TensorDict({"count": count, "mean": mean, "var": variance}, batch_size=[]))
+        weights = counts / count
+        mean = (weights * means).sum()
+        # Empty ranks contribute zero to the centered spread.
+        delta = torch.where(counts > 0, means - mean, 0.0)
+        variance = (weights * (variances + delta.square())).sum()
+        self.merge(TensorDict({"count": count.to(dtype=torch.int64), "mean": mean, "var": variance}, batch_size=[]))
 
     @torch.no_grad()
     def merge(self, observation: TensorDict) -> None:
@@ -593,18 +593,7 @@ class Decoder(DecoderBase):
         # Target statistics in the training scale: the readout starts at their
         # mean and predicts standardized deviations.
         self.normalizer: GlobalOnlineNormalizer = GlobalOnlineNormalizer(alpha=request.alpha)
-        self.metrics = torch.nn.ModuleDict(
-            {
-                f"{strata.value}_metrics": torch.nn.ModuleDict(
-                    {Metric.mae.value: MeanAbsoluteError(), Metric.rmse.value: MeanSquaredError(squared=False)}
-                )
-                for strata in (Strata.train, Strata.validate, Strata.test)
-            }
-        )
-
-    def content_metrics(self, strata: Strata) -> Iterator[tuple[str, TorchMetric]]:
-        for name, metric in cast(torch.nn.ModuleDict, self.metrics[f"{strata.value}_metrics"]).items():
-            yield name, cast(TorchMetric, metric)
+        self.metrics = Scores(address, Errors)
 
     @beartype
     def decode(self, pooled: torch.Tensor) -> TensorDict:
@@ -690,16 +679,7 @@ def loss(
     # Error metrics report source units whatever the training scale.
     content = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N)
     predicted = content.masked_select(valued)
-    for name, metric in decoder.content_metrics(strata):
-        if strata == Strata.train:
-            metric.reset()
-            value = metric(predicted, observed) if predicted.numel() else scaled.new_full((), float("nan"))
-            module.track((address, strata, name, TensorKey.content), value=cast(torch.Tensor, value))
-        else:
-            # Every rank registers the same sum/count metrics, including ranks
-            # with no valued targets. Global RMSE is not a mean of batch RMSEs.
-            metric.update(predicted, observed)
-            module.track((address, strata, name, TensorKey.content), value=metric)
+    decoder.metrics.record(module, strata, *errors(predicted, observed))
 
     return loss
 

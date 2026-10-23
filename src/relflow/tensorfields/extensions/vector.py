@@ -28,6 +28,7 @@ from relflow.tensorfields.base import (
     TensorInput,
 )
 from relflow.tensorfields.output import array, fixed, struct
+from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
 
 
 vector: Extension = Extension(name="vector", types=(int | float,))
+vector.callback(Metrics)
 
 
 class Objective(enum.StrEnum):
@@ -43,10 +45,11 @@ class Objective(enum.StrEnum):
     l2 = "l2"
 
     def loss(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """Mean error over every coordinate of the selected vectors."""
         if self == Objective.l1:
-            return torch.nn.functional.l1_loss(input=inputs, target=targets, reduction="none").mean(dim=1)
+            return torch.nn.functional.l1_loss(input=inputs, target=targets)
 
-        return torch.nn.functional.mse_loss(input=inputs, target=targets, reduction="none").mean(dim=1)
+        return torch.nn.functional.mse_loss(input=inputs, target=targets)
 
 
 @vector.register(Component.Request)
@@ -225,6 +228,7 @@ class Decoder(DecoderBase):
             in_features=schema.d_model,
             out_features=request.n_dim,
         )
+        self.metrics = Scores(address, Errors)
 
     @beartype
     def decode(self, pooled: torch.Tensor) -> TensorDict:
@@ -245,6 +249,7 @@ def loss(
 ) -> torch.Tensor:
     address: Address = prediction.address
     request: Request = cast(Request, module.schema.requests[address])
+    decoder: Decoder = cast(Decoder, module.nodes[address].decoder)
 
     trainable = batch.trainable.reshape(-1)
     state_targets = cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(-1)
@@ -269,27 +274,17 @@ def loss(
     )
 
     valued = trainable & state_targets.eq(Tokens.valued.value)
-    if not valued.any():
-        return output
-
     inputs = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(-1, request.n_dim)
     targets = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(-1, request.n_dim)
-    diff = inputs.subtract(targets)
+    predicted = inputs[valued]
+    observed = targets[valued]
+    if predicted.numel():
+        output += module.track(
+            (address, strata, Metric.loss, TensorKey.content),
+            value=request.objective.loss(inputs=predicted, targets=observed),
+        )
 
-    output += module.track(
-        (address, strata, Metric.loss, TensorKey.content),
-        value=request.objective.loss(inputs=inputs, targets=targets).masked_select(valued).mean(),
-    )
-
-    module.track(
-        (address, strata, Metric.mae, TensorKey.content),
-        value=diff.absolute().mean(dim=1).masked_select(valued).mean(),
-    )
-
-    module.track(
-        (address, strata, Metric.rmse, TensorKey.content),
-        value=diff.square().mean(dim=1).sqrt().masked_select(valued).mean(),
-    )
+    decoder.metrics.record(module, strata, *errors(predicted, observed))
 
     return output
 

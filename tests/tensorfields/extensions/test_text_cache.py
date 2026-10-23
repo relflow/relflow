@@ -18,6 +18,7 @@ from relflow.tensorfields.extensions.text import (
     ATTENTION_MASK,
     INPUT_IDS,
     CachedModel,
+    Decoder,
     Embedder,
     TensorField,
     loss,
@@ -363,7 +364,7 @@ def test_text_cache_reuses_reconstruction_targets_without_revealing_hidden_input
     embedder = Embedder(schema=structure, address=ADDRESS)
     module = SimpleNamespace(
         schema=structure,
-        nodes={ADDRESS: SimpleNamespace(embedder=embedder)},
+        nodes={ADDRESS: SimpleNamespace(embedder=embedder, decoder=Decoder(schema=structure, address=ADDRESS))},
         track=lambda names, value: value,
     )
 

@@ -20,6 +20,7 @@ from relflow.tensorfields.extensions.cluster import (
     Decoder,
     Embedder,
     TensorField,
+    bind,
     loss,
     write,
 )
@@ -27,7 +28,7 @@ from relflow.tensorfields.extensions.cluster import (
     output as output_type,
 )
 from relflow.tensorfields.shared.counter import Counter
-from relflow.tensorfields.shared.vocabulary import OnlineVocabularyModel, VocabularyState
+from relflow.tensorfields.shared.vocabulary import OnlineVocabularyModel, VocabularyBatch, VocabularyState
 from tests.arrow import table as arrow_table
 from tests.tensorfields.helpers import tensorize
 
@@ -235,21 +236,58 @@ def test_cluster_embedder_zeros_cluster_contribution_for_non_valued_state():
     assert torch.allclose(output, expected)
 
 
-def test_cluster_embedder_rejects_indices_beyond_capacity():
-    schema = build_schema(bounds=4, p_unavailable=0.0)
-    embedder = build_embedder(schema)
-
+def test_cluster_bind_rejects_worker_ids_outside_the_batch():
+    model = rf.Model.xs(d_model=8, batch_size=2, cluster=rf.Cluster(bounds=4, p_unavailable=0.0))
+    address = rf.Address("cluster")
     field = TensorField(
-        state=torch.tensor([[Tokens.valued.value]], dtype=torch.int64),
-        content=torch.tensor([[9]], dtype=torch.int64),
-        present=torch.ones((1, 1), dtype=torch.bool),
-        trainable=torch.zeros((1, 1), dtype=torch.bool),
-        inferred=torch.zeros((1, 1), dtype=torch.bool),
+        state=torch.tensor([Tokens.valued.value], dtype=torch.int64),
+        content=torch.tensor([9], dtype=torch.int64),
+        present=torch.ones(1, dtype=torch.bool),
+        trainable=torch.zeros(1, dtype=torch.bool),
+        inferred=torch.zeros(1, dtype=torch.bool),
         targets=TensorDict({}),
         batch_size=1,
     )
-    with pytest.raises(ValueError):
-        embedder.embed(field)
+    binding = VocabularyBatch(labels=pa.array(["ALPHA", "BETA"]), size=2)
+
+    with pytest.raises(ValueError, match=r"outside \[-1, 2\)"):
+        bind(model, field, None, binding, address=address, strata=Strata.validate, resize=Resize())
+
+
+def test_cluster_float_nan_labels_take_the_other_state(tmp_path):
+    model = rf.Model.xs(d_model=8, label=rf.Cluster(bounds=2, mask=True), signal=rf.Number)
+    rows = pa.table({"label": [1.0, 2.0, float("nan"), 0.0], "signal": [1.0, 2.0, 3.0, 4.0]})
+    data = rf.ArrowDataModule(model, train=rows, validate=rows, shuffle=False)
+    model.fit(
+        data,
+        batch_size=4,
+        accelerator="cpu",
+        devices=1,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        num_sanity_val_steps=0,
+        early_stopping=False,
+        rollback=False,
+        enable_progress_bar=False,
+        logger=False,
+        enable_checkpointing=False,
+        default_root_dir=tmp_path,
+    )
+
+    assert rf.Cluster.vocabulary(model, "/label") == (1.0, 2.0, 0.0)
+    expected = [Tokens.valued.value, Tokens.valued.value, Tokens.other.value, Tokens.valued.value]
+    # A supervised field carries states in its training targets; an embedded one in its inputs.
+    targets = model.encode(rows, strata="train")[rf.Address("label")].targets
+    assert targets[TensorKey.state].flatten().tolist() == expected
+    assert targets[TensorKey.content].flatten()[2] < 0
+    embedded = rf.Model.xs(d_model=8, label=rf.Cluster(bounds=2), signal=rf.Number)
+    for strata in ("train", "predict"):
+        field = embedded.encode(rows, strata=strata)[rf.Address("label")]
+        assert field.state.flatten().tolist() == expected
+        assert field.content.flatten()[2] < 0
+    assert rf.Cluster.vocabulary(embedded, "/label") == (1.0, 2.0, 0.0)
+    assert model.predict(rows).num_rows == 4
 
 
 def test_cluster_embedder_init_commits_only_lower_columns():

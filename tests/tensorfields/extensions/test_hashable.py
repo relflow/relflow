@@ -410,6 +410,33 @@ def test_hashable_training_loss_covers_state_and_content_heads():
     assert torch.isfinite(output["loss"])
 
 
+@pytest.mark.parametrize("batch_size", [1, 2, 3])
+def test_hashable_evaluation_accuracy_counts_valued_targets_across_unequal_batches(batch_size, tmp_path):
+    torch.manual_seed(0)
+    model = rf.Model.xs(d_model=8, id=rf.Hash(n_hashes=2, n_buckets=4, mask=True))
+    rows = table([{"id": "alpha"}, {"id": "beta"}, {"id": None}])
+    data = rf.ArrowDataModule(model, validate=rows)
+    values = model.validate(
+        data,
+        batch_size=batch_size,
+        accelerator="cpu",
+        devices=1,
+        precision="32-true",
+        enable_progress_bar=False,
+        default_root_dir=tmp_path,
+    )[0]
+    encoded = model.encode(rows, strata=Strata.validate)
+    model.eval()
+    with torch.no_grad():
+        prediction = next(item for item in model(encoded, strata=Strata.validate) if str(item.address) == "/id")
+    logits = prediction.payload[TensorKey.content].reshape(3, 2, 4)
+    raw = encoded[rf.Address("id")].targets[TensorKey.content].reshape(3, 2)
+    buckets = raw.to(torch.float32).div(float(1 << 63)).add(1.0).mul(2.0).floor().long().clamp(0, 3)
+    correct = logits.argmax(-1).eq(buckets)[:2].sum().item()
+    # Accuracy counts correct buckets over the four valued (row, hash) pairs; the null row adds nothing.
+    assert values[".id/validate.accuracy.content"] == pytest.approx(correct / 4)
+
+
 def test_hashable_content_target_matches_deterministic_recomputation():
     schema = build_schema(n_hashes=5, length=2, mask=Mask(reconstruct=True))
     values = [[["alice", "bob"]], [["carol", "dave"]]]
@@ -590,5 +617,7 @@ def test_validation_and_prediction_preserve_identical_key_payload_context():
 
 def test_hashable_does_not_register_a_salt_callback():
     from relflow.tensorfields.extensions.hashable import hashable
+    from relflow.tensorfields.shared.reconstruction import Metrics
 
-    assert hashable.callback_factories == []
+    # Salting happens per encoded batch; the only callback reduces evaluation metrics.
+    assert hashable.callback_factories == [Metrics]

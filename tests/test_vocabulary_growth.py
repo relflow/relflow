@@ -636,6 +636,42 @@ def test_lightning_checkpoint_resume_restores_training_state_before_further_grow
     assert restored.schema.model_dump(mode="json") == schema
 
 
+def test_set_admission_preserves_predictions_until_the_member_is_learned():
+    model = build("set")
+    model.encode(table("set", ["a", "b", "a"]), strata="train")
+    node = model.nodes[ADDRESS]
+    content = node.embedder.embeddings["content"]
+    head = node.decoder.linears["content"]
+    with torch.no_grad():
+        # Stand in for training that moved the admitted rows away from zero.
+        content.weight[:2].normal_()
+        head.weight[:2].normal_()
+        head.bias[:2].normal_()
+
+    def forward(labels):
+        encoded = model.encode(table("set", labels), strata="predict")
+        with torch.no_grad():
+            parcel = node.embedder.embed(encoded[ADDRESS])
+            predicted = next(item for item in model(encoded, strata="predict") if item.address == ADDRESS)
+        return parcel.payload.reshape(len(labels), -1).clone(), predicted.payload[TensorKey.content].reshape(
+            len(labels), -1
+        ).clone()
+
+    before_embedding, before_logits = forward(["a", "c"])
+    model.encode(table("set", ["c"]), strata="train")
+    assert node.embedder.vocab.size == 4
+    after_embedding, after_logits = forward(["a", "c"])
+
+    # An admitted member embeds exactly as it did while unknown and stays out
+    # of every predicted set: its row is zero and its logit silent.
+    torch.testing.assert_close(after_embedding, before_embedding)
+    torch.testing.assert_close(after_logits[:, :2], before_logits[:, :2])
+    assert torch.equal(content.weight[2], torch.zeros_like(content.weight[2]))
+    assert torch.equal(head.weight[2], torch.zeros_like(head.weight[2]))
+    assert head.bias[2].item() == -20.0
+    assert after_logits[:, 2].sigmoid().max().item() < 1e-6
+
+
 def test_category_admission_preserves_predictions_until_the_label_is_learned():
     model = build("category")
     model.encode(table("category", ["a", "b", "a"]), strata="train")

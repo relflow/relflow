@@ -6,6 +6,7 @@ import math
 import re
 from dataclasses import InitVar
 from datetime import date, datetime
+from functools import partial
 from typing import TYPE_CHECKING, Annotated, Any, Callable, ClassVar, Literal, Unpack, cast, overload
 
 import numpy as np
@@ -31,6 +32,7 @@ from relflow.tensorfields.base import (
     TensorFieldBase,
     TensorInput,
 )
+from relflow.tensorfields.shared.reconstruction import Metrics, Scores, Totals
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
@@ -172,6 +174,22 @@ def second_of_minute(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 dateparts: Extension = Extension(name="dateparts", types=(str | date | datetime,))
+dateparts.callback(Metrics)
+
+
+class Arcs(Totals):
+    """Mean angular error per calendar part over valued targets."""
+
+    def __init__(self, parts: tuple[str, ...]):
+        super().__init__(counts=1, sums=len(parts))
+        self.parts = parts
+
+    def compute(self) -> dict[str, torch.Tensor]:
+        valued = self.counts[0]
+        return {
+            f"{Metric.mae.value}.{TensorKey.content.value}.{part}": total / valued
+            for part, total in zip(self.parts, self.sums.unbind(), strict=True)
+        }
 
 
 @overload
@@ -456,8 +474,10 @@ class Decoder(DecoderBase):
 
         self.dateparts = torch.nn.ModuleDict()
 
-        for datepart in cast(Request, schema.requests[address]).dateparts:
+        request = cast(Request, schema.requests[address])
+        for datepart in request.dateparts:
             self.dateparts[datepart] = torch.nn.Linear(in_features=schema.d_model, out_features=2)
+        self.metrics = Scores(address, partial(Arcs, tuple(datepart.value for datepart in request.dateparts)))
 
     @beartype
     def decode(self, pooled: torch.Tensor) -> TensorDict:
@@ -504,30 +524,36 @@ def loss(
     )
 
     request: Request = cast(Request, module.schema.requests[prediction.address])
+    decoder: Decoder = cast(Decoder, module.nodes[prediction.address].decoder)
 
+    # Only valued targets lie on the unit circle; null and padded coordinates
+    # train the state head alone.
+    valued = trainable & targets.eq(Tokens.valued.value)
     losses: list[torch.Tensor] = []
+    angles: list[torch.Tensor] = []
 
     for datepart in request.dateparts:
         pred_raw = cast(torch.Tensor, cast(TensorDict, prediction.payload[TensorKey.content])[datepart]).reshape(
             numel, 2
-        )
-        target = cast(torch.Tensor, cast(TensorDict, batch.targets[TensorKey.content])[datepart]).reshape(numel, 2)
+        )[valued]
+        target = cast(torch.Tensor, cast(TensorDict, batch.targets[TensorKey.content])[datepart]).reshape(numel, 2)[
+            valued
+        ]
 
         pred: torch.Tensor = pred_raw / pred_raw.norm(dim=-1, keepdim=True).clamp_min(1e-6)
         cosine: torch.Tensor = (pred * target).sum(dim=-1)
 
-        losses.append(
-            module.track(
-                (prediction.address, strata, Metric.loss, TensorKey.content, datepart),
-                value=(1.0 - cosine).masked_select(trainable).mean(),
+        if cosine.numel():
+            losses.append(
+                module.track(
+                    (prediction.address, strata, Metric.loss, TensorKey.content, datepart),
+                    value=(1.0 - cosine).mean(),
+                )
             )
-        )
+        angles.append(cosine.detach().clamp(min=-1.0, max=1.0).arccos().sum())
 
-        module.track(
-            (prediction.address, strata, Metric.mae, TensorKey.content, datepart),
-            value=cosine.clamp(min=-1.0, max=1.0).arccos().masked_select(trainable).mean(),
-        )
-
-    loss += torch.stack(losses).mean()
+    decoder.metrics.record(module, strata, valued.sum().unsqueeze(0), torch.stack(angles))
+    if losses:
+        loss += torch.stack(losses).mean()
 
     return loss

@@ -7,6 +7,7 @@ from dataclasses import InitVar
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Unpack, cast, overload
 from weakref import ReferenceType, ref
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import pydantic
@@ -40,7 +41,9 @@ from relflow.tensorfields.shared.vocabulary import (
     VocabularyBatch,
     VocabularyState,
     VocabularySyncCallback,
+    admissible,
     capacity,
+    states,
 )
 
 if TYPE_CHECKING:
@@ -260,11 +263,11 @@ def observe(
     if not isinstance(state, VocabularyState):
         raise RuntimeError(f"cluster field at '{address}' requires a vocabulary encoding context")
 
-    indices = state.indices(field.values, learn=True)
-    content = torch.from_numpy(indices.copy())
+    values, nan = admissible(field)
+    content = torch.from_numpy(state.indices(values, learn=True))
     return TensorDict(
         {
-            TensorKey.state: tally(torch.from_numpy(field.dense.copy()), len(Tokens)),
+            TensorKey.state: tally(torch.from_numpy(states(field, nan)), len(Tokens)),
             TensorKey.content: tally(content.masked_fill(content < 0, state.size), state.size + 1),
         },
         batch_size=[],
@@ -306,18 +309,24 @@ class TensorField(TensorFieldBase[torch.Tensor]):
                 f"cluster field at '{address}' requires VocabularyState context, got {type(state).__name__}"
             )
 
-        def encode(field: RaggedField) -> torch.Tensor:
+        def encode(field: RaggedField) -> tuple[torch.Tensor, torch.Tensor]:
             if not len(field.values):
-                return torch.zeros(field.shape, dtype=torch.int64)
+                return torch.zeros(field.shape, dtype=torch.int64), torch.from_numpy(field.dense.copy())
             if state is None:
                 raise RuntimeError(f"cluster field at '{address}' requires a vocabulary encoding context")
-            tokens = state.indices(field.values, learn=False)
-            return torch.from_numpy(field.place(tokens, fill=0))
+            values, nan = admissible(field)
+            tokens = np.full(len(nan), -1, dtype=np.int64)
+            tokens[~nan] = state.indices(values, learn=False)
+            return torch.from_numpy(field.place(tokens, fill=0)), torch.from_numpy(states(field, nan))
 
-        content = encode(input)
-        target_content = encode(target) if address in schema.objectives else None
+        content, state_tensor = encode(input)
+        targets = TensorDict({}, batch_size=input.shape)
+        if address in schema.objectives:
+            target_content, target_state = encode(target)
+            targets = TensorDict(
+                {TensorKey.state: target_state, TensorKey.content: target_content}, batch_size=input.shape
+            )
 
-        state_tensor = torch.from_numpy(input.dense)
         if strata == Strata.train:
             p_unavailable: float = cast(Request, schema.requests[address]).p_unavailable
             unavailable_index = -1
@@ -334,15 +343,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             present=present,
             trainable=trainable,
             inferred=inferred,
-            targets=TensorDict(
-                {
-                    TensorKey.state: torch.from_numpy(target.dense),
-                    TensorKey.content: target_content,
-                }
-                if target_content is not None
-                else {},
-                batch_size=input.shape,
-            ),
+            targets=targets,
             batch_size=input.batch_size,
         )
 
@@ -425,11 +426,6 @@ class Embedder(EmbedderBase):
         state = inputs.state.reshape(-1)
         content = cast(torch.Tensor, inputs.content).reshape(-1)
         valued = state.eq(Tokens.valued.value)
-
-        if valued.any():
-            valid_content = content.masked_select(valued)
-            if ((valid_content < -1) | (valid_content >= self.capacity)).any().item():
-                raise ValueError(f"Token in address {self.origin} outside [-1, {self.capacity})")
 
         safe_content = content.masked_fill(content.eq(-1), self.capacity).masked_fill(~valued, 0)
         assign_logits = self.embeddings[TensorKey.cluster.name](safe_content)
@@ -558,10 +554,10 @@ def bind(
     mapping, size = binding.resolve(embedder.vocab, learn=strata == Strata.train, device=module.device, resize=resize)
     embedder.resize(size, resize)
     field = cast(TensorField, field)
-    field.content = mapping.to(field.content.device)[field.content]
+    field.content = binding.translate(field.content, mapping, address=address)
     if TensorKey.content in field.targets:
         values = cast(torch.Tensor, field.targets[TensorKey.content])
-        field.targets[TensorKey.content] = mapping.to(values.device)[values]
+        field.targets[TensorKey.content] = binding.translate(values, mapping, address=address)
     if observation is not None:
         counter_mapping = mapping.clone()
         counter_mapping[-1] = size
