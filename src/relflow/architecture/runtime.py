@@ -258,9 +258,9 @@ def axes(module: Model, address: Address) -> tuple[int | None, ...]:
 
 
 def metadata(module: Model) -> dict[bytes, bytes]:
-    """Identify the public output contract and model's recorded package version."""
+    """Record the model's RelFlow package version on every output table."""
 
-    return {b"relflow.prediction_format": b"2", b"relflow.model_version": module.version.encode()}
+    return {b"relflow.model_version": module.version.encode()}
 
 
 def check_output_type(datatype: pa.DataType, address: Address) -> None:

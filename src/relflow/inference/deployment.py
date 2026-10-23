@@ -188,7 +188,6 @@ class FastAPIRuntime:
 
         values = metadata(self.model)
         return {
-            "X-RelFlow-Prediction-Format": values[b"relflow.prediction_format"].decode("utf-8"),
             "X-RelFlow-Model-Version": values[b"relflow.model_version"].decode("utf-8"),
         }
 
@@ -766,15 +765,10 @@ class Deployment(BaseSettings):
                 "reports request-local failures as error envelopes in their slots, and represents dates, times, "
                 "and durations as ISO 8601 strings, binary as URL-safe base64, decimals as strings, and NaN or "
                 "infinite numbers as null; Arrow output is an IPC stream whose rows remain in input order. "
-                "Selected canonical columns are preserved. Model provenance and the prediction format are "
-                "carried in HTTP headers and Arrow schema metadata."
+                "Selected canonical columns are preserved. Model provenance is carried in an HTTP header "
+                "and Arrow schema metadata."
             )
             success["headers"] = {
-                "X-RelFlow-Prediction-Format": {
-                    "description": "Version of the canonical RelFlow prediction layout.",
-                    "schema": {"type": "string"},
-                    "example": "2",
-                },
                 "X-RelFlow-Model-Version": {
                     "description": (
                         "RelFlow version stored in the loaded model. This describes the package/checkpoint "

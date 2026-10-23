@@ -118,9 +118,7 @@ def test_writer_preserves_metadata_through_postprocessing(tmp_path):
     def select(frame: pl.DataFrame) -> pl.DataFrame:
         return frame.select("score")
 
-    output = pa.table({"score": [0.25], "other": [1]}).replace_schema_metadata(
-        {b"relflow.prediction_format": b"2", b"relflow.model_version": b"example"}
-    )
+    output = pa.table({"score": [0.25], "other": [1]}).replace_schema_metadata({b"relflow.model_version": b"example"})
     writer = Writer(tmp_path, postprocessor=select)
     write(writer, output)
     writer.close()

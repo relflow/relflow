@@ -182,7 +182,6 @@ def test_deployment_serves_embeddings_from_temporary_checkpoint(deployment) -> N
     embedding = representation["embedding"]
     assert len(embedding) == d_model
     assert all(isinstance(value, float) for value in embedding)
-    assert headers["x-relflow-prediction-format"] == "2"
     assert headers["x-relflow-model-version"]
 
 

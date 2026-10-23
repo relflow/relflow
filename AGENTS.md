@@ -193,8 +193,8 @@ and `inferred`. Requested embeddings are separate `representations` records:
 `path` segments (root `[]`), repeated ancestor `parents` ordinals, intrinsic
 `output_index`, and a fixed-width `embedding`. Omit unconfigured output columns;
 `inputs` appears only when retention is selected. Models with no public output
-reject prediction. Output format/version metadata travels with Arrow tables and
-HTTP headers. Extension output list children must be named `element`.
+reject prediction. The model's recorded RelFlow version travels with Arrow tables
+and HTTP headers. Extension output list children must be named `element`.
 
 PyArrow Parquet cannot round-trip fixed-size lists below null containers.
 `rf.Writer` rejects those batches before writing; use Arrow IPC for sparse

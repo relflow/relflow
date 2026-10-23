@@ -511,7 +511,6 @@ def test_deployment_forge_registers_openapi_signatures():
     response_schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
     assert response_schema["anyOf"][0]["required"] == ["predictions"]
     assert "model" not in response_schema["anyOf"][0]["properties"]
-    assert operation["responses"]["200"]["headers"]["X-RelFlow-Prediction-Format"]["example"] == "2"
     assert "X-RelFlow-Model-Version" in operation["responses"]["200"]["headers"]
     assert schema["components"]["schemas"]["DeploymentError"]["properties"]["predictions"] == {"type": "null"}
 
@@ -519,10 +518,7 @@ def test_deployment_forge_registers_openapi_signatures():
 def test_runtime_headers_mirror_canonical_metadata_without_checkpoint_paths():
     server = runtime(model=SimpleNamespace(version="1.2.3"))
 
-    assert server.headers() == {
-        "X-RelFlow-Prediction-Format": "2",
-        "X-RelFlow-Model-Version": "1.2.3",
-    }
+    assert server.headers() == {"X-RelFlow-Model-Version": "1.2.3"}
 
 
 @pytest.mark.parametrize("empty", [False, True])
@@ -595,7 +591,6 @@ def test_arrow_deployment_batches_processed_rows_and_runs_global_processors_once
         "value": [] if empty else [-1.0, -3.0, 4.0],
     }
     assert "model" not in output.column_names
-    assert response.headers["x-relflow-prediction-format"] == "2"
     assert response.headers["x-relflow-model-version"] == model.version
     assert processed == [source.num_rows]
     assert postprocessed == [2 * source.num_rows]
@@ -640,7 +635,6 @@ def test_arrow_deployment_rejects_final_prediction_cardinality_drift(stage):
     response = asyncio.run(run())
 
     assert response.status_code == 500
-    assert response.headers["x-relflow-prediction-format"] == "2"
     assert orjson.loads(response.body) == {
         "predictions": None,
         "error": {
@@ -951,7 +945,6 @@ def test_arrow_route_reports_data_errors_as_422_envelopes():
 
     assert response.status_code == 422
     assert response.media_type == "application/json"
-    assert response.headers["x-relflow-prediction-format"] == "2"
     assert body["predictions"] is None
     assert body["error"]["status_code"] == 422
     assert "'/value'" in body["error"]["message"]
