@@ -1,5 +1,4 @@
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 import numpy as np
 import pyarrow as pa
@@ -145,15 +144,22 @@ def recovered(pairs: torch.Tensor, period: int) -> list[int]:
     return [int(round(value)) % period for value in angles.reshape(-1) / (2 * np.pi) * period]
 
 
-@pytest.mark.parametrize("zone", ["America/New_York", "Asia/Tokyo"])
-def test_dateparts_reads_zone_aware_timestamps_in_their_own_zone(zone: str):
-    tz = ZoneInfo(zone)
-    stamps = [datetime(2024, 3, 9, 18, 30, tzinfo=tz), datetime(2024, 3, 9, 23, 30, tzinfo=tz)]
+@pytest.mark.parametrize(
+    ("zone", "utc"),
+    [
+        ("America/New_York", ["2024-03-09T23:30", "2024-03-10T04:30"]),
+        ("Asia/Tokyo", ["2024-03-09T09:30", "2024-03-09T14:30"]),
+    ],
+)
+def test_dateparts_reads_zone_aware_timestamps_in_their_own_zone(zone: str, utc: list[str]):
+    # The same two local wall-clock times, 18:30 and 23:30 on Saturday 2024-03-09, as instants in each zone.
+    instants = pa.array(np.array(utc, dtype="datetime64[s]")).cast(pa.timestamp("s", tz=zone))
+    local = pa.array(np.array(["2024-03-09T18:30", "2024-03-09T23:30"], dtype="datetime64[s]"))
     model = rf.Model.xs(
         d_model=8, when=rf.DateParts(dateparts=["day_of_week", "hour_of_day"]), label=rf.Boolean(mask=True)
     )
-    aware = model.encode(pa.table({"when": pa.array(stamps, type=pa.timestamp("s", tz=zone))}), strata="predict")
-    naive = model.encode(pa.table({"when": pa.array([s.replace(tzinfo=None) for s in stamps])}), strata="predict")
+    aware = model.encode(pa.table({"when": instants}), strata="predict")
+    naive = model.encode(pa.table({"when": local}), strata="predict")
     content = aware[rf.Address("when")].content
     expected = naive[rf.Address("when")].content
 
