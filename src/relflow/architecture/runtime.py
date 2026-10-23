@@ -77,6 +77,7 @@ class ExecutionPlan:
     embeds: frozenset[Address]
     objectives: tuple[Address, ...]
     decoders: tuple[DecoderRoute, ...]
+    sequenced: frozenset[Address]
 
 
 def execution(module: Model) -> ExecutionPlan:
@@ -106,6 +107,8 @@ def execution(module: Model) -> ExecutionPlan:
         embeds=embeds,
         objectives=objectives,
         decoders=decoders,
+        # Only ancestors of a decoded leaf need their encoded sequence beside the summary.
+        sequenced=frozenset(item for route in decoders for item in route.heritage),
     )
     return module.execution_plan
 
@@ -650,7 +653,10 @@ class ModelRuntime:
 
                 node_module = cast(NodeModule, module.nodes[address])
                 encoder: BranchEncoder = node_module.encoder
-                encoded: Parcel = encoder(processed[address], geometry=geometry)
+                conditioning = {"context": processed[encoder.destination]} if encoder.conditioning is not None else {}
+                encoded: Parcel = encoder(
+                    processed[address], geometry=geometry, sequenced=address in plan.sequenced, **conditioning
+                )
                 if encoded.destination is None:
                     raise ValueError(f"parcel from '{encoded.origin}' has no destination")
                 processed[encoded.destination].append(encoded)
@@ -680,7 +686,14 @@ class ModelRuntime:
         for route in decoders:
             address = route.address
             tensorfield = cast(TensorFieldBase, inputs[address])
-            parcels = [outgoing[item] for item in route.heritage if item in outgoing]
+            # A reduced ancestor hands the decoders beneath it its summary and its encoded sequence.
+            parcels = []
+            for item in route.heritage:
+                if item in outgoing:
+                    parcels.append(outgoing[item])
+                    kept = outgoing[item].sequence
+                    if kept is not None:
+                        parcels.append(kept)
 
             node_module = cast(NodeModule, module.nodes[address])
             decoder: DecoderBase = node_module.decoder
@@ -756,7 +769,7 @@ class ModelRuntime:
         *,
         strata: Strata,
     ) -> Output | pa.Table | None:
-        """Evaluate a loop batch, retaining Arrow sources for public predictions."""
+        """Evaluate one loop batch, retaining Arrow sources for public predictions."""
         if isinstance(batch, Encoded) and batch.bindings:
             trainer = getattr(module, "_trainer", None)
             if trainer is not None and trainer.world_size > 1:

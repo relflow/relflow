@@ -293,23 +293,34 @@ class DecoderBase(torch.nn.Module):
         n_context = math.prod(dimension if dimension is not None else 1 for dimension in self.shape)
         self.n_context = n_context
         self.d_model = schema.d_model
-        self.memory_coordinates: dict[Address, tuple[tuple[Address, ...], tuple[int | None, ...], int | None]] = {}
+        # An ancestor branch reaches the decoder twice: as the summary it routes
+        # upward and as the encoded sequence it keeps for its descendants.
+        Coordinates = tuple[tuple[Address, ...], tuple[int | None, ...], int | None]
+        self.memory_coordinates: dict[Address, Coordinates] = {}
+        self.sequence_coordinates: dict[Address, Coordinates] = {}
         for origin in request.heritage:
             node = schema.requests[origin] if origin in schema.requests else schema.branches[origin]
             path = tuple(cast("Branch", node) for node in node.path if getattr(node, "type", None) == "branch")
             if isinstance(node, Leaf):
-                outer = path[:-1]
-                capacity = path[-1].length
-            else:
-                outer = path[:-2]
-                capacity = schema.branch_outputs[origin]
+                self.memory_coordinates[origin] = (
+                    tuple(node.address for node in path[:-1]),
+                    tuple(node.length for node in path[:-1]),
+                    path[-1].length,
+                )
+                continue
+            outer = path[:-2]
+            for table, width in (
+                (self.memory_coordinates, schema.branch_outputs[origin]),
+                (self.sequence_coordinates, schema.branch_widths[origin]),
+            ):
+                capacity = width
                 if len(path) > 1:
                     capacity = None if path[-2].length is None or capacity is None else path[-2].length * capacity
-            self.memory_coordinates[origin] = (
-                tuple(node.address for node in outer),
-                tuple(node.length for node in outer),
-                capacity,
-            )
+                table[origin] = (
+                    tuple(node.address for node in outer),
+                    tuple(node.length for node in outer),
+                    capacity,
+                )
 
         def visible(node: Branch | Leaf) -> list[Address]:
             if isinstance(node, Leaf):
@@ -563,7 +574,10 @@ class DecoderBase(torch.nn.Module):
                     ranks = torch.arange(size, device=device).expand(batch_size, size)
                     span = torch.full((batch_size,), size, device=device, dtype=torch.int64)
                 else:
-                    axes, capacities, capacity = self.memory_coordinates[parcel.origin]
+                    kept = parcel.destination == parcel.origin
+                    axes, capacities, capacity = (self.sequence_coordinates if kept else self.memory_coordinates)[
+                        parcel.origin
+                    ]
                     lengths = tuple(
                         cast(Geometry, geometry[axis]).lengths if geometry is not None else None for axis in axes
                     )

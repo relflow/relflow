@@ -11,6 +11,8 @@ class Parcel(TensorClass):
     and ``spans`` count that instance's positions. ``slots`` mark tokens that
     stand for real records. ``widths`` count the positions each destination
     item owns in this parcel; leaves omit it and own one position per item.
+    A reduced branch routes its summary upward and keeps its encoded
+    ``sequence`` beside it for the decoders beneath it.
     """
 
     payload: torch.Tensor
@@ -21,6 +23,7 @@ class Parcel(TensorClass):
     spans: torch.Tensor | None = None
     slots: torch.Tensor | None = None
     widths: torch.Tensor | None = None
+    sequence: "Parcel | None" = None
 
 
 # @jaxtyped(typechecker=beartype)
