@@ -127,6 +127,12 @@ model = rf.Model(
   Zone-aware timestamps describe their own wall clock; strings carrying an offset
   are read as UTC. A `Vector` with a NaN or infinite element, and a float NaN label
   in `Category`, take the `other` state; a NaN `Set` member is dropped like a null.
+- `Text(store="dir")` keeps frozen-encoder vectors on disk, keyed by encoder
+  configuration and token row and shared by every split, run, and field with
+  that encoder; misses are encoded once and appended as shards, the
+  extension's callback flushes at epoch and phase ends, and
+  `embedder.warm(strings)` fills it ahead of training. The in-process `cache`
+  stays for runs without a store.
 - `rf.Jitter(add=..., multiply=..., normalize=...)` is a shared frozen
   configuration whose `apply(inputs, mask)` method owns the vectorized affine
   tensor operation. Consumers own training activation, eligible coordinates,
