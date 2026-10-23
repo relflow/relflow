@@ -88,12 +88,14 @@ def test_nested_variable_axes_and_pass_through_embeddings_preserve_structural_sl
     outer = [item for item in first if item["path"] == ["events"]]
     inner = [item for item in first if item["path"] == ["events", "items"]]
     # The null item owns no tokens at either level; its slots stay reserved in the positions.
+    # Item-major: the event's amount sits at 0 and its items block at 1..4, where the null
+    # item reserves 1..2 and the second item's amount and label take 3..4.
     assert len(outer) == 3
     assert len(inner) == 2
     assert all(item["parents"] == [] for item in outer)
     assert all(item["parents"] == [0] for item in inner)
-    assert [item["output_index"] for item in outer] == [0, 2, 4]
-    assert [item["output_index"] for item in inner] == [1, 3]
+    assert [item["output_index"] for item in outer] == [0, 3, 4]
+    assert [item["output_index"] for item in inner] == [2, 3]
     assert all(any(value != 0.0 for value in item["embedding"]) for item in outer[:1] + inner[:1])
     second_inner = [item for item in rows[1]["representations"] if item["path"] == ["events", "items"]]
     assert len(second_inner) == 2
@@ -181,7 +183,7 @@ def test_pass_through_representations_skip_null_items_but_keep_their_slots():
     tokens = [item for item in rows if item["path"] == ["events"]]
     leaves = [item for item in rows if item["path"] == ["events", "amount"]]
 
-    # Field-major slots: amount at 0..2 and tag at 3..5; the null item's slots 1 and 4 own no token.
-    assert [item["output_index"] for item in tokens] == [0, 2, 3, 5]
+    # Item-major slots: item 0 owns 0..1 and item 2 owns 4..5; the null item's slots 2..3 own no token.
+    assert [item["output_index"] for item in tokens] == [0, 1, 4, 5]
     assert all(any(value != 0.0 for value in item["embedding"]) for item in tokens)
     assert [item["parents"] for item in leaves] == [[0], [2]]

@@ -244,9 +244,16 @@ def test_finite_decoder_heritage_retains_original_flat_memory_positions():
     finally:
         for handle in handles:
             handle.remove()
+    # Memory keeps the encoder's item-major numbering: the events block interleaves
+    # amount and target per item (0, 2 | 1, 3) and each heritage parcel continues
+    # after the previous span, so the storage order is not the position order.
+    expected = {
+        11: [0, 2, 1, 3, 4, 5, 7, 6, 8, 9, 10],  # /events/target: root, events, and its own leaf
+        6: [0, 2, 1, 3, 4, 5],  # /answer: root and its own leaf
+    }
     assert len(observed) == 2
     for shape, positions in observed:
-        torch.testing.assert_close(positions, torch.arange(shape[1]).expand(shape[:2]), rtol=0, atol=0)
+        torch.testing.assert_close(positions, torch.tensor([expected[shape[1]]]), rtol=0, atol=0)
 
 
 def test_three_dynamic_axes_preserve_ordered_scalar_and_repeated_predictions():
