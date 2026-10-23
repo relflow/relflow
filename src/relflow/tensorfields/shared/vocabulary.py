@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import zlib
 from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import partial, partialmethod
@@ -566,6 +567,48 @@ class OnlineVocabularyModel(torch.nn.Module):
 
         self._snapshot_cache = None
         self._snapshot_size = -1
+
+
+def start(weight: torch.Tensor, assigned: int, *, seed: int) -> int:
+    """Give the still-zero rows among the first ``assigned`` a normal start; return how many were filled.
+
+    The draw depends only on ``seed``, so every DDP rank fills identical values.
+    """
+    if not assigned:
+        return 0
+    rows = weight[:assigned].eq(0).all(dim=1).nonzero().flatten()
+    if not rows.numel():
+        return 0
+    generator = torch.Generator().manual_seed(seed)
+    weight[rows] = torch.randn(rows.numel(), weight.shape[1], generator=generator).to(weight)
+    return int(rows.numel())
+
+
+class AdmittedRowsCallback(Callback):
+    """Start admitted content rows before their first training step.
+
+    Admission leaves a label's row at zero, so the label embeds exactly as it
+    did while unknown and predictions hold until learning resumes. Attention
+    cannot tell identical keys apart, so labels that all start at zero never
+    separate; a training batch therefore first gives every still-zero assigned
+    row a normal draw. This is the one parameter change outside optimization:
+    from exactly zero to a start that is a fixed function of the address and
+    the batch, so every rank and run fills the same values and rows admitted
+    into spare capacity never coincide.
+    """
+
+    @torch.no_grad()
+    def on_train_batch_start(self, trainer: Trainer, pl_module: LightningModule, batch: Any, batch_idx: int) -> None:
+        module = cast("Model", pl_module)
+        for address, vocabulary in OnlineVocabularyModel.from_model(module).items():
+            embeddings = getattr(module.nodes[address].embedder, "embeddings", None)
+            if embeddings is None or TensorKey.content.name not in embeddings:
+                continue
+            weight = cast(torch.nn.Embedding, embeddings[TensorKey.content.name]).weight
+            seed = (zlib.crc32(str(address).encode()) * 1_000_003 + trainer.current_epoch * 65_536 + batch_idx) % (
+                2**63 - 1
+            )
+            start(weight, len(vocabulary.master), seed=seed)
 
 
 class VocabularySyncCallback(Callback):

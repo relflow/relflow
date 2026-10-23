@@ -33,6 +33,7 @@ from relflow.tensorfields.shared.resize import SILENT_LOGIT
 from relflow.tensorfields.shared.rows import Embedding, Linear
 from relflow.tensorfields.shared.vocabulary import (
     INITIAL_CAPACITY,
+    AdmittedRowsCallback,
     OnlineVocabularyModel,
     VocabularyBatch,
     VocabularyState,
@@ -51,7 +52,7 @@ if TYPE_CHECKING:
 category: Extension = Extension(
     name="category",
     types=(bool, int, float, str, bytes),
-    callbacks=(VocabularySyncCallback, CounterUpdateCallback, Metrics),
+    callbacks=(VocabularySyncCallback, CounterUpdateCallback, Metrics, AdmittedRowsCallback),
 )
 
 
@@ -313,7 +314,7 @@ class Embedder(EmbedderBase):
         )
         # Labels are admitted while training, so every content row starts at
         # zero: an admitted label embeds exactly as it did while unknown until
-        # gradients move its row.
+        # AdmittedRowsCallback starts its row before the next training batch.
         torch.nn.init.zeros_(cast(torch.nn.Embedding, self.embeddings[TensorKey.content.name]).weight)
 
         self.counters = torch.nn.ModuleDict(

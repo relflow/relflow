@@ -700,3 +700,64 @@ def test_category_admission_preserves_predictions_until_the_label_is_learned():
     assert torch.equal(content.weight[2], torch.zeros_like(content.weight[2]))
     assert torch.equal(head.weight[2], torch.zeros_like(head.weight[2]))
     assert head.bias[2].item() == -20.0
+
+
+def test_admitted_rows_stay_zero_until_a_training_batch_starts_them_distinct_and_deterministic():
+    from types import SimpleNamespace
+
+    import lightning.pytorch as lit
+
+    from relflow.tensorfields.shared.vocabulary import AdmittedRowsCallback
+
+    def build():
+        lit.seed_everything(7)
+        return rf.Model.xs(d_model=8, group=rf.Category, y=rf.Number(mask=True))
+
+    rows = pa.table({"group": ["A", "B", "C", "A"], "y": [1.0, 2.0, 3.0, 4.0]})
+    # Admission with null targets touches the vocabulary alone; the target statistics are already set.
+    admission = pa.table({"group": ["A", "B", "C"], "y": pa.array([None] * 3, pa.float64())})
+    model = build()
+    model.encode(pa.table({"group": ["X", "Y", "Z", "X"], "y": [1.0, 2.0, 3.0, 4.0]}), strata="train")
+    unknown = model.predict(rows)
+    model.encode(admission, strata="train")
+    weight = model.nodes["/group"].embedder.embeddings["content"].weight
+    assert list(model.nodes["/group"].embedder.vocab.master) == ["X", "Y", "Z", "A", "B", "C"]
+    # Admission leaves the rows at zero, so the admitted labels still predict as unknown ones.
+    assert weight[3:6].abs().sum() == 0 and model.predict(rows).equals(unknown)
+    callback = AdmittedRowsCallback()
+    callback.on_train_batch_start(SimpleNamespace(current_epoch=0), model, None, 0)
+    started = weight[:6].detach().clone()
+    assert (started != 0).all() and not torch.allclose(started[3], started[4])
+    # Rows already carrying values, such as trained or loaded ones, are left alone.
+    callback.on_train_batch_start(SimpleNamespace(current_epoch=0), model, None, 1)
+    assert torch.equal(weight[:6], started)
+    # The same seed, address, and batch draw the same rows on another rank or run.
+    other = build()
+    other.encode(pa.table({"group": ["X", "Y", "Z", "X"], "y": [1.0, 2.0, 3.0, 4.0]}), strata="train")
+    other.encode(admission, strata="train")
+    callback.on_train_batch_start(SimpleNamespace(current_epoch=0), other, None, 0)
+    assert torch.equal(other.nodes["/group"].embedder.embeddings["content"].weight[:6], started)
+    # A fit starts the rows before its first step, so they train from distinct values.
+    trained = build()
+    data = rf.ArrowDataModule(
+        model=trained, train=rows, validate=rows, num_workers=0, persistent_workers=False, pin_memory=False
+    )
+    trained.fit(
+        data,
+        batch_size=4,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        early_stopping=False,
+        rollback=False,
+        accelerator="cpu",
+        devices=1,
+        precision="32-true",
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        num_sanity_val_steps=0,
+    )
+    weight = trained.nodes["/group"].embedder.embeddings["content"].weight
+    assert (weight[:3] != 0).all() and not torch.allclose(weight[0], weight[1])

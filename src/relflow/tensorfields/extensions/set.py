@@ -32,6 +32,7 @@ from relflow.tensorfields.shared.resize import SILENT_LOGIT
 from relflow.tensorfields.shared.rows import Embedding, Linear
 from relflow.tensorfields.shared.vocabulary import (
     INITIAL_CAPACITY,
+    AdmittedRowsCallback,
     OnlineVocabularyModel,
     VocabularyBatch,
     VocabularyState,
@@ -48,7 +49,7 @@ if TYPE_CHECKING:
 sets: Extension = Extension(
     name="set",
     types=(bool, int, float, str, bytes),
-    callbacks=(VocabularySyncCallback, CounterUpdateCallback, Metrics),
+    callbacks=(VocabularySyncCallback, CounterUpdateCallback, Metrics, AdmittedRowsCallback),
 )
 
 
