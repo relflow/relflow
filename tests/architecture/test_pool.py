@@ -130,3 +130,25 @@ def test_mean_pooling_uses_only_present_memory():
 
     assert torch.equal(output[0], torch.tensor([[2.0, 3.0], [2.0, 3.0]]))
     assert torch.equal(output[1], torch.zeros_like(output[1]))
+
+
+def test_mean_pooling_count_lane_starts_as_the_plain_mean_and_scales_with_presence():
+    plain = MeanPool(n_context=1)
+    counted = MeanPool(n_context=1, d_model=2, mass_capacity=4)
+    memory = torch.tensor([[[2.0, 4.0]] + [[0.0, 0.0]] * 3, [[2.0, 4.0]] * 4])
+    present = torch.tensor([[True, False, False, False], [True, True, True, True]])
+
+    assert torch.equal(counted(memory, present=present), plain(memory, present=present))
+
+    with torch.no_grad():
+        counted.mass_direction.copy_(torch.tensor([1.0, -1.0]))
+    output = counted(memory, present=present)
+    # One item and four equal items share a mean but now differ by their count over capacity.
+    assert torch.allclose(output[0, 0], torch.tensor([2.25, 3.75]))
+    assert torch.allclose(output[1, 0], torch.tensor([3.0, 3.0]))
+
+
+@pytest.mark.parametrize("kwargs", [{"d_model": 2}, {"mass_capacity": 4}, {"d_model": 2, "mass_capacity": 0}])
+def test_mean_pooling_count_lane_requires_a_complete_capacity(kwargs):
+    with pytest.raises(ValueError):
+        MeanPool(n_context=1, **kwargs)

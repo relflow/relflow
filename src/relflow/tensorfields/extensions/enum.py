@@ -32,6 +32,7 @@ from relflow.tensorfields.base import (
 from relflow.tensorfields.output import array, struct, variable
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
 from relflow.tensorfields.shared.reconstruction import Metrics, Reconstruction, Scores
+from relflow.tensorfields.shared.vocabulary import fold
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
@@ -52,12 +53,17 @@ class Request(RequestBase):
     Declaration order defines fixed class IDs. Unknown values are rejected in
     every stage. Null is a value state, not a declared class. Input augmentation,
     reconstruction, and string-label predictions follow Category's conventions.
+    ``strip=True`` trims surrounding whitespace from string labels and
+    ``cased=False`` lowercases them, applied to the declared values and to
+    every input alike, as an escape hatch for look-alike labels.
     """
 
     type: Literal["enum"] = "enum"
     values: tuple[Value, ...]
     p_unavailable: float = pydantic.Field(default=0.01, ge=0.0, le=1.0)
     topk: list[int] | None = None
+    strip: bool = False
+    cased: bool = True
 
     def __init__(
         self,
@@ -65,6 +71,8 @@ class Request(RequestBase):
         values: tuple[Value, ...],
         p_unavailable: float = 0.01,
         topk: list[int] | None = None,
+        strip: bool = False,
+        cased: bool = True,
         type: Literal["enum"] = "enum",
         **options: Unpack[FieldOptions],
     ) -> None:
@@ -73,7 +81,30 @@ class Request(RequestBase):
             raise TypeError("Enum values must be a tuple of unique scalar labels")
         if any(isinstance(value, Mapping) for value in values):
             raise ValueError("Enum values must be scalar labels, not serialized objects")
-        super().__init__(values=values, p_unavailable=p_unavailable, topk=topk, type=type, **options)
+        super().__init__(
+            values=values, p_unavailable=p_unavailable, topk=topk, strip=strip, cased=cased, type=type, **options
+        )
+
+    @pydantic.model_validator(mode="before")
+    @classmethod
+    def check_folded_values(cls, data: Any) -> Any:
+        """Fold declared string labels the way inputs are folded, so one declaration matches both."""
+        if not isinstance(data, Mapping) or not isinstance(data.get("values"), (tuple, list)):
+            return data
+        strip, cased = bool(data.get("strip", False)), bool(data.get("cased", True))
+        if not strip and cased:
+            return data
+
+        def label(value: Any) -> Any:
+            if not isinstance(value, str):
+                return value
+            value = value.strip() if strip else value
+            return value if cased else value.lower()
+
+        folded = tuple(label(value) for value in data["values"])
+        if len(set(folded)) != len(folded):
+            raise ValueError("Enum values collide after strip/cased folding; declare each folded label once")
+        return {**data, "values": folded}
 
     @pydantic.field_validator("values", mode="before")
     @classmethod
@@ -154,6 +185,8 @@ class State:
 
     values: tuple[Value, ...]
     address: Address
+    strip: bool = False
+    cased: bool = True
     tokens: pa.Array = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -179,6 +212,7 @@ class State:
                 f"Enum field at '{self.address}' expects {type(self.values[0]).__name__} labels, got {values.type}"
             )
         try:
+            values = fold(values, strip=self.strip, cased=self.cased)
             values = self.canonical(pc.cast(values, self.tokens.type, safe=True))
             indices = pc.index_in(values, value_set=self.tokens)
         except pa.ArrowException as error:
@@ -266,7 +300,11 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         context: Context,
     ) -> TensorField:
         request = cast(Request, schema.requests[address])
-        vocabulary = context.state if isinstance(context.state, State) else State(request.values, address)
+        vocabulary = (
+            context.state
+            if isinstance(context.state, State)
+            else State(request.values, address, strip=request.strip, cased=request.cased)
+        )
 
         def encode(field: RaggedField) -> torch.Tensor:
             return torch.from_numpy(field.place(vocabulary.indices(field.values), fill=0))
@@ -297,7 +335,8 @@ class TensorField(TensorFieldBase[torch.Tensor]):
 class Embedder(Classes, EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
-        self.classes = State(cast(Request, schema.requests[address]).values, address)
+        request: Request = cast(Request, schema.requests[address])
+        self.classes = State(request.values, address, strip=request.strip, cased=request.cased)
         self.embeddings = torch.nn.ModuleDict(
             {
                 TensorKey.state.name: torch.nn.Embedding(len(Tokens), schema.d_model),
@@ -361,7 +400,7 @@ class Decoder(Classes, DecoderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
         request = cast(Request, schema.requests[address])
-        self.classes = State(request.values, address)
+        self.classes = State(request.values, address, strip=request.strip, cased=request.cased)
         self.linears = torch.nn.ModuleDict(
             {
                 TensorKey.state.name: torch.nn.Linear(schema.d_model, len(Tokens)),

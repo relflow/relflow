@@ -432,3 +432,21 @@ def test_enum_lightning_training_preserves_fixed_classes_and_training_counts():
     assert torch.isfinite(probabilities).all()
     assert probabilities.gt(0).all() and probabilities.le(1).all()
     assert rf.Enum.counts(configured, ADDRESS) == expected_counts
+
+
+def test_enum_strip_and_cased_fold_declared_values_and_inputs():
+    request = rf.Enum(values=(" Foo", "BAR "), strip=True, cased=False)
+    assert request.values == ("foo", "bar")
+    assert rf.Enum.model_validate(request.model_dump(mode="json")).values == ("foo", "bar")
+
+    model = rf.Model.xs(
+        d_model=8, kind=rf.Enum(values=("Foo", "Bar"), strip=True, cased=False), label=rf.Boolean(mask=True)
+    )
+    field = model.encode(pa.table({"kind": pa.array([" FOO ", "bar", "Bar "])}), strata="predict")[rf.Address("kind")]
+    assert field.content.reshape(-1).tolist() == [0, 1, 1]
+
+    with pytest.raises(ValueError, match="collide after strip/cased folding"):
+        rf.Enum(values=("Foo", "foo"), cased=False)
+    exact = rf.Model.xs(d_model=8, kind=rf.Enum(values=("Foo", "Bar")), label=rf.Boolean(mask=True))
+    with pytest.raises(ValueError, match="undeclared value"):
+        exact.encode(pa.table({"kind": pa.array(["foo"])}), strata="predict")

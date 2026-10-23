@@ -431,3 +431,85 @@ def test_category_loss_retains_state_supervision_for_unavailable_content():
         module.tracked[(ADDRESS, Strata.validate, "vocabulary", "size")],
         torch.tensor(0.0),
     )
+
+
+def test_category_float_nan_labels_take_the_other_state_and_never_enter_the_vocabulary(tmp_path):
+    model = rf.Model.xs(d_model=8, code=rf.Category, label=rf.Boolean(mask=True))
+    rows = pa.table({"code": pa.array([1.0, float("nan"), 2.0, None, 1.0]), "label": [True, False, True, False, True]})
+    data = rf.ArrowDataModule(model, train=rows, validate=rows, shuffle=False)
+    model.fit(
+        data,
+        batch_size=5,
+        accelerator="cpu",
+        devices=1,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        num_sanity_val_steps=0,
+        early_stopping=False,
+        rollback=False,
+        enable_progress_bar=False,
+        logger=False,
+        enable_checkpointing=False,
+        default_root_dir=tmp_path,
+    )
+
+    assert rf.Category.vocabulary(model, "/code") == (1.0, 2.0)
+    field = model.encode(rows, strata="predict")[rf.Address("code")]
+    assert field.state.reshape(-1).tolist() == [Tokens.valued, Tokens.other, Tokens.valued, Tokens.null, Tokens.valued]
+    assert field.content.reshape(-1)[1].item() == -1
+    assert all(torch.isfinite(parameter).all() for parameter in model.parameters())
+
+
+def test_category_strip_and_cased_fold_look_alike_labels(tmp_path):
+    rows = pa.table({"code": pa.array(["Foo", "foo ", " FOO", "bar"]), "label": [True, True, True, False]})
+
+    folded = rf.Model.xs(d_model=8, code=rf.Category(strip=True, cased=False), label=rf.Boolean(mask=True))
+    data = rf.ArrowDataModule(folded, train=rows, validate=rows, shuffle=False)
+    folded.fit(
+        data,
+        batch_size=4,
+        accelerator="cpu",
+        devices=1,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        num_sanity_val_steps=0,
+        early_stopping=False,
+        rollback=False,
+        enable_progress_bar=False,
+        logger=False,
+        enable_checkpointing=False,
+        default_root_dir=tmp_path,
+    )
+    assert rf.Category.vocabulary(folded, "/code") == ("foo", "bar")
+    field = folded.encode(rows, strata="predict")[rf.Address("code")]
+    assert field.content.reshape(-1).tolist() == [0, 0, 0, 1]
+
+    exact = rf.Model.xs(d_model=8, code=rf.Category, label=rf.Boolean(mask=True))
+    data = rf.ArrowDataModule(exact, train=rows, validate=rows, shuffle=False)
+    exact.fit(
+        data,
+        batch_size=4,
+        accelerator="cpu",
+        devices=1,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        num_sanity_val_steps=0,
+        early_stopping=False,
+        rollback=False,
+        enable_progress_bar=False,
+        logger=False,
+        enable_checkpointing=False,
+        default_root_dir=tmp_path,
+    )
+    assert len(rf.Category.vocabulary(exact, "/code")) == 4
+
+
+def test_category_folding_options_round_trip_through_the_schema():
+    schema = rf.Schema.from_tree(d_model=8, n_heads=2, n_layers=1, code=rf.Category(strip=True, cased=False))
+    dumped = schema.model_dump(mode="json")
+    restored = rf.Schema.model_validate(dumped).requests[rf.Address("code")]
+    assert restored.strip is True and restored.cased is False
+    assert rf.Category().strip is False and rf.Category().cased is True

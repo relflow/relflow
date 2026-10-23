@@ -150,7 +150,9 @@ def test_native_batch_size_callback_restores_state_then_trains_bf16(tmp_path, ac
     assert any(
         not torch.equal(parameter.detach().cpu(), initial[name]) for name, parameter in configured.named_parameters()
     )
-    assert configured.nodes["/amount"].embedder.normalizer.mean.dtype == torch.float32
+    # Statistics stay float64 except on MPS, which has no float64.
+    expected = torch.float32 if trainer.strategy.root_device.type == "mps" else torch.float64
+    assert configured.nodes["/amount"].embedder.normalizers["raw"].mean.dtype == expected
     assert not list(tmp_path.glob(".scale_batch_size_*.ckpt"))
 
 

@@ -126,7 +126,7 @@ def test_fit_stops_and_restores_the_best_full_model_state(model, data, options):
     assert saved["optimizer_states"]
     assert "schema" in saved
     assert saved["callbacks"]
-    assert saved["state_dict"]["nodes./amount.embedder.normalizer.count"] == 8
+    assert saved["state_dict"]["nodes./amount.embedder.normalizers.raw.count"] == 8
 
 
 def test_callbacks_and_prediction_overloads_keep_every_row(model, data, options):

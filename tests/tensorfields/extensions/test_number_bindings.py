@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-
 import pytest
 import torch
 
@@ -22,7 +20,7 @@ def build_model(*, alpha: float | None = None) -> rf.Model:
 
 def test_number_normalization_returns_cumulative_snapshot() -> None:
     model = build_model()
-    normalizer = model.nodes[ADDRESS].embedder.normalizer
+    normalizer = model.nodes[ADDRESS].embedder.normalizers["raw"]
     normalizer.update(torch.tensor([1.0, 3.0]))
 
     snapshot = rf.Number.normalization(model, ADDRESS)
@@ -31,7 +29,7 @@ def test_number_normalization_returns_cumulative_snapshot() -> None:
         {
             "mean": 2.0,
             "variance": 1.0,
-            "std": math.sqrt(1.0 + normalizer.epsilon),
+            "std": 1.0,
             "count": 2,
             "alpha": None,
         }
@@ -44,21 +42,21 @@ def test_number_normalization_returns_cumulative_snapshot() -> None:
 
 def test_number_normalization_reports_ema_configuration_without_count() -> None:
     model = build_model(alpha=0.25)
-    normalizer = model.nodes[ADDRESS].embedder.normalizer
+    normalizer = model.nodes[ADDRESS].embedder.normalizers["raw"]
     normalizer.update(torch.tensor([2.0, 4.0]))
 
     snapshot = rf.Number.normalization(model, "/amount")
 
     assert snapshot["mean"] == pytest.approx(0.75)
     assert snapshot["variance"] == pytest.approx(1.0)
-    assert snapshot["std"] == pytest.approx(math.sqrt(1.0 + normalizer.epsilon))
+    assert snapshot["std"] == pytest.approx(1.0)
     assert snapshot["count"] is None
     assert snapshot["alpha"] == 0.25
 
 
 def test_number_normalization_count_remains_exact_above_float32_limit() -> None:
     model = build_model()
-    normalizer = model.nodes[ADDRESS].embedder.normalizer
+    normalizer = model.nodes[ADDRESS].embedder.normalizers["raw"]
     normalizer.count.fill_(2**24)
 
     normalizer.update(torch.tensor([1.0]))

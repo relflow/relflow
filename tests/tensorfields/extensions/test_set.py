@@ -313,3 +313,63 @@ def test_set_loss_does_not_mutate_counter():
     expected_state_counts = torch.ones(len(Tokens), dtype=torch.int64)
     assert torch.equal(embedder.counters[TensorKey.state.name].counts, expected_state_counts)
     assert torch.isfinite(result)
+
+
+def test_set_float_nan_members_are_dropped_like_nulls(tmp_path):
+    model = rf.Model.xs(d_model=8, tags=rf.Set, label=rf.Boolean(mask=True))
+    rows = pa.table(
+        {"tags": pa.array([[1.0, float("nan")], [float("nan")], [2.0, None], []]), "label": [True, False, True, False]}
+    )
+    data = rf.ArrowDataModule(model, train=rows, validate=rows, shuffle=False)
+    model.fit(
+        data,
+        batch_size=4,
+        accelerator="cpu",
+        devices=1,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        num_sanity_val_steps=0,
+        early_stopping=False,
+        rollback=False,
+        enable_progress_bar=False,
+        logger=False,
+        enable_checkpointing=False,
+        default_root_dir=tmp_path,
+    )
+
+    assert rf.Set.vocabulary(model, "/tags") == (1.0, 2.0)
+    field = model.encode(rows, strata="predict")[rf.Address("tags")]
+    indices = field.content["indices"].reshape(4, -1)
+    assert indices[0].tolist()[:1] == [0] and (indices[1] < 0).all() and indices[2].tolist()[:1] == [1]
+
+
+def test_set_strip_and_cased_fold_look_alike_members(tmp_path):
+    rows = pa.table({"tags": pa.array([["Foo", "bar "], [" foo"], ["BAR"]]), "label": [True, False, True]})
+    model = rf.Model.xs(d_model=8, tags=rf.Set(strip=True, cased=False), label=rf.Boolean(mask=True))
+    data = rf.ArrowDataModule(model, train=rows, validate=rows, shuffle=False)
+    model.fit(
+        data,
+        batch_size=3,
+        accelerator="cpu",
+        devices=1,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        num_sanity_val_steps=0,
+        early_stopping=False,
+        rollback=False,
+        enable_progress_bar=False,
+        logger=False,
+        enable_checkpointing=False,
+        default_root_dir=tmp_path,
+    )
+
+    assert set(rf.Set.vocabulary(model, "/tags")) == {"foo", "bar"}
+    field = model.encode(rows, strata="predict")[rf.Address("tags")]
+    indices = field.content["indices"].reshape(3, -1)
+    assert sorted(indices[0].tolist()) == sorted(
+        rf.Set.vocabulary(model, "/tags").index(name) for name in ("foo", "bar")
+    )
+    assert indices[1].tolist()[0] == rf.Set.vocabulary(model, "/tags").index("foo")
+    assert indices[2].tolist()[0] == rf.Set.vocabulary(model, "/tags").index("bar")

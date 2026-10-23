@@ -182,6 +182,18 @@ def parse(values: pa.Array, pattern: str | None) -> pa.Array: ...
 def parse(values: pa.ChunkedArray, pattern: str | None) -> pa.ChunkedArray: ...
 
 
+def wall_clock(values: pa.Array) -> pa.Array:
+    """Zone-aware timestamps read in their own zone: calendar parts describe local time, not UTC.
+
+    Strings that carry an offset are normalized to UTC by Arrow before this
+    point; give such columns a zone instead.
+    """
+    if pa.types.is_timestamp(values.type) and cast(pa.TimestampType, values.type).tz is not None:
+        # Arrow exposes this kernel dynamically; pyarrow-stubs omits it.
+        return pc.local_timestamp(values)  # pyrefly: ignore [no-matching-overload]
+    return values
+
+
 def parse(
     values: pa.Array | pa.ChunkedArray,
     pattern: str | None,
@@ -199,7 +211,7 @@ def parse(
     if not pa.types.is_union(values.type):
         if pa.types.is_string(values.type) or pa.types.is_large_string(values.type):
             return pc.strptime(values, format=pattern, unit="s") if pattern is not None else pc.cast(values, datatype)
-        return pc.cast(values, datatype, safe=True)
+        return pc.cast(wall_clock(values), datatype, safe=True)
 
     values = cast(pa.UnionArray, values)
     codes, offsets = variants(values)
@@ -225,7 +237,9 @@ class Request(RequestBase):
     ``dateparts`` is a nonempty, unique sequence of ``DatePart`` members or
     names such as ``"day_of_week"``; names normalize to a list of enum members.
     Inputs may be dates, datetimes, or strings, with optional ``pattern``
-    specifying string parsing. ``jitter`` perturbs training coordinate pairs.
+    specifying string parsing. Zone-aware timestamps describe their own wall
+    clock; strings carrying an offset are read as UTC. ``jitter`` perturbs
+    training coordinate pairs.
     Reconstructing masks train state and per-part cosine losses. Prediction
     exports a field embedding with ``embed=True``; no datetime is decoded.
     """
@@ -347,7 +361,7 @@ class TensorField(TensorFieldBase[TensorDict]):
                         values = pc.strptime(values, format=request.pattern, unit="s")
                     if isinstance(values, pa.ChunkedArray):
                         values = values.combine_chunks()
-                    date_values = values.to_numpy(zero_copy_only=False).astype("datetime64[s]")
+                    date_values = wall_clock(values).to_numpy(zero_copy_only=False).astype("datetime64[s]")
             except (pa.ArrowException, TypeError, ValueError) as error:
                 raise ValueError(f"dateparts field at '{address}' contains invalid date values") from error
 

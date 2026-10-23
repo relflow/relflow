@@ -19,6 +19,7 @@ from relflow.structs import experiment, selectors
 
 FRAMEWORK_PROTOCOL_METHODS = frozenset(
     {
+        "_apply",
         "_load_from_state_dict",
         "_missing_",
         "_save_to_state_dict",

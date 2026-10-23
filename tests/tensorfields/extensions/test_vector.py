@@ -391,3 +391,47 @@ def test_vector_unused_target_omission_preserves_training(monkeypatch: pytest.Mo
         )
 
     torch.testing.assert_close(outcomes[0], outcomes[1], rtol=0, atol=0)
+
+
+def test_vector_non_finite_elements_take_the_other_state_for_inputs_and_targets():
+    rows = pa.table({"vec": pa.array([[1.0, 2.0], [float("nan"), 2.0], [1.0, float("inf")], None])})
+    expected = [Tokens.valued, Tokens.other, Tokens.other, Tokens.null]
+
+    inputs = rf.Model.xs(d_model=8, vec=rf.Vector(n_dim=2), label=rf.Boolean(mask=True))
+    field = inputs.encode(rows, strata="predict")[rf.Address("vec")]
+    assert field.state.reshape(-1).tolist() == expected
+    assert torch.isfinite(field.content).all() and field.content.reshape(4, 2)[1].tolist() == [0.0, 0.0]
+
+    targets = rf.Model.xs(d_model=8, vec=rf.Vector(n_dim=2, mask=True))
+    field = targets.encode(rows, strata="train")[rf.Address("vec")]
+    assert field.targets[TensorKey.state].reshape(-1).tolist() == expected
+    assert torch.isfinite(field.targets[TensorKey.content]).all()
+    assert field.targets[TensorKey.content].reshape(4, 2)[2].tolist() == [0.0, 0.0]
+
+
+def test_vector_training_survives_a_non_finite_element(tmp_path):
+    model = rf.Model.xs(d_model=8, vec=rf.Vector(n_dim=2), label=rf.Boolean(mask=True))
+    rows = pa.table(
+        {
+            "vec": pa.array([[1.0, 2.0], [float("nan"), 2.0], [3.0, float("-inf")], [0.5, 0.5]]),
+            "label": [True, False, True, False],
+        }
+    )
+    data = rf.ArrowDataModule(model, train=rows, validate=rows, shuffle=False)
+    model.fit(
+        data,
+        batch_size=4,
+        accelerator="cpu",
+        devices=1,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        num_sanity_val_steps=0,
+        early_stopping=False,
+        rollback=False,
+        enable_progress_bar=False,
+        logger=False,
+        enable_checkpointing=False,
+        default_root_dir=tmp_path,
+    )
+    assert all(torch.isfinite(parameter).all() for parameter in model.parameters())

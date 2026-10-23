@@ -39,6 +39,7 @@ from relflow.architecture.runtime import (
     OutputPlan,
     PredictionInput,
     step,
+    transfer,
 )
 from relflow.data.arrow import Encoded, Retain
 from relflow.data.datasets.base import EncodedInput, InterprocessEncodingContext
@@ -997,10 +998,10 @@ class Model(lit.LightningModule):
 
         if isinstance(batch, Encoded):
             return Encoded(
-                tensors=batch.tensors.to(device),
+                tensors=transfer(batch.tensors, device),
                 source=batch.source,
                 retain=batch.retain,
-                observations={address: value.to(device) for address, value in batch.observations.items()},
+                observations={address: transfer(value, device) for address, value in batch.observations.items()},
                 bindings=batch.bindings,
             )
         return super().transfer_batch_to_device(batch, device, dataloader_idx)

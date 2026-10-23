@@ -1,5 +1,6 @@
 from datetime import datetime
 
+import numpy as np
 import pyarrow as pa
 import pydantic
 import pytest
@@ -135,3 +136,36 @@ def test_default_dateparts_jitter_does_not_advance_rng_during_training():
     embedder.embed(field)
 
     assert torch.equal(torch.random.get_rng_state(), before)
+
+
+def recovered(pairs: torch.Tensor, period: int) -> list[int]:
+    """Read calendar values back from their (sin, cos) pairs."""
+    angles = np.arctan2(pairs[..., 0].numpy(), pairs[..., 1].numpy()) % (2 * np.pi)
+    return [int(round(value)) % period for value in angles.reshape(-1) / (2 * np.pi) * period]
+
+
+@pytest.mark.parametrize(
+    ("zone", "utc"),
+    [
+        ("America/New_York", ["2024-03-09T23:30", "2024-03-10T04:30"]),
+        ("Asia/Tokyo", ["2024-03-09T09:30", "2024-03-09T14:30"]),
+    ],
+)
+def test_dateparts_reads_zone_aware_timestamps_in_their_own_zone(zone: str, utc: list[str]):
+    # The same two local wall-clock times, 18:30 and 23:30 on Saturday 2024-03-09, as instants in each zone.
+    instants = pa.array(np.array(utc, dtype="datetime64[s]")).cast(pa.timestamp("s", tz=zone))
+    local = pa.array(np.array(["2024-03-09T18:30", "2024-03-09T23:30"], dtype="datetime64[s]"))
+    model = rf.Model.xs(
+        d_model=8, when=rf.DateParts(dateparts=["day_of_week", "hour_of_day"]), label=rf.Boolean(mask=True)
+    )
+    aware = model.encode(pa.table({"when": instants}), strata="predict")
+    naive = model.encode(pa.table({"when": local}), strata="predict")
+    content = aware[rf.Address("when")].content
+    expected = naive[rf.Address("when")].content
+
+    hour = [key for key in content.keys() if "hour" in str(key)][0]
+    week = [key for key in content.keys() if "week" in str(key)][0]
+    assert recovered(content[hour], 24) == [18, 23]
+    assert recovered(content[week], 7) == [6, 6]  # Saturday in both cases, Sunday being 0
+    torch.testing.assert_close(content[hour], expected[hour])
+    torch.testing.assert_close(content[week], expected[week])

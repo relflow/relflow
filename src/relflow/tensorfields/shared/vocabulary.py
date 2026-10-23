@@ -36,6 +36,26 @@ MIN_OBSERVATIONS = 10
 INITIAL_CAPACITY = 1
 
 
+def fold(values: pa.Array | pa.ChunkedArray, *, strip: bool, cased: bool) -> pa.Array | pa.ChunkedArray:
+    """Fold string labels before they key a vocabulary.
+
+    ``strip`` trims surrounding whitespace and ``cased=False`` lowercases, so
+    look-alike labels such as ``"Foo "`` and ``"foo"`` share one entry. Other
+    label types pass through unchanged.
+    """
+    if (not strip and cased) or not len(values):
+        return values
+    if pa.types.is_dictionary(values.type):
+        values = pc.dictionary_decode(values)  # pyrefly: ignore [missing-attribute]
+    if not (pa.types.is_string(values.type) or pa.types.is_large_string(values.type)):
+        return values
+    if strip:
+        values = pc.utf8_trim_whitespace(values)
+    if not cased:
+        values = pc.utf8_lower(values)
+    return values
+
+
 def capacity(initial: int, required: int) -> int:
     """Grow geometrically without declaring an upper vocabulary limit."""
     return initial << (max(required - 1, 0) // initial).bit_length()
@@ -116,10 +136,15 @@ class VocabularyState:
         storage: VocabularyStorage,
         size: int,
         share: Callable[[], VocabularyStorage] | None = None,
+        *,
+        strip: bool = False,
+        cased: bool = True,
     ):
         self.storage = storage
         self.size: int = size
         self._share = share
+        self.strip: bool = strip
+        self.cased: bool = cased
         self.vocab: list[Any] = []
         self.index: dict[Any, int] = {}
         self.refresh(force=True)
@@ -141,9 +166,12 @@ class VocabularyState:
             or pa.types.is_fixed_size_list(array.type)
         ):
             array = pc.list_flatten(array)
-        labels = pc.unique(pc.drop_null(array))
+        labels = pc.unique(pc.drop_null(cast(pa.Array, fold(array, strip=self.strip, cased=self.cased))))
+        if len(labels) and pa.types.is_floating(labels.type):
+            # NaN is never equal to itself, so it cannot key a vocabulary; extensions give it a state instead.
+            labels = pc.filter(labels, pc.invert(pc.is_nan(labels)))
         size = max(1, len(labels))
-        local = OnlineVocabularyModel(size=size)
+        local = OnlineVocabularyModel(size=size, strip=self.strip, cased=self.cased)
         local.load_snapshot(labels.to_pylist())
         return local.state, VocabularyBatch(labels=labels, size=size)
 
@@ -234,6 +262,7 @@ class VocabularyState:
         if not len(array):
             self.reserve((), learn=learn)
             return np.empty(0, dtype=np.int64)
+        array = fold(array, strip=self.strip, cased=self.cased)
 
         unique = pc.unique(array)
         candidates = unique.to_pylist()
@@ -281,10 +310,12 @@ class OnlineVocabularyModel(torch.nn.Module):
 
         return resources
 
-    def __init__(self, size: int = INITIAL_CAPACITY):
+    def __init__(self, size: int = INITIAL_CAPACITY, *, strip: bool = False, cased: bool = True):
         super().__init__()
 
         self.size: int = size
+        self.strip: bool = strip
+        self.cased: bool = cased
         self.manager: SyncManager | None = None
         self.master: list[Any] | ListProxy[Any] = []
         self.lock: Any = LocalLock()
@@ -386,6 +417,8 @@ class OnlineVocabularyModel(torch.nn.Module):
             storage=self.storage,
             size=self.size,
             share=self.shared_state,
+            strip=self.strip,
+            cased=self.cased,
         )
 
     def snapshot(self) -> list[Any]:

@@ -14,6 +14,7 @@ from typing import Any
 
 import pyarrow as pa
 import pytest
+import torch
 
 import relflow as rf
 
@@ -153,6 +154,9 @@ def deployment(tmp_path_factory):
     directory = tmp_path_factory.mktemp("deployment")
     model = rf.Model.xs(d_model=8, label=rf.Category(embed=True))
     model.encode(pa.table({"label": ["alpha", "beta"]}), strata="train")
+    with torch.no_grad():
+        # Admitted labels embed as unknown until trained; stand in for the training that separates them.
+        model.nodes["/label"].embedder.embeddings["content"].weight[:2].normal_()
     checkpoint_path = model.save(directory / "model.ckpt")
     port = free_port()
     base_url = f"http://127.0.0.1:{port}"

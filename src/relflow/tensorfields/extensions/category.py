@@ -5,6 +5,7 @@ from dataclasses import InitVar
 from functools import partial
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Unpack, cast
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import pydantic
@@ -13,6 +14,7 @@ from beartype import beartype
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
+from relflow.helpers.resize import SILENT_LOGIT
 from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
@@ -60,11 +62,17 @@ class Request(RequestBase):
     the discovered vocabulary when fewer than ``k`` labels are known.
     ``mask=True`` declares a supervised classification target. Predictions
     select populated vocabulary labels and exclude the unavailable sentinel.
+    ``strip=True`` trims surrounding whitespace from string labels and
+    ``cased=False`` lowercases them before vocabulary lookup, an escape hatch
+    for look-alike labels; vocabulary snapshots and written labels hold the
+    folded form. Other label types are unaffected.
     """
 
     type: Literal["category"] = "category"
     p_unavailable: Annotated[float, pydantic.Field(ge=0.0, le=1.0, default=0.01)] = 0.01
     topk: list[int] | None = None
+    strip: bool = False
+    cased: bool = True
 
     if TYPE_CHECKING:
 
@@ -73,6 +81,8 @@ class Request(RequestBase):
             *,
             p_unavailable: float = 0.01,
             topk: list[int] | None = None,
+            strip: bool = False,
+            cased: bool = True,
             type: Literal["category"] = "category",
             **options: Unpack[FieldOptions],
         ) -> None: ...
@@ -168,6 +178,29 @@ class Request(RequestBase):
         return self
 
 
+def admissible(field: RaggedField) -> tuple[pa.Array, np.ndarray]:
+    """Valued labels without float NaN, and the compact positions NaN occupied.
+
+    NaN is not a label: it cannot key a vocabulary, so its position takes the
+    ``other`` state instead of admitting or looking up a value.
+    """
+    values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
+    nan = np.zeros(len(values), dtype=bool)
+    if len(values) and pa.types.is_floating(values.type):
+        nan = pc.is_nan(values).to_numpy(zero_copy_only=False)
+        if nan.any():
+            values = pc.filter(values, pa.array(~nan))
+    return values, nan
+
+
+def states(field: RaggedField, nan: np.ndarray) -> np.ndarray:
+    """Dense state tokens with NaN positions marked ``other``."""
+    dense = field.dense.copy()
+    if nan.any():
+        dense[field.place(nan, fill=False)] = Tokens.other.value
+    return dense
+
+
 @category.register(Component.observe)
 def observe(
     field: RaggedField,
@@ -184,10 +217,11 @@ def observe(
     if not isinstance(state, VocabularyState):
         raise RuntimeError(f"category field at '{address}' requires a vocabulary encoding context")
 
-    indices = state.indices(field.values, learn=True)
+    values, nan = admissible(field)
+    indices = state.indices(values, learn=True)
     return TensorDict(
         {
-            TensorKey.state: tally(torch.from_numpy(field.dense.copy()), len(Tokens)),
+            TensorKey.state: tally(torch.from_numpy(states(field, nan)), len(Tokens)),
             TensorKey.content: tally(torch.from_numpy(indices.copy()), state.size),
         },
         batch_size=[],
@@ -229,19 +263,18 @@ class TensorField(TensorFieldBase[torch.Tensor]):
                 f"category field at '{address}' requires VocabularyState context, got {type(state).__name__}"
             )
 
-        def encode(field: RaggedField) -> torch.Tensor:
+        def encode(field: RaggedField) -> tuple[torch.Tensor, torch.Tensor]:
             if not len(field.values):
-                return torch.zeros(field.shape, dtype=torch.int64)
+                return torch.zeros(field.shape, dtype=torch.int64), torch.from_numpy(field.dense.copy())
             if state is None:
                 raise RuntimeError(f"category field at '{address}' requires a vocabulary encoding context")
-            tokens = state.indices(field.values, learn=False)
-            return torch.from_numpy(field.place(tokens, fill=0))
+            values, nan = admissible(field)
+            tokens = np.full(len(nan), -1, dtype=np.int64)
+            tokens[~nan] = state.indices(values, learn=False)
+            return torch.from_numpy(field.place(tokens, fill=0)), torch.from_numpy(states(field, nan))
 
-        content = encode(input)
-        target_content = encode(target)
-
-        state_tensor = torch.from_numpy(input.dense)
-        target_state = torch.from_numpy(target.dense)
+        content, state_tensor = encode(input)
+        target_content, target_state = encode(target)
         if strata == Strata.train:
             p_unavailable: float = cast(Request, schema.requests[address]).p_unavailable
             unavailable_index = -1
@@ -277,11 +310,11 @@ class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
 
-        request = schema.requests[address]
+        request: Request = cast(Request, schema.requests[address])
         self.origin: Address = address
         self.destination: Address = cast("Branch", request.parent).address
 
-        self.vocab: OnlineVocabularyModel = OnlineVocabularyModel()
+        self.vocab: OnlineVocabularyModel = OnlineVocabularyModel(strip=request.strip, cased=request.cased)
 
         self.embeddings = torch.nn.ModuleDict(
             {
@@ -295,6 +328,10 @@ class Embedder(EmbedderBase):
                 ),
             }
         )
+        # Labels are admitted while training, so every content row starts at
+        # zero: an admitted label embeds exactly as it did while unknown until
+        # gradients move its row.
+        torch.nn.init.zeros_(cast(torch.nn.Embedding, self.embeddings[TensorKey.content.name]).weight)
 
         self.counters = torch.nn.ModuleDict(
             {
@@ -358,11 +395,11 @@ def bind(
     node = module.nodes[address]
     embedder = cast(Embedder, node.embedder)
     mapping, size = binding.resolve(embedder.vocab, learn=strata == Strata.train, device=module.device, resize=resize)
-    resize.embedding(cast(torch.nn.Embedding, embedder.embeddings[TensorKey.content.name]), size)
+    resize.embedding(cast(torch.nn.Embedding, embedder.embeddings[TensorKey.content.name]), size, zero=True)
     cast(Counter, embedder.counters[TensorKey.content.name]).resize(size, resize)
     decoder = getattr(node, "decoder", None)
     if decoder is not None:
-        resize.linear(decoder.linears[TensorKey.content.name], size)
+        resize.linear(decoder.linears[TensorKey.content.name], size, silent=True)
     field = cast(TensorField, field)
     field.content = mapping.to(field.content.device)[field.content]
     if TensorKey.content in field.targets:
@@ -412,6 +449,10 @@ class Decoder(DecoderBase):
                 ),
             }
         )
+        # Silent rows keep an admitted label out of the softmax until it learns.
+        content = cast(torch.nn.Linear, self.linears[TensorKey.content.name])
+        torch.nn.init.zeros_(content.weight)
+        torch.nn.init.constant_(content.bias, SILENT_LOGIT)
         self.metrics = Scores(address, partial(Reconstruction, cast(list[int], request.topk)))
 
     @beartype

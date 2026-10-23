@@ -220,11 +220,23 @@ class LearnedQueryCrossAttention(torch.nn.Module):
 
 
 class MeanPool(torch.nn.Module):
-    """Average present memory coordinates and repeat the result across queries."""
+    """Average present memory coordinates, keep their count, and repeat the result across queries.
 
-    def __init__(self, n_context: int) -> None:
+    A mean erases multiplicity: one item and six equal items pool identically.
+    With ``mass_capacity`` the pool adds a learned direction scaled by the
+    present count over that capacity, starting at zero so an untrained pool is
+    still the plain mean.
+    """
+
+    def __init__(self, n_context: int, d_model: int | None = None, mass_capacity: int | None = None) -> None:
         super().__init__()
+        if (mass_capacity is None) != (d_model is None):
+            raise ValueError("MeanPool count lane requires both d_model and mass_capacity")
+        if mass_capacity is not None and mass_capacity < 1:
+            raise ValueError("mass_capacity must be >= 1")
         self.n_context = n_context
+        self.mass_capacity = mass_capacity
+        self.mass_direction = torch.nn.Parameter(torch.zeros(d_model)) if d_model is not None else None
 
     def forward(self, memory: torch.Tensor, present: torch.Tensor | None = None) -> torch.Tensor:
         if present is None:
@@ -234,10 +246,13 @@ class MeanPool(torch.nn.Module):
                 f"pool presence must have bool shape {tuple(memory.shape[:2])}, "
                 f"got {tuple(present.shape)} with dtype {present.dtype}"
             )
-
         weights = present.unsqueeze(-1).to(dtype=memory.dtype)
         pooled = memory.masked_fill(~present.unsqueeze(-1), 0.0).sum(dim=1, keepdim=True)
         pooled = pooled / weights.sum(dim=1, keepdim=True).clamp_min(1.0)
+        if self.mass_direction is not None:
+            assert self.mass_capacity is not None
+            count = present.sum(dim=1).to(dtype=pooled.dtype) / self.mass_capacity
+            pooled = pooled + count[:, None, None] * self.mass_direction.to(dtype=pooled.dtype)
         return pooled.expand(-1, self.n_context, -1)
 
     if TYPE_CHECKING:

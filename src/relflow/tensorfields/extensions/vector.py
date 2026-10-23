@@ -110,8 +110,14 @@ class TensorField(TensorFieldBase[torch.Tensor]):
     ) -> TensorField:
         request: Request = cast(Request, schema.requests[address])
 
-        def encode(field: RaggedField) -> torch.Tensor:
+        def encode(field: RaggedField) -> tuple[torch.Tensor, torch.Tensor]:
+            """Dense content and state; a vector with a NaN or infinite element is not a measurement.
+
+            Such a vector takes the ``other`` state and zero content, so it is
+            neither projected as a value nor regressed against.
+            """
             values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
+            state = field.dense.copy()
             if not len(values):
                 encoded = np.empty((0, request.n_dim), dtype=np.float32)
             else:
@@ -132,26 +138,29 @@ class TensorField(TensorFieldBase[torch.Tensor]):
                     flattened = pc.cast(flattened, pa.float32(), safe=True)
                 except pa.ArrowException as error:
                     raise ValueError(f"vector field at '{address}' could not be converted to float32") from error
-                encoded = flattened.to_numpy(zero_copy_only=False).reshape(-1, request.n_dim)
-            return torch.from_numpy(field.place(encoded, fill=0.0, value_shape=(request.n_dim,)))
+                encoded = flattened.to_numpy(zero_copy_only=False).reshape(-1, request.n_dim).copy()
+                finite = np.isfinite(encoded).all(axis=1)
+                if not finite.all():
+                    encoded[~finite] = 0.0
+                    state[field.place(np.logical_not(finite), fill=False)] = Tokens.other.value
+            content = torch.from_numpy(field.place(encoded, fill=0.0, value_shape=(request.n_dim,)))
+            return content, torch.from_numpy(state)
 
-        state = torch.from_numpy(input.dense)
+        content, state = encode(input)
+        targets = TensorDict({}, batch_size=input.shape)
+        if address in schema.objectives:
+            target_content, target_state = encode(target)
+            targets = TensorDict(
+                {TensorKey.state: target_state, TensorKey.content: target_content}, batch_size=input.shape
+            )
 
         return cls(
-            content=encode(input),
+            content=content,
             state=state,
             present=present,
             trainable=trainable,
             inferred=inferred,
-            targets=TensorDict(
-                {
-                    TensorKey.state: torch.from_numpy(target.dense),
-                    TensorKey.content: encode(target),
-                }
-                if address in schema.objectives
-                else {},
-                batch_size=input.shape,
-            ),
+            targets=targets,
             batch_size=input.batch_size,
         )
 
