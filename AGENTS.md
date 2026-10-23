@@ -112,6 +112,11 @@ model = rf.Model(
   surrounding whitespace and `cased=False` lowercases labels before lookup, and
   the folded form is what vocabularies and predictions carry.
 - `Hash` represents large identifiers with batch-salted hashes, preserving equality across fields in one encoded batch without learning a persistent vocabulary.
+- A `Category` or `Set` label admitted while training keeps a zero content row,
+  so it embeds like an unknown label and admission alone never changes a
+  prediction; the next training batch gives every still-zero assigned row a
+  normal start before using it. Zero rows after `encode(strata="train")` are
+  expected, not a bug.
 - `Number` keeps source values, statistics, and readouts in float64 (float32 on
   MPS, which has no float64), so large offsets keep their spread. A float NaN
   tensorizes as the `other` state, not as a value or a null; ±inf stays valued
