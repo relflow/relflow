@@ -13,7 +13,6 @@ from beartype import beartype
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
-from relflow.helpers.resize import SILENT_LOGIT
 from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
@@ -29,6 +28,7 @@ from relflow.tensorfields.base import (
 from relflow.tensorfields.output import array, labels, struct, variable
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
 from relflow.tensorfields.shared.reconstruction import Metrics, Scores, Totals
+from relflow.tensorfields.shared.resize import SILENT_LOGIT
 from relflow.tensorfields.shared.rows import Embedding, Linear
 from relflow.tensorfields.shared.vocabulary import (
     INITIAL_CAPACITY,
@@ -41,12 +41,15 @@ from relflow.tensorfields.shared.vocabulary import (
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.datasets.base import InterprocessEncodingContext
-    from relflow.helpers.resize import Resize
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
+    from relflow.tensorfields.shared.resize import Resize
 
-sets: Extension = Extension(name="set", types=(bool, int, float, str, bytes))
-sets.callback(VocabularySyncCallback, CounterUpdateCallback, Metrics)
+sets: Extension = Extension(
+    name="set",
+    types=(bool, int, float, str, bytes),
+    callbacks=(VocabularySyncCallback, CounterUpdateCallback, Metrics),
+)
 
 
 @sets.register(Component.Request)

@@ -14,7 +14,6 @@ from beartype import beartype
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
-from relflow.helpers import Jitter
 from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
@@ -28,6 +27,7 @@ from relflow.tensorfields.base import (
     TensorInput,
 )
 from relflow.tensorfields.output import array, fixed, struct
+from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
 if TYPE_CHECKING:
@@ -36,8 +36,7 @@ if TYPE_CHECKING:
     from relflow.structs.structure import Branch
 
 
-vector: Extension = Extension(name="vector", types=(int | float,))
-vector.callback(Metrics)
+vector: Extension = Extension(name="vector", types=(int | float,), callbacks=(Metrics,))
 
 
 class Objective(enum.StrEnum):

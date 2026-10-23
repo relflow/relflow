@@ -37,13 +37,16 @@ from relflow.tensorfields.shared.vocabulary import canonical, fold
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.datasets.base import InterprocessEncodingContext
-    from relflow.helpers.resize import Resize
     from relflow.structs.experiment import Schema
+    from relflow.tensorfields.shared.resize import Resize
 
 Value = bool | int | float | str | bytes
 
-enum = Extension(name="enum", types=(bool, int, float, str, bytes))
-enum.callback(CounterUpdateCallback, Metrics)
+enum: Extension = Extension(
+    name="enum",
+    types=(bool, int, float, str, bytes),
+    callbacks=(CounterUpdateCallback, Metrics),
+)
 
 
 @enum.register(Component.Request)

@@ -16,7 +16,6 @@ from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
 from relflow.distributed import all_gather
-from relflow.helpers import Jitter
 from relflow.logging import logger
 from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
@@ -32,6 +31,7 @@ from relflow.tensorfields.base import (
 )
 from relflow.tensorfields.output import array, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
+from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
 if TYPE_CHECKING:
@@ -40,8 +40,11 @@ if TYPE_CHECKING:
     from relflow.structs.structure import Branch
 
 
-number: Extension = Extension(name="number", types=(int | float,))
-number.callback(CounterUpdateCallback, Metrics)
+number: Extension = Extension(
+    name="number",
+    types=(int | float,),
+    callbacks=(CounterUpdateCallback, Metrics),
+)
 
 FOURIER_SAFE_MAX_ANGLE = float(1e4)
 

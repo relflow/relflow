@@ -35,11 +35,7 @@ if TYPE_CHECKING:
     from relflow.structs.structure import Branch
 
 
-hashable: Extension = Extension(
-    name="hash",
-    types=(int, str, bytes),
-)
-hashable.callback(Metrics)
+hashable: Extension = Extension(name="hash", types=(int, str, bytes), callbacks=(Metrics,))
 
 
 class Buckets(Totals):

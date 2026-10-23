@@ -3,12 +3,12 @@ import pytest
 import torch
 
 import relflow as rf
-from relflow.helpers import Jitter
+from relflow.tensorfields.shared.jitter import Jitter
 
 
 def test_jitter_has_one_public_definition():
-    assert Jitter.__module__ == "relflow.helpers.jitter"
-    assert Jitter.apply.__module__ == "relflow.helpers.jitter"
+    assert Jitter.__module__ == "relflow.tensorfields.shared.jitter"
+    assert Jitter.apply.__module__ == "relflow.tensorfields.shared.jitter"
     assert rf.Jitter is Jitter
 
 

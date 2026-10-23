@@ -19,7 +19,6 @@ from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
 from relflow.distributed import all_gather_object, broadcast_object, is_distributed
-from relflow.helpers.digest import Digest
 from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
@@ -35,13 +34,14 @@ from relflow.tensorfields.base import (
 from relflow.tensorfields.extensions.number import precise
 from relflow.tensorfields.output import array, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
+from relflow.tensorfields.shared.digest import Digest
 from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.datasets.base import InterprocessEncodingContext
-    from relflow.helpers.resize import Resize
     from relflow.structs.experiment import Schema
+    from relflow.tensorfields.shared.resize import Resize
 
 
 # Standardized lanes stay bounded so one extreme outlier cannot swamp the embedding.
@@ -132,9 +132,11 @@ class Synchronize(Callback):
                 resource.state.freeze()
 
 
-quantile = Extension(name="quantile", types=(int | float,))
-quantile.callback(CounterUpdateCallback, Metrics)
-quantile.callback(Synchronize)
+quantile: Extension = Extension(
+    name="quantile",
+    types=(int | float,),
+    callbacks=(CounterUpdateCallback, Metrics, Synchronize),
+)
 
 
 @quantile.register(Component.Request)

@@ -19,7 +19,6 @@ from tensordict import TensorDict, tensorclass
 
 from relflow.data.arrow import variants
 from relflow.data.ragged import RaggedField
-from relflow.helpers import Jitter
 from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
@@ -32,6 +31,7 @@ from relflow.tensorfields.base import (
     TensorFieldBase,
     TensorInput,
 )
+from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.reconstruction import Metrics, Scores, Totals
 
 if TYPE_CHECKING:
@@ -173,8 +173,7 @@ def second_of_minute(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return (np.sin(radians), np.cos(radians))
 
 
-dateparts: Extension = Extension(name="dateparts", types=(str | date | datetime,))
-dateparts.callback(Metrics)
+dateparts: Extension = Extension(name="dateparts", types=(str | date | datetime,), callbacks=(Metrics,))
 
 
 class Arcs(Totals):

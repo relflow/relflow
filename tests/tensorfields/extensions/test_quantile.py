@@ -599,8 +599,8 @@ def test_quantile_decoder_extrapolates_one_interquartile_range_per_unit_score(sc
 
 
 def test_quantile_heavy_tail_predictions_stay_near_the_bulk():
-    from relflow.helpers.digest import Digest
     from relflow.tensorfields.extensions.quantile import SPREAD_LIMIT, inverse, spread
+    from relflow.tensorfields.shared.digest import Digest
 
     sample = np.random.default_rng(0).lognormal(0.0, 2.0, 200_000)
     digest = Digest(100)

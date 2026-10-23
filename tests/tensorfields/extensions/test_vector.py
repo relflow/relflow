@@ -9,7 +9,6 @@ from tensordict import TensorDict
 import relflow as rf
 from relflow.architecture.runtime import ModelRuntime
 from relflow.data.ragged import coalesce
-from relflow.helpers import Jitter
 from relflow.helpers.optimizers import adamw
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
@@ -18,6 +17,7 @@ from relflow.structs.tree import Mask
 from relflow.tensorfields.base import TENSORFIELDS, TensorInput
 from relflow.tensorfields.extensions.vector import Decoder, Embedder, TensorField, loss, write
 from relflow.tensorfields.extensions.vector import output as output_type
+from relflow.tensorfields.shared.jitter import Jitter
 from tests.arrow import table as arrow_table
 from tests.tensorfields.helpers import tensorize
 

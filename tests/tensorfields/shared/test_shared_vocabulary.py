@@ -5,7 +5,7 @@ import pyarrow as pa
 import pytest
 import torch
 
-from relflow.helpers.resize import Resize
+from relflow.tensorfields.shared.resize import Resize
 from relflow.tensorfields.shared.vocabulary import OnlineVocabularyModel, VocabularyBatch
 
 

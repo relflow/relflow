@@ -620,4 +620,4 @@ def test_hashable_does_not_register_a_salt_callback():
     from relflow.tensorfields.shared.reconstruction import Metrics
 
     # Salting happens per encoded batch; the only callback reduces evaluation metrics.
-    assert hashable.callback_factories == [Metrics]
+    assert hashable.callback_factories == (Metrics,)

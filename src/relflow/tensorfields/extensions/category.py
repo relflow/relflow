@@ -14,7 +14,6 @@ from beartype import beartype
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
-from relflow.helpers.resize import SILENT_LOGIT
 from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
@@ -30,6 +29,7 @@ from relflow.tensorfields.base import (
 from relflow.tensorfields.output import array, labels, struct, variable
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
 from relflow.tensorfields.shared.reconstruction import Metrics, Reconstruction, Scores
+from relflow.tensorfields.shared.resize import SILENT_LOGIT
 from relflow.tensorfields.shared.rows import Embedding, Linear
 from relflow.tensorfields.shared.vocabulary import (
     INITIAL_CAPACITY,
@@ -44,11 +44,15 @@ from relflow.tensorfields.shared.vocabulary import (
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.datasets.base import InterprocessEncodingContext
-    from relflow.helpers.resize import Resize
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
+    from relflow.tensorfields.shared.resize import Resize
 
-category: Extension = Extension(name="category", types=(bool, int, float, str, bytes))
+category: Extension = Extension(
+    name="category",
+    types=(bool, int, float, str, bytes),
+    callbacks=(VocabularySyncCallback, CounterUpdateCallback, Metrics),
+)
 
 
 @category.register(Component.Request)
@@ -512,9 +516,6 @@ def loss(
             module, strata, torch.stack((known.sum(), valued.sum(), correct, *topk)), torch.stack((objective, nll))
         )
     return loss + objective / known.sum().clamp_min(1)
-
-
-category.callback(VocabularySyncCallback, CounterUpdateCallback, Metrics)
 
 
 @category.register(Component.output)

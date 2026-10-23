@@ -43,7 +43,6 @@ from relflow.data.processors import (
 )
 from relflow.data.ragged import RaggedField
 from relflow.data.sources import source
-from relflow.helpers import Jitter
 from relflow.helpers.optimizers import adamw
 from relflow.inference.callback import Writer
 from relflow.structs.enums import (
@@ -93,6 +92,7 @@ from relflow.tensorfields.extensions.quantile import Request as Quantile
 from relflow.tensorfields.extensions.set import Request as Set
 from relflow.tensorfields.extensions.text import Request as Text
 from relflow.tensorfields.extensions.vector import Request as Vector
+from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.vocabulary import VocabularySyncCallback
 
 if TYPE_CHECKING:

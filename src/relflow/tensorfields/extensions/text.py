@@ -18,7 +18,6 @@ from beartype import beartype
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
-from relflow.helpers import Jitter
 from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
@@ -32,6 +31,7 @@ from relflow.tensorfields.base import (
     TensorInput,
 )
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
+from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
 if TYPE_CHECKING:
@@ -46,8 +46,8 @@ text: Extension = Extension(
     name="text",
     types=(str,),
     requires={"transformers": "relflow[text]"},
+    callbacks=(CounterUpdateCallback, Metrics),
 )
-text.callback(CounterUpdateCallback, Metrics)
 
 INPUT_IDS = "input_ids"
 ATTENTION_MASK = "attention_mask"

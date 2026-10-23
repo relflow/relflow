@@ -31,7 +31,7 @@ from relflow.tensorfields.shared.counter import Counter
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.ragged import RaggedField
-    from relflow.helpers.resize import Resize
+    from relflow.tensorfields.shared.resize import Resize
 
 
 MIN_OBSERVATIONS = 10

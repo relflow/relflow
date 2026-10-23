@@ -9,7 +9,7 @@ import shlex
 import sys
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from functools import partial
@@ -48,9 +48,9 @@ from relflow.structs.tree import Address, Leaf
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.ragged import RaggedField
-    from relflow.helpers.resize import Resize
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
+    from relflow.tensorfields.shared.resize import Resize
 
 RequestBase: TypeAlias = Leaf
 CallbackFactory: TypeAlias = type[Callback] | Callable[[], Callback]
@@ -774,8 +774,10 @@ class Extension:
     incompatible; types joined in one PEP 604 union may share one Arrow column.
     ``arrow`` supplies a physical-type matcher for custom Python atoms or
     overrides a standard matcher. ``requires`` maps importable module names to
-    their package requirements. Creating an extension with an existing
-    name replaces the registry entry and emits a warning.
+    their package requirements. ``callbacks`` lists the Lightning callback
+    classes or factories every model using the extension attaches; every rank
+    must declare the same. Creating an extension with an existing name replaces
+    the registry entry and emits a warning.
     """
 
     def __init__(
@@ -785,6 +787,7 @@ class Extension:
         types: tuple[ValueTypeFamily, ...],
         arrow: Mapping[type[Any], ArrowMatcher] | None = None,
         requires: Mapping[str, str] | None = None,
+        callbacks: Sequence[CallbackFactory] = (),
     ):
         if not isinstance(name, str):
             raise TypeError("Extension name must be a string")
@@ -855,6 +858,12 @@ class Extension:
             names = ", ".join(repr(module) for module in invalid_requirements)
             raise ValueError(f"Extension requires contains empty or non-string pip requirement(s) for: {names}")
 
+        if isinstance(callbacks, (str, bytes)) or not isinstance(callbacks, Sequence):
+            raise TypeError("Extension callbacks must be a sequence of Lightning Callback classes or factories")
+        for factory in callbacks:
+            if not callable(factory) or not isinstance(factory(), Callback):
+                raise TypeError(f"Extension callback factory for '{name}' must produce a Lightning Callback")
+
         self.name: str = name
         self.value_types: tuple[ValueTypeFamily, ...] = types
         self.families: tuple[tuple[type[Any], ...], ...] = tuple(families)
@@ -866,7 +875,7 @@ class Extension:
             {module: requirement.strip() for module, requirement in dependencies.items()}
         )
         self.components: dict[Component, ComponentValue | None] = {}
-        self.callback_factories: list[CallbackFactory] = []
+        self.callback_factories: tuple[CallbackFactory, ...] = tuple(callbacks)
 
         if name in TENSORFIELDS:
             warnings.warn(
@@ -1138,25 +1147,6 @@ class Extension:
         value = cast(ComponentValue | None, obj)
         self.components[key] = value
         return cast(RegisterT | None, value)
-
-    @overload
-    def callback(self, factory: CallbackFactory, /) -> CallbackFactory: ...
-
-    @overload
-    def callback(self, factory: CallbackFactory, *factories: CallbackFactory) -> tuple[CallbackFactory, ...]: ...
-
-    def callback(
-        self, factory: CallbackFactory, *factories: CallbackFactory
-    ) -> CallbackFactory | tuple[CallbackFactory, ...]:
-        """Register one or more Lightning callback factories for this tensorfield."""
-        registered = (factory, *factories)
-        for callback_factory in registered:
-            callback = callback_factory()
-            if not isinstance(callback, Callback):
-                raise TypeError(f"Extension callback factory for '{self.name}' must produce a Lightning Callback")
-
-        self.callback_factories.extend(registered)
-        return factory if len(registered) == 1 else registered
 
     @property
     def callbacks(self) -> list[Callback]:

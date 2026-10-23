@@ -9,11 +9,11 @@ import torch
 from tensordict import TensorDict
 
 import relflow as rf
-from relflow.helpers import Jitter
 from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Prediction
 from relflow.tensorfields.base import TensorInput
 from relflow.tensorfields.extensions.dateparts import DatePart, Embedder
+from relflow.tensorfields.shared.jitter import Jitter
 
 ADDRESS = rf.Address("/", "created")
 

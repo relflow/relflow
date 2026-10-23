@@ -11,7 +11,6 @@ from tensordict import TensorDict
 
 import relflow as rf
 from relflow.data.ragged import RaggedField, coalesce
-from relflow.helpers import Jitter
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
@@ -27,6 +26,7 @@ from relflow.tensorfields.extensions.text import (
     TensorField,
     loss,
 )
+from relflow.tensorfields.shared.jitter import Jitter
 from tests.arrow import table as arrow_table
 from tests.tensorfields.helpers import tensorize
 

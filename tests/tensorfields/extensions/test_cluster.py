@@ -8,7 +8,6 @@ from tensordict import TensorDict
 
 import relflow as rf
 from relflow.data.ragged import coalesce
-from relflow.helpers.resize import Resize
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
@@ -28,6 +27,7 @@ from relflow.tensorfields.extensions.cluster import (
     output as output_type,
 )
 from relflow.tensorfields.shared.counter import Counter
+from relflow.tensorfields.shared.resize import Resize
 from relflow.tensorfields.shared.vocabulary import OnlineVocabularyModel, VocabularyBatch, VocabularyState
 from tests.arrow import table as arrow_table
 from tests.tensorfields.helpers import tensorize
