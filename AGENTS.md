@@ -112,6 +112,8 @@ model = rf.Model(
   surrounding whitespace and `cased=False` lowercases labels before lookup, and
   the folded form is what vocabularies and predictions carry.
 - `Hash` represents large identifiers with batch-salted hashes, preserving equality across fields in one encoded batch without learning a persistent vocabulary.
+  Training salts derive from the run seed, epoch, and batch ordinal, never
+  from the process-wide `random` state, so seeded runs repeat exactly.
 - A `Category` or `Set` label admitted while training keeps a zero content row,
   so it embeds like an unknown label and admission alone never changes a
   prediction; the next training batch gives every still-zero assigned row a

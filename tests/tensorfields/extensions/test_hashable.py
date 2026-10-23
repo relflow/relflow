@@ -549,17 +549,13 @@ def test_tensorfield_content_reflects_explicit_salt():
     assert torch.equal(field_a.content, field_c.content)
 
 
-def test_equal_values_stay_matched_within_each_rotating_batch(monkeypatch: pytest.MonkeyPatch):
-    from relflow.data import iterables
-
+def test_equal_values_stay_matched_within_each_rotating_batch():
     model = hashable_model()
     records = table([{"items": [{"id": "alice"}, {"id": "bob"}], "owner": "alice"}])
-    salts = iter((1, 2, 3))
-    monkeypatch.setattr(iterables.random, "getrandbits", lambda bits: next(salts))
 
     projections_by_batch: list[tuple[torch.Tensor, torch.Tensor]] = []
-    for _ in range(3):
-        inputs = model.encode(records, strata=Strata.train)
+    for epoch in range(3):
+        inputs = model.encode(records, strata=Strata.train, epoch=epoch)
         items_projection = model.nodes["/items/id"].embedder.embed(inputs["/items/id"]).payload
         owner_projection = model.nodes["/owner"].embedder.embed(inputs["/owner"]).payload
         projections_by_batch.append((items_projection[0, 0, 0].detach(), owner_projection[0, 0].detach()))
@@ -570,6 +566,15 @@ def test_equal_values_stay_matched_within_each_rotating_batch(monkeypatch: pytes
     for later in projections_by_batch[1:]:
         assert not torch.allclose(projections_by_batch[0][0], later[0])
 
+    # The salt is a function of the run seed and the batch, so the same batch encodes identically.
+    repeated = model.encode(records, strata=Strata.train, epoch=0)
+    assert torch.equal(
+        repeated["/owner"].content, model.encode(records, strata=Strata.train, epoch=0)["/owner"].content
+    )
+    assert not torch.equal(
+        repeated["/owner"].content, model.encode(records, strata=Strata.train, seed=1)["/owner"].content
+    )
+
 
 @pytest.mark.parametrize("strata", [Strata.validate, Strata.test, Strata.predict])
 def test_inference_uses_stable_unsalted_hashes(strata: Strata, monkeypatch: pytest.MonkeyPatch):
@@ -578,10 +583,10 @@ def test_inference_uses_stable_unsalted_hashes(strata: Strata, monkeypatch: pyte
     model = hashable_model()
     records = table([{"items": [{"id": "alice"}, {"id": "bob"}], "owner": "alice"}])
 
-    def unexpected_random_salt(bits: int) -> int:
-        raise AssertionError("inference must not generate a random salt")
+    def unexpected_salt(seed: int, *, epoch: int, ordinal: int) -> int:
+        raise AssertionError("inference must not salt its hashes")
 
-    monkeypatch.setattr(iterables.random, "getrandbits", unexpected_random_salt)
+    monkeypatch.setattr(iterables, "batch_salt", unexpected_salt)
 
     first = model.encode(records, strata=strata)
     second = model.encode(records, strata=strata)

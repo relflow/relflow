@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import random
+import hashlib
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any, cast
@@ -38,6 +38,20 @@ def geometry(layouts: Mapping[Address, Layout], *, rows: int) -> TensorDict:
     return TensorDict(source=cast(Any, axes), batch_size=[rows])
 
 
+def batch_salt(seed: int, *, epoch: int, ordinal: int) -> int:
+    """The hash salt of one training batch.
+
+    Hash fields are salted per batch so no bucket identity survives across
+    batches, while every field in the batch shares the salt and keeps equality.
+    Deriving it from the run seed, epoch, and batch ordinal keeps a seeded run
+    reproducible; the process-wide ``random`` state is not, because other
+    callers consume it.
+    """
+
+    payload = f"{seed}:{epoch}:{ordinal}:salt".encode()
+    return int.from_bytes(hashlib.sha256(payload).digest()[:8], "big")
+
+
 def encode(
     batch: pa.Table,
     schema: Schema,
@@ -52,7 +66,7 @@ def encode(
     observations: dict[Address, TensorDict] = {}
     bindings: dict[Address, object] = {}
 
-    salt = random.getrandbits(64) if strata == Strata.train else 0
+    salt = batch_salt(seed, epoch=epoch, ordinal=ordinal) if strata == Strata.train else 0
 
     coalesced = coalesce(batch, schema=schema, strata=strata, seed=seed, epoch=epoch, ordinal=ordinal)
 
