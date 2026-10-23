@@ -491,7 +491,7 @@ class Embedder(EmbedderBase):
         self.hidden_size: int = cached_model.hidden_size
         self.request = request
         self.cache = EmbeddingCache(None if request.cache is True else request.cache) if request.cache else None
-        self.tokens = TokenCache(4096 if request.cache is True else int(request.cache)) if request.cache else None
+        self.tokens = TokenCache(4096 if request.cache is True else request.cache) if request.cache else None
         self.jitter: Jitter = request.jitter
 
         self.embeddings = torch.nn.Embedding(
