@@ -471,3 +471,53 @@ def test_place_validates_encoded_count_and_value_shape():
     placed = field.place(encoded, fill=0.0, value_shape=(2,))
     assert placed.shape == (2, 1, 2)
     assert placed.tolist() == [[[1.0, 2.0]], [[3.0, 4.0]]]
+
+
+def test_root_combines_only_the_columns_the_schema_reads():
+    model = rf.Model.xs(
+        d_model=8,
+        amount=rf.Number(mask=rf.Mask(query="eligible", reconstruct=True)),
+        events=rf.Branch(value=rf.Number),
+    )
+    events = pa.array([[{"value": 1.0}], [], None], type=pa.list_(pa.struct([pa.field("value", pa.float64())])))
+    table = pa.table(
+        {
+            "note": ["a", "b", "c"],
+            "amount": [1.0, 2.0, 3.0],
+            "eligible": [True, False, True],
+            "events": events,
+            "extra": [1, 2, 3],
+        }
+    )
+    chunked = pa.concat_tables([table.slice(0, 1), table.slice(1)])
+
+    resolved = coalesce(chunked, model.schema, Strata.train)
+    combined = coalesce(table, model.schema, Strata.train)
+
+    records = resolved.layouts["/"].records
+    assert isinstance(records, pa.StructArray)
+    assert [field.name for field in records.type] == ["amount", "eligible", "events"]
+    assert resolved.fields["/amount"].pristine.values.to_pylist() == [1.0, 2.0, 3.0]
+    assert resolved.fields["/amount"].trainable.tolist() == combined.fields["/amount"].trainable.tolist()
+    assert resolved.fields["/amount"].trainable.tolist() == [True, False, True]
+    assert (
+        resolved.layouts["/events"].lengths.tolist() == combined.layouts["/events"].lengths.tolist() == [[1], [0], [0]]
+    )
+
+
+def test_rate_masks_vary_by_batch_ordinal_and_reproduce():
+    model = rf.Model.xs(d_model=8, amount=rf.Number(mask=rf.Mask(rate=0.5, reconstruct=True)))
+    table = pa.table({"amount": [float(value) for value in range(16)]})
+
+    patterns = [
+        coalesce(table, model.schema, Strata.train, seed=3, epoch=1, ordinal=ordinal)
+        .fields["/amount"]
+        .trainable.tolist()
+        for ordinal in range(3)
+    ]
+
+    assert len({tuple(pattern) for pattern in patterns}) == 3
+    replay = coalesce(table, model.schema, Strata.train, seed=3, epoch=1, ordinal=1)
+    assert replay.fields["/amount"].trainable.tolist() == patterns[1]
+    with pytest.raises(ValueError, match="ordinal"):
+        coalesce(table, model.schema, Strata.train, ordinal=-1)

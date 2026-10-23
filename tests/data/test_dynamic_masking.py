@@ -5,14 +5,14 @@ import pytest
 import relflow as rf
 from relflow.architecture.binding import bind
 from relflow.data.iterables import encode
-from relflow.data.ragged import boolean, coalesce
+from relflow.data.ragged import coalesce
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.tensorfields.base import TENSORFIELDS
 from tests.arrow import table as arrow_table
 
 
-def bits(values: pa.Array) -> list[bool]:
-    return boolean(values).tolist()
+def bits(values: np.ndarray) -> list[bool]:
+    return values.tolist()
 
 
 def test_branch_query_skip_is_atomic_across_descendants():
@@ -59,8 +59,8 @@ def test_rate_skip_is_stable_for_one_batch_and_changes_by_epoch():
     repeated = coalesce(source, schema, Strata.train, seed=17, epoch=3).fields["/value"]
     next_epoch = coalesce(source, schema, Strata.train, seed=17, epoch=4).fields["/value"]
 
-    assert np.array_equal(boolean(whole.present), boolean(repeated.present))
-    assert not np.array_equal(boolean(whole.present), boolean(next_epoch.present))
+    assert np.array_equal(whole.present, repeated.present)
+    assert not np.array_equal(whole.present, next_epoch.present)
 
 
 def test_query_and_rate_sample_only_eligible_owner_coordinates():
@@ -70,7 +70,7 @@ def test_query_and_rate_sample_only_eligible_owner_coordinates():
     source = arrow_table([{"value": float(index), "eligible": index % 2 == 0} for index in range(256)])
 
     projection = coalesce(source, schema, Strata.train, seed=5, epoch=0).fields["/value"]
-    skipped = ~boolean(projection.present)
+    skipped = ~projection.present
 
     assert skipped.any()
     assert not skipped[1::2].any()

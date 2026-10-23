@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator, Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
 import pyarrow as pa
@@ -10,7 +11,7 @@ from torch.utils.data import IterableDataset
 
 import relflow
 from relflow.data.arrow import Retain, mappings
-from relflow.data.datasets.arrow import ArrowDataModule, ArrowStream
+from relflow.data.datasets.arrow import ArrowDataModule
 from relflow.data.datasets.base import StratumConfig
 from relflow.data.processors import PreprocessorInput
 from relflow.structs.enums import Strata
@@ -38,69 +39,77 @@ def schemas(
     return normalized
 
 
-def adapt(
-    source: Callable[[], Iterable[Mapping[str, Any]]],
-    *,
-    schema: pa.Schema | None,
-    rows: int,
-    name: str,
-) -> Callable[[], ArrowStream]:
-    """Convert bounded mapping groups into restartable Arrow record batches."""
+@dataclass(slots=True)
+class Adapter:
+    """Convert bounded mapping groups into restartable Arrow record batches.
 
-    inferred = schema
-    previous: object | None = None
+    The inferred schema is instance state, so every pass in one process agrees;
+    a spawned worker infers from the first group of its own fresh pass.
+    """
 
-    def factory() -> Iterator[pa.RecordBatch]:
-        nonlocal inferred, previous
-        stream = source()
-        if stream is previous:
-            raise TypeError(f"{name} source must return a fresh iterator for every pass")
-        previous = stream
+    source: Callable[[], Iterable[Mapping[str, Any]]]
+    schema: pa.Schema | None
+    rows: int
+    name: str
+    previous: object | None = field(default=None, init=False, repr=False)
+
+    def __getstate__(self) -> dict[str, Any]:
+        # The previous iterator only guards freshness within one process.
+        return {"source": self.source, "schema": self.schema, "rows": self.rows, "name": self.name}
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        for name, value in state.items():
+            object.__setattr__(self, name, value)
+        object.__setattr__(self, "previous", None)
+
+    def __call__(self) -> Iterator[pa.RecordBatch]:
+        stream = self.source()
+        if stream is self.previous:
+            raise TypeError(f"{self.name} source must return a fresh iterator for every pass")
+        self.previous = stream
         iterator = iter(stream)
 
         emitted = False
         while True:
             values: list[Mapping[str, Any]] = []
-            for _ in range(rows):
+            for _ in range(self.rows):
                 try:
                     item = next(iterator)
                 except StopIteration:
                     break
                 if not isinstance(item, Mapping):
-                    raise TypeError(f"{name} source must yield mappings, got {type(item).__name__}")
+                    raise TypeError(f"{self.name} source must yield mappings, got {type(item).__name__}")
                 if any(not isinstance(key, str) for key in item):
-                    raise TypeError(f"{name} source mapping keys must be strings")
+                    raise TypeError(f"{self.name} source mapping keys must be strings")
                 values.append(item)
 
             if not values:
-                if not emitted and inferred is None:
-                    raise ValueError(f"{name} source is empty; provide arrow_schema")
-                if not emitted and inferred is not None:
-                    yield pa.RecordBatch.from_pylist([], schema=inferred)
+                if not emitted and self.schema is None:
+                    raise ValueError(f"{self.name} source is empty; provide arrow_schema")
+                if not emitted and self.schema is not None:
+                    yield pa.RecordBatch.from_pylist([], schema=self.schema)
                 return
 
             emitted = True
-            if inferred is None:
-                record_batch = pa.RecordBatch.from_pylist(mappings(values, context=f"{name} source"))
+            if self.schema is None:
+                record_batch = pa.RecordBatch.from_pylist(mappings(values, context=f"{self.name} source"))
                 ambiguous = [field.name for field in record_batch.schema if pa.types.is_null(field.type)]
                 if ambiguous:
                     names = ", ".join(repr(field) for field in ambiguous)
-                    raise TypeError(f"{name} source has all-null field(s) {names}; provide arrow_schema")
-                inferred = record_batch.schema
+                    raise TypeError(f"{self.name} source has all-null field(s) {names}; provide arrow_schema")
+                self.schema = record_batch.schema
             else:
                 try:
                     record_batch = pa.RecordBatch.from_pylist(
-                        mappings(values, schema=inferred, context=f"{name} source"),
-                        schema=inferred,
+                        mappings(values, schema=self.schema, context=f"{self.name} source"),
+                        schema=self.schema,
                     )
                 except (pa.ArrowInvalid, pa.ArrowTypeError, TypeError, ValueError) as error:
-                    raise TypeError(f"{name} source does not match arrow_schema: {error}") from error
+                    raise TypeError(f"{self.name} source does not match arrow_schema: {error}") from error
 
             yield record_batch
-            if len(values) < rows:
+            if len(values) < self.rows:
                 return
-
-    return factory
 
 
 class CustomDataModule(ArrowDataModule):
@@ -144,18 +153,13 @@ class CustomDataModule(ArrowDataModule):
             raise ValueError("at least one named data split is required")
         resolved_schemas = schemas(arrow_schema, configured=configured)
 
-        sources: dict[Strata, Callable[[], ArrowStream]] = {}
+        sources: dict[Strata, Adapter] = {}
         for strata, dataset in datasets.items():
             if dataset is None:
                 continue
             if not isinstance(dataset, IterableDataset):
                 raise TypeError(f"{strata} must be a torch IterableDataset, got {type(dataset).__name__}")
-            sources[strata] = adapt(
-                dataset.__iter__,
-                schema=resolved_schemas[strata],
-                rows=ingress_rows,
-                name=str(strata),
-            )
+            sources[strata] = Adapter(dataset.__iter__, resolved_schemas[strata], ingress_rows, str(strata))
 
         super().__init__(
             model=model,
@@ -179,4 +183,4 @@ class CustomDataModule(ArrowDataModule):
         )
 
 
-__all__ = ["CustomDataModule"]
+__all__ = ["Adapter", "CustomDataModule"]

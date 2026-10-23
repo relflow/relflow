@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import multiprocessing as mp
 from collections.abc import Iterator
 from types import SimpleNamespace
 
@@ -13,7 +14,7 @@ from torch.utils.data import IterableDataset
 import relflow as rf
 from relflow.data.arrow import Encoded
 from relflow.data.datasets import arrow
-from relflow.data.datasets.custom import adapt
+from relflow.data.datasets.custom import Adapter
 from relflow.structs.enums import Strata
 
 
@@ -279,11 +280,11 @@ def test_arrow_pipeline_batches_without_materializing_rows(monkeypatch: pytest.M
 @pytest.mark.parametrize(
     ("drop_last", "expected_sizes", "expected_values"),
     [
-        (False, [3, 2], set(range(20))),
-        (True, [3], set(range(12))),
+        (False, [[3, 3], [3, 3], [3, 3], [3, 2]], set(range(23))),
+        (True, [[3], [3], [3], [3]], set(range(12))),
     ],
 )
-def test_distributed_batches_are_disjoint_and_have_equal_tails(drop_last, expected_sizes, expected_values):
+def test_distributed_batches_are_disjoint_and_have_equal_steps(drop_last, expected_sizes, expected_values):
     source = arrow.convert(pa.table({"id": list(range(23))}))
     ranks = [
         list(
@@ -298,10 +299,34 @@ def test_distributed_batches_are_disjoint_and_have_equal_tails(drop_last, expect
         for global_rank in range(4)
     ]
 
-    assert [[len(batch) for batch in batches] for batches in ranks] == [expected_sizes] * 4
+    assert [[len(batch) for batch in batches] for batches in ranks] == expected_sizes
     values = [{value for batch in batches for value in batch["id"].to_pylist()} for batches in ranks]
     assert set().union(*values) == expected_values
     assert sum(map(len, values)) == len(set().union(*values))
+
+
+@pytest.mark.parametrize(
+    ("rows", "world_size", "expected_sizes"),
+    [
+        (5, 2, [[2, 1], [2, 0]]),
+        (7, 3, [[2, 1], [2, 0], [2, 0]]),
+        (2, 3, [[1], [1], [0]]),
+    ],
+)
+def test_distributed_prediction_delivers_every_row_with_equal_steps(rows, world_size, expected_sizes, monkeypatch):
+    module = rf.ArrowDataModule(model=model(), predict=pa.table({"id": list(range(rows))}))
+    monkeypatch.setattr(arrow, "world_size", lambda: world_size)
+    owned: list[list[int]] = []
+    sizes: list[list[int]] = []
+    for rank in range(world_size):
+        monkeypatch.setattr(arrow, "rank", lambda: rank)
+        batches = collect(module.predict_dataloader().dataset, monkeypatch)
+        sizes.append([len(batch) for batch in batches])
+        owned.append([value for batch in batches for value in batch["id"].to_pylist()])
+
+    assert sizes == expected_sizes
+    assert sorted(value for values in owned for value in values) == list(range(rows))
+    assert all(values == list(range(rank, rows, world_size)) for rank, values in enumerate(owned))
 
 
 def test_distributed_ownership_is_independent_of_arrow_batch_boundaries():
@@ -344,7 +369,8 @@ def test_arrow_dataset_uses_distributed_rank_and_world_size(monkeypatch: pytest.
     dataset = module.val_dataloader().dataset
     batches = collect(dataset, monkeypatch)
 
-    assert [batch["id"].to_pylist() for batch in batches] == [["b", "d"]]
+    # Rank 1 steps through the one-row tail with an empty batch so both ranks stay aligned.
+    assert [batch["id"].to_pylist() for batch in batches] == [["b", "d"], []]
     assert dataset.distributed_rank == 1
     assert dataset.distributed_world_size == 2
 
@@ -448,13 +474,13 @@ def test_arrow_worker_count_preserves_distributed_rank_ownership_and_equal_tails
             monkeypatch.setattr(arrow, "get_worker_info", lambda: SimpleNamespace(id=worker, num_workers=workers))
             batches.extend(collect(dataset, monkeypatch))
 
-        assert sorted(len(batch) for batch in batches) == [1, 2, 2, 2, 2, 2]
+        assert sorted(len(batch) for batch in batches) == ([2] * 6 if rank == 0 else [1, 2, 2, 2, 2, 2])
         owned[rank] = sorted(value for batch in batches for value in batch["id"].to_pylist())
 
-    assert owned[0] == list(range(0, 22, 2)) if workers == 1 else len(owned[0]) == 11
+    assert owned[0] == list(range(0, 23, 2)) if workers == 1 else len(owned[0]) == 12
     assert len(owned[1]) == 11
     assert not set(owned[0]) & set(owned[1])
-    assert len(set(owned[0]) | set(owned[1])) == 22
+    assert len(set(owned[0]) | set(owned[1])) == 23
 
 
 def test_arrow_dataset_source_scans_through_the_shared_pipeline(monkeypatch: pytest.MonkeyPatch):
@@ -673,7 +699,7 @@ def test_evaluation_sampling_and_shuffle_are_stable_across_iterations(monkeypatc
     assert first == second
 
 
-def test_stream_epoch_limit_selects_before_shuffling(monkeypatch: pytest.MonkeyPatch):
+def test_stream_epoch_limit_reads_one_shuffle_window_before_capping(monkeypatch: pytest.MonkeyPatch):
     consumed: list[int] = []
 
     def source():
@@ -695,9 +721,68 @@ def test_stream_epoch_limit_selects_before_shuffling(monkeypatch: pytest.MonkeyP
 
     selected = pa.concat_tables(collect(dataset, monkeypatch))["id"].to_pylist()
 
+    # The cap applies after shuffling a window of 2 * shuffle_rows stream rows.
     assert len(selected) == 2
-    assert sorted(selected) == [0, 1]
-    assert consumed == [0, 1]
+    assert set(selected) < set(range(8))
+    assert consumed == list(range(8))
+
+
+def test_unshuffled_stream_epoch_limit_stops_reading_at_the_cap(monkeypatch: pytest.MonkeyPatch):
+    consumed: list[int] = []
+
+    def source():
+        for value in range(16):
+            consumed.append(value)
+            yield pa.record_batch({"id": [value]})
+
+    module = rf.ArrowDataModule(model=model(2), validate=source, shuffle=False, epoch_size=3)
+    selected = pa.concat_tables(collect(module.val_dataloader().dataset, monkeypatch))["id"].to_pylist()
+
+    assert selected == [0, 1, 2]
+    assert consumed == [0, 1, 2]
+
+
+def test_rebatch_combines_chunks_once_per_fill(monkeypatch: pytest.MonkeyPatch):
+    units = [pa.table({"id": [value]}) for value in range(10)]
+
+    batches = list(arrow.rebatch(iter(units), size=4, drop_last=False))
+
+    assert [batch["id"].to_pylist() for batch in batches] == [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9]]
+    assert all(batch["id"].num_chunks == 1 for batch in batches[:2])
+
+
+def test_rate_masks_differ_between_batches_and_replay_across_loaders():
+    configured = rf.Model.xs(d_model=8, batch_size=8, amount=rf.Number(mask=rf.Mask(rate=0.5, reconstruct=True)))
+    table = pa.table({"amount": [float(value) for value in range(64)]})
+
+    def patterns() -> list[list[bool]]:
+        module = rf.ArrowDataModule(model=configured, validate=table, shuffle=False, seed=7)
+        return [batch.tensors["/amount"].trainable.reshape(-1).tolist() for batch in module.val_dataloader()]
+
+    first = patterns()
+
+    assert len(first) == 8
+    assert len({tuple(pattern) for pattern in first}) > 1
+    assert patterns() == first
+
+
+def synthetic_records() -> Iterator[dict[str, float]]:
+    return iter([{"id": float(value)} for value in range(5)])
+
+
+@pytest.mark.parametrize("kind", ["custom", "synthetic"])
+def test_mapping_modules_encode_in_spawned_workers(kind):
+    if "spawn" not in mp.get_all_start_methods():
+        pytest.skip("this platform cannot spawn data workers")
+    records = [{"id": float(value)} for value in range(5)]
+    if kind == "custom":
+        module = rf.CustomDataModule(model=model(), validate=Records(records), num_workers=1, shuffle=False)
+    else:
+        module = rf.SyntheticDataModule(model=model(), validate=synthetic_records, num_workers=1, shuffle=False)
+
+    batches = list(module.val_dataloader())
+
+    assert pa.concat_tables([batch.source for batch in batches])["id"].to_pylist() == [0.0, 1.0, 2.0, 3.0, 4.0]
 
 
 def test_stream_randomization_is_independent_of_record_batch_boundaries(monkeypatch: pytest.MonkeyPatch):
@@ -798,7 +883,7 @@ def test_custom_adapter_bounds_mapping_conversion_and_restarts():
 
 
 def test_custom_inference_uses_the_union_of_first_chunk_mapping_keys():
-    source = adapt(
+    source = Adapter(
         lambda: iter([{"id": 1}, {"id": 2, "late_in_chunk": "kept"}]),
         schema=None,
         rows=2,
@@ -815,9 +900,9 @@ def test_custom_inference_uses_the_union_of_first_chunk_mapping_keys():
 
 
 def test_custom_schema_errors_explain_arrow_schema_remedy():
-    empty = adapt(lambda: iter(()), schema=None, rows=2, name="train")
-    nulls = adapt(lambda: iter([{"id": None}]), schema=None, rows=2, name="train")
-    late = adapt(lambda: iter([{"id": 1}, {"id": 2, "late": True}]), schema=None, rows=1, name="train")
+    empty = Adapter(lambda: iter(()), schema=None, rows=2, name="train")
+    nulls = Adapter(lambda: iter([{"id": None}]), schema=None, rows=2, name="train")
+    late = Adapter(lambda: iter([{"id": 1}, {"id": 2, "late": True}]), schema=None, rows=1, name="train")
 
     with pytest.raises(ValueError, match="provide arrow_schema"):
         list(empty())
@@ -829,7 +914,7 @@ def test_custom_schema_errors_explain_arrow_schema_remedy():
 
 def test_explicit_custom_schema_supports_empty_sources():
     schema = pa.schema([("id", pa.int64())])
-    source = adapt(lambda: iter(()), schema=schema, rows=2, name="validate")
+    source = Adapter(lambda: iter(()), schema=schema, rows=2, name="validate")
 
     batches = list(source())
 

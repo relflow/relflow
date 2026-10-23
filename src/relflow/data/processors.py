@@ -12,6 +12,7 @@ from typing import Any, Generic, Literal, Self, TypeAlias, TypeVar, overload
 import polars as pl
 import pyarrow as pa
 
+from relflow.data.query import listed
 from relflow.structs import experiment
 from relflow.structs.enums import Strata
 from relflow.structs.tree import Address
@@ -67,14 +68,71 @@ def polars(table: pa.Table, *, context: str) -> pl.DataFrame:
     return result
 
 
-def arrow(value: pl.DataFrame, *, context: str) -> pa.Table:
-    """Convert one eager Polars frame to the canonical Arrow representation."""
+def equivalent(target: pa.DataType, actual: pa.DataType) -> bool:
+    """Return whether ``actual`` is only Polars' rendering of ``target``.
+
+    Polars widens strings, binaries, and lists to their large variants, renames
+    list children, and chooses its own dictionary index width. Those changes
+    are reversible, so such a column returns to its source Arrow type.
+    """
+
+    if pa.types.is_string(target) or pa.types.is_large_string(target):
+        return pa.types.is_string(actual) or pa.types.is_large_string(actual)
+    if pa.types.is_binary(target) or pa.types.is_large_binary(target):
+        return pa.types.is_binary(actual) or pa.types.is_large_binary(actual)
+    if pa.types.is_fixed_size_list(target) or pa.types.is_fixed_size_list(actual):
+        return (
+            pa.types.is_fixed_size_list(target)
+            and pa.types.is_fixed_size_list(actual)
+            and target.list_size == actual.list_size
+            and equivalent(target.value_type, actual.value_type)
+        )
+    if listed(target) and listed(actual):
+        return equivalent(target.value_type, actual.value_type)
+    if pa.types.is_struct(target) and pa.types.is_struct(actual):
+        return target.num_fields == actual.num_fields and all(
+            left.name == right.name and equivalent(left.type, right.type)
+            for left, right in zip(target, actual, strict=True)
+        )
+    if pa.types.is_dictionary(target) and pa.types.is_dictionary(actual):
+        return pa.types.is_integer(actual.index_type) and equivalent(target.value_type, actual.value_type)
+    if pa.types.is_map(target) and pa.types.is_map(actual):
+        return equivalent(target.key_type, actual.key_type) and equivalent(target.item_type, actual.item_type)
+    return target.equals(actual)
+
+
+def arrow(value: pl.DataFrame, *, context: str, schema: pa.Schema | None = None) -> pa.Table:
+    """Convert one eager Polars frame to the canonical Arrow representation.
+
+    Columns that keep a name from ``schema`` and differ only by Polars'
+    rendering return to that source field; other columns keep Polars types.
+    """
 
     frame(value, kind=context, name="output")
     try:
-        return value.to_arrow(compat_level=pl.CompatLevel.oldest())
+        table = value.to_arrow(compat_level=pl.CompatLevel.oldest())
     except Exception as error:
         raise TypeError(f"{context} could not be converted from Polars to Arrow: {error}") from error
+    if schema is None:
+        return table
+
+    restored = pa.schema(
+        [
+            schema.field(current.name)
+            if schema.get_field_index(current.name) >= 0 and equivalent(schema.field(current.name).type, current.type)
+            else current
+            for current in table.schema
+        ]
+    )
+    if table.schema.equals(restored, check_metadata=True):
+        return table
+    try:
+        return table.cast(restored)
+    except (pa.ArrowInvalid, ValueError) as error:
+        raise TypeError(
+            f"{context} could not return its columns to their source Arrow fields {restored}: {error}; "
+            "rename a column to keep its Polars type"
+        ) from error
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -316,7 +374,7 @@ def apply(table: pa.Table, processors: PostprocessorInput = ()) -> pa.Table:
     result = polars(table, context="postprocessor input")
     for processor in pipeline:
         result = processor.run(result)
-    return arrow(result, context="postprocessor output")
+    return arrow(result, context="postprocessor output", schema=table.schema)
 
 
 @overload

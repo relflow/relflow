@@ -14,7 +14,7 @@ from tensordict import TensorDict
 
 from relflow.data.arrow import Encoded, Geometry, Retain
 from relflow.data.datasets.base import EncodedInput, InterprocessEncodingContext
-from relflow.data.ragged import Layout, RaggedField, boolean, coalesce
+from relflow.data.ragged import Layout, RaggedField, coalesce
 from relflow.structs.enums import Component, Strata, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.tree import Address, Node
@@ -46,6 +46,7 @@ def encode(
     seed: int = 0,
     epoch: int = 0,
     retain: Retain = (),
+    ordinal: int = 0,
 ) -> Encoded:
     out: dict[Address, TensorFieldBase] = {}
     observations: dict[Address, TensorDict] = {}
@@ -53,7 +54,7 @@ def encode(
 
     salt = random.getrandbits(64) if strata == Strata.train else 0
 
-    coalesced = coalesce(batch, schema=schema, strata=strata, seed=seed, epoch=epoch)
+    coalesced = coalesce(batch, schema=schema, strata=strata, seed=seed, epoch=epoch, ordinal=ordinal)
 
     for address, request in schema.active_requests.items():
         extension = TENSORFIELDS[request.type]
@@ -106,9 +107,9 @@ def encode(
         out[address] = TensorField.new(
             input=input_field,
             target=target_field,
-            present=torch.from_numpy(boolean(projection.present).copy()).reshape(input_field.shape),
-            trainable=torch.from_numpy(boolean(projection.trainable).copy()).reshape(input_field.shape),
-            inferred=torch.from_numpy(boolean(projection.inferred).copy()).reshape(input_field.shape),
+            present=torch.from_numpy(projection.present).reshape(input_field.shape),
+            trainable=torch.from_numpy(projection.trainable).reshape(input_field.shape),
+            inferred=torch.from_numpy(projection.inferred).reshape(input_field.shape),
             address=address,
             schema=schema,
             strata=strata,
