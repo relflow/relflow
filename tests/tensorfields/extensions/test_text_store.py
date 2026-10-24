@@ -7,6 +7,9 @@ import torch
 import relflow as rf
 from relflow.structs.enums import Strata
 from relflow.tensorfields.extensions.text import Embedder, EmbeddingStore, flush_stores, hash_rows, hash_rows_torch
+from tests.tensorfields.extensions.test_text import patch_hf
+
+MODEL = "test-text-store"  # a fake encoder from patch_hf: the tests run offline, like CI
 
 
 def test_hash_rows_is_deterministic_and_row_sensitive():
@@ -55,11 +58,12 @@ def test_store_flushes_itself_at_its_interval(tmp_path):
 
 def configured(store):
     return rf.Model.xs(
-        note=rf.Text(store=str(store), max_length=8), label=rf.Boolean(mask=True), d_model=8, batch_size=4
+        note=rf.Text(model=MODEL, store=str(store), max_length=8), label=rf.Boolean(mask=True), d_model=8, batch_size=4
     )
 
 
 def test_embedder_consults_the_store_before_the_encoder(tmp_path, monkeypatch):
+    patch_hf(monkeypatch)
     table = pa.table({"note": ["alpha", "beta", "alpha", None], "label": [True, False, True, False]})
     model = configured(tmp_path)
     embedder = model.nodes["/note"].embedder
@@ -83,28 +87,31 @@ def test_embedder_consults_the_store_before_the_encoder(tmp_path, monkeypatch):
     third = later.nodes["/note"].embedder.encode(content=inputs["/note"].content, state=inputs["/note"].state)
     assert calls == [] and torch.allclose(first, third)
 
-    plain = rf.Model.xs(note=rf.Text(max_length=8), label=rf.Boolean(mask=True), d_model=8, batch_size=4)
+    plain = rf.Model.xs(note=rf.Text(model=MODEL, max_length=8), label=rf.Boolean(mask=True), d_model=8, batch_size=4)
     direct = plain.nodes["/note"].embedder.encode(content=inputs["/note"].content, state=inputs["/note"].state)
     assert torch.allclose(first, direct, atol=1e-5), "stored vectors are the encoder's own"
 
 
 def test_warm_fills_the_store_for_every_later_split(tmp_path, monkeypatch):
+    patch_hf(monkeypatch)
     model = configured(tmp_path)
     embedder = model.nodes["/note"].embedder
-    assert embedder.warm(pa.array(["one", "two", None, "one"])) == 2
-    assert embedder.warm(["two", "three"]) == 1
+    # The fake tokenizer keys rows by length, so distinct strings here have distinct lengths.
+    assert embedder.warm(pa.array(["a", "bbb", None, "a"])) == 2
+    assert embedder.warm(["bbb", "ccccc"]) == 1
     monkeypatch.setattr(Embedder, "pool", lambda self, ids, mask: (_ for _ in ()).throw(AssertionError("encoder ran")))
     for strata in (Strata.train, Strata.validate, Strata.test):
-        table = pa.table({"note": ["one", "two", "three"], "label": [True, False, True]})
+        table = pa.table({"note": ["a", "bbb", "ccccc"], "label": [True, False, True]})
         inputs = model.encode(table, strata=strata)
         encoded = embedder.encode(content=inputs["/note"].content, state=inputs["/note"].state)
         assert encoded.shape[0] == 3 and encoded.shape[-1] == embedder.hidden_size and torch.isfinite(encoded).all()
 
 
 def test_fields_with_the_same_encoder_share_one_store(tmp_path, monkeypatch):
+    patch_hf(monkeypatch)
     model = rf.Model.xs(
-        a=rf.Text(store=str(tmp_path), max_length=8),
-        b=rf.Text(store=str(tmp_path), max_length=8),
+        a=rf.Text(model=MODEL, store=str(tmp_path), max_length=8),
+        b=rf.Text(model=MODEL, store=str(tmp_path), max_length=8),
         label=rf.Boolean(mask=True),
         d_model=8,
         batch_size=2,
@@ -133,8 +140,9 @@ def test_resident_view_answers_on_device_within_its_budget(tmp_path):
 
 
 def test_embedder_uses_the_resident_view_after_a_flush(tmp_path, monkeypatch):
+    patch_hf(monkeypatch)
     model = rf.Model.xs(
-        note=rf.Text(store=str(tmp_path), resident=64, max_length=8),
+        note=rf.Text(model=MODEL, store=str(tmp_path), resident=64, max_length=8),
         label=rf.Boolean(mask=True),
         d_model=8,
         batch_size=4,
