@@ -8,7 +8,7 @@ import os
 from collections.abc import Callable, Generator, Iterable, Iterator, Mapping
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, replace
-from typing import Any, Literal, TypeAlias, TypeVar, overload
+from typing import Any, Literal, TypeAlias, TypeVar, cast, overload
 
 import lightning.pytorch as lit
 import numpy as np
@@ -16,6 +16,7 @@ import polars as pl
 import pyarrow as pa
 import pyarrow.dataset as ds
 import torch
+from tensordict import TensorDict
 from torch.utils.data import DataLoader, IterableDataset, get_worker_info
 
 import relflow
@@ -577,10 +578,11 @@ class ArrowDataset(IterableDataset[Encoded]):
                 scanned.close()
 
     def encode(self, batches: Iterable[tuple[int, pa.Table]], *, epoch: int) -> Iterator[Encoded]:
-        """Encode one consumer's final model batches by epoch ordinal."""
+        """Encode one consumer's final model batches by epoch ordinal; a loader worker ships each one packed."""
 
+        shipped = get_worker_info() is not None
         for ordinal, item in batches:
-            yield encode(
+            encoded = encode(
                 batch=item,
                 schema=self.schema,
                 strata=self.strata,
@@ -590,6 +592,29 @@ class ArrowDataset(IterableDataset[Encoded]):
                 retain=self.options.retain,
                 ordinal=ordinal,
             )
+            yield ship(encoded) if shipped else encoded
+
+
+def ship(encoded: Encoded) -> Encoded:
+    """Pack a batch for the loader queue: one storage per TensorDict and an Arrow source owning only its rows.
+
+    A worker hands batches to the trainer through pickles. A sliced Arrow table
+    pickles its parent buffers, the whole shuffle window, and hundreds of tensor
+    leaves cross as hundreds of shared-memory segments; either costs more than
+    encoding the batch did.
+    """
+
+    source = encoded.source
+    if source.num_rows:
+        source = source.take(np.arange(source.num_rows))
+    return replace(
+        encoded,
+        tensors=cast(TensorDict, encoded.tensors.consolidate()),
+        source=source,
+        observations={
+            address: cast(TensorDict, value.consolidate()) for address, value in encoded.observations.items()
+        },
+    )
 
 
 def loader(

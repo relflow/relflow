@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import pickle
 from collections.abc import Iterator
 from types import SimpleNamespace
 
@@ -783,6 +784,32 @@ def test_mapping_modules_encode_in_spawned_workers(kind):
     batches = list(module.val_dataloader())
 
     assert pa.concat_tables([batch.source for batch in batches])["id"].to_pylist() == [0.0, 1.0, 2.0, 3.0, 4.0]
+
+
+def test_shipping_packs_a_batch_without_its_stream():
+    stream = pa.table({"id": [float(value) for value in range(4096)], "note": ["x" * 64] * 4096})
+    batch = next(iter(rf.ArrowDataModule(model=model(batch_size=8), validate=stream, shuffle=False).val_dataloader()))
+    assert not batch.tensors.is_consolidated(), "in-process batches are not packed"
+
+    packed = arrow.ship(batch)
+
+    assert packed.tensors.is_consolidated()
+    assert all(value.is_consolidated() for value in packed.observations.values())
+    assert packed.source.equals(batch.source)
+    assert len(pickle.dumps(batch.source)) > len(pickle.dumps(stream)) / 2, "a slice pickles its whole stream"
+    assert len(pickle.dumps(packed.source)) < len(pickle.dumps(stream)) / 64
+
+
+def test_spawned_workers_ship_packed_batches():
+    if "spawn" not in mp.get_all_start_methods():
+        pytest.skip("this platform cannot spawn data workers")
+    stream = pa.table({"id": [float(value) for value in range(64)]})
+    module = rf.ArrowDataModule(model=model(batch_size=8), validate=stream, num_workers=1, shuffle=False)
+
+    batches = list(module.val_dataloader())
+
+    assert all(batch.tensors.is_consolidated() for batch in batches)
+    assert pa.concat_tables([batch.source for batch in batches])["id"].to_pylist() == [float(v) for v in range(64)]
 
 
 def test_stream_randomization_is_independent_of_record_batch_boundaries(monkeypatch: pytest.MonkeyPatch):

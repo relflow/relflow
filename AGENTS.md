@@ -200,6 +200,12 @@ For runtime smoke tests, train with `max_epochs=1`, `limit_train_batches=1`, and
 `limit_val_batches=1`. Documentation may show realistic training configurations
 without executing them.
 
+Loader workers ship each batch packed: `ship()` consolidates the batch's
+TensorDicts into one storage each and compacts the Arrow source so the batch
+pickles at its own size rather than its shuffle window's. In-process batches
+are untouched. Keep `pin_memory` off with workers; pinning is a main-process
+cost, not an overlap.
+
 `model.predict(...)` returns a `pyarrow.Table`. It accepts Arrow inputs directly
 and retains a nonempty sequence of mappings as a small interactive convenience;
 pass a typed empty Arrow object when there are no rows. Canonical decoded
