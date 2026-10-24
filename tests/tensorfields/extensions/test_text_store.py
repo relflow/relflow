@@ -6,16 +6,18 @@ import torch
 
 import relflow as rf
 from relflow.structs.enums import Strata
-from relflow.tensorfields.extensions.text import Embedder, EmbeddingStore, flush_stores, hash_rows
+from relflow.tensorfields.extensions.text import Embedder, EmbeddingStore, flush_stores, hash_rows, hash_rows_torch
 
 
 def test_hash_rows_is_deterministic_and_row_sensitive():
     rows = np.array([[1, 2, 3, 1, 1, 0], [1, 2, 4, 1, 1, 0], [1, 2, 3, 1, 1, 0]], dtype=np.int64)
     keys = hash_rows(rows)
-    assert keys.shape == (3, 2) and keys.dtype == np.uint64
+    assert keys.shape == (3, 2) and keys.dtype == np.int64
     assert np.array_equal(keys[0], keys[2]) and not np.array_equal(keys[0], keys[1])
     assert not np.array_equal(hash_rows(rows, salt=1)[0], keys[0])
     assert np.array_equal(hash_rows(rows), keys)
+    on_device = hash_rows_torch(torch.from_numpy(rows), salt=7).numpy()
+    assert np.array_equal(on_device, hash_rows(rows, salt=7)), "numpy and torch hash the same rows to the same words"
 
 
 def test_store_round_trips_through_shards_and_later_openers(tmp_path):
@@ -112,4 +114,40 @@ def test_fields_with_the_same_encoder_share_one_store(tmp_path, monkeypatch):
     first = model.nodes["/a"].embedder.encode(content=inputs["/a"].content, state=inputs["/a"].state)
     monkeypatch.setattr(Embedder, "pool", lambda self, ids, mask: (_ for _ in ()).throw(AssertionError("encoder ran")))
     second = model.nodes["/b"].embedder.encode(content=inputs["/b"].content, state=inputs["/b"].state)
+    assert torch.equal(first, second)
+
+
+def test_resident_view_answers_on_device_within_its_budget(tmp_path):
+    store = EmbeddingStore(tmp_path, "enc", 4, flush_every=1000, resident=64)
+    keys = hash_rows(np.arange(20, dtype=np.int64).reshape(5, 4))
+    vectors = np.arange(20, dtype=np.float32).reshape(5, 4)
+    store.put(keys, vectors)
+    assert store.lookup_device(torch.from_numpy(keys)) is None, "pending vectors are not resident until flushed"
+    store.flush()
+    found, out = store.lookup_device(torch.from_numpy(keys[[4, 1]]))
+    assert found.all() and torch.equal(out, torch.from_numpy(vectors[[4, 1]]))
+    found, _ = store.lookup_device(torch.from_numpy(hash_rows(np.array([[9, 9, 9, 9]], dtype=np.int64))))
+    assert not found.any()
+    assert EmbeddingStore(tmp_path, "enc", 4, resident=0).lookup_device(torch.from_numpy(keys)) is None
+    assert EmbeddingStore(tmp_path, "enc", 4).view(torch.device("cpu")) is None, "a CPU model keeps the host index"
+
+
+def test_embedder_uses_the_resident_view_after_a_flush(tmp_path, monkeypatch):
+    model = rf.Model.xs(
+        note=rf.Text(store=str(tmp_path), resident=64, max_length=8),
+        label=rf.Boolean(mask=True),
+        d_model=8,
+        batch_size=4,
+    )
+    embedder = model.nodes["/note"].embedder
+    table = pa.table({"note": ["alpha", "beta", "alpha", None], "label": [True, False, True, False]})
+    inputs = model.encode(table, strata=Strata.train)
+    first = embedder.encode(content=inputs["/note"].content, state=inputs["/note"].state)
+    assert flush_stores(model) == {"/note": 2}
+    assert embedder.store.view(torch.device("cpu")) is not None
+    monkeypatch.setattr(Embedder, "pool", lambda self, ids, mask: (_ for _ in ()).throw(AssertionError("encoder ran")))
+    monkeypatch.setattr(
+        embedder.store, "lookup", lambda keys: (_ for _ in ()).throw(AssertionError("host index consulted"))
+    )
+    second = embedder.encode(content=inputs["/note"].content, state=inputs["/note"].state)
     assert torch.equal(first, second)

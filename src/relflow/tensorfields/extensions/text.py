@@ -48,30 +48,41 @@ if TYPE_CHECKING:
     from relflow.structs.structure import Branch
 
 
-HASH_MULTIPLIERS = (np.uint64(0x9E3779B97F4A7C15), np.uint64(0xC2B2AE3D27D4EB4F))
+HASH_SEED = 0x9E3779B97F4A7C15
+
+
+def hash_weights(width: int) -> np.ndarray:
+    """Two rows of odd 64-bit weights for token rows of one width, fixed for the life of a store."""
+    generator = np.random.default_rng(HASH_SEED ^ width)
+    weights = generator.integers(1, 2**63 - 1, size=(2, width), dtype=np.int64)
+    return weights | np.int64(1)
 
 
 def hash_rows(rows: np.ndarray, *, salt: int = 0) -> np.ndarray:
-    """Two independent 64-bit polynomial hashes of every token row, vectorized over the batch.
+    """Two independent 64-bit multilinear hashes of every token row, as two int64 words per row.
 
     The first word indexes the store; the second guards against a first-word
-    collision, which then reads as a miss rather than as a wrong vector.
+    collision, which then reads as a miss rather than as a wrong vector. The
+    arithmetic wraps modulo 2**64, so ``hash_rows_torch`` reproduces it bit for
+    bit on any device.
     """
     if rows.ndim != 2:
         raise ValueError(f"token rows must be a 2-D array, got shape {rows.shape}")
-    values = rows.astype(np.uint64, copy=False) + np.uint64(1)
-    keys = np.empty((rows.shape[0], 2), dtype=np.uint64)
+    weights = hash_weights(rows.shape[1])
+    values = rows.astype(np.int64, copy=False) + np.int64(1)
     with np.errstate(over="ignore"):
-        for lane, multiplier in enumerate(HASH_MULTIPLIERS):
-            acc = np.full(
-                rows.shape[0],
-                np.uint64(salt) ^ np.uint64(rows.shape[1]) ^ (multiplier >> np.uint64(lane)),
-                dtype=np.uint64,
-            )
-            for column in range(rows.shape[1]):
-                acc = acc * multiplier + values[:, column]
-            keys[:, lane] = acc ^ (acc >> np.uint64(29))
-    return keys
+        words = (values[:, None, :] * weights[None, :, :]).sum(axis=2, dtype=np.int64)
+        words += np.int64(np.uint64(salt).astype(np.int64)) * np.array([1, 3], dtype=np.int64)
+    return words
+
+
+def hash_rows_torch(rows: torch.Tensor, *, salt: int = 0) -> torch.Tensor:
+    """``hash_rows`` on a device tensor of token rows; identical words, no host round trip."""
+    weights = torch.from_numpy(hash_weights(rows.shape[1])).to(rows.device)
+    values = rows.to(torch.int64) + 1
+    words = torch.stack(((values * weights[0]).sum(dim=1), (values * weights[1]).sum(dim=1)), dim=1)
+    offset = torch.tensor([1, 3], dtype=torch.int64, device=rows.device) * int(np.uint64(salt).astype(np.int64))
+    return words + offset
 
 
 class EmbeddingStore:
@@ -88,25 +99,33 @@ class EmbeddingStore:
     """
 
     def __init__(
-        self, directory: str | os.PathLike[str], fingerprint: str, hidden_size: int, *, flush_every: int = 65_536
+        self,
+        directory: str | os.PathLike[str],
+        fingerprint: str,
+        hidden_size: int,
+        *,
+        flush_every: int = 65_536,
+        resident: int | None = None,
     ):
-        if hidden_size <= 0 or flush_every <= 0:
-            raise ValueError("EmbeddingStore needs a positive hidden size and flush interval")
+        if hidden_size <= 0 or flush_every <= 0 or (resident is not None and resident < 0):
+            raise ValueError("EmbeddingStore needs a positive hidden size and flush interval and a nonnegative budget")
         self.directory = Path(directory)
         self.fingerprint = fingerprint
         self.hidden_size = hidden_size
         self.flush_every = flush_every
+        self.resident = resident  # MiB of accelerator memory a device view may take; None decides per device
         self.lock = RLock()
         self.directory.mkdir(parents=True, exist_ok=True)
         self.shards: list[np.ndarray] = []
         self.offsets = np.zeros(1, dtype=np.int64)
-        self.k1 = np.empty(0, dtype=np.uint64)
-        self.k2 = np.empty(0, dtype=np.uint64)
+        self.k1 = np.empty(0, dtype=np.int64)
+        self.k2 = np.empty(0, dtype=np.int64)
         self.locator = np.empty(0, dtype=np.int64)
-        self.pending_keys = np.empty((0, 2), dtype=np.uint64)
+        self.pending_keys = np.empty((0, 2), dtype=np.int64)
         self.pending_vectors = np.empty((0, hidden_size), dtype=np.float32)
         self.pending_order = np.empty(0, dtype=np.int64)
         self.loaded: set[str] = set()
+        self.views: dict[str, tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None] = {}
         self.reload()
 
     instances: ClassVar[dict[tuple[str, str, int], EmbeddingStore]] = {}
@@ -120,6 +139,8 @@ class EmbeddingStore:
             store = cls.instances.get(key)
             if store is None:
                 store = cls.instances[key] = cls(directory, fingerprint, hidden_size, **options)
+            elif options.get("resident") is not None:
+                store.resident = options["resident"]
             return store
 
     def __len__(self) -> int:
@@ -159,6 +180,7 @@ class EmbeddingStore:
         locator = np.concatenate((self.locator, np.arange(start, start + len(vectors), dtype=np.int64)))
         order = np.argsort(k1, kind="stable")
         self.k1, self.k2, self.locator = k1[order], k2[order], locator[order]
+        self.views.clear()  # device views are rebuilt from the new index on their next use
 
     def fetch(self, positions: np.ndarray) -> np.ndarray:
         """Vectors at sorted index positions, gathered shard by shard."""
@@ -232,10 +254,48 @@ class EmbeddingStore:
                 os.replace(temporary, path)
             self.admit(np.load(keys_path), np.load(vectors_path, mmap_mode="r"))
             self.loaded.add(keys_path.name)
-            self.pending_keys = np.empty((0, 2), dtype=np.uint64)
+            self.pending_keys = np.empty((0, 2), dtype=np.int64)
             self.pending_vectors = np.empty((0, self.hidden_size), dtype=np.float32)
             self.pending_order = np.empty(0, dtype=np.int64)
             return count
+
+    def budget(self, device: torch.device) -> int:
+        """Bytes a device view may take: the configured MiB, or a quarter of the device's memory up to 2 GiB."""
+        if self.resident is not None:
+            return self.resident * 2**20
+        if device.type == "cuda":
+            total = torch.cuda.get_device_properties(device).total_memory
+            return int(min(total // 4, 2 * 2**30))
+        return 0
+
+    def view(self, device: torch.device) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None:
+        """The flushed index and vectors on ``device`` when they fit its budget; built once per index version."""
+        name = str(device)
+        if name in self.views:
+            return self.views[name]
+        with self.lock:
+            if name in self.views:
+                return self.views[name]
+            size = len(self.k1) * (self.hidden_size * 4 + 16)
+            # The host index already serves a CPU model; an explicit budget still allows a CPU view for tests and tools.
+            if not len(self.k1) or size > self.budget(device) or (device.type == "cpu" and self.resident is None):
+                self.views[name] = None
+                return None
+            vectors = torch.from_numpy(self.fetch(np.arange(len(self.k1)))).to(device)
+            k1 = torch.from_numpy(self.k1).to(device)
+            k2 = torch.from_numpy(self.k2).to(device)
+            self.views[name] = (k1, k2, vectors)
+            return self.views[name]
+
+    def lookup_device(self, keys: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor] | None:
+        """Device-side lookup against the resident view: (found, vectors), or None when no view fits."""
+        resident = self.view(keys.device)
+        if resident is None:
+            return None
+        k1, k2, vectors = resident
+        positions = torch.searchsorted(k1, keys[:, 0].contiguous()).clamp_max(len(k1) - 1)
+        found = (k1[positions] == keys[:, 0]) & (k2[positions] == keys[:, 1])
+        return found, vectors.index_select(0, positions)
 
 
 def flush_stores(module: Model) -> dict[str, int]:
@@ -542,7 +602,10 @@ class Request(RequestBase):
     ``store`` names a directory of persistent frozen-encoder vectors keyed by
     encoder configuration and token row; every split, run, and field with the
     same encoder shares it, misses are encoded once and appended, and the
-    in-process embedding cache is bypassed. ``jitter`` perturbs pooled training inputs.
+    in-process embedding cache is bypassed. ``resident`` is the accelerator
+    memory in MiB a store may occupy so lookups never leave the device; ``None``
+    allows a quarter of the device up to 2 GiB and ``0`` keeps the store on the
+    host. ``jitter`` perturbs pooled training inputs.
     Reconstructing masks use ``"l1"`` or ``"l2"`` ``objective`` loss against
     pristine frozen embeddings. Prediction can export an embedding with
     ``embed=True``; this field does not generate text.
@@ -558,6 +621,7 @@ class Request(RequestBase):
     encoder_pooling: Pooling = Pooling.cls
     cache: pydantic.StrictBool | Annotated[pydantic.StrictInt, pydantic.Field(gt=0)] = False
     store: Annotated[str, pydantic.Field(min_length=1)] | None = None
+    resident: Annotated[pydantic.StrictInt, pydantic.Field(ge=0)] | None = None
     objective: Objective = Objective.l2
     jitter: Jitter = pydantic.Field(default_factory=Jitter)
 
@@ -573,6 +637,7 @@ class Request(RequestBase):
             encoder_pooling: Pooling | Literal["cls", "mean", "pooler"] = Pooling.cls,
             cache: bool | int = False,
             store: str | None = None,
+            resident: int | None = None,
             objective: Objective | Literal["l1", "l2"] = Objective.l2,
             jitter: Jitter = ...,
             type: Literal["text"] = "text",
@@ -730,7 +795,9 @@ class Embedder(EmbedderBase):
         self.cache = EmbeddingCache(None if request.cache is True else request.cache) if request.cache else None
         self.tokens = TokenCache(4096 if request.cache is True else request.cache) if request.cache else None
         self.store = (
-            EmbeddingStore.open(request.store, self.fingerprint(request), self.hidden_size) if request.store else None
+            EmbeddingStore.open(request.store, self.fingerprint(request), self.hidden_size, resident=request.resident)
+            if request.store
+            else None
         )
         self.jitter: Jitter = request.jitter
 
@@ -755,24 +822,38 @@ class Embedder(EmbedderBase):
         return self.tokens
 
     def consult(self, valued_ids: torch.Tensor, valued_mask: torch.Tensor) -> torch.Tensor:
-        """Pooled vectors for token rows from the store, encoding and remembering only the rows it lacks."""
+        """Pooled vectors for token rows from the store, encoding and remembering only the rows it lacks.
+
+        Rows are hashed on their own device. A store small enough to be resident
+        there answers without a host round trip; the host index answers the rest,
+        and misses reach the encoder once per distinct row.
+        """
         assert self.store is not None
         device = valued_ids.device
         dtype = torch.get_autocast_dtype(device.type) if torch.is_autocast_enabled(device.type) else None
         salt = int.from_bytes(hashlib.sha256(f"{device.type}|{dtype}".encode()).digest()[:8], "big")
-        rows = torch.cat((valued_ids, valued_mask), dim=1).detach().cpu().numpy()
-        keys = hash_rows(rows, salt=salt)
-        found, vectors = self.store.lookup(keys)
+        keys = hash_rows_torch(torch.cat((valued_ids, valued_mask), dim=1), salt=salt)
         out = torch.empty((len(keys), self.hidden_size), device=device, dtype=torch.float32)
-        if found.any():
-            out[torch.from_numpy(found).to(device)] = torch.from_numpy(vectors[found]).to(device)
-        missing = np.flatnonzero(~found)
+        found = torch.zeros(len(keys), dtype=torch.bool, device=device)
+        resident = self.store.lookup_device(keys)
+        if resident is not None:
+            found, vectors = resident
+            out[found] = vectors[found]
+        remaining = (~found).nonzero(as_tuple=False).reshape(-1)
+        if not len(remaining):
+            return out
+        host_keys = keys.index_select(0, remaining).cpu().numpy()
+        host_found, host_vectors = self.store.lookup(host_keys)
+        if host_found.any():
+            hit = remaining[torch.from_numpy(host_found).to(device)]
+            out[hit] = torch.from_numpy(host_vectors[host_found]).to(device)
+        missing = np.flatnonzero(~host_found)
         if len(missing):
-            unique_keys, first, inverse = np.unique(keys[missing], axis=0, return_index=True, return_inverse=True)
-            select = torch.from_numpy(missing[first]).to(device)
+            unique_keys, first, inverse = np.unique(host_keys[missing], axis=0, return_index=True, return_inverse=True)
+            rows = remaining[torch.from_numpy(missing).to(device)]
+            select = remaining[torch.from_numpy(missing[first]).to(device)]
             fresh = self.pool(valued_ids.index_select(0, select), valued_mask.index_select(0, select))
-            spread = fresh.index_select(0, torch.from_numpy(inverse.reshape(-1)).to(device))
-            out[torch.from_numpy(missing).to(device)] = spread
+            out[rows] = fresh.index_select(0, torch.from_numpy(inverse.reshape(-1)).to(device))
             self.store.put(unique_keys, fresh.detach().cpu().numpy())
         return out
 

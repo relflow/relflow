@@ -131,8 +131,11 @@ model = rf.Model(
   configuration and token row and shared by every split, run, and field with
   that encoder; misses are encoded once and appended as shards, the
   extension's callback flushes at epoch and phase ends, and
-  `embedder.warm(strings)` fills it ahead of training. The in-process `cache`
-  stays for runs without a store.
+  `embedder.warm(strings)` fills it ahead of training. A store that fits
+  `resident` MiB of accelerator memory (default a quarter of the device, up
+  to 2 GiB) is uploaded once per index version and answered on the device;
+  rows hash identically on numpy and torch. The in-process `cache` stays for
+  runs without a store.
 - `rf.Jitter(add=..., multiply=..., normalize=...)` is a shared frozen
   configuration whose `apply(inputs, mask)` method owns the vectorized affine
   tensor operation. Consumers own training activation, eligible coordinates,
