@@ -95,12 +95,17 @@ class CheckpointState:
         torch.save(checkpoint, path)
 
     @staticmethod
-    def restore(module: "Model", checkpoint: dict[str, Any]) -> None:
-        """Restore a checkpoint, rolling back the graph if schema or tensor loading fails."""
+    def require(checkpoint: dict[str, Any]) -> None:
+        """Reject a checkpoint mapping that lacks a RelFlow field."""
         missing = CheckpointState.required_fields - set(checkpoint)
         if missing:
             fields = ", ".join(sorted(missing))
             raise ValueError(f"missing checkpoint fields: {fields}")
+
+    @staticmethod
+    def restore(module: "Model", checkpoint: dict[str, Any]) -> None:
+        """Restore a checkpoint, rolling back the graph if schema or tensor loading fails."""
+        CheckpointState.require(checkpoint)
 
         device = module.device
         was_training = module.training
@@ -136,14 +141,12 @@ class CheckpointState:
         path = Path(checkpoint)
         logger.bind(component="model_factory", checkpoint=str(path)).info("loading Model from checkpoint")
         state = torch.load(path, weights_only=False, map_location="cpu")
-        if "schema" not in state:
-            raise ValueError("missing schema in checkpoint")
+        CheckpointState.require(state)
 
-        model = model_cls(
-            schema=Schema.model_validate(state["schema"]),
-            batch_size=state["batch_size"],
-        )
-        model.restore_checkpoint_state(state)
+        # Construction installs the saved schema's graph once; only tensors and provenance remain.
+        model = model_cls(schema=Schema.model_validate(state["schema"]), batch_size=state["batch_size"])
+        CheckpointState.restore_metadata(model, state)
+        model.load_state_dict(state_dict=state["state_dict"])
         logger.bind(component="model_factory", checkpoint=str(path)).info("restored model state from checkpoint")
 
         return model

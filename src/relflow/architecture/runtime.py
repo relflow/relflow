@@ -77,6 +77,7 @@ class ExecutionPlan:
     embeds: frozenset[Address]
     objectives: tuple[Address, ...]
     decoders: tuple[DecoderRoute, ...]
+    sequenced: frozenset[Address]
 
 
 def execution(module: Model) -> ExecutionPlan:
@@ -106,6 +107,8 @@ def execution(module: Model) -> ExecutionPlan:
         embeds=embeds,
         objectives=objectives,
         decoders=decoders,
+        # Only ancestors of a decoded leaf need their encoded sequence beside the summary.
+        sequenced=frozenset(item for route in decoders for item in route.heritage),
     )
     return module.execution_plan
 
@@ -129,6 +132,15 @@ def participation(
         {address for address, active in zip(objectives, selected[0], strict=True) if active},
         {address for address, active in zip(objectives, selected[1], strict=True) if active},
     )
+
+
+def rows(module: Model, inputs: EncodedInput) -> int:
+    """Count the observations in one forward batch."""
+
+    if inputs.batch_dims:
+        return int(inputs.batch_size[0])
+    address = next(iter(module.schema.active_requests), None)
+    return 0 if address is None else int(cast(TensorFieldBase, inputs[address]).state.shape[0])
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,9 +261,9 @@ def axes(module: Model, address: Address) -> tuple[int | None, ...]:
 
 
 def metadata(module: Model) -> dict[bytes, bytes]:
-    """Identify the public output contract and model's recorded package version."""
+    """Record the model's RelFlow package version on every output table."""
 
-    return {b"relflow.prediction_format": b"2", b"relflow.model_version": module.version.encode()}
+    return {b"relflow.model_version": module.version.encode()}
 
 
 def check_output_type(datatype: pa.DataType, address: Address) -> None:
@@ -641,7 +653,10 @@ class ModelRuntime:
 
                 node_module = cast(NodeModule, module.nodes[address])
                 encoder: BranchEncoder = node_module.encoder
-                encoded: Parcel = encoder(processed[address], geometry=geometry)
+                conditioning = {"context": processed[encoder.destination]} if encoder.conditioning is not None else {}
+                encoded: Parcel = encoder(
+                    processed[address], geometry=geometry, sequenced=address in plan.sequenced, **conditioning
+                )
                 if encoded.destination is None:
                     raise ValueError(f"parcel from '{encoded.origin}' has no destination")
                 processed[encoded.destination].append(encoded)
@@ -671,7 +686,14 @@ class ModelRuntime:
         for route in decoders:
             address = route.address
             tensorfield = cast(TensorFieldBase, inputs[address])
-            parcels = [outgoing[item] for item in route.heritage if item in outgoing]
+            # A reduced ancestor hands the decoders beneath it its summary and its encoded sequence.
+            parcels = []
+            for item in route.heritage:
+                if item in outgoing:
+                    parcels.append(outgoing[item])
+                    kept = outgoing[item].sequence
+                    if kept is not None:
+                        parcels.append(kept)
 
             node_module = cast(NodeModule, module.nodes[address])
             decoder: DecoderBase = node_module.decoder
@@ -747,7 +769,7 @@ class ModelRuntime:
         *,
         strata: Strata,
     ) -> Output | pa.Table | None:
-        """Evaluate a loop batch, retaining Arrow sources for public predictions."""
+        """Evaluate one loop batch, retaining Arrow sources for public predictions."""
         if isinstance(batch, Encoded) and batch.bindings:
             trainer = getattr(module, "_trainer", None)
             if trainer is not None and trainer.world_size > 1:
@@ -830,6 +852,9 @@ class ModelRuntime:
             anchor = torch.stack(anchors).sum()
         else:
             anchor = torch.zeros((), device=inputs.device)
+        # Peer ranks reduce the loss metric, so a rank without local targets
+        # still emits it, weighted by zero observations.
+        weight = rows(module, inputs) if losses else 0
         if not losses:
             suffix = "anchored zero loss" if strata == Strata.train else "zero loss"
             logger.bind(
@@ -838,11 +863,19 @@ class ModelRuntime:
                 rank=module.global_rank,
                 batch=batch_idx,
             ).warning(f"reconstruction targets are present only on peer ranks, returning {suffix}")
-            return Output(loss=anchor)
 
-        loss = module.track((Metric.loss, strata), value=torch.stack(losses).sum() + anchor)
+        total = torch.stack(losses).sum() + anchor if losses else anchor
+        loss = module.track((Metric.loss, strata), value=total, rows=weight, uniform=True)
         if strata == Strata.train:
-            module.track((Metric.loss, "train_epoch"), value=loss, on_step=False, on_epoch=True, logger=False)
+            module.track(
+                (Metric.loss, "train_epoch"),
+                value=loss,
+                on_step=False,
+                on_epoch=True,
+                logger=False,
+                rows=weight,
+                uniform=True,
+            )
         return Output(loss=loss)
 
     @staticmethod
@@ -858,7 +891,7 @@ class ModelRuntime:
 
         if not isinstance(source, pa.Table):
             raise TypeError(f"source must be a pyarrow.Table, got {type(source).__name__}")
-        active = plan(module, retain, refresh=True) if compiled is None else compiled
+        active = plan(module, retain, refresh=module.training) if compiled is None else compiled
         if active.retain != retain:
             raise ValueError(f"compiled output plan retain {active.retain!r} does not match write retain {retain!r}")
         columns: dict[str, pa.Array] = {}
@@ -990,7 +1023,9 @@ class ModelRuntime:
                 strata=Strata.predict,
             )
             if compiled is None:
-                compiled = plan(module, retain, refresh=True)
+                # An evaluation model's contract is fixed per generation, so serving
+                # reuses it across calls; a training model may still grow resources.
+                compiled = plan(module, retain, refresh=module.training)
             raw: list[Prediction] = []
             if encoded.source.num_rows:
                 was_training = module.training

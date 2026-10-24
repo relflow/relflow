@@ -82,12 +82,13 @@ class EMA(lit.Callback):
             raise RuntimeError("EMA evaluation weights are active during an optimizer step")
         current = self.synchronize(module)
         decay = min(self.decay, self.updates / (self.updates + 1))
+        # Averages are private clones, so one fused lerp over the list updates
+        # them in place; a resumed average first moves to its parameter's device.
         averaged = {
-            name: self.average[name].to(parameter).clone().lerp_(parameter.detach(), 1 - decay)
-            if name in self.average
-            else parameter.detach().clone()
+            name: self.average[name].to(parameter) if name in self.average else parameter.detach().clone()
             for name, parameter in current.items()
         }
+        torch._foreach_lerp_(list(averaged.values()), [parameter.detach() for parameter in current.values()], 1 - decay)
         self.average = averaged
         self.tracked = current
         self.updates += 1

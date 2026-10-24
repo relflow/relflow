@@ -32,18 +32,21 @@ from relflow.tensorfields.base import (
 from relflow.tensorfields.output import array, struct, variable
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
 from relflow.tensorfields.shared.reconstruction import Metrics, Reconstruction, Scores
-from relflow.tensorfields.shared.vocabulary import fold
+from relflow.tensorfields.shared.vocabulary import canonical, fold
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.datasets.base import InterprocessEncodingContext
-    from relflow.helpers.resize import Resize
     from relflow.structs.experiment import Schema
+    from relflow.tensorfields.shared.resize import Resize
 
 Value = bool | int | float | str | bytes
 
-enum = Extension(name="enum", types=(bool, int, float, str, bytes))
-enum.callback(CounterUpdateCallback, Metrics)
+enum: Extension = Extension(
+    name="enum",
+    types=(bool, int, float, str, bytes),
+    callbacks=(CounterUpdateCallback, Metrics),
+)
 
 
 @enum.register(Component.Request)
@@ -190,15 +193,7 @@ class State:
     tokens: pa.Array = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "tokens", self.canonical(pa.array(cast(tuple[Any, ...], self.values))))
-
-    @staticmethod
-    def canonical(values: pa.Array | pa.ChunkedArray) -> pa.Array | pa.ChunkedArray:
-        """Make Arrow lookup agree with Python equality for signed floating zero."""
-        if pa.types.is_floating(values.type):
-            zero = pa.scalar(0.0, type=values.type)
-            return pc.if_else(pc.equal(values, zero), zero, values)
-        return values
+        object.__setattr__(self, "tokens", canonical(pa.array(cast(tuple[Any, ...], self.values))))
 
     @property
     def signature(self) -> tuple[str, tuple[Value, ...]]:
@@ -213,7 +208,7 @@ class State:
             )
         try:
             values = fold(values, strip=self.strip, cased=self.cased)
-            values = self.canonical(pc.cast(values, self.tokens.type, safe=True))
+            values = canonical(pc.cast(values, self.tokens.type, safe=True))
             indices = pc.index_in(values, value_set=self.tokens)
         except pa.ArrowException as error:
             raise ValueError(

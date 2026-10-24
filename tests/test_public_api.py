@@ -1,8 +1,11 @@
+import sys
 from typing import get_type_hints
 
 import pyarrow as pa
+import pytest
 
 import relflow
+import relflow.inference as inference
 import relflow.tensorfields as tensorfields
 
 
@@ -97,3 +100,28 @@ def test_data_module_constructor_annotations_resolve_at_runtime():
 
     writer_hints = get_type_hints(relflow.Writer.write_on_batch_end)
     assert writer_hints["output"] is pa.Table
+
+
+def test_star_imports_and_lazy_serving_exports_without_the_serving_extra(monkeypatch):
+    monkeypatch.setitem(sys.modules, "fastapi", None)
+    monkeypatch.delitem(sys.modules, "relflow.inference.deployment", raising=False)
+    # Lazy names may already be cached from earlier access; drop them without triggering ``__getattr__``.
+    monkeypatch.delitem(inference.__dict__, "deployment", raising=False)
+    for module in (relflow, inference):
+        for name in ("Accelerator", "Deployment", "Input", "JSONBackend", "ModelSource", "UpdateOperation"):
+            monkeypatch.delitem(module.__dict__, name, raising=False)
+            assert name not in module.__all__
+            assert name in dir(module)
+
+    namespace: dict[str, object] = {}
+    exec("from relflow import *\nfrom relflow.inference import *", namespace)
+
+    assert namespace["Model"] is relflow.Model
+    assert namespace["Writer"] is relflow.Writer
+    assert "Deployment" not in namespace
+    with pytest.raises(ModuleNotFoundError, match="relflow.Deployment requires the serving extra"):
+        relflow.Deployment
+    with pytest.raises(ModuleNotFoundError, match="relflow.inference.Accelerator requires the serving extra"):
+        inference.Accelerator
+    with pytest.raises(AttributeError, match="has no attribute 'Missing'"):
+        relflow.Missing

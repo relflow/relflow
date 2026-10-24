@@ -15,7 +15,6 @@ from tensordict import TensorDict
 
 import relflow as rf
 from relflow.data.ragged import coalesce
-from relflow.helpers import Jitter
 from relflow.logging import logger
 from relflow.logging.config import CONTEXT
 from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
@@ -35,6 +34,7 @@ from relflow.tensorfields.extensions.number import (
 from relflow.tensorfields.extensions.number import (
     output as output_type,
 )
+from relflow.tensorfields.shared.jitter import Jitter
 from tests.arrow import table as arrow_table
 from tests.tensorfields.helpers import tensorize
 

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from lightning.pytorch import Trainer
 
     from relflow.architecture.root import Model
-    from relflow.helpers.resize import Resize
+    from relflow.tensorfields.shared.resize import Resize
 
 
 class Counter(torch.nn.Module):

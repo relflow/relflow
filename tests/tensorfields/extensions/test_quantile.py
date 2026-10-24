@@ -50,7 +50,7 @@ def decoded(configured: rf.Model, field, percentile: float = 0.5) -> Prediction:
     decoder = configured.nodes[ADDRESS].decoder
     with torch.no_grad():
         decoder.regression.weight.zero_()
-        decoder.regression.bias.fill_(percentile)
+        decoder.regression.bias.fill_(torch.logit(torch.tensor(percentile)))
     pooled = torch.zeros(*field.state.shape, configured.schema.d_model)
     return Prediction(address=ADDRESS, payload=decoder.decode(pooled))
 
@@ -82,15 +82,8 @@ def test_quantile_rejects_invalid_options(options):
 
 @pytest.mark.parametrize(
     "column",
-    [
-        pa.array([True]),
-        pa.array(["1"]),
-        pa.array([[1.0]]),
-        pa.array([float("nan")]),
-        pa.array([float("inf")]),
-        pa.array([float("-inf")]),
-    ],
-    ids=["boolean", "string", "list", "nan", "positive-infinity", "negative-infinity"],
+    [pa.array([True]), pa.array(["1"]), pa.array([[1.0]])],
+    ids=["boolean", "string", "list"],
 )
 def test_quantile_rejects_incompatible_values_before_learning(column):
     configured = model()
@@ -100,11 +93,27 @@ def test_quantile_rejects_incompatible_values_before_learning(column):
 
 
 @pytest.mark.parametrize("strata", [rf.Strata.train, rf.Strata.predict])
-def test_quantile_rejects_nonfinite_pristine_values_even_when_skipped(strata):
-    configured = model(mask=True)
-    with pytest.raises(ValueError, match="amount.*finite"):
-        configured.encode(values(float("inf")), strata=strata)
-    assert normalization(configured)["count"] == 0
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "-inf"])
+def test_quantile_nonfinite_values_take_the_other_state(strata, value):
+    expected = [Tokens.other.value, Tokens.valued.value, Tokens.null.value]
+    embedded = model()
+    embedded.encode(values(10, 20, 30), strata=rf.Strata.train)
+    field = embedded.encode(values(value, 20, None), strata=strata)[ADDRESS]
+
+    assert field.state.flatten().tolist() == expected
+    assert field.raw.flatten()[0] == 0
+    torch.testing.assert_close(field.content.flatten()[0], torch.tensor(0.5))
+    assert normalization(embedded)["count"] == 3 + (strata == rf.Strata.train)
+
+    # A supervised field carries the same states in its training targets.
+    supervised = model(mask=True)
+    supervised.encode(values(10, 20, 30), strata=rf.Strata.train)
+    targets = supervised.encode(values(value, 20, None), strata=rf.Strata.train)[ADDRESS].targets
+
+    assert targets[TensorKey.state].flatten().tolist() == expected
+    assert targets["raw"].flatten()[0] == 0
+    torch.testing.assert_close(targets[TensorKey.content].flatten()[0], torch.tensor(0.5))
+    assert normalization(supervised)["count"] == 4
 
 
 def test_quantile_accepts_chunked_integers_without_losing_float64_distinctions():
@@ -118,7 +127,7 @@ def test_quantile_accepts_chunked_integers_without_losing_float64_distinctions()
     assert field.content.dtype == torch.float32
     assert field.raw.dtype == torch.int64
     torch.testing.assert_close(field.raw.view(torch.float64).flatten(), torch.tensor(content, dtype=torch.float64))
-    assert torch.all(field.content[..., 0].flatten().diff() > 0)
+    assert torch.all(field.content.flatten().diff() > 0)
     assert field.targets.is_empty()
     assert normalization(configured)["count"] == 3
 
@@ -126,8 +135,7 @@ def test_quantile_accepts_chunked_integers_without_losing_float64_distinctions()
 def test_quantile_empty_constant_and_tail_coordinates():
     configured = model(embed=True)
     fresh = configured.encode(values(-10, 20))[ADDRESS]
-    torch.testing.assert_close(fresh.content[..., 0], torch.full_like(fresh.content[..., 0], 0.5))
-    assert torch.equal(fresh.content[..., 1], torch.zeros_like(fresh.content[..., 1]))
+    torch.testing.assert_close(fresh.content, torch.full_like(fresh.content, 0.5))
     assert normalization(configured) == {
         "count": 0,
         "compression": 100,
@@ -139,7 +147,7 @@ def test_quantile_empty_constant_and_tail_coordinates():
 
     configured.encode(values(7, 7, None), strata=rf.Strata.train)
     field = configured.encode(values(-100, 7, 100))[ADDRESS]
-    torch.testing.assert_close(field.content[..., 0].flatten(), torch.tensor([0.0, 0.5, 1.0]))
+    torch.testing.assert_close(field.content.flatten(), torch.tensor([0.0, 0.5, 1.0]))
     assert normalization(configured) == {"count": 2, "compression": 100, "minimum": 7.0, "median": 7.0, "maximum": 7.0}
     assert write(configured, decoded(configured, field)).field("content").to_pylist() == [7.0, 7.0, 7.0]
 
@@ -197,7 +205,7 @@ def test_quantile_evaluation_reuses_state(strata):
 
     field = configured.encode(values(-100, 100), strata=strata)[ADDRESS]
 
-    torch.testing.assert_close(field.content[..., 0].flatten(), torch.tensor([0.0, 1.0]))
+    torch.testing.assert_close(field.content.flatten(), torch.tensor([0.0, 1.0]))
     assert normalization(configured) == before
 
 
@@ -255,7 +263,7 @@ def test_quantile_embedding_retains_percentile_lane_without_learning():
 
     embedded = configured.nodes[ADDRESS].embedder.embed(field)
 
-    torch.testing.assert_close(embedded.payload[..., -1], field.content[..., 0])
+    torch.testing.assert_close(embedded.payload[..., -1], field.content)
     assert torch.isfinite(embedded.payload).all()
     assert normalization(configured) == before
 
@@ -306,7 +314,7 @@ def test_quantile_loss_uses_percentile_units_and_excludes_null_targets(monkeypat
 def test_quantile_all_null_targets_have_finite_state_only_loss(monkeypatch):
     configured = model(mask=True)
     field = configured.encode(values(None, None), strata=rf.Strata.train)[ADDRESS]
-    content = torch.zeros_like(field.content[..., 0], requires_grad=True)
+    content = torch.zeros_like(field.content, requires_grad=True)
     monkeypatch.setattr(configured, "track", lambda names, value: value)
 
     result = rf.TENSORFIELDS["quantile"].loss(configured, prediction(field, content), field, rf.Strata.train)
@@ -503,15 +511,16 @@ def test_quantile_forward_reuses_encoded_inputs_after_restoring_resources(tmp_pa
     assert rf.Quantile.normalization(configured, rf.Address("y"))["count"] == 3
 
 
-def test_quantile_cold_validation_omits_undefined_source_unit_metrics(monkeypatch):
+def test_quantile_cold_validation_registers_undefined_source_unit_metrics(monkeypatch):
     configured = model(mask=True)
     field = configured.encode(values(10, 20), strata=rf.Strata.validate)[ADDRESS]
     predicted = decoded(configured, field)
     tracked = {}
 
     def track(names, value):
-        assert torch.isfinite(value).all()
-        tracked[names[-2:]] = value.detach().clone()
+        if torch.is_tensor(value):
+            assert torch.isfinite(value).all()
+        tracked[names[-2:]] = value
         return value
 
     monkeypatch.setattr(configured, "track", track)
@@ -521,29 +530,44 @@ def test_quantile_cold_validation_omits_undefined_source_unit_metrics(monkeypatc
     assert torch.isfinite(result)
     assert (Metric.loss, TensorKey.state) in tracked
     assert (Metric.loss, TensorKey.content) in tracked
+    # Every rank accumulates the source-unit totals for the epoch; without an
+    # inverse their value is undefined rather than fabricated from nothing.
     assert (Metric.mae, TensorKey.content) not in tracked
-    assert (Metric.rmse, TensorKey.content) not in tracked
+    metrics = configured.nodes[ADDRESS].decoder.metrics.compute(rf.Strata.validate)
+    for name in ("mae.content", "rmse.content"):
+        assert torch.isnan(metrics[name])
     assert normalization(configured)["count"] == 0
 
 
-def test_quantile_spread_lane_keeps_growing_beyond_learned_support():
-    configured = model()
-    configured.encode(values(*range(0, 101, 10)), strata=rf.Strata.train)
-
-    field = configured.encode(values(200, 1_000, 10_000, None))[ADDRESS]
-
-    ranks, spread = field.content[..., 0].flatten(), field.content[..., 1].flatten()
-    assert torch.equal(ranks[:3], torch.ones(3))
-    assert torch.all(spread[:3].diff() > 0)
-    assert spread.max() <= 64.0
-    assert spread[3] == 0.0
-
-
-@pytest.mark.parametrize(("score", "low", "high"), [(-0.5, -60.0, -40.0), (1.5, 140.0, 160.0)])
-def test_quantile_decoder_extrapolates_from_the_outer_deciles(score, low, high):
+@pytest.mark.parametrize("batch_size", [1, 2, 3])
+def test_quantile_evaluation_metrics_count_valued_targets_across_unequal_batches(batch_size, tmp_path):
     configured = model(mask=True)
-    field = configured.encode(values(*range(0, 101)), strata=rf.Strata.train)[ADDRESS]
+    configured.encode(values(*range(0, 101, 10)), strata=rf.Strata.train)
+    decoder = configured.nodes[ADDRESS].decoder
+    with torch.no_grad():
+        decoder.regression.weight.zero_()
+        decoder.regression.bias.zero_()
+    data = rf.ArrowDataModule(configured, validate=values(30.0, 40.0, None))
+    results = configured.validate(
+        data,
+        batch_size=batch_size,
+        accelerator="cpu",
+        devices=1,
+        precision="32-true",
+        enable_progress_bar=False,
+        default_root_dir=tmp_path,
+    )[0]
+    # The median readout predicts 50 for every row: errors 20 and 10 over two valued rows.
+    assert results[".amount/validate.mae.content"] == pytest.approx(15.0)
+    assert results[".amount/validate.rmse.content"] == pytest.approx((500 / 2) ** 0.5)
 
-    output = write(configured, decoded(configured, field, score)).field("content").to_pylist()
 
-    assert all(low <= value <= high for value in output)
+def test_quantile_readout_stays_wide_under_autocast():
+    configured = model(mask=True)
+    decoder = configured.nodes[ADDRESS].decoder
+
+    with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+        payload = decoder.decode(torch.zeros(3, configured.schema.d_model))
+
+    assert payload["percentile"].dtype == torch.float32
+    assert payload[TensorKey.content].dtype == torch.float64

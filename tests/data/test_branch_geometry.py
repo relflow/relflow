@@ -6,6 +6,7 @@ import pytest
 import torch
 
 import relflow as rf
+from relflow.data import ragged
 from relflow.data.arrow import Geometry
 from relflow.data.iterables import encode, mock
 from relflow.data.ragged import coalesce
@@ -170,3 +171,29 @@ def test_vacant_training_still_observes_and_learns_every_registered_field(monkey
     assert rf.Category.vocabulary(model, "/events/category") == ()
     for name, value in before.items():
         torch.testing.assert_close(model.state_dict()[name], value, rtol=0, atol=0)
+
+
+def test_absent_branch_collection_warns_once_per_address_outside_prediction(monkeypatch):
+    messages: list[str] = []
+
+    class Recorder:
+        def bind(self, **context):
+            return self
+
+        def warning(self, message: str) -> None:
+            messages.append(message)
+
+    monkeypatch.setattr(ragged, "logger", Recorder())
+    ragged.absent.cache_clear()
+    configured = schema(events=rf.Branch(left=rf.Number))
+    source = pa.table({"unused": [1, 2]})
+
+    coalesce(source, configured, Strata.predict)
+    assert messages == []
+
+    for strata in (Strata.train, Strata.validate, Strata.train):
+        resolved = coalesce(source, configured, strata)
+        assert resolved.layouts["/events"].present.tolist() == [[False], [False]]
+
+    assert len(messages) == 1
+    assert "'/events'" in messages[0] and "'events'" in messages[0] and "preprocessor" in messages[0]

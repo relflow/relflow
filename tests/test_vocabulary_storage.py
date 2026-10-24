@@ -8,10 +8,10 @@ import pytest
 import torch
 
 import relflow as rf
-from relflow.helpers.resize import Resize
 from relflow.structs.packages import Prediction
 from relflow.tensorfields.extensions import category, cluster
 from relflow.tensorfields.extensions import set as sets
+from relflow.tensorfields.shared.resize import Resize
 
 ADDRESS = "/label"
 FIELDS = (rf.Category, rf.Set, rf.Cluster)

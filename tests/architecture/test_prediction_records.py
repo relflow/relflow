@@ -68,10 +68,7 @@ def test_nested_records_share_collection_boundaries_and_preserve_structural_hole
     assert pa.types.is_list(account_type)
     assert account_type.value_field.name == "element"
     assert pa.types.is_list(account_type.value_type.field("transactions").type)
-    assert output.schema.metadata == {
-        b"relflow.prediction_format": b"2",
-        b"relflow.model_version": model.version.encode(),
-    }
+    assert output.schema.metadata == {b"relflow.model_version": model.version.encode()}
 
     chunked = model.predict(source, batch_size=1, retain=("id",))
     assert chunked.schema.equals(output.schema, check_metadata=True)

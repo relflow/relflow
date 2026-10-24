@@ -77,5 +77,4 @@ def test_direct_parquet_arrow_and_json_preserve_the_same_selected_columns(tmp_pa
     }
     assert set(partial[2]) == set(direct.to_pylist()[1])
     for response in (arrow_response, json_response, partial_response):
-        assert response.headers["x-relflow-prediction-format"] == "2"
         assert response.headers["x-relflow-model-version"] == model.version

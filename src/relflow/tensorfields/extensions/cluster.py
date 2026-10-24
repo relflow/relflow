@@ -7,6 +7,7 @@ from dataclasses import InitVar
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Unpack, cast, overload
 from weakref import ReferenceType, ref
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import pydantic
@@ -17,7 +18,6 @@ from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
 from relflow.distributed import broadcast_object
-from relflow.helpers.resize import Resize
 from relflow.logging import logger
 from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
@@ -34,13 +34,16 @@ from relflow.tensorfields.base import (
 from relflow.tensorfields.output import array, labels, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
 from relflow.tensorfields.shared.reconstruction import Metrics, Reconstruction, Scores
+from relflow.tensorfields.shared.resize import Resize
 from relflow.tensorfields.shared.rows import Embedding
 from relflow.tensorfields.shared.vocabulary import (
     OnlineVocabularyModel,
     VocabularyBatch,
     VocabularyState,
     VocabularySyncCallback,
+    admissible,
     capacity,
+    states,
 )
 
 if TYPE_CHECKING:
@@ -49,9 +52,200 @@ if TYPE_CHECKING:
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
 
-cluster: Extension = Extension(name="cluster", types=(bool, int, float, str, bytes))
 
-cluster.callback(VocabularySyncCallback, CounterUpdateCallback, Metrics)
+class ClusterReviveCallback(Callback):
+    @torch.no_grad()
+    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        pl_module = cast("Model", pl_module)
+        epoch = trainer.current_epoch
+        targets: dict[Address, tuple[Embedder, Decoder, Request]] = {}
+        for address, node in pl_module.nodes.items():
+            request = pl_module.schema.requests.get(cast(Address, address))
+            if not isinstance(request, Request) or request.revive_temperature <= 0.0:
+                continue
+            if request.n_clusters[0] == request.n_clusters[-1]:
+                continue
+            embedder = getattr(node, "embedder", None)
+            decoder = getattr(node, "decoder", None)
+            if isinstance(embedder, Embedder) and isinstance(decoder, Decoder):
+                if decoder.metrics.compute(Strata.train)["targets.known"] > 0:
+                    targets[cast(Address, address)] = (embedder, decoder, request)
+
+        if not targets:
+            return
+
+        plans: dict[Address, dict[str, Any] | None] = {}
+        if trainer.is_global_zero:
+            for address, (embedder, _, request) in targets.items():
+                plans[address] = self.plan(embedder, request, epoch=epoch)
+        plans = broadcast_object(plans, src=0)
+
+        for address, (embedder, decoder, request) in targets.items():
+            self.apply(embedder, decoder, plans.get(address))
+
+    @staticmethod
+    def plan(embedder: "Embedder", request: "Request", *, epoch: int) -> dict[str, Any] | None:
+        dead = (~embedder.committed).nonzero(as_tuple=True)[0]
+        n_dead = dead.numel()
+        if n_dead == 0:
+            return None
+
+        committed_idx = embedder.committed.nonzero(as_tuple=True)[0]
+        n_committed = committed_idx.numel()
+        adherence = float(embedder.adherence_ema.item())
+        warmup = epoch < _REVIVE_WARMUP
+
+        signal = max(adherence, 1.0 if warmup else 0.0)
+        if signal <= 0.0:
+            return None
+
+        base = math.exp(-epoch / request.revive_temperature)
+        cap = 1.0 / n_dead
+        p = min(base * signal, cap)
+        if p <= 0.0:
+            return None
+
+        trials = torch.rand(n_dead)
+        chosen_mask = trials < p
+        if not bool(chosen_mask.any().item()):
+            return None
+
+        chosen = dead[chosen_mask].tolist()
+
+        if n_committed > 0:
+            committed_order = committed_idx[embedder.usage_ema[committed_idx].argsort(descending=True)]
+            donors = [int(committed_order[i % n_committed].item()) for i in range(len(chosen))]
+        else:
+            donor = int(embedder.usage_ema.argmax().item())
+            donors = [donor] * len(chosen)
+
+        assign_w: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.cluster.name].weight)
+        content_w: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.content.name].weight)
+        v_plus_1 = assign_w.shape[0]
+        d_model = content_w.shape[0]
+        noise = _REVIVE_NOISE
+        n_chosen = len(chosen)
+        return {
+            "dead_ids": chosen,
+            "donors": donors,
+            "noise_assign": noise * torch.randn(n_chosen, v_plus_1),
+            "noise_content": noise * torch.randn(n_chosen, d_model),
+            "noise_cluster": noise * torch.randn(n_chosen, d_model),
+        }
+
+    @staticmethod
+    def apply(embedder: "Embedder", decoder: "Decoder", plan: dict[str, Any] | None) -> None:
+        if plan is None:
+            return
+
+        assign_w: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.cluster.name].weight)
+        content_w: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.content.name].weight)
+        cluster_w: torch.Tensor = cast(torch.Tensor, decoder.linears[TensorKey.cluster.name].weight)
+        donors = plan["donors"]
+        device = assign_w.device
+        dtype = assign_w.dtype
+
+        for i, k in enumerate(plan["dead_ids"]):
+            donor = donors[i]
+            assign_w.data[:, k] = assign_w.data[:, donor] + plan["noise_assign"][i].to(device=device, dtype=dtype)
+            content_w.data[:, k] = content_w.data[:, donor] + plan["noise_content"][i].to(device=device, dtype=dtype)
+            cluster_w.data[k, :] = cluster_w.data[donor, :] + plan["noise_cluster"][i].to(
+                device=cluster_w.device, dtype=cluster_w.dtype
+            )
+            embedder.usage_ema[k] = embedder.usage_ema[donor] * 0.5
+            embedder.usage_ema[donor] *= 0.5
+
+        embedder.adherence_ema.zero_()
+
+
+_MERGE_THRESHOLD: float = 0.95
+
+
+class ClusterMergeCallback(Callback):
+    @torch.no_grad()
+    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        pl_module = cast("Model", pl_module)
+        targets: dict[Address, tuple[Embedder, Decoder, Request]] = {}
+        for address, node in pl_module.nodes.items():
+            request = pl_module.schema.requests.get(cast(Address, address))
+            if not isinstance(request, Request):
+                continue
+            if request.n_clusters[0] == request.n_clusters[-1]:
+                continue
+            embedder = getattr(node, "embedder", None)
+            decoder = getattr(node, "decoder", None)
+            if isinstance(embedder, Embedder) and isinstance(decoder, Decoder):
+                if decoder.metrics.compute(Strata.train)["targets.known"] > 0:
+                    targets[cast(Address, address)] = (embedder, decoder, request)
+
+        if not targets:
+            return
+
+        plans: dict[Address, dict[str, int] | None] = {}
+        if trainer.is_global_zero:
+            for address, (embedder, decoder, request) in targets.items():
+                plans[address] = self.plan(embedder, decoder, request)
+        plans = broadcast_object(plans, src=0)
+
+        for address, (embedder, decoder, _) in targets.items():
+            self.apply(embedder, decoder, plans.get(address))
+
+    @staticmethod
+    def plan(embedder: "Embedder", decoder: "Decoder", request: "Request") -> dict[str, int] | None:
+        committed_idx = embedder.committed.nonzero(as_tuple=True)[0]
+        n_committed = committed_idx.numel()
+        lower = request.n_clusters[0]
+        if n_committed <= lower or n_committed < 2:
+            return None
+
+        content_w = cast(torch.Tensor, embedder.embeddings[TensorKey.content.name].weight)  # (d_model, K)
+        cluster_w = cast(torch.Tensor, decoder.linears[TensorKey.cluster.name].weight)  # (K, d_model)
+
+        content_cols = content_w[:, committed_idx]
+        cluster_rows = cluster_w[committed_idx, :]
+        content_norm = content_cols / content_cols.norm(dim=0).clamp_min(1e-12)
+        cluster_norm = cluster_rows / cluster_rows.norm(dim=1, keepdim=True).clamp_min(1e-12)
+
+        content_sim = content_norm.T @ content_norm
+        cluster_sim = cluster_norm @ cluster_norm.T
+        joint_sim = torch.minimum(content_sim, cluster_sim)
+        joint_sim.fill_diagonal_(-1.0)
+
+        max_sim, max_j = joint_sim.max(dim=1)
+        overall_max, overall_i = max_sim.max(dim=0)
+        if float(overall_max.item()) <= _MERGE_THRESHOLD:
+            return None
+
+        i_local = int(overall_i.item())
+        j_local = int(max_j[i_local].item())
+        i_global = int(committed_idx[i_local].item())
+        j_global = int(committed_idx[j_local].item())
+
+        if embedder.usage_ema[i_global] < embedder.usage_ema[j_global]:
+            loser, winner = i_global, j_global
+        else:
+            loser, winner = j_global, i_global
+        return {"loser": loser, "winner": winner}
+
+    @staticmethod
+    def apply(embedder: "Embedder", decoder: "Decoder", plan: dict[str, int] | None) -> None:
+        if plan is None:
+            return
+
+        loser = plan["loser"]
+        winner = plan["winner"]
+        embedder.usage_ema[winner] = embedder.usage_ema[winner] + embedder.usage_ema[loser]
+        embedder.usage_ema[loser] = 0.0
+        embedder.committed[loser] = False
+        cast(torch.Tensor, decoder.linears[TensorKey.cluster.name].weight).data[loser, :].zero_()
+
+
+cluster: Extension = Extension(
+    name="cluster",
+    types=(bool, int, float, str, bytes),
+    callbacks=(VocabularySyncCallback, CounterUpdateCallback, Metrics, ClusterReviveCallback, ClusterMergeCallback),
+)
+
 
 # Algorithmic constants: fixed values from the SwAV/DINO literature or symmetry-breaking
 # magnitudes that have no reason to be user-tuned.
@@ -260,11 +454,11 @@ def observe(
     if not isinstance(state, VocabularyState):
         raise RuntimeError(f"cluster field at '{address}' requires a vocabulary encoding context")
 
-    indices = state.indices(field.values, learn=True)
-    content = torch.from_numpy(indices.copy())
+    values, nan = admissible(field)
+    content = torch.from_numpy(state.indices(values, learn=True))
     return TensorDict(
         {
-            TensorKey.state: tally(torch.from_numpy(field.dense.copy()), len(Tokens)),
+            TensorKey.state: tally(torch.from_numpy(states(field, nan)), len(Tokens)),
             TensorKey.content: tally(content.masked_fill(content < 0, state.size), state.size + 1),
         },
         batch_size=[],
@@ -306,18 +500,24 @@ class TensorField(TensorFieldBase[torch.Tensor]):
                 f"cluster field at '{address}' requires VocabularyState context, got {type(state).__name__}"
             )
 
-        def encode(field: RaggedField) -> torch.Tensor:
+        def encode(field: RaggedField) -> tuple[torch.Tensor, torch.Tensor]:
             if not len(field.values):
-                return torch.zeros(field.shape, dtype=torch.int64)
+                return torch.zeros(field.shape, dtype=torch.int64), torch.from_numpy(field.dense.copy())
             if state is None:
                 raise RuntimeError(f"cluster field at '{address}' requires a vocabulary encoding context")
-            tokens = state.indices(field.values, learn=False)
-            return torch.from_numpy(field.place(tokens, fill=0))
+            values, nan = admissible(field)
+            tokens = np.full(len(nan), -1, dtype=np.int64)
+            tokens[~nan] = state.indices(values, learn=False)
+            return torch.from_numpy(field.place(tokens, fill=0)), torch.from_numpy(states(field, nan))
 
-        content = encode(input)
-        target_content = encode(target) if address in schema.objectives else None
+        content, state_tensor = encode(input)
+        targets = TensorDict({}, batch_size=input.shape)
+        if address in schema.objectives:
+            target_content, target_state = encode(target)
+            targets = TensorDict(
+                {TensorKey.state: target_state, TensorKey.content: target_content}, batch_size=input.shape
+            )
 
-        state_tensor = torch.from_numpy(input.dense)
         if strata == Strata.train:
             p_unavailable: float = cast(Request, schema.requests[address]).p_unavailable
             unavailable_index = -1
@@ -334,15 +534,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             present=present,
             trainable=trainable,
             inferred=inferred,
-            targets=TensorDict(
-                {
-                    TensorKey.state: torch.from_numpy(target.dense),
-                    TensorKey.content: target_content,
-                }
-                if target_content is not None
-                else {},
-                batch_size=input.shape,
-            ),
+            targets=targets,
             batch_size=input.batch_size,
         )
 
@@ -425,11 +617,6 @@ class Embedder(EmbedderBase):
         state = inputs.state.reshape(-1)
         content = cast(torch.Tensor, inputs.content).reshape(-1)
         valued = state.eq(Tokens.valued.value)
-
-        if valued.any():
-            valid_content = content.masked_select(valued)
-            if ((valid_content < -1) | (valid_content >= self.capacity)).any().item():
-                raise ValueError(f"Token in address {self.origin} outside [-1, {self.capacity})")
 
         safe_content = content.masked_fill(content.eq(-1), self.capacity).masked_fill(~valued, 0)
         assign_logits = self.embeddings[TensorKey.cluster.name](safe_content)
@@ -558,10 +745,10 @@ def bind(
     mapping, size = binding.resolve(embedder.vocab, learn=strata == Strata.train, device=module.device, resize=resize)
     embedder.resize(size, resize)
     field = cast(TensorField, field)
-    field.content = mapping.to(field.content.device)[field.content]
+    field.content = binding.translate(field.content, mapping, address=address)
     if TensorKey.content in field.targets:
         values = cast(torch.Tensor, field.targets[TensorKey.content])
-        field.targets[TensorKey.content] = mapping.to(values.device)[values]
+        field.targets[TensorKey.content] = binding.translate(values, mapping, address=address)
     if observation is not None:
         counter_mapping = mapping.clone()
         counter_mapping[-1] = size
@@ -908,193 +1095,3 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
         },
         datatype,
     )
-
-
-class ClusterReviveCallback(Callback):
-    @torch.no_grad()
-    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        pl_module = cast("Model", pl_module)
-        epoch = trainer.current_epoch
-        targets: dict[Address, tuple[Embedder, Decoder, Request]] = {}
-        for address, node in pl_module.nodes.items():
-            request = pl_module.schema.requests.get(cast(Address, address))
-            if not isinstance(request, Request) or request.revive_temperature <= 0.0:
-                continue
-            if request.n_clusters[0] == request.n_clusters[-1]:
-                continue
-            embedder = getattr(node, "embedder", None)
-            decoder = getattr(node, "decoder", None)
-            if isinstance(embedder, Embedder) and isinstance(decoder, Decoder):
-                if decoder.metrics.compute(Strata.train)["targets.known"] > 0:
-                    targets[cast(Address, address)] = (embedder, decoder, request)
-
-        if not targets:
-            return
-
-        plans: dict[Address, dict[str, Any] | None] = {}
-        if trainer.is_global_zero:
-            for address, (embedder, _, request) in targets.items():
-                plans[address] = self.plan(embedder, request, epoch=epoch)
-        plans = broadcast_object(plans, src=0)
-
-        for address, (embedder, decoder, request) in targets.items():
-            self.apply(embedder, decoder, plans.get(address))
-
-    @staticmethod
-    def plan(embedder: "Embedder", request: "Request", *, epoch: int) -> dict[str, Any] | None:
-        dead = (~embedder.committed).nonzero(as_tuple=True)[0]
-        n_dead = dead.numel()
-        if n_dead == 0:
-            return None
-
-        committed_idx = embedder.committed.nonzero(as_tuple=True)[0]
-        n_committed = committed_idx.numel()
-        adherence = float(embedder.adherence_ema.item())
-        warmup = epoch < _REVIVE_WARMUP
-
-        signal = max(adherence, 1.0 if warmup else 0.0)
-        if signal <= 0.0:
-            return None
-
-        base = math.exp(-epoch / request.revive_temperature)
-        cap = 1.0 / n_dead
-        p = min(base * signal, cap)
-        if p <= 0.0:
-            return None
-
-        trials = torch.rand(n_dead)
-        chosen_mask = trials < p
-        if not bool(chosen_mask.any().item()):
-            return None
-
-        chosen = dead[chosen_mask].tolist()
-
-        if n_committed > 0:
-            committed_order = committed_idx[embedder.usage_ema[committed_idx].argsort(descending=True)]
-            donors = [int(committed_order[i % n_committed].item()) for i in range(len(chosen))]
-        else:
-            donor = int(embedder.usage_ema.argmax().item())
-            donors = [donor] * len(chosen)
-
-        assign_w: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.cluster.name].weight)
-        content_w: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.content.name].weight)
-        v_plus_1 = assign_w.shape[0]
-        d_model = content_w.shape[0]
-        noise = _REVIVE_NOISE
-        n_chosen = len(chosen)
-        return {
-            "dead_ids": chosen,
-            "donors": donors,
-            "noise_assign": noise * torch.randn(n_chosen, v_plus_1),
-            "noise_content": noise * torch.randn(n_chosen, d_model),
-            "noise_cluster": noise * torch.randn(n_chosen, d_model),
-        }
-
-    @staticmethod
-    def apply(embedder: "Embedder", decoder: "Decoder", plan: dict[str, Any] | None) -> None:
-        if plan is None:
-            return
-
-        assign_w: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.cluster.name].weight)
-        content_w: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.content.name].weight)
-        cluster_w: torch.Tensor = cast(torch.Tensor, decoder.linears[TensorKey.cluster.name].weight)
-        donors = plan["donors"]
-        device = assign_w.device
-        dtype = assign_w.dtype
-
-        for i, k in enumerate(plan["dead_ids"]):
-            donor = donors[i]
-            assign_w.data[:, k] = assign_w.data[:, donor] + plan["noise_assign"][i].to(device=device, dtype=dtype)
-            content_w.data[:, k] = content_w.data[:, donor] + plan["noise_content"][i].to(device=device, dtype=dtype)
-            cluster_w.data[k, :] = cluster_w.data[donor, :] + plan["noise_cluster"][i].to(
-                device=cluster_w.device, dtype=cluster_w.dtype
-            )
-            embedder.usage_ema[k] = embedder.usage_ema[donor] * 0.5
-            embedder.usage_ema[donor] *= 0.5
-
-        embedder.adherence_ema.zero_()
-
-
-_MERGE_THRESHOLD: float = 0.95
-
-
-class ClusterMergeCallback(Callback):
-    @torch.no_grad()
-    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        pl_module = cast("Model", pl_module)
-        targets: dict[Address, tuple[Embedder, Decoder, Request]] = {}
-        for address, node in pl_module.nodes.items():
-            request = pl_module.schema.requests.get(cast(Address, address))
-            if not isinstance(request, Request):
-                continue
-            if request.n_clusters[0] == request.n_clusters[-1]:
-                continue
-            embedder = getattr(node, "embedder", None)
-            decoder = getattr(node, "decoder", None)
-            if isinstance(embedder, Embedder) and isinstance(decoder, Decoder):
-                if decoder.metrics.compute(Strata.train)["targets.known"] > 0:
-                    targets[cast(Address, address)] = (embedder, decoder, request)
-
-        if not targets:
-            return
-
-        plans: dict[Address, dict[str, int] | None] = {}
-        if trainer.is_global_zero:
-            for address, (embedder, decoder, request) in targets.items():
-                plans[address] = self.plan(embedder, decoder, request)
-        plans = broadcast_object(plans, src=0)
-
-        for address, (embedder, decoder, _) in targets.items():
-            self.apply(embedder, decoder, plans.get(address))
-
-    @staticmethod
-    def plan(embedder: "Embedder", decoder: "Decoder", request: "Request") -> dict[str, int] | None:
-        committed_idx = embedder.committed.nonzero(as_tuple=True)[0]
-        n_committed = committed_idx.numel()
-        lower = request.n_clusters[0]
-        if n_committed <= lower or n_committed < 2:
-            return None
-
-        content_w = cast(torch.Tensor, embedder.embeddings[TensorKey.content.name].weight)  # (d_model, K)
-        cluster_w = cast(torch.Tensor, decoder.linears[TensorKey.cluster.name].weight)  # (K, d_model)
-
-        content_cols = content_w[:, committed_idx]
-        cluster_rows = cluster_w[committed_idx, :]
-        content_norm = content_cols / content_cols.norm(dim=0).clamp_min(1e-12)
-        cluster_norm = cluster_rows / cluster_rows.norm(dim=1, keepdim=True).clamp_min(1e-12)
-
-        content_sim = content_norm.T @ content_norm
-        cluster_sim = cluster_norm @ cluster_norm.T
-        joint_sim = torch.minimum(content_sim, cluster_sim)
-        joint_sim.fill_diagonal_(-1.0)
-
-        max_sim, max_j = joint_sim.max(dim=1)
-        overall_max, overall_i = max_sim.max(dim=0)
-        if float(overall_max.item()) <= _MERGE_THRESHOLD:
-            return None
-
-        i_local = int(overall_i.item())
-        j_local = int(max_j[i_local].item())
-        i_global = int(committed_idx[i_local].item())
-        j_global = int(committed_idx[j_local].item())
-
-        if embedder.usage_ema[i_global] < embedder.usage_ema[j_global]:
-            loser, winner = i_global, j_global
-        else:
-            loser, winner = j_global, i_global
-        return {"loser": loser, "winner": winner}
-
-    @staticmethod
-    def apply(embedder: "Embedder", decoder: "Decoder", plan: dict[str, int] | None) -> None:
-        if plan is None:
-            return
-
-        loser = plan["loser"]
-        winner = plan["winner"]
-        embedder.usage_ema[winner] = embedder.usage_ema[winner] + embedder.usage_ema[loser]
-        embedder.usage_ema[loser] = 0.0
-        embedder.committed[loser] = False
-        cast(torch.Tensor, decoder.linears[TensorKey.cluster.name].weight).data[loser, :].zero_()
-
-
-cluster.callback(ClusterReviveCallback, ClusterMergeCallback)

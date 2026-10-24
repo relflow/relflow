@@ -410,6 +410,33 @@ def test_hashable_training_loss_covers_state_and_content_heads():
     assert torch.isfinite(output["loss"])
 
 
+@pytest.mark.parametrize("batch_size", [1, 2, 3])
+def test_hashable_evaluation_accuracy_counts_valued_targets_across_unequal_batches(batch_size, tmp_path):
+    torch.manual_seed(0)
+    model = rf.Model.xs(d_model=8, id=rf.Hash(n_hashes=2, n_buckets=4, mask=True))
+    rows = table([{"id": "alpha"}, {"id": "beta"}, {"id": None}])
+    data = rf.ArrowDataModule(model, validate=rows)
+    values = model.validate(
+        data,
+        batch_size=batch_size,
+        accelerator="cpu",
+        devices=1,
+        precision="32-true",
+        enable_progress_bar=False,
+        default_root_dir=tmp_path,
+    )[0]
+    encoded = model.encode(rows, strata=Strata.validate)
+    model.eval()
+    with torch.no_grad():
+        prediction = next(item for item in model(encoded, strata=Strata.validate) if str(item.address) == "/id")
+    logits = prediction.payload[TensorKey.content].reshape(3, 2, 4)
+    raw = encoded[rf.Address("id")].targets[TensorKey.content].reshape(3, 2)
+    buckets = raw.to(torch.float32).div(float(1 << 63)).add(1.0).mul(2.0).floor().long().clamp(0, 3)
+    correct = logits.argmax(-1).eq(buckets)[:2].sum().item()
+    # Accuracy counts correct buckets over the four valued (row, hash) pairs; the null row adds nothing.
+    assert values[".id/validate.accuracy.content"] == pytest.approx(correct / 4)
+
+
 def test_hashable_content_target_matches_deterministic_recomputation():
     schema = build_schema(n_hashes=5, length=2, mask=Mask(reconstruct=True))
     values = [[["alice", "bob"]], [["carol", "dave"]]]
@@ -522,17 +549,13 @@ def test_tensorfield_content_reflects_explicit_salt():
     assert torch.equal(field_a.content, field_c.content)
 
 
-def test_equal_values_stay_matched_within_each_rotating_batch(monkeypatch: pytest.MonkeyPatch):
-    from relflow.data import iterables
-
+def test_equal_values_stay_matched_within_each_rotating_batch():
     model = hashable_model()
     records = table([{"items": [{"id": "alice"}, {"id": "bob"}], "owner": "alice"}])
-    salts = iter((1, 2, 3))
-    monkeypatch.setattr(iterables.random, "getrandbits", lambda bits: next(salts))
 
     projections_by_batch: list[tuple[torch.Tensor, torch.Tensor]] = []
-    for _ in range(3):
-        inputs = model.encode(records, strata=Strata.train)
+    for epoch in range(3):
+        inputs = model.encode(records, strata=Strata.train, epoch=epoch)
         items_projection = model.nodes["/items/id"].embedder.embed(inputs["/items/id"]).payload
         owner_projection = model.nodes["/owner"].embedder.embed(inputs["/owner"]).payload
         projections_by_batch.append((items_projection[0, 0, 0].detach(), owner_projection[0, 0].detach()))
@@ -543,6 +566,15 @@ def test_equal_values_stay_matched_within_each_rotating_batch(monkeypatch: pytes
     for later in projections_by_batch[1:]:
         assert not torch.allclose(projections_by_batch[0][0], later[0])
 
+    # The salt is a function of the run seed and the batch, so the same batch encodes identically.
+    repeated = model.encode(records, strata=Strata.train, epoch=0)
+    assert torch.equal(
+        repeated["/owner"].content, model.encode(records, strata=Strata.train, epoch=0)["/owner"].content
+    )
+    assert not torch.equal(
+        repeated["/owner"].content, model.encode(records, strata=Strata.train, seed=1)["/owner"].content
+    )
+
 
 @pytest.mark.parametrize("strata", [Strata.validate, Strata.test, Strata.predict])
 def test_inference_uses_stable_unsalted_hashes(strata: Strata, monkeypatch: pytest.MonkeyPatch):
@@ -551,10 +583,10 @@ def test_inference_uses_stable_unsalted_hashes(strata: Strata, monkeypatch: pyte
     model = hashable_model()
     records = table([{"items": [{"id": "alice"}, {"id": "bob"}], "owner": "alice"}])
 
-    def unexpected_random_salt(bits: int) -> int:
-        raise AssertionError("inference must not generate a random salt")
+    def unexpected_salt(seed: int, *, epoch: int, ordinal: int) -> int:
+        raise AssertionError("inference must not salt its hashes")
 
-    monkeypatch.setattr(iterables.random, "getrandbits", unexpected_random_salt)
+    monkeypatch.setattr(iterables, "batch_salt", unexpected_salt)
 
     first = model.encode(records, strata=strata)
     second = model.encode(records, strata=strata)
@@ -590,5 +622,7 @@ def test_validation_and_prediction_preserve_identical_key_payload_context():
 
 def test_hashable_does_not_register_a_salt_callback():
     from relflow.tensorfields.extensions.hashable import hashable
+    from relflow.tensorfields.shared.reconstruction import Metrics
 
-    assert hashable.callback_factories == []
+    # Salting happens per encoded batch; the only callback reduces evaluation metrics.
+    assert hashable.callback_factories == (Metrics,)

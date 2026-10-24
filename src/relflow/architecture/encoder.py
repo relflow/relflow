@@ -10,7 +10,7 @@ from tensordict import TensorDict
 from relflow.architecture.attention import RotaryMultiheadAttention
 from relflow.architecture.blocks import feed_forward, norm
 from relflow.architecture.packed import SDPA_BATCH_MAX, Packed, block, customized, pack, stochastic, unpack
-from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool
+from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool, Pool
 from relflow.structs.packages import Parcel
 from relflow.structs.reduction import Attention, Mean
 from relflow.structs.tree import Address, Leaf, Node
@@ -37,32 +37,57 @@ def locate(parcel: Parcel, *, schema: Schema, geometry: TensorDict | None) -> Pa
         if lengths is not None
         else torch.full(shape, width, device=parcel.payload.device, dtype=torch.int64)
     )
-    parcel.slots = (
-        parcel.positions < lengths.unsqueeze(-1)
-        if lengths is not None
-        else torch.ones_like(parcel.present, dtype=torch.bool)
-    )
+    # Geometry slots exclude null item records, so no routed token stands for a missing item.
+    parcel.slots = layout.slots if layout is not None else torch.ones_like(parcel.present, dtype=torch.bool)
     return parcel
 
 
 def sequence(
     parcels: list[Parcel], *, order: dict[Address, int] | None = None
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Concatenate fields using structural spans rather than padded storage widths."""
+    """Number tokens item-major within each branch instance.
+
+    Every item owns one contiguous block of positions holding its leaf tokens
+    and then each child branch's tokens, in field order, so same-item offsets
+    never depend on how many items a record holds. Storage stays field-major;
+    spans sum every parcel's instance span.
+    """
     if order is not None:
         parcels = sorted(parcels, key=lambda parcel: order[parcel.origin])
     first = parcels[0]
-    spans = torch.zeros(first.payload.shape[:-2], device=first.payload.device, dtype=torch.int64)
-    positions, slots = [], []
+    device = first.payload.device
+    shape = tuple(first.payload.shape[:-2])
+    declared = next((parcel.widths for parcel in parcels if parcel.widths is not None), None)
+    # Leaves hold one token per item, so the narrowest undeclared parcel sets the item count.
+    items = declared.shape[-1] if declared is not None else min(parcel.payload.shape[-2] for parcel in parcels)
+    widths: list[torch.Tensor] = []
     for parcel in parcels:
-        local = parcel.positions
-        if local is None:
-            local = torch.arange(parcel.payload.shape[-2], device=parcel.payload.device).expand(
-                parcel.payload.shape[:-1]
+        count = parcel.payload.shape[-2]
+        if parcel.widths is not None:
+            widths.append(parcel.widths)
+        elif items and count % items:
+            raise ValueError(
+                f"parcel from '{parcel.origin}' holds {count} tokens per instance of '{parcel.destination}', "
+                f"which is not a multiple of its {items} items"
             )
-        positions.append(local + spans.unsqueeze(-1))
+        else:
+            widths.append(torch.full((*shape, items), count // items if items else 0, dtype=torch.int64, device=device))
+    stride = torch.stack(widths).sum(dim=0)
+    start = stride.cumsum(dim=-1) - stride
+    lead = torch.zeros_like(stride)
+    spans = torch.zeros(shape, dtype=torch.int64, device=device)
+    positions, slots = [], []
+    for parcel, width in zip(parcels, widths, strict=True):
+        count = parcel.payload.shape[-2]
+        repeats = count // items if items else 0
+        local = (
+            torch.arange(count, device=device).expand(*shape, count) if parcel.positions is None else parcel.positions
+        )
+        heads = width.cumsum(dim=-1) - width
+        positions.append((start + lead - heads).repeat_interleave(repeats, dim=-1) + local)
         slots.append(torch.ones_like(parcel.present) if parcel.slots is None else parcel.slots)
-        spans = spans + (parcel.payload.shape[-2] if parcel.spans is None else parcel.spans)
+        spans = spans + (count if parcel.spans is None else parcel.spans)
+        lead = lead + width
     return torch.cat(positions, dim=-1), spans, torch.cat(slots, dim=-1)
 
 
@@ -171,12 +196,34 @@ class BranchEncoder(torch.nn.Module):
         self.visible_width = None if branch.length is None or visible_width is None else branch.length * visible_width
         self.parent_capacity = getattr(branch.parent, "length", 1)
         self.child_order = {child.address: index for index, child in enumerate(branch.fields)}
+        # A child branch reads its parent's own fields before encoding: one
+        # projection of their mean reaches every token and every reduction
+        # query, so items know the record they belong to. It starts at a
+        # standard scale: from zero, the stack takes twice as long to learn
+        # to read the parent at all.
+        parent_fields = getattr(branch.parent, "fields", None) if address != Address() else None
+        context_fields = [child for child in (parent_fields or ()) if isinstance(child, Leaf) and child.embedded]
+        self.context_origins = frozenset(child.address for child in context_fields)
+        self.conditioning: torch.nn.Linear | None = None
+        if context_fields:
+            self.conditioning = torch.nn.Linear(schema.d_model, schema.d_model, bias=False)
+            torch.nn.init.xavier_uniform_(self.conditioning.weight)
 
         self.coordinate_origins = frozenset(
             child.address for child in branch.fields if isinstance(child, Leaf) and child.active
         )
+        # A reduced child branch contributes its summary tokens to each item's
+        # coordinate, so leaf-times-child interactions form before reduction.
+        self.coordinate_branches: dict[Address, int] = {
+            child.address: cast(int, schema.branch_outputs[child.address])
+            for child in branch.fields
+            if not isinstance(child, Leaf)
+            and cast("Branch", child).reduction is not None
+            and schema.branch_outputs[child.address]
+        }
+        coordinate_tokens = len(self.coordinate_origins) + sum(self.coordinate_branches.values())
         self.coordinate_encoder: RotaryTransformerEncoderLayer | None = None
-        if attention is not None and len(self.coordinate_origins) > 1:
+        if attention is not None and coordinate_tokens > 1:
             coordinate_heads = branch.n_heads
             while coordinate_heads > 0 and (
                 schema.d_model % coordinate_heads != 0 or schema.d_model // coordinate_heads < 2
@@ -195,13 +242,15 @@ class BranchEncoder(torch.nn.Module):
             )
 
         self.reduction = branch.reduction
+        # An unbounded visible width leaves the lanes to the capacity observed while training.
+        capacity = None if self.visible_width is None else max(1, self.visible_width)
         match branch.reduction:
             case None:
                 self.n_outputs: int | None = None
-                self.pool: torch.nn.Module | None = None
+                self.pool: Pool | None = None
             case Mean():
                 self.n_outputs = 1
-                self.pool = MeanPool(n_context=1, d_model=schema.d_model, mass_capacity=max(1, self.visible_width or 1))
+                self.pool = MeanPool(n_context=1, d_model=schema.d_model, mass_capacity=capacity)
             case Attention():
                 self.n_outputs = branch.reduction.n_outputs
                 self.pool = LearnedQueryCrossAttention(
@@ -211,13 +260,22 @@ class BranchEncoder(torch.nn.Module):
                     dropout=float(branch.reduction.dropout if branch.reduction.dropout is not None else dropout),
                     n_linear=branch.reduction.n_layers,
                     position=branch.reduction.position,
-                    mass_capacity=max(1, self.visible_width or 1),
+                    mass_capacity=capacity,
+                    mass=True,
                     ffnx=branch.ffnx,
                 )
             case _:
                 raise ValueError(f"unsupported branch reduction: {branch.reduction}")
 
-    def forward(self, parcels: list[Parcel], *, geometry: TensorDict | None = None) -> Parcel:
+    def forward(
+        self,
+        parcels: list[Parcel],
+        *,
+        geometry: TensorDict | None = None,
+        context: list[Parcel] | None = None,
+        sequenced: bool = False,
+    ) -> Parcel:
+        """Encode one branch; ``sequenced`` also routes its encoded sequence to the decoders beneath it."""
         from relflow.architecture.compiler import canonical
 
         if not parcels:
@@ -228,6 +286,27 @@ class BranchEncoder(torch.nn.Module):
             origins = ", ".join(repr(str(origin)) for origin in unknown)
             raise ValueError(f"branch encoder '{self.origin}' received parcel(s) from non-child address(es): {origins}")
         parcels = sorted(parcels, key=lambda parcel: self.child_order[parcel.origin])
+        conditioned: torch.Tensor | None = None
+        if self.conditioning is not None and context:
+            # The parent's record reaches every token before its fields are mixed,
+            # so leaf-times-parent interactions form where leaf-times-leaf ones do.
+            conditioned = self.condition(context, math.prod(parcels[0].payload.shape[:-2]))
+            parcels = [
+                Parcel(
+                    payload=(
+                        parcel.payload + conditioned.reshape(*parcel.payload.shape[:-2], 1, conditioned.shape[-1])
+                    ).masked_fill(~parcel.present.unsqueeze(-1), 0.0),
+                    present=parcel.present,
+                    origin=parcel.origin,
+                    destination=parcel.destination,
+                    positions=parcel.positions,
+                    spans=parcel.spans,
+                    slots=parcel.slots,
+                    widths=parcel.widths,
+                    batch_size=parcel.payload.shape[0],
+                )
+                for parcel in parcels
+            ]
         parcels = self.contextualize(parcels)
         positions, spans, slots = sequence(parcels)
         positioned = any(parcel.positions is not None for parcel in parcels)
@@ -247,6 +326,8 @@ class BranchEncoder(torch.nn.Module):
         rows = N * math.prod(dims)
         encoded: torch.Tensor = concatenated.reshape(rows, L, C)
         present = present.reshape(rows, L)
+        if isinstance(self.pool, Pool):
+            self.pool.observe(present)
         flat_positions = positions.reshape(rows, L)
         active = present.any(dim=1)
         indices = active.nonzero(as_tuple=False).reshape(-1)
@@ -255,6 +336,7 @@ class BranchEncoder(torch.nn.Module):
         count = indices.numel()
         complete = count > 0 and count == encoded.shape[0]
         shape = (encoded.shape[0], output_width, C)
+        selected = encoded
         selected_output = encoded
         selected_output_present = present
         if count:
@@ -263,6 +345,9 @@ class BranchEncoder(torch.nn.Module):
             selected_positions = flat_positions if complete else flat_positions.index_select(0, indices)
             selected = selected.masked_fill(~selected_present.unsqueeze(-1), 0.0)
             evidence = selected
+            selected_context = (
+                None if conditioned is None else conditioned if complete else conditioned.index_select(0, indices)
+            )
 
             prepared = (
                 bool(self.encoder)
@@ -289,7 +374,7 @@ class BranchEncoder(torch.nn.Module):
                     and type(self) is BranchEncoder
                     and canonical(self, self.compute)
                 )
-                if positioned and type(self).compute is BranchEncoder.compute and canonical(self, self.compute):
+                if positioned:
                     selected = self.compute(
                         selected, None if unmasked else selected_present, positions=selected_positions
                     )
@@ -306,6 +391,9 @@ class BranchEncoder(torch.nn.Module):
                         selected_output = self.pool(
                             selected,
                             present=selected_present,
+                            context=None
+                            if selected_context is None
+                            else selected_context.unsqueeze(1).expand(-1, output_width, -1),
                             evidence=evidence,
                             memory_positions=selected_positions if positioned else None,
                         )
@@ -341,47 +429,108 @@ class BranchEncoder(torch.nn.Module):
 
         reduced = reduced.reshape(N, *dims, output_width, C)
         reduced_present = reduced_present.reshape(N, *dims, output_width)
-        if self.n_outputs is not None:
-            positions = torch.arange(output_width, device=encoded.device).expand(N, *dims, output_width)
-            spans = torch.full((N, *dims), output_width, device=encoded.device, dtype=torch.int64)
-            slots = torch.ones((N, *dims, output_width), device=encoded.device, dtype=torch.bool)
+        if self.n_outputs is None:
+            return self.route(
+                reduced, reduced_present, positions, spans, slots, capacity=self.input_width, geometry=geometry
+            )
+
+        summary = self.route(
+            reduced,
+            reduced_present,
+            torch.arange(output_width, device=encoded.device).expand(N, *dims, output_width),
+            torch.full((N, *dims), output_width, device=encoded.device, dtype=torch.int64),
+            torch.ones((N, *dims, output_width), device=encoded.device, dtype=torch.bool),
+            capacity=self.n_outputs,
+            geometry=geometry,
+        )
+        if not sequenced:
+            return summary
+        # The sequence stays at this branch: it is addressed to itself, never to the parent.
+        # It is materialized only for branches with a decoder beneath them, since the full
+        # width of a nested branch costs far more than its summary.
+        if count and count == encoded.shape[0]:
+            stacked = selected
+        else:
+            stacked = encoded.new_zeros(encoded.shape)
+            if count:
+                stacked = stacked.index_copy(0, indices, selected)
+        summary.sequence = self.route(
+            stacked.reshape(N, *dims, L, C),
+            present.reshape(N, *dims, L),
+            positions,
+            spans,
+            slots,
+            capacity=self.input_width,
+            geometry=geometry,
+            destination=self.origin,
+        )
+        return summary
+
+    def route(
+        self,
+        payload: torch.Tensor,
+        present: torch.Tensor,
+        positions: torch.Tensor,
+        spans: torch.Tensor,
+        slots: torch.Tensor,
+        *,
+        capacity: int | None,
+        geometry: TensorDict | None,
+        destination: Address | None = None,
+    ) -> Parcel:
+        """Flatten one output per instance onto the parent's item axis, numbering positions item by item."""
+        N, *dims, width, C = payload.shape
+        widths: torch.Tensor | None = None
         if dims:
-            offsets = spans.cumsum(dim=-1) - spans
-            positions = (positions + offsets.unsqueeze(-1)).reshape(N, *dims[:-1], dims[-1] * output_width)
-            slots = slots.reshape(N, *dims[:-1], dims[-1] * output_width)
             parent = cast("Geometry", geometry[self.destination]) if geometry is not None else None
             if parent is not None:
-                retained = torch.arange(dims[-1], device=encoded.device) < parent.lengths.unsqueeze(-1)
-                slots = slots.reshape(N, *dims, output_width).masked_fill(~retained.unsqueeze(-1), False)
-                slots = slots.reshape(N, *dims[:-1], dims[-1] * output_width)
+                # A null parent item keeps its span so sibling positions stay put, but owns no tokens.
+                retained = torch.arange(dims[-1], device=payload.device) < parent.lengths.unsqueeze(-1)
+                slots = slots.masked_fill(~parent.slots.unsqueeze(-1), False)
                 spans = spans.masked_fill(~retained, 0)
-            capacity = self.input_width if self.n_outputs is None else self.n_outputs
+            # Each parent item owns this instance's span; positions run across items in order.
+            widths = spans
+            offsets = spans.cumsum(dim=-1) - spans
+            positions = (positions + offsets.unsqueeze(-1)).reshape(N, *dims[:-1], dims[-1] * width)
+            slots = slots.reshape(N, *dims[:-1], dims[-1] * width)
             spans = (
-                torch.full((N, *dims[:-1]), self.parent_capacity * capacity, device=encoded.device, dtype=torch.int64)
+                torch.full((N, *dims[:-1]), self.parent_capacity * capacity, device=payload.device, dtype=torch.int64)
                 if self.parent_capacity is not None and capacity is not None
                 else spans.sum(dim=-1)
             )
-            routed = reduced.reshape(N, *dims[:-1], dims[-1] * output_width, C)
-            routed_present = reduced_present.reshape(N, *dims[:-1], dims[-1] * output_width)
-        elif output_width == 1:
-            routed = reduced[:, 0]
-            routed_present = reduced_present[:, 0]
-            positions = positions[:, 0]
-            slots = slots[:, 0]
-        else:
-            routed = reduced
-            routed_present = reduced_present
+            payload = payload.reshape(N, *dims[:-1], dims[-1] * width, C)
+            present = present.reshape(N, *dims[:-1], dims[-1] * width)
+        elif width == 1:
+            payload, present, positions, slots = payload[:, 0], present[:, 0], positions[:, 0], slots[:, 0]
 
         return Parcel(
-            payload=routed,
-            present=routed_present,
+            payload=payload,
+            present=present,
             origin=self.origin,
-            destination=self.destination,
+            destination=self.destination if destination is None else destination,
             positions=positions,
             spans=spans,
             slots=slots,
+            widths=widths,
             batch_size=N,
         )
+
+    def condition(self, context: list[Parcel], rows: int) -> torch.Tensor:
+        """Project the mean of the parent's present leaf embeddings at each instance of this branch."""
+        assert self.conditioning is not None
+        selected = [parcel for parcel in context if parcel.origin in self.context_origins]
+        if selected:
+            payload = torch.stack([parcel.payload for parcel in selected], dim=-2)
+            present = torch.stack([parcel.present for parcel in selected], dim=-1)
+            total = payload.masked_fill(~present.unsqueeze(-1), 0.0).sum(dim=-2)
+            mean = (total / present.sum(dim=-1, keepdim=True).clamp_min(1)).reshape(-1, payload.shape[-1])
+            if mean.shape[0] != rows:
+                raise ValueError(
+                    f"branch '{self.origin}' expected its parent's fields over {rows} instances, got {mean.shape[0]}"
+                )
+        else:
+            mean = self.conditioning.weight.new_zeros((rows, self.conditioning.in_features))
+        return self.conditioning(mean)
 
     def compute(
         self,
@@ -391,40 +540,59 @@ class BranchEncoder(torch.nn.Module):
         packing: Packed | None = None,
         positions: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Encode prepared sequences; absent presence means every coordinate is live."""
+        """Encode prepared sequences; absent presence means every coordinate is live.
+
+        Layers receive the branch's structural positions whenever it has them.
+        """
         for layer in cast(Iterable[RotaryTransformerEncoderLayer], self.encoder):
-            if packing is None:
-                if (
-                    positions is not None
-                    and type(layer) is RotaryTransformerEncoderLayer
-                    and "forward" not in layer.__dict__
-                ):
-                    inputs = layer(inputs, present=present, positions=positions)
-                else:
-                    inputs = layer(inputs, present=present)
-            else:
+            if packing is not None:
                 inputs = layer(inputs, present=present, packing=packing)
+            elif positions is not None:
+                inputs = layer(inputs, present=present, positions=positions)
+            else:
+                inputs = layer(inputs, present=present)
         return inputs
 
     def contextualize(self, parcels: list[Parcel]) -> list[Parcel]:
-        """Mix direct sibling fields only with fields at the same coordinate."""
+        """Mix each item's fields: its leaves and the summaries of its reduced child branches."""
 
         if self.coordinate_encoder is None:
             return parcels
 
-        indices = [index for index, parcel in enumerate(parcels) if parcel.origin in self.coordinate_origins]
-        if len(indices) < 2:
+        # Tokens keep schema field order, so an appended field never moves an existing slot.
+        selected = [
+            index
+            for index, parcel in enumerate(parcels)
+            if parcel.origin in self.coordinate_origins or parcel.origin in self.coordinate_branches
+        ]
+        outputs = [self.coordinate_branches.get(parcels[index].origin, 1) for index in selected]
+        if sum(outputs) < 2:
             return parcels
 
-        selected = [parcels[index] for index in indices]
-        shapes = {tuple(parcel.payload.shape) for parcel in selected}
-        presence_shapes = {tuple(parcel.present.shape) for parcel in selected}
-        if len(shapes) != 1 or len(presence_shapes) != 1:
-            origins = ", ".join(str(parcel.origin) for parcel in selected)
+        leaves = [index for index in selected if parcels[index].origin in self.coordinate_origins]
+        shapes = {tuple(parcels[index].payload.shape) for index in leaves}
+        if len(shapes) > 1:
+            origins = ", ".join(str(parcels[index].origin) for index in leaves)
             raise ValueError(f"coordinate fields in branch '{self.origin}' must share one shape: {origins}")
-
-        payload = torch.stack([parcel.payload for parcel in selected], dim=-2)
-        present = torch.stack([parcel.present for parcel in selected], dim=-1)
+        if leaves:
+            shape = tuple(parcels[leaves[0]].payload.shape)
+        else:
+            parcel = parcels[selected[0]]
+            items = parcel.payload.shape[-2] // outputs[0]
+            shape = (*parcel.payload.shape[:-2], items, parcel.payload.shape[-1])
+        payloads, presences = [], []
+        for index, width in zip(selected, outputs, strict=True):
+            parcel = parcels[index]
+            expected = (*shape[:-2], shape[-2] * width, shape[-1])
+            if tuple(parcel.payload.shape) != expected:
+                raise ValueError(
+                    f"branch '{self.origin}' expected {expected} from '{parcel.origin}' for {width} token(s) per item, "
+                    f"got {tuple(parcel.payload.shape)}"
+                )
+            payloads.append(parcel.payload.reshape(*shape[:-1], width, shape[-1]))
+            presences.append(parcel.present.reshape(*shape[:-1], width))
+        payload = torch.cat(payloads, dim=-2)
+        present = torch.cat(presences, dim=-1)
         field_count = payload.shape[-2]
         channel_count = payload.shape[-1]
         rows = math.prod(payload.shape[:-2])
@@ -449,18 +617,21 @@ class BranchEncoder(torch.nn.Module):
         mixed = mixed.reshape(payload.shape)
 
         contextualized = list(parcels)
-        for field_index, parcel_index in enumerate(indices):
-            parcel = parcels[parcel_index]
-            contextualized[parcel_index] = Parcel(
-                payload=mixed[..., field_index, :],
+        cursor = 0
+        for index, width in zip(selected, outputs, strict=True):
+            parcel = parcels[index]
+            contextualized[index] = Parcel(
+                payload=mixed[..., cursor : cursor + width, :].reshape(parcel.payload.shape),
                 present=parcel.present,
                 origin=parcel.origin,
                 destination=parcel.destination,
                 positions=parcel.positions,
                 spans=parcel.spans,
                 slots=parcel.slots,
+                widths=parcel.widths,
                 batch_size=parcel.payload.shape[0],
             )
+            cursor += width
         return contextualized
 
     if TYPE_CHECKING:

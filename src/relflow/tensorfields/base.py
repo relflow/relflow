@@ -9,7 +9,7 @@ import shlex
 import sys
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from functools import partial
@@ -48,9 +48,9 @@ from relflow.structs.tree import Address, Leaf
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.ragged import RaggedField
-    from relflow.helpers.resize import Resize
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
+    from relflow.tensorfields.shared.resize import Resize
 
 RequestBase: TypeAlias = Leaf
 CallbackFactory: TypeAlias = type[Callback] | Callable[[], Callback]
@@ -293,23 +293,34 @@ class DecoderBase(torch.nn.Module):
         n_context = math.prod(dimension if dimension is not None else 1 for dimension in self.shape)
         self.n_context = n_context
         self.d_model = schema.d_model
-        self.memory_coordinates: dict[Address, tuple[tuple[Address, ...], tuple[int | None, ...], int | None]] = {}
+        # An ancestor branch reaches the decoder twice: as the summary it routes
+        # upward and as the encoded sequence it keeps for its descendants.
+        Coordinates = tuple[tuple[Address, ...], tuple[int | None, ...], int | None]
+        self.memory_coordinates: dict[Address, Coordinates] = {}
+        self.sequence_coordinates: dict[Address, Coordinates] = {}
         for origin in request.heritage:
             node = schema.requests[origin] if origin in schema.requests else schema.branches[origin]
             path = tuple(cast("Branch", node) for node in node.path if getattr(node, "type", None) == "branch")
             if isinstance(node, Leaf):
-                outer = path[:-1]
-                capacity = path[-1].length
-            else:
-                outer = path[:-2]
-                capacity = schema.branch_outputs[origin]
+                self.memory_coordinates[origin] = (
+                    tuple(node.address for node in path[:-1]),
+                    tuple(node.length for node in path[:-1]),
+                    path[-1].length,
+                )
+                continue
+            outer = path[:-2]
+            for table, width in (
+                (self.memory_coordinates, schema.branch_outputs[origin]),
+                (self.sequence_coordinates, schema.branch_widths[origin]),
+            ):
+                capacity = width
                 if len(path) > 1:
                     capacity = None if path[-2].length is None or capacity is None else path[-2].length * capacity
-            self.memory_coordinates[origin] = (
-                tuple(node.address for node in outer),
-                tuple(node.length for node in outer),
-                capacity,
-            )
+                table[origin] = (
+                    tuple(node.address for node in outer),
+                    tuple(node.length for node in outer),
+                    capacity,
+                )
 
         def visible(node: Branch | Leaf) -> list[Address]:
             if isinstance(node, Leaf):
@@ -563,7 +574,10 @@ class DecoderBase(torch.nn.Module):
                     ranks = torch.arange(size, device=device).expand(batch_size, size)
                     span = torch.full((batch_size,), size, device=device, dtype=torch.int64)
                 else:
-                    axes, capacities, capacity = self.memory_coordinates[parcel.origin]
+                    kept = parcel.destination == parcel.origin
+                    axes, capacities, capacity = (self.sequence_coordinates if kept else self.memory_coordinates)[
+                        parcel.origin
+                    ]
                     lengths = tuple(
                         cast(Geometry, geometry[axis]).lengths if geometry is not None else None for axis in axes
                     )
@@ -774,8 +788,10 @@ class Extension:
     incompatible; types joined in one PEP 604 union may share one Arrow column.
     ``arrow`` supplies a physical-type matcher for custom Python atoms or
     overrides a standard matcher. ``requires`` maps importable module names to
-    their package requirements. Creating an extension with an existing
-    name replaces the registry entry and emits a warning.
+    their package requirements. ``callbacks`` lists the Lightning callback
+    classes or factories every model using the extension attaches; every rank
+    must declare the same. Creating an extension with an existing name replaces
+    the registry entry and emits a warning.
     """
 
     def __init__(
@@ -785,6 +801,7 @@ class Extension:
         types: tuple[ValueTypeFamily, ...],
         arrow: Mapping[type[Any], ArrowMatcher] | None = None,
         requires: Mapping[str, str] | None = None,
+        callbacks: Sequence[CallbackFactory] = (),
     ):
         if not isinstance(name, str):
             raise TypeError("Extension name must be a string")
@@ -855,6 +872,12 @@ class Extension:
             names = ", ".join(repr(module) for module in invalid_requirements)
             raise ValueError(f"Extension requires contains empty or non-string pip requirement(s) for: {names}")
 
+        if isinstance(callbacks, (str, bytes)) or not isinstance(callbacks, Sequence):
+            raise TypeError("Extension callbacks must be a sequence of Lightning Callback classes or factories")
+        for factory in callbacks:
+            if not callable(factory) or not isinstance(factory(), Callback):
+                raise TypeError(f"Extension callback factory for '{name}' must produce a Lightning Callback")
+
         self.name: str = name
         self.value_types: tuple[ValueTypeFamily, ...] = types
         self.families: tuple[tuple[type[Any], ...], ...] = tuple(families)
@@ -866,7 +889,7 @@ class Extension:
             {module: requirement.strip() for module, requirement in dependencies.items()}
         )
         self.components: dict[Component, ComponentValue | None] = {}
-        self.callback_factories: list[CallbackFactory] = []
+        self.callback_factories: tuple[CallbackFactory, ...] = tuple(callbacks)
 
         if name in TENSORFIELDS:
             warnings.warn(
@@ -1138,25 +1161,6 @@ class Extension:
         value = cast(ComponentValue | None, obj)
         self.components[key] = value
         return cast(RegisterT | None, value)
-
-    @overload
-    def callback(self, factory: CallbackFactory, /) -> CallbackFactory: ...
-
-    @overload
-    def callback(self, factory: CallbackFactory, *factories: CallbackFactory) -> tuple[CallbackFactory, ...]: ...
-
-    def callback(
-        self, factory: CallbackFactory, *factories: CallbackFactory
-    ) -> CallbackFactory | tuple[CallbackFactory, ...]:
-        """Register one or more Lightning callback factories for this tensorfield."""
-        registered = (factory, *factories)
-        for callback_factory in registered:
-            callback = callback_factory()
-            if not isinstance(callback, Callback):
-                raise TypeError(f"Extension callback factory for '{self.name}' must produce a Lightning Callback")
-
-        self.callback_factories.extend(registered)
-        return factory if len(registered) == 1 else registered
 
     @property
     def callbacks(self) -> list[Callback]:

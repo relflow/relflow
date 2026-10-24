@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import torch
 
-from relflow.data.ragged import Projection, boolean
+from relflow.data.ragged import Projection
 from relflow.structs.enums import Strata
 from relflow.structs.experiment import Schema
 from relflow.structs.tree import Address
@@ -37,9 +37,9 @@ def tensorize(
     return tensorfield.new(
         input=input,
         target=target,
-        present=torch.from_numpy(boolean(projection.present).copy()).reshape(shape),
-        trainable=torch.from_numpy(boolean(projection.trainable).copy()).reshape(shape),
-        inferred=torch.from_numpy(boolean(projection.inferred).copy()).reshape(shape),
+        present=torch.from_numpy(projection.present).reshape(shape),
+        trainable=torch.from_numpy(projection.trainable).reshape(shape),
+        inferred=torch.from_numpy(projection.inferred).reshape(shape),
         address=address,
         schema=schema,
         strata=strata,

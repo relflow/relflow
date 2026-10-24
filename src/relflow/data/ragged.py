@@ -7,6 +7,7 @@ import json
 import math
 import re
 from dataclasses import dataclass
+from functools import cache
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -14,7 +15,8 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from relflow.data.arrow import variants
-from relflow.data.query import MissingFieldError, listed, parts, query
+from relflow.data.query import Literal, Member, MissingFieldError, compile, listed, parts, query
+from relflow.logging.config import logger
 from relflow.structs.enums import Overflow, Strata, Tokens
 from relflow.structs.tree import Address
 
@@ -28,6 +30,17 @@ def member(name: str) -> str:
     """Render a schema name as one native query member."""
 
     return name if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) else f"[{json.dumps(name)}]"
+
+
+@cache
+def absent(address: Address, expression: str, datatype: pa.DataType) -> None:
+    """Warn once per branch and record type when a learning split lacks its collection."""
+
+    logger.bind(component="data", address=str(address)).warning(
+        f"branch '{address}' reads collection {expression!r}, which is absent from the processed records "
+        f"{datatype}; every slot counts as an absent collection. Rename the branch, set query=, or add the "
+        "column in a preprocessor."
+    )
 
 
 def boolean(values: pa.Array | pa.ChunkedArray) -> np.ndarray:
@@ -216,13 +229,13 @@ class Decision:
 
 @dataclass(frozen=True, slots=True)
 class Projection:
-    """Pristine Arrow values plus resolved model-input and objective routing."""
+    """Pristine Arrow values plus dense Boolean model-input and objective routing."""
 
     pristine: RaggedField
-    visible: pa.Array
-    present: pa.Array
-    trainable: pa.Array
-    inferred: pa.Array
+    visible: np.ndarray
+    present: np.ndarray
+    trainable: np.ndarray
+    inferred: np.ndarray
     vacant: bool = False
 
     def __post_init__(self) -> None:
@@ -234,13 +247,11 @@ class Projection:
         size = math.prod(self.pristine.shape)
         for name in ("visible", "present", "trainable", "inferred"):
             values = getattr(self, name)
-            if not isinstance(values, pa.Array) or values.type != pa.bool_():
-                datatype = getattr(values, "type", type(values).__name__)
-                raise TypeError(f"Projection.{name} must be a Boolean Arrow array, got {datatype}")
-            if values.null_count:
-                raise ValueError(f"Projection.{name} cannot contain nulls")
-            if len(values) != size:
-                raise ValueError(f"Projection.{name} length must equal shape product {size}, got {len(values)}")
+            if not isinstance(values, np.ndarray) or values.dtype != np.bool_:
+                datatype = getattr(values, "dtype", type(values).__name__)
+                raise TypeError(f"Projection.{name} must be a Boolean NumPy array, got {datatype}")
+            if values.shape != (size,):
+                raise ValueError(f"Projection.{name} shape must be ({size},), got {values.shape}")
 
     def split(
         self,
@@ -259,20 +270,17 @@ class Projection:
             raise ValueError("prepared projection values cannot contain nulls")
 
         state = self.pristine.state.to_numpy(zero_copy_only=False).astype(np.int8, copy=True)
-        visible = boolean(self.visible)
-        present = boolean(self.present)
-        trainable = boolean(self.trainable)
         placement = self.pristine.placement.to_numpy(zero_copy_only=False)
 
         input_state = state.copy()
-        input_state[~present] = Tokens.padded.value
-        input_state[present & ~visible] = Tokens.masked.value
-        input_values = visible[placement]
+        input_state[~self.present] = Tokens.padded.value
+        input_state[self.present & ~self.visible] = Tokens.masked.value
+        input_values = self.visible[placement]
         input_placement = placement[input_values]
 
         target_state = np.full(len(state), Tokens.padded.value, dtype=np.int8)
-        target_state[trainable] = state[trainable]
-        target_values = trainable[placement]
+        target_state[self.trainable] = state[self.trainable]
+        target_values = self.trainable[placement]
         target_placement = placement[target_values]
 
         if self.vacant and (input_values.any() or target_values.any()):
@@ -302,13 +310,43 @@ class Coalesced:
     layouts: dict[Address, Layout]
 
 
+def head(expression: str) -> str:
+    """Return the record member a query reads first."""
+
+    first = compile(expression).steps[0]
+    if isinstance(first, Member):
+        return first.name
+    if isinstance(first, Literal) and isinstance(first.value, str):
+        return first.value
+    raise ValueError(f"query {expression!r} must begin with a field name")
+
+
+def referenced(branch: Branch) -> set[str]:
+    """Return the record members that a branch, its masks, and its children read."""
+
+    names = {head(branch.query)} if branch.query is not None else set()
+    for mask in branch.mask:
+        if mask.query is not None:
+            names.add(head(mask.query))
+    if branch.query is not None:
+        return names
+    for child in branch.fields:
+        names.add(head(child.query) if child.query is not None else cast(str, child.name))
+        for mask in child.mask:
+            if mask.query is not None and getattr(child, "type", None) != "branch":
+                names.add(head(mask.query))
+    return names
+
+
 def root(values: pa.Table, branch: Branch, *, size: int | None = None) -> Layout:
-    """Build the singleton root layout without copying unmodeled columns."""
+    """Build the singleton root layout, combining only the columns the schema reads."""
 
     rows = values.num_rows if values.num_columns else (0 if size is None else size)
+    names = referenced(branch)
+    selected = values.select([index for index, name in enumerate(values.column_names) if name in names])
     records = (
-        compact(values.to_struct_array())
-        if values.num_columns
+        compact(selected.to_struct_array())
+        if selected.num_columns
         else pa.StructArray.from_buffers(pa.struct([]), rows, [None])
     )
     if branch.query is None:
@@ -337,7 +375,7 @@ def root(values: pa.Table, branch: Branch, *, size: int | None = None) -> Layout
     )
 
 
-def descend(layout: Layout, branch: Branch, address: Address) -> Layout:
+def descend(layout: Layout, branch: Branch, address: Address, *, strata: Strata) -> Layout:
     """Retain collection slots before resolving their shared execution extent."""
 
     parent_size = math.prod(layout.shape)
@@ -350,7 +388,8 @@ def descend(layout: Layout, branch: Branch, address: Address) -> Layout:
         try:
             selected = query(layout.records, expression, address=str(branch.address))
         except MissingFieldError:
-            pass
+            if strata != Strata.predict:
+                absent(branch.address, expression, layout.records.type)
     if selected is None or pa.types.is_null(selected.values.type):
         if selected is not None:
             collection_present[layout.placement] = boolean(selected.present)
@@ -522,9 +561,10 @@ def scores(
     mask: Mask,
     seed: int,
     epoch: int,
+    ordinal: int,
     strata: Strata,
 ) -> np.ndarray:
-    """Draw reproducible scores in canonical record order."""
+    """Draw reproducible scores in canonical record order, distinct for every batch ordinal."""
 
     if not len(layout.records):
         return np.empty(0, dtype=np.uint64)
@@ -534,7 +574,7 @@ def scores(
         (mask.query, float(mask.rate).hex() if mask.rate is not None else None),
         separators=(",", ":"),
     )
-    payload = f"relflow-mask-v2:{seed}:{strata}:{effective_epoch}:{address}:{selection}".encode()
+    payload = f"relflow-mask-v3:{seed}:{strata}:{effective_epoch}:{ordinal}:{address}:{selection}".encode()
     random = np.random.default_rng(int.from_bytes(hashlib.sha256(payload).digest()[:8], "big"))
     return random.integers(0, np.iinfo(np.uint64).max, len(layout.records), dtype=np.uint64)
 
@@ -546,6 +586,7 @@ def select(
     address: Address,
     seed: int,
     epoch: int,
+    ordinal: int,
     strata: Strata,
 ) -> np.ndarray:
     """Resolve one literal, query-backed, or uniformly sampled policy."""
@@ -564,6 +605,7 @@ def select(
                     mask=mask,
                     seed=seed,
                     epoch=epoch,
+                    ordinal=ordinal,
                     strata=strata,
                 )
                 <= threshold
@@ -580,6 +622,7 @@ def resolve(
     *,
     seed: int,
     epoch: int,
+    ordinal: int,
     strata: Strata,
 ) -> tuple[Decision, ...]:
     """Resolve every active policy once in one node's owner geometry."""
@@ -593,6 +636,7 @@ def resolve(
                 address=node.address,
                 seed=seed,
                 epoch=epoch,
+                ordinal=ordinal,
                 strata=strata,
             ),
             shape=layout.shape,
@@ -660,10 +704,10 @@ def project(
     visible = observed & ~masked & ~skipped
     return Projection(
         pristine=field,
-        visible=pa.array(visible, type=pa.bool_()),
-        present=pa.array(present, type=pa.bool_()),
-        trainable=pa.array(trainable, type=pa.bool_()),
-        inferred=pa.array(inferred, type=pa.bool_()),
+        visible=visible,
+        present=present,
+        trainable=trainable,
+        inferred=inferred,
         vacant=source_less,
     )
 
@@ -675,14 +719,21 @@ def coalesce(
     *,
     seed: int = 0,
     epoch: int = 0,
+    ordinal: int = 0,
 ) -> Coalesced:
-    """Resolve schema geometry and masks before datatype conversion."""
+    """Resolve schema geometry and masks before datatype conversion.
+
+    ``ordinal`` numbers the batch within its epoch so sampled masks differ
+    between batches while every batch stays reproducible.
+    """
     if not isinstance(values, pa.Table):
         raise TypeError(f"coalesce values must be a pyarrow.Table, got {type(values).__name__}")
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise TypeError(f"coalesce seed must be an integer, got {type(seed).__name__}")
     if not isinstance(epoch, int) or isinstance(epoch, bool) or epoch < 0:
         raise ValueError("coalesce epoch must be a non-negative integer")
+    if not isinstance(ordinal, int) or isinstance(ordinal, bool) or ordinal < 0:
+        raise ValueError("coalesce ordinal must be a non-negative batch index")
 
     strata = Strata.normalize(strata)
     addresses = tuple(schema.active_requests)
@@ -702,12 +753,13 @@ def coalesce(
                 child = cast("Branch", child)
                 active = descendants.get(child.address, [])
                 if active:
-                    child_layout = descend(layout, child, active[0])
+                    child_layout = descend(layout, child, active[0], strata=strata)
                     decisions = resolve(
                         child_layout,
                         child,
                         seed=seed,
                         epoch=epoch,
+                        ordinal=ordinal,
                         strata=strata,
                     )
                     visit(child, child_layout, (*inherited, *decisions))
@@ -717,12 +769,13 @@ def coalesce(
                     child,
                     seed=seed,
                     epoch=epoch,
+                    ordinal=ordinal,
                     strata=strata,
                 )
                 fields[child.address] = project(layout, child, (*inherited, *decisions), strata=strata)
 
     layout = root(values, schema.fields)
-    decisions = resolve(layout, schema.fields, seed=seed, epoch=epoch, strata=strata)
+    decisions = resolve(layout, schema.fields, seed=seed, epoch=epoch, ordinal=ordinal, strata=strata)
     visit(schema.fields, layout, decisions)
 
     return Coalesced(fields=fields, layouts=layouts)

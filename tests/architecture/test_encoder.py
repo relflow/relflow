@@ -409,8 +409,11 @@ def test_decoder_receives_canonical_heritage_and_separate_sibling_context():
 
     parcels = forward.call_args.args[0]
     contexts = forward.call_args.kwargs["contexts"]
-    assert [parcel.origin for parcel in parcels] == ["/", "/answer"]
-    assert not parcels[1].present.any()
+    # The root arrives as its two-query summary and as its encoded sequence, which stays at the root.
+    assert [parcel.origin for parcel in parcels] == ["/", "/", "/answer"]
+    assert parcels[0].destination != parcels[0].origin and parcels[1].destination == parcels[1].origin
+    assert tuple(parcels[0].payload.shape[1:-1]) == (2,) and tuple(parcels[1].payload.shape[1:-1]) == (4,)
+    assert not parcels[2].present.any()
     assert [parcel.origin for parcel in contexts] == [
         "/items",
         "/items/value",

@@ -9,9 +9,9 @@ import pyarrow as pa
 
 import relflow
 from relflow.data.arrow import Retain
-from relflow.data.datasets.arrow import ArrowDataModule, ArrowStream
+from relflow.data.datasets.arrow import ArrowDataModule
 from relflow.data.datasets.base import StratumConfig
-from relflow.data.datasets.custom import adapt, schemas
+from relflow.data.datasets.custom import Adapter, schemas
 from relflow.data.processors import PreprocessorInput
 from relflow.structs.enums import Strata
 
@@ -64,18 +64,13 @@ class SyntheticDataModule(ArrowDataModule):
             raise ValueError("at least one named data split is required")
         resolved_schemas = schemas(arrow_schema, configured=configured)
 
-        sources: dict[Strata, Callable[[], ArrowStream]] = {}
+        sources: dict[Strata, Adapter] = {}
         for strata, generator in generators.items():
             if generator is None:
                 continue
             if not callable(generator):
                 raise TypeError(f"{strata} generator must be callable, got {type(generator).__name__}")
-            sources[strata] = adapt(
-                generator,
-                schema=resolved_schemas[strata],
-                rows=ingress_rows,
-                name=str(strata),
-            )
+            sources[strata] = Adapter(generator, resolved_schemas[strata], ingress_rows, str(strata))
 
         super().__init__(
             model=model,

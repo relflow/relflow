@@ -8,7 +8,6 @@ from tensordict import TensorDict
 
 import relflow as rf
 from relflow.data.ragged import coalesce
-from relflow.helpers import Jitter
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
@@ -18,10 +17,12 @@ from relflow.tensorfields.extensions.text import (
     ATTENTION_MASK,
     INPUT_IDS,
     CachedModel,
+    Decoder,
     Embedder,
     TensorField,
     loss,
 )
+from relflow.tensorfields.shared.jitter import Jitter
 from tests.arrow import table as arrow_table
 from tests.tensorfields.extensions.test_text import FakeHFModel, FakeTokenizer
 from tests.tensorfields.helpers import tensorize
@@ -363,7 +364,7 @@ def test_text_cache_reuses_reconstruction_targets_without_revealing_hidden_input
     embedder = Embedder(schema=structure, address=ADDRESS)
     module = SimpleNamespace(
         schema=structure,
-        nodes={ADDRESS: SimpleNamespace(embedder=embedder)},
+        nodes={ADDRESS: SimpleNamespace(embedder=embedder, decoder=Decoder(schema=structure, address=ADDRESS))},
         track=lambda names, value: value,
     )
 

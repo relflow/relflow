@@ -6,7 +6,7 @@ import numpy as np
 import pyarrow as pa
 import pytest
 
-from relflow.helpers.digest import SCHEMA, Digest
+from relflow.tensorfields.shared.digest import SCHEMA, Digest
 
 
 def snapshot(means, weights, points=None, *, metadata=None) -> bytes:

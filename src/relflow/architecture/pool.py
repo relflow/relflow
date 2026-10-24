@@ -5,6 +5,7 @@ import torch
 
 from relflow.architecture.attention import RotaryMultiheadAttention
 from relflow.architecture.blocks import feed_forward, norm
+from relflow.distributed import all_reduce_max
 
 
 class CrossAttentionBlock(torch.nn.Module):
@@ -49,7 +50,52 @@ class CrossAttentionBlock(torch.nn.Module):
         __call__ = forward
 
 
-class LearnedQueryCrossAttention(torch.nn.Module):
+class Pool(torch.nn.Module):
+    """Own the count and evidence lanes that restore multiplicity after pooling.
+
+    A bounded branch divides its lanes by a static visible capacity. An
+    unbounded branch has no cap, so its lanes divide by the largest present
+    count seen while training: a persisted buffer that every rank raises
+    together, keeping DDP replicas identical. Without ``mass`` a pool has no
+    lanes.
+    """
+
+    def __init__(self, *, mass: bool, mass_capacity: int | None) -> None:
+        super().__init__()
+        if mass_capacity is not None and not mass:
+            raise ValueError(
+                f"{type(self).__name__} mass_capacity={mass_capacity} requires its lanes; "
+                "construct MeanPool with d_model or LearnedQueryCrossAttention with mass=True"
+            )
+        if mass_capacity is not None and mass_capacity < 1:
+            raise ValueError(f"{type(self).__name__} mass_capacity must be >= 1, got {mass_capacity}")
+        self.mass_capacity = mass_capacity
+        self.mass_observed: torch.Tensor | None
+        self.register_buffer(
+            "mass_observed", torch.ones((), dtype=torch.int64) if mass and mass_capacity is None else None
+        )
+
+    def observe(self, present: torch.Tensor) -> None:
+        """Raise the observed capacity to this training batch's largest present count.
+
+        Every rank calls this on every training step, so the reduction is a
+        uniform collective.
+        """
+        if self.mass_observed is None or not self.training:
+            return
+        counts = present.sum(dim=1)
+        largest = counts.max() if counts.numel() else counts.new_zeros(())
+        self.mass_observed.copy_(torch.maximum(self.mass_observed, all_reduce_max(largest.to(self.mass_observed))))
+
+    def divisors(self, dtype: torch.dtype) -> tuple[float | torch.Tensor, float | torch.Tensor]:
+        """Return the evidence and count divisors for the current capacity."""
+        if self.mass_capacity is not None:
+            return math.sqrt(self.mass_capacity), float(self.mass_capacity)
+        observed = cast(torch.Tensor, self.mass_observed).to(dtype)
+        return observed.sqrt(), observed
+
+
+class LearnedQueryCrossAttention(Pool):
     """Pool nonempty memory rows into learned queries and optional additive evidence."""
 
     def __init__(
@@ -62,12 +108,10 @@ class LearnedQueryCrossAttention(torch.nn.Module):
         position: bool = True,
         mass_capacity: int | None = None,
         *,
+        mass: bool = False,
         ffnx: int = 8,
     ) -> None:
-        super().__init__()
-
-        if mass_capacity is not None and mass_capacity < 1:
-            raise ValueError("mass_capacity must be >= 1")
+        super().__init__(mass=mass, mass_capacity=mass_capacity)
 
         self.queries = torch.nn.Parameter(torch.normal(mean=0.0, std=1e-2, size=(n_context, d_model)))
         self.blocks = torch.nn.ModuleList()
@@ -82,11 +126,8 @@ class LearnedQueryCrossAttention(torch.nn.Module):
                 )
             )
         self.norm = norm(d_model)
-        self.mass_capacity = mass_capacity
-        self.mass_projection = (
-            torch.nn.Linear(d_model, n_context * d_model, bias=False) if mass_capacity is not None else None
-        )
-        self.mass_direction = torch.nn.Parameter(torch.zeros(n_context, d_model)) if mass_capacity is not None else None
+        self.mass_projection = torch.nn.Linear(d_model, n_context * d_model, bias=False) if mass else None
+        self.mass_direction = torch.nn.Parameter(torch.zeros(n_context, d_model)) if mass else None
         if self.mass_projection is not None:
             torch.nn.init.zeros_(self.mass_projection.weight)
 
@@ -101,8 +142,6 @@ class LearnedQueryCrossAttention(torch.nn.Module):
         positions: torch.Tensor | None = None,
         memory_positions: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        from relflow.architecture.compiler import canonical
-
         N, _, _ = memory.shape
         if present is None:
             present = torch.ones(memory.shape[:2], dtype=torch.bool, device=memory.device)
@@ -145,19 +184,13 @@ class LearnedQueryCrossAttention(torch.nn.Module):
         if memory_positions is not None and memory_positions.ndim > 1:
             memory_positions = memory_positions.index_select(0, indices)
 
-        original = type(self).compute is LearnedQueryCrossAttention.compute and canonical(self, self.compute)
-        if not original or (queries is None and positions is None and memory_positions is None):
-            queries = self.compute(memory, present, context, evidence)
-        else:
-            queries = self.compute(
-                memory,
-                present,
-                context,
-                evidence,
-                queries=queries,
-                positions=positions,
-                memory_positions=memory_positions,
-            )
+        # Geometry reaches compute whenever a caller supplies it; pools without it keep the plain protocol.
+        geometry = {
+            name: value
+            for name, value in (("queries", queries), ("positions", positions), ("memory_positions", memory_positions))
+            if value is not None
+        }
+        queries = self.compute(memory, present, context, evidence, **geometry)
         expected = (indices.numel(), *shape[1:])
         if tuple(queries.shape) != expected:
             raise RuntimeError(
@@ -207,10 +240,9 @@ class LearnedQueryCrossAttention(torch.nn.Module):
         result = cast(torch.Tensor, self.norm(queries))
         if self.mass_projection is not None and self.mass_direction is not None:
             additive = memory if evidence is None else evidence
-            assert self.mass_capacity is not None
-            total = additive.sum(dim=1) / math.sqrt(self.mass_capacity)
-            mass = self.mass_projection(total).reshape_as(result)
-            count = present.sum(dim=1).to(dtype=result.dtype) / self.mass_capacity
+            root, capacity = self.divisors(result.dtype)
+            mass = self.mass_projection(additive.sum(dim=1) / root).reshape_as(result)
+            count = present.sum(dim=1).to(dtype=result.dtype) / capacity
             result = result + mass + count[:, None, None] * self.mass_direction.unsqueeze(0)
 
         return result
@@ -219,23 +251,19 @@ class LearnedQueryCrossAttention(torch.nn.Module):
         __call__ = forward
 
 
-class MeanPool(torch.nn.Module):
+class MeanPool(Pool):
     """Average present memory coordinates, keep their count, and repeat the result across queries.
 
     A mean erases multiplicity: one item and six equal items pool identically.
-    With ``mass_capacity`` the pool adds a learned direction scaled by the
-    present count over that capacity, starting at zero so an untrained pool is
-    still the plain mean.
+    With ``d_model`` the pool adds a learned direction scaled by the present
+    count over its capacity, starting at zero so an untrained pool is still the
+    plain mean. ``mass_capacity`` fixes that capacity; omitting it tracks the
+    largest count observed while training.
     """
 
     def __init__(self, n_context: int, d_model: int | None = None, mass_capacity: int | None = None) -> None:
-        super().__init__()
-        if (mass_capacity is None) != (d_model is None):
-            raise ValueError("MeanPool count lane requires both d_model and mass_capacity")
-        if mass_capacity is not None and mass_capacity < 1:
-            raise ValueError("mass_capacity must be >= 1")
+        super().__init__(mass=d_model is not None, mass_capacity=mass_capacity)
         self.n_context = n_context
-        self.mass_capacity = mass_capacity
         self.mass_direction = torch.nn.Parameter(torch.zeros(d_model)) if d_model is not None else None
 
     def forward(self, memory: torch.Tensor, present: torch.Tensor | None = None) -> torch.Tensor:
@@ -250,8 +278,7 @@ class MeanPool(torch.nn.Module):
         pooled = memory.masked_fill(~present.unsqueeze(-1), 0.0).sum(dim=1, keepdim=True)
         pooled = pooled / weights.sum(dim=1, keepdim=True).clamp_min(1.0)
         if self.mass_direction is not None:
-            assert self.mass_capacity is not None
-            count = present.sum(dim=1).to(dtype=pooled.dtype) / self.mass_capacity
+            count = present.sum(dim=1).to(dtype=pooled.dtype) / self.divisors(pooled.dtype)[1]
             pooled = pooled + count[:, None, None] * self.mass_direction.to(dtype=pooled.dtype)
         return pooled.expand(-1, self.n_context, -1)
 

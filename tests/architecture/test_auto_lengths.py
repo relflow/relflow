@@ -244,9 +244,16 @@ def test_finite_decoder_heritage_retains_original_flat_memory_positions():
     finally:
         for handle in handles:
             handle.remove()
+    # Memory keeps the encoder's item-major numbering: the events block interleaves
+    # amount and target per item (0, 2 | 1, 3) and each heritage parcel continues
+    # after the previous span, so the storage order is not the position order.
+    expected = {
+        11: [0, 2, 1, 3, 4, 5, 7, 6, 8, 9, 10],  # /events/target: root, events, and its own leaf
+        6: [0, 2, 1, 3, 4, 5],  # /answer: root and its own leaf
+    }
     assert len(observed) == 2
     for shape, positions in observed:
-        torch.testing.assert_close(positions, torch.arange(shape[1]).expand(shape[:2]), rtol=0, atol=0)
+        torch.testing.assert_close(positions, torch.tensor([expected[shape[1]]]), rtol=0, atol=0)
 
 
 def test_three_dynamic_axes_preserve_ordered_scalar_and_repeated_predictions():
@@ -296,20 +303,22 @@ def test_three_dynamic_axes_preserve_ordered_scalar_and_repeated_predictions():
             torch.testing.assert_close(actual, reference, rtol=1e-5, atol=1e-5)
 
 
-def test_encoded_models_preserve_original_custom_compute_protocols(monkeypatch):
+def test_encoded_models_pass_structural_geometry_to_custom_compute(monkeypatch):
     model = rf.Model(d_model=8, n_layers=1, n_heads=2, amount=rf.Number, answer=rf.Number(mask=True)).eval()
     encoder = model.nodes["/"].encoder
     pool = model.nodes["/answer"].decoder.pool
     encode, compute = encoder.compute, pool.compute
     calls = []
 
-    def custom_encoder(inputs, present, *, packing=None):
+    def custom_encoder(inputs, present, *, packing=None, positions=None):
         calls.append("encoder")
-        return encode(inputs, present, packing=packing)
+        assert packing is not None or positions is not None
+        return encode(inputs, present, packing=packing, positions=positions)
 
-    def custom_pool(memory, present, context, evidence):
+    def custom_pool(memory, present, context, evidence, **geometry):
         calls.append("pool")
-        return compute(memory, present, context, evidence)
+        assert geometry["memory_positions"] is not None
+        return compute(memory, present, context, evidence, **geometry)
 
     monkeypatch.setattr(encoder, "compute", custom_encoder)
     monkeypatch.setattr(pool, "compute", custom_pool)
@@ -331,7 +340,7 @@ def test_custom_pool_compute_reports_incompatible_dynamic_queries(monkeypatch):
     pool = model.nodes["/events/target"].decoder.pool
     compute = pool.compute
 
-    def custom_pool(memory, present, context, evidence):
+    def custom_pool(memory, present, context, evidence, **geometry):
         return compute(memory, present, None, evidence)
 
     monkeypatch.setattr(pool, "compute", custom_pool)

@@ -70,7 +70,11 @@ def snapshot(trainer, model):
 
 
 def assert_migration(before, after):
-    """No optimizer/scheduler work may occur while the next batch is bound."""
+    """No optimizer/scheduler work may occur while the next batch is bound.
+
+    Content rows admitted into spare capacity are the one exception: they
+    stay exactly zero until the batch that first trains them starts them.
+    """
     assert after["step"] == before["step"]
     assert after["scheduler"] == before["scheduler"]
     assert after["lr"] == before["lr"]
@@ -79,7 +83,8 @@ def assert_migration(before, after):
         destinations = torch.arange(old.shape[0])
         if name == "cluster/embedding":
             destinations[-1] = new.shape[0] - 1
-        assert torch.equal(new[destinations], old), name
+        unstarted = old.eq(0).all(dim=1) if old.ndim == 2 else torch.zeros(old.shape[0], dtype=torch.bool)
+        assert torch.equal(new[destinations][~unstarted], old[~unstarted]), name
         introduced = torch.ones(new.shape[0], dtype=torch.bool)
         introduced[destinations] = False
         previous = before["moments"][name]

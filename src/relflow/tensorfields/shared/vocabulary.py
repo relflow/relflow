@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+import zlib
 from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import partial, partialmethod
@@ -23,13 +25,14 @@ from relflow.distributed import (
     synchronize_epoch_metrics,
 )
 from relflow.logging import logger
-from relflow.structs.enums import Strata, TensorKey
+from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.tree import Address
 from relflow.tensorfields.shared.counter import Counter
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
-    from relflow.helpers.resize import Resize
+    from relflow.data.ragged import RaggedField
+    from relflow.tensorfields.shared.resize import Resize
 
 
 MIN_OBSERVATIONS = 10
@@ -56,6 +59,67 @@ def fold(values: pa.Array | pa.ChunkedArray, *, strip: bool, cased: bool) -> pa.
     return values
 
 
+def canonical(values: pa.Array | pa.ChunkedArray) -> pa.Array | pa.ChunkedArray:
+    """Make Arrow lookup agree with Python equality: no dictionary wrapper and one signed zero."""
+    if pa.types.is_dictionary(values.type):
+        values = pc.dictionary_decode(values)  # pyrefly: ignore [missing-attribute]
+    if pa.types.is_floating(values.type):
+        zero = pa.scalar(0.0, type=values.type)
+        return pc.if_else(pc.equal(values, zero), zero, values)
+    return values
+
+
+def atoms(labels: list[Any]) -> pa.Array:
+    """One canonical Arrow array for Python vocabulary labels.
+
+    Labels come from one Arrow column family, so they share one scalar type;
+    ``index_in`` then matches batch columns of any width in that family.
+    """
+    try:
+        array = pa.array(labels)
+    except OverflowError:
+        array = pa.array(labels, type=pa.uint64())
+    except (pa.ArrowInvalid, pa.ArrowTypeError) as error:
+        raise ValueError(
+            "vocabulary labels must share one scalar type (bool, int, float, str, or bytes); "
+            "normalize the source column in a preprocessor"
+        ) from error
+    return cast(pa.Array, canonical(array))
+
+
+def positions(values: pa.Array, vocabulary: pa.Array) -> np.ndarray:
+    """Vocabulary positions of labels, or -1 for absent labels and float NaN."""
+    if not len(values) or not len(vocabulary):
+        return np.full(len(values), -1, dtype=np.int64)
+    found = pc.index_in(canonical(values), value_set=vocabulary)
+    # Arrow accepts Python scalars; the stubs require an explicit Scalar.
+    filled = pc.fill_null(found, -1)  # pyrefly: ignore[bad-specialization]
+    return np.array(filled, dtype=np.int64)
+
+
+def admissible(field: RaggedField) -> tuple[pa.Array, np.ndarray]:
+    """Valued labels without float NaN, and the compact positions NaN occupied.
+
+    NaN is not a label: it cannot key a vocabulary, so its position takes the
+    ``other`` state instead of admitting or looking up a value.
+    """
+    values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
+    nan = np.zeros(len(values), dtype=bool)
+    if len(values) and pa.types.is_floating(values.type):
+        nan = pc.is_nan(values).to_numpy(zero_copy_only=False)
+        if nan.any():
+            values = pc.filter(values, pa.array(~nan))
+    return values, nan
+
+
+def states(field: RaggedField, nan: np.ndarray) -> np.ndarray:
+    """Dense state tokens with NaN positions marked ``other``."""
+    dense = field.dense.copy()
+    if nan.any():
+        dense[field.place(nan, fill=False)] = Tokens.other.value
+    return dense
+
+
 def capacity(initial: int, required: int) -> int:
     """Grow geometrically without declaring an upper vocabulary limit."""
     return initial << (max(required - 1, 0) // initial).bit_length()
@@ -80,7 +144,8 @@ class VocabularyBatch:
             if is_distributed():
                 needed = bool(all_reduce_max(torch.tensor(needed, dtype=torch.int64, device=device)).item())
             if needed:
-                gathered = all_gather_object(pc.filter(self.labels, pa.array(unseen)))
+                local = pc.filter(self.labels, pa.array(unseen))
+                gathered = all_gather_object(local)
                 existing = vocabulary.index()
                 additions: dict[Any, int] = {}
                 for labels in gathered:
@@ -88,13 +153,26 @@ class VocabularyBatch:
                         if label not in existing and label not in additions:
                             additions[label] = len(existing) + len(additions)
                 size = capacity(size, len(existing) + len(additions))
-                for position, label in enumerate(self.labels.to_pylist()):
-                    if indices[position] < 0:
-                        indices[position] = additions[label]
+                for position, label in zip(np.flatnonzero(unseen), local.to_pylist(), strict=True):
+                    indices[position] = additions[label]
                 resize.publish(partial(vocabulary.extend, list(additions)))
         mapping = torch.full((self.size + 1,), -1, dtype=torch.int64)
-        mapping[: len(indices)] = torch.from_numpy(indices.copy())
+        mapping[: len(indices)] = torch.from_numpy(indices)
         return mapping, size
+
+    def translate(self, values: torch.Tensor, mapping: torch.Tensor, *, address: Address) -> torch.Tensor:
+        """Map worker IDs to model rows; ``-1`` wraps to the unavailable row the mapping reserves.
+
+        Workers issue IDs below this batch's width, so a wider ID means the
+        tensorfield was bound to another batch. Validating here on the host
+        keeps the embedder free of per-step device synchronization.
+        """
+        if values.numel() and bool((values.lt(-1) | values.ge(self.size)).any()):
+            raise ValueError(
+                f"vocabulary batch at '{address}' holds worker token IDs outside [-1, {self.size}); "
+                "bind each encoded batch to the model that encoded it"
+            )
+        return mapping.to(values.device)[values]
 
     def counts(self, values: torch.Tensor, mapping: torch.Tensor, size: int) -> torch.Tensor:
         """Move pristine exposure to global IDs without counting unused rows."""
@@ -147,11 +225,13 @@ class VocabularyState:
         self.cased: bool = cased
         self.vocab: list[Any] = []
         self.index: dict[Any, int] = {}
+        self._atoms: pa.Array | None = None
         self.refresh(force=True)
 
     def __getstate__(self) -> dict[str, Any]:
         state = self.__dict__.copy()
         state["_share"] = None
+        state["_atoms"] = None
         return state
 
     def __setstate__(self, state: dict[str, Any]) -> None:
@@ -189,6 +269,7 @@ class VocabularyState:
         if not force and master_size == vocab_size:
             return
 
+        self._atoms = None
         if force or master_size < vocab_size:
             self.vocab = list(self.master)
             self.index = {word: index for index, word in enumerate(self.vocab)}
@@ -200,6 +281,12 @@ class VocabularyState:
 
             self.index[word] = len(self.vocab)
             self.vocab.append(word)
+
+    def atoms(self) -> pa.Array:
+        """Return the cached vocabulary as one canonical Arrow array."""
+        if self._atoms is None or len(self._atoms) != len(self.vocab):
+            self._atoms = atoms(self.vocab)
+        return self._atoms
 
     @property
     def master(self) -> list[Any] | ListProxy[Any]:
@@ -224,7 +311,9 @@ class VocabularyState:
         candidates: list[Any] = []
         seen: set[Any] = set()
         for word in self.tokens(values):
-            if word is None or word in self.index or word in seen:
+            # NaN never equals itself, so it can neither key nor be found in a
+            # vocabulary; admitting it would grow this state past its batch.
+            if word is None or word in self.index or word in seen or (isinstance(word, float) and math.isnan(word)):
                 continue
 
             seen.add(word)
@@ -242,6 +331,7 @@ class VocabularyState:
                 self.index[word] = len(self.vocab)
                 self.vocab.append(word)
                 self.master.append(word)
+            self._atoms = None
             self.size = capacity(self.size, len(self.vocab))
 
     def encode(self, word: Any) -> int | None:
@@ -254,7 +344,7 @@ class VocabularyState:
         return self.index.get(word, self.unavailable_index)
 
     def indices(self, values: pa.Array | pa.ChunkedArray, *, learn: bool) -> np.ndarray:
-        """Encode one whole non-null Arrow token column through unique values."""
+        """Encode one whole non-null Arrow token column; float NaN encodes as unavailable."""
 
         array = values.combine_chunks() if isinstance(values, pa.ChunkedArray) else values
         if array.null_count:
@@ -262,20 +352,13 @@ class VocabularyState:
         if not len(array):
             self.reserve((), learn=learn)
             return np.empty(0, dtype=np.int64)
-        array = fold(array, strip=self.strip, cased=self.cased)
+        array = cast(pa.Array, fold(array, strip=self.strip, cased=self.cased))
 
-        unique = pc.unique(array)
-        candidates = unique.to_pylist()
-        self.reserve(candidates, learn=learn)
-        encoded = pa.array(
-            [self.encode(candidate) for candidate in candidates],
-            type=pa.int64(),
-        )
-        positions = pc.index_in(array, value_set=unique)
-        if positions.null_count:
-            raise RuntimeError("Arrow vocabulary lookup failed to resolve a source token")
-        selected = pc.take(encoded, positions)
-        return selected.to_numpy(zero_copy_only=False)
+        if learn:
+            self.reserve(pc.unique(array).to_pylist(), learn=True)
+        else:
+            self.refresh()
+        return positions(array, self.atoms())
 
     def tokens(self, values: Any) -> Iterable[Any]:
         if values is None:
@@ -455,6 +538,12 @@ class OnlineVocabularyModel(torch.nn.Module):
         return self._index_cache
 
     def lookup(self, values: pa.Array) -> np.ndarray:
+        """Master rows of unique batch labels, or -1 for labels the model has not admitted.
+
+        The incremental index costs one dictionary probe per batch label. An
+        Arrow ``index_in`` would rehash the whole master on every call, which
+        loses for every vocabulary larger than a batch.
+        """
         index = self.index()
         return np.asarray([index.get(value, -1) for value in values.to_pylist()], dtype=np.int64)
 
@@ -478,6 +567,48 @@ class OnlineVocabularyModel(torch.nn.Module):
 
         self._snapshot_cache = None
         self._snapshot_size = -1
+
+
+def start(weight: torch.Tensor, assigned: int, *, seed: int) -> int:
+    """Give the still-zero rows among the first ``assigned`` a normal start; return how many were filled.
+
+    The draw depends only on ``seed``, so every DDP rank fills identical values.
+    """
+    if not assigned:
+        return 0
+    rows = weight[:assigned].eq(0).all(dim=1).nonzero().flatten()
+    if not rows.numel():
+        return 0
+    generator = torch.Generator().manual_seed(seed)
+    weight[rows] = torch.randn(rows.numel(), weight.shape[1], generator=generator).to(weight)
+    return int(rows.numel())
+
+
+class AdmittedRowsCallback(Callback):
+    """Start admitted content rows before their first training step.
+
+    Admission leaves a label's row at zero, so the label embeds exactly as it
+    did while unknown and predictions hold until learning resumes. Attention
+    cannot tell identical keys apart, so labels that all start at zero never
+    separate; a training batch therefore first gives every still-zero assigned
+    row a normal draw. This is the one parameter change outside optimization:
+    from exactly zero to a start that is a fixed function of the address and
+    the batch, so every rank and run fills the same values and rows admitted
+    into spare capacity never coincide.
+    """
+
+    @torch.no_grad()
+    def on_train_batch_start(self, trainer: Trainer, pl_module: LightningModule, batch: Any, batch_idx: int) -> None:
+        module = cast("Model", pl_module)
+        for address, vocabulary in OnlineVocabularyModel.from_model(module).items():
+            embeddings = getattr(module.nodes[address].embedder, "embeddings", None)
+            if embeddings is None or TensorKey.content.name not in embeddings:
+                continue
+            weight = cast(torch.nn.Embedding, embeddings[TensorKey.content.name]).weight
+            seed = (zlib.crc32(str(address).encode()) * 1_000_003 + trainer.current_epoch * 65_536 + batch_idx) % (
+                2**63 - 1
+            )
+            start(weight, len(vocabulary.master), seed=seed)
 
 
 class VocabularySyncCallback(Callback):
@@ -561,6 +692,14 @@ class VocabularySyncCallback(Callback):
 __all__ = [
     "INITIAL_CAPACITY",
     "OnlineVocabularyModel",
+    "VocabularyBatch",
     "VocabularyState",
     "VocabularySyncCallback",
+    "admissible",
+    "atoms",
+    "canonical",
+    "capacity",
+    "fold",
+    "positions",
+    "states",
 ]

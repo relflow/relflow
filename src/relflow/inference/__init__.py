@@ -6,7 +6,7 @@ from relflow.data.processors import Postprocessor
 from relflow.inference.callback import Writer
 
 if TYPE_CHECKING:
-    from relflow.inference.deployment import (
+    from relflow.inference.deployment import (  # noqa: F401
         Accelerator,
         Deployment,
         Input,
@@ -15,6 +15,8 @@ if TYPE_CHECKING:
         UpdateOperation,
     )
 
+# Deployment names resolve lazily through ``__getattr__`` and stay out of ``__all__``
+# so star imports succeed without the serving extra.
 _DEPLOYMENT_EXPORTS = {
     "Accelerator",
     "Deployment",
@@ -48,12 +50,6 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
-    "Accelerator",
-    "Deployment",
-    "Input",
-    "JSONBackend",
-    "ModelSource",
     "Postprocessor",
-    "UpdateOperation",
     "Writer",
 ]

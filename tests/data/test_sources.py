@@ -451,3 +451,12 @@ def test_live_filesystem_and_bytes_patterns_are_rejected():
         rf.source("train.parquet", filesystem=fs.LocalFileSystem())
     with pytest.raises(TypeError, match="text pattern"):
         rf.source("train.parquet", match=re.compile(b"train"))
+
+
+def test_discovery_ignores_file_metadata_differences(tmp_path):
+    pq.write_table(pa.table({"id": [1]}).replace_schema_metadata({"writer": "a"}), tmp_path / "a.parquet")
+    pq.write_table(pa.table({"id": [2]}).replace_schema_metadata({"writer": "b"}), tmp_path / "b.parquet")
+
+    batches = list(rf.source(tmp_path)())
+
+    assert pa.Table.from_batches(batches)["id"].to_pylist() == [1, 2]
