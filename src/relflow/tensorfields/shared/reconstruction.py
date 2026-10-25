@@ -57,6 +57,25 @@ class Reconstruction(Totals):
         }
 
 
+class Errors(Totals):
+    """Source-unit regression error over valued target coordinates."""
+
+    def __init__(self) -> None:
+        super().__init__(counts=1, sums=2)
+
+    def compute(self) -> dict[str, torch.Tensor]:
+        valued = self.counts[0]
+        absolute, squared = self.sums.unbind()
+        return {"mae.content": absolute / valued, "rmse.content": (squared / valued).sqrt()}
+
+
+def errors(predicted: torch.Tensor, observed: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Coordinate count with absolute and squared error sums for ``Errors``, in the targets' precision."""
+    difference = predicted.detach().to(observed.dtype) - observed.detach()
+    counts = torch.full((1,), difference.numel(), dtype=torch.int64, device=difference.device)
+    return counts, torch.stack((difference.abs().sum(), difference.square().sum()))
+
+
 class Scores(torch.nn.ModuleDict):
     """Register independent statistics for each epoch stage at one field address."""
 

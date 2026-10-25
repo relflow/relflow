@@ -58,6 +58,7 @@ def test_learned_query_mass_lane_preserves_additive_evidence():
         dropout=0.0,
         position=False,
         mass_capacity=4,
+        mass=True,
     ).eval()
     assert model.mass_projection is not None
     assert model.mass_direction is not None
@@ -107,6 +108,7 @@ def test_learned_query_context_and_evidence_validate_shape():
         nhead=2,
         dropout=0.0,
         mass_capacity=3,
+        mass=True,
     )
     memory = torch.randn(4, 3, 8)
 
@@ -148,7 +150,7 @@ def test_mean_pooling_count_lane_starts_as_the_plain_mean_and_scales_with_presen
     assert torch.allclose(output[1, 0], torch.tensor([3.0, 3.0]))
 
 
-@pytest.mark.parametrize("kwargs", [{"d_model": 2}, {"mass_capacity": 4}, {"d_model": 2, "mass_capacity": 0}])
-def test_mean_pooling_count_lane_requires_a_complete_capacity(kwargs):
+@pytest.mark.parametrize("kwargs", [{"mass_capacity": 4}, {"d_model": 2, "mass_capacity": 0}])
+def test_mean_pooling_count_lane_rejects_a_capacity_without_a_direction_or_below_one(kwargs):
     with pytest.raises(ValueError):
         MeanPool(n_context=1, **kwargs)

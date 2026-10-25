@@ -278,6 +278,23 @@ class Schema(Node):
 
         return outputs
 
+    @functools.cached_property
+    def branch_widths(self) -> dict[Address, int | None]:
+        """Symbolic encoded sequence widths per branch instance; ``None`` depends on the observed collections."""
+
+        outputs = self.branch_outputs
+        widths: dict[Address, int | None] = {}
+        for address, branch in self.branches.items():
+            parts = [
+                int(child.active) if isinstance(child, Leaf) else outputs[child.address] for child in branch.fields
+            ]
+            widths[address] = (
+                None
+                if branch.length is None or any(part is None for part in parts)
+                else branch.length * sum(cast(int, part) for part in parts)
+            )
+        return widths
+
     def overflows(self, address: Address) -> tuple[Overflow | None, ...]:
         return (Overflow.error, *self.requests[Address(str(address))].overflows)
 
@@ -303,7 +320,16 @@ class Schema(Node):
         return out
 
     def clear_tree_caches(self) -> None:
-        for name in ("roles", "branches", "requests", "active_requests", "shapes", "branch_outputs", "depthwise"):
+        for name in (
+            "roles",
+            "branches",
+            "requests",
+            "active_requests",
+            "shapes",
+            "branch_outputs",
+            "branch_widths",
+            "depthwise",
+        ):
             self.__dict__.pop(name, None)
 
         for node in PreOrderIter(self.fields):

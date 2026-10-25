@@ -104,19 +104,26 @@ def pack(
         if capacity
         else indices
     )
-    counts = present.sum(dim=1, dtype=torch.int32)
-    offsets = torch.cat((counts.new_zeros(1), counts.cumsum(dim=0, dtype=torch.int32)))
+    counts = present.sum(dim=1, dtype=torch.int64)
+    # Rows sorted by length give every group one contiguous run of the sorted
+    # token axis, so groups are slices of a single on-device index and the host
+    # receives only the distinct lengths with their row counts.
+    order = counts.argsort(stable=True)
+    sorted_counts = counts.index_select(0, order)
+    lengths, sizes = torch.unique_consecutive(sorted_counts, return_counts=True)
+    total = indices.numel()
+    starts = (torch.cumsum(counts, dim=0) - counts).index_select(0, order)
+    firsts = torch.cumsum(sorted_counts, dim=0) - sorted_counts
+    tokens = torch.repeat_interleave(starts - firsts, sorted_counts, output_size=total) + torch.arange(
+        total, device=inputs.device
+    )
     groups = []
-    # One host transfer groups rows by length for every layer in the stack.
-    grouped_rows: dict[int, list[int]] = {}
-    for row, length in enumerate(counts.detach().cpu().tolist()):
+    cursor = 0
+    for length, rows in zip(*torch.stack((lengths, sizes)).tolist(), strict=True):
+        span = rows * length
         if length:
-            grouped_rows.setdefault(length, []).append(row)
-    for length, rows in sorted(grouped_rows.items()):
-        selected_rows = torch.tensor(rows, dtype=torch.int64, device=inputs.device)
-        starts = offsets.index_select(0, selected_rows).to(torch.int64)
-        tokens = (starts[:, None] + torch.arange(length, device=inputs.device)[None, :]).reshape(-1)
-        groups.append(Group(len(rows), length, tokens))
+            groups.append(Group(rows, length, tokens[cursor : cursor + span]))
+        cursor += span
     return inputs.reshape(batch * capacity, width).index_select(0, indices), Packed(indices, positions, tuple(groups))
 
 

@@ -6,7 +6,15 @@ from collections.abc import Mapping, MutableMapping
 from typing import Any, Self, TextIO, cast
 
 CONTEXT = "relflow_context"
-LOG_LEVEL = os.getenv("RELFLOW_LOG_LEVEL", "DEBUG").upper()
+# Uvicorn's vocabulary extends the standard names with ``trace``, its finest level.
+LEVELS: dict[str, int] = {
+    "critical": logging.CRITICAL,
+    "error": logging.ERROR,
+    "warning": logging.WARNING,
+    "info": logging.INFO,
+    "debug": logging.DEBUG,
+    "trace": logging.DEBUG,
+}
 
 
 class Formatter(logging.Formatter):
@@ -42,25 +50,37 @@ class Logger(logging.LoggerAdapter):
         return msg, kwargs
 
 
-def configure(*, level: str | int | None = None, output: TextIO | None = None) -> Logger:
-    """Install one plain stream handler, retaining handlers owned by callers."""
+def severity(level: str | int) -> int:
+    """Translate a level name from RelFlow's or Uvicorn's vocabulary into a standard level."""
 
-    selected = LOG_LEVEL if level is None else level
-    if isinstance(selected, str):
-        name = selected.upper()
-        levels = {
-            "DEBUG": logging.DEBUG,
-            "INFO": logging.INFO,
-            "WARNING": logging.WARNING,
-            "ERROR": logging.ERROR,
-            "CRITICAL": logging.CRITICAL,
-        }
-        if name not in levels:
-            choices = ", ".join(levels)
-            raise ValueError(f"RelFlow log level must be one of {choices}, got {selected!r}")
-        selected = levels[name]
-    elif not isinstance(selected, int) or isinstance(selected, bool):
-        raise TypeError(f"RelFlow log level must be a string or integer, got {type(selected).__name__}")
+    if isinstance(level, bool) or not isinstance(level, (str, int)):
+        raise TypeError(f"RelFlow log level must be a string or integer, got {type(level).__name__}")
+    if isinstance(level, int):
+        return level
+    try:
+        return LEVELS[level.strip().lower()]
+    except KeyError:
+        choices = ", ".join(name.upper() for name in LEVELS)
+        raise ValueError(f"RelFlow log level must be one of {choices}, got {level!r}") from None
+
+
+def configure(*, level: str | int | None = None, output: TextIO | None = None) -> Logger:
+    """Install one plain stream handler, retaining handlers owned by callers.
+
+    An explicit ``level`` is validated strictly. Otherwise ``RELFLOW_LOG_LEVEL``
+    selects the level, and an unknown value falls back to INFO with a warning
+    so that importing the package never fails on environment configuration.
+    """
+
+    unknown: str | None = None
+    if level is None:
+        requested = os.getenv("RELFLOW_LOG_LEVEL", "DEBUG")
+        try:
+            selected = severity(requested)
+        except ValueError:
+            selected, unknown = logging.INFO, requested
+    else:
+        selected = severity(level)
 
     core = logging.getLogger("relflow")
     core.setLevel(selected)
@@ -74,9 +94,15 @@ def configure(*, level: str | int | None = None, output: TextIO | None = None) -
     handler.setLevel(selected)
     handler.setFormatter(FORMATTER)
     core.addHandler(handler)
-    return Logger(core, {})
+    configured = Logger(core, {})
+    if unknown is not None:
+        choices = ", ".join(name.upper() for name in LEVELS)
+        configured.bind(component="logging").warning(
+            "RELFLOW_LOG_LEVEL=%r is not one of %s; logging at INFO", unknown, choices
+        )
+    return configured
 
 
 logger = configure()
 
-__all__ = ["CONTEXT", "LOG_LEVEL", "Logger", "configure", "logger"]
+__all__ = ["CONTEXT", "LEVELS", "Logger", "configure", "logger", "severity"]

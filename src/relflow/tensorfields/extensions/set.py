@@ -28,9 +28,11 @@ from relflow.tensorfields.base import (
 from relflow.tensorfields.output import array, labels, struct, variable
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
 from relflow.tensorfields.shared.reconstruction import Metrics, Scores, Totals
+from relflow.tensorfields.shared.resize import SILENT_LOGIT
 from relflow.tensorfields.shared.rows import Embedding, Linear
 from relflow.tensorfields.shared.vocabulary import (
     INITIAL_CAPACITY,
+    AdmittedRowsCallback,
     OnlineVocabularyModel,
     VocabularyBatch,
     VocabularyState,
@@ -40,12 +42,15 @@ from relflow.tensorfields.shared.vocabulary import (
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.datasets.base import InterprocessEncodingContext
-    from relflow.helpers.resize import Resize
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
+    from relflow.tensorfields.shared.resize import Resize
 
-sets: Extension = Extension(name="set", types=(bool, int, float, str, bytes))
-sets.callback(VocabularySyncCallback, CounterUpdateCallback, Metrics)
+sets: Extension = Extension(
+    name="set",
+    types=(bool, int, float, str, bytes),
+    callbacks=(VocabularySyncCallback, CounterUpdateCallback, Metrics, AdmittedRowsCallback),
+)
 
 
 @sets.register(Component.Request)
@@ -305,6 +310,10 @@ class Embedder(EmbedderBase):
                 ),
             }
         )
+        # Members are admitted while training, so every content row starts at
+        # zero: an admitted member pools exactly as it did while unknown until
+        # gradients move its row.
+        torch.nn.init.zeros_(cast(torch.nn.Embedding, self.embeddings[TensorKey.content.name]).weight)
         self.counters = torch.nn.ModuleDict(
             {
                 TensorKey.state.name: Counter(address=address, size=len(Tokens)),
@@ -375,19 +384,18 @@ def bind(
     node = module.nodes[address]
     embedder = cast(Embedder, node.embedder)
     mapping, size = binding.resolve(embedder.vocab, learn=strata == Strata.train, device=module.device, resize=resize)
-    resize.embedding(cast(torch.nn.Embedding, embedder.embeddings[TensorKey.content.name]), size)
+    resize.embedding(cast(torch.nn.Embedding, embedder.embeddings[TensorKey.content.name]), size, zero=True)
     cast(Counter, embedder.counters[TensorKey.content.name]).resize(size, resize)
     decoder = getattr(node, "decoder", None)
     if decoder is not None:
-        resize.linear(decoder.linears[TensorKey.content.name], size)
+        resize.linear(decoder.linears[TensorKey.content.name], size, silent=True)
     field = cast(TensorField, field)
-    mapping = mapping.to(field.state.device)
     contents = [field.content]
     if TensorKey.content in field.targets:
         contents.append(cast(TensorDict, field.targets[TensorKey.content]))
     for content in contents:
         previous = cast(torch.Tensor, content["indices"])
-        indices = mapping[previous]
+        indices = binding.translate(previous, mapping, address=address)
         content["unavailable"] = cast(torch.Tensor, content["unavailable"]) + (previous.ge(0) & indices.lt(0)).sum(
             dim=-1
         )
@@ -463,6 +471,10 @@ class Decoder(DecoderBase):
                 ),
             }
         )
+        # Silent rows keep an admitted member out of every predicted set until it learns.
+        content = cast(torch.nn.Linear, self.linears[TensorKey.content.name])
+        torch.nn.init.zeros_(content.weight)
+        torch.nn.init.constant_(content.bias, SILENT_LOGIT)
 
     @beartype
     def decode(self, pooled: torch.Tensor) -> TensorDict:

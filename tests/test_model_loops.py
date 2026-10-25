@@ -915,3 +915,48 @@ def test_model_batch_size_requires_a_positive_integer(model, entrypoint, batch_s
         else:
             model.batch_size = batch_size
     assert model.batch_size == 2
+
+
+class DistributedCapacity(lit.Callback):
+    """Record reduced loss metrics and the shared observed capacity from each rank."""
+
+    def __init__(self, path):
+        self.path = path
+
+    def teardown(self, trainer, pl_module, stage):
+        torch.save(
+            {
+                "validate": trainer.callback_metrics["loss/validate"].clone(),
+                "train_epoch": trainer.callback_metrics["loss/train_epoch"].clone(),
+                "observed": pl_module.nodes["/events"].encoder.pool.mass_observed.clone(),
+            },
+            self.path / f"capacity-{trainer.global_rank}.pt",
+        )
+
+
+def test_distributed_ranks_share_reduced_losses_and_observed_capacity(options, tmp_path):
+    from lightning.pytorch.strategies import DDPStrategy
+
+    model = rf.Model.xs(d_model=8, batch_size=2, events=rf.Branch(amount=rf.Number), label=rf.Boolean(mask=True))
+    # Only row 1 carries the longest collection, so a single rank observes it directly.
+    table = pa.Table.from_pylist(
+        [
+            {"events": [{"amount": float(j)} for j in range(9 if i == 1 else 1 + i % 3)], "label": bool(i % 2)}
+            for i in range(48)
+        ]
+    )
+    data = rf.ArrowDataModule(model=model, train=table, validate=table, shuffle=False)
+    options["devices"] = 2
+    model.fit(
+        data,
+        max_epochs=1,
+        limit_val_batches=2,
+        callbacks=[DistributedCapacity(tmp_path)],
+        strategy=DDPStrategy(start_method="spawn", process_group_backend="gloo", timeout=timedelta(seconds=45)),
+        **options,
+    )
+    ranks = [torch.load(tmp_path / f"capacity-{rank}.pt", weights_only=True) for rank in range(2)]
+    assert ranks[0]["observed"].item() == ranks[1]["observed"].item() == 9
+    for name in ("validate", "train_epoch"):
+        assert torch.isfinite(ranks[0][name])
+        assert torch.equal(ranks[0][name], ranks[1][name])

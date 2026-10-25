@@ -31,10 +31,7 @@ def test_prediction_envelope_includes_target_state_and_normalized_embedding() ->
     assert representation["output_index"] == 0
     embedding = representation["embedding"]
     assert torch.linalg.vector_norm(torch.tensor(embedding)).item() == pytest.approx(1.0)
-    assert output.schema.metadata == {
-        b"relflow.prediction_format": b"2",
-        b"relflow.model_version": model.version.encode("utf-8"),
-    }
+    assert output.schema.metadata == {b"relflow.model_version": model.version.encode("utf-8")}
     assert "inputs" not in output.column_names
 
 

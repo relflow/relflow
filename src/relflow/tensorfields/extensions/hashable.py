@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import InitVar
+from functools import partial
 from typing import TYPE_CHECKING, Annotated, Literal, Unpack, cast
 
 import numpy as np
@@ -26,6 +27,7 @@ from relflow.tensorfields.base import (
     TensorFieldBase,
     TensorInput,
 )
+from relflow.tensorfields.shared.reconstruction import Metrics, Scores, Totals
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
@@ -33,10 +35,22 @@ if TYPE_CHECKING:
     from relflow.structs.structure import Branch
 
 
-hashable: Extension = Extension(
-    name="hash",
-    types=(int, str, bytes),
-)
+hashable: Extension = Extension(name="hash", types=(int, str, bytes), callbacks=(Metrics,))
+
+
+class Buckets(Totals):
+    """Per-hash bucket accuracy and categorical loss over valued targets."""
+
+    def __init__(self, n_hashes: int):
+        super().__init__(counts=2, sums=1)
+        self.n_hashes = n_hashes
+
+    def compute(self) -> dict[str, torch.Tensor]:
+        valued, correct = self.counts.unbind()
+        return {
+            f"{Metric.loss.value}.{TensorKey.content.value}": self.sums[0] / valued,
+            f"{Metric.accuracy.value}.{TensorKey.content.value}": correct / (valued * self.n_hashes),
+        }
 
 
 _HASH_NORMALIZER: float = float(1 << 63)
@@ -249,6 +263,7 @@ class Decoder(DecoderBase):
             in_features=schema.d_model,
             out_features=request.n_hashes * request.n_buckets,
         )
+        self.metrics = Scores(address, partial(Buckets, request.n_hashes))
 
     @beartype
     def decode(self, pooled: torch.Tensor) -> TensorDict:
@@ -291,16 +306,14 @@ def loss(
     )
 
     valued = trainable & state_targets.eq(Tokens.valued.value)
-    if not valued.any():
-        return loss
-
     request: Request = cast(Request, module.schema.requests[prediction.address])
+    decoder: Decoder = cast(Decoder, module.nodes[prediction.address].decoder)
     n_hashes: int = request.n_hashes
     n_buckets: int = request.n_buckets
 
-    # Per-hash categorical over deterministic quantile buckets.
-    inputs = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N * n_hashes, n_buckets)
-    raw_targets = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(N, n_hashes)
+    # Per-hash categorical over deterministic quantile buckets of valued targets.
+    inputs = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N, n_hashes, n_buckets)[valued]
+    raw_targets = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(N, n_hashes)[valued]
     bucket_targets = (
         raw_targets.to(dtype=torch.get_default_dtype())
         .div(_HASH_NORMALIZER)
@@ -309,31 +322,16 @@ def loss(
         .floor()
         .long()
         .clamp(min=0, max=n_buckets - 1)
-        .reshape(N * n_hashes)
+        .reshape(-1)
     )
-
     per_hash_ce = torch.nn.functional.cross_entropy(
-        input=inputs,
+        input=inputs.reshape(-1, n_buckets),
         target=bucket_targets,
         reduction="none",
     )
+    objective = per_hash_ce.sum() / n_hashes
+    with torch.no_grad():
+        correct = inputs.reshape(-1, n_buckets).argmax(dim=-1).eq(bucket_targets).sum()
+        decoder.metrics.record(module, strata, torch.stack((valued.sum(), correct)), objective.unsqueeze(0))
 
-    loss += module.track(
-        (prediction.address, strata, Metric.loss, TensorKey.content),
-        value=(per_hash_ce.reshape(N, n_hashes).mean(dim=-1).masked_select(valued).mean()),
-    )
-
-    module.track(
-        (prediction.address, strata, Metric.accuracy, TensorKey.content),
-        value=(
-            inputs.argmax(dim=-1)
-            .eq(bucket_targets)
-            .float()
-            .reshape(N, n_hashes)
-            .mean(dim=-1)
-            .masked_select(valued)
-            .mean()
-        ),
-    )
-
-    return loss
+    return loss + objective / valued.sum().clamp_min(1)

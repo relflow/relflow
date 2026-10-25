@@ -8,7 +8,7 @@ import os
 from collections.abc import Callable, Generator, Iterable, Iterator, Mapping
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, replace
-from typing import Any, Literal, TypeAlias, TypeVar, overload
+from typing import Any, Literal, TypeAlias, TypeVar, cast, overload
 
 import lightning.pytorch as lit
 import numpy as np
@@ -16,6 +16,7 @@ import polars as pl
 import pyarrow as pa
 import pyarrow.dataset as ds
 import torch
+from tensordict import TensorDict
 from torch.utils.data import DataLoader, IterableDataset, get_worker_info
 
 import relflow
@@ -260,7 +261,11 @@ def process(
     encoding_context: InterprocessEncodingContext,
     schemas: Schemas | None = None,
 ) -> Iterator[pa.Table]:
-    """Apply an ordered preprocessor pipeline and enforce its final schema."""
+    """Apply an ordered preprocessor pipeline and enforce its final schema.
+
+    Output columns that keep a source name and differ only by Polars' rendering
+    return to their source Arrow field.
+    """
 
     pipeline = Preprocessor.normalize(preprocessor)
     schemas = Schemas() if schemas is None else schemas
@@ -275,7 +280,12 @@ def process(
             yield table
         return
 
-    current: Iterable[pl.DataFrame] = (polars(batch, context="preprocessor input") for batch in batches)
+    def ingress() -> Iterator[pl.DataFrame]:
+        for batch in batches:
+            lock(schemas, "source", batch.schema, context="Arrow source schema changed")
+            yield polars(batch, context="preprocessor input")
+
+    current: Iterable[pl.DataFrame] = ingress()
     for processor in pipeline:
         if processor.scope == "dataset":
             frames = list(current)
@@ -289,7 +299,7 @@ def process(
         )
 
     for output in current:
-        table = arrow(output, context="preprocessor output")
+        table = arrow(output, context="preprocessor output", schema=schemas.source)
         lock(
             schemas,
             "processed",
@@ -386,6 +396,9 @@ def rebatch(batches: Iterable[pa.Table], *, size: int, drop_last: bool) -> Itera
     held: pa.Table | None = None
     for item in batches:
         held = merge((held, item)) if held is not None else item
+        if held is not None and held.num_rows >= size and any(column.num_chunks > 1 for column in held.columns):
+            # One copy per buffer fill keeps every sliced batch single-chunk.
+            held = held.combine_chunks()
         while held is not None and held.num_rows >= size:
             yield held.slice(0, size)
             held = held.slice(size)
@@ -402,17 +415,18 @@ def distribute(
     world_size: int,
     drop_last: bool,
 ) -> Iterator[pa.Table]:
-    """Give every distributed rank disjoint batches with an equal step count."""
+    """Give every distributed rank disjoint rows and an equal step count without dropping rows."""
 
     global_size = size * world_size
     for item in rebatch(batches, size=global_size, drop_last=False):
         if item.num_rows < global_size and drop_last:
             return
-
-        usable = item.num_rows - item.num_rows % world_size
-        if not usable:
-            return
-        indices = pa.array(np.arange(global_rank, usable, world_size), type=pa.int64())
+        if world_size == 1:
+            yield item
+            continue
+        # Every rank steps once per superbatch: the first ranks carry the
+        # remainder rows and ranks beyond a short tail receive zero rows.
+        indices = pa.array(np.arange(global_rank, item.num_rows, world_size), type=pa.int64())
         yield item.take(indices)
 
 
@@ -525,8 +539,11 @@ class ArrowDataset(IterableDataset[Encoded]):
                     batches = (materialized,)
                 batches = limit(batches, size=self.options.epoch_size)
             else:
-                if callable(self.source):
-                    batches = limit(batches, size=self.options.epoch_size)
+                if callable(self.source) and self.options.epoch_size is not None:
+                    # A factory may be unbounded: read one shuffle window past
+                    # the cap so each epoch still draws a different subset.
+                    window = 2 * self.options.shuffle_rows if self.options.shuffle and self.options.shuffle_rows else 0
+                    batches = limit(batches, size=max(self.options.epoch_size, window))
                 if self.options.shuffle:
                     assert self.options.shuffle_rows is not None
                     batches = shuffle(
@@ -546,10 +563,12 @@ class ArrowDataset(IterableDataset[Encoded]):
             # Only distributed ranks require equal steps. A sharded worker already
             # owns disjoint rows; replaying workers take turns on complete rank
             # batches, including a partial tail that would otherwise be lost.
+            # Ordinals stay unique across workers so sampled masks differ for
+            # every batch of an epoch while replaying deterministically.
             assigned = (
-                distributed
+                ((index * workers + worker, batch) for index, batch in enumerate(distributed))
                 if sharded
-                else (batch for index, batch in enumerate(distributed) if index % workers == worker)
+                else ((index, batch) for index, batch in enumerate(distributed) if index % workers == worker)
             )
             yield from self.encode(assigned, epoch=epoch)
         finally:
@@ -558,11 +577,12 @@ class ArrowDataset(IterableDataset[Encoded]):
             if isinstance(scanned, Generator):
                 scanned.close()
 
-    def encode(self, batches: Iterable[pa.Table], *, epoch: int) -> Iterator[Encoded]:
-        """Encode one consumer's final model batches."""
+    def encode(self, batches: Iterable[tuple[int, pa.Table]], *, epoch: int) -> Iterator[Encoded]:
+        """Encode one consumer's final model batches by epoch ordinal; a loader worker ships each one packed."""
 
-        for item in batches:
-            yield encode(
+        shipped = get_worker_info() is not None
+        for ordinal, item in batches:
+            encoded = encode(
                 batch=item,
                 schema=self.schema,
                 strata=self.strata,
@@ -570,7 +590,31 @@ class ArrowDataset(IterableDataset[Encoded]):
                 seed=self.seed,
                 epoch=epoch,
                 retain=self.options.retain,
+                ordinal=ordinal,
             )
+            yield ship(encoded) if shipped else encoded
+
+
+def ship(encoded: Encoded) -> Encoded:
+    """Pack a batch for the loader queue: one storage per TensorDict and an Arrow source owning only its rows.
+
+    A worker hands batches to the trainer through pickles. A sliced Arrow table
+    pickles its parent buffers, the whole shuffle window, and hundreds of tensor
+    leaves cross as hundreds of shared-memory segments; either costs more than
+    encoding the batch did.
+    """
+
+    source = encoded.source
+    if source.num_rows:
+        source = source.take(np.arange(source.num_rows))
+    return replace(
+        encoded,
+        tensors=cast(TensorDict, encoded.tensors.consolidate()),
+        source=source,
+        observations={
+            address: cast(TensorDict, value.consolidate()) for address, value in encoded.observations.items()
+        },
+    )
 
 
 def loader(
@@ -662,8 +706,12 @@ class ArrowDataModule(lit.LightningDataModule):
     Pass at least one of ``train``, ``validate``, ``test`` or ``predict``.
     Configuration accepts one value for every split or a mapping keyed by
     ``"train"``, ``"validate"``, ``"test"`` and ``"predict"``. Shuffling defaults
-    to training only; ``sample`` is a probability, ``epoch_size`` caps rows, and
-    ``shuffle_rows`` bounds the streaming shuffle buffer. ``retain`` preserves
+    to training only and ``sample`` is a probability. ``epoch_size`` caps the
+    rows of one epoch after shuffling, so tables, files, and datasets draw a
+    fresh subset each epoch; a callable source may be unbounded, so it stops
+    reading after ``max(epoch_size, 2 * shuffle_rows)`` rows (``epoch_size``
+    without shuffling) and caps within that window. ``shuffle_rows`` bounds the
+    streaming shuffle buffer. ``retain`` preserves
     processed columns for prediction output and requires exact split keys when
     given as a mapping. Data loaders yield :class:`~relflow.data.arrow.Encoded`
     batches with Arrow source metadata and a TensorDict payload.

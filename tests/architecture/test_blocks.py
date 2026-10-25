@@ -144,7 +144,7 @@ def test_active_dropout_requires_dense_rng_schedule():
 
 
 def test_learned_pool_preserves_additive_evidence_and_count_after_rms_normalization():
-    pool = LearnedQueryCrossAttention(1, 4, 2, 0.0, position=False, mass_capacity=4, ffnx=3).double()
+    pool = LearnedQueryCrossAttention(1, 4, 2, 0.0, position=False, mass_capacity=4, mass=True, ffnx=3).double()
     assert isinstance(pool.norm, torch.nn.RMSNorm)
     with torch.no_grad():
         pool.mass_projection.weight.copy_(torch.eye(4))

@@ -9,6 +9,7 @@ from functools import partial
 from multiprocessing import Manager
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Unpack, cast
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import pydantic
@@ -18,7 +19,6 @@ from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
 from relflow.distributed import all_gather_object, broadcast_object, is_distributed
-from relflow.helpers.digest import Digest
 from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
@@ -31,18 +31,17 @@ from relflow.tensorfields.base import (
     TensorFieldBase,
     TensorInput,
 )
+from relflow.tensorfields.extensions.number import precise
 from relflow.tensorfields.output import array, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
+from relflow.tensorfields.shared.digest import Digest
+from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.datasets.base import InterprocessEncodingContext
-    from relflow.helpers.resize import Resize
     from relflow.structs.experiment import Schema
-
-
-# Standardized lanes stay bounded so one extreme outlier cannot swamp the embedding.
-SPREAD_LIMIT: float = 64.0
+    from relflow.tensorfields.shared.resize import Resize
 
 
 @dataclass(frozen=True)
@@ -129,21 +128,20 @@ class Synchronize(Callback):
                 resource.state.freeze()
 
 
-quantile = Extension(name="quantile", types=(int | float,))
-quantile.callback(CounterUpdateCallback)
-quantile.callback(Synchronize)
+quantile: Extension = Extension(
+    name="quantile",
+    types=(int | float,),
+    callbacks=(CounterUpdateCallback, Metrics, Synchronize),
+)
 
 
 @quantile.register(Component.Request)
 class Request(RequestBase):
-    """A finite scalar normalized to its estimated training percentile.
+    """A scalar normalized to its estimated training percentile.
 
     The digest learns pristine consumed training values, including hidden targets.
-    Evaluation freezes the distribution. Each coordinate carries its percentile
-    rank and a robust standardized lane, so values beyond the learned support
-    still move the embedding. Predictions invert the learned quantiles inside
-    ``[0, 1]`` and continue linearly from the outer deciles beyond them, in
-    source units.
+    Evaluation freezes the distribution. Predictions use its inverse transform
+    and remain in source units; values outside learned support clip to its tails.
     """
 
     type: Literal["quantile"] = "quantile"
@@ -194,14 +192,25 @@ class Request(RequestBase):
 
 
 def numeric(values: pa.Array | pa.ChunkedArray, address: Address) -> pa.Array:
-    """Preserve float64 distinctions and reject unordered or nonfinite scalars."""
+    """Preserve float64 distinctions and reject unordered scalars; the digest ignores nonfinite values."""
     if not (pa.types.is_integer(values.type) or pa.types.is_floating(values.type) or pa.types.is_null(values.type)):
-        raise ValueError(f"Quantile field at '{address}' expects finite scalar numbers, got {values.type}")
+        raise ValueError(f"Quantile field at '{address}' expects scalar numbers, got {values.type}")
     converted = pc.cast(values, pa.float64(), safe=True)
-    converted = converted.combine_chunks() if isinstance(converted, pa.ChunkedArray) else converted
-    if pc.any(pc.invert(pc.is_finite(converted))).as_py():
-        raise ValueError(f"Quantile field at '{address}' requires finite numbers; use null for missing values")
-    return converted
+    return converted.combine_chunks() if isinstance(converted, pa.ChunkedArray) else converted
+
+
+def encode(field: RaggedField, *, address: Address) -> tuple[torch.Tensor, torch.Tensor]:
+    """Source float64 bits and state tokens of one field.
+
+    A NaN or infinite value has no percentile: its position takes the ``other``
+    state and zero bits, so it is neither ranked nor regressed against. Integer
+    bits retain source precision on devices without float64 arithmetic.
+    """
+    data = field.place(numeric(field.values, address).to_numpy(zero_copy_only=False), fill=0.0)
+    state = field.dense.copy()
+    state[~np.isfinite(data) & (state == Tokens.valued.value)] = Tokens.other.value
+    np.nan_to_num(data, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+    return torch.from_numpy(data).view(torch.int64), torch.from_numpy(state)
 
 
 def values(raw: torch.Tensor) -> pa.Array:
@@ -215,48 +224,14 @@ def percentiles(digest: Digest, raw: torch.Tensor, state: torch.Tensor) -> torch
     return torch.where(state.eq(Tokens.valued), ranks, 0.5)
 
 
-def quantiles(digest: Digest, probabilities: list[float]) -> list[float]:
-    """Read learned quantiles as floats; callers check that the digest has observed values."""
-    return [float(cast(float, value)) for value in digest.quantile(pa.array(probabilities)).to_pylist()]
-
-
-def lanes(digest: Digest, raw: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
-    """Pair each percentile rank with a robust standardized lane that keeps growing past the learned support."""
-    ranks = percentiles(digest, raw, state)
-    spread = torch.zeros_like(ranks)
-    if digest.count:
-        lower, median, upper = quantiles(digest, [0.25, 0.5, 0.75])
-        scale = upper - lower
-        if not scale > 0.0:
-            scale = max(digest.maximum - digest.minimum, 1.0)
-        floats = values(raw).to_numpy(zero_copy_only=False)
-        standardized = torch.from_numpy(((floats - median) / scale).copy()).reshape(raw.shape)
-        standardized = standardized.to(device=raw.device, dtype=torch.float32).clamp(-SPREAD_LIMIT, SPREAD_LIMIT)
-        spread = torch.where(state.eq(Tokens.valued), standardized, 0.0)
-    return torch.stack((ranks, spread), dim=-1)
-
-
-def inverse(digest: Digest, scores: torch.Tensor) -> torch.Tensor:
-    """Return source units: learned quantiles inside [0, 1], continued linearly from the outer deciles beyond."""
-    # Source units are output metadata; retain their float64 precision on CPU.
-    flat = scores.detach().cpu().to(torch.float64).reshape(-1)
-    raw = digest.quantile(array(flat.clamp(0.0, 1.0), pa.float64())).to_numpy(zero_copy_only=False).copy()
-    content = torch.from_numpy(raw)
-    if digest.count:
-        low, lower, upper, high = quantiles(digest, [0.0, 0.1, 0.9, 1.0])
-        below = flat.clamp(max=0.0) * ((lower - low) / 0.1)
-        above = (flat - 1.0).clamp(min=0.0) * ((high - upper) / 0.1)
-        content = content + below + above
-    return content.reshape(scores.shape)
-
-
 @quantile.register(Component.observe)
 def observe(
     field: RaggedField, *, address: Address, schema: Schema, state: object | None, learn: bool
 ) -> TensorDict | None:
     if not learn:
         return None
-    return TensorDict({TensorKey.state: tally(torch.from_numpy(field.dense.copy()), len(Tokens))}, batch_size=[])
+    _, states = encode(field, address=address)
+    return TensorDict({TensorKey.state: tally(states, len(Tokens))}, batch_size=[])
 
 
 @quantile.register(Component.TensorField)
@@ -291,28 +266,20 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         request = cast(Request, schema.requests[address])
         digest = context.state if isinstance(context.state, Digest) else Digest(request.compression)
 
-        def raw(field: RaggedField) -> torch.Tensor:
-            values = numeric(field.values, address).to_numpy(zero_copy_only=False)
-            # Float64 bits retain source precision without putting unsupported
-            # float64 arithmetic on devices such as MPS. Batch axes stay explicit.
-            return torch.from_numpy(field.place(values, fill=0.0).copy()).view(torch.int64)
-
-        state = torch.from_numpy(input.dense.copy())
-        content = raw(input)
+        content, state = encode(input, address=address)
         targets = TensorDict({}, batch_size=input.shape)
         if address in schema.objectives:
-            target_state = torch.from_numpy(target.dense.copy())
-            target_raw = raw(target)
+            target_raw, target_state = encode(target, address=address)
             targets = TensorDict(
                 {
                     TensorKey.state: target_state,
-                    TensorKey.content: lanes(digest, target_raw, target_state),
+                    TensorKey.content: percentiles(digest, target_raw, target_state),
                     "raw": target_raw,
                 },
                 batch_size=input.shape,
             )
         return cls(
-            content=lanes(digest, content, state),
+            content=percentiles(digest, content, state),
             raw=content,
             state=state,
             present=present,
@@ -348,9 +315,9 @@ def bind(
         for payload in all_gather_object(delta.serialize()):
             digest.merge(Digest.deserialize(payload))
         resize.publish(partial(resource.state.publish, digest.serialize()))
-    field.content = lanes(digest, field.raw, field.state)
+    field.content = percentiles(digest, field.raw, field.state)
     if TensorKey.content in field.targets:
-        field.targets[TensorKey.content] = lanes(
+        field.targets[TensorKey.content] = percentiles(
             digest, cast(torch.Tensor, field.targets["raw"]), cast(torch.Tensor, field.targets[TensorKey.state])
         )
 
@@ -363,7 +330,7 @@ class Embedder(EmbedderBase):
         self.distribution = Distribution(request.compression)
         self.counter = Counter(address, len(Tokens))
         self.embeddings = torch.nn.Embedding(len(Tokens), schema.d_model)
-        self.linear = torch.nn.Linear(2 * request.n_bands + 2, schema.d_model)
+        self.linear = torch.nn.Linear(2 * request.n_bands + 1, schema.d_model)
         self.register_buffer("frequencies", torch.arange(1, request.n_bands + 1).float() * math.pi)
         self.frequencies: torch.Tensor
 
@@ -373,10 +340,9 @@ class Embedder(EmbedderBase):
 
     def forward(self, inputs: TensorInput) -> Parcel:
         state = inputs.state.reshape(-1)
-        content = cast(torch.Tensor, inputs.content).reshape(-1, 2)
-        ranks = content[:, :1]
+        ranks = cast(torch.Tensor, inputs.content).reshape(-1, 1)
         weighted = ranks * self.frequencies
-        features = torch.cat((content, weighted.sin(), weighted.cos()), dim=-1)
+        features = torch.cat((ranks, weighted.sin(), weighted.cos()), dim=-1)
         payload = self.embeddings(state) + torch.nn.functional.gelu(self.linear(features), approximate="tanh")
         lane = torch.where(state.eq(Tokens.valued), ranks[:, 0], payload[:, -1])
         payload = torch.cat((payload[:, :-1], (lane + payload[:, -1] * 0.0).unsqueeze(-1)), dim=-1)
@@ -405,6 +371,7 @@ class Decoder(DecoderBase):
         self.classification = torch.nn.Linear(schema.d_model, len(Tokens))
         self.regression = torch.nn.Linear(schema.d_model, 1)
         self.distribution = State(cast(Request, schema.requests[address]).compression)
+        self.metrics = Scores(address, Errors)
 
     def attach(self, context: object | None) -> None:
         if not isinstance(context, State):
@@ -412,10 +379,14 @@ class Decoder(DecoderBase):
         self.distribution = context
 
     def decode(self, pooled: torch.Tensor) -> TensorDict:
-        scores = self.regression(pooled)
-        content = inverse(self.distribution.snapshot(), scores)
+        with precise(pooled.device):
+            # A percentile is a source-unit coordinate; bf16 would quantize it to 1/256.
+            ranks = self.regression(pooled.float()).sigmoid()
+        raw = self.distribution.snapshot().quantile(array(ranks, pa.float64())).to_numpy(zero_copy_only=False).copy()
+        # Source units are output metadata; retain their float64 precision on CPU.
+        content = torch.from_numpy(raw).reshape(ranks.shape)
         return TensorDict(
-            {TensorKey.state: self.classification(pooled), TensorKey.content: content, "percentile": scores}
+            {TensorKey.state: self.classification(pooled), TensorKey.content: content, "percentile": ranks}
         )
 
 
@@ -424,6 +395,7 @@ def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: 
     address = prediction.address
     request = cast(Request, module.schema.requests[address])
     embedder = cast(Embedder, module.nodes[address].embedder)
+    decoder = cast(Decoder, module.nodes[address].decoder)
     logits = cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(-1, len(Tokens))
     ranks = cast(torch.Tensor, prediction.payload["percentile"]).reshape(-1)
     selected = batch.trainable.reshape(-1)
@@ -438,7 +410,7 @@ def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: 
         )
     valued = selected & states.eq(Tokens.valued)
     if valued.any():
-        target = cast(torch.Tensor, batch.targets[TensorKey.content])[..., 0].reshape(-1)
+        target = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(-1)
         match request.objective:
             case "mae":
                 residual = (ranks - target).abs()
@@ -447,15 +419,14 @@ def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: 
             case "huber":
                 residual = torch.nn.functional.huber_loss(ranks, target, reduction="none")
         result = result + module.track((address, strata, Metric.loss, TensorKey.content), residual[valued].mean())
-        raw = cast(torch.Tensor, prediction.payload[TensorKey.content]).detach().cpu().reshape(-1)
-        raw_target = (
-            cast(torch.Tensor, batch.targets["raw"]).detach().cpu().contiguous().view(torch.float64).reshape(-1)
-        )
-        valid = valued.cpu() & torch.isfinite(raw)
-        if valid.any():
-            error = (raw - raw_target)[valid]
-            module.track((address, strata, Metric.mae, TensorKey.content), error.abs().mean().to(ranks))
-            module.track((address, strata, Metric.rmse, TensorKey.content), error.square().mean().sqrt().to(ranks))
+
+    # Error metrics report source units on finite targets whose inverse is defined.
+    raw = cast(torch.Tensor, prediction.payload[TensorKey.content]).detach().cpu().reshape(-1)
+    raw_target = cast(torch.Tensor, batch.targets["raw"]).detach().cpu().contiguous().view(torch.float64).reshape(-1)
+    valid = valued.cpu() & torch.isfinite(raw)
+    predicted = raw.masked_select(valid).to(ranks)
+    observed = raw_target.masked_select(valid).to(ranks)
+    decoder.metrics.record(module, strata, *errors(predicted, observed))
     return result
 
 
@@ -481,6 +452,7 @@ __all__ = [
     "Embedder",
     "Decoder",
     "quantile",
+    "encode",
     "observe",
     "bind",
     "learn",

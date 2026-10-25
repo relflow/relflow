@@ -367,3 +367,22 @@ def test_relflow_full_resume_restores_live_rows_before_admitting_new_categories(
     assert rf.Category.vocabulary(restored, "/category") == tuple("abcdefgh")
     assert rf.Category.counts(restored, "/category") == dict.fromkeys("abcdefgh", 1)
     assert rf.Number.normalization(restored, "/amount")["count"] == 8
+
+
+def test_update_follows_the_lerp_recurrence_without_aliasing_parameters():
+    module = torch.nn.Linear(3, 2)
+    optimizer = torch.optim.SGD(module.parameters(), lr=0.1)
+    ema = rf.EMA(decay=0.5)
+
+    ema.update(module, optimizer)
+    first = {name: parameter.detach().clone() for name, parameter in module.named_parameters()}
+    with torch.no_grad():
+        for parameter in module.parameters():
+            parameter.add_(1.0)
+    ema.update(module, optimizer)
+
+    assert ema.updates == 2
+    for name, parameter in module.named_parameters():
+        torch.testing.assert_close(ema.average[name], 0.5 * first[name] + 0.5 * parameter.detach())
+        assert ema.average[name].data_ptr() != parameter.data_ptr()
+        assert not ema.average[name].requires_grad

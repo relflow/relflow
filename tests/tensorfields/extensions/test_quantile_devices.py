@@ -21,10 +21,6 @@ def test_quantile_accelerator_keeps_raw_doubles_off_device(device, monkeypatch):
     model.to(device)
     batch = encoded.to(device)
     monkeypatch.setattr(model, "track", lambda names, value: value)
-    with torch.no_grad():
-        # Scores inside [0, 1] stay within the learned support; beyond it they extrapolate.
-        model.nodes["/y"].decoder.regression.weight.zero_()
-        model.nodes["/y"].decoder.regression.bias.fill_(0.5)
 
     [prediction] = model(batch, strata="train")
     content = prediction.payload[TensorKey.content]

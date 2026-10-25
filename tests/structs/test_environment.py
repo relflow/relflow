@@ -10,6 +10,8 @@ ENV_VARS = (
     "MAX_BATCH_SIZE",
     "RELFLOW_BATCH_TIMEOUT",
     "BATCH_TIMEOUT",
+    "RELFLOW_MAX_QUEUE_SIZE",
+    "MAX_QUEUE_SIZE",
     "RELFLOW_WORKERS",
     "WORKERS",
     "RELFLOW_ACCELERATOR",
@@ -70,3 +72,26 @@ def test_deployment_environment_accepts_all_column_retention(monkeypatch: pytest
     monkeypatch.setenv("RELFLOW_RETAIN", '"*"')
 
     assert Deployment().retain == "*"
+
+
+def test_deployment_environment_accepts_json_column_retention(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("RELFLOW_RETAIN", '["id", "amount"]')
+
+    assert Deployment().retain == ("id", "amount")
+
+
+def test_deployment_environment_rejects_malformed_retention(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("RELFLOW_RETAIN", '["id", 1]')
+
+    with pytest.raises(ValidationError, match="RELFLOW_RETAIN"):
+        Deployment()
+
+
+def test_deployment_environment_accepts_uvicorn_log_levels_and_queue_size(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("RELFLOW_LOG_LEVEL", "TRACE")
+    monkeypatch.setenv("RELFLOW_MAX_QUEUE_SIZE", "16")
+
+    env = Deployment()
+
+    assert env.log_level == "trace"
+    assert env.max_queue_size == 16

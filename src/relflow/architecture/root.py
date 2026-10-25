@@ -516,16 +516,23 @@ class Model(lit.LightningModule):
         on_step: bool | None = None,
         on_epoch: bool | None = None,
         logger: bool | None = None,
+        rows: int | None = None,
+        uniform: bool = False,
     ) -> MetricValue:
-        """Log training steps or evaluation aggregates, using dotted address groups."""
+        """Log training steps or evaluation aggregates, using dotted address groups.
+
+        ``rows`` weights epoch means by this batch's observations instead of the
+        configured batch size. ``uniform`` declares that every rank emits the
+        metric on every step, so Lightning reduces it across ranks; a metric
+        emitted from a data-dependent branch must stay rank-local because a
+        collective that only some ranks join hangs. Stateful TorchMetrics are
+        updated on every rank and aggregate their own state.
+        """
         assert len(names) > 1
         group, *keys = names
         group = ("." if group.startswith("/") else "") + group.strip("/").replace("/", ".")
         key = ".".join(part.replace("/", ".").lower() for part in keys)
 
-        # Scalar metrics are emitted from data-dependent branches, so DDP ranks cannot
-        # safely synchronize every scalar log call as a collective. Stateful
-        # TorchMetrics are updated/logged on every rank and can aggregate their state.
         stateful = isinstance(value, TorchMetric)
         self.log(
             name=f"{group}/{key}",
@@ -534,8 +541,8 @@ class Model(lit.LightningModule):
             on_epoch=not self.training if on_epoch is None else on_epoch,
             logger=logger,
             sync_dist=True,
-            rank_zero_only=not stateful,
-            batch_size=self.batch_size,
+            rank_zero_only=not (stateful or uniform),
+            batch_size=self.batch_size if rows is None else rows,
         )
 
         return value

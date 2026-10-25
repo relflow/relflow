@@ -203,7 +203,7 @@ class Source:
             for fragment in dataset.get_fragments():
                 actual = fragment.physical_schema
                 if self.schema is None:
-                    if physical is not None and not physical.equals(actual, check_metadata=True):
+                    if physical is not None and not physical.equals(actual, check_metadata=False):
                         raise TypeError(
                             f"{self.label}: schema changed in {fragment.path!r}; expected {physical}, got {actual}; supply a compatible schema explicitly"
                         )

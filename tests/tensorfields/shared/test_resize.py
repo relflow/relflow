@@ -4,7 +4,7 @@ import pytest
 import torch
 from torch import nn
 
-from relflow.helpers.resize import Resize
+from relflow.tensorfields.shared.resize import Resize
 
 
 def test_metadata_publication_follows_successful_validation_and_commit():

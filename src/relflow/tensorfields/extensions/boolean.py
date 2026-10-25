@@ -41,8 +41,7 @@ if TYPE_CHECKING:
     from relflow.structs.structure import Branch
 
 
-boolean: Extension = Extension(name="boolean", types=(bool,))
-boolean.callback(CounterUpdateCallback)
+boolean: Extension = Extension(name="boolean", types=(bool,), callbacks=(CounterUpdateCallback,))
 BOOLEAN_VALUES = (-1.0, 0.0, 1.0)
 Threshold = Annotated[float, pydantic.Field(ge=0.0, le=1.0)]
 Thresholds = Annotated[list[Threshold], pydantic.Field(min_length=1)]

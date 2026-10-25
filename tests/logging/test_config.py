@@ -6,7 +6,7 @@ from logging.handlers import BufferingHandler
 
 import pytest
 
-from relflow.logging.config import CONTEXT, Logger, configure
+from relflow.logging.config import CONTEXT, Logger, configure, severity
 
 
 @pytest.fixture
@@ -129,3 +129,43 @@ def test_logger_rejects_non_mapping_context():
 def test_configure_rejects_invalid_levels(level: object):
     with pytest.raises((TypeError, ValueError), match="RelFlow log level"):
         configure(level=level)
+
+
+def test_configure_reads_uvicorn_levels_from_the_environment(
+    package_logger: logging.Logger, monkeypatch: pytest.MonkeyPatch
+):
+    stream = io.StringIO()
+    monkeypatch.setenv("RELFLOW_LOG_LEVEL", "trace")
+
+    logger = configure(output=stream)
+    logger.debug("fine")
+
+    assert package_logger.level == logging.DEBUG
+    assert stream.getvalue().partition(" ")[2] == "DEBUG fine\n"
+
+
+def test_configure_falls_back_to_info_for_unknown_environment_levels(
+    package_logger: logging.Logger, monkeypatch: pytest.MonkeyPatch
+):
+    stream = io.StringIO()
+    monkeypatch.setenv("RELFLOW_LOG_LEVEL", "verbose")
+
+    logger = configure(output=stream)
+    logger.debug("hidden")
+
+    assert package_logger.level == logging.INFO
+    assert stream.getvalue().partition(" ")[2] == (
+        "WARNING RELFLOW_LOG_LEVEL='verbose' is not one of CRITICAL, ERROR, WARNING, INFO, DEBUG, TRACE; "
+        "logging at INFO {'component': 'logging'}\n"
+    )
+
+
+def test_configure_accepts_an_explicit_trace_level(package_logger: logging.Logger):
+    configure(level="trace", output=io.StringIO())
+
+    assert package_logger.level == logging.DEBUG
+
+
+@pytest.mark.parametrize(("level", "expected"), [("trace", logging.DEBUG), (" Warning ", logging.WARNING), (25, 25)])
+def test_severity_translates_the_shared_vocabulary(level: str | int, expected: int):
+    assert severity(level) == expected

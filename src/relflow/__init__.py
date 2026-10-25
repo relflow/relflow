@@ -43,7 +43,6 @@ from relflow.data.processors import (
 )
 from relflow.data.ragged import RaggedField
 from relflow.data.sources import source
-from relflow.helpers import Jitter
 from relflow.helpers.optimizers import adamw
 from relflow.inference.callback import Writer
 from relflow.structs.enums import (
@@ -93,10 +92,11 @@ from relflow.tensorfields.extensions.quantile import Request as Quantile
 from relflow.tensorfields.extensions.set import Request as Set
 from relflow.tensorfields.extensions.text import Request as Text
 from relflow.tensorfields.extensions.vector import Request as Vector
+from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.vocabulary import VocabularySyncCallback
 
 if TYPE_CHECKING:
-    from relflow.inference.deployment import (
+    from relflow.inference.deployment import (  # noqa: F401
         Accelerator,
         Deployment,
         Input,
@@ -105,6 +105,8 @@ if TYPE_CHECKING:
         UpdateOperation,
     )
 
+# Serving names resolve lazily through ``__getattr__`` and stay out of ``__all__``
+# so star imports succeed without the serving extra.
 _SERVING_EXPORTS = {
     "Accelerator",
     "Deployment",
@@ -140,7 +142,6 @@ def __dir__() -> list[str]:
 __all__ = [
     "__version__",
     "Address",
-    "Accelerator",
     "Attention",
     "Branch",
     "BatchContext",
@@ -160,12 +161,9 @@ __all__ = [
     "EarlyStopping",
     "EMA",
     "DecoderBase",
-    "Deployment",
     "EmbedderBase",
     "Hash",
     "Schema",
-    "Input",
-    "JSONBackend",
     "Jitter",
     "Leaf",
     "Metric",
@@ -173,7 +171,6 @@ __all__ = [
     "MaskInput",
     "Mean",
     "Model",
-    "ModelSource",
     "MutationLockCallback",
     "NodeAttribute",
     "NodePredicate",
@@ -212,7 +209,6 @@ __all__ = [
     "Text",
     "Tokens",
     "TreeFieldInput",
-    "UpdateOperation",
     "Vector",
     "VocabularySyncCallback",
     "Writer",

@@ -257,7 +257,8 @@ def test_preprocessor_may_filter_every_prediction_row_without_erasing_schema(bat
 
     assert calls == {"pre": 1, "post": 1}
     assert len(result) == 0
-    assert result["inputs"].type == pa.struct([pa.field("request_id", pa.large_string())])
+    # Retained inputs keep their source Arrow types through the Polars round trip.
+    assert result["inputs"].type == pa.struct([pa.field("request_id", pa.string())])
     assert result["predictions"].type.get_field_index("label") == 0
 
 

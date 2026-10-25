@@ -11,7 +11,6 @@ from tensordict import TensorDict
 
 import relflow as rf
 from relflow.data.ragged import RaggedField, coalesce
-from relflow.helpers import Jitter
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
@@ -27,6 +26,7 @@ from relflow.tensorfields.extensions.text import (
     TensorField,
     loss,
 )
+from relflow.tensorfields.shared.jitter import Jitter
 from tests.arrow import table as arrow_table
 from tests.tensorfields.helpers import tensorize
 
@@ -680,10 +680,10 @@ class DummyModule:
     def __init__(self, schema: Schema, embedder: Embedder, decoder: Decoder | None):
         self.schema = schema
         self.nodes = {ADDRESS: SimpleNamespace(embedder=embedder, decoder=decoder)}
-        self.logged: list[tuple[tuple[str, ...], float]] = []
+        self.logged: list[tuple[tuple[str, ...], object]] = []
 
     def track(self, names: tuple[str, ...], value: torch.Tensor) -> torch.Tensor:
-        self.logged.append((names, float(value.detach().cpu())))
+        self.logged.append((names, float(value.detach().cpu()) if torch.is_tensor(value) else value))
         return value
 
 
@@ -761,3 +761,33 @@ def test_text_loss_reconstructs_frozen_embedding(monkeypatch: pytest.MonkeyPatch
     module = DummyModule(schema, embedder, decoder)
     output = loss(module=module, prediction=prediction, batch=field, strata=Strata.train)
     assert torch.isclose(output, torch.tensor(expected, dtype=output.dtype), atol=1e-3)
+
+
+def test_text_evaluation_metrics_accumulate_across_unequal_batches(monkeypatch: pytest.MonkeyPatch):
+    patch_hf(monkeypatch)
+
+    schema = build_schema(mask=Mask(reconstruct=True))
+    embedder = Embedder(schema=schema, address=ADDRESS)
+    decoder = Decoder(schema=schema, address=ADDRESS)
+    module = DummyModule(schema, embedder, decoder)
+    errors = []
+    for rows, offset in ((values(), 1.0), ([[["solo", None]]], 4.0)):
+        field = tensorfield(values=rows, schema=schema, strata=Strata.validate)
+        targets = embedder.encode(content=field.targets[TensorKey.content], state=field.targets[TensorKey.state])
+        state_logits = torch.full((*field.targets[TensorKey.state].shape, len(Tokens)), -50.0)
+        state_logits.scatter_(-1, field.targets[TensorKey.state].unsqueeze(-1), 50.0)
+        prediction = Prediction(
+            address=ADDRESS,
+            payload=TensorDict(
+                {TensorKey.state: state_logits, TensorKey.content: targets + offset}, batch_size=field.state.shape[:1]
+            ),
+        )
+        loss(module=module, prediction=prediction, batch=field, strata=Strata.validate)
+        valued = field.targets[TensorKey.state].reshape(-1).eq(Tokens.valued.value).sum().item()
+        errors.extend([offset] * int(valued) * embedder.hidden_size)
+
+    # Four valued rows at error 1 and one at error 4: the global mean is not the mean of batch means.
+    metrics = decoder.metrics.compute(Strata.validate)
+    assert metrics["mae.content"].item() == pytest.approx(sum(errors) / len(errors))
+    assert metrics["rmse.content"].item() == pytest.approx((sum(e * e for e in errors) / len(errors)) ** 0.5)
+    assert sum(errors) / len(errors) != pytest.approx((1.0 + 4.0) / 2)

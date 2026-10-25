@@ -1,3 +1,4 @@
+import math
 from datetime import datetime
 
 import numpy as np
@@ -8,10 +9,11 @@ import torch
 from tensordict import TensorDict
 
 import relflow as rf
-from relflow.helpers import Jitter
-from relflow.structs.enums import Strata, TensorKey, Tokens
+from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
+from relflow.structs.packages import Prediction
 from relflow.tensorfields.base import TensorInput
 from relflow.tensorfields.extensions.dateparts import DatePart, Embedder
+from relflow.tensorfields.shared.jitter import Jitter
 
 ADDRESS = rf.Address("/", "created")
 
@@ -25,6 +27,55 @@ def test_dateparts_request_hydrates_jitter_from_a_mapping():
     model = build({"add": 0.2, "multiply": 0.1, "normalize": False})
 
     assert model.schema.requests[ADDRESS].jitter == Jitter(add=0.2, multiply=0.1, normalize=False)
+
+
+def test_dateparts_content_loss_and_angle_exclude_null_targets(monkeypatch: pytest.MonkeyPatch):
+    model = rf.Model.xs(created=rf.DateParts(dateparts=["day_of_week"], mask=True), d_model=8)
+    rows = pa.table({"created": pa.array([datetime(2024, 1, 1), None, datetime(2024, 1, 4)])})
+    field = model.encode(rows, strata=Strata.train)[ADDRESS]
+    target = field.targets[TensorKey.content]["day_of_week"].reshape(3, 2)
+    # Predict the first target everywhere: exact for row 0, wrong for row 2, undefined for the null row.
+    content = target[0].expand(3, 2).clone()
+    state_logits = torch.full((3, len(Tokens)), -50.0)
+    state_logits.scatter_(-1, field.targets[TensorKey.state].reshape(3, 1), 50.0)
+    prediction = Prediction(
+        address=ADDRESS,
+        payload=TensorDict(
+            {TensorKey.state: state_logits, TensorKey.content: TensorDict({"day_of_week": content}, batch_size=[3])},
+            batch_size=[3],
+        ),
+    )
+    tracked = {}
+    monkeypatch.setattr(model, "track", lambda names, value, **options: tracked.setdefault(names[2:], value))
+
+    rf.TENSORFIELDS["dateparts"].loss(model, prediction, field, Strata.train)
+
+    angle = 2 * math.pi * 3 / 7
+    assert tracked[Metric.loss, TensorKey.content, "day_of_week"].item() == pytest.approx((1 - math.cos(angle)) / 2)
+    assert tracked[Metric.mae, TensorKey.content, "day_of_week"].item() == pytest.approx(angle / 2)
+
+
+@pytest.mark.parametrize("batch_size", [1, 2, 3])
+def test_dateparts_evaluation_angles_count_valued_targets_across_unequal_batches(batch_size, tmp_path):
+    model = rf.Model.xs(created=rf.DateParts(dateparts=["day_of_week"], mask=True), d_model=8)
+    decoder = model.nodes[ADDRESS].decoder
+    with torch.no_grad():
+        # A constant readout on the unit circle: day 0 of the Sunday-based week.
+        decoder.dateparts["day_of_week"].weight.zero_()
+        decoder.dateparts["day_of_week"].bias.copy_(torch.tensor([0.0, 1.0]))
+    rows = pa.table({"created": pa.array([datetime(2024, 1, 7), datetime(2024, 1, 10), None])})
+    data = rf.ArrowDataModule(model, validate=rows)
+    values = model.validate(
+        data,
+        batch_size=batch_size,
+        accelerator="cpu",
+        devices=1,
+        precision="32-true",
+        enable_progress_bar=False,
+        default_root_dir=tmp_path,
+    )[0]
+    # Sunday is exact and Wednesday is three sevenths of a turn away; the null row adds nothing.
+    assert values[".created/validate.mae.content.day_of_week"] == pytest.approx(2 * math.pi * 3 / 7 / 2, rel=1e-4)
 
 
 @pytest.mark.parametrize("value", [None, 0.0, 0.2, 1, True])

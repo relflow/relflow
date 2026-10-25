@@ -56,6 +56,16 @@ def all_reduce_max(tensor: torch.Tensor) -> torch.Tensor:
     return tensor
 
 
+def all_gather(tensor: torch.Tensor) -> torch.Tensor:
+    """Stack every rank's tensor along a new leading axis; one row when not distributed."""
+    if not is_distributed():
+        return tensor.unsqueeze(0)
+
+    gathered = [torch.empty_like(tensor) for _ in range(world_size())]
+    dist.all_gather(gathered, tensor)
+    return torch.stack(gathered)
+
+
 def all_gather_object(value: Any) -> list[Any]:
     if not is_distributed():
         return [value]

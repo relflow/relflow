@@ -11,9 +11,9 @@ from lightning.pytorch.strategies import DDPStrategy
 from torch.nn.parallel import DistributedDataParallel
 
 from relflow.data.arrow import Encoded
-from relflow.helpers.resize import Resize
 from relflow.structs.enums import Component, Strata
 from relflow.tensorfields.base import TENSORFIELDS, Bind, TensorFieldBase
+from relflow.tensorfields.shared.resize import Resize
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model

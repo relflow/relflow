@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import random
+import hashlib
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any, cast
@@ -14,7 +14,7 @@ from tensordict import TensorDict
 
 from relflow.data.arrow import Encoded, Geometry, Retain
 from relflow.data.datasets.base import EncodedInput, InterprocessEncodingContext
-from relflow.data.ragged import Layout, RaggedField, boolean, coalesce
+from relflow.data.ragged import Layout, RaggedField, coalesce
 from relflow.structs.enums import Component, Strata, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.tree import Address, Node
@@ -38,6 +38,20 @@ def geometry(layouts: Mapping[Address, Layout], *, rows: int) -> TensorDict:
     return TensorDict(source=cast(Any, axes), batch_size=[rows])
 
 
+def batch_salt(seed: int, *, epoch: int, ordinal: int) -> int:
+    """The hash salt of one training batch.
+
+    Hash fields are salted per batch so no bucket identity survives across
+    batches, while every field in the batch shares the salt and keeps equality.
+    Deriving it from the run seed, epoch, and batch ordinal keeps a seeded run
+    reproducible; the process-wide ``random`` state is not, because other
+    callers consume it.
+    """
+
+    payload = f"{seed}:{epoch}:{ordinal}:salt".encode()
+    return int.from_bytes(hashlib.sha256(payload).digest()[:8], "big")
+
+
 def encode(
     batch: pa.Table,
     schema: Schema,
@@ -46,14 +60,15 @@ def encode(
     seed: int = 0,
     epoch: int = 0,
     retain: Retain = (),
+    ordinal: int = 0,
 ) -> Encoded:
     out: dict[Address, TensorFieldBase] = {}
     observations: dict[Address, TensorDict] = {}
     bindings: dict[Address, object] = {}
 
-    salt = random.getrandbits(64) if strata == Strata.train else 0
+    salt = batch_salt(seed, epoch=epoch, ordinal=ordinal) if strata == Strata.train else 0
 
-    coalesced = coalesce(batch, schema=schema, strata=strata, seed=seed, epoch=epoch)
+    coalesced = coalesce(batch, schema=schema, strata=strata, seed=seed, epoch=epoch, ordinal=ordinal)
 
     for address, request in schema.active_requests.items():
         extension = TENSORFIELDS[request.type]
@@ -106,9 +121,9 @@ def encode(
         out[address] = TensorField.new(
             input=input_field,
             target=target_field,
-            present=torch.from_numpy(boolean(projection.present).copy()).reshape(input_field.shape),
-            trainable=torch.from_numpy(boolean(projection.trainable).copy()).reshape(input_field.shape),
-            inferred=torch.from_numpy(boolean(projection.inferred).copy()).reshape(input_field.shape),
+            present=torch.from_numpy(projection.present).reshape(input_field.shape),
+            trainable=torch.from_numpy(projection.trainable).reshape(input_field.shape),
+            inferred=torch.from_numpy(projection.inferred).reshape(input_field.shape),
             address=address,
             schema=schema,
             strata=strata,

@@ -65,7 +65,7 @@ def empty_path(kind, batch_size):
             expected_shape = (batch_size, 8)
             parameters = tuple(module.parameters())
         case "pool":
-            module = LearnedQueryCrossAttention(2, 8, 2, 0.2, mass_capacity=3)
+            module = LearnedQueryCrossAttention(2, 8, 2, 0.2, mass_capacity=3, mass=True)
 
             def invoke():
                 return module(memory, present=present)

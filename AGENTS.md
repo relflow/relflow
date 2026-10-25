@@ -112,6 +112,13 @@ model = rf.Model(
   surrounding whitespace and `cased=False` lowercases labels before lookup, and
   the folded form is what vocabularies and predictions carry.
 - `Hash` represents large identifiers with batch-salted hashes, preserving equality across fields in one encoded batch without learning a persistent vocabulary.
+  Training salts derive from the run seed, epoch, and batch ordinal, never
+  from the process-wide `random` state, so seeded runs repeat exactly.
+- A `Category` or `Set` label admitted while training keeps a zero content row,
+  so it embeds like an unknown label and admission alone never changes a
+  prediction; the next training batch gives every still-zero assigned row a
+  normal start before using it. Zero rows after `encode(strata="train")` are
+  expected, not a bug.
 - `Number` keeps source values, statistics, and readouts in float64 (float32 on
   MPS, which has no float64), so large offsets keep their spread. A float NaN
   tensorizes as the `other` state, not as a value or a null; ±inf stays valued
@@ -120,6 +127,15 @@ model = rf.Model(
   Zone-aware timestamps describe their own wall clock; strings carrying an offset
   are read as UTC. A `Vector` with a NaN or infinite element, and a float NaN label
   in `Category`, take the `other` state; a NaN `Set` member is dropped like a null.
+- `Text(store="dir")` keeps frozen-encoder vectors on disk, keyed by encoder
+  configuration and token row and shared by every split, run, and field with
+  that encoder; misses are encoded once and appended as shards, the
+  extension's callback flushes at epoch and phase ends, and
+  `embedder.warm(strings)` fills it ahead of training. A store that fits
+  `resident` MiB of accelerator memory (default a quarter of the device, up
+  to 2 GiB) is uploaded once per index version and answered on the device;
+  rows hash identically on numpy and torch. The in-process `cache` stays for
+  runs without a store.
 - `rf.Jitter(add=..., multiply=..., normalize=...)` is a shared frozen
   configuration whose `apply(inputs, mask)` method owns the vectorized affine
   tensor operation. Consumers own training activation, eligible coordinates,
@@ -184,6 +200,12 @@ For runtime smoke tests, train with `max_epochs=1`, `limit_train_batches=1`, and
 `limit_val_batches=1`. Documentation may show realistic training configurations
 without executing them.
 
+Loader workers ship each batch packed: `ship()` consolidates the batch's
+TensorDicts into one storage each and compacts the Arrow source so the batch
+pickles at its own size rather than its shuffle window's. In-process batches
+are untouched. Keep `pin_memory` off with workers; pinning is a main-process
+cost, not an overlap.
+
 `model.predict(...)` returns a `pyarrow.Table`. It accepts Arrow inputs directly
 and retains a nonempty sequence of mappings as a small interactive convenience;
 pass a typed empty Arrow object when there are no rows. Canonical decoded
@@ -193,8 +215,8 @@ and `inferred`. Requested embeddings are separate `representations` records:
 `path` segments (root `[]`), repeated ancestor `parents` ordinals, intrinsic
 `output_index`, and a fixed-width `embedding`. Omit unconfigured output columns;
 `inputs` appears only when retention is selected. Models with no public output
-reject prediction. Output format/version metadata travels with Arrow tables and
-HTTP headers. Extension output list children must be named `element`.
+reject prediction. The model's recorded RelFlow version travels with Arrow tables
+and HTTP headers. Extension output list children must be named `element`.
 
 PyArrow Parquet cannot round-trip fixed-size lists below null containers.
 `rf.Writer` rejects those batches before writing; use Arrow IPC for sparse

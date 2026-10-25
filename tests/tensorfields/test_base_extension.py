@@ -540,19 +540,16 @@ def test_extension_missing_required_component_reports_the_extension_and_role(com
         TENSORFIELDS.pop(extension.name, None)
 
 
-def test_extension_registers_multiple_callback_factories():
+def test_extension_declares_callback_factories():
     class FirstCallback(Callback):
         pass
 
     class SecondCallback(Callback):
         pass
 
-    extension = Extension(name=extension_name("callbacks"), types=(object,))
+    extension = Extension(name=extension_name("callbacks"), types=(object,), callbacks=(FirstCallback, SecondCallback))
     try:
-        result = extension.callback(FirstCallback, SecondCallback)
-
-        assert result == (FirstCallback, SecondCallback)
-        assert extension.callback_factories == [FirstCallback, SecondCallback]
+        assert extension.callback_factories == (FirstCallback, SecondCallback)
         assert [type(callback) for callback in extension.callbacks] == [FirstCallback, SecondCallback]
     finally:
         TENSORFIELDS.pop(extension.name, None)
@@ -562,14 +559,11 @@ def test_extension_rejects_invalid_callback_factory_without_registering():
     class InvalidCallback:
         pass
 
-    extension = Extension(name=extension_name("badcallbacks"), types=(object,))
-    try:
-        with pytest.raises(TypeError, match="must produce a Lightning Callback"):
-            extension.callback(InvalidCallback)
+    name = extension_name("badcallbacks")
+    with pytest.raises(TypeError, match="must produce a Lightning Callback"):
+        Extension(name=name, types=(object,), callbacks=(InvalidCallback,))
 
-        assert extension.callback_factories == []
-    finally:
-        TENSORFIELDS.pop(extension.name, None)
+    assert name not in TENSORFIELDS
 
 
 def test_extension_request_must_implement_leaf_contract():

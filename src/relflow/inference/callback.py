@@ -59,24 +59,37 @@ def check_parquet(array: pa.Array | pa.ChunkedArray, address: str, valid: np.nda
 
 
 class Writer(callbacks.BasePredictionWriter):
-    """Persist each written prediction table as one Arrow Parquet shard.
+    """Persist each rank's written prediction tables as one Arrow Parquet shard.
 
     ``Model.predict_step`` has already converted tensors into the canonical
     Arrow prediction envelope. Configured Polars postprocessors run in order,
-    and the first result locks the exact Parquet schema for the rank. Arrow IPC
-    is required when null containers contain fixed-size-list descendants.
+    and the first result locks the exact Parquet schema for the rank. Batches
+    accumulate until ``row_group_size`` rows are pending and are then written
+    as whole row groups, so downstream readers see few large groups instead of
+    one per prediction batch. The shard grows as ``rank-N.parquet.partial`` and
+    takes its final name only when prediction ends; an interrupted or failed
+    run removes the partial file instead of leaving a complete-looking shard.
+    Arrow IPC is required when null containers contain fixed-size-list
+    descendants.
     """
 
     def __init__(
         self,
         path: os.PathLike[str] | str,
         postprocessor: PostprocessorInput = (),
+        row_group_size: int = 65536,
     ) -> None:
         super().__init__(write_interval="batch")
+        if isinstance(row_group_size, bool) or not isinstance(row_group_size, int) or row_group_size <= 0:
+            raise ValueError(f"Writer row_group_size must be a positive integer, got {row_group_size!r}")
         self.path = Path(path)
         self.postprocessors = Postprocessor.normalize(postprocessor)
+        self.row_group_size = row_group_size
         self.schema: pa.Schema | None = None
         self.writer: pq.ParquetWriter | None = None
+        self.shard: Path | None = None
+        self.pending: list[pa.Table] = []
+        self.rows = 0
 
     # Keep the public ``output`` keyword; Lightning calls this hook positionally.
     def write_on_batch_end(  # pyrefly: ignore[bad-override-param-name]
@@ -89,7 +102,7 @@ class Writer(callbacks.BasePredictionWriter):
         batch_idx: int,
         dataloader_idx: int,
     ) -> None:
-        """Write the Arrow table returned by one prediction step."""
+        """Stage the Arrow table returned by one prediction step."""
 
         try:
             if not isinstance(output, pa.Table):
@@ -102,26 +115,73 @@ class Writer(callbacks.BasePredictionWriter):
             if self.writer is None:
                 self.path.mkdir(parents=True, exist_ok=True)
                 self.schema = table.schema
-                self.writer = pq.ParquetWriter(
-                    where=self.path / f"rank-{trainer.global_rank}.parquet",
-                    schema=table.schema,
-                )
+                self.shard = self.path / f"rank-{trainer.global_rank}.parquet"
+                self.writer = pq.ParquetWriter(where=self.partial(self.shard), schema=table.schema)
             elif self.schema is None or not table.schema.equals(self.schema, check_metadata=True):
                 raise ValueError(
                     f"prediction batch schema differs from the first batch; expected {self.schema}, got {table.schema}"
                 )
 
-            self.writer.write_table(table)
+            self.pending.append(table)
+            self.rows += table.num_rows
+            if self.rows >= self.row_group_size:
+                self.flush(final=False)
         except BaseException:
-            self.close()
+            self.discard()
             raise
 
+    @staticmethod
+    def partial(shard: Path) -> Path:
+        """Name the in-progress file beside its final shard."""
+
+        return shard.with_name(f"{shard.name}.partial")
+
+    def flush(self, *, final: bool) -> None:
+        """Write whole row groups from the pending tables; ``final`` also writes the remainder."""
+
+        assert self.writer is not None
+        if not self.pending:
+            return
+        table = pa.concat_tables(self.pending)
+        rows = table.num_rows if final else table.num_rows - table.num_rows % self.row_group_size
+        if rows:
+            self.writer.write_table(table.slice(0, rows), row_group_size=self.row_group_size)
+        remainder = table.slice(rows)
+        self.pending = [remainder] if remainder.num_rows else []
+        self.rows = remainder.num_rows
+
     def close(self) -> None:
-        """Close the active Parquet shard, if any."""
+        """Flush pending rows, finalize the shard under its final name, and unlock the schema."""
+
+        if self.writer is None:
+            return
+        try:
+            self.flush(final=True)
+            self.writer.close()
+            assert self.shard is not None
+            self.partial(self.shard).replace(self.shard)
+        except BaseException:
+            self.discard()
+            raise
+        self.reset()
+
+    def discard(self) -> None:
+        """Drop the partial shard so a failed run leaves no complete-looking output."""
 
         if self.writer is not None:
-            self.writer.close()
-            self.writer = None
+            try:
+                self.writer.close()
+            finally:
+                assert self.shard is not None
+                self.partial(self.shard).unlink(missing_ok=True)
+        self.reset()
+
+    def reset(self) -> None:
+        self.writer = None
+        self.schema = None
+        self.shard = None
+        self.pending = []
+        self.rows = 0
 
     def on_predict_end(self, trainer: lit.Trainer, pl_module: lit.LightningModule) -> None:
         self.close()
@@ -132,7 +192,7 @@ class Writer(callbacks.BasePredictionWriter):
         pl_module: lit.LightningModule,
         exception: BaseException,
     ) -> None:
-        self.close()
+        self.discard()
 
 
 __all__ = ["Writer"]

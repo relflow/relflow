@@ -14,7 +14,6 @@ from beartype import beartype
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
-from relflow.helpers.resize import SILENT_LOGIT
 from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
@@ -30,23 +29,31 @@ from relflow.tensorfields.base import (
 from relflow.tensorfields.output import array, labels, struct, variable
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
 from relflow.tensorfields.shared.reconstruction import Metrics, Reconstruction, Scores
+from relflow.tensorfields.shared.resize import SILENT_LOGIT
 from relflow.tensorfields.shared.rows import Embedding, Linear
 from relflow.tensorfields.shared.vocabulary import (
     INITIAL_CAPACITY,
+    AdmittedRowsCallback,
     OnlineVocabularyModel,
     VocabularyBatch,
     VocabularyState,
     VocabularySyncCallback,
+    admissible,
+    states,
 )
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.datasets.base import InterprocessEncodingContext
-    from relflow.helpers.resize import Resize
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
+    from relflow.tensorfields.shared.resize import Resize
 
-category: Extension = Extension(name="category", types=(bool, int, float, str, bytes))
+category: Extension = Extension(
+    name="category",
+    types=(bool, int, float, str, bytes),
+    callbacks=(VocabularySyncCallback, CounterUpdateCallback, Metrics, AdmittedRowsCallback),
+)
 
 
 @category.register(Component.Request)
@@ -178,29 +185,6 @@ class Request(RequestBase):
         return self
 
 
-def admissible(field: RaggedField) -> tuple[pa.Array, np.ndarray]:
-    """Valued labels without float NaN, and the compact positions NaN occupied.
-
-    NaN is not a label: it cannot key a vocabulary, so its position takes the
-    ``other`` state instead of admitting or looking up a value.
-    """
-    values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
-    nan = np.zeros(len(values), dtype=bool)
-    if len(values) and pa.types.is_floating(values.type):
-        nan = pc.is_nan(values).to_numpy(zero_copy_only=False)
-        if nan.any():
-            values = pc.filter(values, pa.array(~nan))
-    return values, nan
-
-
-def states(field: RaggedField, nan: np.ndarray) -> np.ndarray:
-    """Dense state tokens with NaN positions marked ``other``."""
-    dense = field.dense.copy()
-    if nan.any():
-        dense[field.place(nan, fill=False)] = Tokens.other.value
-    return dense
-
-
 @category.register(Component.observe)
 def observe(
     field: RaggedField,
@@ -330,7 +314,7 @@ class Embedder(EmbedderBase):
         )
         # Labels are admitted while training, so every content row starts at
         # zero: an admitted label embeds exactly as it did while unknown until
-        # gradients move its row.
+        # AdmittedRowsCallback starts its row before the next training batch.
         torch.nn.init.zeros_(cast(torch.nn.Embedding, self.embeddings[TensorKey.content.name]).weight)
 
         self.counters = torch.nn.ModuleDict(
@@ -353,9 +337,6 @@ class Embedder(EmbedderBase):
         state = inputs.state.reshape(-1)
         content = cast(torch.Tensor, inputs.content).reshape(-1)
         valued = state.eq(Tokens.valued.value)
-
-        if (valued & ((content < -1) | (content >= self.size))).any():
-            raise ValueError(f"Token in address {self.origin} exceeds vocabulary size of {self.size}")
 
         known = valued & content.ge(0)
         safe_content = content.masked_fill(~known, 0)
@@ -401,10 +382,10 @@ def bind(
     if decoder is not None:
         resize.linear(decoder.linears[TensorKey.content.name], size, silent=True)
     field = cast(TensorField, field)
-    field.content = mapping.to(field.content.device)[field.content]
+    field.content = binding.translate(field.content, mapping, address=address)
     if TensorKey.content in field.targets:
         values = cast(torch.Tensor, field.targets[TensorKey.content])
-        field.targets[TensorKey.content] = mapping.to(values.device)[values]
+        field.targets[TensorKey.content] = binding.translate(values, mapping, address=address)
     if observation is not None:
         observation[TensorKey.content] = binding.counts(
             cast(torch.Tensor, observation[TensorKey.content]), mapping, size
@@ -536,9 +517,6 @@ def loss(
             module, strata, torch.stack((known.sum(), valued.sum(), correct, *topk)), torch.stack((objective, nll))
         )
     return loss + objective / known.sum().clamp_min(1)
-
-
-category.callback(VocabularySyncCallback, CounterUpdateCallback, Metrics)
 
 
 @category.register(Component.output)
