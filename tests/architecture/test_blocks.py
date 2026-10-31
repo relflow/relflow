@@ -7,7 +7,7 @@ import relflow as rf
 from relflow.architecture import compiler
 from relflow.architecture.blocks import feed_forward, norm
 from relflow.architecture.encoder import BranchEncoder, RotaryTransformerEncoderLayer
-from relflow.architecture.packed import customized, pack, stochastic, unpack
+from relflow.architecture.packed import customized, pack, unpack
 from relflow.architecture.pool import LearnedQueryCrossAttention
 
 
@@ -129,18 +129,39 @@ def test_node_blocks_preserve_dense_and_packed_outputs_and_gradients(n_kv_heads,
         torch.testing.assert_close(parameter.grad, reference.grad, rtol=1e-10, atol=1e-10)
 
 
-def test_active_dropout_requires_dense_rng_schedule():
-    layer = RotaryTransformerEncoderLayer(16, 4, 4, 0.2)
-    assert stochastic((layer,))
-    layer.eval()
-    assert not stochastic((layer,))
-    layer.train()
-    layer.attention.dropout_p = 0.0
-    assert stochastic((layer,))
-    for module in layer.ffn.modules():
-        if isinstance(module, torch.nn.Dropout):
-            module.p = 0.0
-    assert not stochastic((layer,))
+@pytest.mark.parametrize("n_kv_heads", [4, 2, 1])
+@pytest.mark.parametrize("training", [True, False])
+def test_packed_node_passes_training_dropout_to_each_attention_group(monkeypatch, n_kv_heads, training):
+    torch.manual_seed(47)
+    layer = RotaryTransformerEncoderLayer(16, 4, n_kv_heads, 0.2).double().train(training)
+    assert not customized((layer,))
+    present = torch.tensor(
+        [[True, False, True, False, True], [False, False, False, False, False], [False, True, False, True, False]]
+    )
+    inputs = torch.randn(3, 5, 16, dtype=torch.float64).masked_fill(~present[..., None], torch.nan).requires_grad_()
+    values, packing = pack(inputs, present)
+    calls = []
+    sdpa = torch.nn.functional.scaled_dot_product_attention
+
+    def observe(query, key, value, **kwargs):
+        calls.append((query.shape, key.shape, kwargs))
+        return sdpa(query, key, value, **kwargs)
+
+    monkeypatch.setattr(torch.nn.functional, "scaled_dot_product_attention", observe)
+    output = unpack(layer(values, present, packing=packing), packing, inputs, present, (layer,))
+    output.square().sum().backward()
+
+    assert len(calls) == 2
+    assert {shape[-2] for shape, _, _ in calls} == {2, 3}
+    for query, key, options in calls:
+        assert query[1] == 4 and key[1] == n_kv_heads
+        assert options["dropout_p"] == (0.2 if training else 0.0)
+        assert options["enable_gqa"] is (n_kv_heads != 4)
+        assert options.get("attn_mask") is None
+    assert torch.isfinite(output).all() and not output[~present].any()
+    assert inputs.grad is not None and torch.isfinite(inputs.grad).all()
+    assert not inputs.grad[~present].any()
+    assert all(parameter.grad is not None and torch.isfinite(parameter.grad).all() for parameter in layer.parameters())
 
 
 def test_learned_pool_preserves_additive_evidence_and_count_after_rms_normalization():

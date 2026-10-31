@@ -275,8 +275,8 @@ class DecoderBase(torch.nn.Module):
     A concrete decoder may declare ``coordinatewise = True`` when ``decode``
     treats every target coordinate independently. Objective execution can then
     omit unselected queries while restoring the original tensor-tree geometry.
-    Custom forward/context methods, hooks, and active dropout keep dense shapes
-    and their original random-number schedule.
+    Custom forward/context methods and hooks keep dense shapes. Dropout draws
+    follow the compacted query shape without changing their distribution.
     """
 
     coordinatewise: ClassVar[bool] = False
@@ -452,19 +452,9 @@ class DecoderBase(torch.nn.Module):
                 "forward" in module.__dict__ or any(getattr(module, name) for name in hooks)
                 for module in self.modules()
             )
-            stochastic = any(
-                isinstance(module, torch.nn.Dropout) and module.training and module.p > 0 for module in self.modules()
-            ) or (
-                isinstance(pool, LearnedQueryCrossAttention)
-                and any(
-                    block.attention.training and block.attention.dropout_p > 0
-                    for block in cast(Iterator[CrossAttentionBlock], iter(pool.blocks))
-                )
-            )
             if (
                 canonical_pool
                 and not observed
-                and not stochastic
                 and not customized(
                     layers, additional=(LearnedQueryCrossAttention, CrossAttentionBlock, MeanPool, torch.nn.ModuleList)
                 )

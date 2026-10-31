@@ -116,6 +116,11 @@ model = rf.Model(
   each node. The model root, child branches, and tensorfield decoders configure
   it independently. Hidden neural activations use tanh GELU and normalization
   uses RMSNorm; these have no configuration knobs.
+- Node `dropout` retains live-token encoder packing and selected-target decoding
+  for compatible modules. Attention and feed-forward dropout keep their declared
+  rates and locations; padding does not need dropout masks. Seeded masks follow
+  the execution layout, so they need not match a padded implementation. Attention
+  kernel memory still depends on device, dtype, and head configuration.
 - `Category`, `Set`, and `Enum` match string labels exactly; `strip=True` trims
   surrounding whitespace and `cased=False` lowercases labels before lookup, and
   the folded form is what vocabularies and predictions carry.
