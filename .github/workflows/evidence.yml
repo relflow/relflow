@@ -49,7 +49,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: relflow/evidence/.github/workflows/lab.yml@edca6365a10a5e2e07d4a455c04068e1153161af
+    uses: relflow/docs/.github/workflows/evidence-lab.yml@85ae1548128151cadb35c5bf84c17f568486b8e0
 
   required:
     name: Evidence / required
