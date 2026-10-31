@@ -31,7 +31,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: '3.12'
-      - name: Build supplied revisions without Modal credentials
+      - name: Build supplied revisions without tailnet credentials
         run: |
           uv build --project candidate --wheel --out-dir inputs/candidate
           uv build --project baseline --wheel --out-dir inputs/baseline
@@ -44,44 +44,12 @@ jobs:
           if-no-files-found: error
 
   run:
-    name: Run full paired suite on Modal
+    name: Run full paired suite on lab
     needs: wheels
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: relflow/evidence
-          ref: 7db117c3b3fc91ab984cd39182bc0f32483b67a8
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@v5
-        with:
-          python-version: '3.12'
-          enable-cache: true
-      - run: uv sync --locked
-      - uses: actions/download-artifact@v4
-        with:
-          name: evidence-inputs
-          path: inputs
-      - name: Run and collect every experiment
-        env:
-          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
-          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-          CANDIDATE_SHA: ${{ github.sha }}
-          BASELINE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}
-        run: |
-          test -n "$MODAL_TOKEN_ID" || { echo 'Configure the dedicated MODAL_TOKEN_ID CI secret'; exit 1; }
-          test -n "$MODAL_TOKEN_SECRET" || { echo 'Configure the dedicated MODAL_TOKEN_SECRET CI secret'; exit 1; }
-          uv run python -u modal_run.py --candidate-wheel inputs/candidate/*.whl --baseline-wheel inputs/baseline/*.whl --candidate-sha "$CANDIDATE_SHA" --baseline-sha "$BASELINE_SHA" --requirements inputs/requirements.txt --output runs/gh-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Attach report on success or failure
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: relflow-evidence
-          path: runs/gh-${{ github.run_id }}-${{ github.run_attempt }}/
-          retention-days: 90
-          if-no-files-found: warn
+    permissions:
+      contents: read
+      id-token: write
+    uses: relflow/evidence/.github/workflows/lab.yml@edca6365a10a5e2e07d4a455c04068e1153161af
 
   required:
     name: Evidence / required
