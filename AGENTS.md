@@ -86,7 +86,15 @@ model = rf.Model(
   retained collection in each batch, without changing the schema or parameters.
   A positive integer sets a hard limit; omitted overflow then defaults to
   `"head"`. Use `length=N, overflow="tail"` for recency-ordered histories or
-  `overflow="error"` to reject excess rows. Unbounded branches require
+  `overflow="error"` to reject excess rows. With a finite cap,
+  `overflow="random"` draws a uniformly selected contiguous window during
+  training and retains the tail during validation, test, and prediction.
+  Whole records, their fields, and nested children stay aligned. The source
+  or preprocessor must provide more than the cap for cropping to vary; apply
+  a separate resource bound to that candidate pool. Crops repeat for a fixed
+  data seed, epoch, batch ordinal, branch address, and parent position;
+  changing batching, worker assignment, or row order can change them.
+  Unbounded branches require
   `overflow=None` and log one resource-exhaustion warning per model generation.
   The anonymous root remains `length=1, overflow="error"`.
 - Bounded axes also compact execution to the observed batch width, up to their

@@ -86,7 +86,7 @@ def test_branch_limits_require_positive_integers(length):
         Branch(length=length, value=rf.Number)
 
 
-@pytest.mark.parametrize("overflow", ["head", "tail", "error"])
+@pytest.mark.parametrize("overflow", ["head", "tail", "random", "error"])
 def test_unbounded_branches_cannot_select_overflow(overflow):
     with pytest.raises(ValueError, match="unbounded branch.*finite length"):
         Branch(overflow=overflow, value=rf.Number)
