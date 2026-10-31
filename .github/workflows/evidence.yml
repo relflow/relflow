@@ -1,0 +1,66 @@
+name: Evidence
+
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evidence-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wheels:
+    name: Build exact candidate and baseline wheels
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: candidate
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          path: baseline
+          ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+      - name: Build supplied revisions without tailnet credentials
+        run: |
+          uv build --project "$GITHUB_WORKSPACE/candidate" --wheel --out-dir "$GITHUB_WORKSPACE/inputs/candidate"
+          uv build --project "$GITHUB_WORKSPACE/baseline" --wheel --out-dir "$GITHUB_WORKSPACE/inputs/baseline"
+          uv export --project "$GITHUB_WORKSPACE/candidate" --locked --no-dev --no-emit-project --no-hashes --format requirements-txt --output-file "$GITHUB_WORKSPACE/inputs/requirements.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evidence-inputs
+          path: inputs/
+          retention-days: 7
+          if-no-files-found: error
+
+  run:
+    name: Run full paired suite on lab
+    needs: wheels
+    permissions:
+      contents: read
+      id-token: write
+    uses: relflow/evidence/.github/workflows/lab.yml@edca6365a10a5e2e07d4a455c04068e1153161af
+
+  required:
+    name: Evidence / required
+    if: always()
+    needs: [wheels, run]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require successful complete evidence execution
+        env:
+          BUILD_RESULT: ${{ needs.wheels.result }}
+          EVIDENCE_RESULT: ${{ needs.run.result }}
+        run: |
+          test "$BUILD_RESULT" = success
+          test "$EVIDENCE_RESULT" = success
