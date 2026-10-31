@@ -27,7 +27,7 @@ class Tokenizer:
         (rf.Number, 1.5, {}),
         (rf.Boolean, True, {}),
         (rf.Category, "known", {"p_unavailable": 0.0}),
-        (rf.Cluster, "known", {"n_clusters": 3, "p_unavailable": 0.0}),
+        (rf.Group, "known", {"n_groups": 3, "p_unavailable": 0.0}),
         (rf.Set, ["known"], {"p_unavailable": 0.0}),
         (rf.DateParts, datetime(2026, 1, 1), {"dateparts": ["day_of_week"]}),
         (rf.Hash, "identifier", {}),
@@ -44,7 +44,7 @@ def test_targets_follow_objectives(field_type, value, options, objective, strata
         n_heads=4,
         value=field_type(mask=rf.Mask(dropout=False, reconstruct=True) if objective else False, **options),
     )
-    context = {"/value": OnlineVocabularyModel(size=8).state} if field_type in (rf.Category, rf.Cluster, rf.Set) else {}
+    context = {"/value": OnlineVocabularyModel(size=8).state} if field_type in (rf.Category, rf.Group, rf.Set) else {}
     batch = encode(
         pa.table({"value": [value, None]}),
         schema=schema,
