@@ -13,6 +13,18 @@ from relflow.structs.enums import Strata, Tokens
 from tests.arrow import table
 
 
+def request(field_type: str, *, query: str | None = None):
+    if field_type == "hash":
+        return rf.Hash(query=query, n_hashes=2)
+    if field_type == "category":
+        return rf.Category(query=query, p_unavailable=0.0)
+    if field_type == "group":
+        return rf.Group(query=query, n_groups=2, p_unavailable=0.0)
+    if field_type == "set":
+        return rf.Set(query=query, p_unavailable=0.0)
+    raise AssertionError(f"unsupported test field type: {field_type}")
+
+
 def test_coalesce_requires_table():
     schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, value=rf.Number)
 

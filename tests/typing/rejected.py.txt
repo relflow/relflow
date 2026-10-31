@@ -21,12 +21,17 @@ rf.Enum(values=(None,))  # rejected
 rf.Enum(("yes", "no"))  # rejected
 rf.Enum(values=("yes", "no"), size=16)  # rejected
 rf.Vector()  # rejected
-rf.Cluster(bounds=(1, 2, 3))  # rejected
+rf.Group()  # rejected
+rf.Group(n_groups=(1, 2, 3))  # rejected
+rf.Group(n_groups="four")  # rejected
+rf.Group(n_groups=4, bounds=4)  # rejected
 rf.Category(size="large")  # rejected
 rf.Branch(overflow="middle", value=rf.Number)  # rejected
 rf.Model(d_model=32, value=rf.Number)  # rejected
 rf.Model(d_model=32, n_heads=4, n_layers=1, value=rf.Number, scheduler="cosine")  # rejected
 model = rf.Model(d_model=32, n_heads=4, n_layers=1, value=rf.Number)
+rf.Group.assign(model, "/value", "token", [0.0, 1.0])  # rejected
+rf.Group.override(model, "/value", {"token": [0.0, 1.0]})  # rejected
 model.compile(encoders="yes")  # rejected
 model.predict(123)  # rejected
 rf.Model.xs(d_model="wide", value=rf.Number)  # rejected

@@ -1,3 +1,5 @@
+import math
+
 import lightning.pytorch as lit
 import pyarrow as pa
 import pytest
@@ -128,16 +130,18 @@ def test_validation_keeps_its_metric_name_and_default_checkpoint_monitor(fit_opt
 
 
 @pytest.mark.parametrize(
-    ("field", "labels"),
+    ("field", "labels", "has_content_scores"),
     [
-        (rf.Category(mask=True), ["a", "b", "b", "a"]),
-        (rf.Enum(values=("a", "b"), mask=True), ["a", "b", "b", "a"]),
-        (rf.Set(mask=True), [["a"], ["b"], ["b"], ["a"]]),
-        (rf.Cluster(bounds=2, mask=True), ["a", "b", "b", "a"]),
+        (rf.Category(mask=True), ["a", "b", "b", "a"], True),
+        (rf.Enum(values=("a", "b"), mask=True), ["a", "b", "b", "a"], True),
+        (rf.Set(mask=True), [["a"], ["b"], ["b"], ["a"]], True),
+        (rf.Group, ["a", "b", "b", "a"], False),
     ],
 )
-def test_vocabulary_scores_log_per_batch_and_validation_keeps_pass_totals(fit_options, field, labels):
-    model = rf.Model.xs(d_model=8, amount=rf.Number, label=field)
+def test_vocabulary_fields_log_available_scores(fit_options, field, labels, has_content_scores):
+    if field is rf.Group:
+        field = rf.Group(n_groups=2, mask=True)
+    model = rf.Model.xs(d_model=8, batch_size=2, amount=rf.Number, label=field)
     rows = pa.table({"amount": [1.0, 2.0, 3.0, 4.0], "label": labels})
     data = rf.ArrowDataModule(train=rows, validate=rows, shuffle=False)
     logger = RecordingLogger()
@@ -152,11 +156,23 @@ def test_vocabulary_scores_log_per_batch_and_validation_keeps_pass_totals(fit_op
     )
     training = [(metrics, step) for metrics, step in logger.records if "loss/train" in metrics]
     assert [step for _, step in training] == [0, 1]
-    assert all(metrics[".label/train.targets.known"] == 2 for metrics, _ in training)
-    assert all(metrics[".label/train.coverage.content"] == 1.0 for metrics, _ in training)
+    assert all(".label/train.loss.state" in metrics for metrics, _ in training)
+    if has_content_scores:
+        assert all(metrics[".label/train.targets.known"] == 2 for metrics, _ in training)
+        assert all(metrics[".label/train.coverage.content"] == 1.0 for metrics, _ in training)
+    else:
+        assert all(".label/train.targets.known" not in metrics for metrics, _ in training)
+        assert all(".label/train.coverage.content" not in metrics for metrics, _ in training)
     assert not any(name.endswith(("_step", "_epoch")) for metrics, _ in logger.records for name in metrics)
     validations = [metrics for metrics, _ in logger.records if "loss/validate" in metrics]
     assert len(validations) == 1
-    assert validations[0][".label/validate.targets.known"] == 4
-    assert validations[0][".label/validate.coverage.content"] == 1.0
+    assert math.isfinite(validations[0][".label/validate.loss.state"])
+    if has_content_scores:
+        assert validations[0][".label/validate.targets.known"] == 4
+        assert validations[0][".label/validate.coverage.content"] == 1.0
+    else:
+        assert ".label/validate.targets.known" not in validations[0]
+        assert ".label/validate.coverage.content" not in validations[0]
+        assert ".label/validate.loss.content" not in validations[0]
+    assert model.trainer.checkpoint_callback.best_model_score.item() == pytest.approx(validations[0]["loss/validate"])
     assert torch.isfinite(model.trainer.callback_metrics["loss/train_epoch"])

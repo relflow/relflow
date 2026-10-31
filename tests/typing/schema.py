@@ -27,8 +27,8 @@ def schema_api() -> None:
     assert_type(enum.values, tuple[bool | int | float | str | bytes, ...])
     assert_type(enum.topk, list[int] | None)
     assert_type(enum.mask, tuple[rf.Mask, ...])
-    assert_type(rf.Cluster(bounds=4).n_clusters, tuple[int, int])
-    assert_type(rf.Cluster(n_clusters=(2, 8)).n_clusters, tuple[int, int])
+    assert_type(rf.Group(n_groups=4).n_groups, int)
+    assert_type(rf.Group(n_groups=8).n_groups, int)
     assert_type(rf.DateParts(dateparts=["day_of_week", DatePart.hour_of_day]).dateparts, list[DatePart])
     assert_type(rf.Vector(n_dim=8, objective="l1").n_dim, int)
     rf.Text(encoder_pooling="mean", objective="l2", max_length=64)
@@ -53,6 +53,12 @@ def schema_api() -> None:
     rf.Model.xs(value=rf.Quantile, target=quantile)
     rf.Model.sm(target=enum)
     rf.Model(d_model=32, n_heads=4, n_layers=1, attention=None, items=rf.Branch(attention=None, value=rf.Number))
+
+
+def group_assignments(model: rf.Model) -> None:
+    assert_type(rf.Group.assign(model, "/group", "token", 2), int)
+    with rf.Group.override(model, "/group", {"token": 1}):
+        pass
 
 
 def third_party_schema() -> None:
