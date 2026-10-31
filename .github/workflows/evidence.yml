@@ -33,9 +33,9 @@ jobs:
           python-version: '3.12'
       - name: Build supplied revisions without tailnet credentials
         run: |
-          uv build --project candidate --wheel --out-dir inputs/candidate
-          uv build --project baseline --wheel --out-dir inputs/baseline
-          uv export --project candidate --locked --no-dev --no-emit-project --no-hashes --format requirements-txt --output-file inputs/requirements.txt
+          uv build --project "$GITHUB_WORKSPACE/candidate" --wheel --out-dir "$GITHUB_WORKSPACE/inputs/candidate"
+          uv build --project "$GITHUB_WORKSPACE/baseline" --wheel --out-dir "$GITHUB_WORKSPACE/inputs/baseline"
+          uv export --project "$GITHUB_WORKSPACE/candidate" --locked --no-dev --no-emit-project --no-hashes --format requirements-txt --output-file "$GITHUB_WORKSPACE/inputs/requirements.txt"
       - uses: actions/upload-artifact@v4
         with:
           name: evidence-inputs
