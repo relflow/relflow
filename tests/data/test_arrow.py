@@ -5,13 +5,8 @@ import pytest
 import torch
 from tensordict import TensorDict
 
-from relflow.data import arrow
 from relflow.data.arrow import Encoded, mappings, variants
 from relflow.structs.tree import Address
-
-
-def test_encoded_stays_internal_to_the_arrow_module():
-    assert "Encoded" not in arrow.__all__
 
 
 def test_mappings_reuses_uniform_dicts_without_rebuilding_rows():

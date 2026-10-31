@@ -8,6 +8,7 @@ from relflow.architecture.encoder import BranchEncoder
 from relflow.structs.packages import Parcel
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("dropout", [0.0, 0.2])
 def test_branch_compute_compiles_without_breaks_and_preserves_compacted_training(dropout):
     schema = rf.Schema.from_tree(value=rf.Number, d_model=16, n_layers=2, n_heads=4, dropout=dropout, reduction=None)

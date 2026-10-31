@@ -57,6 +57,7 @@ def configured() -> tuple[rf.Model, rf.ArrowDataModule]:
     return model, datamodule
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("precision", ["auto", "bf16-mixed"])
 @pytest.mark.parametrize("algorithm", ["norm", "value"])
 def test_bf16_fused_adamw_clips_large_gradients_and_updates_weights(precision, algorithm):

@@ -60,13 +60,6 @@ def test_model_constructor_supports_direct_binding_and_opt_in_queries():
     assert params.reconstruct == ["/label"]
 
 
-def test_model_uses_constructor_without_from_tree_alternative():
-    model = rf.Model(amount=rf.Number(), d_model=16, n_layers=1, n_heads=4, reduction=rf.Mean())
-
-    assert model.schema.requests["/amount"].name == "amount"
-    assert not hasattr(rf.Model, "from_tree")
-
-
 def test_model_constructor_rejects_duplicate_sources():
     with pytest.raises(ValueError, match="duplicate field name"):
         rf.Model(amount=rf.Number(), fields={"amount": rf.Number()}, d_model=16, n_layers=1, n_heads=4)
@@ -262,10 +255,9 @@ def test_schema_predicate_constructors_back_public_dsl():
         assert schema.select(selector) == [schema.requests["/amount"]]
 
 
-@pytest.mark.parametrize("metadata", [{"key": ("obsolete",)}, {"cacheable": False}])
-def test_node_predicates_reject_removed_cache_configuration(metadata):
+def test_node_predicates_reject_undeclared_configuration():
     with pytest.raises(ValueError, match="Extra inputs are not permitted"):
-        rf.NodePredicate(func=lambda node: True, **metadata)
+        rf.NodePredicate(func=lambda node: True, unsupported=True)
 
 
 @pytest.mark.parametrize("wrapped", [False, True])

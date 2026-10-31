@@ -328,7 +328,23 @@ uv run ruff check
 uv run pyrefly check
 uv run pytest
 uv run pytest tests/test_public_api.py
+uv run pytest --full -n 2
+uv run pytest -m integration -n 2
 ```
+
+Plain `pytest` and pre-commit run the fast core serially (about 12 seconds on
+the development machine). An explicit `-m` expression overrides the default
+`not integration` selection. Use `--full` for the complete suite; every PR CI
+job selects it explicitly and retains its platform and Python version matrix.
+
+Mark tests with `pytest.mark.integration` when they run real Trainer/Tuner loops,
+compiler graph capture, worker or distributed processes, socket servers, optional
+encoder models, or accelerator execution. Mark individual parameters when CPU
+or mocked cases belong in the core. Keep cheap in-process data, serving, and
+extension checks in the core. New integration tests must remain in the full
+suite rather than being deleted to meet the local runtime target. Thread-pool
+and offline encoder defaults are set before collection; explicit environment
+values take precedence.
 
 ## Documentation And Learning Proofs
 

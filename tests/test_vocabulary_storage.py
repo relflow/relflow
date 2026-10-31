@@ -63,7 +63,7 @@ def test_allocation_options_are_rejected_by_constructor_and_schema(field, option
     with pytest.raises(pydantic.ValidationError, match=option):
         field(**required, **{option: 8})
     with pytest.raises(pydantic.ValidationError, match=option):
-        field.model_validate({"name": "label", **required, option: 8})
+        field.model_validate({**required, option: 8})
     assert option not in field.model_json_schema()["properties"]
     assert option not in field(**required).model_dump()
 

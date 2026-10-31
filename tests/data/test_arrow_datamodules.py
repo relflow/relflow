@@ -43,31 +43,6 @@ def collect(dataset: arrow.ArrowDataset, monkeypatch: pytest.MonkeyPatch) -> lis
     return [item.source for item in dataset]
 
 
-def test_public_surface_has_five_modules_and_no_source_specific_datasets():
-    import relflow.data.datasets as datasets
-
-    assert rf.ArrowDataModule is arrow.ArrowDataModule
-    assert datasets.__all__ == [
-        "ArrowDataModule",
-        "ArrowInput",
-        "ArrowSource",
-        "ArrowStream",
-        "ArrowUnit",
-        "CustomDataModule",
-        "DuckDBDataModule",
-        "PolarsDataModule",
-        "Retain",
-        "StratumConfig",
-        "SyntheticDataModule",
-    ]
-    assert callable(rf.source)
-    assert not hasattr(rf, "parquet")
-    assert not hasattr(rf, "PartitionedSource")
-    assert not hasattr(rf, "StreamingDataModule")
-    assert not hasattr(datasets, "PolarsBatchDataset")
-    assert not hasattr(datasets, "CustomBatchDataset")
-
-
 @pytest.mark.parametrize(
     "module_type,source",
     [
@@ -211,7 +186,7 @@ def test_empty_arrow_factory_must_declare_its_schema():
         list(module.val_dataloader().dataset)
 
 
-def test_zero_batch_reader_preserves_its_declared_schema(monkeypatch: pytest.MonkeyPatch):
+def test_zero_batch_reader_preserves_its_declared_schema_through_shuffle(monkeypatch: pytest.MonkeyPatch):
     schema = pa.schema(
         [pa.field("id", pa.int64(), metadata={b"unit": b"stable"})],
         metadata={b"source": b"reader"},
@@ -220,7 +195,7 @@ def test_zero_batch_reader_preserves_its_declared_schema(monkeypatch: pytest.Mon
     def source():
         return pa.RecordBatchReader.from_batches(schema, [])
 
-    module = rf.ArrowDataModule(model=model(), validate=source, shuffle=False)
+    module = rf.ArrowDataModule(model=model(), validate=source, shuffle={"validate": True}, shuffle_rows=2)
 
     assert collect(module.val_dataloader().dataset, monkeypatch) == []
     assert module.schemas[Strata.validate].source.equals(schema, check_metadata=True)
@@ -743,7 +718,7 @@ def test_unshuffled_stream_epoch_limit_stops_reading_at_the_cap(monkeypatch: pyt
     assert consumed == [0, 1, 2]
 
 
-def test_rebatch_combines_chunks_once_per_fill(monkeypatch: pytest.MonkeyPatch):
+def test_rebatch_combines_chunks_once_per_fill():
     units = [pa.table({"id": [value]}) for value in range(10)]
 
     batches = list(arrow.rebatch(iter(units), size=4, drop_last=False))
@@ -771,6 +746,7 @@ def synthetic_records() -> Iterator[dict[str, float]]:
     return iter([{"id": float(value)} for value in range(5)])
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", ["custom", "synthetic"])
 def test_mapping_modules_encode_in_spawned_workers(kind):
     if "spawn" not in mp.get_all_start_methods():
@@ -784,6 +760,7 @@ def test_mapping_modules_encode_in_spawned_workers(kind):
     batches = list(module.val_dataloader())
 
     assert pa.concat_tables([batch.source for batch in batches])["id"].to_pylist() == [0.0, 1.0, 2.0, 3.0, 4.0]
+    assert all(batch.tensors.is_consolidated() for batch in batches)
 
 
 def test_shipping_packs_a_batch_without_its_stream():
@@ -798,18 +775,6 @@ def test_shipping_packs_a_batch_without_its_stream():
     assert packed.source.equals(batch.source)
     assert len(pickle.dumps(batch.source)) > len(pickle.dumps(stream)) / 2, "a slice pickles its whole stream"
     assert len(pickle.dumps(packed.source)) < len(pickle.dumps(stream)) / 64
-
-
-def test_spawned_workers_ship_packed_batches():
-    if "spawn" not in mp.get_all_start_methods():
-        pytest.skip("this platform cannot spawn data workers")
-    stream = pa.table({"id": [float(value) for value in range(64)]})
-    module = rf.ArrowDataModule(model=model(batch_size=8), validate=stream, num_workers=1, shuffle=False)
-
-    batches = list(module.val_dataloader())
-
-    assert all(batch.tensors.is_consolidated() for batch in batches)
-    assert pa.concat_tables([batch.source for batch in batches])["id"].to_pylist() == [float(v) for v in range(64)]
 
 
 def test_stream_randomization_is_independent_of_record_batch_boundaries(monkeypatch: pytest.MonkeyPatch):
@@ -1088,4 +1053,4 @@ def test_split_overrides_stay_isolated_when_loaders_are_recreated():
 )
 def test_invalid_overrides_are_rejected_even_for_unused_splits(option, value, error):
     with pytest.raises(error, match=option):
-        rf.ArrowDataModule(model=model(), train=pa.table({"id": [1]}), **{option: {"validate": value}})
+        rf.ArrowDataModule(train=pa.table({"id": [1]}), **{option: {"validate": value}})

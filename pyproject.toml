@@ -79,7 +79,10 @@ include = ["relflow*"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 pythonpath = ["."]
-addopts = ["-n", "auto"]
+addopts = ["-n", "0", "--strict-markers"]
+markers = [
+    "integration: real training loops, compilation, processes, external resources, optional encoders, or accelerators",
+]
 
 [tool.coverage.run]
 branch = true

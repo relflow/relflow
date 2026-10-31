@@ -133,9 +133,90 @@ def check_state(model, optimizer, reference, reference_optimizer):
             torch.testing.assert_close(state[key], reference_state[key], atol=1e-11, rtol=1e-11)
 
 
-def accumulation_worker(rank, directory, bucket_view, optimizer_kind):
+def accumulate(rank, bucket_view, optimizer_kind):
     from relflow.architecture.binding import synchronize_gradients
 
+    # Without synchronization, rank 1 retains None even with bucket views enabled.
+    conditional = Conditional()
+    wrapped = DistributedDataParallel(conditional, find_unused_parameters=True, gradient_as_bucket_view=bucket_view)
+    with wrapped.no_sync():
+        wrapped(True, rank).backward()
+    synchronize_gradients(conditional)
+    torch.testing.assert_close(conditional.before.grad, torch.tensor([0.5], dtype=torch.float64))
+    assert conditional.unused.grad is None
+    old = wrapped
+    old._remove_autograd_hooks()
+    wrapped = DistributedDataParallel(conditional, find_unused_parameters=True, gradient_as_bucket_view=bucket_view)
+    wrapped(False, rank).backward()
+    torch.testing.assert_close(conditional.before.grad, torch.tensor([0.5], dtype=torch.float64))
+    assert conditional.unused.grad is None
+    wrapped._remove_autograd_hooks()
+
+    model, reference = GrowthModel(), GrowthModel()
+    optimizer = make_optimizer(model, optimizer_kind)
+    reference_optimizer = make_optimizer(reference, optimizer_kind)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.85)
+    reference_scheduler = torch.optim.lr_scheduler.StepLR(reference_optimizer, step_size=1, gamma=0.85)
+    groups = list(optimizer.param_groups)
+    parameter_lists = [group["params"] for group in groups]
+    wrapped = DistributedDataParallel(
+        model, find_unused_parameters=True, gradient_as_bucket_view=bucket_view, bucket_cap_mb=0.0001
+    )
+    retired = []
+    replacements = 0
+    for length, growth_points in ((6, ()), (6, (1, 2, 4, 5)), (3, (1, 2))):
+        optimizer.zero_grad(set_to_none=True)
+        reference_optimizer.zero_grad(set_to_none=True)
+        size = model.rows.shape[0]
+        capacities = []
+        for microbatch in range(length):
+            size += microbatch in growth_points
+            capacities.append(size)
+        # This reference never replaces parameters or migrates gradients mid-window.
+        grow(reference, reference_optimizer, capacities[-1])
+        for microbatch, size in enumerate(capacities):
+            if microbatch in growth_points:
+                old = wrapped
+                old._check_reducer_finalized()
+                synchronize_gradients(model)
+                check_gradients(model, reference)
+                old._remove_autograd_hooks()
+                retired.append(old)  # Hook cleanup must work even while old wrappers remain alive.
+                grow(model, optimizer, size)
+                check_gradients(model, reference)
+                wrapped = DistributedDataParallel(
+                    model,
+                    find_unused_parameters=True,
+                    gradient_as_bucket_view=bucket_view,
+                    bucket_cap_mb=0.0001,
+                )
+                check_gradients(model, reference)
+                replacements += 1
+            context = wrapped.no_sync() if microbatch < length - 1 else nullcontext()
+            with context:
+                (wrapped(microbatch, rank, size) / ACCUMULATION).backward()
+            sum(reference(microbatch, r, size) / (2 * ACCUMULATION) for r in range(2)).backward()
+
+        check_gradients(model, reference)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.37)
+        torch.nn.utils.clip_grad_norm_(reference.parameters(), max_norm=0.37)
+        optimizer.step()
+        reference_optimizer.step()
+        scheduler.step()
+        reference_scheduler.step()
+        check_state(model, optimizer, reference, reference_optimizer)
+        assert scheduler.state_dict() == reference_scheduler.state_dict()
+        assert scheduler.optimizer is optimizer
+        for index, group in enumerate(optimizer.param_groups):
+            assert group is groups[index]
+            assert group["params"] is parameter_lists[index]
+            assert group["lr"] == reference_optimizer.param_groups[index]["lr"]
+    assert replacements == 6
+    assert scheduler.last_epoch == 3
+    wrapped._remove_autograd_hooks()
+
+
+def accumulation_worker(rank, directory):
     torch.set_num_threads(1)
     distributed.init_process_group(
         "gloo",
@@ -145,93 +226,19 @@ def accumulation_worker(rank, directory, bucket_view, optimizer_kind):
         timeout=timedelta(seconds=30),
     )
     try:
-        # Without synchronization, rank 1 retains None even with bucket views enabled.
-        conditional = Conditional()
-        wrapped = DistributedDataParallel(conditional, find_unused_parameters=True, gradient_as_bucket_view=bucket_view)
-        with wrapped.no_sync():
-            wrapped(True, rank).backward()
-        synchronize_gradients(conditional)
-        torch.testing.assert_close(conditional.before.grad, torch.tensor([0.5], dtype=torch.float64))
-        assert conditional.unused.grad is None
-        old = wrapped
-        old._remove_autograd_hooks()
-        wrapped = DistributedDataParallel(conditional, find_unused_parameters=True, gradient_as_bucket_view=bucket_view)
-        wrapped(False, rank).backward()
-        torch.testing.assert_close(conditional.before.grad, torch.tensor([0.5], dtype=torch.float64))
-        assert conditional.unused.grad is None
-        wrapped._remove_autograd_hooks()
-
-        model, reference = GrowthModel(), GrowthModel()
-        optimizer = make_optimizer(model, optimizer_kind)
-        reference_optimizer = make_optimizer(reference, optimizer_kind)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.85)
-        reference_scheduler = torch.optim.lr_scheduler.StepLR(reference_optimizer, step_size=1, gamma=0.85)
-        groups = list(optimizer.param_groups)
-        parameter_lists = [group["params"] for group in groups]
-        wrapped = DistributedDataParallel(
-            model, find_unused_parameters=True, gradient_as_bucket_view=bucket_view, bucket_cap_mb=0.0001
-        )
-        retired = []
-        replacements = 0
-        for length, growth_points in ((6, ()), (6, (1, 2, 4, 5)), (3, (1, 2))):
-            optimizer.zero_grad(set_to_none=True)
-            reference_optimizer.zero_grad(set_to_none=True)
-            size = model.rows.shape[0]
-            capacities = []
-            for microbatch in range(length):
-                size += microbatch in growth_points
-                capacities.append(size)
-            # This reference never replaces parameters or migrates gradients mid-window.
-            grow(reference, reference_optimizer, capacities[-1])
-            for microbatch, size in enumerate(capacities):
-                if microbatch in growth_points:
-                    old = wrapped
-                    old._check_reducer_finalized()
-                    synchronize_gradients(model)
-                    check_gradients(model, reference)
-                    old._remove_autograd_hooks()
-                    retired.append(old)  # Hook cleanup must work even while old wrappers remain alive.
-                    grow(model, optimizer, size)
-                    check_gradients(model, reference)
-                    wrapped = DistributedDataParallel(
-                        model,
-                        find_unused_parameters=True,
-                        gradient_as_bucket_view=bucket_view,
-                        bucket_cap_mb=0.0001,
-                    )
-                    check_gradients(model, reference)
-                    replacements += 1
-                context = wrapped.no_sync() if microbatch < length - 1 else nullcontext()
-                with context:
-                    (wrapped(microbatch, rank, size) / ACCUMULATION).backward()
-                sum(reference(microbatch, r, size) / (2 * ACCUMULATION) for r in range(2)).backward()
-
-            check_gradients(model, reference)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.37)
-            torch.nn.utils.clip_grad_norm_(reference.parameters(), max_norm=0.37)
-            optimizer.step()
-            reference_optimizer.step()
-            scheduler.step()
-            reference_scheduler.step()
-            check_state(model, optimizer, reference, reference_optimizer)
-            assert scheduler.state_dict() == reference_scheduler.state_dict()
-            assert scheduler.optimizer is optimizer
-            for index, group in enumerate(optimizer.param_groups):
-                assert group is groups[index]
-                assert group["params"] is parameter_lists[index]
-                assert group["lr"] == reference_optimizer.param_groups[index]["lr"]
-        assert replacements == 6
-        assert scheduler.last_epoch == 3
-        wrapped._remove_autograd_hooks()
+        for optimizer_kind in ("sgd", "adamw"):
+            for bucket_view in (False, True):
+                try:
+                    accumulate(rank, bucket_view, optimizer_kind)
+                except Exception as error:
+                    error.add_note(f"DDP accumulation: {optimizer_kind=}, {bucket_view=}")
+                    raise
     finally:
         distributed.destroy_process_group()
 
 
-@pytest.mark.parametrize("bucket_view", [False, True], ids=["separate_gradients", "bucket_views"])
-@pytest.mark.parametrize("optimizer_kind", ["sgd", "adamw"])
-def test_growth_preserves_accumulation_across_repeated_ddp_replacement(
-    tmp_path, monkeypatch, bucket_view, optimizer_kind
-):
+@pytest.mark.integration
+def test_growth_preserves_accumulation_across_repeated_ddp_replacement(tmp_path, monkeypatch):
     monkeypatch.setenv("OMP_NUM_THREADS", "1")
     monkeypatch.setenv("MKL_NUM_THREADS", "1")
-    multiprocessing.spawn(accumulation_worker, args=(str(tmp_path), bucket_view, optimizer_kind), nprocs=2, join=True)
+    multiprocessing.spawn(accumulation_worker, args=(str(tmp_path),), nprocs=2, join=True)

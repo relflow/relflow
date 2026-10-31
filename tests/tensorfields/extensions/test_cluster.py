@@ -254,6 +254,7 @@ def test_cluster_bind_rejects_worker_ids_outside_the_batch():
         bind(model, field, None, binding, address=address, strata=Strata.validate, resize=Resize())
 
 
+@pytest.mark.integration
 def test_cluster_float_nan_labels_take_the_other_state(tmp_path):
     model = rf.Model.xs(d_model=8, label=rf.Cluster(bounds=2, mask=True), signal=rf.Number)
     rows = pa.table({"label": [1.0, 2.0, float("nan"), 0.0], "signal": [1.0, 2.0, 3.0, 4.0]})
@@ -329,39 +330,27 @@ def test_cluster_embedder_init_matches_upper_when_bounds_fixed():
 # ---------- write ----------
 
 
-class _DummyVocab:
-    def __init__(self, tokens: list[str]):
-        self._tokens = list(tokens)
-
-    def labels(self) -> pa.Array:
-        return pa.array(self._tokens, type=pa.large_string())
-
-
-class _DummyEmbedder:
-    def __init__(self, *, vocab_tokens: list[str], capacity: int, K: int, assign_weight: torch.Tensor | None = None):
-        self.vocab = _DummyVocab(vocab_tokens)
-        self.capacity = capacity
-        if assign_weight is None:
-            assign_weight = torch.zeros(capacity + 1, K)
-            for i in range(capacity + 1):
-                assign_weight[i, i % K] = 1.0
-        self.embeddings = {TensorKey.cluster.name: SimpleNamespace(weight=assign_weight)}
-
-
-class _DummyWriteModule:
-    def __init__(self, embedder: _DummyEmbedder):
-        self.nodes = {ADDRESS: SimpleNamespace(embedder=embedder)}
+def writer_module(*, vocab_tokens, capacity, K, assign_weight=None):
+    vocabulary = OnlineVocabularyModel(size=capacity)
+    vocabulary.load_snapshot(vocab_tokens)
+    if assign_weight is None:
+        assign_weight = torch.nn.functional.one_hot(torch.arange(capacity + 1) % K, num_classes=K).float()
+    embedder = SimpleNamespace(
+        vocab=vocabulary,
+        capacity=capacity,
+        embeddings={TensorKey.cluster.name: SimpleNamespace(weight=assign_weight)},
+    )
+    return SimpleNamespace(nodes={ADDRESS: SimpleNamespace(embedder=embedder)})
 
 
 def test_cluster_write_emits_arrow_cluster_and_content_payloads():
     K = 4
     capacity = 5
-    embedder = _DummyEmbedder(
+    module = writer_module(
         vocab_tokens=["ALPHA", "BETA", "GAMMA", "DELTA", "EPS"],
         capacity=capacity,
         K=K,
     )
-    module = _DummyWriteModule(embedder)
 
     state_logits = torch.zeros(2, 1, len(Tokens))
     state_logits[0, 0, Tokens.valued.value] = 10.0
@@ -403,13 +392,12 @@ def test_cluster_write_drops_sentinel_column_from_content_prediction():
     assign_weight[2, 2] = 1.0
     # Sentinel row (index=capacity) is one-hot on cluster 0.
     assign_weight[3, 0] = 1.0
-    embedder = _DummyEmbedder(
+    module = writer_module(
         vocab_tokens=["A", "B", "C"],
         capacity=capacity,
         K=K,
         assign_weight=assign_weight,
     )
-    module = _DummyWriteModule(embedder)
 
     cluster_logits = torch.zeros(1, 1, K)
     cluster_logits[0, 0, 0] = 10.0
@@ -433,8 +421,7 @@ def test_cluster_write_drops_sentinel_column_from_content_prediction():
 def test_cluster_write_returns_none_labels_when_vocab_is_empty():
     K = 4
     capacity = 5
-    embedder = _DummyEmbedder(vocab_tokens=[], capacity=capacity, K=K)
-    module = _DummyWriteModule(embedder)
+    module = writer_module(vocab_tokens=[], capacity=capacity, K=K)
 
     state_logits = torch.zeros(1, 1, len(Tokens))
     cluster_logits = torch.zeros(1, 1, K)

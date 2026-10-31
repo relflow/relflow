@@ -267,6 +267,7 @@ def test_empty_coordinate_routing_keeps_zero_payload_gradients(dropout):
     assert all(parameter.grad is None for parameter in encoder.encoder.parameters())
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("dropout", [0.0, 0.2])
 def test_original_dense_compute_remains_fullgraph_with_changing_presence(dropout):
     torch.manual_seed(41)

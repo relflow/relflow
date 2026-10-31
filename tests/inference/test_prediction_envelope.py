@@ -35,7 +35,7 @@ def test_prediction_envelope_includes_target_state_and_normalized_embedding() ->
     assert "inputs" not in output.column_names
 
 
-def test_embedding_only_leaf_does_not_enable_a_decoder_or_predictions_column() -> None:
+def test_embedding_only_leaf_emits_representations_without_predictions() -> None:
     model = rf.Model.xs(d_model=8, merchant=rf.Category(embed=True))
     model.encode(pa.table({"merchant": ["shop", "cafe"]}), strata="train")
 

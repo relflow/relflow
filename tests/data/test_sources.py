@@ -33,22 +33,23 @@ def prepare(frame: pl.DataFrame) -> pl.DataFrame:
     return frame.filter(pl.col("id") % 2 == 0).with_columns(id=pl.col("id") + 100)
 
 
-def distributed_source(rank: int, directory: str, missing: bool) -> None:
+def distributed_source(rank: int, directory: str) -> None:
     root = Path(directory)
     distributed.init_process_group(
         "gloo", init_method=(root / "rendezvous").as_uri(), rank=rank, world_size=2, timeout=timedelta(seconds=30)
     )
     try:
-        # Only rank zero's description is discoverable. Rank one must use the
-        # broadcast manifest rather than independently discovering its own path.
-        path = root / ("missing.parquet" if missing or rank == 1 else "train.parquet")
-        data = rf.ArrowDataModule(model(), validate=path, num_workers=1)
-        if missing:
-            with pytest.raises(FileNotFoundError, match="validate source"):
-                data.val_dataloader()
-        else:
-            actual = [v for batch in data.val_dataloader() for v in batch.source["id"].to_pylist()]
-            assert actual == list(range(rank, 8, 2))
+        for missing in (False, True):
+            # Fresh modules distinguish a rank-zero manifest from a broadcast
+            # discovery error without paying for another pair of ranks.
+            path = root / ("missing.parquet" if missing or rank == 1 else "train.parquet")
+            data = rf.ArrowDataModule(model(), validate=path, num_workers=1)
+            if missing:
+                with pytest.raises(FileNotFoundError, match="validate source"):
+                    data.val_dataloader()
+            else:
+                actual = [v for batch in data.val_dataloader() for v in batch.source["id"].to_pylist()]
+                assert actual == list(range(rank, 8, 2))
     finally:
         distributed.destroy_process_group()
 
@@ -343,29 +344,43 @@ def test_data_modules_have_independent_source_lifecycles(tmp_path):
     assert [v for b in second.val_dataloader() for v in b.source["id"].to_pylist()] == [1, 2]
 
 
-@pytest.mark.parametrize("workers", [0, 1, 2])
+@pytest.mark.parametrize(
+    "workers",
+    [0, pytest.param(1, marks=pytest.mark.integration), pytest.param(2, marks=pytest.mark.integration)],
+)
 def test_files_with_unequal_fragments_and_filtering_need_no_epoch_quota(tmp_path, workers):
     pq.write_table(pa.table({"id": [0]}), tmp_path / "a.parquet")
     pq.write_table(pa.table({"id": list(range(1, 16))}), tmp_path / "b.parquet", row_group_size=3)
-    data = rf.ArrowDataModule(model(), train=tmp_path, preprocessor=prepare, num_workers=workers, shuffle=False)
-    values = [v for b in data.train_dataloader() for v in b.source["id"].to_pylist()]
-    assert sorted(values) == list(range(100, 116, 2))
-
-
-def test_persistent_file_workers_restart_and_keep_the_frozen_selection(tmp_path):
-    pq.write_table(pa.table({"id": list(range(32))}), tmp_path / "a.parquet")
-    data = rf.ArrowDataModule(model(4), train=tmp_path, num_workers=2, persistent_workers=True)
+    persistent = workers == 2
+    data = rf.ArrowDataModule(
+        model(),
+        train=tmp_path,
+        preprocessor=prepare,
+        num_workers=workers,
+        persistent_workers=persistent,
+        shuffle=persistent,
+        seed=19,
+    )
     loader = data.train_dataloader()
+    if workers:
+        loader.timeout = 30
     try:
-        first = [v for b in loader for v in b.source["id"].to_pylist()]
-        pq.write_table(pa.table({"id": [1000]}), tmp_path / "b.parquet")
-        second = [v for b in loader for v in b.source["id"].to_pylist()]
-        assert sorted(first) == sorted(second) == list(range(32))
-        assert first != second
+        batches = list(loader)
+        first = [value for batch in batches for value in batch.source["id"].to_pylist()]
+        assert sorted(first) == list(range(100, 116, 2))
+        if workers:
+            assert all(batch.tensors.is_consolidated() for batch in batches)
+        if persistent:
+            pq.write_table(pa.table({"id": [1000]}), tmp_path / "added.parquet")
+            second = [value for batch in loader for value in batch.source["id"].to_pylist()]
+            assert sorted(second) == sorted(first)
+            assert second != first
     finally:
-        loader._iterator._shutdown_workers()
+        if loader._iterator is not None:
+            loader._iterator._shutdown_workers()
 
 
+@pytest.mark.integration
 def test_global_epoch_cap_need_not_be_divisible_by_workers(tmp_path):
     pq.write_table(pa.table({"id": list(range(16))}), tmp_path / "a.parquet")
     data = rf.ArrowDataModule(model(2), train=tmp_path, epoch_size=6, num_workers=2, shuffle=False)
@@ -387,11 +402,11 @@ def test_discovery_error_is_broadcast_before_workers_start(tmp_path, monkeypatch
     assert isinstance(results[0], FileNotFoundError)
 
 
-@pytest.mark.parametrize("missing", [False, True])
+@pytest.mark.integration
 @pytest.mark.skipif(not distributed.is_available() or not distributed.is_gloo_available(), reason="requires CPU Gloo")
-def test_ranks_share_manifest_and_discovery_errors(tmp_path, missing):
+def test_ranks_share_manifest_and_discovery_errors(tmp_path):
     pq.write_table(pa.table({"id": list(range(8))}), tmp_path / "train.parquet")
-    multiprocessing.spawn(distributed_source, args=(str(tmp_path), missing), nprocs=2, join=True)
+    multiprocessing.spawn(distributed_source, args=(str(tmp_path),), nprocs=2, join=True)
 
 
 def test_factory_generator_closes_on_early_stop_even_when_provider_retains_it():

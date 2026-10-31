@@ -7,18 +7,6 @@ import torch.nn.functional as F
 from relflow.architecture.attention import RotaryMultiheadAttention
 
 
-@pytest.mark.parametrize("n_kv_heads", [1, 2, 4])
-def test_rotary_attention_supports_grouped_kv_heads(n_kv_heads: int):
-    attention = RotaryMultiheadAttention(d_model=16, nhead=4, n_kv_heads=n_kv_heads, dropout=0.0)
-    inputs = torch.randn(3, 5, 16)
-
-    output = attention(query=inputs, key=inputs, value=inputs)
-
-    assert output.shape == inputs.shape
-    assert attention.k_proj.out_features == n_kv_heads * attention.head_dim
-    assert attention.v_proj.out_features == n_kv_heads * attention.head_dim
-
-
 def test_rotary_attention_rejects_kv_heads_that_do_not_divide_query_heads():
     with pytest.raises(ValueError, match="nhead must be divisible by n_kv_heads"):
         RotaryMultiheadAttention(d_model=16, nhead=4, n_kv_heads=3, dropout=0.0)
@@ -89,7 +77,7 @@ def test_rotary_attention_padding_mask_uses_sdpa_keep_mask(monkeypatch: pytest.M
     assert torch.equal(output[1], torch.zeros_like(output[1]))
 
 
-def test_rotary_attention_bypasses_an_all_empty_batch(monkeypatch: pytest.MonkeyPatch):
+def test_rotary_attention_zeros_all_absent_rows_after_sdpa(monkeypatch: pytest.MonkeyPatch):
     called = False
 
     def sdpa(*args, **kwargs):

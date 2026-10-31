@@ -15,7 +15,7 @@ import torch
 import relflow as rf
 import relflow.inference.deployment as deployment_module
 from relflow.data.processors import apply
-from relflow.inference.deployment import Deployment, ErrorItem
+from relflow.inference.deployment import ErrorItem
 
 
 class PredictModel:
@@ -388,13 +388,13 @@ def test_runtime_setup_applies_updates_before_device_placement(monkeypatch):
     server = deployment_module.FastAPIRuntime(
         checkpoint="unused",
         accelerator=deployment_module.Accelerator.cpu,
-        update_operations=[((predicate,), {"target": False})],
+        update_operations=[((predicate,), {"embed": True})],
     )
 
     server.setup()
 
     assert calls == [
-        ("update", (predicate,), {"target": False}),
+        ("update", (predicate,), {"embed": True}),
         ("warn",),
         ("to", "cpu"),
         ("eval",),
@@ -418,66 +418,54 @@ def test_runtime_setup_uses_an_in_memory_model(monkeypatch):
     assert server.model is model
 
 
-def test_deployment_builder_keeps_polars_processors_and_retention():
-    @rf.preprocess
-    def prepare(frame: pl.DataFrame) -> pl.DataFrame:
-        return frame
-
-    @rf.postprocess
-    def compact(frame: pl.DataFrame) -> pl.DataFrame:
-        return frame
-
-    deployment = Deployment(checkpoint="unused", retain=("request_id",)).preprocess(prepare).postprocess(compact)
-
-    assert deployment.retain == ("request_id",)
-    assert deployment._preprocessors == (prepare,)
-    assert deployment._postprocessors == (compact,)
-
-
 def test_deployment_builder_replaces_processor_collections():
     @rf.preprocess
     def prepare(frame: pl.DataFrame) -> pl.DataFrame:
-        return frame
+        pytest.fail("the replaced preprocessor must not run")
 
     @rf.preprocess
     def replace(frame: pl.DataFrame) -> pl.DataFrame:
-        return frame
+        return frame.with_columns(id=pl.col("id") + 1)
 
     @rf.postprocess
     def compact(frame: pl.DataFrame) -> pl.DataFrame:
-        return frame
+        pytest.fail("the replaced postprocessor must not run")
 
     @rf.postprocess
     def finish(frame: pl.DataFrame) -> pl.DataFrame:
-        return frame
+        return frame.select(id=pl.col("inputs").struct.field("id"))
 
-    deployment = (
-        Deployment(checkpoint="unused")
+    app = (
+        rf.Deployment(model=rf.Model.xs(id=rf.Number, d_model=8, embed=True), accelerator="cpu", retain=("id",))
         .preprocess([prepare])
         .preprocess((replace,))
         .postprocess([compact])
         .postprocess((finish,))
+        .app()
     )
 
-    assert deployment._preprocessors == (replace,)
-    assert deployment._postprocessors == (finish,)
+    async def run():
+        async with app.router.lifespan_context(app):
+            return app.state.relflow_runtime.predict_table(pa.table({"id": [1]}))
+
+    assert asyncio.run(run()).to_pydict() == {"id": [2]}
 
 
 @pytest.mark.parametrize("retain", [("id", "id"), ("",), (1,), ([],), "id", [1]])
 def test_deployment_rejects_invalid_retention(retain):
     with pytest.raises(pydantic.ValidationError, match="retain"):
-        Deployment(checkpoint="unused", retain=retain)
+        rf.Deployment(checkpoint="unused", retain=retain)
 
 
 def test_deployment_accepts_list_retention():
-    assert Deployment(checkpoint="unused", retain=["id", "value"]).retain == ("id", "value")
+    assert rf.Deployment(checkpoint="unused", retain=["id", "value"]).retain == ("id", "value")
 
 
 def test_deployment_validates_log_level_against_the_shared_vocabulary():
-    assert Deployment(checkpoint="unused", log_level=" TRACE ").log_level == "trace"
+    assert rf.Deployment(checkpoint="unused", log_level=" TRACE ").log_level == "trace"
 
     with pytest.raises(pydantic.ValidationError, match="log_level must be one of"):
-        Deployment(checkpoint="unused", log_level="verbose")
+        rf.Deployment(checkpoint="unused", log_level="verbose")
 
 
 def test_deployment_forge_registers_openapi_signatures():
@@ -487,7 +475,7 @@ def test_deployment_forge_registers_openapi_signatures():
     class Response(pydantic.BaseModel):
         predictions: dict[str, object]
 
-    app = Deployment(checkpoint="unused").forge(request=Request, response=Response).app()
+    app = rf.Deployment(checkpoint="unused").forge(request=Request, response=Response).app()
     schema = app.openapi()
     operation = schema["paths"]["/predict"]["post"]
 
@@ -553,7 +541,7 @@ def test_arrow_deployment_batches_processed_rows_and_runs_global_processors_once
         lambda *args, **kwargs: pytest.fail("Arrow deployment entered the Python mapping adapter"),
     )
     app = (
-        Deployment(checkpoint=model, accelerator="cpu", max_batch_size=2, retain=("id", "value"))
+        rf.Deployment(checkpoint=model, accelerator="cpu", max_batch_size=2, retain=("id", "value"))
         .preprocess(prepare)
         .postprocess(finish)
         .app()
@@ -609,7 +597,7 @@ def test_arrow_deployment_rejects_final_prediction_cardinality_drift(stage):
         return frame.head(2)
 
     model = rf.Model.xs(value=rf.Number, d_model=8, embed=True)
-    deployment = Deployment(checkpoint=model, accelerator="cpu", max_batch_size=2)
+    deployment = rf.Deployment(checkpoint=model, accelerator="cpu", max_batch_size=2)
     if stage == "preprocess":
         deployment.preprocess(drop_inputs)
     else:
@@ -644,8 +632,8 @@ def test_arrow_deployment_rejects_final_prediction_cardinality_drift(stage):
     }
 
 
-def test_deployment_predict_rejects_an_invalid_arrow_stream(monkeypatch):
-    app = Deployment(checkpoint="unused", accelerator="cpu").app()
+def test_deployment_predict_rejects_an_invalid_arrow_stream():
+    app = rf.Deployment(checkpoint="unused", accelerator="cpu").app()
 
     class Request:
         headers = {"content-type": "application/vnd.apache.arrow.stream"}
@@ -660,7 +648,7 @@ def test_deployment_predict_rejects_an_invalid_arrow_stream(monkeypatch):
 
 
 def test_deployment_predict_rejects_an_unsupported_content_type():
-    app = Deployment(checkpoint="unused", accelerator="cpu").app()
+    app = rf.Deployment(checkpoint="unused", accelerator="cpu").app()
 
     class Request:
         headers = {"content-type": "application/octet-stream"}
@@ -689,7 +677,7 @@ def test_deployment_serve_configures_uvicorn_and_relflow_logging(monkeypatch):
     monkeypatch.setattr(deployment_module.uvicorn, "run", run)
     monkeypatch.setattr(deployment_module, "configure", lambda *, level: captured.update(configured=level))
 
-    Deployment(
+    rf.Deployment(
         checkpoint="unused",
         accelerator="cpu",
         host="127.0.0.1",
@@ -717,7 +705,7 @@ def test_multiworker_deployment_uses_the_importable_asgi_app(monkeypatch):
     monkeypatch.setattr(deployment_module, "configure", lambda *, level: None)
     monkeypatch.delenv("RELFLOW_RETAIN", raising=False)
 
-    Deployment(checkpoint="model.ckpt", workers=2, retain=("id",), log_level="trace", max_queue_size=7).serve()
+    rf.Deployment(checkpoint="model.ckpt", workers=2, retain=("id",), log_level="trace", max_queue_size=7).serve()
 
     assert captured["app"] == "relflow.inference.asgi:app"
     assert captured["workers"] == 2
@@ -734,26 +722,26 @@ def test_multiworker_deployment_rejects_in_process_builder_configuration(monkeyp
 
     monkeypatch.setattr(deployment_module, "configure", lambda *, level: None)
     with pytest.raises(ValueError, match="cannot serialize in-process"):
-        Deployment(checkpoint="model.ckpt", workers=2).postprocess(compact).serve()
+        rf.Deployment(checkpoint="model.ckpt", workers=2).postprocess(compact).serve()
 
 
 def test_deployment_rejects_explicit_checkpoint_and_model():
     model = rf.Model.xs(amount=rf.Number, d_model=8)
 
     with pytest.raises(ValueError, match="pass either checkpoint or model"):
-        Deployment(checkpoint="model.ckpt", model=model)
+        rf.Deployment(checkpoint="model.ckpt", model=model)
 
 
 def test_deployment_model_ignores_an_environment_checkpoint(monkeypatch):
     model = rf.Model.xs(amount=rf.Number, d_model=8)
     monkeypatch.setenv("RELFLOW_CHECKPOINT", "/srv/models/leftover.ckpt")
 
-    deployment = Deployment(model=model)
+    deployment = rf.Deployment(model=model)
 
     assert deployment.model is model
     assert deployment.checkpoint == "/srv/models/leftover.ckpt"
     with pytest.raises(ValueError, match="pass either checkpoint or model"):
-        Deployment(model=model, checkpoint="explicit.ckpt")
+        rf.Deployment(model=model, checkpoint="explicit.ckpt")
 
 
 def test_error_envelope_is_stable():
@@ -876,7 +864,8 @@ def test_json_rows_settle_durations_binary_decimals_and_nan():
         }
     ]
     encoded = {
-        backend: Deployment(checkpoint="unused", json_backend=backend).encode(rows) for backend in ("orjson", "stdlib")
+        backend: rf.Deployment(checkpoint="unused", json_backend=backend).encode(rows)
+        for backend in ("orjson", "stdlib")
     }
     assert orjson.loads(encoded["orjson"]) == orjson.loads(encoded["stdlib"]) == rows
 
@@ -894,7 +883,7 @@ def test_runtime_restores_the_model_batch_size_after_bounded_prediction():
 
 def test_json_route_isolates_request_failures_within_one_microbatch():
     model = rf.Model.xs(value=rf.Number, vector=rf.Vector(n_dim=2), d_model=8, embed=True)
-    app = Deployment(checkpoint=model, accelerator="cpu", max_batch_size=4).app()
+    app = rf.Deployment(checkpoint=model, accelerator="cpu", max_batch_size=4).app()
     good = {"value": 1.0, "vector": [0.1, 0.2]}
     bad = {"value": 2.0, "vector": [0.1]}
 
@@ -922,7 +911,7 @@ def test_json_route_isolates_request_failures_within_one_microbatch():
 
 def test_arrow_route_reports_data_errors_as_422_envelopes():
     model = rf.Model.xs(value=rf.Number, d_model=8, embed=True)
-    app = Deployment(checkpoint=model, accelerator="cpu").app()
+    app = rf.Deployment(checkpoint=model, accelerator="cpu").app()
     source = pa.table({"value": ["not a number"]})
     sink = pa.BufferOutputStream()
     with pa.ipc.new_stream(sink, source.schema) as writer:
@@ -952,7 +941,7 @@ def test_arrow_route_reports_data_errors_as_422_envelopes():
 
 @pytest.mark.parametrize("media_type", ["application/json", "application/vnd.apache.arrow.stream"])
 def test_predict_reports_a_missing_worker_as_503(media_type):
-    app = Deployment(checkpoint="unused", accelerator="cpu").app()
+    app = rf.Deployment(checkpoint="unused", accelerator="cpu").app()
     source = pa.table({"value": [1.0]})
     sink = pa.BufferOutputStream()
     with pa.ipc.new_stream(sink, source.schema) as writer:

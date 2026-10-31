@@ -190,7 +190,9 @@ def test_schema_converts_leaf_instances_nested_in_branches():
     )
 
     request = structure.requests["/branch/category_leaf"]
-    assert "size" not in request.model_dump()
+    assert type(request) is rf.Category
+    assert request.parent is structure.branches["/branch"]
+    assert request.address == "/branch/category_leaf"
 
 
 def test_raw_generic_leaves_materialize_through_the_live_registry():

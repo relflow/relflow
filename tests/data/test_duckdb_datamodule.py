@@ -209,6 +209,7 @@ def test_preprocessing_retention_and_epoch_limit_use_the_arrow_pipeline(database
     assert all(batch.retain == ("request_id",) for batch in batches)
 
 
+@pytest.mark.integration
 def test_spawned_persistent_workers_restart_without_duplicate_rows(database: Path):
     data = rf.DuckDBDataModule(
         model=model(),
@@ -233,6 +234,7 @@ def test_spawned_persistent_workers_restart_without_duplicate_rows(database: Pat
             loader._iterator._shutdown_workers()
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(("rows", "workers"), [(5, 2), (1, 3)])
 def test_spawned_prediction_workers_preserve_every_anchor(rows: int, workers: int):
     data = rf.DuckDBDataModule(

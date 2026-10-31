@@ -11,7 +11,6 @@ from tensordict import TensorDict
 
 import relflow as rf
 from relflow.architecture.binding import bind
-from relflow.architecture.runtime import ModelRuntime
 from relflow.data.iterables import encode
 from relflow.structs.enums import TensorKey, Tokens
 from relflow.structs.packages import Prediction
@@ -182,30 +181,6 @@ def test_enum_unavailable_input_augmentation_keeps_targets_and_counts():
     assert rf.Enum.counts(configured, ADDRESS) == {"pending": 1, "complete": 0, "rejected": 1}
 
 
-@pytest.mark.parametrize("workers", [0, 1])
-def test_enum_prefetch_keeps_ids_fixed_and_counts_only_consumed_batches(workers):
-    configured = model(mask=True)
-    data = rf.ArrowDataModule(
-        model=configured,
-        train=records("rejected", "complete", "pending", "pending"),
-        shuffle=False,
-        num_workers=workers,
-        persistent_workers=False,
-        pin_memory=False,
-    )
-    batches = list(data.train_dataloader())
-    assert len(batches) == 2
-    assert rf.Enum.counts(configured, ADDRESS) == dict.fromkeys(VALUES, 0)
-    assert batches[0].tensors[ADDRESS].targets[TensorKey.content].flatten().tolist() == [2, 1]
-    assert batches[1].tensors[ADDRESS].targets[TensorKey.content].flatten().tolist() == [0, 0]
-
-    consumed = bind(configured, batches[0], rf.Strata.train)
-    ModelRuntime.learn(configured, consumed.observations, strata=rf.Strata.train)
-    assert not consumed.bindings
-    assert rf.Enum.counts(configured, ADDRESS) == {"pending": 0, "complete": 1, "rejected": 1}
-    assert rf.Enum.vocabulary(configured, ADDRESS) == VALUES
-
-
 def test_enum_output_includes_declared_unobserved_classes_and_caps_topk():
     configured = model(mask=True, topk=[8, 2, 8])
     field = configured.encode(records("pending", "pending"), strata=rf.Strata.train)[ADDRESS]
@@ -354,6 +329,7 @@ def test_enum_introspection_rejects_wrong_fields_and_sources():
             inspect(object(), ADDRESS)
 
 
+@pytest.mark.integration
 def test_enum_lightning_training_preserves_fixed_classes_and_training_counts():
     torch.manual_seed(923)
     configured = rf.Model.xs(

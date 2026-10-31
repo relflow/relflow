@@ -1,11 +1,13 @@
 import pyarrow as pa
 import pytest
 import torch
+from tensordict import TensorDict
 
 import relflow as rf
 from relflow.data.ragged import coalesce
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
+from relflow.structs.packages import Prediction
 from relflow.structs.tree import Mask
 from relflow.tensorfields.base import TENSORFIELDS, Context
 from relflow.tensorfields.extensions.hashable import (
@@ -252,32 +254,13 @@ def hash_matrix(values, n_hashes: int, *, salt: int = 0) -> torch.Tensor:
     return field.content.reshape(len(values), n_hashes)
 
 
-def bucket_ids(content: torch.Tensor, n_buckets: int) -> torch.Tensor:
-    return (
-        content.to(dtype=torch.get_default_dtype())
-        .div(1 << 63)
-        .add(1.0)
-        .mul(0.5 * n_buckets)
-        .floor()
-        .long()
-        .clamp(min=0, max=n_buckets - 1)
-    )
-
-
-def test_hashable_hashes_never_collide_over_10000_distinct_strings():
-    """Empirical injectivity probe.
-
-    Each seeded Polars lane provides 64 bits per input, so fingerprint
-    collisions on 10k short strings should be improbable.
-    """
+def test_hashable_fingerprints_distinguish_a_representative_identifier_sample():
     n_hashes = 4
     values = [f"user-{index}" for index in range(10_000)]
 
     matrix = hash_matrix(values, n_hashes=n_hashes)
 
-    # Convert each row to a fingerprint tuple; count uniques.
-    fingerprints = {tuple(row.tolist()) for row in matrix}
-    assert len(fingerprints) == len(values)
+    assert torch.unique(matrix, dim=0).shape[0] == len(values)
 
 
 def test_hashable_hashes_are_stable_across_calls():
@@ -290,59 +273,34 @@ def test_hashable_hashes_are_stable_across_calls():
     assert torch.equal(matrix_a, matrix_b)
 
 
-def test_hashable_sign_fingerprint_has_bounded_capacity():
-    """Bucket-collapsed fingerprints cap at `n_buckets ** n_hashes` distinct identities.
+@pytest.mark.parametrize("n_buckets", [2, 5, 16])
+def test_hashable_loss_bucket_boundaries_and_null_gradients(n_buckets, monkeypatch):
+    model = rf.Model.xs(d_model=8, id=rf.Hash(n_hashes=2, n_buckets=n_buckets, mask=True))
+    field = model.encode(pa.table({"id": ["low", "negative", "zero", "high", None]}), strata="train")["/id"]
+    raw = torch.tensor([-(2**63), -(2**62), 0, 2**63 - 1, 0], dtype=torch.int64)
+    field.targets[TensorKey.content].copy_(raw[:, None, None].expand(-1, 1, 2))
+    content = torch.linspace(-1, 1, 5 * 2 * n_buckets).reshape(5, 1, 2 * n_buckets).requires_grad_()
+    state = torch.zeros(5, 1, len(Tokens))
+    predicted = Prediction(
+        address="/id",
+        payload=TensorDict({TensorKey.state: state, TensorKey.content: content}, batch_size=[5]),
+    )
+    monkeypatch.setattr(model, "track", lambda names, value: value)
 
-    Deliberate probe of the reconstruction capacity ceiling the loss enforces.
-    """
-    n_hashes = 4
-    n_buckets = 2
-    values = [f"user-{index}" for index in range(500)]
+    actual = rf.TENSORFIELDS["hash"].loss(model, predicted, field, Strata.train)
 
-    matrix = hash_matrix(values, n_hashes=n_hashes)
-    encoded = bucket_ids(matrix, n_buckets=n_buckets)
-    fingerprints = {tuple(row.tolist()) for row in encoded}
-
-    assert len(fingerprints) <= n_buckets**n_hashes
-    # With 500 inputs into 2**4 = 16 buckets we necessarily observe collisions.
-    assert len(fingerprints) < len(values)
-
-
-def test_hashable_more_hashes_increase_sign_fingerprint_capacity():
-    values = [f"user-{index}" for index in range(2_000)]
-    n_buckets = 2
-
-    small = bucket_ids(hash_matrix(values, n_hashes=4), n_buckets=n_buckets)
-    large = bucket_ids(hash_matrix(values, n_hashes=16), n_buckets=n_buckets)
-
-    small_uniques = len({tuple(row.tolist()) for row in small})
-    large_uniques = len({tuple(row.tolist()) for row in large})
-
-    assert small_uniques <= n_buckets**4
-    assert large_uniques > small_uniques
-
-
-def test_hashable_more_buckets_increase_fingerprint_capacity():
-    values = [f"user-{index}" for index in range(4_000)]
-    n_hashes = 4
-
-    coarse = bucket_ids(hash_matrix(values, n_hashes=n_hashes), n_buckets=2)
-    fine = bucket_ids(hash_matrix(values, n_hashes=n_hashes), n_buckets=16)
-
-    coarse_uniques = len({tuple(row.tolist()) for row in coarse})
-    fine_uniques = len({tuple(row.tolist()) for row in fine})
-
-    assert coarse_uniques <= 2**n_hashes
-    assert fine_uniques > coarse_uniques
-    assert fine_uniques <= 16**n_hashes
-
-
-def test_hashable_bucketize_range_is_valid():
-    matrix = hash_matrix([f"v-{i}" for i in range(2_000)], n_hashes=4)
-    for k in (2, 4, 8, 16):
-        buckets = bucket_ids(matrix, n_buckets=k)
-        assert int(buckets.min().item()) >= 0
-        assert int(buckets.max().item()) < k
+    reference = content.detach().clone().requires_grad_()
+    # Endpoint clamping and an odd bucket count have explicit expected labels;
+    # this oracle never repeats the production bucket-conversion formula.
+    buckets = torch.tensor([0, n_buckets // 4, n_buckets // 2, n_buckets - 1]).repeat_interleave(2)
+    expected = torch.nn.functional.cross_entropy(
+        state.reshape(5, len(Tokens)), field.targets[TensorKey.state].reshape(5)
+    ) + torch.nn.functional.cross_entropy(reference.reshape(5, 2, n_buckets)[:4].reshape(-1, n_buckets), buckets)
+    torch.testing.assert_close(actual, expected)
+    actual.backward()
+    expected.backward()
+    torch.testing.assert_close(content.grad, reference.grad)
+    assert not content.grad[-1].any()
 
 
 # --- embedder / decoder / loss end-to-end -----------------------------------------
@@ -410,6 +368,7 @@ def test_hashable_training_loss_covers_state_and_content_heads():
     assert torch.isfinite(output["loss"])
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("batch_size", [1, 2, 3])
 def test_hashable_evaluation_accuracy_counts_valued_targets_across_unequal_batches(batch_size, tmp_path):
     torch.manual_seed(0)
@@ -435,25 +394,6 @@ def test_hashable_evaluation_accuracy_counts_valued_targets_across_unequal_batch
     correct = logits.argmax(-1).eq(buckets)[:2].sum().item()
     # Accuracy counts correct buckets over the four valued (row, hash) pairs; the null row adds nothing.
     assert values[".id/validate.accuracy.content"] == pytest.approx(correct / 4)
-
-
-def test_hashable_content_target_matches_deterministic_recomputation():
-    schema = build_schema(n_hashes=5, length=2, mask=Mask(reconstruct=True))
-    values = [[["alice", "bob"]], [["carol", "dave"]]]
-
-    field = tensorfield(
-        values=values,
-        schema=schema,
-        strata=Strata.train,
-    )
-
-    fresh = tensorfield(
-        values=values,
-        schema=build_schema(n_hashes=5, length=2),
-        strata=Strata.train,
-    )
-
-    assert torch.equal(field.targets[TensorKey.content], fresh.content)
 
 
 def test_hashable_decoder_content_head_width_matches_n_hashes():

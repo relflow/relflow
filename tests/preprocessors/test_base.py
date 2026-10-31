@@ -7,7 +7,6 @@ import pytest
 
 import relflow as rf
 from relflow.data import processors
-from relflow.structs.enums import Strata
 
 
 def make_frame(values: list[int]) -> pl.DataFrame:
@@ -33,7 +32,7 @@ def test_decorated_processors_pickle_with_bound_configuration():
     finished = pickle.loads(pickle.dumps(scale.partial(amount=2)))
     assert prepared.scope == "dataset"
     assert prepared.func is offset.func
-    assert prepared(make_frame([1]), strata=Strata.train).equals(make_frame([4]))
+    assert prepared(make_frame([1]), strata=rf.Strata.train).equals(make_frame([4]))
     assert finished(make_frame([1])).equals(make_frame([2]))
 
 
@@ -51,38 +50,28 @@ def test_preprocessor_providers_are_string_enums():
 
 
 def test_preprocess_returns_callable_processor_object():
-    @processors.preprocess
+    @rf.preprocess
     def increment(frame: pl.DataFrame) -> pl.DataFrame:
         return frame.with_columns(pl.col("value") + 1)
 
     source = make_frame([1, 2])
-    assert isinstance(increment, processors.Preprocessor)
+    assert isinstance(increment, rf.Preprocessor)
     assert increment(source).to_dict(as_series=False) == {"value": [2, 3]}
-    [result] = increment.run(source, strata=Strata.train, schema=None, encoding_context={})
+    [result] = increment.run(source, strata=rf.Strata.train, schema=None, encoding_context={})
     assert result.equals(pl.DataFrame({"value": [2, 3]}))
 
 
-def test_preprocess_scope_is_the_only_decorator_option():
-    @processors.preprocess(scope="dataset")
-    def prepare(frame: pl.DataFrame) -> pl.DataFrame:
-        return frame
-
-    assert prepare.scope == "dataset"
-    assert not hasattr(prepare, "requires")
-    assert not hasattr(prepare, "produces")
-
+def test_preprocess_rejects_invalid_scope():
     with pytest.raises(ValueError, match="scope must be"):
-        processors.preprocess(scope="global")(lambda frame: frame)  # type: ignore[arg-type]
-    with pytest.raises(TypeError, match="unexpected keyword argument 'requires'"):
-        processors.preprocess(requires="value")  # type: ignore[call-overload]
+        rf.preprocess(scope="global")(lambda frame: frame)  # type: ignore[arg-type]
 
 
 def test_processor_decorators_accept_direct_calls():
-    prepare = processors.preprocess(lambda frame: frame, scope="dataset")
-    finish = processors.postprocess(lambda frame: frame)
+    prepare = rf.preprocess(lambda frame: frame, scope="dataset")
+    finish = rf.postprocess(lambda frame: frame)
 
     assert prepare.scope == "dataset"
-    assert isinstance(finish, processors.Postprocessor)
+    assert isinstance(finish, rf.Postprocessor)
 
 
 def test_processor_pipelines_normalize_to_immutable_tuples():
@@ -124,19 +113,19 @@ def test_processor_pipeline_rejects_wrong_and_nested_members_by_index():
 
 
 def test_preprocessor_discards_none_and_expands_frames():
-    @processors.preprocess
+    @rf.preprocess
     def discard(frame: pl.DataFrame):
         return None
 
-    @processors.preprocess
+    @rf.preprocess
     def split(frame: pl.DataFrame):
         yield frame.head(1)
         yield frame.slice(1)
 
     source = make_frame([1, 2, 3])
-    assert list(discard.run(source, strata=Strata.train, schema=None, encoding_context={})) == []
+    assert list(discard.run(source, strata=rf.Strata.train, schema=None, encoding_context={})) == []
     assert [
-        item["value"].to_list() for item in split.run(source, strata=Strata.train, schema=None, encoding_context={})
+        item["value"].to_list() for item in split.run(source, strata=rf.Strata.train, schema=None, encoding_context={})
     ] == [[1], [2, 3]]
 
 
@@ -145,12 +134,12 @@ def test_preprocessor_discards_none_and_expands_frames():
     [pa.table({"value": [1]}), {"value": [1]}, [1], pl.Series("value", [1]), pl.LazyFrame({"value": [1]})],
 )
 def test_preprocessor_rejects_non_dataframe_results(value):
-    @processors.preprocess
+    @rf.preprocess
     def invalid(frame: pl.DataFrame):
         return value
 
     with pytest.raises(TypeError, match="DataFrame"):
-        list(invalid.run(make_frame([1]), strata=Strata.train, schema=None, encoding_context={}))
+        list(invalid.run(make_frame([1]), strata=rf.Strata.train, schema=None, encoding_context={}))
 
 
 def test_preprocessor_accepts_arbitrary_canonical_row_changes():
@@ -162,14 +151,14 @@ def test_preprocessor_accepts_arbitrary_canonical_row_changes():
             .select(pl.col("value").repeat_by(2).explode())
         )
 
-    [result] = canonicalize.run(make_frame([1, 2, 3]), strata=Strata.train, schema=None, encoding_context={})
+    [result] = canonicalize.run(make_frame([1, 2, 3]), strata=rf.Strata.train, schema=None, encoding_context={})
     assert result["value"].to_list() == [3, 3, 2, 2]
 
 
 def test_preprocessor_receives_only_named_pipeline_providers():
-    @processors.preprocess
+    @rf.preprocess
     def inspect(frame: pl.DataFrame, *, strata, schema, encoding_context):
-        assert strata is Strata.validate
+        assert strata is rf.Strata.validate
         assert schema == "schema"
         assert encoding_context == {"marker": "seen"}
         return frame
@@ -178,7 +167,7 @@ def test_preprocessor_receives_only_named_pipeline_providers():
     assert list(
         inspect.run(
             source,
-            strata=Strata.validate,
+            strata=rf.Strata.validate,
             schema="schema",
             encoding_context={"marker": "seen"},
         )
@@ -186,17 +175,17 @@ def test_preprocessor_receives_only_named_pipeline_providers():
 
 
 def test_required_user_parameters_are_bound_immutably():
-    @processors.preprocess
+    @rf.preprocess
     def offset(frame: pl.DataFrame, *, amount: int) -> pl.DataFrame:
         return frame.with_columns(pl.col("value") + amount)
 
     with pytest.raises(ValueError, match="requires unbound parameter"):
-        list(offset.run(make_frame([1]), strata=Strata.train, schema=None, encoding_context={}))
+        list(offset.run(make_frame([1]), strata=rf.Strata.train, schema=None, encoding_context={}))
 
     configured = offset.partial(amount=4)
     assert configured.bound == {"amount": 4}
     assert offset.bound == {}
-    [result] = configured.run(make_frame([1]), strata=Strata.train, schema=None, encoding_context={})
+    [result] = configured.run(make_frame([1]), strata=rf.Strata.train, schema=None, encoding_context={})
     assert result["value"].to_list() == [5]
 
     with pytest.raises(ValueError, match="already bound"):
@@ -204,12 +193,12 @@ def test_required_user_parameters_are_bound_immutably():
 
 
 def test_pipeline_parameters_cannot_be_bound():
-    @processors.preprocess
+    @rf.preprocess
     def inspect(frame: pl.DataFrame, *, strata):
         return frame
 
     with pytest.raises(ValueError, match="provided by the pipeline"):
-        inspect.partial(strata=Strata.train)
+        inspect.partial(strata=rf.Strata.train)
 
 
 @pytest.mark.parametrize(
@@ -221,12 +210,12 @@ def test_pipeline_parameters_cannot_be_bound():
 )
 def test_processor_signatures_are_explicit(function, message):
     with pytest.raises(TypeError, match=message):
-        processors.preprocess(function)
+        rf.preprocess(function)
 
 
 def test_preprocessor_normalize_rejects_raw_callable():
     with pytest.raises(TypeError, match="preprocessor must be a Preprocessor"):
-        processors.Preprocessor.normalize(lambda frame: frame)
+        rf.Preprocessor.normalize(lambda frame: frame)
 
 
 def test_postprocessor_may_change_rows_and_columns():
@@ -238,26 +227,8 @@ def test_postprocessor_may_change_rows_and_columns():
     assert output.to_dict(as_series=False) == {"large": [True]}
 
 
-def test_postprocessor_pipeline_runs_in_order():
+def test_postprocessor_pipeline_runs_in_order_and_converts_arrow_once(monkeypatch):
     calls: list[str] = []
-
-    @rf.postprocess
-    def double(frame: pl.DataFrame) -> pl.DataFrame:
-        calls.append("double")
-        return frame.select(doubled=pl.col("value") * 2)
-
-    @rf.postprocess
-    def classify(frame: pl.DataFrame) -> pl.DataFrame:
-        calls.append("classify")
-        return frame.select(large=pl.col("doubled") > 3)
-
-    result = processors.apply(pa.table({"value": [1, 2]}), [double, classify])
-
-    assert calls == ["double", "classify"]
-    assert result.to_pydict() == {"large": [False, True]}
-
-
-def test_processor_boundaries_convert_arrow_once(monkeypatch):
     counts = {"from": 0, "to": 0}
     from_arrow = pl.from_arrow
     to_arrow = pl.DataFrame.to_arrow
@@ -274,16 +245,19 @@ def test_processor_boundaries_convert_arrow_once(monkeypatch):
     monkeypatch.setattr(pl.DataFrame, "to_arrow", convert_to)
 
     @rf.postprocess
-    def first(frame: pl.DataFrame) -> pl.DataFrame:
-        return frame.with_columns(pl.col("value") + 1)
+    def double(frame: pl.DataFrame) -> pl.DataFrame:
+        calls.append("double")
+        return frame.select(doubled=pl.col("value") * 2)
 
     @rf.postprocess
-    def second(frame: pl.DataFrame) -> pl.DataFrame:
-        return frame.with_columns(pl.col("value") * 2)
+    def classify(frame: pl.DataFrame) -> pl.DataFrame:
+        calls.append("classify")
+        return frame.select(large=pl.col("doubled") > 3)
 
-    result = processors.apply(pa.table({"value": [1]}), [first, second])
+    result = processors.apply(pa.table({"value": [1, 2]}), [double, classify])
 
-    assert result.to_pydict() == {"value": [4]}
+    assert calls == ["double", "classify"]
+    assert result.to_pydict() == {"large": [False, True]}
     assert counts == {"from": 1, "to": 1}
 
 
@@ -297,7 +271,7 @@ def test_processors_reject_zero_column_results():
         return pl.DataFrame()
 
     with pytest.raises(ValueError, match="at least one Polars column"):
-        list(empty.run(make_frame([1]), strata=Strata.train, schema=None, encoding_context={}))
+        list(empty.run(make_frame([1]), strata=rf.Strata.train, schema=None, encoding_context={}))
     with pytest.raises(ValueError, match="at least one Polars column"):
         also_empty.run(make_frame([1]))
 

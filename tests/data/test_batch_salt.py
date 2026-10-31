@@ -37,6 +37,10 @@ def test_training_batches_repeat_exactly_whatever_the_process_rng_did():
             )
         return out
 
-    first, second = leaves(1), leaves(2)
+    state = random.getstate()
+    try:
+        first, second = leaves(1), leaves(2)
+    finally:
+        random.setstate(state)
     assert [key for key, _ in first] == [key for key, _ in second]
     assert all(torch.equal(a, b) for (_, a), (_, b) in zip(first, second, strict=True))

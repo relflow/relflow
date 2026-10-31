@@ -23,6 +23,8 @@ from relflow.data import sources
 from relflow.data.sources import Source
 from tests.data.s3 import S3Fixture
 
+pytestmark = pytest.mark.integration
+
 
 def parquet(table: pa.Table) -> bytes:
     sink = pa.BufferOutputStream()

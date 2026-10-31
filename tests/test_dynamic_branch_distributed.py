@@ -127,6 +127,7 @@ def distributed_lengths(rank, directory):
         distributed.destroy_process_group()
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(not distributed.is_available() or not distributed.is_gloo_available(), reason="requires CPU Gloo")
 def test_automatic_lengths_can_differ_and_swap_between_ddp_ranks(tmp_path, monkeypatch):
     monkeypatch.setenv("OMP_NUM_THREADS", "1")

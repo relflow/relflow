@@ -11,12 +11,10 @@ from relflow.tensorfields.base import TENSORFIELDS
 from tests.arrow import table as arrow_table
 
 
-def bits(values: np.ndarray) -> list[bool]:
-    return values.tolist()
-
-
 def test_branch_query_skip_is_atomic_across_descendants():
-    schema = rf.Model.xs(
+    schema = rf.Schema.from_tree(
+        n_layers=1,
+        n_heads=2,
         d_model=8,
         items=rf.Branch(
             amount=rf.Number,
@@ -24,7 +22,7 @@ def test_branch_query_skip_is_atomic_across_descendants():
             length=3,
             mask=rf.Mask(query="selected", skip=True, dropout=False, reconstruct=True),
         ),
-    ).schema
+    )
     source = arrow_table(
         [
             {
@@ -40,9 +38,9 @@ def test_branch_query_skip_is_atomic_across_descendants():
     amount = projections["/items/amount"]
     code = projections["/items/code"]
 
-    assert bits(amount.present) == bits(code.present) == [True, False]
-    assert bits(amount.trainable) == bits(code.trainable) == [False, True]
-    assert bits(amount.visible) == bits(code.visible) == [True, False]
+    assert amount.present.tolist() == code.present.tolist() == [True, False]
+    assert amount.trainable.tolist() == code.trainable.tolist() == [False, True]
+    assert amount.visible.tolist() == code.visible.tolist() == [True, False]
 
     inputs, targets = amount.split(amount.pristine.values)
     assert inputs.values.to_pylist() == [1.0]
@@ -52,7 +50,9 @@ def test_branch_query_skip_is_atomic_across_descendants():
 
 
 def test_rate_skip_is_stable_for_one_batch_and_changes_by_epoch():
-    schema = rf.Model.xs(d_model=8, value=rf.Number(mask=rf.Mask(rate=0.5, skip=True, dropout=False))).schema
+    schema = rf.Schema.from_tree(
+        n_layers=1, n_heads=2, d_model=8, value=rf.Number(mask=rf.Mask(rate=0.5, skip=True, dropout=False))
+    )
     source = arrow_table([{"value": float(index)} for index in range(512)])
 
     whole = coalesce(source, schema, Strata.train, seed=17, epoch=3).fields["/value"]
@@ -64,9 +64,12 @@ def test_rate_skip_is_stable_for_one_batch_and_changes_by_epoch():
 
 
 def test_query_and_rate_sample_only_eligible_owner_coordinates():
-    schema = rf.Model.xs(
-        d_model=8, value=rf.Number(mask=rf.Mask(query="eligible", rate=0.5, skip=True, dropout=False))
-    ).schema
+    schema = rf.Schema.from_tree(
+        n_layers=1,
+        n_heads=2,
+        d_model=8,
+        value=rf.Number(mask=rf.Mask(query="eligible", rate=0.5, skip=True, dropout=False)),
+    )
     source = arrow_table([{"value": float(index), "eligible": index % 2 == 0} for index in range(256)])
 
     projection = coalesce(source, schema, Strata.train, seed=5, epoch=0).fields["/value"]
@@ -186,7 +189,9 @@ def test_observation_learning_is_frozen_outside_training():
     ],
 )
 def test_query_selector_requires_non_null_scalar_booleans(selector, message):
-    schema = rf.Model.xs(d_model=8, value=rf.Number(mask=rf.Mask(query="selected", skip=True, dropout=False))).schema
+    schema = rf.Schema.from_tree(
+        n_layers=1, n_heads=2, d_model=8, value=rf.Number(mask=rf.Mask(query="selected", skip=True, dropout=False))
+    )
     source = arrow_table([{"value": 1.0, "selected": selector[0]}, {"value": 2.0, "selected": selector[1]}])
 
     with pytest.raises((TypeError, ValueError), match=message):
@@ -194,7 +199,7 @@ def test_query_selector_requires_non_null_scalar_booleans(selector, message):
 
 
 def test_source_less_prediction_uses_vacancy_and_fixed_routing():
-    schema = rf.Model.xs(d_model=8, label=rf.Category(mask=True)).schema
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, label=rf.Category(mask=True))
     source = arrow_table([{"unused": 1}, {"unused": 2}])
 
     projection = coalesce(source, schema, Strata.predict).fields["/label"]
@@ -203,15 +208,15 @@ def test_source_less_prediction_uses_vacancy_and_fixed_routing():
     assert projection.vacant is True
     assert pa.types.is_null(projection.pristine.values.type)
     assert projection.pristine.shape == (2, 1)
-    assert bits(projection.present) == [False, False]
-    assert bits(projection.inferred) == [True, True]
+    assert projection.present.tolist() == [False, False]
+    assert projection.inferred.tolist() == [True, True]
     assert inputs.dense.tolist() == [[Tokens.padded.value], [Tokens.padded.value]]
     assert targets.dense.tolist() == [[Tokens.padded.value], [Tokens.padded.value]]
 
 
 @pytest.mark.parametrize("strata", [Strata.train, Strata.validate, Strata.test])
 def test_source_less_reconstruction_fails_outside_prediction(strata):
-    schema = rf.Model.xs(d_model=8, value=rf.Number, label=rf.Category(mask=True)).schema
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, value=rf.Number, label=rf.Category(mask=True))
     source = arrow_table([{"value": 1.0}, {"value": 2.0}])
 
     with pytest.raises(ValueError, match="field 'label' is absent"):
@@ -219,13 +224,15 @@ def test_source_less_reconstruction_fails_outside_prediction(strata):
 
 
 def test_source_less_learned_mask_reconstruction_remains_present():
-    schema = rf.Model.xs(d_model=8, label=rf.Category(mask=rf.Mask(dropout=False, reconstruct=True))).schema
+    schema = rf.Schema.from_tree(
+        n_layers=1, n_heads=2, d_model=8, label=rf.Category(mask=rf.Mask(dropout=False, reconstruct=True))
+    )
     source = arrow_table([{"unused": 1}, {"unused": 2}])
 
     projection = coalesce(source, schema, Strata.predict).fields["/label"]
     inputs, _ = projection.split(projection.pristine.values)
 
     assert projection.vacant is True
-    assert bits(projection.present) == [True, True]
-    assert bits(projection.inferred) == [True, True]
+    assert projection.present.tolist() == [True, True]
+    assert projection.inferred.tolist() == [True, True]
     assert inputs.dense.tolist() == [[Tokens.masked.value], [Tokens.masked.value]]

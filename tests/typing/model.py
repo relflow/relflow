@@ -41,7 +41,7 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
     assert_type(Classifier.xl(amount=rf.Number, dropout=None, optimizer=rf.adamw(1e-3)), Classifier)
     assert_type(rf.Model.md(fields={"size": rf.Number}, scheduler=schedule), rf.Model)
     assert_type(Classifier.compact(amount=rf.Number, n_layers=2), Classifier)
-    assert_type(model.track(("train", "loss"), loss), torch.Tensor)
+    assert_type(model.track(("loss", "train"), loss), torch.Tensor)
     assert_type(model.track(("throughput", "train"), loss, on_step=True, on_epoch=False), torch.Tensor)
     assert_type(model.track(("loss", "train_epoch"), loss, on_step=False, on_epoch=True, logger=False), torch.Tensor)
     assert_type(model.encode(table), TensorDict)
@@ -60,8 +60,8 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
     assert_type(model.validation_step(batch, 0), Output)
     assert_type(model.predict(table), pa.Table)
     assert_type(model.predict([{"amount": 1.0}]), pa.Table)
-    data = rf.ArrowDataModule(model, train=table, validate=table, test=table, predict=table)
-    assert_type(model.fit(data, log_every_n_steps=50), Classifier)
+    data = rf.ArrowDataModule(train=table, validate=table, test=table, predict=table)
+    assert_type(model.fit(data, scheduler=schedule, log_every_n_steps=50), Classifier)
     assert_type(
         model.fit(
             data,

@@ -286,6 +286,7 @@ def mixed_metrics():
         assert result[f".{name}/validate.coverage.content"] == 0.5
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(not distributed.is_available() or not distributed.is_gloo_available(), reason="requires CPU Gloo")
 def test_mixed_vocabulary_metrics_include_a_distributed_objective_empty_rank():
     launch(mixed_metrics)
@@ -315,6 +316,7 @@ def test_set_unknown_members_are_distinct_within_each_arrow_atom_family(known, u
     assert indices[1:].eq(-1).all()
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "accelerator",
     ["cpu", pytest.param("gpu", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable"))],

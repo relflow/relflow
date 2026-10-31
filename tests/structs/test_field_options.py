@@ -14,6 +14,8 @@ REQUESTS = [
     (rf.DateParts, {"dateparts": ["day_of_week"]}),
     (rf.Hash, {}),
     (rf.Number, {}),
+    (rf.Quantile, {}),
+    (rf.Enum, {"values": ("a", "b")}),
     (rf.Set, {}),
     (rf.Text, {}),
     (rf.Vector, {"n_dim": 4}),

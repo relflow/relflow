@@ -164,37 +164,36 @@ def test_packed_node_passes_training_dropout_to_each_attention_group(monkeypatch
     assert all(parameter.grad is not None and torch.isfinite(parameter.grad).all() for parameter in layer.parameters())
 
 
-def test_learned_pool_preserves_additive_evidence_and_count_after_rms_normalization():
-    pool = LearnedQueryCrossAttention(1, 4, 2, 0.0, position=False, mass_capacity=4, mass=True, ffnx=3).double()
+@pytest.mark.parametrize("direction,dtype,tolerance", [(0.0, torch.float32, 1e-5), (0.25, torch.float64, 1e-12)])
+def test_learned_pool_preserves_additive_evidence_and_count_after_rms_normalization(direction, dtype, tolerance):
+    pool = LearnedQueryCrossAttention(1, 4, 2, 0.0, position=False, mass_capacity=4, mass=True, ffnx=3).to(dtype)
     assert isinstance(pool.norm, torch.nn.RMSNorm)
     with torch.no_grad():
         pool.mass_projection.weight.copy_(torch.eye(4))
-        pool.mass_direction.fill_(0.25)
-    memory = torch.tensor([[[0.5, -1.0, 0.25, 2.0]]], dtype=torch.float64).expand(1, 4, 4).clone()
+        pool.mass_direction.fill_(direction)
+    memory = torch.tensor([[[0.5, -1.0, 0.25, 2.0]]], dtype=dtype).expand(1, 4, 4).clone()
     one = torch.tensor([[True, False, False, False]])
     three = torch.tensor([[True, True, True, False]])
     first = pool(memory, present=one, evidence=memory)
     second = pool(memory, present=three, evidence=memory)
-    torch.testing.assert_close(second - first, memory[:, :1] + 0.125, rtol=1e-12, atol=1e-12)
+    torch.testing.assert_close(second - first, memory[:, :1] + direction / 2, rtol=tolerance, atol=tolerance)
 
 
-@pytest.mark.parametrize("boundary", ["normalization", "projection", "activation"])
-def test_hooks_added_after_compiler_warmup_force_eager_and_resume(boundary):
+@pytest.mark.integration
+def test_hooks_added_after_compiler_warmup_force_eager_and_resume():
     pool = LearnedQueryCrossAttention(1, 8, 2, 0.0)
-    observed, executions = [], []
+    observed, graphs, executions = [], [], []
 
     def backend(graph, inputs):
+        graphs.append(graph)
+
         def execute(*args):
             executions.append(graph)
             return graph.forward(*args)
 
         return execute
 
-    descendant = {
-        "normalization": pool.blocks[0].ffn_norm,
-        "projection": pool.blocks[0].ffn[0],
-        "activation": pool.blocks[0].ffn[1],
-    }[boundary]
+    descendants = (pool.blocks[0].ffn_norm, pool.blocks[0].ffn[0], pool.blocks[0].ffn[1])
     memory = torch.randn(2, 3, 8)
     present = torch.ones(2, 3, dtype=torch.bool)
 
@@ -208,16 +207,19 @@ def test_hooks_added_after_compiler_warmup_force_eager_and_resume(boundary):
         compiler.compile(pool, encoders=False, pools=True, backend=backend, dynamic=None, options=None)
         first = pool.compute(memory, present, None, None)
         assert len(executions) == 1
-        handle = descendant.register_forward_hook(hook)
-        second = pool.compute(memory, present, None, None)
-        assert observed == [descendant]
-        assert len(executions) == 1
-        assert not torch.equal(second, first)
-        handle.remove()
-        handle = None
-        restored = pool.compute(memory, present, None, None)
-        assert len(executions) == 2
-        torch.testing.assert_close(restored, first, rtol=0, atol=0)
+        for index, descendant in enumerate(descendants, 1):
+            observed.clear()
+            handle = descendant.register_forward_hook(hook)
+            second = pool.compute(memory, present, None, None)
+            assert observed == [descendant]
+            assert len(executions) == index
+            assert not torch.equal(second, first)
+            handle.remove()
+            handle = None
+            restored = pool.compute(memory, present, None, None)
+            assert len(executions) == index + 1
+            torch.testing.assert_close(restored, first, rtol=0, atol=0)
+        assert len(graphs) == 1
     finally:
         if handle is not None:
             handle.remove()

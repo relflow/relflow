@@ -19,6 +19,13 @@ from tests.distributed import launch
 LABELS = (("rank0-a", "rank0-b", "rank0-b", "rank0-a"), ("rank1-a", "rank1-b", "rank1-late", "rank1-late"))
 FIELDS = ("category", "tags", "cluster")
 CAPACITIES = (2, 4, 8, 8)
+CASES = (
+    ("ddp", False, 1, True),
+    ("bucket_view", True, 1, True),
+    ("accumulate", False, 2, True),
+    ("bucket_view_accumulate", True, 2, True),
+    ("no_initial_sync", True, 2, False),
+)
 
 
 def optimizer(model):
@@ -231,8 +238,6 @@ def train(directory, bucket_view, accumulation, init_sync):
         outcome=rf.Boolean(mask=True),
     )
     # Visible rows train the input embeddings through outcome; masked rows train each vocabulary decoder.
-    model.optimizer = optimizer
-    model.scheduler = schedule
     records = []
     # distribute() takes alternating rows within each global batch of four.
     for batch_idx in range(4):
@@ -259,9 +264,13 @@ def train(directory, bucket_view, accumulation, init_sync):
         multiprocessing_context="spawn",
         prefetch_factor=2,
     )
-    trainer = lit.Trainer(
+    model.fit(
+        datamodule,
+        optimizer=optimizer,
+        scheduler=schedule,
         accelerator="cpu",
         devices=2,
+        precision="32-true",
         strategy=DDPStrategy(
             start_method="popen",
             process_group_backend="gloo",
@@ -276,29 +285,32 @@ def train(directory, bucket_view, accumulation, init_sync):
         num_sanity_val_steps=0,
         accumulate_grad_batches=accumulation,
         callbacks=[GrowthAudit(directory, bucket_view)],
+        early_stopping=False,
+        rollback=False,
         logger=False,
         enable_checkpointing=False,
         enable_progress_bar=False,
         enable_model_summary=False,
         default_root_dir=directory,
     )
-    trainer.fit(model, datamodule=datamodule)
 
 
-@pytest.mark.skipif(
-    not torch.distributed.is_available() or not torch.distributed.is_gloo_available(), reason="requires CPU Gloo"
-)
-@pytest.mark.parametrize(
-    "bucket_view,accumulation,init_sync",
-    [(False, 1, True), (True, 1, True), (False, 2, True), (True, 2, True), (True, 2, False)],
-    ids=["ddp", "bucket_view", "accumulate", "bucket_view_accumulate", "no_initial_sync"],
-)
-def test_distributed_vocabulary_growth_in_one_fit(tmp_path, monkeypatch, bucket_view, accumulation, init_sync):
-    # The two data workers also use spawn; keep this proof independent of host thread counts.
-    monkeypatch.setenv("OMP_NUM_THREADS", "1")
-    monkeypatch.setenv("MKL_NUM_THREADS", "1")
-    launch(train, tmp_path, bucket_view, accumulation, init_sync)
-    ranks = [torch.load(tmp_path / f"rank-{rank}.pt", weights_only=True) for rank in range(2)]
+def train_scenarios(directory, accumulation):
+    """Share the rank startup; each fit owns fresh model, source and optimizer state."""
+    for name, bucket_view, steps, init_sync in CASES:
+        if steps != accumulation:
+            continue
+        path = directory / name
+        path.mkdir(exist_ok=True)
+        try:
+            train(path, bucket_view, accumulation, init_sync)
+        except Exception as error:
+            error.add_note(f"Distributed vocabulary growth: {name}")
+            raise
+
+
+def check_growth(directory, accumulation):
+    ranks = [torch.load(directory / f"rank-{rank}.pt", weights_only=True) for rank in range(2)]
     expected_vocabulary = ["rank0-a", "rank1-a", "rank0-b", "rank1-b", "rank1-late"]
     global_counts = Counter(label for labels in LABELS for label in labels)
     for rank, result in enumerate(ranks):
@@ -380,3 +392,22 @@ def test_distributed_vocabulary_growth_in_one_fit(tmp_path, monkeypatch, bucket_
                 introduced = torch.ones(after.shape[0], dtype=torch.bool)
                 introduced[destinations] = False
                 assert torch.count_nonzero(after[introduced]) == 0, (rank, name)
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not torch.distributed.is_available() or not torch.distributed.is_gloo_available(), reason="requires CPU Gloo"
+)
+@pytest.mark.parametrize("accumulation", [1, 2], ids=["step", "accumulate"])
+def test_distributed_vocabulary_growth_in_one_fit(tmp_path, monkeypatch, accumulation):
+    # Both ranks create a fresh prefetched Arrow loader for every fit.
+    monkeypatch.setenv("OMP_NUM_THREADS", "1")
+    monkeypatch.setenv("MKL_NUM_THREADS", "1")
+    launch(train_scenarios, tmp_path, accumulation)
+    for name, _, steps, _ in CASES:
+        if steps == accumulation:
+            try:
+                check_growth(tmp_path / name, accumulation)
+            except Exception as error:
+                error.add_note(f"Distributed vocabulary growth: {name}")
+                raise

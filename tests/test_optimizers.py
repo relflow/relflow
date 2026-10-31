@@ -9,7 +9,7 @@ import torch
 from relflow import adamw
 
 
-def _module() -> torch.nn.Module:
+def network() -> torch.nn.Module:
     return torch.nn.Sequential(
         OrderedDict(
             [
@@ -20,12 +20,12 @@ def _module() -> torch.nn.Module:
     )
 
 
-def _parameter_ids(parameters: Iterable[torch.nn.Parameter]) -> set[int]:
+def identities(parameters: Iterable[torch.nn.Parameter]) -> set[int]:
     return {id(parameter) for parameter in parameters}
 
 
 def test_adamw_groups_bias_1d_and_named_parameters_without_decay() -> None:
-    module = _module()
+    module = network()
     parameters = dict(module.named_parameters())
 
     optimizer = adamw(
@@ -44,8 +44,8 @@ def test_adamw_groups_bias_1d_and_named_parameters_without_decay() -> None:
     assert [group["weight_decay"] for group in optimizer.param_groups] == [0.5, 0.0]
 
     decay_group, no_decay_group = optimizer.param_groups
-    assert _parameter_ids(decay_group["params"]) == {id(parameters["linear.weight"])}
-    assert _parameter_ids(no_decay_group["params"]) == {
+    assert identities(decay_group["params"]) == {id(parameters["linear.weight"])}
+    assert identities(no_decay_group["params"]) == {
         id(parameters["linear.bias"]),
         id(parameters["norm.weight"]),
         id(parameters["norm.bias"]),
@@ -53,7 +53,7 @@ def test_adamw_groups_bias_1d_and_named_parameters_without_decay() -> None:
 
 
 def test_adamw_can_decay_bias_and_1d_parameters() -> None:
-    module = _module()
+    module = network()
     parameters = dict(module.named_parameters())
 
     optimizer = adamw(
@@ -66,29 +66,29 @@ def test_adamw_can_decay_bias_and_1d_parameters() -> None:
 
     assert len(optimizer.param_groups) == 1
     assert optimizer.param_groups[0]["weight_decay"] == 0.2
-    assert _parameter_ids(optimizer.param_groups[0]["params"]) == {id(parameter) for parameter in parameters.values()}
+    assert identities(optimizer.param_groups[0]["params"]) == {id(parameter) for parameter in parameters.values()}
 
 
 def test_adamw_skips_frozen_parameters() -> None:
-    module = _module()
+    module = network()
     parameters = dict(module.named_parameters())
     parameters["linear.weight"].requires_grad_(False)
 
     optimizer = adamw(learning_rate=1e-3)(module)
 
     optimized_parameters = {
-        parameter_id for group in optimizer.param_groups for parameter_id in _parameter_ids(group["params"])
+        parameter_id for group in optimizer.param_groups for parameter_id in identities(group["params"])
     }
     assert id(parameters["linear.weight"]) not in optimized_parameters
 
 
-@pytest.mark.parametrize("device", ["cpu", "cuda"])
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.integration)])
 def test_fused_adamw_matches_updates_and_checkpoint_continuation(device: str) -> None:
     if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA is unavailable")
 
     torch.manual_seed(29)
-    reference = _module().to(device)
+    reference = network().to(device)
     reference.register_parameter("unused", torch.nn.Parameter(torch.randn(2, device=device)))
     candidate = deepcopy(reference)
     baseline = adamw(learning_rate=1e-3, fused=None)(reference)
@@ -129,7 +129,7 @@ def test_fused_adamw_matches_updates_and_checkpoint_continuation(device: str) ->
 
 def test_unfused_adamw_checkpoint_resumes_with_original_backend_and_grad_scaler() -> None:
     torch.manual_seed(41)
-    reference = _module()
+    reference = network()
     baseline = adamw(learning_rate=1e-3, fused=None)(reference)
     inputs = torch.randn(8, 3)
     targets = torch.randn(8, 2)

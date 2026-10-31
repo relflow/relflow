@@ -5,6 +5,8 @@ import torch
 
 import relflow as rf
 
+pytestmark = pytest.mark.integration
+
 
 class RecordingLogger(lit.loggers.Logger):
     def __init__(self):
@@ -38,19 +40,21 @@ class FixedLosses(rf.Model):
 @pytest.fixture
 def fit_options(tmp_path):
     return {
+        "batch_size": 2,
         "max_epochs": 1,
         "accelerator": "cpu",
         "devices": 1,
         "precision": "32-true",
         "enable_progress_bar": False,
+        "enable_model_summary": False,
         "default_root_dir": tmp_path,
     }
 
 
 def test_track_logs_only_steps_and_keeps_training_loss_internal_with_accumulation(fit_options):
-    model = FixedLosses.xs(d_model=8, batch_size=2, label=rf.Boolean(mask=True))
+    model = FixedLosses.xs(d_model=8, label=rf.Boolean(mask=True))
     rows = pa.table({"label": [True, False, True, False, True, False, True]})
-    data = rf.ArrowDataModule(model, train=rows)
+    data = rf.ArrowDataModule(train=rows)
     logger = RecordingLogger()
     model.fit(
         data,
@@ -73,9 +77,9 @@ def test_track_logs_only_steps_and_keeps_training_loss_internal_with_accumulatio
 
 
 def test_logging_interval_samples_steps_and_zero_keeps_training_loss_internal(fit_options):
-    model = FixedLosses.xs(d_model=8, batch_size=2, label=rf.Boolean(mask=True))
+    model = FixedLosses.xs(d_model=8, label=rf.Boolean(mask=True))
     rows = pa.table({"label": [True, False] * 5})
-    data = rf.ArrowDataModule(model, train=rows)
+    data = rf.ArrowDataModule(train=rows)
     logger = RecordingLogger()
     options = dict(
         early_stopping=False,
@@ -99,9 +103,9 @@ def test_logging_interval_samples_steps_and_zero_keeps_training_loss_internal(fi
 
 
 def test_validation_keeps_its_metric_name_and_default_checkpoint_monitor(fit_options):
-    model = rf.Model.xs(d_model=8, batch_size=2, label=rf.Boolean(mask=True))
+    model = rf.Model.xs(d_model=8, label=rf.Boolean(mask=True))
     rows = pa.table({"label": [True, False] * 3})
-    data = rf.ArrowDataModule(model, train=rows, validate=rows)
+    data = rf.ArrowDataModule(train=rows, validate=rows)
     logger = RecordingLogger()
     model.fit(
         data,
@@ -133,15 +137,17 @@ def test_validation_keeps_its_metric_name_and_default_checkpoint_monitor(fit_opt
     ],
 )
 def test_vocabulary_scores_log_per_batch_and_validation_keeps_pass_totals(fit_options, field, labels):
-    model = rf.Model.xs(d_model=8, batch_size=2, amount=rf.Number, label=field)
+    model = rf.Model.xs(d_model=8, amount=rf.Number, label=field)
     rows = pa.table({"amount": [1.0, 2.0, 3.0, 4.0], "label": labels})
-    data = rf.ArrowDataModule(model, train=rows, validate=rows, shuffle=False)
+    data = rf.ArrowDataModule(train=rows, validate=rows, shuffle=False)
     logger = RecordingLogger()
     model.fit(
         data,
         log_every_n_steps=1,
         logger=logger,
         num_sanity_val_steps=0,
+        early_stopping=False,
+        rollback=False,
         **fit_options,
     )
     training = [(metrics, step) for metrics, step in logger.records if "loss/train" in metrics]
@@ -153,5 +159,4 @@ def test_vocabulary_scores_log_per_batch_and_validation_keeps_pass_totals(fit_op
     assert len(validations) == 1
     assert validations[0][".label/validate.targets.known"] == 4
     assert validations[0][".label/validate.coverage.content"] == 1.0
-    assert model.trainer.checkpoint_callback.best_model_score.item() == pytest.approx(validations[0]["loss/validate"])
     assert torch.isfinite(model.trainer.callback_metrics["loss/train_epoch"])

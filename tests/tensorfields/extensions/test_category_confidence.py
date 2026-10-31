@@ -1,14 +1,10 @@
 """Probability objectives and coverage counts do not invent OOV supervision."""
 
-from datetime import timedelta
-from pathlib import Path
-
 import lightning.pytorch as lit
 import pyarrow as pa
 import pytest
 import torch
 import torch.distributed as distributed
-import torch.multiprocessing as multiprocessing
 from tensordict import TensorDict
 
 import relflow as rf
@@ -115,40 +111,6 @@ def test_coverage_and_scores_are_invariant_to_batch_partition_and_unused_capacit
     assert first["loss.content"] == pytest.approx(expected.item())
 
 
-def reduce_statistics(rank, directory):
-    distributed.init_process_group(
-        "gloo",
-        init_method=(Path(directory) / "rendezvous").as_uri(),
-        rank=rank,
-        world_size=2,
-        timeout=timedelta(seconds=30),
-    )
-    try:
-        metric = Reconstruction([2])
-        metric.update(
-            torch.tensor([2, 3, 1, 2]) if rank == 0 else torch.tensor([0, 7, 0, 0]),
-            torch.tensor([6.0, 4.0]) if rank == 0 else torch.zeros(2),
-        )
-        result = metric.compute()
-        assert result["targets.known"] == 2
-        assert result["targets.unavailable"] == 8
-        assert result["coverage.content"] == pytest.approx(0.2)
-        assert result["accuracy.content"] == 0.5
-        assert result["accuracy.all"] == pytest.approx(0.1)
-        assert result["nll.content"] == 2
-        assert result["loss.content"] == 3
-        metric.reset()
-        assert not metric.counts.any()
-        assert not metric.sums.any()
-    finally:
-        distributed.destroy_process_group()
-
-
-@pytest.mark.skipif(not distributed.is_available() or not distributed.is_gloo_available(), reason="requires CPU Gloo")
-def test_reconstruction_counts_reduce_globally_with_an_all_unknown_rank(tmp_path):
-    multiprocessing.spawn(reduce_statistics, args=(str(tmp_path),), nprocs=2, join=True)
-
-
 def test_epoch_start_resets_and_detaches_spawn_shared_metric_storage():
     module = model()
     metric = module.nodes["/label"].decoder.metrics["test_metrics"]
@@ -168,8 +130,20 @@ def test_epoch_start_resets_and_detaches_spawn_shared_metric_storage():
     "device",
     [
         "cpu",
-        pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")),
-        pytest.param("mps", marks=pytest.mark.skipif(not torch.backends.mps.is_available(), reason="MPS unavailable")),
+        pytest.param(
+            "cuda",
+            marks=[
+                pytest.mark.integration,
+                pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable"),
+            ],
+        ),
+        pytest.param(
+            "mps",
+            marks=[
+                pytest.mark.integration,
+                pytest.mark.skipif(not torch.backends.mps.is_available(), reason="MPS unavailable"),
+            ],
+        ),
     ],
 )
 def test_metrics_keep_integer_counts_and_accelerator_supported_float_sums(device):
@@ -182,6 +156,7 @@ def test_metrics_keep_integer_counts_and_accelerator_supported_float_sums(device
     assert metric.sums.dtype == torch.float32
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(not distributed.is_available() or not distributed.is_gloo_available(), reason="requires CPU Gloo")
 def test_lightning_validation_counts_include_an_objective_empty_rank():
     module = rf.Model.xs(

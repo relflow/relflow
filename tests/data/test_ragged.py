@@ -13,33 +13,21 @@ from relflow.structs.enums import Strata, Tokens
 from tests.arrow import table
 
 
-def request(field_type: str, *, query: str | None = None):
-    if field_type == "hash":
-        return rf.Hash(query=query, n_hashes=2)
-    if field_type == "category":
-        return rf.Category(query=query, p_unavailable=0.0)
-    if field_type == "cluster":
-        return rf.Cluster(query=query, n_clusters=2, p_unavailable=0.0)
-    if field_type == "set":
-        return rf.Set(query=query, p_unavailable=0.0)
-    raise AssertionError(f"unsupported test field type: {field_type}")
-
-
 def test_coalesce_requires_table():
-    model = rf.Model.xs(d_model=8, value=rf.Number)
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, value=rf.Number)
 
     with pytest.raises(TypeError, match="must be a pyarrow.Table"):
-        coalesce({"value": [1.0]}, schema=model.schema, strata=Strata.predict).fields  # type: ignore[arg-type]
+        coalesce({"value": [1.0]}, schema=schema, strata=Strata.predict).fields  # type: ignore[arg-type]
 
 
 def test_ragged_field_distinguishes_value_null_and_missing():
-    model = rf.Model.xs(d_model=8, value=rf.Number)
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, value=rf.Number)
     source = table(
         [{"value": 1.5}, {"value": None}, {}],
         schema=pa.schema([pa.field("value", pa.float64())]),
     )
 
-    field = coalesce(source, schema=model.schema, strata=Strata.predict).fields["/value"].pristine
+    field = coalesce(source, schema=schema, strata=Strata.predict).fields["/value"].pristine
 
     assert field.shape == (3, 1)
     assert field.batch_size == 3
@@ -55,7 +43,9 @@ def test_ragged_field_distinguishes_value_null_and_missing():
 
 
 def test_sibling_fields_share_branch_geometry_without_sharing_leaf_state():
-    model = rf.Model.xs(d_model=8, items=rf.Branch(left=rf.Number, right=rf.Number, length=3))
+    schema = rf.Schema.from_tree(
+        n_layers=1, n_heads=2, d_model=8, items=rf.Branch(left=rf.Number, right=rf.Number, length=3)
+    )
     fields = coalesce(
         table(
             [
@@ -68,7 +58,7 @@ def test_sibling_fields_share_branch_geometry_without_sharing_leaf_state():
                 }
             ]
         ),
-        schema=model.schema,
+        schema=schema,
         strata=Strata.train,
     ).fields
 
@@ -143,12 +133,12 @@ def test_union_leaf_uses_selected_child_validity(values):
 
 
 def test_coalesce_rejects_modeled_field_missing_from_arrow_schema():
-    model = rf.Model.xs(d_model=8, value=rf.Number)
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, value=rf.Number)
 
     with pytest.raises(ValueError, match="field 'value' is absent"):
         coalesce(
             table([{"metadata": 1}, {"metadata": 2}]),
-            schema=model.schema,
+            schema=schema,
             strata=Strata.train,
         ).fields
 
@@ -162,11 +152,11 @@ def test_mask_spelling_is_ordinary_string_content():
 
 
 def test_structured_leaf_mask_spelling_is_ordinary_codec_input():
-    model = rf.Model.xs(d_model=8, labels=rf.Set(p_unavailable=0.0))
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, labels=rf.Set(p_unavailable=0.0))
     field = (
         coalesce(
             table([{"labels": ["<MASK>", "A"]}]),
-            schema=model.schema,
+            schema=schema,
             strata=Strata.predict,
         )
         .fields["/labels"]
@@ -178,11 +168,13 @@ def test_structured_leaf_mask_spelling_is_ordinary_codec_input():
 
 
 def test_tail_overflow_finishes_before_leaf_codec_observes_values():
-    model = rf.Model.xs(d_model=8, items=rf.Branch(value=rf.Vector(n_dim=2), length=2, overflow="tail"))
+    schema = rf.Schema.from_tree(
+        n_layers=1, n_heads=2, d_model=8, items=rf.Branch(value=rf.Vector(n_dim=2), length=2, overflow="tail")
+    )
     field = (
         coalesce(
             table([{"items": [{"value": [0, 1, 2]}, {"value": [2, 3]}, {"value": [4, 5]}]}]),
-            schema=model.schema,
+            schema=schema,
             strata=Strata.train,
         )
         .fields["/items/value"]
@@ -195,7 +187,12 @@ def test_tail_overflow_finishes_before_leaf_codec_observes_values():
 
 
 def test_branch_overflow_precedes_queries_on_discarded_children():
-    model = rf.Model.xs(d_model=8, items=rf.Branch(value=rf.Number(query='attributes["x"]'), length=1, overflow="head"))
+    schema = rf.Schema.from_tree(
+        n_layers=1,
+        n_heads=2,
+        d_model=8,
+        items=rf.Branch(value=rf.Number(query='attributes["x"]'), length=1, overflow="head"),
+    )
     item = pa.struct([pa.field("attributes", pa.map_(pa.string(), pa.float64()))])
     source = pa.table(
         {
@@ -214,7 +211,7 @@ def test_branch_overflow_precedes_queries_on_discarded_children():
     field = (
         coalesce(
             convert(source),
-            schema=model.schema,
+            schema=schema,
             strata=Strata.train,
         )
         .fields["/items/value"]
@@ -225,18 +222,23 @@ def test_branch_overflow_precedes_queries_on_discarded_children():
 
 
 def test_error_overflow_names_address_and_axis():
-    model = rf.Model.xs(d_model=8, items=rf.Branch(value=rf.Number, length=1, overflow="error"))
+    schema = rf.Schema.from_tree(
+        n_layers=1, n_heads=2, d_model=8, items=rf.Branch(value=rf.Number, length=1, overflow="error")
+    )
     with pytest.raises(ValueError, match="branch overflow at dimension 2 for /items/value"):
         coalesce(
             table([{"items": [{"value": 1}, {"value": 2}]}]),
-            schema=model.schema,
+            schema=schema,
             strata=Strata.train,
         ).fields
 
 
 def test_all_empty_deep_branches_resolve_zero_extents():
-    model = rf.Model.xs(
-        d_model=8, outer=rf.Branch(inner=rf.Branch(deep=rf.Branch(value=rf.Number, length=2), length=2), length=2)
+    schema = rf.Schema.from_tree(
+        n_layers=1,
+        n_heads=2,
+        d_model=8,
+        outer=rf.Branch(inner=rf.Branch(deep=rf.Branch(value=rf.Number, length=2), length=2), length=2),
     )
     deep = pa.struct([pa.field("value", pa.float64())])
     inner = pa.struct([pa.field("deep", pa.list_(deep))])
@@ -247,7 +249,7 @@ def test_all_empty_deep_branches_resolve_zero_extents():
                 [{"outer": []}, {"outer": None}],
                 schema=pa.schema([pa.field("outer", pa.list_(outer))]),
             ),
-            schema=model.schema,
+            schema=schema,
             strata=Strata.train,
         )
         .fields["/outer/inner/deep/value"]
@@ -261,12 +263,12 @@ def test_all_empty_deep_branches_resolve_zero_extents():
 
 
 def test_typed_empty_nested_batch_preserves_row_axis_with_zero_extent():
-    model = rf.Model.xs(d_model=8, items=rf.Branch(value=rf.Number, length=3))
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, items=rf.Branch(value=rf.Number, length=3))
     item = pa.struct([pa.field("value", pa.float64())])
     field = (
         coalesce(
             table([], schema=pa.schema([pa.field("items", pa.list_(item))])),
-            schema=model.schema,
+            schema=schema,
             strata=Strata.train,
         )
         .fields["/items/value"]
@@ -280,11 +282,11 @@ def test_typed_empty_nested_batch_preserves_row_axis_with_zero_extent():
 
 
 def test_singleton_branch_accepts_one_item_list():
-    model = rf.Model.xs(d_model=8, details=rf.Branch(value=rf.Number, length=1))
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, details=rf.Branch(value=rf.Number, length=1))
     field = (
         coalesce(
             table([{"details": [{"value": 4}]}]),
-            schema=model.schema,
+            schema=schema,
             strata=Strata.train,
         )
         .fields["/details/value"]
@@ -296,7 +298,9 @@ def test_singleton_branch_accepts_one_item_list():
 
 
 def test_singleton_branch_lists_nest_inside_repeated_branch():
-    model = rf.Model.xs(d_model=8, items=rf.Branch(details=rf.Branch(value=rf.Number, length=1), length=3))
+    schema = rf.Schema.from_tree(
+        n_layers=1, n_heads=2, d_model=8, items=rf.Branch(details=rf.Branch(value=rf.Number, length=1), length=3)
+    )
     source = table(
         [
             {
@@ -307,7 +311,7 @@ def test_singleton_branch_lists_nest_inside_repeated_branch():
             }
         ]
     )
-    field = coalesce(source, schema=model.schema, strata=Strata.train).fields["/items/details/value"].pristine
+    field = coalesce(source, schema=schema, strata=Strata.train).fields["/items/details/value"].pristine
 
     assert field.dense.tolist() == [
         [
@@ -322,31 +326,31 @@ def test_singleton_branch_lists_nest_inside_repeated_branch():
 
 
 def test_branch_rejects_struct_where_list_axis_is_required():
-    model = rf.Model.xs(d_model=8, items=rf.Branch(value=rf.Number, length=2))
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, items=rf.Branch(value=rf.Number, length=2))
 
     with pytest.raises(ValueError, match="expected a list"):
         coalesce(
             table([{"items": {"value": 4}}]),
-            schema=model.schema,
+            schema=schema,
             strata=Strata.train,
         ).fields
 
 
 def test_coalesce_ignores_unmodeled_arrow_columns():
-    model = rf.Model.xs(d_model=8, identifier=rf.Hash)
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, identifier=rf.Hash)
     source = table([{"identifier": "A", "metadata": {"tags": [1, 2]}}])
 
-    field = coalesce(source, schema=model.schema, strata=Strata.train).fields["/identifier"].pristine
+    field = coalesce(source, schema=schema, strata=Strata.train).fields["/identifier"].pristine
 
     assert source["metadata"].to_pylist() == [{"tags": [1, 2]}]
     assert field.values.to_pylist() == ["A"]
 
 
 def test_coalesce_does_not_ingest_inactive_field_values():
-    model = rf.Model.xs(d_model=8, value=rf.Number, unused=rf.Hash(active=False))
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, value=rf.Number, unused=rf.Hash(active=False))
     source = table([{"value": 1.0, "unused": {"opaque": True}}])
 
-    field = coalesce(source, schema=model.schema, strata=Strata.train).fields["/value"].pristine
+    field = coalesce(source, schema=schema, strata=Strata.train).fields["/value"].pristine
 
     assert source["unused"].to_pylist() == [{"opaque": True}]
     assert field.values.to_pylist() == [1.0]
@@ -381,22 +385,24 @@ def test_query_only_branch_ignores_same_named_direct_source_value():
 
 
 def test_inactive_only_branch_does_not_ingest_same_named_source_value():
-    model = rf.Model.xs(d_model=8, value=rf.Number, synthetic=rf.Branch(unused=rf.Hash(active=False), length=2))
+    schema = rf.Schema.from_tree(
+        n_layers=1, n_heads=2, d_model=8, value=rf.Number, synthetic=rf.Branch(unused=rf.Hash(active=False), length=2)
+    )
     source = table([{"value": 1.0, "synthetic": {"opaque": True}}])
 
-    field = coalesce(source, schema=model.schema, strata=Strata.train).fields["/value"].pristine
+    field = coalesce(source, schema=schema, strata=Strata.train).fields["/value"].pristine
 
     assert source["synthetic"].to_pylist() == [{"opaque": True}]
     assert field.values.to_pylist() == [1.0]
 
 
 def test_datetime_leaf_remains_arrow_backed():
-    model = rf.Model.xs(d_model=8, created=rf.DateParts(dateparts=["day_of_year"]))
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, created=rf.DateParts(dateparts=["day_of_year"]))
     value = datetime.datetime(2025, 2, 3, 4, 5, 6)
     field = (
         coalesce(
             table([{"created": value}]),
-            schema=model.schema,
+            schema=schema,
             strata=Strata.train,
         )
         .fields["/created"]
@@ -441,7 +447,7 @@ def test_set_accepts_arrow_lists_and_scalar_labels(value, expected_vocabulary):
 
 @pytest.mark.parametrize("query", [None, "source"], ids=["direct", "query"])
 def test_set_treats_scalar_bytes_as_one_label(query):
-    model = rf.Model.xs(d_model=8, identity=request("set", query=query))
+    model = rf.Model.xs(d_model=8, identity=rf.Set(query=query, p_unavailable=0.0))
     key = "source" if query is not None else "identity"
     field = model.encode(
         table([{key: b"AB"}, {key: b"AB"}]),
@@ -453,11 +459,11 @@ def test_set_treats_scalar_bytes_as_one_label(query):
 
 
 def test_place_validates_encoded_count_and_value_shape():
-    model = rf.Model.xs(d_model=8, value=rf.Number)
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, value=rf.Number)
     field = (
         coalesce(
             table([{"value": 1}, {"value": 2}]),
-            schema=model.schema,
+            schema=schema,
             strata=Strata.train,
         )
         .fields["/value"]
@@ -474,7 +480,9 @@ def test_place_validates_encoded_count_and_value_shape():
 
 
 def test_root_combines_only_the_columns_the_schema_reads():
-    model = rf.Model.xs(
+    schema = rf.Schema.from_tree(
+        n_layers=1,
+        n_heads=2,
         d_model=8,
         amount=rf.Number(mask=rf.Mask(query="eligible", reconstruct=True)),
         events=rf.Branch(value=rf.Number),
@@ -491,8 +499,8 @@ def test_root_combines_only_the_columns_the_schema_reads():
     )
     chunked = pa.concat_tables([table.slice(0, 1), table.slice(1)])
 
-    resolved = coalesce(chunked, model.schema, Strata.train)
-    combined = coalesce(table, model.schema, Strata.train)
+    resolved = coalesce(chunked, schema, Strata.train)
+    combined = coalesce(table, schema, Strata.train)
 
     records = resolved.layouts["/"].records
     assert isinstance(records, pa.StructArray)
@@ -506,18 +514,18 @@ def test_root_combines_only_the_columns_the_schema_reads():
 
 
 def test_rate_masks_vary_by_batch_ordinal_and_reproduce():
-    model = rf.Model.xs(d_model=8, amount=rf.Number(mask=rf.Mask(rate=0.5, reconstruct=True)))
+    schema = rf.Schema.from_tree(
+        n_layers=1, n_heads=2, d_model=8, amount=rf.Number(mask=rf.Mask(rate=0.5, reconstruct=True))
+    )
     table = pa.table({"amount": [float(value) for value in range(16)]})
 
     patterns = [
-        coalesce(table, model.schema, Strata.train, seed=3, epoch=1, ordinal=ordinal)
-        .fields["/amount"]
-        .trainable.tolist()
+        coalesce(table, schema, Strata.train, seed=3, epoch=1, ordinal=ordinal).fields["/amount"].trainable.tolist()
         for ordinal in range(3)
     ]
 
     assert len({tuple(pattern) for pattern in patterns}) == 3
-    replay = coalesce(table, model.schema, Strata.train, seed=3, epoch=1, ordinal=1)
+    replay = coalesce(table, schema, Strata.train, seed=3, epoch=1, ordinal=1)
     assert replay.fields["/amount"].trainable.tolist() == patterns[1]
     with pytest.raises(ValueError, match="ordinal"):
-        coalesce(table, model.schema, Strata.train, ordinal=-1)
+        coalesce(table, schema, Strata.train, ordinal=-1)

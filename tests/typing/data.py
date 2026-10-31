@@ -11,7 +11,6 @@ from torch.utils.data import DataLoader, IterableDataset
 import relflow as rf
 from relflow.data.arrow import Encoded
 from relflow.data.datasets import StratumConfig
-from relflow.data.processors import Postprocessor, Preprocessor
 
 
 @rf.preprocess
@@ -35,12 +34,12 @@ def prediction_columns(frame: pl.DataFrame) -> pl.DataFrame:
 
 
 def processors(frame: pl.DataFrame) -> None:
-    assert_type(increase, Preprocessor[pl.DataFrame])
-    assert_type(increase.partial(amount=2.0), Preprocessor[pl.DataFrame])
+    assert_type(increase, rf.Preprocessor[pl.DataFrame])
+    assert_type(increase.partial(amount=2.0), rf.Preprocessor[pl.DataFrame])
     assert_type(increase(frame), pl.DataFrame)
     assert_type(partitions(frame), Iterator[pl.DataFrame])
     assert_type(discard(frame), None)
-    assert_type(prediction_columns, Postprocessor)
+    assert_type(prediction_columns, rf.Postprocessor)
     assert_type(prediction_columns(frame), pl.DataFrame)
 
 

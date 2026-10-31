@@ -25,32 +25,5 @@ def test_schema_binding_preserves_sparse_coordinates() -> None:
         ),
     )
     encoded = model.encode(observation)
-    assert encoded[rf.Address("/", "events", "ip_country")].state.tolist() == [[[0, 1, 0]]]
-    assert encoded[rf.Address("/", "events", "amount")].state.tolist() == [[[1, 0, 1]]]
-
-    source = [
-        {
-            "events": [
-                {"event_type": "login", "device_id": "a", "risk_score": None},
-                {"event_type": "other", "device_id": "b", "risk_score": 1.0},
-                {"event_type": "login", "device_id": "c", "risk_score": 2.0},
-            ]
-        }
-    ]
-    filtered = [
-        {
-            "login_events": [event for event in record["events"] if event["event_type"] == "login"],
-        }
-        for record in source
-    ]
-    filtered_model = rf.Model.xs(
-        d_model=8,
-        login_events=rf.Branch(
-            length=2,
-            device_id=rf.Category,
-            risk_score=rf.Number,
-        ),
-    )
-    filtered_encoded = filtered_model.encode(pa.Table.from_pylist(filtered))
-    assert filtered_encoded[rf.Address("/", "login_events", "device_id")].state.tolist() == [[[0, 0]]]
-    assert filtered_encoded[rf.Address("/", "login_events", "risk_score")].state.tolist() == [[[1, 0]]]
+    assert encoded["/events/ip_country"].state.tolist() == [[[rf.Tokens.valued, rf.Tokens.null, rf.Tokens.valued]]]
+    assert encoded["/events/amount"].state.tolist() == [[[rf.Tokens.null, rf.Tokens.valued, rf.Tokens.null]]]

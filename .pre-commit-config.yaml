@@ -26,7 +26,7 @@ repos:
         verbose: true
 
       - id: pytest
-        name: Run Pytest
+        name: Run fast tests
         entry: uv run pytest
         language: system
         pass_filenames: false

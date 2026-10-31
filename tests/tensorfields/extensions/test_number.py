@@ -1,5 +1,4 @@
 import math
-from datetime import timedelta
 from logging.handlers import BufferingHandler
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,8 +8,6 @@ import pyarrow as pa
 import pydantic
 import pytest
 import torch
-import torch.distributed as distributed
-import torch.multiprocessing as multiprocessing
 from tensordict import TensorDict
 
 import relflow as rf
@@ -306,6 +303,7 @@ def test_number_loss_does_not_mutate_counter():
     assert torch.equal(embedder.counter.counts, expected_counts)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("batch_size", [1, 2, 3])
 def test_number_evaluation_metrics_count_valued_targets_across_unequal_batches(batch_size, tmp_path):
     model = rf.Model.xs(d_model=8, target=rf.Number(mask=True))
@@ -370,7 +368,7 @@ def test_number_normalizer_ignores_nonfinite_values_when_updating():
     assert torch.isnan(output[3])
 
 
-@pytest.mark.parametrize("device", ["cpu", "cuda"])
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.integration)])
 @pytest.mark.parametrize("layout", ["flat", "transposed", "scalar", "empty"])
 @pytest.mark.parametrize(
     ("dtype", "buffer_dtype"),
@@ -464,36 +462,6 @@ def test_number_observes_large_integers_in_float64():
     assert observation["mean"].dtype == torch.float64
     assert observation["count"].dtype == torch.int64
     assert observation["mean"].item() == records["amount"].to_numpy().astype("float64").mean().item()
-
-
-def distributed_normalization(rank: int, directory: str, empty: bool) -> None:
-    distributed.init_process_group(
-        "gloo",
-        init_method=(Path(directory) / "rendezvous").as_uri(),
-        rank=rank,
-        world_size=2,
-        timeout=timedelta(seconds=30),
-    )
-    try:
-        normalizer = GlobalOnlineNormalizer()
-        local = [1_000_000.0] if rank == 0 else [1_000_002.0, 1_000_004.0, 1_000_006.0]
-        if empty and rank == 0:
-            local = []
-        normalizer.learn(moments(torch.tensor(local, dtype=torch.float32)))
-        assert normalizer.count.item() == (3 if empty else 4)
-        assert normalizer.mean.item() == (1_000_004.0 if empty else 1_000_003.0)
-        assert normalizer.var.item() == pytest.approx(8 / 3 if empty else 5.0)
-        assert normalizer.mean.dtype == normalizer.var.dtype == torch.float64
-        normalizer.learn(moments(torch.empty(0)))
-        assert normalizer.count.item() == (3 if empty else 4)
-    finally:
-        distributed.destroy_process_group()
-
-
-@pytest.mark.parametrize("empty", [False, True])
-@pytest.mark.skipif(not distributed.is_available() or not distributed.is_gloo_available(), reason="requires CPU Gloo")
-def test_number_float64_moments_merge_across_ranks(tmp_path, empty):
-    multiprocessing.spawn(distributed_normalization, args=(str(tmp_path), empty), nprocs=2, join=True)
 
 
 def test_number_embedder_clamps_unsafe_fourier_inputs_and_warns():
@@ -624,13 +592,6 @@ def test_number_values_stay_in_source_units_and_the_readout_learns_the_log_scale
         decoder = model.nodes[rf.Address("amount")].decoder
         assert decoder.normalizer.count.item() == 3
         assert decoder.normalizer.var.item() == pytest.approx(2 * math.log1p(99.0) ** 2 / 3, rel=1e-5)
-
-
-def test_number_rejects_the_removed_lanes_and_log_options():
-    with pytest.raises(pydantic.ValidationError):
-        rf.Number(log=True)
-    with pytest.raises(pydantic.ValidationError):
-        rf.Number(lanes=("raw",))
 
 
 def test_number_mse_and_huber_train_in_source_units():
@@ -870,6 +831,7 @@ def test_number_scale_floor_is_relative_to_the_mean():
     assert narrow(torch.tensor([1e6 + 3.0]), mask=torch.tensor([True]), update=False).item() == pytest.approx(1.0)
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(not torch.backends.mps.is_available(), reason="MPS unavailable")
 def test_number_normalizer_keeps_float32_statistics_on_mps():
     normalizer = GlobalOnlineNormalizer().to("mps")

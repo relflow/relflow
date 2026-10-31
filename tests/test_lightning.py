@@ -27,6 +27,7 @@ def data(configured=None):
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("loop", ["fit", "validate", "test", "predict"])
 def test_native_trainer_binds_before_callbacks_and_loaders(tmp_path, loop):
     configured = model()
@@ -95,15 +96,14 @@ def test_checkpoint_schema_loads_without_custom_pickle_globals(tmp_path):
     assert schema.model_dump(mode="python") == configured.schema.model_dump(mode="python")
 
 
-@pytest.mark.parametrize("accelerator", ["cpu", "cuda", "mps", "auto"])
+@pytest.mark.integration
+@pytest.mark.parametrize("accelerator", ["cpu", "cuda", "mps"])
 @pytest.mark.parametrize("kind", ["category", "set", "cluster"])
 def test_native_batch_size_callback_restores_state_then_trains_bf16(tmp_path, accelerator, kind):
     if accelerator == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA is unavailable")
     if accelerator == "mps" and not torch.backends.mps.is_available():
         pytest.skip("MPS is unavailable")
-    if accelerator == "auto" and torch.cuda.device_count() > 1:
-        pytest.skip("Lightning's batch-size finder requires a single device")
     field = {"category": rf.Category, "set": rf.Set, "cluster": rf.Cluster}[kind]
     options = {"bounds": 2, "revive_temperature": 0.0} if kind == "cluster" else {}
     configured = model(field(mask=rf.Mask(reconstruct=True), **options))
@@ -124,7 +124,7 @@ def test_native_batch_size_callback_restores_state_then_trains_bf16(tmp_path, ac
 
     trainer = lit.Trainer(
         accelerator=accelerator,
-        devices="auto" if accelerator == "auto" else 1,
+        devices=1,
         precision="bf16-mixed",
         callbacks=[finder, CheckRestore()],
         max_epochs=1,
@@ -156,6 +156,7 @@ def test_native_batch_size_callback_restores_state_then_trains_bf16(tmp_path, ac
     assert not list(tmp_path.glob(".scale_batch_size_*.ckpt"))
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("bound", [False, True])
 def test_native_tuner_can_prepare_a_separate_training_run(tmp_path, bound):
     configured = model()

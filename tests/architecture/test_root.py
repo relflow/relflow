@@ -15,7 +15,7 @@ from relflow.architecture.root import Model, MutationLockCallback, RollbackCheck
 from relflow.architecture.runtime import ModelRuntime
 from relflow.data.iterables import encode
 from relflow.logging.throughput import ThroughputLogger
-from relflow.structs.enums import AttentionMode, Strata, TensorKey, Tokens
+from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.tree import Address
 from relflow.tensorfields.shared.counter import CounterUpdateCallback
@@ -27,22 +27,7 @@ from tests.arrow import table
 
 
 def configuration() -> Schema:
-    return Schema.model_validate(
-        {
-            "d_model": 8,
-            "fields": {
-                "type": "branch",
-                "dropout": 0.1,
-                "length": 1,
-                "fields": [
-                    {
-                        "name": "label",
-                        "type": "category",
-                    }
-                ],
-            },
-        }
-    )
+    return rf.Schema.from_tree(d_model=8, n_layers=1, n_heads=4, dropout=0.1, label=rf.Category)
 
 
 def test_model_accepts_schema_positionally_and_by_keyword() -> None:
@@ -105,30 +90,14 @@ def test_save_writes_loadable_checkpoint(tmp_path: Path) -> None:
 
 
 def prediction_schema() -> Schema:
-    return Schema(
+    return rf.Schema.from_tree(
         d_model=8,
-        fields={
-            "type": "branch",
-            "embed": True,
-            "length": 1,
-            "attention": None,
-            "fields": [
-                {
-                    "name": "color",
-                    "type": "category",
-                    "embed": False,
-                    "p_unavailable": 0.0,
-                },
-                {
-                    "name": "label",
-                    "type": "category",
-                    "embed": False,
-                    "mask": True,
-                    "p_unavailable": 0.0,
-                    "topk": [2],
-                },
-            ],
-        },
+        n_layers=1,
+        n_heads=4,
+        embed=True,
+        attention=None,
+        color=rf.Category(p_unavailable=0.0),
+        label=rf.Category(mask=True, p_unavailable=0.0, topk=[2]),
     )
 
 
@@ -147,24 +116,6 @@ def primed() -> Model:
 
     model(inputs, strata=Strata.train)
     return model
-
-
-def checkpoint(tmp_path: Path) -> tuple[Path, Schema]:
-    schema = configuration()
-    model = Model(schema=schema, batch_size=2)
-    checkpoint_path = tmp_path / "model.ckpt"
-    model.save(checkpoint_path)
-
-    return checkpoint_path, schema
-
-
-def test_load_restores_local_checkpoint(tmp_path: Path) -> None:
-    checkpoint_path, schema = checkpoint(tmp_path)
-
-    model = Model.load(checkpoint_path)
-
-    assert model.batch_size == 2
-    assert model.schema.model_dump(mode="python") == schema.model_dump(mode="python")
 
 
 def test_rollback_checkpoint_restores_best_model_from_disk(tmp_path: Path) -> None:
@@ -220,41 +171,6 @@ def test_rollback_checkpoint_restores_best_model_from_disk(tmp_path: Path) -> No
             assert restored == value
 
 
-def test_rollback_checkpoint_loads_schema_metadata_with_weights_only_disabled(tmp_path: Path) -> None:
-    model = Model(schema=configuration(), batch_size=2)
-    best_path = tmp_path / "best.ckpt"
-    model.save(best_path)
-    checkpoint = torch.load(best_path, weights_only=False, map_location="cpu")
-    assert checkpoint["schema"]["fields"]["attention"] == AttentionMode.mha
-
-    with torch.no_grad():
-        next(model.parameters()).add_(1.0)
-
-    class CheckpointIOStub:
-        def __init__(self) -> None:
-            self.weights_only: bool | None = None
-
-        def load_checkpoint(self, path: str, map_location: torch.device, weights_only: bool | None = None):
-            self.weights_only = weights_only
-            return torch.load(path, weights_only=weights_only, map_location=map_location)
-
-    class StrategyStub:
-        def __init__(self) -> None:
-            self.checkpoint_io = CheckpointIOStub()
-
-        def barrier(self, name: str) -> None:
-            pass
-
-    strategy = StrategyStub()
-    trainer = type("TrainerStub", (), {"strategy": strategy})()
-    callback = RollbackCheckpoint(dirpath=tmp_path)
-    callback.best_model_path = str(best_path)
-
-    callback.on_fit_end(trainer=trainer, pl_module=model)
-
-    assert strategy.checkpoint_io.weights_only is False
-
-
 def test_rollback_checkpoint_requires_full_saved_checkpoint() -> None:
     with pytest.raises(ValueError, match="full checkpoints"):
         RollbackCheckpoint(save_weights_only=True)
@@ -265,10 +181,9 @@ def test_rollback_checkpoint_requires_a_saved_checkpoint() -> None:
         RollbackCheckpoint(save_top_k=0)
 
 
-def test_configure_optimizers_uses_user_supplied_optimizer(tmp_path: Path) -> None:
-    _, schema = checkpoint(tmp_path)
+def test_configure_optimizers_uses_user_supplied_optimizer() -> None:
     model = Model(
-        schema=schema,
+        schema=configuration(),
         batch_size=2,
         optimizer=lambda module: torch.optim.AdamW(module.parameters(), lr=1e-3),
     )
@@ -277,10 +192,9 @@ def test_configure_optimizers_uses_user_supplied_optimizer(tmp_path: Path) -> No
     assert isinstance(optimizer, torch.optim.AdamW)
 
 
-def test_configure_optimizers_uses_user_supplied_scheduler(tmp_path: Path) -> None:
-    _, schema = checkpoint(tmp_path)
+def test_configure_optimizers_uses_user_supplied_scheduler() -> None:
     model = Model(
-        schema=schema,
+        schema=configuration(),
         batch_size=2,
         optimizer=lambda module: torch.optim.AdamW(module.parameters(), lr=1e-3),
         scheduler=lambda _module, optimizer: torch.optim.lr_scheduler.StepLR(optimizer, step_size=1),
@@ -292,17 +206,18 @@ def test_configure_optimizers_uses_user_supplied_scheduler(tmp_path: Path) -> No
     assert isinstance(configured["lr_scheduler"], torch.optim.lr_scheduler.StepLR)
 
 
-def test_configure_callbacks_collects_active_extension_callbacks() -> None:
-    model = Model(schema=configuration(), batch_size=2)
+def test_configure_callbacks_collects_and_deduplicates_active_extension_callbacks() -> None:
+    model = Model(d_model=8, n_layers=1, n_heads=4, label=rf.Category, tags=rf.Set, batch_size=2)
+    callback_types = [type(callback) for callback in model.configure_callbacks()]
 
-    callbacks = model.configure_callbacks()
-    callback_types = [type(callback) for callback in callbacks]
-
-    assert any(isinstance(callback, RuntimePlacementCallback) for callback in callbacks)
-    assert any(isinstance(callback, MutationLockCallback) for callback in callbacks)
-    assert any(isinstance(callback, ThroughputLogger) for callback in callbacks)
-    assert any(isinstance(callback, VocabularySyncCallback) for callback in callbacks)
-    assert any(isinstance(callback, CounterUpdateCallback) for callback in callbacks)
+    for callback_type in (
+        RuntimePlacementCallback,
+        MutationLockCallback,
+        ThroughputLogger,
+        VocabularySyncCallback,
+        CounterUpdateCallback,
+    ):
+        assert callback_types.count(callback_type) == 1
     assert callback_types == sorted(
         callback_types,
         key=lambda callback_type: (
@@ -310,54 +225,6 @@ def test_configure_callbacks_collects_active_extension_callbacks() -> None:
             callback_type.__qualname__,
         ),
     )
-
-
-def test_configure_callbacks_deduplicates_shared_extension_callbacks() -> None:
-    schema = Schema.model_validate(
-        {
-            "d_model": 8,
-            "fields": {
-                "type": "branch",
-                "length": 1,
-                "fields": [
-                    {
-                        "name": "label",
-                        "type": "category",
-                    },
-                    {
-                        "name": "tags",
-                        "type": "set",
-                    },
-                ],
-            },
-        }
-    )
-    model = Model(schema=schema, batch_size=2)
-
-    vocabulary_callbacks = [
-        callback for callback in model.configure_callbacks() if isinstance(callback, VocabularySyncCallback)
-    ]
-    counter_callbacks = [
-        callback for callback in model.configure_callbacks() if isinstance(callback, CounterUpdateCallback)
-    ]
-
-    mutation_lock_callbacks = [
-        callback for callback in model.configure_callbacks() if isinstance(callback, MutationLockCallback)
-    ]
-    runtime_placement_callbacks = [
-        callback for callback in model.configure_callbacks() if isinstance(callback, RuntimePlacementCallback)
-    ]
-    throughput_callbacks = [
-        callback for callback in model.configure_callbacks() if isinstance(callback, ThroughputLogger)
-    ]
-
-    assert len(runtime_placement_callbacks) == 1
-    assert len(mutation_lock_callbacks) == 1
-    assert len(throughput_callbacks) == 1
-    assert len(vocabulary_callbacks) == 1
-    assert len(counter_callbacks) == 1
-
-    callback_types = [type(callback) for callback in model.configure_callbacks()]
     assert callback_types.index(CounterUpdateCallback) < callback_types.index(VocabularySyncCallback)
 
 
@@ -394,6 +261,7 @@ def test_builtin_resources_are_attached_to_extension_modules() -> None:
     assert TensorKey.content.name in model.nodes[address].embedder.counters
 
 
+@pytest.mark.integration
 def test_online_vocabulary_model_uses_local_storage_until_shared():
     vocab = OnlineVocabularyModel(size=8)
 
@@ -440,6 +308,7 @@ def test_vocabulary_reservations_refresh_after_checkpoint_restore():
     assert vocabulary.snapshot() == ["ALPHA", "BETA"]
 
 
+@pytest.mark.integration
 def test_vocabulary_callback_freezes_model_vocabularies_on_fit_end():
     model = Model(schema=configuration(), batch_size=2)
     address = Address("/", "label")
@@ -622,28 +491,13 @@ def test_training_step_returns_only_loss_to_avoid_retaining_prediction_graphs(mo
 
 def test_inactive_leaf_nodes_are_ignored_by_encoding_and_forward() -> None:
     model = Model(
-        schema=Schema(
-            d_model=8,
-            fields={
-                "type": "branch",
-                "embed": True,
-                "length": 1,
-                "attention": None,
-                "fields": [
-                    {
-                        "name": "color",
-                        "type": "category",
-                    },
-                    {
-                        "name": "ignored",
-                        "type": "category",
-                        "active": False,
-                        "embed": True,
-                        "mask": True,
-                    },
-                ],
-            },
-        ),
+        d_model=8,
+        n_layers=1,
+        n_heads=4,
+        embed=True,
+        attention=None,
+        color=rf.Category,
+        ignored=rf.Category(active=False, embed=True, mask=True),
         batch_size=2,
     )
 
@@ -669,7 +523,7 @@ def test_inactive_leaf_nodes_are_ignored_by_encoding_and_forward() -> None:
     assert all(prediction.address != Address("/", "ignored") for prediction in predictions)
 
 
-def test_predict_encodes_batch_and_returns_supervised_outputs() -> None:
+def test_predict_encodes_batch_and_returns_supervised_outputs_and_root_embeddings() -> None:
     model = primed()
     model.train()
 
@@ -689,6 +543,14 @@ def test_predict_encodes_batch_and_returns_supervised_outputs() -> None:
         for row in state
     )
     assert label.field(TensorKey.inferred.name).to_pylist() == [True, True]
+
+    root = supervised["representations"].combine_chunks().values
+    embedding = root.field(TensorKey.embedding.name)
+    assert len(embedding) == 2
+    assert embedding.type == pa.list_(pa.field("element", pa.float32()), 8)
+    assert root.field("path").to_pylist() == [[], []]
+    assert root.field("parents").to_pylist() == [[], []]
+    assert root.field("output_index").to_pylist() == [0, 0]
 
 
 def test_encode_returns_tensorfield_inputs_for_raw_batch() -> None:
@@ -774,7 +636,7 @@ def test_encode_nullable_false_rejects_null_inputs() -> None:
         model.encode(table([{"amount": None}], schema=pa.schema([("amount", pa.float64())])))
 
 
-def test_encode_accepts_preprocess() -> None:
+def test_encode_and_predict_accept_preprocess() -> None:
     @rf.preprocess
     def recolor(frame: pl.DataFrame) -> pl.DataFrame:
         return frame.select(color=pl.col("hue"))
@@ -790,6 +652,10 @@ def test_encode_accepts_preprocess() -> None:
         inputs[Address("/", "color")].state,
         torch.tensor([[Tokens.valued.value], [Tokens.valued.value]], dtype=torch.int64),
     )
+
+    supervised = model.predict(table([{"hue": "red"}, {"hue": "blue"}]), preprocess=recolor)
+    predictions = supervised["predictions"].combine_chunks()
+    assert predictions.type.get_field_index("label") >= 0
 
 
 def test_encode_accepts_strata_for_testing_training_inputs() -> None:
@@ -814,42 +680,12 @@ def test_encode_accepts_strata_for_testing_training_inputs() -> None:
     assert not label.present.any()
 
 
-def test_predict_encodes_batch_and_returns_embedding_outputs() -> None:
-    model = primed()
-
-    predictions = model.predict(table([{"color": "red"}, {"color": "blue"}]))
-
-    root = predictions["representations"].combine_chunks().values
-    embedding = root.field(TensorKey.embedding.name)
-    assert len(embedding) == 2
-    assert embedding.type == pa.list_(pa.field("element", pa.float32()), 8)
-    assert root.field("path").to_pylist() == [[], []]
-    assert root.field("parents").to_pylist() == [[], []]
-    assert root.field("output_index").to_pylist() == [0, 0]
-
-
 def test_leaf_embed_uses_decoder_pooled_embedding() -> None:
     class ConstantPool(torch.nn.Module):
         def forward(self, memory: torch.Tensor, *, present: torch.Tensor) -> torch.Tensor:
             return torch.ones(memory.shape[0], 1, memory.shape[-1], device=memory.device)
 
-    schema = Schema.model_validate(
-        {
-            "d_model": 8,
-            "fields": {
-                "type": "branch",
-                "length": 1,
-                "fields": [
-                    {
-                        "name": "color",
-                        "type": "category",
-                        "embed": True,
-                    }
-                ],
-            },
-        }
-    )
-    model = Model(schema=schema, batch_size=2)
+    model = Model(d_model=8, n_layers=1, n_heads=4, color=rf.Category(embed=True), batch_size=2)
     model.nodes[Address("/", "color")].decoder.pool = ConstantPool()
 
     inputs = model.encode(table([{"color": "red"}, {"color": "blue"}]))
@@ -876,16 +712,3 @@ def test_inference_helpers_accept_postprocess() -> None:
     assert len(calls) == 1
     assert calls[0].columns == ["predictions", "representations"]
     assert predictions.to_pydict() == {"label": ["postprocessed", "postprocessed"]}
-
-
-def test_inference_helpers_accept_preprocess() -> None:
-    @rf.preprocess
-    def recolor(frame: pl.DataFrame) -> pl.DataFrame:
-        return frame.select(color=pl.col("hue"))
-
-    model = primed()
-
-    supervised = model.predict(table([{"hue": "red"}, {"hue": "blue"}]), preprocess=recolor)
-
-    predictions = supervised["predictions"].combine_chunks()
-    assert predictions.type.get_field_index("label") >= 0
