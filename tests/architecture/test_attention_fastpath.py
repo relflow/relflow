@@ -12,7 +12,7 @@ from relflow.architecture.encoder import BranchEncoder
 from relflow.structs.packages import Parcel
 
 CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
-DEVICES = ["cpu", pytest.param("cuda", marks=CUDA)]
+DEVICES = ["cpu", pytest.param("cuda", marks=[pytest.mark.integration, CUDA])]
 
 
 def branch(*fields, attention="mha", dropout=0.0, device="cpu", dtype=torch.float32):
@@ -71,6 +71,7 @@ def relative_error(actual, expected):
     return (actual - expected).norm() / expected.norm().clamp_min(1e-12)
 
 
+@pytest.mark.integration
 @CUDA
 @pytest.mark.parametrize("scope", ["stack", "coordinate"])
 @pytest.mark.parametrize("attention", ["mha", "gqa", "mqa"])
@@ -156,6 +157,7 @@ def test_full_presence_removes_sdpa_mask_and_preserves_training(monkeypatch, sco
         assert relative_error(expected_gradient, oracle_gradient) < 0.02
 
 
+@pytest.mark.integration
 @CUDA
 @pytest.mark.parametrize("scope", ["stack", "coordinate"])
 @pytest.mark.parametrize("attention", ["mha", "gqa", "mqa"])
@@ -191,13 +193,14 @@ def test_full_presence_mask_preserves_exact_math_training(scope, attention, dtyp
             torch.testing.assert_close(parameter.grad, original.grad, rtol=0, atol=0)
 
 
+@pytest.mark.integration
 @CUDA
 @pytest.mark.parametrize("scope", ["stack", "coordinate"])
-@pytest.mark.parametrize("boundary", ["dropout", "hook"])
-def test_full_presence_keeps_masks_for_dropout_and_observers(monkeypatch, scope, boundary):
+@pytest.mark.parametrize("dropout", [0.0, 0.2])
+def test_full_presence_observers_keep_dense_masks_and_rng(monkeypatch, scope, dropout):
     torch.manual_seed(103)
     fields = ("left", "middle", "right") if scope == "coordinate" else ("value",)
-    encoder = branch(*fields, dropout=0.2 if boundary == "dropout" else 0.0, device="cuda")
+    encoder = branch(*fields, dropout=dropout, device="cuda")
     reference = deepcopy(encoder)
     masked(reference, scope)
     values = [torch.randn(3, 5, 32, device="cuda") for _ in fields]
@@ -213,7 +216,7 @@ def test_full_presence_keeps_masks_for_dropout_and_observers(monkeypatch, scope,
         observed.append(kwargs["present"])
 
     layer = encoder.coordinate_encoder if scope == "coordinate" else encoder.encoder[0]
-    handle = layer.register_forward_pre_hook(hook, with_kwargs=True) if boundary == "hook" else None
+    handle = layer.register_forward_pre_hook(hook, with_kwargs=True)
     try:
         torch.manual_seed(107)
         with monkeypatch.context() as patch:
@@ -226,13 +229,43 @@ def test_full_presence_keeps_masks_for_dropout_and_observers(monkeypatch, scope,
         torch.testing.assert_close(actual, expected, rtol=0, atol=0)
         assert len(masks) == (2 if scope == "stack" else 1)
         assert all(mask is not None and mask.all() for mask in masks)
-        if boundary == "hook":
-            assert len(observed) == 1
-            expected_shape = (15, 3) if scope == "coordinate" else (3, 5)
-            assert observed[0].shape == expected_shape and observed[0].dtype == torch.bool and observed[0].all()
+        assert len(observed) == 1
+        expected_shape = (15, 3) if scope == "coordinate" else (3, 5)
+        assert observed[0].shape == expected_shape and observed[0].dtype == torch.bool and observed[0].all()
     finally:
-        if handle is not None:
-            handle.remove()
+        handle.remove()
+
+
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("scope", ["stack", "coordinate"])
+@pytest.mark.parametrize("attention", ["mha", "gqa", "mqa"])
+@pytest.mark.parametrize("training", [True, False])
+def test_full_presence_dropout_keeps_fastpath_eligibility(monkeypatch, device, scope, attention, training):
+    torch.manual_seed(109)
+    fields = ("left", "middle", "right") if scope == "coordinate" else ("value",)
+    encoder = branch(*fields, attention=attention, dropout=0.2, device=device).train(training)
+    values = [torch.randn(3, 5, 32, device=device, requires_grad=True) for _ in fields]
+    present = torch.ones(3, 5, dtype=torch.bool, device=device)
+    calls = []
+    sdpa = F.scaled_dot_product_attention
+
+    def observe(*args, **kwargs):
+        calls.append(kwargs)
+        return sdpa(*args, **kwargs)
+
+    monkeypatch.setattr(F, "scaled_dot_product_attention", observe)
+    output = invoke(encoder, scope, values, present)
+    output.square().sum().backward()
+    assert len(calls) == (2 if scope == "stack" else 1)
+    for options in calls:
+        assert options["dropout_p"] == (0.2 if training else 0.0)
+        mask = options.get("attn_mask")
+        if device == "cuda":
+            assert mask is None
+        else:
+            assert mask is not None and mask.all()
+    assert torch.isfinite(output).all()
+    assert all(value.grad is not None and torch.isfinite(value.grad).all() for value in values)
 
 
 @pytest.mark.parametrize("device", DEVICES)
@@ -286,6 +319,7 @@ def test_custom_compute_preserves_dense_tensor_protocol(device, kind):
     assert not result.payload[~present].any()
 
 
+@pytest.mark.integration
 @CUDA
 @pytest.mark.parametrize("scope", ["stack", "coordinate"])
 def test_large_prepared_batches_retain_masks_and_run_on_cuda(monkeypatch, scope):
@@ -309,6 +343,7 @@ def test_large_prepared_batches_retain_masks_and_run_on_cuda(monkeypatch, scope)
     assert result.shape[0] == 65536 and torch.isfinite(result).all()
 
 
+@pytest.mark.integration
 @CUDA
 def test_compiled_full_presence_falls_back_for_new_hooks_and_resumes():
     encoder = branch(device="cuda").eval()

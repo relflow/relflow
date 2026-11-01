@@ -47,6 +47,7 @@ def schema_api() -> None:
     assert_type(branch.attention, AttentionMode | None)
     assert_type(branch.overflow, Overflow | None)
     assert_type(branch.mask, tuple[rf.Mask, ...])
+    rf.Branch(length=3, overflow="random", value=rf.Number)
     rf.Branch(fields={"length": number, "description": rf.Category}, reduction=rf.Mean())
     rf.Model(d_model=32, n_heads=4, n_layers=1, items=branch, label=rf.Boolean(mask=True))
     rf.Model.xs(value=rf.Quantile, target=quantile)

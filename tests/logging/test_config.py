@@ -25,29 +25,19 @@ def package_logger() -> Iterator[logging.Logger]:
         core.propagate = propagate
 
 
-def test_logger_preserves_bound_context_on_standard_records():
+def test_logger_preserves_bound_context_and_merges_call_context_immutably():
     core = logging.Logger("relflow-test", level=logging.DEBUG)
     records = BufferingHandler(capacity=10)
     core.addHandler(records)
     logger = Logger(core, {}).bind(component="model", rank=2)
 
     logger.bind(epoch=4).info("started training")
-
-    record = records.buffer[0]
-    assert record.getMessage() == "started training"
-    assert getattr(record, CONTEXT) == {"component": "model", "rank": 2, "epoch": 4}
-
-
-def test_logger_merges_call_context_without_mutating_bound_context():
-    core = logging.Logger("relflow-test", level=logging.DEBUG)
-    records = BufferingHandler(capacity=10)
-    core.addHandler(records)
-    logger = Logger(core, {}).bind(component="model", rank=2)
-
     logger.info("batch %d", 4, extra={CONTEXT: {"rank": 3}, "request_id": "abc"})
     logger.info("next batch")
 
-    first, second = records.buffer
+    bound, first, second = records.buffer
+    assert bound.getMessage() == "started training"
+    assert getattr(bound, CONTEXT) == {"component": "model", "rank": 2, "epoch": 4}
     assert first.getMessage() == "batch 4"
     assert first.request_id == "abc"
     assert getattr(first, CONTEXT) == {"component": "model", "rank": 3}

@@ -63,9 +63,11 @@ class Projections(TorchDispatchMode):
         return function(*args, **(kwargs or {}))
 
 
-def test_packing_precedes_every_projection_and_feedforward():
+@pytest.mark.parametrize("dropout", [0.0, 0.2])
+@pytest.mark.parametrize("training", [True, False])
+def test_packing_precedes_every_projection_and_feedforward(dropout, training):
     torch.manual_seed(31)
-    encoder = branch()
+    encoder = branch(dropout=dropout).train(training)
     present = presence()
     values = torch.randn(4, 7, 20, dtype=torch.float64).masked_fill(~present[..., None], torch.nan)
     original = values.clone()
@@ -221,8 +223,9 @@ def test_packed_training_preserves_original_rotary_holes_and_independent_rows(at
     torch.testing.assert_close(isolated[1:], actual[1:], rtol=0, atol=0)
 
 
-def test_empty_branch_routing_keeps_parameter_anchors_and_unused_payload():
-    encoder = branch()
+@pytest.mark.parametrize("dropout", [0.0, 0.2])
+def test_empty_branch_routing_keeps_parameter_anchors_and_unused_payload(dropout):
+    encoder = branch(dropout=dropout)
     values = torch.full((2, 3, 20), torch.nan, dtype=torch.float64, requires_grad=True)
     present = torch.zeros(2, 3, dtype=torch.bool)
     output = encoder([parcel(values, present)])
@@ -248,8 +251,9 @@ def test_zero_length_compute_keeps_attention_norm_gradients_unallocated():
             assert not parameter.grad.any()
 
 
-def test_empty_coordinate_routing_keeps_zero_payload_gradients():
-    encoder = branch("left", "right")
+@pytest.mark.parametrize("dropout", [0.0, 0.2])
+def test_empty_coordinate_routing_keeps_zero_payload_gradients(dropout):
+    encoder = branch("left", "right", dropout=dropout)
     values = [torch.full((2, 20), torch.nan, dtype=torch.float64, requires_grad=True) for _ in range(2)]
     present = torch.zeros(2, dtype=torch.bool)
     outputs = encoder.contextualize([parcel(value, present, name) for value, name in zip(values, ["left", "right"])])
@@ -263,6 +267,7 @@ def test_empty_coordinate_routing_keeps_zero_payload_gradients():
     assert all(parameter.grad is None for parameter in encoder.encoder.parameters())
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("dropout", [0.0, 0.2])
 def test_original_dense_compute_remains_fullgraph_with_changing_presence(dropout):
     torch.manual_seed(41)
@@ -300,8 +305,68 @@ def test_original_dense_compute_remains_fullgraph_with_changing_presence(dropout
         torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 
 
+@pytest.mark.parametrize("scope", ["stack", "coordinate"])
+@pytest.mark.parametrize("attention", ["mha", "gqa", "mqa"])
+@pytest.mark.parametrize("training", [True, False])
+def test_packed_dropout_repeats_seeded_outputs_gradients_and_rng(scope, attention, training):
+    torch.manual_seed(47)
+    fields = ("left", "middle", "right") if scope == "coordinate" else ("value",)
+    encoder = branch(*fields, attention=attention, dropout=0.2).train(training)
+    target = encoder.coordinate_encoder if scope == "coordinate" else encoder.encoder
+    masks = [presence().roll(offset, dims=1) for offset in range(len(fields))]
+    values = [torch.randn(4, 7, 20, dtype=torch.float64).masked_fill(~mask[..., None], torch.nan) for mask in masks]
+    present = torch.stack(masks, dim=-1) if scope == "coordinate" else masks[0]
+    weights = torch.randn((*present.shape, 20), dtype=torch.float64)
+
+    def run(seed):
+        encoder.zero_grad(set_to_none=True)
+        inputs = [value.clone().requires_grad_() for value in values]
+        observer = Projections(target)
+        torch.manual_seed(seed)
+        initial_rng = torch.get_rng_state()
+        with observer:
+            parcels = [parcel(value, mask, name) for value, mask, name in zip(inputs, masks, fields, strict=True)]
+            if scope == "coordinate":
+                output = torch.stack([item.payload for item in encoder.contextualize(parcels)], dim=-2)
+            else:
+                output = encoder(parcels).payload
+            (output * weights).sum().backward()
+
+        assert observer.observed.keys() == set(observer.weights.values())
+        assert all(
+            shape[0] == sum(int(mask.sum()) for mask in masks)
+            for shapes in observer.observed.values()
+            for shape in shapes
+        )
+        assert torch.isfinite(output).all() and not output[~present].any()
+        for value, mask in zip(inputs, masks, strict=True):
+            assert value.grad is not None and torch.isfinite(value.grad).all()
+            assert not value.grad[~mask].any()
+        assert all(
+            parameter.grad is not None and torch.isfinite(parameter.grad).all() for parameter in target.parameters()
+        )
+        final_rng = torch.get_rng_state()
+        if not training:
+            assert torch.equal(initial_rng, final_rng)
+        return (
+            output.detach(),
+            [value.grad.clone() for value in inputs],
+            [parameter.grad.clone() for parameter in target.parameters()],
+            final_rng,
+        )
+
+    first = run(53)
+    repeated = run(53)
+    torch.testing.assert_close(first, repeated, rtol=0, atol=0)
+    changed = run(59)
+    if training:
+        assert not torch.equal(first[0], changed[0])
+    else:
+        torch.testing.assert_close(first[:-1], changed[:-1], rtol=0, atol=0)
+
+
 @pytest.mark.parametrize("training,dropout", [(True, 0.2), (True, 0.0), (False, 0.2)])
-def test_nested_dropout_keeps_dense_masks_and_rng_only_when_active(training, dropout):
+def test_nested_feedforward_dropout_keeps_packing_and_repeats_seeded_output(training, dropout):
     torch.manual_seed(47)
     encoder = branch()
     encoder.encoder[0].ffn[2] = torch.nn.Sequential(torch.nn.Dropout(dropout))
@@ -309,7 +374,6 @@ def test_nested_dropout_keeps_dense_masks_and_rng_only_when_active(training, dro
     reference = deepcopy(encoder)
     present = presence()
     values = torch.randn(4, 7, 20, dtype=torch.float64)
-    active = present.any(dim=1)
     observer = Projections(encoder)
 
     torch.manual_seed(53)
@@ -317,17 +381,13 @@ def test_nested_dropout_keeps_dense_masks_and_rng_only_when_active(training, dro
         actual = encoder([parcel(values, present)]).payload
     actual_rng = torch.get_rng_state()
     torch.manual_seed(53)
-    expected = torch.zeros_like(values)
-    expected[active] = reference.compute(values[active], present[active])
+    expected = reference([parcel(values, present)]).payload
     expected_rng = torch.get_rng_state()
 
-    stochastic = training and dropout > 0
-    tolerance = 0 if stochastic else 1e-10
-    torch.testing.assert_close(actual, expected, rtol=tolerance, atol=tolerance)
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
     assert torch.equal(actual_rng, expected_rng)
-    expected_tokens = int(active.sum()) * values.shape[1] if stochastic else int(present.sum())
     assert observer.observed.keys() == set(observer.weights.values())
-    assert all(shape[0] == expected_tokens for shapes in observer.observed.values() for shape in shapes)
+    assert all(shape[0] == int(present.sum()) for shapes in observer.observed.values() for shape in shapes)
 
 
 def test_sequence_layernorm_keeps_dense_normalization_axes():

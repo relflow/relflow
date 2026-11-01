@@ -36,9 +36,6 @@ def build_extension() -> Extension:
             return object()
 
     class Embedder(EmbedderBase):
-        def __init__(self, schema, address):
-            super().__init__(schema=schema, address=address)
-
         def forward(self, values):
             return values
 

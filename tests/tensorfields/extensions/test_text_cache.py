@@ -317,6 +317,7 @@ def test_text_cache_warmed_by_inference_supports_training_gradients(encoder: Fak
         assert value.grad_fn is None
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("pooling", ["cls", "mean", "pooler"])
 @pytest.mark.parametrize("mixed", [False, True])
 def test_text_cache_matches_an_offline_frozen_bert(

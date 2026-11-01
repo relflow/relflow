@@ -375,7 +375,9 @@ def root(values: pa.Table, branch: Branch, *, size: int | None = None) -> Layout
     )
 
 
-def descend(layout: Layout, branch: Branch, address: Address, *, strata: Strata) -> Layout:
+def descend(
+    layout: Layout, branch: Branch, address: Address, *, strata: Strata, seed: int, epoch: int, ordinal: int
+) -> Layout:
     """Retain collection slots before resolving their shared execution extent."""
 
     parent_size = math.prod(layout.shape)
@@ -410,6 +412,9 @@ def descend(layout: Layout, branch: Branch, address: Address, *, strata: Strata)
     source = compact(selected.values)
     chunks = source.chunks if isinstance(source, pa.ChunkedArray) else [source]
     retained: list[tuple[np.ndarray, pa.Array, np.ndarray, np.ndarray]] = []
+    randomized = branch.overflow == Overflow.random and strata == Strata.train
+    ranges = np.zeros(parent_size, dtype=np.int64) if randomized else None
+    tail = branch.overflow == Overflow.tail or (branch.overflow == Overflow.random and not randomized)
     offset = 0
     for values in chunks:
         parent_placement = layout.placement[offset : offset + len(values)]
@@ -431,14 +436,25 @@ def descend(layout: Layout, branch: Branch, address: Address, *, strata: Strata)
 
         counts = np.where(available, lengths if branch.length is None else np.minimum(lengths, branch.length), 0)
         retained_lengths[parent_placement] = counts
-        starts = list_offsets[:-1] + (lengths - counts if branch.overflow == Overflow.tail else 0)
+        starts = list_offsets[:-1] + (lengths - counts if tail else 0)
+        if ranges is not None:
+            ranges[parent_placement] = np.where(available, lengths - counts, 0)
         retained.append((starts, children, counts, parent_placement))
+
+    shifts = None
+    if ranges is not None:
+        payload = f"relflow-overflow-v1:{seed}:{epoch}:{ordinal}:{branch.address}".encode()
+        random = np.random.default_rng(int.from_bytes(hashlib.sha256(payload).digest()[:8], "big"))
+        # One canonical parent vector keeps draws independent of Arrow chunking.
+        shifts = random.integers(0, ranges + 1, dtype=np.int64)
 
     extent = int(retained_lengths.max(initial=0))
     shape = (*layout.shape, extent)
     record_chunks: list[pa.Array] = []
     placement_chunks: list[np.ndarray] = []
     for starts, children, counts, parent_placement in retained:
+        if shifts is not None:
+            starts = starts + shifts[parent_placement]
         total = int(counts.sum())
         if total == 0:
             record_chunks.append(children.slice(0, 0))
@@ -753,7 +769,9 @@ def coalesce(
                 child = cast("Branch", child)
                 active = descendants.get(child.address, [])
                 if active:
-                    child_layout = descend(layout, child, active[0], strata=strata)
+                    child_layout = descend(
+                        layout, child, active[0], strata=strata, seed=seed, epoch=epoch, ordinal=ordinal
+                    )
                     decisions = resolve(
                         child_layout,
                         child,

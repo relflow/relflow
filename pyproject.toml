@@ -1,6 +1,6 @@
 [project]
 name = "relflow"
-version = "0.4.0"
+version = "0.4.1"
 description = "Relationship Flow: schema-first PyTorch models for hierarchical, nested, and sequence data"
 readme = "README.md"
 authors = [
@@ -79,7 +79,10 @@ include = ["relflow*"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 pythonpath = ["."]
-addopts = ["-n", "auto"]
+addopts = ["-n", "0", "--strict-markers"]
+markers = [
+    "integration: real training loops, compilation, processes, external resources, optional encoders, or accelerators",
+]
 
 [tool.coverage.run]
 branch = true

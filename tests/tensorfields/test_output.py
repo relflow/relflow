@@ -215,7 +215,10 @@ def test_embedding_only_extensions_declare_no_decoded_output(name: str):
 
 DEVICES = [
     "cpu",
-    pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")),
+    pytest.param(
+        "cuda",
+        marks=[pytest.mark.integration, pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")],
+    ),
 ]
 
 

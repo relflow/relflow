@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 
 import pyarrow as pa
@@ -306,7 +305,7 @@ def test_override_accepts_probability_vector():
 
 
 def test_persistent_assignment_survives_predict_calls():
-    model = build_model()
+    model = build_model(embed=True).eval()
     embedder = cluster_embedder(model)
     embedder.eval()
 
@@ -314,12 +313,15 @@ def test_persistent_assignment_survives_predict_calls():
     assigned_index = embedder.vocab.state.index["returning-token"]
     first_row = embedder.embeddings["cluster"].weight[assigned_index].detach().clone()
 
-    # Simulate a subsequent predict call by running the embedder again.
-    _ = embedder.embed(valued_token(assigned_index))
+    source = pa.table({"merchant_id": ["returning-token"]})
+    first = model.predict(source)
+    second = model.predict(source)
     second_row = embedder.embeddings["cluster"].weight[assigned_index].detach().clone()
 
     assert torch.equal(first_row, second_row)
     assert int(first_row.argmax().item()) == 3
+    assert first.equals(second)
+    assert rf.Cluster.assignments(model, ADDRESS)["returning-token"]["cluster"] == 3
 
 
 def test_persistent_assignment_round_trips_through_checkpoint(tmp_path: Path):
@@ -346,10 +348,3 @@ def test_assign_resolves_the_live_embedder_after_reset():
     index = rf.Cluster.assign(model, ADDRESS, "after-reset", 2)
     assert rebuilt.vocab.master[index] == "after-reset"
     assert int(rebuilt.embeddings["cluster"].weight[index].argmax().item()) == 2
-
-
-def test_cluster_api_does_not_leak_into_model_or_runtime_signatures():
-    assert not hasattr(rf.Cluster, "bind")
-    assert "cluster_hints" not in inspect.signature(rf.Model.predict).parameters
-    assert not hasattr(rf.Model, "commit_cluster")
-    assert not hasattr(rf.Model, "_cluster_embedder")

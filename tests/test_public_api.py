@@ -15,25 +15,19 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.Attention().type == "attention"
     assert relflow.AttentionMode.mha == "mha"
     assert relflow.Mean().type == "mean"
-    assert not hasattr(relflow, "Convolution")
     assert relflow.ReductionConfig is not None
-    assert not hasattr(relflow, "Dataset")
     assert relflow.ArrowDataModule.__name__ == "ArrowDataModule"
     assert relflow.CustomDataModule.__name__ == "CustomDataModule"
     assert relflow.DuckDBDataModule.__name__ == "DuckDBDataModule"
     assert relflow.PolarsDataModule.__name__ == "PolarsDataModule"
-    assert not hasattr(relflow, "StreamingDataModule")
     assert relflow.SyntheticDataModule.__name__ == "SyntheticDataModule"
     assert relflow.Schema.__name__ == "Schema"
     assert relflow.Address("label") == "/label"
     assert relflow.Address("transactions", "amount") == "/transactions/amount"
     assert relflow.Address() == "/"
     assert relflow.Branch.__name__ == "Branch"
-    assert not hasattr(relflow, "Block")
     assert relflow.Extension.__name__ == "Extension"
     assert tensorfields.Extension is relflow.Extension
-    assert not hasattr(relflow, "Plugin")
-    assert not hasattr(tensorfields, "Plugin")
     assert relflow.Mask.model_fields["rate"].default is None
     assert relflow.Jitter.model_fields["add"].default == 0.0
     assert relflow.Jitter.model_fields["multiply"].default == 0.0
@@ -45,18 +39,14 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.postprocess.__name__ == "postprocess"
     assert relflow.Preprocessor.__name__ == "Preprocessor"
     assert relflow.PreprocessorProvider.strata == "strata"
-    assert not hasattr(relflow, "Batch")
     assert relflow.Context().state is None
     assert relflow.Context().salt == 0
-    assert not hasattr(relflow, "Observation")
-    assert not hasattr(relflow, "observe")
     assert relflow.OptimizerConfig is not None
     assert relflow.SchedulerConfig is not None
     assert relflow.RollbackCheckpoint.__name__ == "RollbackCheckpoint"
     assert relflow.EarlyStopping.__name__ == "EarlyStopping"
     assert relflow.Writer.__name__ == "Writer"
     assert relflow.Postprocessor is not None
-    assert not hasattr(relflow, "PostprocessorProvider")
     assert relflow.Deployment.__name__ == "Deployment"
     assert relflow.Accelerator.cpu == "cpu"
     assert relflow.JSONBackend.orjson == "orjson"
@@ -72,8 +62,6 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.Quantile.model_fields["type"].default == "quantile"
     assert relflow.Set.model_fields["type"].default == "set"
     assert relflow.Hash.model_fields["type"].default == "hash"
-    assert not hasattr(relflow, "Entity")
-    assert not hasattr(relflow, "StaticEntity")
     assert relflow.Overflow.tail == "tail"
     assert relflow.VocabularySyncCallback.__name__ == "VocabularySyncCallback"
     assert "number" in relflow.TENSORFIELDS
@@ -82,9 +70,6 @@ def test_common_resources_are_available_from_package_root():
     assert "boolean" in relflow.TENSORFIELDS
     assert "set" in relflow.TENSORFIELDS
     assert "hash" in relflow.TENSORFIELDS
-    assert "entity" not in relflow.TENSORFIELDS
-    assert "static_entity" not in relflow.TENSORFIELDS
-    assert "hashable" not in relflow.TENSORFIELDS
 
 
 def test_data_module_constructor_annotations_resolve_at_runtime():

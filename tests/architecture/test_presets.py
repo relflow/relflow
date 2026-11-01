@@ -19,10 +19,11 @@ PROFILES = [
 
 
 @pytest.mark.parametrize("name,width,root_depth,branch_depth,heads,root_outputs,branch_outputs", PROFILES)
-def test_presets_resolve_root_nested_branches_and_leaf_defaults(
+def test_factories_apply_presets_to_root_nested_branches_and_leaves(
     name, width, root_depth, branch_depth, heads, root_outputs, branch_outputs
 ):
     model = getattr(rf.Model, name)(
+        d_model=16,
         amount=rf.Number,
         orders=rf.Branch(
             length=3,
@@ -34,7 +35,9 @@ def test_presets_resolve_root_nested_branches_and_leaf_defaults(
         label=rf.Category(mask=True, topk=[3]),
     )
 
-    assert model.schema.d_model == width
+    # Full default widths are covered without module allocation in test_preset_resolution.
+    assert model.schema.d_model == 16
+    assert model.preset.d_model == width
     assert model.preset.name == name
     assert model.preset.revision == 1
     assert model.schema.fields.name is None

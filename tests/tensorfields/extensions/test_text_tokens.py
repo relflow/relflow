@@ -135,6 +135,7 @@ def test_encoding_context_copies_start_cold(resources, operation):
     assert cache.capacity == original.capacity and cache.byte_limit == original.byte_limit
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("method", ["spawn", "fork"])
 def test_worker_context_starts_cold_and_preserves_parent_state(resources, method):
     if method not in mp.get_all_start_methods():
@@ -244,6 +245,7 @@ def fast_tokenizer():
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("change", ["padding", "truncation", "length", "normalizer", "pre_tokenizer", "post_processor"])
 def test_actual_tokenizer_option_changes_invalidate_cached_rows(fast_tokenizer, change):
     from tokenizers import normalizers, pre_tokenizers, processors

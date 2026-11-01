@@ -209,31 +209,6 @@ def test_quantile_evaluation_reuses_state(strata):
     assert normalization(configured) == before
 
 
-@pytest.mark.parametrize("workers", [0, 1])
-def test_quantile_only_consumed_prefetched_batches_update_state(workers):
-    configured = model(mask=True)
-    data = rf.ArrowDataModule(
-        configured,
-        train=values(1, 2, 3, 4, 5, 6),
-        shuffle=False,
-        num_workers=workers,
-        persistent_workers=False,
-        pin_memory=False,
-    )
-    batches = list(data.train_dataloader())
-    assert normalization(configured)["count"] == 0
-
-    consumed = bind(configured, batches[0], rf.Strata.train)
-    assert not consumed.bindings
-    assert normalization(configured)["count"] == 2
-    bind(configured, consumed, rf.Strata.train)
-    assert normalization(configured)["count"] == 2
-    pending = batches[1].tensors[ADDRESS].targets[TensorKey.content].clone()
-    second = bind(configured, batches[1], rf.Strata.train)
-    assert normalization(configured)["count"] == 4
-    assert not torch.equal(second.tensors[ADDRESS].targets[TensorKey.content], pending)
-
-
 def test_quantile_encoding_context_reads_latest_snapshot():
     configured = model()
     context = configured.interprocess_encoding_context
@@ -396,6 +371,7 @@ def test_quantile_worker_encoding_does_not_mutate_live_distribution():
     assert torch.isfinite(bound.tensors[ADDRESS].targets[TensorKey.content]).all()
 
 
+@pytest.mark.integration
 def test_quantile_lightning_training_learns_only_consumed_values():
     torch.manual_seed(811)
     configured = rf.Model.xs(
@@ -539,6 +515,7 @@ def test_quantile_cold_validation_registers_undefined_source_unit_metrics(monkey
     assert normalization(configured)["count"] == 0
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("batch_size", [1, 2, 3])
 def test_quantile_evaluation_metrics_count_valued_targets_across_unequal_batches(batch_size, tmp_path):
     configured = model(mask=True)

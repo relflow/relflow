@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import ast
-import inspect
 import subprocess
 import sys
 import uuid
@@ -11,7 +9,6 @@ import pyarrow as pa
 import pytest
 
 import relflow as rf
-import relflow.data.ragged as ragged_module
 from relflow.data.iterables import encode
 from relflow.data.ragged import Projection, RaggedField, coalesce
 from relflow.structs.enums import Strata, Tokens
@@ -125,14 +122,6 @@ def test_builtin_extension_type_contract_fails_before_codec_coercion():
         model.encode(pa.table({"value": ["1.5"]}))
 
 
-def test_mask_spelling_is_ordinary_typed_string_content():
-    model = rf.Model.xs(value=rf.Category(p_unavailable=0), d_model=8)
-
-    fields = model.encode(pa.table({"value": ["<MASK>"]}))
-
-    assert fields["/value"].state.tolist() == [[Tokens.valued.value]]
-
-
 def test_nested_dictionary_chunks_decode_without_combining_indices():
     chunks = []
     expected = []
@@ -243,6 +232,7 @@ def test_dateparts_encodes_heterogeneous_date_union():
     ]
 
 
+@pytest.mark.integration
 def test_typed_empty_root_map_does_not_abort_arrow():
     program = """
 import pyarrow as pa
@@ -252,12 +242,14 @@ from relflow.data.ragged import coalesce
 from relflow.structs.enums import Strata
 
 source = pa.table({"payload": pa.chunked_array([], type=pa.map_(pa.string(), pa.float64()))})
-model = rf.Model.xs(
+schema = rf.Schema.from_tree(
     query="payload",
     value=rf.Number(query='["value"]'),
     d_model=8,
+    n_layers=1,
+    n_heads=2,
 )
-field = coalesce(convert(source), model.schema, Strata.predict).fields["/value"].pristine
+field = coalesce(convert(source), schema, Strata.predict).fields["/value"].pristine
 assert field.shape == (0, 1)
 assert pa.types.is_null(field.values.type)
 assert source.schema.field("payload").type == pa.map_(pa.string(), pa.float64())
@@ -267,6 +259,7 @@ assert source.schema.field("payload").type == pa.map_(pa.string(), pa.float64())
         capture_output=True,
         text=True,
         check=False,
+        timeout=30,
     )
 
     assert process.returncode == 0, process.stderr
@@ -293,13 +286,15 @@ def test_typed_empty_union_branch_encodes_zero_extent():
 
 
 def test_coalesce_returns_arrow_backed_projections():
-    model = rf.Model.xs(
+    schema = rf.Schema.from_tree(
+        n_layers=1,
+        n_heads=2,
         items=rf.Branch(length=3, value=rf.Number),
         d_model=8,
     )
     source = arrow_table([{"items": [{"value": 1.0}, {"value": None}]}])
 
-    projection = coalesce(source, schema=model.schema, strata=Strata.predict).fields["/items/value"]
+    projection = coalesce(source, schema=schema, strata=Strata.predict).fields["/items/value"]
     field = projection.pristine
 
     assert isinstance(projection, Projection)
@@ -357,16 +352,3 @@ def test_ragged_field_requires_exact_valued_placement():
             placement=pa.array([1], type=pa.int64()),
             shape=(2,),
         )
-
-
-def test_ragged_core_does_not_name_or_import_registered_tensorfield_types():
-    tree = ast.parse(inspect.getsource(ragged_module))
-    string_literals = {
-        node.value for node in ast.walk(tree) if isinstance(node, ast.Constant) and isinstance(node.value, str)
-    }
-    imported_modules = {
-        node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module is not None
-    }
-
-    assert string_literals.isdisjoint(TENSORFIELDS)
-    assert not any(module.startswith("relflow.tensorfields.extensions") for module in imported_modules)

@@ -289,6 +289,7 @@ def test_changing_packed_groups_stays_eager_without_disabling_dense_compilation(
         assert record["executions"] == 1
 
 
+@pytest.mark.integration
 def test_dynamic_dense_region_reuses_a_graph_across_collection_extents(model):
     encoder = model.nodes["/"].encoder
     eager = encoder.compute
@@ -311,6 +312,7 @@ def test_dynamic_dense_region_reuses_a_graph_across_collection_extents(model):
         torch._dynamo.reset()
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("dropout", [0.0, 0.2])
 def test_real_graph_backend_reaches_training_step_and_preserves_accumulation(monkeypatch, dropout):
     eager = rf.Model.xs(value=rf.Number, label=rf.Boolean(mask=True), d_model=8, dropout=dropout, batch_size=2)
@@ -352,6 +354,7 @@ def test_real_graph_backend_reaches_training_step_and_preserves_accumulation(mon
         torch._dynamo.reset()
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("boundary", ["encoder", "pool"])
 def test_descendant_hooks_added_after_warmup_run_eager_then_compilation_resumes(model, boundary):
     graphs, executions, hooks = [], [], []

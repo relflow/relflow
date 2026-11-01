@@ -9,8 +9,7 @@ import pyarrow.parquet as pq
 import pytest
 
 import relflow as rf
-from relflow.inference.callback import Writer
-from relflow.inference.deployment import ARROW_MEDIA_TYPE, JSON_MEDIA_TYPE, Deployment
+from relflow.inference.deployment import ARROW_MEDIA_TYPE, JSON_MEDIA_TYPE
 
 
 @pytest.mark.parametrize("retain", [(), "*"])
@@ -23,7 +22,7 @@ def test_direct_parquet_arrow_and_json_preserve_the_same_selected_columns(tmp_pa
     )
     source = pa.table({"amount": [1.0, 2.0]})
     direct = model.predict(source, retain=retain, batch_size=2)
-    writer = Writer(tmp_path)
+    writer = rf.Writer(tmp_path)
     writer.write_on_batch_end(
         SimpleNamespace(global_rank=0),
         SimpleNamespace(),
@@ -42,7 +41,7 @@ def test_direct_parquet_arrow_and_json_preserve_the_same_selected_columns(tmp_pa
     with pa.ipc.new_stream(sink, source.schema) as stream:
         stream.write_table(source)
     arrow_body = sink.getvalue().to_pybytes()
-    app = Deployment(model=model, accelerator="cpu", max_batch_size=2, retain=retain).app()
+    app = rf.Deployment(model=model, accelerator="cpu", max_batch_size=2, retain=retain).app()
     endpoint = next(route.endpoint for route in app.routes if route.path == "/predict")
 
     class Request:

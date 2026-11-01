@@ -63,6 +63,7 @@ def test_decay_requires_a_finite_probability(decay):
         rf.EMA(decay=decay)
 
 
+@pytest.mark.integration
 def test_optimizer_updates_drive_ema_not_accumulated_batches(tmp_path):
     model = Scalar()
     ema = rf.EMA(decay=0.99)
@@ -86,6 +87,7 @@ def test_optimizer_updates_drive_ema_not_accumulated_batches(tmp_path):
     assert not ema.handles and not ema.active
 
 
+@pytest.mark.integration
 def test_checkpoint_exports_evaluated_weights_and_resume_restores_live_optimizer_state(tmp_path):
     inputs = DataLoader(torch.tensor([1.0, 2.0]), batch_size=1)
     ema = rf.EMA(decay=0.5)
@@ -137,6 +139,7 @@ def test_checkpoint_exports_evaluated_weights_and_resume_restores_live_optimizer
         torch.testing.assert_close(continued.optimizers[0].state[resumed.weight][name], value, rtol=0, atol=0)
 
 
+@pytest.mark.integration
 def test_checkpoint_saved_after_fit_keeps_live_resume_snapshot(tmp_path):
     inputs = DataLoader(torch.tensor([1.0, 2.0]), batch_size=1)
     ema = rf.EMA(decay=0.5)
@@ -232,6 +235,7 @@ def test_incompatible_snapshot_does_not_partially_overwrite_parameters():
     assert model.weight.item() == 0
 
 
+@pytest.mark.integration
 def test_validation_restores_live_parameters_and_exception_removes_hooks(tmp_path):
     model = Scalar()
     ema = rf.EMA(decay=0.5)
@@ -254,6 +258,7 @@ def test_validation_restores_live_parameters_and_exception_removes_hooks(tmp_pat
     assert not ema.live
 
 
+@pytest.mark.integration
 def test_relflow_growth_and_rollback_export_the_selected_averaged_model(tmp_path):
     model = rf.Model.xs(
         d_model=8,
@@ -289,6 +294,8 @@ def test_relflow_growth_and_rollback_export_the_selected_averaged_model(tmp_path
         accelerator="cpu",
         devices=1,
         precision="32-true",
+        logger=False,
+        enable_model_summary=False,
         enable_progress_bar=False,
         num_sanity_val_steps=0,
         checkpoint_dir=tmp_path / "selected",
@@ -313,6 +320,7 @@ def test_weights_only_callbacks_are_rejected_before_training(tmp_path):
         rf.EMA().setup(SimpleNamespace(callbacks=[checkpoint]), Scalar(), "fit")
 
 
+@pytest.mark.integration
 def test_relflow_full_resume_restores_live_rows_before_admitting_new_categories(tmp_path):
     def build():
         return rf.Model.xs(
@@ -334,6 +342,9 @@ def test_relflow_full_resume_restores_live_rows_before_admitting_new_categories(
         accelerator="cpu",
         devices=1,
         precision="32-true",
+        logger=False,
+        enable_checkpointing=False,
+        enable_model_summary=False,
         enable_progress_bar=False,
         default_root_dir=tmp_path,
         early_stopping=False,

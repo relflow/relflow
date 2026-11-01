@@ -9,6 +9,8 @@ import relflow as rf
 from relflow.structs.enums import TensorKey
 from relflow.tensorfields.extensions.quantile import loss
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.parametrize("device", ["cuda", "mps"])
 def test_quantile_accelerator_keeps_raw_doubles_off_device(device, monkeypatch):

@@ -7,7 +7,7 @@ from typing import Literal
 import pyarrow as pa
 import pytest
 import torch
-from lightning.pytorch import Callback, Trainer
+from lightning.pytorch import Callback
 
 import relflow as rf
 from relflow.architecture.binding import bind
@@ -43,10 +43,10 @@ def table(kind, labels, *, supervise=False, distinct=False):
     return pa.table({"value": values, "signal": signal, "supervise": [supervise] * len(labels)})
 
 
-def assert_counts(model, kind, expected):
-    vocabulary = REQUESTS[kind].vocabulary(model, ADDRESS)
+def assert_counts(model, kind, expected, *, address=ADDRESS):
+    vocabulary = REQUESTS[kind].vocabulary(model, address)
     assert set(vocabulary) == set(expected)
-    counter = model.nodes[ADDRESS].embedder.counters["content"]
+    counter = model.nodes[address].embedder.counters["content"]
     # Counters contain one prior per row; unused storage and the Cluster sentinel
     # must not receive observations when a local dictionary is remapped.
     counts = torch.ones_like(counter.counts)
@@ -54,11 +54,11 @@ def assert_counts(model, kind, expected):
         counts[index] += expected[label]
     torch.testing.assert_close(counter.counts, counts, rtol=0, atol=0)
     if kind == "category":
-        assert rf.Category.counts(model, ADDRESS) == expected
+        assert rf.Category.counts(model, address) == expected
 
 
-def assert_shapes(model, kind, capacity):
-    node = model.nodes[ADDRESS]
+def assert_shapes(model, kind, capacity, *, address=ADDRESS):
+    node = model.nodes[address]
     assert node.embedder.vocab.size == capacity
     counter = node.embedder.counters["content"]
     rows = capacity + (kind == "cluster")
@@ -81,8 +81,8 @@ def assert_shapes(model, kind, capacity):
     assert embedding.num_embeddings == rows
 
 
-def assert_encoding(model, kind, field, labels, *, inputs=True):
-    vocabulary = REQUESTS[kind].vocabulary(model, ADDRESS)
+def assert_encoding(model, kind, field, labels, *, inputs=True, address=ADDRESS):
+    vocabulary = REQUESTS[kind].vocabulary(model, address)
     contents = [
         (field.targets[rf.TensorKey.content], field.targets[rf.TensorKey.state].reshape(-1).eq(rf.Tokens.valued))
     ]
@@ -104,7 +104,7 @@ def assert_encoding(model, kind, field, labels, *, inputs=True):
                 assert rows[row][rows[row].ge(0)].tolist() == expected
             torch.testing.assert_close(content["unavailable"].reshape(-1)[valued], unavailable[valued])
     else:
-        unavailable = model.interprocess_encoding_context[ADDRESS].unavailable_index
+        unavailable = model.interprocess_encoding_context[address].unavailable_index
         expected = [vocabulary.index(label) if label in vocabulary else unavailable for label in labels]
         for content, valued in contents:
             assert content.reshape(-1)[valued].tolist() == torch.tensor(expected)[valued].tolist()
@@ -393,64 +393,93 @@ def test_late_registered_category_subclass_uses_its_registered_bind_component():
 
 
 class TrainingTrace(Callback):
-    """Record optimizer progress and worker identity across late admissions."""
+    """Check every growing datatype against the same live optimizer and workers."""
 
-    def __init__(self, kind):
-        self.kind = kind
+    def __init__(self):
         self.batches = []
         self.workers = []
         self.optimizers = []
-        self.weights = []
+        self.weights = {kind: [] for kind in KINDS}
 
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
         assert not batch.bindings
-        labels = batch.source["value"].to_pylist()
-        if self.kind == "set":
-            labels = [value[0] for value in labels]
-        assert_encoding(pl_module, self.kind, batch.tensors[ADDRESS], labels, inputs=False)
+        labels = batch.source["category"].to_pylist()
+        for kind in KINDS:
+            address = rf.Address(kind)
+            values = batch.source[kind].to_pylist()
+            assert values == ([[label] for label in labels] if kind == "set" else labels)
+            assert_encoding(pl_module, kind, batch.tensors[address], labels, inputs=False, address=address)
+            node = pl_module.nodes[address]
+            parameter = (
+                node.embedder.embeddings["cluster"].weight
+                if kind == "cluster"
+                else node.decoder.linears["content"].weight
+            )
+            self.weights[kind].append(parameter.detach().clone())
         self.batches.append((trainer.current_epoch, batch_idx, tuple(labels)))
         self.optimizers.append(trainer.optimizers[0])
         if trainer.train_dataloader.num_workers:
             self.workers.append(tuple(worker.pid for worker in trainer.train_dataloader._iterator._workers))
-        node = pl_module.nodes[ADDRESS]
-        parameter = (
-            node.embedder.embeddings["cluster"].weight
-            if self.kind == "cluster"
-            else node.decoder.linears["content"].weight
-        )
-        self.weights.append(parameter.detach().clone())
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         assert outputs is not None and torch.isfinite(outputs["loss"])
-        node = pl_module.nodes[ADDRESS]
-        parameter = (
-            node.embedder.embeddings["cluster"].weight
-            if self.kind == "cluster"
-            else node.decoder.linears["content"].weight
-        )
         optimizer = trainer.optimizers[0]
-        assert any(parameter is item for group in optimizer.param_groups for item in group["params"])
-        assert optimizer.state[parameter]["step"].item() == batch_idx + 1
-        assert optimizer.state[parameter]["exp_avg"].shape == parameter.shape
-        assert optimizer.state[parameter]["exp_avg_sq"].shape == parameter.shape
-        assert not torch.equal(parameter, self.weights[-1])
+        for kind in KINDS:
+            node = pl_module.nodes[rf.Address(kind)]
+            parameter = (
+                node.embedder.embeddings["cluster"].weight
+                if kind == "cluster"
+                else node.decoder.linears["content"].weight
+            )
+            assert any(parameter is item for group in optimizer.param_groups for item in group["params"])
+            assert optimizer.state[parameter]["step"].item() == batch_idx + 1
+            assert optimizer.state[parameter]["exp_avg"].shape == parameter.shape
+            assert optimizer.state[parameter]["exp_avg_sq"].shape == parameter.shape
+            assert not torch.equal(parameter, self.weights[kind][-1])
 
 
-@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.integration
 @pytest.mark.parametrize("workers", [0, 2], ids=["main-process", "persistent-workers"])
-def test_one_fit_admits_late_labels_without_restarting_epoch_or_optimizer(kind, workers, tmp_path):
-    model = build(kind)
+def test_one_fit_admits_late_labels_without_restarting_epoch_or_optimizer(workers, tmp_path):
+    selected = rf.Mask(query="supervise", reconstruct=True)
+    model = rf.Model.xs(
+        d_model=8,
+        attention=None,
+        reduction=rf.Mean(),
+        batch_size=2,
+        signal=rf.Number,
+        category=rf.Category(p_unavailable=0, mask=selected),
+        set=rf.Set(p_unavailable=0, mask=selected),
+        cluster=rf.Cluster(bounds=3, revive_temperature=0, p_unavailable=0, mask=selected),
+    )
     labels = ["a", "b", "c", "a", "d", "e", "f", "b"]
+    train = pa.table(
+        {
+            "category": labels,
+            "set": [[label] for label in labels],
+            "cluster": labels,
+            "signal": [float(index + 1) for index in range(len(labels))],
+            "supervise": [True] * len(labels),
+        }
+    )
+    validate = pa.table(
+        {
+            "category": ["validation-only", "a"],
+            "set": [["validation-only"], ["a"]],
+            "cluster": ["validation-only", "a"],
+            "signal": [1.0, 1.0],
+            "supervise": [True, True],
+        }
+    )
     data = rf.ArrowDataModule(
-        model=model,
-        train=table(kind, labels, supervise=True, distinct=True),
-        validate=table(kind, ["validation-only", "a"], supervise=True),
+        train=train,
+        validate=validate,
         shuffle=False,
         num_workers={"train": workers, "validate": 0},
         persistent_workers={"train": bool(workers), "validate": False},
         pin_memory=False,
     )
-    trace = TrainingTrace(kind)
+    trace = TrainingTrace()
     model.fit(
         data,
         learning_rate=1e-3,
@@ -473,24 +502,27 @@ def test_one_fit_admits_late_labels_without_restarting_epoch_or_optimizer(kind, 
     consumed = [label for _, _, batch_labels in trace.batches for label in batch_labels]
     assert Counter(consumed) == Counter(labels)
     assert all(optimizer is trace.optimizers[0] for optimizer in trace.optimizers)
-    assert [weight.shape[0] for weight in trace.weights] == ([3, 5, 9, 9] if kind == "cluster" else [2, 4, 8, 8])
+    for kind in KINDS:
+        assert [weight.shape[0] for weight in trace.weights[kind]] == (
+            [3, 5, 9, 9] if kind == "cluster" else [2, 4, 8, 8]
+        )
+        address = rf.Address(kind)
+        assert REQUESTS[kind].vocabulary(model, address) == tuple(dict.fromkeys(consumed))
+        assert_shapes(model, kind, 8, address=address)
+        assert_counts(model, kind, Counter(labels), address=address)
     if workers:
         assert len(trace.workers) == 4
         assert len(set(trace.workers[0])) == workers
         assert all(pids == trace.workers[0] for pids in trace.workers)
-    assert REQUESTS[kind].vocabulary(model, ADDRESS) == tuple(dict.fromkeys(consumed))
-    assert_shapes(model, kind, 8)
-    assert_counts(model, kind, Counter(labels))
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kind", KINDS)
 def test_lightning_checkpoint_resume_restores_training_state_before_further_growth(kind, tmp_path):
     def schedule(module, optimizer):
         return {"scheduler": torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.5), "interval": "step"}
 
     model = build(kind)
-    model.optimizer = rf.adamw(learning_rate=1e-3, fused=False)
-    model.scheduler = schedule
     schema = model.schema.model_dump(mode="json")
     labels = ["a", "b", "c", "a"]
     data_options = dict(shuffle=False, num_workers=0, persistent_workers=False, pin_memory=False)
@@ -498,6 +530,7 @@ def test_lightning_checkpoint_resume_restores_training_state_before_further_grow
     trainer_options = dict(
         accelerator="cpu",
         devices=1,
+        precision="32-true",
         limit_train_batches=2,
         limit_val_batches=0,
         num_sanity_val_steps=0,
@@ -507,8 +540,17 @@ def test_lightning_checkpoint_resume_restores_training_state_before_further_grow
         enable_model_summary=False,
         default_root_dir=tmp_path,
     )
-    trainer = Trainer(max_epochs=1, **trainer_options)
-    trainer.fit(model, datamodule=data)
+    model.fit(
+        data,
+        learning_rate=1e-3,
+        fused=False,
+        scheduler=schedule,
+        early_stopping=False,
+        rollback=False,
+        max_epochs=1,
+        **trainer_options,
+    )
+    trainer = model.trainer
     assert trainer.global_step == 2
     assert_shapes(model, kind, 4)
     assert_counts(model, kind, Counter(labels))
@@ -614,16 +656,25 @@ def test_lightning_checkpoint_resume_restores_training_state_before_further_grow
             assert state["exp_avg_sq"][3:5].count_nonzero() > 0
 
     restored = build(kind)
-    restored.optimizer = rf.adamw(learning_rate=1e-3, fused=False)
-    restored.scheduler = schedule
     assert restored.schema.model_dump(mode="json") == schema
     assert_shapes(restored, kind, 1)
     assert REQUESTS[kind].vocabulary(restored, ADDRESS) == ()
     more = ["d", "e", "f", "a"]
     resumed_data = rf.ArrowDataModule(model=restored, train=table(kind, more, supervise=True), **data_options)
     trace = ResumeTrace()
-    resumed = Trainer(max_epochs=2, callbacks=[trace], **trainer_options)
-    resumed.fit(restored, datamodule=resumed_data, ckpt_path=path)
+    restored.fit(
+        resumed_data,
+        learning_rate=1e-3,
+        fused=False,
+        scheduler=schedule,
+        early_stopping=False,
+        rollback=False,
+        max_epochs=2,
+        callbacks=[trace],
+        ckpt_path=path,
+        **trainer_options,
+    )
+    resumed = restored.trainer
 
     assert trace.restored and trace.batches == [0, 1]
     assert resumed.global_step == 4
@@ -702,6 +753,7 @@ def test_category_admission_preserves_predictions_until_the_label_is_learned():
     assert head.bias[2].item() == -20.0
 
 
+@pytest.mark.integration
 def test_admitted_rows_stay_zero_until_a_training_batch_starts_them_distinct_and_deterministic():
     from types import SimpleNamespace
 

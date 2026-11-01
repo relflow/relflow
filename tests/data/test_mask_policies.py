@@ -5,15 +5,7 @@ import pyarrow as pa
 import pytest
 
 import relflow as rf
-
-
-def model(mask: rf.Mask) -> rf.Model:
-    return rf.Model.xs(d_model=8, value=rf.Number(mask=mask))
-
-
-def selected(field) -> list[bool]:
-    state = field.state.reshape(-1)
-    return state.ne(rf.Tokens.valued).tolist()
+from relflow.data.ragged import coalesce
 
 
 @pytest.mark.parametrize(
@@ -60,15 +52,12 @@ def test_mask_configuration_matrix(
         reconstruct=reconstruct,
     )
 
-    field = model(policy).encode(
-        source,
-        strata=strata,
-        seed=19,
-        epoch=3,
-    )[rf.Address("/value")]
+    schema = rf.Schema.from_tree(d_model=8, n_layers=1, n_heads=2, value=rf.Number(mask=policy))
+    projection = coalesce(source, schema, strata, seed=19, epoch=3).fields["/value"]
+    inputs, targets = projection.split(projection.pristine.values)
 
     active = strata == rf.Strata.train or (not dropout and (strata != rf.Strata.predict or rate is None))
-    chosen = selected(field)
+    chosen = (inputs.dense.reshape(-1) != rf.Tokens.valued).tolist()
 
     if not active:
         assert not any(chosen)
@@ -85,16 +74,17 @@ def test_mask_configuration_matrix(
 
     expected_target = [active and reconstruct and value for value in chosen]
     if strata == rf.Strata.predict:
-        assert field.trainable.reshape(-1).tolist() == [False] * size
-        assert field.inferred.reshape(-1).tolist() == expected_target
+        assert projection.trainable.tolist() == [False] * size
+        assert projection.inferred.tolist() == expected_target
     else:
-        assert field.trainable.reshape(-1).tolist() == expected_target
-        assert field.inferred.reshape(-1).tolist() == [False] * size
+        assert projection.trainable.tolist() == expected_target
+        assert projection.inferred.tolist() == [False] * size
+    assert targets.placement.to_pylist() == [index for index, value in enumerate(projection.trainable) if value]
 
     if skip:
-        assert field.present.reshape(-1).tolist() == [not value for value in chosen]
+        assert projection.present.tolist() == [not value for value in chosen]
     else:
-        assert field.present.all()
+        assert projection.present.all()
 
 
 @rf.preprocess
@@ -437,7 +427,7 @@ def test_observation_selector_broadcasts_into_nested_records():
 
 
 def test_train_only_query_is_not_required_during_prediction():
-    configured = model(rf.Mask(query="eligible"))
+    configured = rf.Model.xs(d_model=8, value=rf.Number(mask=rf.Mask(query="eligible")))
 
     field = configured.encode(
         pa.table({"value": [1.0, 2.0]}),

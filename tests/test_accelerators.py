@@ -10,6 +10,7 @@ import torch
 import relflow as rf
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "accelerator",
     [

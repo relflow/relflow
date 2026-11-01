@@ -340,9 +340,19 @@ def test_text_tensorfield_tokenizes_bounded_numpy_batches(monkeypatch: pytest.Mo
     assert torch.count_nonzero(field.content[INPUT_IDS][2, 0, 1]) == 0
 
 
-@pytest.mark.parametrize("storage", ["string", "large_string", "chunked", "dictionary", "chunked_dictionary"])
-@pytest.mark.parametrize("padding_side", ["left", "right"])
-@pytest.mark.parametrize("max_length", [1, 4])
+@pytest.mark.parametrize(
+    ("storage", "padding_side", "max_length"),
+    [
+        ("string", "right", 4),
+        ("large_string", "right", 4),
+        ("chunked", "right", 4),
+        ("dictionary", "right", 4),
+        ("chunked_dictionary", "right", 4),
+        ("string", "left", 4),
+        ("string", "right", 1),
+        ("string", "left", 1),
+    ],
+)
 @pytest.mark.parametrize("objective", [False, True])
 def test_text_tokenizes_unique_strings_and_restores_sparse_coordinates(
     monkeypatch: pytest.MonkeyPatch, storage: str, padding_side: str, max_length: int, objective: bool

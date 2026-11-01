@@ -1,8 +1,8 @@
 """Live-token encoder blocks with attention grouped by sequence length.
 
 Packing is shared across an entire encoder stack. Equal-length grouping supports
-standard SDPA without padded queries. Nonzero training dropout retains the
-original dense RNG schedule.
+standard SDPA without padded queries. Dropout samples live activations and
+attention edges; its random-number schedule follows the packed execution.
 """
 
 from __future__ import annotations
@@ -38,17 +38,6 @@ class Packed:
     indices: torch.Tensor
     positions: torch.Tensor
     groups: tuple[Group, ...]
-
-
-def stochastic(layers: Iterable[RotaryTransformerEncoderLayer]) -> bool:
-    """Whether active dropout requires the original dense RNG schedule."""
-    return any(
-        (layer.attention.training and layer.attention.dropout_p > 0)
-        or any(
-            isinstance(module, torch.nn.Dropout) and module.training and module.p > 0 for module in layer.ffn.modules()
-        )
-        for layer in layers
-    )
 
 
 def customized(layers: Iterable[torch.nn.Module], *, additional: tuple[type[torch.nn.Module], ...] = ()) -> bool:
@@ -161,7 +150,11 @@ def attend(
                 .transpose(1, 2)
             )
             attended = F.scaled_dot_product_attention(
-                selected_q, selected_k, selected_v, dropout_p=0.0, enable_gqa=attention.nhead != attention.n_kv_heads
+                selected_q,
+                selected_k,
+                selected_v,
+                dropout_p=attention.dropout_p if attention.training else 0.0,
+                enable_gqa=attention.nhead != attention.n_kv_heads,
             )
             attended = attended.transpose(1, 2).reshape(-1, attention.nhead, attention.head_dim)
             outputs.append(attended)

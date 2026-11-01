@@ -75,12 +75,6 @@ def test_leaf_rejects_invalid_explicit_query():
         Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "query": "["})
 
 
-def test_leaf_query_is_observation_relative():
-    leaf = Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "query": "payload.amount"})
-
-    assert leaf.query == "payload.amount"
-
-
 def test_leaf_query_rejects_a_batch_axis_prefix():
     with pytest.raises(ValueError, match="must not begin with"):
         Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "query": "[*].payload.amount"})

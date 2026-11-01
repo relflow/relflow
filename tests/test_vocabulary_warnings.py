@@ -143,6 +143,7 @@ def test_warning_uses_shared_resources_without_a_builtin_field_type(records):
     assert warnings(records)[0]["minimum_observations"] == 0
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("stage", ["validate", "test", "predict"])
 def test_loops_warn_once_per_field_not_per_batch(records, stage):
     module = model()
@@ -161,6 +162,7 @@ def test_loops_warn_once_per_field_not_per_batch(records, stage):
     assert rf.Category.counts(module, "/category") == before
 
 
+@pytest.mark.integration
 def test_validation_during_fit_warns_using_only_training_exposures(records):
     module = model()
     for vocabulary in OnlineVocabularyModel.from_model(module).values():
@@ -255,6 +257,7 @@ def distributed_warning(rank, directory):
         distributed.destroy_process_group()
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(not distributed.is_available() or not distributed.is_gloo_available(), reason="requires CPU Gloo")
 def test_distributed_warning_uses_global_counts_and_logs_only_on_rank_zero(tmp_path):
     multiprocessing.spawn(distributed_warning, args=(str(tmp_path),), nprocs=2, join=True)
