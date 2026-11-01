@@ -142,22 +142,30 @@ owner account:
    its GitHub App for `relflow/relflow`, and grant that repository access.
    Choose **Projects → Add project**, select `relflow/relflow`, and retain the
    repository URL. Follow the [GitHub connection guide](https://docs.readthedocs.com/platform/stable/reference/git-integration.html).
-2. Set the initial **Default branch** to `stage/0.4.2`, where this configuration
-   exists. Confirm the root configuration path is `.readthedocs.yaml`, create
-   the project, and inspect the first build and its **View docs** link. Use the
-   project's actual assigned slug; no particular project name is assumed here.
-3. In **Settings → Pull request builds**, enable previews. In
+2. Create the project using the connected repository's default branch,
+   `main`, and the root configuration path `.readthedocs.yaml`. The import
+   wizard does not expose a branch override. Before this migration merges,
+   the initial `latest` build will fail because `main` lacks that file.
+3. Open **Versions**, include inactive versions, and find the branch
+   `stage/0.4.2` (normally the URL identifier `stage-0.4.2`). Activate that
+   version and save; activation triggers its build. Inspect the build and its
+   **View docs** link. The project branch selector only lists discovered
+   branches, so changing the default branch is unnecessary for this preview.
+   Read the Docs synchronizes versions on repository pushes and builds; if
+   the branch is missing, resolve version discovery before retrying the
+   selector. See the [version synchronization reference](https://docs.readthedocs.com/platform/stable/versions.html#version-syncing).
+4. In **Settings → Pull request builds**, enable previews. In
    **Settings → Addons → Flyout Menu**, enable the version menu; in
    **Settings → Search**, enable the search modal. Enable the pull request
    notification under **Settings → Addons → Notifications**. Verify these
    controls on hosted pages; the local preview does not receive host injection.
-4. After this branch merges, change the project's **Default branch** to `main`
+5. After this branch merges, confirm the project's **Default branch** is `main`
    and rebuild `latest`. Keep `latest` as the default documentation version
    during setup. In **Versions**, deactivate an unsupported `stable` alias and
    leave older tags inactive. Activate a release tag only after verifying that
    it contains the consolidated docs and root build configuration. Backfilling
    older release documentation is a separate change.
-5. Verify a hosted branch or pull request preview, including assets, nested
+6. Verify a hosted branch or pull request preview, including assets, nested
    links, evidence pages, version navigation, and search. Initial connection
    leaves DNS and the existing production deployment unchanged.
 
