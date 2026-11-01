@@ -1,0 +1,270 @@
+---
+title: Model presets
+description: "The bundled xs to xl size ladder, which node owns each setting, overrides, and application presets."
+engine: markdown
+---
+
+`rf.Model.xs(...)`, `.sm(...)`, `.md(...)`, `.lg(...)`, and `.xl(...)` build the
+same schema with different architecture defaults. Start with `xs` or `sm` to
+establish a working payment model, then compare larger configurations on
+validation data. See [Your first model](../learn/your-first-model.qmd) for the basic
+training workflow.
+
+Each factory call builds fresh model state. To reuse a trained model, load its
+[saved artifact](../guides/checkpoints-ema-and-resuming.qmd), then adapt it through
+another fit or [schema evolution](../guides/schema-mutation.qmd) as the task needs.
+
+## Bundled sizes
+
+These are the bundled revision-1 configurations:
+
+| Setting | `xs` | `sm` | `md` | `lg` | `xl` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Shared width, `d_model` | 64 | 128 | 256 | 384 | 512 |
+| Root encoder layers | 1 | 2 | 3 | 4 | 6 |
+| Child branch encoder layers | 1 | 1 | 2 | 2 | 3 |
+| Root, branch, and leaf heads | 2 | 4 | 8 | 8 | 8 |
+| Root attention outputs | 1 | 2 | 4 | 8 | 16 |
+| Child branch attention outputs | 1 | 2 | 4 | 4 | 8 |
+| Feed-forward multiplier, `ffnx` | 8 | 8 | 8 | 8 | 8 |
+
+Every size uses MHA encoders and zero dropout. Each attention reduction has one
+layer and positional information; its heads and dropout inherit the owning
+branch. Leaf decoders use query pooling, one cross-attention block
+(`n_linear=1`), and automatic decoder positioning (`decoder_position=None`).
+Automatic positioning is off for a single predicted position and on when the
+target has more than one position.
+
+RelFlow's hidden activations use tanh GELU, and its neural normalization uses
+RMSNorm with epsilon `1e-5`. These choices are fixed. Pretrained text encoders
+retain their own architectures.
+
+A size name describes defaults, rather than a parameter-count range or a
+prediction-quality guarantee. The schema, vocabularies, requested decoders,
+and external text encoders also determine model size.
+
+## Which node owns a setting?
+
+A preset fills three separate scopes:
+
+| Scope | Settings supplied |
+| --- | --- |
+| Model root | Encoder `n_layers`, `n_heads`, `ffnx`, `attention`, `dropout`, and root `reduction`. |
+| Every child branch | Its own encoder settings and `reduction`, at every nesting depth. |
+| Each leaf | Decoder `n_heads`, `ffnx`, `pooling`, `n_linear`, `dropout`, and `decoder_position`. |
+
+`d_model` is shared across the whole model. Root overrides apply to the root;
+branch overrides apply to that branch. Leaf decoder heads do not inherit a
+containing branch's override.
+
+For example, take the sequence schema from
+[Add transaction history](../learn/add-transaction-history.qmd), with a hidden
+dispute target on every retained transaction. This `sm` model changes root
+depth, the history's feed-forward multiplier, and the dispute decoder's heads
+independently:
+
+```python
+import relflow as rf
+
+model = rf.Model.sm(
+    n_layers=3,
+    trxns=rf.Branch(
+        length=32,
+        overflow="tail",
+        ffnx=4,
+        booked_at=rf.DateParts(
+            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
+        ),
+        amount=rf.Number,
+        merchant=rf.Category,
+        disputed=rf.Boolean(mask=True, n_heads=2),
+    ),
+)
+```
+
+The history keeps the `sm` branch depth of one layer. Its leaves keep their
+own `ffnx=8` defaults. Changing the history's multiplier does not change them.
+Each `ffnx` must be a positive integer; its hidden feed-forward width is
+`ffnx * d_model`.
+
+```{typst}
+//| label: fig-preset-ownership
+//| fig-cap: "The payment root, transaction branch, and field decoders have separate settings. Their ownership follows the schema."
+//| fig-alt: "A payment root contains one repeated trxns branch with booked_at DateParts, amount Number, merchant Category, and a hidden disputed Boolean target for every transaction. Root and branch own separate contexts; the nested dispute target owns its decoder."
+#tree(node("payment", kind: "root", detail: "Root context", children: (
+  node("trxns", kind: "branch", repeated: true, detail: "Local context", children: (
+    node("booked_at", type: "DateParts"),
+    node("amount", type: "Number"),
+    node("merchant", type: "Category"),
+    node("disputed", kind: "target", type: "Boolean", detail: "Every transaction; own decoder"),
+  )),
+)))
+```
+
+The multiplier controls a branch's sequence encoder, coordinate encoder, and
+learned reduction. On a leaf it controls query-decoder feed-forward blocks and
+aligned sibling-context projection. It does not change the number of retained
+transactions or the shared output width.
+
+## Overrides and explicit None
+
+Resolution follows this order at each node:
+
+1. An explicitly supplied option wins, including one equal to the ordinary default.
+2. An omitted option uses that scope's preset value.
+3. Options outside the preset keep their ordinary datatype or branch defaults.
+
+An explicit reduction replaces the whole reduction object. For example,
+`reduction=rf.Attention()` selects one output and one layer even under `xl`.
+It does not inherit `xl`'s output count. `rf.Mean()` and `None` also replace the
+preset reduction completely.
+
+`None` is a deliberate value where the option accepts it:
+
+| Option | Meaning of `None` |
+| --- | --- |
+| Root or branch `attention` | Disable encoder attention; the reduction remains separately configured. |
+| Root or branch `reduction` | Pass through routed child slots instead of reducing them. |
+| Node `dropout` | Use zero dropout. |
+| Leaf `decoder_position` | Use the automatic scalar/repeated-target policy. |
+| Attention reduction `n_heads` or `dropout` | Inherit the owning branch's value. |
+
+A width override must be compatible with every effective attention head count.
+It does not rewrite branch or leaf heads. Invalid geometry is rejected at the
+affected address. Reusing a branch or leaf definition in another model creates
+a separately resolved tree and leaves the original definition unchanged.
+
+The preset leaves history lengths, overflow, field roles, queries, objective
+weights, and datatype-specific options to the application. Set batch size on
+the loop, such as `model.fit(data, batch_size=128, max_epochs=30)`. Constructor
+batch size remains the initial value, defaulting to one. Optimization,
+schedulers, training budgets, hardware, and data-loader settings belong to the
+[training workflow](../guides/training-options.qmd), not the size profile.
+
+For YAML configurations, `preset: sm` chooses the same bundled policy.
+Python overrides win over file options, which win over the preset. See
+[Model templates](../guides/model-templates.qmd).
+
+## Save, load, and extend
+
+The resolved schema records the model's actual architecture. `model.preset`
+holds the immutable construction policy, including its name and revision.
+Saving preserves both. Loading uses those saved values rather than applying a
+newer version of a bundled preset.
+
+```python
+model.save("artifacts/payment-history.rf")
+restored = rf.Model.load("artifacts/payment-history.rf")
+restored.extend(
+    rf.where("address") == rf.Address(),
+    country=rf.Category,
+)
+```
+
+The new `country` field receives the saved `sm` leaf defaults. Existing nodes
+keep their resolved options, including the earlier dispute-head override.
+Updating a trained model does not reapply the preset to its existing tree.
+See [Schema mutation](../guides/schema-mutation.qmd) for learned-state boundaries.
+
+`rf.Model(schema=schema)` restores an already resolved architecture. It carries
+no preset policy unless loaded from a saved artifact that contains one; newly
+extended nodes then use ordinary defaults. Preset factories reject `schema=`
+because the schema already specifies its architecture.
+
+Selecting another size constructs a new architecture. Increasing width, depth,
+or output count on a trained model does not provide automatic weight
+compatibility.
+
+## Define an application preset
+
+Use `rf.presets.Preset` with frozen root, branch, and leaf configurations, then
+bind it to a model subclass with `rf.presets.factory`:
+
+```python
+compact = rf.presets.Preset(
+    name="payment-compact",
+    revision=1,
+    d_model=96,
+    root=rf.presets.BranchDefaults(
+        n_layers=2,
+        n_heads=4,
+        reduction=rf.Attention(n_outputs=2),
+    ),
+    branch=rf.presets.BranchDefaults(
+        n_layers=1,
+        n_heads=4,
+        reduction=rf.Attention(n_outputs=1),
+    ),
+    leaf=rf.presets.LeafDefaults(n_heads=4),
+)
+
+class PaymentModel(rf.Model):
+    compact = rf.presets.factory(compact)
+
+payment_model = PaymentModel.compact(
+    trxns=rf.Branch(
+        length=32,
+        overflow="tail",
+        booked_at=rf.DateParts(
+            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
+        ),
+        amount=rf.Number,
+        merchant=rf.Category,
+        disputed=rf.Boolean(mask=True),
+    ),
+)
+```
+
+The result is a `PaymentModel`. Inherited built-in factories also construct the
+calling subclass. Policy names must be nonempty and revisions positive; use a
+new revision when changing an application's defaults. Common leaf settings also
+apply to registered third-party tensorfields without replacing their extension
+options.
+
+Ordinary Python construction uses these factories rather than a `preset=` or
+`size=` selector. A schema child named `preset` or `size` remains an ordinary
+field. YAML templates reserve their own top-level `preset` entry.
+
+## Capacity, embeddings, and cost
+
+The size ladder increases shared width and root depth while keeping child
+encoders shallower. More reduction outputs let a branch send more context to
+its parent. These are useful axes to compare; their values are engineering
+starting points rather than benchmark-derived quality thresholds.
+
+Each branch owns separate weights, and each decoded field adds its own decoder.
+Wider feed-forward layers, more branches, deeper encoders, longer histories,
+and larger vocabularies can all increase memory or compute. Attention output
+slots also add learned parameters and affect the parent's input size. Reducing
+those slots occurs after that branch's encoder, so it does not remove the
+branch's own input-attention work.
+
+
+`n_layers` counts sequence encoder blocks. A branch with multiple active direct
+leaves can also have a separate coordinate-attention block. Head count partitions
+the shared width; adding heads at a fixed width does not multiply the MHA
+projection parameter count.
+
+An attention reduction may have more outputs than inputs. In that case it
+expands context rather than compressing it. Mean reduction emits one summary;
+no reduction preserves routed child slots. Completely inactive subtrees emit
+no structural outputs. See [Branch](../datatypes/branch.qmd) for these contracts.
+
+With root `embed=True`, the default `xs` model emits one width-64 vector, while
+`md` emits four width-256 vectors. Set `reduction=rf.Attention(n_outputs=1)`
+when an application needs one root vector, then evaluate the resulting
+bottleneck. Reduction outputs are context vectors, not additional prediction
+records; target coordinates still come from the schema.
+
+Zero dropout permits the eligible packed encoder training path for partially
+present inputs. Nonzero dropout can change both learning and execution cost.
+GQA, MQA, Mean reduction, and disabled attention likewise change model behavior;
+measure them on the actual task. GQA and MQA apply to branch encoders; reduction
+and decoder query attention retain MHA. Turning off reduction positioning alone does
+not make a branch with positional encoder attention permutation invariant.
+
+Compare task quality on fixed validation splits and record the actual parameter
+count, peak memory, and throughput for the schema and hardware used. Increase
+one capacity axis at a time. A larger preset can underfit, overfit, or cost more
+without improving the task. See [Evaluation](../learn/evaluation.qmd) and
+[Performance](../guides/performance.qmd).

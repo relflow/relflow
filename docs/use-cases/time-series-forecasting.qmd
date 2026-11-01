@@ -1,0 +1,174 @@
+---
+title: Time series forecasting
+description: "Predict future values from observed history, series context, and covariates known at each forecast cutoff."
+engine: markdown
+---
+
+Suppose a retailer has hourly sales for each store and product, plus a promotion
+schedule published in advance. It wants forecasts for the next few hours to
+support replenishment decisions. One observation will describe a store-product
+series at a cutoff, its completed sales history, and the future hours to score.
+
+The model below combines numeric targets and repeated contexts for that
+dataset. Compare it with simpler forecasts on the same replenishment
+decisions to assess whether those contexts help.
+
+## Describe history and the requested horizon
+
+Let `at` mean the end of an hourly bucket. At a May 28 cutoff of 10:00, all
+history buckets have completed. The application supplies three requested
+future buckets, ending at 11:00, 12:00, and 13:00. The promotion flags were
+already known at 10:00. A historical training observation receives the
+future `units` labels after those buckets complete:
+
+```yaml
+series_id: store-17_milk-1l
+history:
+  - at: "2026-05-28T08:00:00Z"
+    age_hours: 2
+    units: 8
+  - at: "2026-05-28T09:00:00Z"
+    age_hours: 1
+    units: 11
+  - at: "2026-05-28T10:00:00Z"
+    age_hours: 0
+    units: 10
+horizon:
+  - at: "2026-05-28T11:00:00Z"
+    lead_hours: 1
+    promotion: false
+    units: 12
+  - at: "2026-05-28T12:00:00Z"
+    lead_hours: 2
+    promotion: true
+    units: 16
+  - at: "2026-05-28T13:00:00Z"
+    lead_hours: 3
+    promotion: true
+    units: 14
+```
+
+The entire record is one observation. `history.units` is observed input;
+`horizon.units` is a future target. Their separate schema addresses allow the
+same field name to have those different roles. Retain the series identifier
+and cutoff when associating forecasts with source records.
+
+## Build a model for those records
+
+The declared numeric, categorical, and calendar fields generate encoders for
+this dataset. The two branches specify observed history and future requests;
+the masked numeric field puts a prediction objective at every requested
+horizon record. Together they define the forecasting model's architecture
+and learning task:
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    series_id=rf.Category,
+    history=rf.Branch(
+        length=168,
+        overflow="tail",
+        at=rf.DateParts(dateparts=["day_of_month", "day_of_week", "hour_of_day"]),
+        age_hours=rf.Number,
+        units=rf.Number,
+    ),
+    horizon=rf.Branch(
+        length=24,
+        overflow="error",
+        at=rf.DateParts(dateparts=["day_of_month", "day_of_week", "hour_of_day"]),
+        lead_hours=rf.Number,
+        promotion=rf.Boolean,
+        units=rf.Number(mask=True),
+    ),
+)
+```
+
+Order the history oldest to newest; it keeps the latest 168 completed hourly
+observations. The horizon accepts
+up to 24 requested hours; the three slots above request three forecasts.
+`length=24` sets a limit. The application still constructs each future record
+and timestamp.
+
+`DateParts` supplies calendar cycles, while `age_hours` and `lead_hours` express
+elapsed time relative to the cutoff. Your application calculates those
+durations. The model can learn relationships between recent demand, calendar
+position, and planned promotions across the training observations.
+
+At prediction, keep the observed `history.units`. Omit `units` only from the
+`horizon` records, leaving their timestamps, lead times, and known promotion
+flags. The returned `predictions.horizon` contains one numeric result per
+requested future record, in its retained order. It returns three results for
+this request, with no padding to 24.
+
+Use application-prepared Parquet files with this structure and follow
+[Train and save](../learn/train-and-save.qmd) with forecasting-specific file
+paths. The [prediction contract](../reference/prediction-output.qmd) describes
+the numeric result envelope.
+
+## Prepare a forecast as it would have been known
+
+Choose whether a series is regular hourly data or an irregular event history.
+For hourly demand, assemble the hourly grid before making observations. A
+verified hour with no sales can be zero; an unavailable hour is missing data.
+RelFlow's branch ordering and calendar fields do not infer which situation
+occurred or fill missing hours.
+
+Here `units` measures recorded sales. A stockout can suppress those sales, so
+the example's target is observed sales under the retailer's availability
+conditions. Estimating unmet demand needs additional availability information
+and a corresponding target definition. Preserve stock and availability facts
+as they were known at each cutoff when they enter a forecast.
+
+Keep only completed, available history buckets. Use the promotion schedule
+version known at the cutoff. A weather input for a future hour would need the
+weather forecast issued by that cutoff, rather than the weather later
+observed. Every `horizon.units` label remains masked, including when several
+future targets share context.
+
+Train on many historical cutoffs and series. Field normalization is learned
+across that field's training observations; declaring `series_id` does not
+create a separate automatic normalizer for each series. Decide how source
+units and large differences in series scale should enter the comparison.
+
+## Evaluate at the requested lead times
+
+Compare the same series, cutoffs, and requested hours with these baselines:
+
+| Baseline | Forecast |
+| --- | --- |
+| Last observed value | Repeat the latest completed hourly value. |
+| Seasonal naive | Reuse the corresponding hour from a prior day or week, with the lag chosen on validation data. |
+| Existing forecasting model | Use the same observed history and genuinely known future inputs. |
+
+These simple benchmarks are described in
+[Forecasting: Principles and Practice](https://otexts.com/fpp3/toolbox.html).
+Measure MAE or RMSE separately by lead time and across the series that matter
+to replenishment. Check whether a pooled metric hides weak performance on
+low-volume series. Test across later cutoffs, ensuring training labels and
+their reporting delays complete before the evaluation period. Compare the
+same chosen horizons throughout.
+
+The model above produces point forecasts. Prediction intervals require a
+separate uncertainty method and coverage evaluation; a `Quantile` field's
+percentile encoding is not a forecast interval. If demand decisions require
+nonnegative outputs or accounting constraints, define that output policy and
+evaluate the resulting forecasts. See [Evaluation](../learn/evaluation.qmd).
+
+## Adapt the series and its context
+
+For **load or sensor forecasting**, replace `units` with the measured quantity
+and add device or site attributes, maintenance events, and known schedules
+when available. Irregular measurements need explicit elapsed durations.
+
+For **market bars**, a record can keep opening, high, low, closing prices, and
+volume together. To predict the next trading day's close, supply only
+completed bars and define the next trading session explicitly. Compare with
+the last observed close on the same sessions and forecast horizon.
+
+For **multiple related series**, decide which other measurements were available
+at each cutoff and how their histories belong in the observation. Nested
+branches provide structure; the application supplies the alignment and
+relationships. [Relational prediction](relational-prediction.qmd) explains
+that preparation, while [Customer outcomes](customer-outcomes.qmd) covers
+future totals over a fixed outcome window.

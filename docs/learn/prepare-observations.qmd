@@ -1,0 +1,216 @@
+---
+title: Prepare observations
+description: "Assemble one record per decision with the history known at that time and labels from the window after it."
+engine: markdown
+---
+
+Suppose your source data contains a transaction table and a separate stream
+of dispute reports. To support the review decision in the
+[history tutorial](add-transaction-history.qmd), prepare a dataset with one
+account review per row. relflow reads those observations; your application
+decides which transactions belong to each review, what was known then, and
+what the later labels mean. This page defines that data contract for the
+payment examples.
+
+## One row is one decision
+
+The inputs to an observation describe what was known about one decision at
+one moment. For this account review, they are the account's transactions
+through the latest payment, in order. A historical training row also carries
+the labels learned later: each `disputed` Boolean records whether a new
+dispute against that transaction was reported in the 30 days after the
+common review cutoff. None of those labels is an input.
+
+The YAML below illustrates one such training row. Each transaction has its
+booking time, amount, and merchant; the cutoff is immediately after the
+final booking on May 28. `payment_id` identifies the review and
+`transaction_id` identifies an item in its history:
+
+```yaml
+payment_id: payment-42
+trxns:
+  - transaction_id: trxn-40
+    booked_at: "2026-05-21T10:00:00"
+    amount: 32.00
+    merchant: Station Cafe
+    disputed: false
+  - transaction_id: trxn-41
+    booked_at: "2026-05-27T18:15:00"
+    amount: 56.20
+    merchant: North Market
+    disputed: true
+  - transaction_id: trxn-42
+    booked_at: "2026-05-28T14:30:00"
+    amount: 84.50
+    merchant: North Market
+    disputed: false
+```
+
+The latest payment is the final item of `trxns`. It needs no separate root
+fields: the branch reads the booking time, amount, and merchant of every
+transaction, including that one.
+
+The outer row is the unit of batching and splitting. A batch of 128 rows
+contains 128 account-review observations, with a transaction list inside each.
+A branch's `length` limit controls those inner lists independently.
+
+Keep `payment_id` at the root to identify the review and `transaction_id`
+inside each item to identify that transaction. These identifiers remain
+application metadata unless the model explicitly declares them as fields.
+
+## Choose a decision time
+
+Every observation has a cutoff, the moment the decision is made. Here it is
+the account review immediately after the latest booking on May 28. The inputs
+may contain only what was known then. Each label answers one question about
+the following window: was a new dispute reported against this transaction in
+the 30 days after the cutoff?
+
+```{typst}
+//| label: fig-decision-time
+//| fig-cap: "Transactions booked before the review cutoff are inputs. Labels come from the 30 days after it. Events after the cutoff never enter the inputs."
+//| fig-alt: "A timeline with three transactions on May 21, May 27, and May 28 before a dashed review cutoff at 14:30 on May 28. A shaded label window covers the next 30 days. An event on June 3 is excluded from the inputs, and a dispute reported inside the window defines a label."
+#timeline(
+  (
+    (at: 3, label: [May 21]),
+    (at: 9, label: [May 27], level: 1),
+    (at: 10.6, label: [May 28, latest]),
+    (at: 16, label: [June 3, excluded], kind: "excluded", level: 1),
+    (at: 23, label: [Dispute reported], kind: "label"),
+  ),
+  cutoff: (at: 10.6, label: [Review cutoff: May 28, 14:30]),
+  window: (from: 10.6, to: 40.6, label: [Label window: the next 30 days]),
+  start: 0, end: 44,
+)
+```
+
+Three consequences follow:
+
+- **Every transaction is a target.** All three transactions are known at the
+  cutoff, so each one gets a label for the same window, and the full sequence
+  is valid context for each prediction. These are not forecasts made
+  separately at each transaction's original booking time.
+- **Labels arrive later.** Attach `disputed` only after the window has closed.
+  A payment still waiting for its outcome is not a negative example.
+- **Prediction records look the same without labels.** A request contains
+  the same `trxns` records, cut at its own decision time, with `disputed`
+  omitted.
+
+## Order the history
+
+Supply `trxns` oldest to newest. The model reads order from list position,
+and `overflow="tail"` on a bounded branch keeps the most recent records,
+including the latest payment, when a history is longer than its cap. relflow
+does not sort, deduplicate, or join; do that before the row exists.
+
+`booked_at` becomes recurring calendar positions through `DateParts`: day of
+month, day of week, and hour of day. Those cycles say when something
+happened, not how long ago. When the pace of activity matters, derive the gap
+between transactions in a [preprocessor](../guides/preprocessing.qmd) and read
+it as a `Number`.
+
+## Split by time
+
+Splits are separate collections of observations with different roles:
+
+| Split | Purpose | Includes the settled target labels? |
+| --- | --- | --- |
+| `train` | Update the model's learned parameters and data-dependent state. | Yes |
+| `validate` | Choose model settings and the best checkpoint without training on these observations. | Yes |
+| `test` | Assess the chosen model on observations held out from those choices. | Yes |
+| `predict` | Score new decisions whose answers are not yet known. | No |
+
+Train on earlier decision windows and validate on later ones. Build each
+observation from information available at its own cutoff, and keep later
+outcomes out of its inputs. The same account can appear at several decision
+times; keep their label windows from overlapping the validation period.
+relflow does not enforce these rules. [Evaluation](evaluation.qmd)
+describes the comparisons that depend on them.
+
+## Bind the record to the schema
+
+The Parquet schema describes the stored values. Your model declaration also
+chooses how each value is represented and which fields to predict; those
+choices drive architecture generation.
+
+With the record prepared, binding is a matter of names. The parent keyword
+names each child, and each child reads the same-named value in its parent:
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    trxns=rf.Branch(
+        length=32,
+        overflow="tail",
+        booked_at=rf.DateParts(
+            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
+        ),
+        amount=rf.Number,
+        merchant=rf.Category,
+        disputed=rf.Boolean(mask=True),
+    ),
+)
+```
+
+`trxns` reads the list; its children read each transaction's fields. Columns
+the schema does not name, such as `payment_id`, are ignored as inputs and can
+be [retained in the output](read-predictions.qmd). A required
+field missing from the Arrow schema is a binding error; an explicit null is a
+value state governed by the field's `nullable` option.
+
+When names or nesting differ from the schema, read them in place with a
+[query](../guides/query-paths.qmd). When the source needs renaming, derived values,
+filtering, joins, or reshaping, attach a
+[preprocessor](../guides/preprocessing.qmd) to the data module. Its output is
+what the model binds.
+
+## Assemble histories from transaction tables
+
+If your source has one row per transaction, prepare one review observation
+before passing it to RelFlow:
+
+1. Create the review decisions with an account identifier, `payment_id`, and
+   cutoff time. The payment being reviewed is the latest item at that cutoff.
+2. Join each decision to that account's transactions. Keep only transactions
+   booked by the cutoff and known to the application then. Deduplicate by
+   transaction identifier, sort oldest to newest, and use a stable tie-breaker
+   for equal booking times. The latest payment appears exactly once.
+3. For a labeled observation, attach each transaction's `disputed` answer
+   from reports in the 30 days after that review's cutoff. Wait for the whole
+   window to finish before labeling the absence of a report as `false`.
+4. Group by review decision, collecting the ordered transaction fields into
+   the `trxns` list. Keep the review's `payment_id` outside it and each
+   `transaction_id` inside its item. Assign whole review observations to their
+   time-based splits, then export them.
+
+One account can contribute several observations, each with its own cutoff and
+labels. Grouping by account alone would collapse those decisions together
+and could introduce future transactions into earlier observations. Your
+application's SQL, Arrow, or Polars preparation must preserve the decision
+boundary.
+
+## Supply the files used by the tutorials
+
+Export each collection of prepared observations as Parquet, preserving `trxns`
+as a list of records with typed fields. The history tutorial uses:
+
+| Example path | Row contents |
+| --- | --- |
+| `payments/history/train.parquet` | Historical review observations with every transaction's settled `disputed` label. |
+| `payments/history/validation.parquet` | Separate, later review observations with the same structure and labels. |
+| `payments/history/requests.parquet` | New review observations with `disputed` omitted from each transaction. |
+
+These paths name files your application creates. `ArrowDataModule` reads the
+files you pass to it; assigning a split does not assemble histories or divide
+one file into train and validation rows. The flat tutorial uses separate
+`payments/flat/` files because each of its rows is a single payment.
+
+Keep both kinds of identifier in request files so
+[Read predictions](read-predictions.qmd) can associate every answer with its
+source transaction. [Preprocessing](../guides/preprocessing.qmd) shows
+additional transforms on prepared records. For existing Arrow or Polars
+tables, databases, and streamed sources, see [Data modules](../guides/data-modules.qmd).
+
+Next, [train and save](train-and-save.qmd) the model on files
+prepared this way.

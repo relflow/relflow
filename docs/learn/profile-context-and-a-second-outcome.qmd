@@ -1,0 +1,192 @@
+---
+title: Profile context and a second outcome
+description: "Extend the transaction model with payment channels, account profile context, and a merchant-repeat target."
+engine: markdown
+---
+
+Suppose the payment service from the
+[history tutorial](add-transaction-history.qmd) also wants to anticipate
+which merchants will be paid again. Extend its account-review dataset with
+each payment's channel and the account's age, then add a merchant-repeat
+label beside every transaction's dispute label. Each row still describes
+one account at one common review cutoff.
+
+This is a richer transaction model, built after the basic training and
+[evaluation workflow](evaluation.qmd). Keep the earlier model as a baseline
+so you can test what each addition contributes.
+
+## Keep events and account context together {#describe-the-evidence-before-the-architecture}
+
+This illustrative training row ends with a direct debit to an internet
+provider. `channel` records how each payment was made, and `account_age_days`
+is the account's age at review. Keep the latest payment once at the end of
+`trxns`, alongside the earlier transactions known then.
+
+The cutoff is the final booking on May 28 at 09:00. Every `disputed` label
+records a new dispute during the next 30 days. Every
+`repeats_next_30_days` label records another payment to that transaction's
+merchant during the same window. Both answers are attached after the window
+closes:
+
+```yaml
+account_age_days: 420
+trxns:
+  - booked_at: "2026-03-28T09:00:00"
+    amount: 24.00
+    merchant: Harbor Internet
+    channel: direct_debit
+    disputed: false
+    repeats_next_30_days: true
+  - booked_at: "2026-04-28T09:00:00"
+    amount: 24.00
+    merchant: Harbor Internet
+    channel: direct_debit
+    disputed: false
+    repeats_next_30_days: true
+  - booked_at: "2026-05-27T08:00:00"
+    amount: 32.00
+    merchant: Station Cafe
+    channel: card
+    disputed: true
+    repeats_next_30_days: false
+  - booked_at: "2026-05-28T09:00:00"
+    amount: 24.00
+    merchant: Harbor Internet
+    channel: direct_debit
+    disputed: false
+    repeats_next_30_days: true
+```
+
+The transaction list is the **event history**, including the payment being
+scored. Each event keeps its amount, merchant, channel, and booking date
+together. `account_age_days` supplies **profile context** shared by the
+sequence. Use its value as known at the decision time.
+
+| Evidence | What it contributes |
+| --- | --- |
+| Amount, merchant, and channel within one event | Distinguishes a direct debit from a card purchase, even at the same merchant. |
+| Ordered transactions and booking dates | Exposes repeated amounts, merchant visits, and calendar patterns. |
+| Account profile | Supplies context shared by the transaction sequence, such as account tenure. |
+
+A calculated mean payment amount or dominant channel is another possible
+input. Compare those summaries with the event sequence to learn whether
+preserving individual transactions is useful.
+
+The record follows [Prepare observations](prepare-observations.qmd):
+sorted oldest to newest, ending at the latest payment. Every transaction's
+predictions use the complete sequence known at the common cutoff. Earlier
+payments to Harbor Internet are context, not the future payments that define
+its repeat labels.
+
+## Learn two outcomes from the same history {#ideas-from-transaction-and-time-series-models}
+
+Place both targets inside `trxns`, beside the transaction they describe.
+`mask=True` hides each transaction's answers and supplies their supervision.
+The two predictions share encoded context, with their own decoders and
+supervision. This lets the application test a joint model against separate
+models for the two decisions. Build a fresh model for the extended schema
+and use application-supplied files with the row structure above:
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    account_age_days=rf.Number,
+    trxns=rf.Branch(
+        length=32,
+        overflow="tail",
+        booked_at=rf.DateParts(
+            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
+        ),
+        amount=rf.Number,
+        merchant=rf.Category,
+        channel=rf.Enum(values=("card", "direct_debit", "bank_transfer")),
+        disputed=rf.Boolean(mask=True),
+        repeats_next_30_days=rf.Boolean(mask=True),
+    ),
+)
+data = rf.ArrowDataModule(
+    train="payments/context/train.parquet",
+    validate="payments/context/validation.parquet",
+)
+model.fit(data, batch_size=128, max_epochs=30)
+```
+
+```{typst}
+//| label: fig-profile-context-two-outcomes
+//| fig-cap: "Profile context sits at the root. Every transaction carries its own evidence and two hidden targets that share the same context."
+//| fig-alt: "An account root contains account_age_days Number and one repeated trxns branch. Each transaction has booked_at DateParts, amount Number, merchant Category, channel Enum, and two Boolean targets, disputed and repeats_next_30_days, each hidden and supervised at every transaction."
+#tree(node("account", kind: "root", children: (
+  node("account_age_days", width: 150pt, type: "Number", detail: "Profile context"),
+  node("trxns", kind: "branch", repeated: true, width: 150pt, detail: "Event history", children: (
+    node("booked_at", type: "DateParts"),
+    node("amount", type: "Number"),
+    node("merchant", type: "Category"),
+    node("channel", type: "Enum"),
+    node("disputed", kind: "target", type: "Boolean", width: 175pt, detail: "Every transaction"),
+    node("repeats_next_30_days", kind: "target", type: "Boolean", width: 175pt, detail: "Every transaction"),
+  )),
+)))
+```
+
+These application-supplied Parquet files keep profile context at the root and
+all transaction fields inside `trxns`. Every listed transaction supplies both
+Boolean labels. Their schema addresses are `/trxns/disputed` and
+`/trxns/repeats_next_30_days`.
+
+`channel` uses [Enum](../datatypes/enum.qmd) because its allowed values are
+declared in advance. `merchant` uses `Category` because its vocabulary is
+learned from training records. Both field names still come from the
+application's records. Adding these fields and targets changes the
+architecture generated from the schema; training learns how the new event
+and profile context contributes to each outcome.
+
+Prediction files omit both outcome fields from every transaction while keeping
+the transaction records. The results arrive inside `predictions.trxns`, with
+`inferred: true` for both targets at every retained transaction position. See
+[Read predictions](read-predictions.qmd).
+
+Shared context lets you test whether learning the account's behavior helps
+both tasks. Inspect each outcome separately: improvement on repeat payments
+can accompany a regression in dispute detection. For repeat payments, measure
+precision and recall for another payment to each transaction's merchant within
+the common 30-day window. For disputes, measure recall at the team's review
+capacity. A dispute label records a later customer outcome and needs its own
+operational definition.
+
+## Choose a learning workflow
+
+With settled outcome labels, train the supervised model directly. When you
+have many more histories than labels, first hide sampled transaction amounts
+or merchants and learn to reconstruct them from the remaining context. That
+gives unlabeled activity a learning role before adapting the model to dispute
+or repeat-payment prediction.
+
+Reconstructing a hidden transaction value asks what fits the observed
+sequence. Predicting a later outcome asks what happens after the decision.
+Define and evaluate those objectives separately. The
+[pretraining guide](pretraining-and-fine-tuning.qmd) shows how to change objectives while
+reusing compatible learned state.
+
+You can also export a **contextual representation**: learned vectors combining
+the account fields and its history. Keep the encoder fixed while training
+separate task predictors on those vectors. This tests whether the learned
+context is useful for another outcome before updating the encoder for it.
+[Reusable representations](reusable-representations.qmd) explains that
+workflow.
+
+## Make the comparison about the decision
+
+For repeat payments, compare with rules based on merchant, amount, and the
+booking calendar. For disputes, compare with the existing tabular model and
+its history features. Keep the eligible payments, available evidence, and
+outcome windows identical.
+
+Test each addition in sequence: history versus the payment alone, channel and
+profile versus history alone, then joint targets versus separate models.
+Later, compare reconstruction pretraining with the same supervised model
+trained from scratch. [Evaluation](evaluation.qmd) explains these comparisons.
+
+Next, [Nested context and account outcomes](nested-context-and-account-outcomes.qmd)
+nests line items inside transactions, adds a separate withdrawal history, and
+combines transaction dispute targets with an account-level loss target.

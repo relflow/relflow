@@ -1,0 +1,153 @@
+---
+title: Text
+description: "Free-form strings encoded by a frozen text model."
+---
+
+A payment description can carry detail beyond the merchant label, such as
+whether the charge is a delivery order. `Text` encodes those free-form strings
+with a frozen Hugging Face model. RelFlow learns to combine their representations
+with the amount and other fields. It does not fine-tune that encoder or
+generate text.
+
+Install the optional text dependency:
+
+```bash
+uv add "relflow[text]"
+```
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    amount=rf.Number,
+    merchant=rf.Category,
+    memo=rf.Text,
+    disputed=rf.Boolean(mask=True),
+)
+```
+
+One labeled payment:
+
+```yaml
+amount: 84.50
+merchant: North Market
+memo: "North Market delivery order"
+disputed: false
+```
+
+## Input and options
+
+The Arrow leaf must contain strings. An empty string is valued; a null has a
+separate state. Tokenization pads and truncates at `max_length`.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `model` | `"google/bert_uncased_L-2_H-128_A-2"` | Hugging Face identifier or local model path. |
+| `max_length` | `128` | Positive tokenization length limit. |
+| `tokenizer_batch_size` | `4096` | Maximum strings materialized per tokenizer call. |
+| `encoder_batch_size` | `32` | Maximum flattened text values per frozen-encoder call. |
+| `encoder_pooling` | `"cls"` | `"cls"`, `"mean"`, or `"pooler"`; the last requires `pooler_output`. |
+| `cache` | `False` | Reuse pooled frozen-encoder outputs and token rows: `True` keeps every distinct embedding; a positive integer caps retained entries. |
+| `store` | `None` | Directory of persistent frozen-encoder vectors shared by every run, split, and field with the same encoder. |
+| `resident` | `None` | Accelerator memory in MiB a store may occupy for on-device lookups; `None` automatically budgets CUDA up to a quarter of total device memory, capped at 2 GiB; `0` keeps the store on the host. |
+| `objective` | `"l2"` | Embedding reconstruction loss: `"l1"` or `"l2"`. |
+| `jitter` | `rf.Jitter()` | Training noise on the pooled frozen embedding before learned projection. |
+
+`cls` and `mean` require `last_hidden_state`. Text fields using the same model
+reuse its frozen encoder within the process. Right-padded values are grouped
+by length and cropped per encoder batch; left-padded values retain their full
+width. `max_length` still controls truncation and tensor storage.
+
+## Repeated text
+
+Repeated descriptions can reuse frozen-encoder outputs across forward passes:
+
+```python
+memo = rf.Text(cache=10_000)
+```
+
+`cache=False` disables this reuse. `cache=True` retains every distinct tokenized
+input encountered; a positive integer retains at most that many entries.
+The bounded cache evicts the least frequently reused resident entry, breaking
+ties by least recent use. It favors frequent reuse rather than tracking a
+global ranking of every description ever seen. Texts that tokenize identically,
+including after truncation, can share an entry.
+
+Entries are pristine pooled embeddings stored in CPU memory, separately for
+each text field in each process. Encoder device and precision distinguish
+entries. The same setting also keeps token rows in a separate least-recently-used
+cache: 4,096 rows for `True`, or at most the configured entries for a positive
+integer, bounded further by a 64 MiB payload limit and invalidated when tokenizer
+settings change. Duplicate strings within a batch are tokenized once either way.
+The trainable projection and training jitter still run on every forward pass, so
+caching preserves their gradients and fresh noise while avoiding repeated
+tokenizer and frozen-encoder work.
+
+Checkpoints retain the `cache` setting but omit cached embeddings and token
+rows; a loaded or copied model starts cold. Under DDP, each process builds its
+own caches. Use a finite cap when inputs contain many distinct descriptions:
+`cache=True` has no embedding limit and can keep growing in host memory.
+
+## Persistent store
+
+Frozen encoder vectors can be reused across tasks, splits, and training
+runs when their encoder configuration and token rows match:
+
+```python
+model = rf.Model.xs(
+    amount=rf.Number,
+    merchant=rf.Category,
+    memo=rf.Text(store="embeddings/payment-memos"),
+    disputed=rf.Boolean(mask=True),
+)
+```
+
+The directory holds memory-mapped shards named by the encoder configuration,
+keyed by token row with the encoder device type and precision. Every split,
+run, and field that names the same directory and encoder reads the same
+vectors. Missing token rows are encoded and appended, with duplicates within
+a batch sharing an encoder result. New vectors wait in memory and are written
+as a new shard at the end of every epoch and phase,
+or after 65,536 new rows. Shards are added without rewriting existing ones.
+Lookups hash whole token rows and binary-search a sorted index, so a batch
+resolves without a Python loop over its rows. When the flushed store fits the
+`resident` budget, its index and vectors are uploaded to the device once per
+index version. Resident hits are answered there without a host round trip;
+larger stores answer from the host
+index over memory-mapped shards, which the page cache keeps in memory after
+first use. The automatic budget applies to CUDA; other devices use the host
+index unless given an explicit resident budget. With a store the in-process
+embedding `cache` is bypassed; the token-row cache still follows `cache`.
+
+To fill a store ahead of training, provide the application-supplied
+`memo_texts` as a string sequence or Arrow column:
+
+```python
+model.nodes[rf.Address("memo")].embedder.warm(memo_texts)
+```
+
+Run the warmer on the device and under the autocast context training will
+use, since precision is part of the key. Nulls are skipped and repeated
+strings count once. The trainable projection and training jitter still run on
+every forward pass.
+
+## Learning and output
+
+A reconstructing mask trains the decoder against the pristine frozen embedding,
+using state loss and the configured content objective on valued targets.
+[Jitter](../reference/jitter.qmd) affects only visible continuous inputs,
+not strings, token IDs, or target embeddings. Both settings of
+`jitter.normalize` act at the same pooled-embedding boundary.
+
+Text has no decoded public state/content payload. `embed=True` exports a
+contextual relflow embedding, distinct from the frozen encoder output; see
+[shared leaf options](index.qmd#shared-leaf-options).
+Use [Vector](vector.qmd) when the source already supplies an embedding.
+
+## External model assets
+
+The first use of a remote model identifier may download tokenizer and encoder
+assets. relflow checkpoints save the request and learned relflow weights,
+but do not bundle those external assets. Every loading or serving process
+must be able to resolve the same identifier or local path. For reproducible
+deployment, prepare a pinned encoder directory and ship it with the artifact.

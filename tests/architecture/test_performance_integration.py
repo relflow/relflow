@@ -8,7 +8,7 @@ import torch
 
 import relflow as rf
 import relflow.architecture.encoder as encoder
-from relflow.architecture.runtime import ModelRuntime
+from relflow.architecture import runtime
 from relflow.tensorfields.base import TENSORFIELDS, DecoderBase
 from tests.architecture.test_extension_contract import build_extension
 from tests.tensorfields.extensions.test_text import patch_hf
@@ -67,7 +67,7 @@ def test_ragged_text_and_input_only_fields_preserve_dense_objective_and_gradient
             if not optimized:
                 mode.setattr(encoder, "customized", lambda *args, **kwargs: True)
                 mode.setattr(type(model.nodes["/transactions/risk"].decoder), "coordinatewise", False)
-            result = ModelRuntime.step(model, fields, 0, strata=rf.Strata.validate)
+            result = runtime.step(model, fields, 0, strata=rf.Strata.validate)
             assert result is not None
             loss = result["loss"]
             assert torch.isfinite(loss)

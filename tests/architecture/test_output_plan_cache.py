@@ -3,16 +3,16 @@
 import pyarrow as pa
 
 import relflow as rf
-from relflow.architecture import runtime
+from relflow.architecture import output
 
 
 def test_evaluation_prediction_reuses_the_plan_and_training_refreshes_it(monkeypatch):
     model = rf.Model.xs(d_model=8, amount=rf.Number, label=rf.Boolean(mask=True)).eval()
     table = pa.table({"amount": [1.0, 2.0], "label": [True, False]})
     refreshes = []
-    plan = runtime.plan
+    plan = output.plan
     monkeypatch.setattr(
-        runtime,
+        output,
         "plan",
         lambda module, retain=(), *, refresh=False: (refreshes.append(refresh), plan(module, retain, refresh=refresh))[
             1

@@ -1,0 +1,255 @@
+---
+title: Branch
+description: "A collection of records with the same fields, such as an account's transactions."
+engine: markdown
+---
+
+`Branch` groups repeated records that have the same fields. In this
+account-review example, each observation contains the transactions available
+at one cutoff, and the task is to predict later disputes for those transactions.
+The `trxns` branch keeps earlier events and the latest payment in one sequence,
+with each timestamp, amount, and merchant together. This gives the model
+context within an event and across the sequence.
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    trxns=rf.Branch(
+        length=32,
+        overflow="tail",
+        booked_at=rf.DateParts(
+            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
+        ),
+        amount=rf.Number,
+        merchant=rf.Category,
+        disputed=rf.Boolean(mask=True),
+    ),
+)
+```
+
+One account review observation, ordered oldest to latest:
+
+```yaml
+trxns:
+  - booked_at: "2026-05-21T10:00:00"
+    amount: 32.00
+    merchant: Station Cafe
+    disputed: false
+  - booked_at: "2026-05-27T18:15:00"
+    amount: 56.20
+    merchant: North Market
+    disputed: true
+  - booked_at: "2026-05-28T14:30:00"
+    amount: 84.50
+    merchant: North Market
+    disputed: false
+```
+
+`length=32` keeps at most 32 transactions. `overflow="tail"` keeps the most
+recent ones, including the latest payment, when the application supplies this
+order. A [preprocessor](../guides/preprocessing.qmd) owns sorting.
+`mask=True` hides and predicts the dispute label for every transaction, and
+prediction records omit it. [Prepare observations](../learn/prepare-observations.qmd)
+defines the cutoff and label window these records follow.
+
+```{typst}
+//| label: fig-branch-context
+//| fig-alt: "An account review observation owns one repeated trxns branch with booked_at DateParts, amount Number, merchant Category, and disputed Boolean. Every transaction's dispute label is hidden and supervised."
+//| fig-cap: "The branch holds the complete review-time sequence and a target for each transaction."
+#tree(node("payment", kind: "root", children: (
+  node("trxns", kind: "branch", repeated: true, children: (
+    node("booked_at", type: "DateParts"),
+    node("amount", type: "Number"),
+    node("merchant", type: "Category"),
+    node("disputed", kind: "target", type: "Boolean", detail: "Every transaction"),
+  )),
+)))
+```
+
+## Binding and shape
+
+The parent keyword supplies the collection name. With `query=None`,
+`trxns` reads the same-named child collection, and its leaves read
+keys within each transaction. Use a [query](../guides/query-paths.qmd) for
+a different structural path and a preprocessor for sorting, filtering, or derived
+values.
+
+A child branch requires a list of objects, including when `length=1`. Only
+the generated model root reads one object directly. Each child branch adds a
+repeated axis. Its execution width follows the selected collections in each
+batch; an explicit `length` caps retained items. Padding does not contribute to
+attention or reduction, but it still has storage and processing costs.
+[Prediction output](../reference/prediction-output.qmd#repeated-coordinates) writes
+every record collection as a variable Arrow list of sibling result structs,
+without public cap padding. Structural nulls and empty collections are preserved.
+
+A branch can own nested branches: purchases within transactions can each vary
+in length while remaining attached to their parent transaction. Declare the
+complete finite tree in the schema; collection lengths can then vary between
+observations without changing its field definitions. See
+[Nested context and account outcomes](../learn/nested-context-and-account-outcomes.qmd).
+
+Definitions are reusable: binding clones them without changing the original.
+Use `fields={"length": rf.Number}` for generated schemas or child names that
+collide with configuration. Use [Set](set.qmd) for membership alone and
+[Vector](vector.qmd) for one numeric vector.
+
+## Automatic lengths and limits {#automatic-lengths-and-limits}
+
+Omitting `length`, or setting `length=None`, retains every collection slot:
+
+```python
+history = rf.Branch(
+    amount=rf.Number,
+    merchant=rf.Category,
+)
+```
+
+Each batch uses the largest retained collection length, including null object
+slots. Widths can grow or shrink between batches; all-empty collections have
+width zero. Nested widths are resolved after any parent limit has selected its
+records. Leaves beneath the same branch share its geometry, independently of
+values, masking, or which target is supplied. This changes execution geometry,
+without updating the schema, growing parameters, or replacing the optimizer.
+
+Set a positive integer `length` for a hard limit. Only bounded branches accept
+`overflow="head"`, `"tail"`, or `"error"`; omission or `None` selects `"head"`
+when a limit exists. `Branch(overflow="tail", ...)` without a finite length is
+an error. The generated root always remains a singleton with `length=1` and
+internal `overflow="error"`.
+
+Bounded branches also pad only to the largest retained length in each batch,
+up to their cap. This internal execution width does not add padding to public
+record collections.
+
+::: {.callout-warning}
+## Inference-time DoS/DDoS attack vector
+
+With `length=None`, untrusted requests control nested collection sizes during
+inference. Oversized collections can exhaust CPU/GPU memory or compute and deny
+service to other users. Requests from multiple sources can amplify this into a
+distributed denial-of-service (DDoS) attack.
+
+Set finite branch lengths and enforce request-size limits before
+[public serving](../guides/serving.qmd#bound-public-requests). A batch-size limit
+alone does not bound nested collections. RelFlow logs one aggregate warning per
+model generation for active unbounded branches; the warning enforces no limit.
+No hidden cap is applied to `length=None`.
+:::
+
+## Random training windows {#random-training-windows}
+
+Use a finite `length` with `overflow="random"` to vary the retained history
+during training:
+
+```python
+history = rf.Branch(
+    length=32,
+    overflow="random",
+    amount=rf.Number,
+    merchant=rf.Category,
+)
+```
+
+When a collection exceeds the cap, training selects a contiguous window of
+32 whole records, preserving their order. With 80 records, its starting
+position is drawn uniformly from 0 through 48. Fields and nested children
+remain attached to the same record; null items still count as collection
+slots. Collections at or below the cap are unchanged.
+
+| Loop | Retained records |
+| --- | --- |
+| Training | A randomly selected contiguous window. |
+| Validation, test, prediction | The tail, deterministically. |
+
+The source or preprocessor must supply more than 32 eligible records for
+this example to vary. If an upstream query has already kept only the latest
+32, random overflow has no effect. Supply a larger, separately bounded
+candidate pool while preserving the scoring cutoff and desired ordering.
+The model's cap does not bound the cost of loading or preparing that pool.
+
+Crops repeat for the same data seed, epoch, batch ordinal, branch address,
+and parent position within a batch. Changing batching, worker assignment, or
+row order can change them. A random window can omit the latest payment; keep
+`overflow="tail"` when that payment must always be included. Uniform window
+starts also do not give every item the same inclusion probability.
+
+## Options
+
+These are the direct `rf.Branch` defaults. A
+[size preset](../concepts/model-tree.qmd#choose-a-size) such as
+`Model.xs` fills omitted branch settings; explicit node settings take precedence.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `fields` | `None` | Named child mapping, combinable with keyword children; names must be unique. |
+| `query` | `None` | Optional node-relative structural path. |
+| `length` | `None` | Automatic batch width; a positive integer caps retained items per parent coordinate. |
+| `overflow` | `None` | Unbounded branches require `None`. With finite `length`, omission becomes `"head"`; choose `"head"`, `"tail"`, or `"error"`. The [`"random"` policy](#random-training-windows) samples training windows and keeps the tail for evaluation. Order comes from the processed source. |
+| `attention` | `"mha"` | Encoder mode; see below. |
+| `n_layers` | `1` | Positive sequence-encoder depth. |
+| `n_heads` | `4` | Positive, even encoder head count and fallback for Attention reduction. Active attention requires heads to divide `d_model` with at least two dimensions per head. |
+| `ffnx` | `8` | Positive integer feed-forward multiplier for this branch's encoders and learned reduction. See [model-tree configuration](../concepts/model-tree.qmd#configure-the-context). |
+| `reduction` | `rf.Attention()` | What encoded memory reaches the parent. |
+| `dropout` | `None` | Optional encoder dropout in `[0, 1)` and reduction fallback. |
+| `mask` | `False` | Visibility and reconstruction policy applied atomically to active descendants. |
+| `embed` | `False` | Export this branch's contextual embedding. |
+| `description` | `None` | Human-readable notes. |
+
+Branch settings are local. Model settings configure the generated singleton
+root; they do not replace every child branch's defaults.
+
+## Attention and reduction {#reduce-branch-memory}
+
+An attention-enabled branch first mixes direct sibling leaves and summaries
+from reduced child branches at each aligned record coordinate, when there is
+more than one participating token. Its `n_layers` sequence stack
+then mixes child slots across the branch. Finally, reduction chooses the
+representations routed to its parent.
+
+| Encoder mode | Key/value heads |
+| --- | --- |
+| `"mha"` | One per query head. |
+| `"gqa"` | One per pair of query heads. |
+| `"mqa"` | One shared by every query head. |
+| `None` | No coordinate or sequence attention; reduction still runs. |
+
+Sharing key/value heads changes model capacity as well as cost.
+
+| Reduction | Parent receives | Tradeoff |
+| --- | --- | --- |
+| `rf.Attention(n_outputs=1)` | A fixed number of learned summaries. | Bounded memory; outputs do not guarantee item identity. |
+| `rf.Mean()` | One average of present encoded vectors plus a learned count lane. | Cheap; multiplicity survives through the count lane, while order and individual values are not directly preserved. |
+| `None` | Every encoded child slot with its presence state. | Keeps token correspondence available; increases parent sequence cost. |
+
+`Attention` has `n_outputs=1`, `n_layers=1`, `n_heads=None`, `dropout=None`,
+and `position=True`. Counts are positive. Omitted heads and dropout inherit
+from the branch; explicit values override them. `position` controls rotary
+position in the reducer only. `Mean` has no tuning options. These configurations
+are frozen and share settings, not learned weights, when reused.
+
+`attention=None` and `reduction=None` skip different operations. Use both for
+pure pass-through. Turning off reducer position alone does not remove position
+information from earlier encoder attention.
+
+Choose reduction from the evidence the parent needs. A mean is not a raw-field
+sum, and more learned summaries do not perform a join. Capacity must survive
+later reductions too. `model.schema.branch_outputs` reports each branch's
+static routed width, or `None` when pass-through width depends on the batch.
+
+The [nested cardinality evidence](../evidence/structure/attention-preserves-nested-cardinality.html)
+tests whether session summaries preserve enough information for their parent.
+The [Mean control](../evidence/structure/mean-keeps-cardinality.html) shows that
+Mean's count lane keeps the multiplicity a plain average would lose.
+
+## Masks and output
+
+`disputed=rf.Boolean(mask=True)` keeps the answer out of the inputs and
+produces a dispute prediction for every transaction. The predictions retain
+their transaction positions; the branch groups those results and has no typed
+prediction value of its own.
+
+`embed=True` exports branch context at its address. See
+[Reusable representations](../learn/reusable-representations.qmd) for output roles and
+[Model tree](../concepts/model-tree.qmd) for the route through nested contexts.

@@ -1,0 +1,163 @@
+---
+title: Add transaction history
+description: "Predict a dispute for every transaction in an account's history using shared context."
+engine: markdown
+---
+
+The [first model](your-first-model.qmd) uses a dataset with one payment per
+row. Suppose you can also supply the earlier transactions for each payment's
+account. Prepare a new dataset with one account-review observation per row:
+the latest payment appears once, at the end of a `trxns` list containing that
+history. Each listed transaction has its own dispute target.
+
+The business question becomes more specific: which transactions in the account
+will receive a dispute report after review? Visits to the same merchant, changes in
+amount, and booking-time patterns can provide context. An **event
+history** preserves those observations so the model can learn their
+relationships. Compare it with your existing aggregate features to find out
+whether that detail improves dispute prediction.
+
+The latest payment appears once, at the end of the same list as the earlier
+events. Its amount and merchant need no separate root fields.
+
+## Add a collection to each record
+
+In this illustrative training row, `trxns` is oldest to newest and ends at
+the payment being assessed. Each item keeps its booking time, amount, and
+merchant together. The common review cutoff is immediately after the final
+booking on May 28; every `disputed` label records whether a new dispute was
+reported against that transaction in the following 30 days. These labels are
+attached after the window closes:
+
+```yaml
+payment_id: payment-42
+trxns:
+  - transaction_id: trxn-40
+    booked_at: "2026-05-21T10:00:00"
+    amount: 32.00
+    merchant: Station Cafe
+    disputed: false
+  - transaction_id: trxn-41
+    booked_at: "2026-05-27T18:15:00"
+    amount: 56.20
+    merchant: North Market
+    disputed: true
+  - transaction_id: trxn-42
+    booked_at: "2026-05-28T14:30:00"
+    amount: 84.50
+    merchant: North Market
+    disputed: false
+```
+
+The whole sequence is known at that cutoff, so it is valid context for
+every prediction. [Prepare observations](prepare-observations.qmd)
+defines the cutoff, the label window, and the ordering rules in full.
+
+The whole record above is **one observation and one Parquet row**. Its three
+transactions are items inside that observation. Another row describes another
+account review and can contain a different number of transactions.
+
+`payment_id` identifies the review decision; `transaction_id` identifies an
+item inside its history. Keep them in the data for matching results later.
+They are application metadata and are not declared as model inputs here.
+
+List order says which transaction came first. `booked_at` supplies calendar
+parts that can reveal recurring patterns, not the elapsed time between
+transactions.
+
+A fixed feature table might retain total spend and transaction count. Here,
+the amount and merchant stay paired within each event: a cafe payment and a
+visit to North Market remain distinguishable. This gives the model evidence
+for learning account behavior without deciding every summary in advance.
+
+## Describe the collection with a branch
+
+Build a new model for these history-shaped records. This construction starts
+with fresh weights; it does not modify or transfer learning from the flat model.
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    trxns=rf.Branch(
+        length=32,
+        overflow="tail",
+        booked_at=rf.DateParts(
+            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
+        ),
+        amount=rf.Number,
+        merchant=rf.Category,
+        disputed=rf.Boolean(mask=True),
+    ),
+)
+```
+
+`Branch` describes a collection of records with the same fields. This branch
+keeps at most 32 transactions; `overflow="tail"` retains the last 32, including
+the latest payment. `mask=True` hides every transaction's dispute label and
+trains the model to predict it from the shared context.
+
+Each field definition and its learned weights are reused at every transaction
+position. You declare `amount` once, and it reads every retained transaction's
+amount. `length=32` limits items inside each observation; it does not set the
+number of observations in a training batch.
+
+The collection remains variable-length: one account can supply three
+transactions and another twenty. The declared branch generates the model's
+history structure, and training learns how its fields contribute context.
+The later [nested-context example](nested-context-and-account-outcomes.qmd)
+places collections inside transactions and adds another history alongside them.
+
+```{typst}
+//| label: fig-payment-history-tutorial
+//| fig-alt: "The payment observation contains one repeated trxns branch with booked_at DateParts, amount Number, merchant Category, and disputed Boolean. Each transaction's dispute label is hidden and supervised using the complete decision-time sequence."
+//| fig-cap: "All transactions share context and each has a dispute prediction."
+#tree(node("payment", kind: "root", children: (
+  node("trxns", kind: "branch", repeated: true, width: 165pt, children: (
+    node("booked_at", type: "DateParts"),
+    node("amount", type: "Number"),
+    node("merchant", type: "Category"),
+    node("disputed", kind: "target", type: "Boolean", detail: "Every transaction"),
+  )),
+)))
+```
+
+## Use the same training steps
+
+Train this new model with the history present in each record. Your application
+supplies Parquet files with the nested structure shown above:
+
+```python
+data = rf.ArrowDataModule(
+    train="payments/history/train.parquet",
+    validate="payments/history/validation.parquet",
+)
+model.fit(data, batch_size=128, max_epochs=20)
+```
+
+`batch_size=128` now counts account-review observations, each with up to 32
+transactions. The `payments/history/` files have a different row structure
+from the first tutorial's `payments/flat/` files. Keep the two datasets and
+their models distinct.
+
+Prediction files keep the same transaction list and omit `disputed` from each
+record:
+
+```python
+requests = rf.ArrowDataModule(
+    predict="payments/history/requests.parquet",
+)
+predictions = model.predict(datamodule=requests, batch_size=256, devices=1)
+```
+
+`predictions.trxns` holds one result per retained transaction;
+[Read predictions](read-predictions.qmd) shows how to extract each
+probability.
+
+Next, [Featureless models](featureless-models.qmd) names what
+these two model definitions automate. After that,
+[Prepare observations](prepare-observations.qmd) defines the data
+contract these files follow, including
+[assembling histories from transaction tables](prepare-observations.qmd#assemble-histories-from-transaction-tables).
+[Preprocessing](../guides/preprocessing.qmd) shows transforms to apply once
+those observations have been assembled.

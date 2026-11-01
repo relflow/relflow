@@ -1,0 +1,144 @@
+<meta name="readthedocs-addons-api-version" content="1">
+<script>
+  (() => {
+    let data;
+
+    function versionKey(version) {
+      return version.id ?? `${version.type}:${version.slug}`;
+    }
+
+    function versionName(version) {
+      if (version.type === "external") {
+        return /^\d+$/.test(version.slug) ? `PR #${version.slug}` : "Preview";
+      }
+      if (version.slug === "latest") return "Latest";
+      if (version.slug === "stable") return "Stable";
+      return version.verbose_name || version.slug;
+    }
+
+    function renderVersions() {
+      if (!data || document.readyState === "loading" || document.querySelector(".docs-version")) return;
+      const brand = document.querySelector("#quarto-header .navbar-brand-container");
+      const current = data.versions?.current;
+      if (!brand || !current || !Array.isArray(data.versions.active)) return;
+
+      const versions = new Map(data.versions.active.map((version) => [versionKey(version), version]));
+      if (!versions.has(versionKey(current))) {
+        // Pull request previews are not part of the published version list.
+        versions.set(versionKey(current), current);
+      }
+      const base = new URL(current.urls.documentation);
+      const filename = data.readthedocs?.resolver?.filename
+        || document.querySelector('meta[name="readthedocs-resolver-filename"]')?.content
+        || (location.pathname.startsWith(base.pathname) ? location.pathname.slice(base.pathname.length) : null);
+      if (filename === null) return;
+      const relative = filename.replace(/(^|\/)index\.html$/, "$1").replace(/^\/+/, "");
+      const links = [...versions.values()].map((version) => {
+        const root = new URL(version.urls.documentation);
+        const url = new URL(relative, root);
+        if (root.protocol !== "https:" || root.username || root.password
+            || url.origin !== root.origin || !url.pathname.startsWith(root.pathname)) {
+          throw new Error("Unexpected documentation version URL");
+        }
+        url.search = location.search;
+        url.hash = location.hash;
+        return { version, url };
+      });
+
+      const picker = document.createElement("div");
+      picker.className = "docs-version";
+      const label = document.createElement("span");
+      label.className = "docs-version-label";
+      label.textContent = versionName(current);
+
+      if (links.length === 1) {
+        const badge = document.createElement("span");
+        badge.className = "docs-version-current";
+        badge.title = `Documentation version: ${versionName(current)}`;
+        badge.append(label);
+        picker.append(badge);
+      } else {
+        const details = document.createElement("details");
+        const summary = document.createElement("summary");
+        summary.className = "docs-version-current";
+        summary.setAttribute("aria-label", `Documentation version: ${versionName(current)}`);
+        summary.title = "Switch documentation version";
+        summary.append(label);
+        const menu = document.createElement("nav");
+        menu.className = "docs-version-menu";
+        menu.setAttribute("aria-label", "Documentation versions");
+        const heading = document.createElement("p");
+        heading.className = "docs-version-heading";
+        heading.textContent = "Documentation versions";
+        const list = document.createElement("ul");
+
+        for (const { version, url } of links) {
+          const item = document.createElement("li");
+          const link = document.createElement("a");
+          link.href = url.href;
+          const name = document.createElement("span");
+          name.className = "docs-version-name";
+          name.textContent = versionName(version);
+          link.append(name);
+          if (versionKey(version) === versionKey(current)) {
+            link.setAttribute("aria-current", "true");
+            const check = document.createElement("span");
+            check.className = "docs-version-check";
+            check.setAttribute("aria-hidden", "true");
+            check.textContent = "✓";
+            link.append(check);
+          }
+          item.append(link);
+          list.append(item);
+        }
+
+        menu.append(heading, list);
+        details.append(summary, menu);
+        picker.append(details);
+        function refreshLinks() {
+          for (const link of list.querySelectorAll("a")) {
+            const url = new URL(link.href);
+            url.search = location.search;
+            url.hash = location.hash;
+            link.href = url.href;
+          }
+        }
+        details.addEventListener("toggle", refreshLinks);
+        menu.addEventListener("click", refreshLinks);
+        details.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && details.open) {
+            event.preventDefault();
+            details.open = false;
+            summary.focus();
+          }
+        });
+        document.addEventListener("click", (event) => {
+          if (!picker.contains(event.target)) details.open = false;
+        });
+        document.addEventListener("focusin", (event) => {
+          if (!picker.contains(event.target)) details.open = false;
+        });
+      }
+
+      brand.append(picker);
+      // Retain RTD's native flyout whenever this replacement cannot initialize.
+      document.body.classList.add("rf-version-ready");
+    }
+
+    function receiveVersions(event) {
+      try {
+        data = event.detail.data();
+        renderVersions();
+      } catch {
+        // Hosted metadata failures leave the native version switcher available.
+      }
+    }
+
+    document.addEventListener("readthedocs-addons-data-ready", receiveVersions);
+    document.addEventListener("DOMContentLoaded", () => {
+      if (window.ReadTheDocsEventData) receiveVersions({ detail: window.ReadTheDocsEventData });
+      else renderVersions();
+    }, { once: true });
+    if (window.ReadTheDocsEventData) receiveVersions({ detail: window.ReadTheDocsEventData });
+  })();
+</script>

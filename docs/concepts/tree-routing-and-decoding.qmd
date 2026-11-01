@@ -1,0 +1,103 @@
+---
+title: Tree routing and decoding
+description: "Context moves from the leaves toward the root, and each decoder reads the context along its path."
+engine: markdown
+---
+
+The model builds context from the leaves toward the root, then each requested
+field decoder reads the context available along its schema path. The
+[transaction-history example](../learn/add-transaction-history.qmd)
+has one `trxns` branch containing earlier payments and the latest payment.
+Its fields build transaction context, and `disputed=rf.Boolean(mask=True)`
+requests a dispute prediction at every retained transaction coordinate.
+
+This explanation follows RelFlow 0.4.1's
+[execution plan](https://github.com/relflow/relflow/blob/1b95c334d5a1251c37ac5323b7dcec750550908e/src/relflow/architecture/runtime.py)
+and [branch encoder](https://github.com/relflow/relflow/blob/1b95c334d5a1251c37ac5323b7dcec750550908e/src/relflow/architecture/encoder.py).
+
+## Context moves toward the root
+
+```{typst}
+//| label: fig-mechanism-tree-routing
+//| fig-alt: "An account snapshot has one repeated trxns branch containing earlier and latest payments. Each transaction has DateParts booked_at, Number amount, Category merchant, and Boolean disputed. Every dispute label is hidden and supervised for the same 30-day window after the common review cutoff."
+//| fig-cap: "Connections show schema ownership. The transaction collection builds context, and the dispute decoder reads its path at every retained position."
+#tree(node("account", kind: "root", body: [One decision snapshot.], children: (
+  node("trxns", kind: "branch", repeated: true, body: [Earlier and latest payments.], children: (
+    node("booked_at", type: "DateParts", body: [Selected calendar cycles.]),
+    node("amount", type: "Number"),
+    node("merchant", type: "Category"),
+    node("disputed", kind: "target", type: "Boolean", body: [Hidden and supervised for every transaction.]),
+  )),
+)))
+```
+
+Each active leaf first supplies a field representation with its presence
+information. The runtime sends it to its owning branch. Branches execute from
+the deepest level upward, so a parent receives representations from its nested
+branches after those branches have encoded and reduced their own children.
+
+For this model, `trxns` processes the fields at its transaction positions first.
+The root then receives the branch's output, without duplicate root amount or
+merchant fields. With more nesting, the same rule repeats at each level.
+
+When a parent has its own input fields, context also moves one step down
+before a child branch encodes. A learned projection of the mean of the
+parent's present field embeddings reaches every child token and its reduction
+queries. Account-level inputs can therefore condition transaction
+representations before the history is summarized.
+
+Branches at one depth form a group in the execution plan; this grouping
+describes dependencies, without promising parallel execution.
+
+The root is anonymous at `rf.Address()`. `account` in the figure describes the
+observation; it does not add an address prefix. For schema construction and
+addresses, see [Model tree](model-tree.qmd).
+
+## A decoder reads its path
+
+A target decoder receives the representations retained along its heritage:
+the schema path through its ancestors to the field. A reduced ancestor branch
+supplies both the summary it sends to its parent and its encoded sequence,
+the tokens after that branch's own layers. A nested target can
+therefore read individual sibling transactions and individual root fields as
+well as their summaries. A reduced branch with no descendant decoder only needs
+its summary; it does not retain a separate decoder sequence. Decoding starts after context
+has been built; it does not reconstruct the input tree one parent prediction at
+a time.
+
+Targets can occupy different depths in the same model: an account outcome at
+the root, a dispute outcome inside `trxns`, or an outcome inside each
+transaction's nested purchases. Each decoder reads context along its own path
+and produces results at that target's coordinates. See
+[Nested context and account outcomes](../learn/nested-context-and-account-outcomes.qmd)
+for transaction and account targets learned together.
+
+Query pooling uses learned queries shaped for the target's coordinates. Where
+sibling representations align with those coordinates, the decoder can also
+condition those queries on sibling context. The field's decoder then produces
+the datatype-specific answer, such as the Boolean output for `disputed`.
+
+The tutorial's `disputed=rf.Boolean(mask=True)` keeps every dispute label out
+of the input and requests predictions at all retained positions. Training
+supplies Boolean labels for all of them. Prediction can omit this directly
+bound target from every transaction while retaining the input records that
+establish those positions.
+
+`embed=True` requests an exported contextual representation and adds no
+reconstruction objective. These roles have their own explanations in
+[Masking and reconstruction](masking-and-reconstruction.qmd) and
+[Reusable representations](../learn/reusable-representations.qmd).
+
+## Read the result
+
+Prediction returns decoded fields in a `predictions` tree
+and requested embeddings in a separate `representations` column. Only selected
+columns appear. Repeated decoded siblings share one record collection; branch
+representations retain their own output indices and ancestor coordinates.
+[Read predictions](../learn/read-predictions.qmd) walks through one
+payment's output and its state, content, and inference flag;
+[Prediction output](../reference/prediction-output.qmd) is the full contract.
+
+Continue with [Branch summaries](branch-summaries.qmd) for the information passed
+between levels, or [How fields interact](how-fields-interact.qmd) for the context
+built inside each branch.

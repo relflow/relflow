@@ -1,0 +1,113 @@
+---
+title: Quantile
+description: "A number represented by its position in the learned training distribution."
+---
+
+`Quantile` represents a number by its position in the learned training
+distribution. For a payment dataset, it can express how an amount such as
+`84.50` ranks among the training amounts. The example below uses that
+representation to predict a later dispute. It offers an alternative to
+[Number](number.qmd)'s magnitude representation; compare them on the same
+held-out task.
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    amount=rf.Quantile,
+    merchant=rf.Category,
+    disputed=rf.Boolean(mask=True),
+)
+```
+
+One labeled payment:
+
+```yaml
+amount: 84.50
+merchant: North Market
+disputed: false
+```
+
+Use `rf.Quantile(mask=True)` to predict a number through this representation.
+Predictions return to the original units, within the learned numeric range.
+The distribution belongs to this field across its training observations; it
+is not automatically a separate amount distribution for each merchant.
+
+## Input and representation
+
+The Arrow leaf accepts integers and floating-point scalars; Booleans,
+strings, and lists are rejected. NaN and infinity take the `other`
+[value state](index.qmd#value-state) and do not enter the learned distribution
+or numeric reconstruction loss. Put repeated measurements
+inside a [Branch](branch.qmd). Nulls remain separate from numeric values;
+unused branch slots are padded.
+
+Each field learns its own approximate distribution from pristine training
+values, including values selected as hidden reconstruction targets. Encoding
+preserves source values as float64 before mapping them to float32 percentile
+coordinates. The embedder combines the percentile and its Fourier features
+with value state. The input representation does not retain a separate
+magnitude lane: two amounts beyond the learned maximum both have percentile
+`1`, even if their source values differ.
+
+Equal values receive equal coordinates. A constant training distribution maps
+its observed value to `0.5`. Values below the learned minimum map to `0`; values
+above the learned maximum map to `1`. Before any finite training value has been
+observed, numeric inputs use `0.5`.
+
+## Options
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `compression` | `100` | Integer at least `10`; controls the detail retained by the approximate distribution summary. |
+| `n_bands` | `8` | Positive number of Fourier frequencies; frequency `k` is `k * pi`, for `k` from `1` through `n_bands`. |
+| `objective` | `"mae"` | Reconstruction loss in percentile units: `"mae"`, `"mse"`, or `"huber"`. |
+
+[Shared leaf options](index.qmd#shared-leaf-options)
+control masking, decoder pooling, and exported embeddings. Quantile does not
+accept a `jitter` option.
+
+## Learned state and output
+
+Only consumed training batches update the learned distribution. Preparing or
+prefetching a batch does not update it. Validation, test, and prediction reuse
+the learned state. Repeated training presentations count again; nulls and
+padding do not contribute. Checkpoints preserve the distribution.
+
+RelFlow keeps a weighted-centroid t-digest in Arrow data rather than retaining
+training rows. This is RelFlow's implementation, not PyArrow's native t-digest
+kernel. Compression controls approximation detail, not a guaranteed percentile
+error bound.
+
+For an application-supplied trained `model`:
+
+```python
+normalization = rf.Quantile.normalization(
+    model, rf.Address("amount")
+)
+```
+
+The snapshot contains `count`, `compression`, `minimum`, `median`, and `maximum`.
+The last three values are `None` until the field has observed numeric training
+data. A [preprocessor](../guides/preprocessing.qmd) can pass its supplied
+`encoding_context` in place of `model` to inspect the same field state.
+
+Prediction `content` is a nullable `float64` scalar in source units. It is null
+until a distribution has been learned. The decoder predicts a percentile in
+`[0, 1]` and maps it back through the learned distribution, so numeric
+predictions stay between the learned minimum and maximum. MAE and RMSE
+metrics use source units; the reconstruction objective uses percentile units.
+Source-unit error metrics are omitted until
+the field has learned a distribution. Read the scalar alongside `state` and
+`inferred` in the [prediction envelope](../reference/prediction-output.qmd).
+
+These percentiles describe the numeric representation. They are not prediction
+intervals or coverage estimates.
+
+The [regression evidence](../evidence/quantile/rank-regression.html) measures held-out
+learning against shuffled inputs. The
+[extrapolation evidence](../evidence/quantile/clipped-extrapolation.html) measures the
+error imposed by the learned support boundary.
+The [representation tradeoff evidence](../evidence/quantile/representation-tradeoffs.html)
+compares Number and Quantile under contaminated inputs and distinguishes
+percentile-loss predictions from source-unit conditional means and medians.

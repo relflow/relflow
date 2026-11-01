@@ -27,3 +27,19 @@ private/
 *.ckpt
 
 /specs
+
+# Static documentation and evidence output
+.pytest_cache/
+.ruff_cache/
+docs/site/
+docs/.quarto/
+docs/.gitignore
+docs/assets/diagrams/
+docs/evidence/
+docs/**/*.quarto_ipynb
+docs/**/*_files/
+docs/**/*_cache/
+evidence/runs/
+/.quarto/
+/_readthedocs/
+/docs/_quarto-readthedocs-*.yml

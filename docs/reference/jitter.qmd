@@ -1,0 +1,70 @@
+---
+title: Jitter
+description: "Bounded training noise for continuous inputs."
+---
+
+`rf.Jitter` adds bounded noise to visible continuous inputs during training.
+Use it when small changes should preserve the answer, such as uncertainty in
+an estimated account balance. Evaluation and prediction use unperturbed values.
+
+```python
+import relflow as rf
+
+estimated_balance = rf.Number(
+    jitter=rf.Jitter(add=0.1, multiply=0.02, normalize=False),
+)
+```
+
+Here additive noise uses the balance's source currency units, while
+multiplication models proportional uncertainty. Stored inputs and reconstruction
+targets remain unchanged. Validate the noise magnitude against the distinctions
+the task needs to preserve; exact settlement amounts may need no jitter.
+
+## Options
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `add` | `0.0` | Maximum absolute additive displacement. |
+| `multiply` | `0.0` | Maximum multiplicative deviation from one. |
+| `normalize` | `True` | Use the normalized boundary when the field has one. |
+
+Both magnitudes must be finite and nonnegative. The configuration is frozen;
+construct a new value to change it. `rf.Jitter()` disables noise and consumes
+no random numbers.
+
+Each enabled component uses independent triangular noise: the difference of
+two uniform draws on `[0, 1]`. Small perturbations are more likely than extremes.
+With both components enabled:
+
+$$
+J(v) = v[1 + m(U_1-U_2)] + a(U_3-U_4)
+$$
+
+The additive range is `[-add, add]`; the scale range is
+`[1 - multiply, 1 + multiply]`. No application-domain clipping is performed,
+and `multiply > 1` can reverse a sign.
+
+## Where it acts
+
+| Field | Continuous representation |
+| --- | --- |
+| [Number](../datatypes/number.qmd) | Standardized values by default; raw values before normalization when `normalize=False`. |
+| [Vector](../datatypes/vector.qmd) | Supplied coordinates before projection; no learned normalizer. |
+| [DateParts](../datatypes/dateparts.qmd) | Sine/cosine pairs, without moving the source timestamp or renormalizing the pair. |
+| [Text](../datatypes/text.qmd) | Pooled frozen-encoder embedding before relflow projection. |
+
+Only Number has separate raw and standardized boundaries. For the other types,
+both settings of `normalize` use the same coordinate space. Choose `add` in that
+space's units.
+
+Noise applies only to finite coordinates of valued training inputs. Nulls,
+padding, learned-mask representations, skipped values, and target embeddings
+remain unchanged. Number's normalizer also learns from pristine values.
+
+Torch supplies the random draws. Reproducing them requires the same seed,
+device, batch geometry, and execution order. Jitter is not a persisted data
+transformation.
+
+For custom tensorfields, `jitter.apply(inputs, mask)` owns the tensor operation;
+the consumer owns training-mode gating, coordinate eligibility, normalization
+placement, and pristine targets. See [Custom tensorfields](../datatypes/custom-tensorfields.qmd).

@@ -1,0 +1,183 @@
+---
+title: Serving
+description: "Serve a saved model over HTTP with request validation, bounded inputs, and shared processors."
+---
+
+`rf.Deployment` configures the HTTP serving runtime for a saved model or an
+in-memory model through FastAPI. Its `checkpoint` parameter accepts the model
+artifact written by `model.save(...)`. The examples serve the sequence model
+trained in [Train and save](../learn/train-and-save.qmd). Requests
+supply its `trxns` inputs and omit the dispute labels. Every retained transaction
+receives a prediction.
+Install the optional dependency:
+
+```bash
+pip install 'relflow[serving]'
+```
+
+Save the trained model as shown in [Train and save](../learn/train-and-save.qmd),
+then create `serve_payments.py` in your application directory. Its `app` is the
+HTTP application that Uvicorn, the web server, will run on infrastructure you
+supply:
+
+```python
+import relflow as rf
+
+app = rf.Deployment(checkpoint="artifacts/payment-history.rf").app()
+```
+
+From that directory, where `artifacts/payment-history.rf` is available, start
+the server:
+
+```bash
+uvicorn serve_payments:app --host 127.0.0.1 --port 8000
+```
+
+The model is loaded at startup and placed on the selected accelerator. Keep the
+server running while sending requests from another terminal. A Python script can
+also start Uvicorn with
+`rf.Deployment(checkpoint="artifacts/payment-history.rf").serve()`.
+
+## Requests
+
+`POST /predict` accepts a JSON object, an array of JSON objects, or an Arrow IPC
+stream. This YAML illustrates **one** JSON request for this model; send its
+JSON representation over HTTP:
+
+```yaml
+payment_id: payment-42
+trxns:
+  - booked_at: "2026-05-21T10:00:00"
+    amount: 32.00
+    merchant: Station Cafe
+  - booked_at: "2026-05-27T18:15:00"
+    amount: 56.20
+    merchant: North Market
+  - booked_at: "2026-05-28T14:30:00"
+    amount: 84.50
+    merchant: North Market
+```
+
+```bash
+curl http://localhost:8000/predict \
+  -H 'Content-Type: application/json' \
+  --data-binary @request.json
+```
+
+`request.json` is supplied by your application. A single object returns a single
+object; an array returns an array in request order. For Arrow, send an IPC stream
+with `Content-Type: application/vnd.apache.arrow.stream`; the response is also
+an IPC stream. `GET /health` supplies a health endpoint, and `/docs` exposes the
+API reference.
+
+In [prediction output](../reference/prediction-output.qmd), successful responses
+preserve the canonical selected columns: `predictions`, requested
+`representations`, and explicitly retained `inputs`. A postprocessor can define
+the same application response schema used by direct or batch prediction.
+There is no appended per-row `model` field or reserved application name.
+
+Arrow schema metadata records `relflow.model_version`, and HTTP exposes the
+same value through the `X-RelFlow-Model-Version` header: the model's recorded
+RelFlow package version, not a checkpoint fingerprint. The output layout carries
+no separate version; each RelFlow release defines the current one.
+Keep checkpoint identity in application metadata when it is needed.
+
+A failed JSON item carries an explicit error in its original request position;
+it is not an empty successful prediction. Successful-record parity does not
+make JSON error envelopes part of the canonical Arrow success schema.
+
+## Bound public requests
+
+::: {.callout-warning}
+## Inference-time DoS/DDoS attack vector
+
+An unbounded `Branch(length=None)` lets a client control nested collection sizes
+during inference. A single oversized request can exhaust CPU/GPU memory or
+compute and interrupt service. Requests from multiple sources can amplify this
+into a distributed denial-of-service (DDoS) attack. Automatic batch widths and
+sparse attention do not impose a resource limit.
+:::
+
+Set finite `Branch(length=...)` limits on every branch that reads untrusted
+collections. Use `overflow="error"` when excess items must raise an error rather
+than be truncated. These limits bound retained model input; they do not prevent
+resource exhaustion while receiving, parsing, or preprocessing a request.
+
+Enforce request-body size limits before parsing, for both JSON and Arrow, at the
+application ingress or reverse proxy. Also validate collection sizes and nesting
+depth, and apply rate and concurrency limits appropriate to the service.
+`max_batch_size` bounds observation rows, not items inside each row or request
+bytes. One row can contain an oversized nested collection.
+
+RelFlow logs one aggregate warning per model generation for active unbounded
+paths; serving startup checks the same guard after queued schema changes. The
+warning does not reject requests or impose a cap. See
+[branch limits](../datatypes/branch.qmd#automatic-lengths-and-limits).
+
+## Validate application inputs
+
+Optional Pydantic signatures validate JSON requests before prediction and
+responses after postprocessing. For the request above:
+
+```python
+from datetime import datetime
+from pydantic import BaseModel
+
+class Transaction(BaseModel):
+    booked_at: datetime
+    amount: float
+    merchant: str
+
+class PaymentRequest(BaseModel):
+    payment_id: str
+    trxns: list[Transaction]
+
+app = (
+    rf.Deployment(checkpoint="artifacts/payment-history.rf")
+    .forge(request=PaymentRequest)
+    .app()
+)
+```
+
+These signatures apply to JSON. Arrow requests are validated through the
+preprocessing and model-binding contracts.
+
+The application also validates a nonempty, oldest-to-newest sequence whose
+input records are available at the account-review cutoff.
+
+## Reuse processing
+
+Reuse the `decision` processor from [Postprocessing](postprocessing.qmd) to
+return a payment identifier and aligned lists of dispute probabilities and review flags:
+
+```python
+app = (
+    rf.Deployment(checkpoint="artifacts/payment-history.rf", retain=("payment_id",))
+    .postprocess(decision.partial(threshold=0.8))
+    .app()
+)
+```
+
+Retention exposes `payment_id` to the postprocessor. The final result must
+contain one row per valid request with unchanged identity and request order.
+Equal row counts cannot detect a permutation; both pre- and postprocessors
+must preserve that association. If the API accepts raw fields
+that require [preprocessing](preprocessing.qmd), attach that processor with
+`.preprocess(prepare)` and make the request signature match those raw fields.
+
+Concurrent JSON requests can share a model microbatch. `max_batch_size` bounds
+its size; `batch_timeout` sets the optional collection wait in seconds.
+For Arrow requests, `max_batch_size` bounds model batches after preprocessing.
+The preprocessor sees the full request table, and the postprocessor sees the
+combined output.
+
+`accelerator` selects `auto`, `cpu`, `cuda`, or `mps`. An in-memory model can be
+supplied with `model=model` instead of a checkpoint.
+
+Use one process for an in-memory model or a serving configuration with
+signatures, processors, or queued mutations. For
+`Deployment(workers=2).serve()`, the configuration must be checkpoint-based and
+cannot carry those in-process objects or a tuple retention projection.
+
+For failures at startup, binding, or batching, see
+[Troubleshooting](../reference/troubleshooting.qmd).

@@ -1,0 +1,108 @@
+---
+title: Postprocessing
+description: "Turn the nested prediction table into the columns an application consumes."
+---
+
+A postprocessor turns the [prediction table](../reference/prediction-output.qmd) into the
+shape an application needs. It receives and returns an eager Polars DataFrame.
+
+Suppose an application needs one list of dispute probabilities and one list
+of review decisions for each account-review observation. Reuse `model` from
+[Train and save](../learn/train-and-save.qmd), with a `/trxns/disputed`
+target on every retained transaction. This processor converts its
+[nested prediction output](../reference/prediction-output.qmd) into those
+application columns:
+
+```python
+import polars as pl
+import relflow as rf
+
+@rf.postprocess
+def decision(frame: pl.DataFrame, *, threshold: float) -> pl.DataFrame:
+    transactions = pl.col("predictions").struct.field("trxns")
+    probability = (
+        pl.element()
+        .struct.field("disputed")
+        .struct.field("content")
+        .struct.field("probability")
+    )
+    return frame.select(
+        payment_id=pl.col("inputs").struct.field("payment_id"),
+        dispute_probabilities=transactions.list.eval(probability),
+        review=transactions.list.eval(probability >= threshold),
+    )
+
+# The request file is supplied by the application.
+requests = rf.ArrowDataModule(
+    predict="payments/history/requests.parquet",
+    retain=("payment_id",),
+)
+model.predict(
+    datamodule=requests,
+    batch_size=256,
+    devices=1,
+    callbacks=[rf.Writer(
+        "payment-decisions",
+        postprocessor=decision.partial(threshold=0.8),
+    )],
+    return_predictions=False,
+)
+```
+
+The chain of `struct.field` calls follows the nesting of one output record:
+`predictions`, then `trxns`, then each transaction's `disputed`, `content`,
+and `probability`. `list.eval` applies that path to every transaction in the
+list, so the observation keeps one row with one value per transaction. The Writer
+applies the processor to each prediction batch and writes Parquet files under
+`payment-decisions`. Each output list follows the retained transaction order. One output record has this shape; values are placeholders:
+
+```yaml
+payment_id: payment-42
+dispute_probabilities:
+  - <probability of true>
+  - <probability of true>
+  - <probability of true>
+review:
+  - <true or false>
+  - <true or false>
+  - <true or false>
+```
+
+The direct in-memory prediction API accepts `postprocess=` on the prediction
+call. It applies the processor to the combined result once, after all model
+batches have completed. A Writer applies it to each output batch.
+
+The threshold is an application decision rule. The example uses the content
+probability; incorporate the predicted value state when your application needs
+to treat missingness separately. Select the threshold on validation data for
+the team's review capacity and error costs; `0.8` here illustrates configuration.
+
+## Compose and reuse
+
+The first callback parameter must be `frame`; additional parameters are
+keyword-only and bound with `.partial(...)`. A tuple of decorated processors
+runs left to right. The pipeline converts Arrow to Polars before its first
+stage and back to Arrow after its last.
+
+Use the same configured processor in each output path:
+
+```python
+processor = decision.partial(threshold=0.8)
+writer = rf.Writer("payment-predictions", postprocessor=processor)
+deployment = rf.Deployment(model=model, retain=("payment_id",)).postprocess(processor)
+```
+
+For `Writer`, configure `retain=("payment_id",)` on the prediction data module.
+Serving requires `relflow[serving]`.
+
+Processors may change rows or columns, but must return an eager frame with at
+least one column. Retain every source column they need; source data is not
+otherwise available in the written table. A `Writer` requires the same output
+schema across batches in its shard.
+
+HTTP serving has an additional requirement: preserve one final row per valid
+request with the same identity and order. RelFlow checks the count; processors
+own identity and order, including when row counts happen to be equal.
+
+For file output at scale, see [Batch inference](batch-inference.qmd); for the
+HTTP path, see [Serving](serving.qmd).

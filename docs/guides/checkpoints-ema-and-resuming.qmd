@@ -1,0 +1,178 @@
+---
+title: Checkpoints, EMA, and resuming
+description: "Save and load artifacts, average parameters with EMA, and resume a run from a full checkpoint."
+---
+
+Save a model artifact for inference, serving, representation export, or
+adaptation in another fit. Keep a full Lightning checkpoint to resume the
+training run. Optional EMA maintains an averaged copy of the parameters. This
+page covers all three, continuing with `model` from
+[Train and save](../learn/train-and-save.qmd).
+[Training options](training-options.qmd) covers the fit call itself.
+
+## Save and load
+
+Use a RelFlow artifact to retain the schema and learned model state:
+
+```python
+import relflow as rf
+
+model.save("artifacts/payment-history.rf")
+loaded = rf.Model.load("artifacts/payment-history.rf")
+prediction_data = rf.ArrowDataModule(
+    predict="payments/history/requests.parquet",
+)
+predictions = loaded.predict(datamodule=prediction_data, batch_size=256, devices=1)
+```
+
+The application supplies `payments/history/requests.parquet` as a Parquet file.
+Prediction records omit `disputed` from every transaction.
+
+The artifact contains the state dictionary, schema, batch size, and producing
+RelFlow version. State includes field-owned buffers such as vocabularies and
+normalizers. `load` constructs the model on CPU. Move it to the intended device
+for direct inference; Lightning owns placement when using its loops.
+
+A `Model.save` artifact does not contain optimizer or scheduler state, Trainer
+progress, data sources, or processor configuration. Supply those explicitly
+when fitting a loaded model. Compilation is transient and must be requested
+again after loading.
+
+The artifact carries the model's generated architecture and learned state.
+The [serving runtime](serving.qmd) loads that model into an HTTP application;
+hosts, process supervision, and ingress configuration belong to the
+infrastructure running that application.
+
+### Checkpoint compatibility
+
+Saved weights must match the model architecture used to load them. Loading
+incompatible weights raises an error; there is no automatic conversion.
+
+## Average learned parameters with EMA
+
+Payment-review validation scores can vary as optimization moves the learned
+parameters. Exponential moving averaging (EMA) evaluates a smoothed parameter
+history. It is optional; compare it with ordinary training on the same
+held-out payments before adopting it. For this fit, `datamodule` supplies the
+training and validation splits as in [Training options](training-options.qmd#fit-a-model).
+
+```python
+model.fit(
+    datamodule,
+    batch_size=128,
+    learning_rate=1e-4,
+    max_epochs=30,
+    callbacks=[rf.EMA(decay=0.99)],
+    checkpoint_dir="checkpoints/payments-ema",
+)
+```
+
+`rf.EMA` defaults to `decay=0.99`. Decay must be finite and satisfy
+`0 <= decay < 1`. A larger decay gives older updates more influence after
+warmup. Averaging follows optimizer updates, so accumulating more batches
+before an update does not itself advance EMA.
+
+EMA smooths learned parameters, while vocabulary and normalization state keep
+their current values. Averaging restarts for parameters replaced by model or
+vocabulary changes. It consumes additional model memory, including during
+validation; include it when checking whether a training configuration fits.
+
+During fitting, validation uses averaged parameters and restores live
+parameters afterward so optimization can continue. Early stopping and rollback
+therefore select using the averaged model's validation score. Fitting ends
+with averaged parameters; default rollback restores the best selected averaged
+checkpoint. With `rollback=False`, the returned model retains the final
+average. Use that returned model or its saved artifact for subsequent test and
+prediction. Adding EMA only to standalone evaluation does not create an
+average of a past training run.
+
+### Save and resume EMA training
+
+`rf.Model.load(...)` reads an EMA checkpoint's averaged model for inference.
+Full Lightning checkpoints also preserve the information needed to continue
+training. Resume with a fresh EMA callback and the full checkpoint:
+
+```python
+checkpoint = "checkpoints/payments-ema/last.ckpt"
+resumed = rf.Model.load(checkpoint)
+resume_data = rf.ArrowDataModule(
+    train="payments/history/train.parquet",
+    validate="payments/history/validation.parquet",
+)
+resumed.fit(
+    resume_data,
+    batch_size=128,
+    learning_rate=1e-4,
+    max_epochs=60,
+    callbacks=[rf.EMA(decay=0.99)],
+    ckpt_path=checkpoint,
+)
+```
+
+Use the actual checkpoint path produced by the run. Recreate the optimizer
+and any scheduler configuration as in [Resume Training](#resume-training).
+Loading the model alone and calling `fit` without `ckpt_path` starts a new
+run from its exported averaged parameters. Resuming restores the saved decay.
+EMA rejects checkpoint callbacks configured with
+`save_weights_only=True`; use full checkpoints, including for recovery saves.
+A `model.save(...)` artifact stores the current inference model but cannot
+resume the EMA or optimizer history.
+
+## Resume training
+
+The default rollback callback saves best and last full checkpoints at its
+validation/epoch checkpoints. The best model is selected for its validation
+score; the last checkpoint preserves the most recent state saved by that
+callback. For recovery between validation checks, attach a separate unmonitored
+checkpoint callback:
+
+```python
+from lightning.pytorch.callbacks import ModelCheckpoint
+
+recovery = ModelCheckpoint(
+    dirpath="checkpoints/recovery",
+    filename="step-{step}",
+    monitor=None,
+    every_n_train_steps=1_000,
+    save_top_k=1,
+    save_last=True,
+)
+model.fit(datamodule, callbacks=[recovery])
+```
+
+The recovery checkpoint contains optimizer and scheduler state. Its step
+schedule does not select the best model using a previous validation score;
+the built-in rollback callback continues to select from fresh validation checks.
+
+Use a full Lightning checkpoint to resume optimizer/scheduler state and loop
+progress. Recreate the runtime configuration and pass the checkpoint to `fit`:
+
+```python
+resumed = rf.Model.load("checkpoints/recovery/last.ckpt")
+resume_data = rf.ArrowDataModule(
+    train="payments/history/train.parquet",
+    validate="payments/history/validation.parquet",
+)
+resumed.fit(
+    resume_data,
+    batch_size=128,
+    learning_rate=1e-3,
+    max_epochs=100,
+    ckpt_path="checkpoints/recovery/last.ckpt",
+)
+```
+
+Recreate any scheduler and keep optimizer configuration consistent with the
+saved run. `rf.Model.load` restores model state; the `ckpt_path` argument is
+what tells Lightning to resume training state.
+
+Another `fit` call without `ckpt_path` starts a new optimizer run from the current
+model state. Use the best full checkpoint to continue with optimizer and
+scheduler state matching the restored best model. A new ordinary fit after
+rollback creates AdamW on the restored parameters automatically. Supply any
+scheduler again for that new run.
+
+The saved artifact is what [Serving](serving.qmd) loads, and what
+[Reusable representations](../learn/reusable-representations.qmd) reopens to
+export context. If a run fails, [Troubleshooting](../reference/troubleshooting.qmd)
+lists the first checks for checkpoint and EMA errors.

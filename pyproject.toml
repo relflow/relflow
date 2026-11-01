@@ -1,6 +1,6 @@
 [project]
 name = "relflow"
-version = "0.4.1"
+version = "0.4.2"
 description = "Relationship Flow: schema-first PyTorch models for hierarchical, nested, and sequence data"
 readme = "README.md"
 authors = [
@@ -25,6 +25,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+torchjd = [
+    "torch>=2.9",
+    "torchjd[quadprog_projector]>=0.18,<0.19",
+]
 serving = [
     "fastapi>=0.124.0",
     "orjson>=3.10.0",
@@ -111,6 +115,7 @@ output = "coverage.json"
 
 [tool.ruff]
 line-length = 120
+extend-exclude = ["docs", "evidence"]
 lint.extend-select = ["I"]
 
 [tool.pyrefly]

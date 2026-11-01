@@ -1,0 +1,75 @@
+---
+engine: markdown
+title: Evidence
+description: Small experiments about what a model can learn and where it loses information.
+format:
+  html:
+    css: assets/stylesheets/evidence.css
+    include-after-body: assets/evidence-status.html
+    tbl-colwidths: false
+listing:
+  id: evidence
+  contents: "evidence/*/*.py"
+  sort: order
+  type: table
+  fields: [evidence-id, title, evidence-group, evidence-status]
+  field-links: [title]
+  field-display-names:
+    evidence-id: ID
+    title: Question
+    evidence-group: Group
+    evidence-status: Result
+  filter-ui: [evidence-id, title, evidence-group, evidence-status]
+  sort-ui: [evidence-id, title, evidence-group, evidence-status]
+  categories: false
+---
+
+These are small learning experiments, each asking one question. Open a page
+for an example, a comparison, and the recorded result. Details and runnable
+code are available in a foldout.
+
+They test specific mechanisms in models generated from declared field types,
+nested structures, and objectives: what information survives encoding, what
+the model can learn, and how learned state behaves during reuse or edits.
+The measurements describe those controlled setups. They do not establish
+application quality, competitive benchmark rankings, or production training
+and serving throughput. The [use cases](use-cases/index.qmd) show how to
+design and evaluate a workload around a real decision.
+
+Start with [adding six numbers](evidence/structure/attention-learns-fixed-width-sum.html),
+[matching unfamiliar IDs](evidence/identity/unseen-identity-equality.html), or
+[distinguishing missing values from zero](evidence/state/null-versus-zero.html).
+
+
+The catalog is ordered by group, from simple aggregation to calibration and
+anomaly detection. Search or sort by question, group, result, or ID, such as
+`P021`.
+
+::: {#evidence}
+:::
+
+<details>
+<summary>How to read the results</summary>
+
+These experiments measure behavior on controlled synthetic data. Each result
+applies to its recorded setup. A successful run can be provisional. Some experiments are
+designed to demonstrate a limitation. Short execution checks, called smoke
+runs, do not replace full learning results.
+
+| Result | Meaning |
+| --- | --- |
+| [Passing]{.evidence-status data-evidence-status="Passing"} | The current full run meets its stated checks. |
+| [Failing]{.evidence-status data-evidence-status="Failing"} | The current full run misses at least one required check. |
+| [Error]{.evidence-status data-evidence-status="Error"} | The current full run could not complete. |
+| [Missing]{.evidence-status data-evidence-status="Missing"} | No full run has been recorded. |
+
+Each page shows one selected full run, with its measurements, checks, seed,
+and source provenance. The [run reports](https://github.com/relflow/docs/releases)
+retain the complete paired execution records. A single seed provides provisional evidence
+about repeatability; internal seed panels are described by each experiment.
+
+Learned arithmetic is approximate. Use
+[preprocessing](guides/preprocessing.qmd) for business rules that require exact results.
+Each page includes its reproduction command and a downloadable script.
+
+</details>

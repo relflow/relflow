@@ -1,0 +1,121 @@
+---
+title: Featureless models
+description: "How a model factory turns typed, nested records and targets into an architecture that learns encodings and context."
+engine: markdown
+---
+
+The [flat-payment](your-first-model.qmd) and
+[transaction-history](add-transaction-history.qmd) tutorials define models for
+two observation shapes. In both, your application supplies the fields and
+settled dispute labels. You do not write a merchant encoder, an amount scaler,
+or a job that reduces every history to totals before the model can read it.
+This page explains what those declarations automate and what remains your
+work.
+
+Here **featureless** refers to learning from the declared fields and related
+records without first engineering a fixed-width table of aggregate features.
+You still choose which source values the model can use and what to predict.
+
+## Two ways to model a payment
+
+One common approach to the same review decision turns records into a
+fixed-width feature table before the model sees them. Someone writes the jobs that compute counts, totals, and
+recency windows, fits label encoders and scalers on training data, and stores
+their state. The same jobs run again before every scoring run, and a serving
+path has to reproduce them exactly. Each new idea about the data is a new
+column, and the model only ever sees the columns someone thought to build.
+
+RelFlow is a model factory for typed, nested data. You declare field names,
+datatypes, nesting, and prediction targets; it generates the corresponding
+neural architecture. You choose the schema and capacity preset explicitly.
+Training then learns encodings, context, and predictions from your records.
+[How declarations become a model](../concepts/model-tree.qmd#how-declarations-become-a-model)
+separates construction from learning.
+
+```{typst}
+//| label: fig-featureless-pipelines
+//| fig-cap: "A feature pipeline maintains jobs, a fixed-width table, and serving features. A relflow schema reads nested records and learns its own encodings."
+//| fig-alt: "Two lanes. The feature pipeline lane runs from source tables through feature jobs that aggregate, encode, and scale, to a fixed-width feature table, a model, and a second set of serving features. The relflow lane runs from nested source records through a schema of fields, branches, and targets to a model that learns vocabularies, normalizers, and context, then to predictions on the same records with labels omitted."
+#flow(
+  (title: "Feature pipeline", steps: (
+    step("Source tables", note: "Transactions, accounts"),
+    step("Feature jobs", kind: "target", note: "Aggregate, encode, scale. Rerun before every training and scoring run."),
+    step("Feature table", kind: "target", note: "One fixed-width row per entity"),
+    step("Model"),
+    step("Serving features", kind: "target", note: "A second pipeline kept in sync"),
+  )),
+  (title: "relflow", steps: (
+    step("Source records", note: "Nested rows as stored"),
+    step("Schema", kind: "branch", note: "Fields, branches, targets"),
+    step("Model", kind: "root", note: "Learns vocabularies, normalizers, and context"),
+    step("Predictions", note: "Same records, labels omitted"),
+  )),
+)
+```
+
+## What the schema automates
+
+| Feature pipeline step | What relflow does instead | Where to read more |
+| --- | --- | --- |
+| Encode labels as integers with an encoder fitted offline, and decide what to do with unseen labels | `Category`, `Set`, and `Cluster` learn labels from training batches. Storage grows as new labels arrive. An unknown label at prediction stays a valued input whose content is marked unavailable. | [Online vocabulary](../concepts/online-vocabulary.qmd) |
+| Fit scalers on training data and store them beside the model | `Number` learns online normalization statistics and `Quantile` learns a distribution. Both are saved in the model artifact. | [Number](../datatypes/number.qmd), [Quantile](../datatypes/quantile.qmd) |
+| Aggregate a history into counts, totals, and recency columns | A `Branch` keeps each event's fields together. Attention can learn relationships within an event and across the sequence, and a learned summary reaches the parent. | [How fields interact](../concepts/how-fields-interact.qmd), [Branch summaries](../concepts/branch-summaries.qmd) |
+| Pad or truncate every history to one width | Branch widths follow each batch. A cap is optional, and predictions return variable lists. | [Branch](../datatypes/branch.qmd) |
+| Flatten nested records into one row per entity | Nested Arrow structs and lists are read directly from Parquet, including branches inside branches. | [Data modules](../guides/data-modules.qmd), [Nested context and account outcomes](nested-context-and-account-outcomes.qmd) |
+| Route the target labels separately from the inputs | `mask=True` declares a target and keeps it out of the input. Prediction requests omit it. | [Masking and reconstruction](../concepts/masking-and-reconstruction.qmd) |
+| Maintain a second feature path for serving | One preprocessor attaches to training, batch prediction, and HTTP serving. The artifact carries the schema, vocabularies, and normalizers. | [Preprocessing](../guides/preprocessing.qmd), [Serving](../guides/serving.qmd) |
+| Train one model per outcome | Targets at different levels of one observation share context and train together. | [Nested context and account outcomes](nested-context-and-account-outcomes.qmd) |
+| Use labeled rows only | Reconstruction objectives learn from unlabeled histories, and learned context can be exported for other predictors. | [Pretraining and fine-tuning](pretraining-and-fine-tuning.qmd), [Reusable representations](reusable-representations.qmd) |
+
+Field types are extensible. When a value needs a new representation,
+encoder, objective, or output contract, a
+[custom tensorfield](../datatypes/custom-tensorfields.qmd) supplies those
+components within the same schema-driven construction. Ordinary joins and
+derived values belong in data preparation or preprocessing.
+
+Learned state, including vocabularies and normalization, stays inside the
+model. The schema and data pipeline handle record structure and batch widths.
+After fitting the history model on your training files, you can inspect that
+state. Here `model` refers to that fitted history model:
+
+`rf.Address("trxns", "merchant")` identifies a path through the declared
+model tree, with one argument per level: the `merchant` field inside `trxns`.
+It selects the field whose learned state you want to inspect.
+
+```python
+import relflow as rf
+
+merchants = rf.Category.vocabulary(model, rf.Address("trxns", "merchant"))
+amounts = rf.Number.normalization(model, rf.Address("trxns", "amount"))
+```
+
+`merchants` is the tuple of labels the field learned, and `amounts` is the
+snapshot of mean, variance, and count used to standardize the amount. Saving
+the model preserves both.
+
+## What stays yours
+
+relflow does not assemble observations. Your application still joins the
+records that belong to one decision, orders them, cuts them at the decision
+time, and attaches labels after the outcome window closes.
+[Prepare observations](prepare-observations.qmd) defines those rules once.
+
+Exact business arithmetic also stays outside the model. A learned summary of a
+history is not a ledger, and calendar parts are not elapsed time. When a rule
+needs an exact value, compute it in a
+[preprocessor](../guides/preprocessing.qmd) and let the model read it as
+another field. The [evidence](../evidence.qmd) record what the architecture can
+learn and where it loses information.
+
+## How to judge the value
+
+The honest comparison is against your current aggregate-feature model on the
+same held-out decision windows. Keep the eligible payments, available
+evidence, and outcome definitions identical, then add one thing at a time: the
+history, then more fields, then shared targets.
+[Evaluation](evaluation.qmd) lays out that sequence. Preserving
+individual events costs preparation, retained records, and model computation;
+choose it when the comparison justifies it.
+
+Next, [prepare observations](prepare-observations.qmd): the one data contract every
+later page relies on.

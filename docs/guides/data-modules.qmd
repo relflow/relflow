@@ -1,0 +1,220 @@
+---
+title: Data modules
+description: "Supply named train, validate, test, and predict sources from Parquet, Arrow, Polars, or DuckDB."
+---
+
+A data module groups sources into named splits: training learns the model,
+validation selects it, testing evaluates it, and prediction scores new records.
+RelFlow uses Lightning, a training framework, to iterate these sources in batches.
+Passing a module to a model loop binds it to that model's schema and batch size.
+Each row is one observation prepared as in
+[Prepare observations](../learn/prepare-observations.qmd): nested lists and
+structs stay inside the row, the application assembles each history and
+chooses the splits, and training files carry settled labels while prediction
+files omit them. The data module does not join transaction tables into a
+history.
+
+The examples continue the
+[transaction model](../learn/add-transaction-history.qmd). Its `payment_id`
+column remains a source column without becoming a model field.
+
+## Arrow
+
+Pass Parquet file paths to `ArrowDataModule`:
+
+```python
+import relflow as rf
+
+# Reuse the history model; each file row has the nested structure above.
+data = rf.ArrowDataModule(
+    train="payments/history/train.parquet",
+    validate="payments/history/validation.parquet",
+)
+```
+
+Nested structs and lists remain part of each observation. Existing in-memory
+`pyarrow.Table` objects are also supported.
+
+## Bind a model when the loop starts
+
+Configure the sources independently of the model, then pass the data module
+to the model's loop:
+
+```python
+data = rf.ArrowDataModule(
+    train="payments/history/train.parquet",
+    validate="payments/history/validation.parquet",
+)
+model.fit(data, batch_size=128, max_epochs=30)
+```
+
+`fit`, `validate`, `test`, and data-module `predict` bind an unbound module
+before setup and loading. `PolarsDataModule`, `DuckDBDataModule`,
+`CustomDataModule`, and `SyntheticDataModule` support the same lifecycle.
+The loop's model owns the schema and batch size used to prepare batches.
+
+For direct loader access outside a loop, call `data.bind(model)` first.
+Reading the model-dependent schema or batch size, or creating a configured
+loader while unbound, raises `RuntimeError`.
+Calling `bind` again with the same model is harmless; binding to a different
+model raises `ValueError`. Create a separate data module for each model in a
+comparison, including a separately loaded copy of the same artifact.
+
+Native Lightning `Trainer` loops also bind in data-module `setup` using the
+attached RelFlow model. Their optimizer requirements remain those described
+in [Training options](training-options.qmd#configure-optimization-and-callbacks).
+
+The default shuffle window is resolved once at binding as
+`max(model.batch_size * 32, 4096)` rows. For an unbound module, a loop's
+explicit batch size is applied before binding. An explicit `shuffle_rows`
+value takes precedence. Changing batch size after binding changes subsequent
+loader batches but does not resize that window; set `shuffle_rows` explicitly
+when comparing shuffle behavior across runs. This window applies to streaming
+sources; in-memory Arrow tables use a full permutation. Streaming shuffle can
+buffer up to twice the window, so account for that memory when sizing it.
+
+## Splits and preparation
+
+Supply `train`, `validate`, `test`, and `predict` independently; at least one is
+required. Each supplied path or source belongs to its named split. Training
+shuffles by default. The other splits do not. Set model
+batch size on the loop, for example `model.fit(data, batch_size=128, max_epochs=30)`.
+Arrow data modules read the model's current size whenever they create loaders;
+see [Batch size](training-options.qmd#batch-size) for overrides on the other loops.
+
+Choose splits before constructing the module. For time-based evaluation, define
+an observation cutoff, build features only from information available then, and
+keep later outcomes out of inputs. relflow does not enforce these application
+rules. Fit application preprocessing state on training data and reuse it for
+validation and prediction.
+
+Attach an ordered [preprocessor](preprocessing.qmd) with
+`preprocessor=prepare` or `preprocessor=(clean, enrich)`. Processing happens
+before sampling, shuffling, and model batching. The source and processed Arrow
+schemas must remain stable within each split across partitions and epochs.
+
+For prediction, `retain=("payment_id",)` keeps a processed identifier in the
+output for downstream joins. See [Batch inference](batch-inference.qmd).
+
+## Polars
+
+For applications that already use in-memory eager frames, `PolarsDataModule`
+converts each frame to Arrow once and uses the same pipeline. Collect a
+`LazyFrame` explicitly before passing it in.
+
+## Files and restartable sources
+
+Each split also accepts a `pa.RecordBatch`, Arrow Dataset, file path or glob,
+`rf.source(...)`, or a callable returning a fresh reader or iterable of Arrow
+batches. A reader itself is one-shot; wrap its creation in a callable when
+repeated epochs need it.
+
+Use `rf.source(...)` to configure a directory or glob explicitly:
+
+```python
+data = rf.ArrowDataModule(
+    train=rf.source("payments/history/train", format="parquet"),
+    validate=rf.source("payments/history/validation/*.parquet", format="parquet"),
+)
+```
+
+`rf.source(...)` adds explicit format, schema, filesystem, and partitioning
+configuration when needed. Keep nested structs and lists in their Arrow form.
+Use an explicit schema when values are empty, entirely null, or ambiguous.
+Local `file://` URIs preserve Windows drive letters and URI-encoded path
+characters; ordinary local file paths remain supported.
+
+## DuckDB
+
+Install `relflow[duckdb]` to use SQL queries as named splits. `DuckDBDataModule`
+opens an existing database file read-only and streams query results as Arrow
+batches through the same preprocessing and batching pipeline.
+
+Suppose your application maintains `warehouse/payments.duckdb` with a
+`payment_observations` table. Each row has the payment fields above, a unique
+`payment_id`, and a `dataset_split` column assigned by the application:
+
+```python
+observations = """
+    SELECT payment_id, trxns
+    FROM payment_observations
+    WHERE dataset_split = $split
+    ORDER BY payment_id
+"""
+
+data = rf.DuckDBDataModule(
+    database="warehouse/payments.duckdb",
+    train=observations,
+    validate=observations,
+    parameters={
+        "train": {"split": "train"},
+        "validate": {"split": "validate"},
+    },
+)
+```
+
+Each split accepts one `SELECT` statement, including a query beginning with
+`WITH`. Bind values through `parameters`, keyed by split: a mapping supplies
+named parameters such as `$split`; a sequence supplies positional `?`
+parameters. Parameters are bound by DuckDB rather than interpolated into SQL.
+
+Omitting `database` creates a fresh in-memory database for each scan. This is
+useful for queries that read files directly:
+
+```python
+data = rf.DuckDBDataModule(
+    predict="""
+        SELECT payment_id, trxns
+        FROM read_parquet('warehouse/scoring/*.parquet')
+        ORDER BY payment_id
+    """,
+)
+```
+
+The module stores the database path, SQL, parameters, and connection settings.
+Each scan opens its own connection and Arrow reader in the consuming process,
+then closes both. Pass a database path or `":memory:"`; live connections,
+relations, and tables registered on another connection are not inputs. Nested
+lists and structs remain Arrow-backed, and an empty result retains its schema.
+Close writable connections to a database file before starting read-only scans.
+
+Workers and distributed ranks replay the full query. Distributed ranks then
+take disjoint model batches, and local data workers alternate the Arrow
+batches the query yields before preprocessing, so each worker prepares only
+its share. Prediction, an `epoch_size` cap, and dataset-scoped preprocessors
+keep every worker on the complete stream, taking turns on finished batches.
+Use a deterministic `ORDER BY` with a unique key and keep query results stable
+for the duration of each pass across workers and ranks. Data may change
+between passes if its Arrow schema stays stable. The module does not
+materialize a shared snapshot, and adding workers repeats database work.
+
+`ingress_rows` defaults to `4096` and controls the Arrow batch size requested
+from DuckDB; `model.batch_size` controls the final model batches. Each connection
+defaults to one DuckDB thread. Override connection settings with `config`, such
+as `config={"threads": 2}`. The usual `ArrowDataModule` options, including
+sampling, shuffling, retention, and workers, also apply. Partition-scoped
+[preprocessors](preprocessing.qmd) run on streamed Arrow batches converted to
+eager Polars frames; dataset-scoped preprocessing is unsupported for these
+restartable query sources.
+
+## File scan resources
+
+File sources freeze the selected file paths, schema, sizes, and modification
+times, then create a fresh filesystem and dataset for each scan. Exhausting or
+closing the scan releases its readers and clients; the source and data module
+retain only the description and manifest between passes. Storage failures keep
+their original cause and include the discovery or scan stage in the traceback.
+The data pipeline also closes suspended scans when preprocessing fails or an
+`epoch_size` limit ends the iteration.
+
+This matters for native S3: Arrow's process-wide shutdown callback can block
+while native clients remain alive, as described in an
+[upstream report](https://github.com/apache/arrow/issues/50188). RelFlow releases
+its scan resources before interpreter shutdown and continues to use native
+PyArrow S3 without another transport dependency. Application-owned datasets,
+filesystems, and unfinished iterators have their own lifetimes; close active
+iterators when stopping a scan early. The change does not establish that every
+native Arrow shutdown hang has the same cause or replace runtime supervision.
+
+[Preprocessing](preprocessing.qmd) attaches to any of these sources. If a
+split fails to bind, see [Troubleshooting](../reference/troubleshooting.qmd).

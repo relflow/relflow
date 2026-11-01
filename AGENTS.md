@@ -183,6 +183,16 @@ Supply any scheduler for that run through `fit(scheduler=...)`. Keep
 `rf.adamw(...)` factories for custom optimizers and direct `lit.Trainer` setup;
 ordinary examples do not assign `model.optimizer` before calling `fit`.
 
+`Model(..., jacobian=True)` or a factory such as `Model.xs(..., jacobian=True)`
+opts into TorchJD UPGrad for multiple reconstruction
+objectives and requires `relflow[torchjd]`. One weighted scalar per reconstruction
+address participates; Lightning retains automatic optimization. The session
+policy belongs outside serialized presets and YAML templates and is not checkpointed.
+For a model loaded from YAML, set `model.jacobian = True` before compiling or
+fitting. Enable it before `model.compile(...)`; after loading,
+opt in explicitly before fitting again. Single-device and unsharded DDP training
+are supported; validation and prediction keep ordinary loss/output behavior.
+
 Set `batch_size` on `fit`, `validate`, `test`, or `predict` to update the model's
 current positive integer batch size. Arrow data modules read it when creating
 loaders; custom Lightning data modules own their loader behavior. The size is per
@@ -346,28 +356,44 @@ suite rather than being deleted to meet the local runtime target. Thread-pool
 and offline encoder defaults are set before collection; explicit environment
 values take precedence.
 
-## Documentation And Learning Proofs
+## Documentation And Learning Evidence
 
-User documentation, executable modeling proofs, recorded learning results, and
-branding assets live in the separate [relflow/docs repository](https://github.com/relflow/docs).
-The website is published at [relflow.github.io/docs](https://relflow.github.io/docs/).
-Follow that repository's agent guide for authoring, Typst diagrams, preview,
-validation, proof execution, and publication. This package has no documentation
-checkout, proof source, or site build dependency.
+This repository contains the package, user documentation, branding assets, and
+canonical learning experiments with recorded results. The website is published
+at [relflow.ai](https://relflow.ai/). Follow [docs/AGENTS.md](docs/AGENTS.md) and
+[docs/README.md](docs/README.md) for authoring, Typst diagrams, preview,
+validation, and publication; follow [evidence/AGENTS.md](evidence/AGENTS.md) and
+[evidence/SPEC.md](evidence/SPEC.md) for the learning protocol.
 
-Coordinate documentation and proof changes with public API changes. Verify
+Coordinate documentation and evidence changes with public API changes. Verify
 claims against the implementation and use the current top-level imports.
-Package runtime and architectural tests belong in this repository's `tests/`;
-learning experiments and their canonical results belong in `relflow/docs`.
-Documentation builds remain static; learning proofs run only when explicitly
-invoked in that repository with RelFlow installed.
+Package runtime and architectural tests belong in `tests/`; static documentation
+tests belong in `docs/tests/`, and learning experiments, runtime tests, and
+their canonical results belong in `evidence/`.
+
+Documentation builds use the isolated `docs/pyproject.toml` environment and
+remain static: never install or import RelFlow, Torch, or Lightning to build the
+site. From the repository root, run `uv sync --project docs --locked`,
+`make check`, and `make check-docs`. Use `make dev` for preview and `make render`
+for HTML output. Learning experiments run only when explicitly invoked with
+the intended RelFlow wheel; ordinary package checks do not run them.
+
+Read the Docs builds versioned hosting and pull request previews from the root
+`.readthedocs.yaml`, using `uv run --project docs python -m docs.publish`.
+GitHub documentation CI validates and uploads a review artifact. Preserve
+Quarto's visuals and the isolated static environment; the host supplies version
+URLs and its native version flyout, while source views use the actual checkout
+commit. See `docs/README.md`
+for account connection, Gold/project ad-free setup, eligible release tags, and
+the verified-preview requirement before any production domain cutover.
 
 ## CI Ownership
 
-`ci.yml` owns PR, merge-group, main-push, and manual triggers. `tests.yml` and
-`evidence.yml` are reusable implementations. Require `CI / required` for PRs,
-including the full matrix and paired evidence. Release and coverage workflows
+`ci.yml` owns PR, merge-group, main-push, and manual triggers. `tests.yml`,
+`docs.yml`, and `evidence.yml` are reusable implementations. Require `CI / required`
+for PRs, including the full matrix, static documentation checks, and paired
+evidence. Release and coverage workflows
 consume successful main CI; do not add a second matrix invocation to release.
 The evidence helper and trusted executor are pinned separately from the suite.
 Keep selected suite code off the host execution path and preserve full evidence
-budgets, seeds, checks, and provenance. See the docs repository's lab guide.
+budgets, seeds, checks, and provenance. See [evidence/lab.md](evidence/lab.md).
