@@ -1,4 +1,7 @@
+import ast
+from copy import deepcopy
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pyarrow as pa
@@ -488,3 +491,128 @@ def test_predict_inside_branch_with_null_items_round_trips_parquet(tmp_path):
     table = model.predict(rows)
     pq.write_table(table, tmp_path / "p.parquet")
     assert pq.read_table(tmp_path / "p.parquet").equals(table)
+
+
+def values_of(table: pa.Table, *path: str) -> list:
+    return table.to_pylist()[0]["predictions"][path[0]][path[1]] if len(path) == 2 else None
+
+
+def test_classification_with_series_input():
+    model = rf.Model.xs(d_model=8, signal=rf.Series(channels=2), label=rf.Category(mask=True))
+    rows = pa.table({"signal": [[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0]]], "label": ["a", "b"]})
+    result = model.training_step(model.encode(rows, strata=Strata.train), 0)
+    assert torch.isfinite(result["loss"])
+    assert values_of(model.predict(rows), "label", "inferred") is True
+
+
+def test_embed_output_width():
+    model = rf.Model.xs(d_model=8, signal=rf.Series(channels=1, embed=True), label=rf.Boolean(mask=True))
+    table = model.predict(pa.table({"signal": [[1.0, 2.0], [3.0]], "label": [True, False]}))
+    embedding = table.to_pylist()[0]["representations"][0]["embedding"]
+    assert len(embedding) == 8
+
+
+def test_predict_without_target_column_outputs_horizon_steps():
+    model = rf.Model.xs(d_model=8, history=rf.Series(channels=1), future=rf.Series(channels=2, horizon=3, mask=True))
+    table = model.predict(pa.table({"history": [[1.0, 2.0], [3.0]]}))
+    for row in table.to_pylist():
+        content = row["predictions"]["future"]["content"]
+        assert len(content) == 3 and all(len(step) == 2 for step in content)
+
+
+def test_rebuild_keeps_weights_across_length_and_n_blocks_and_resets_only_regression_on_horizon():
+    model = rf.Model.xs(
+        d_model=8,
+        past=rf.Series(channels=1, length=8, n_blocks=2),
+        future=rf.Series(channels=1, horizon=3, mask=True),
+    )
+
+    def weights(address: str) -> dict[str, torch.Tensor]:
+        node = model.nodes[address]
+        decoder = getattr(node, "decoder", None)
+        state = {f"embedder.{name}": value for name, value in node.embedder.state_dict().items()}
+        state |= {f"decoder.{name}": value for name, value in (decoder.state_dict() if decoder else {}).items()}
+        return deepcopy(state)
+
+    def unchanged(before: dict[str, torch.Tensor], after: dict[str, torch.Tensor]) -> set[str]:
+        return {
+            name
+            for name in before.keys() & after.keys()
+            if before[name].shape == after[name].shape and torch.equal(before[name], after[name])
+        }
+
+    before = weights("/past")
+    model.update(rf.where("address") == "/past", length=16)
+    assert model.schema.requests["/past"].length == 16
+    after = weights("/past")
+    assert before.keys() == after.keys() and unchanged(before, after) == set(before)
+
+    model.update(rf.where("address") == "/past", n_blocks=3)
+    grown = weights("/past")
+    assert not any("blocks.2." in name for name in before) and any("blocks.2." in name for name in grown)
+    assert unchanged(before, grown) == set(before)
+
+    first = weights("/future")
+    model.update(rf.where("address") == "/future", horizon=4)
+    second = weights("/future")
+    assert second["decoder.regression.weight"].shape[0] == 4
+    assert {name for name in first if name not in unchanged(first, second)} == {
+        "decoder.regression.weight",
+        "decoder.regression.bias",
+    }
+
+
+def test_shared_modules_do_not_reference_series():
+    root = Path(rf.__file__).parent
+    offenders = []
+    for package in ("structs", "data", "architecture"):
+        for path in sorted((root / package).rglob("*.py")):
+            for node in ast.walk(ast.parse(path.read_text())):
+                if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("extensions.series"):
+                    offenders.append(f"{path.name}:{node.lineno} imports series")
+                if isinstance(node, ast.Import) and any(
+                    alias.name.endswith("extensions.series") for alias in node.names
+                ):
+                    offenders.append(f"{path.name}:{node.lineno} imports series")
+                if isinstance(node, ast.Constant) and node.value == "series":
+                    offenders.append(f"{path.name}:{node.lineno} names series")
+    assert offenders == []
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("nested", [False, True])
+def test_forecast_smoke(tmp_path, nested):
+    history, future = [1.0, 2.0, 3.0], [4.0, 5.0]
+    if nested:
+        model = rf.Model.xs(
+            d_model=8,
+            items=rf.Branch(
+                length=2, history=rf.Series(channels=1), future=rf.Series(channels=1, horizon=2, mask=True)
+            ),
+        )
+        rows = pa.table(
+            {"items": [[{"history": history, "future": future}, {"history": history[:2], "future": future}]] * 4}
+        )
+    else:
+        model = rf.Model.xs(
+            d_model=8, history=rf.Series(channels=1), future=rf.Series(channels=1, horizon=2, mask=True)
+        )
+        rows = pa.table({"history": [history] * 4, "future": [future] * 4})
+    data = rf.ArrowDataModule(model, train=rows, validate=rows, shuffle=False)
+    model.fit(
+        data,
+        batch_size=4,
+        accelerator="cpu",
+        devices=1,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        num_sanity_val_steps=0,
+        early_stopping=False,
+        rollback=False,
+        enable_progress_bar=False,
+        logger=False,
+        enable_checkpointing=False,
+        default_root_dir=tmp_path,
+    )
+    assert all(torch.isfinite(parameter).all() for parameter in model.parameters())
