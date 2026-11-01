@@ -90,6 +90,7 @@ from relflow.tensorfields.extensions.enum import Request as Enum
 from relflow.tensorfields.extensions.hashable import Request as Hash
 from relflow.tensorfields.extensions.number import Request as Number
 from relflow.tensorfields.extensions.quantile import Request as Quantile
+from relflow.tensorfields.extensions.series import Request as Series
 from relflow.tensorfields.extensions.set import Request as Set
 from relflow.tensorfields.extensions.text import Request as Text
 from relflow.tensorfields.extensions.vector import Request as Vector
@@ -195,6 +196,7 @@ __all__ = [
     "ReductionConfig",
     "RollbackCheckpoint",
     "RuntimePlacementCallback",
+    "Series",
     "Set",
     "SchedulerConfig",
     "Scheduler",
