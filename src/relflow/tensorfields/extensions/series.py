@@ -11,19 +11,30 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pydantic
 import torch
+from beartype import beartype
 from pydantic import StrictInt
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
 from relflow.structs.enums import Component, Overflow, Strata, TensorKey, Tokens
+from relflow.structs.packages import Parcel
 from relflow.structs.tree import Address, FieldOptions
-from relflow.tensorfields.base import Context, Extension, RequestBase, TensorFieldBase
+from relflow.tensorfields.base import (
+    Context,
+    EmbedderBase,
+    Extension,
+    RequestBase,
+    TensorFieldBase,
+    TensorInput,
+)
 from relflow.tensorfields.shared.jitter import Jitter
-from relflow.tensorfields.shared.normalizer import moments
+from relflow.tensorfields.shared.normalizer import GlobalOnlineNormalizer, moments, precise
 from relflow.tensorfields.shared.reconstruction import Metrics
 
 if TYPE_CHECKING:
+    from relflow.architecture.root import Model
     from relflow.structs.experiment import Schema
+    from relflow.structs.structure import Branch
 
 series: Extension = Extension(name="series", types=(int | float,), callbacks=(Metrics,))
 
@@ -284,3 +295,108 @@ def observe(
     matrix, _ = steps(values, channels=request.channels, address=address)
     observed = torch.from_numpy(matrix[np.isfinite(matrix).all(axis=1)])
     return TensorDict({TensorKey.content: moments(observed, width=request.channels)}, batch_size=[])
+
+
+class Block(torch.nn.Module):
+    """Pre-norm residual block of two dilated convolutions over observed steps.
+
+    Unobserved steps are zero on entry to every convolution, so a series
+    embeds the same whatever the batch pads it with.
+    """
+
+    def __init__(self, width: int, dilation: int):
+        super().__init__()
+        self.norm = torch.nn.RMSNorm(width)
+        self.first = torch.nn.Conv1d(width, width, kernel_size=3, padding=dilation, dilation=dilation)
+        self.second = torch.nn.Conv1d(width, width, kernel_size=3, padding=dilation, dilation=dilation)
+        self.activation = torch.nn.GELU(approximate="tanh")
+
+    def forward(self, x: torch.Tensor, observed: torch.Tensor) -> torch.Tensor:
+        gone = ~observed.unsqueeze(-1)
+        hidden = self.activation(self.norm(x)).transpose(1, 2)
+        hidden = self.activation(self.first(hidden).transpose(1, 2)).masked_fill(gone, 0.0)
+        hidden = self.second(hidden.transpose(1, 2)).transpose(1, 2)
+        return (x + hidden).masked_fill(gone, 0.0)
+
+
+@series.register(Component.Embedder)
+class Embedder(EmbedderBase):
+    def __init__(self, schema: Schema, address: Address):
+        super().__init__(schema=schema, address=address)
+
+        request: Request = cast(Request, schema.requests[address])
+        if address in schema.objectives and request.horizon is None:
+            raise ValueError(
+                f"series field at '{address}' is a reconstruction target and requires "
+                "horizon=<steps to predict>; set horizon or remove mask"
+            )
+        if address not in schema.objectives and request.horizon is not None:
+            raise ValueError(
+                f"series field at '{address}' sets horizon={request.horizon}, but horizon applies only to "
+                "reconstruction targets; remove horizon or add mask=True"
+            )
+
+        self.origin: Address = address
+        self.destination: Address = cast("Branch", request.parent).address
+        self.jitter: Jitter = request.jitter
+
+        self.normalizer = GlobalOnlineNormalizer(width=request.channels)
+        self.projection = torch.nn.Linear(in_features=request.channels, out_features=schema.d_model)
+        self.blocks = torch.nn.ModuleList(
+            [Block(width=schema.d_model, dilation=2**depth) for depth in range(request.n_blocks)]
+        )
+        self.embeddings = torch.nn.Embedding(num_embeddings=len(Tokens), embedding_dim=schema.d_model)
+
+    @beartype
+    def forward(self, inputs: TensorInput) -> Parcel:
+        """Pool each record's observed steps to one token.
+
+        Values standardize per channel in the widest float the device holds,
+        then the network runs float32. Jitter perturbs observed steps of valued
+        records, in standardized units when ``normalize`` is set.
+        """
+
+        state = inputs.state
+        content = cast(TensorDict, inputs.content)
+        observed = content["observed"] & state.eq(Tokens.valued).unsqueeze(-1)
+        keep = observed.unsqueeze(-1)
+
+        with precise(state.device):
+            values = cast(torch.Tensor, content["values"]).to(dtype=self.normalizer.mean.dtype)
+            eligible = keep.expand_as(values)
+            if self.training and not self.jitter.normalize:
+                values = self.jitter.apply(values, eligible)
+            values = (values - self.normalizer.mean) / self.normalizer.scale
+            if self.training and self.jitter.normalize:
+                values = self.jitter.apply(values, eligible)
+            values = values.masked_fill(~eligible, 0.0).float()
+
+        hidden = self.projection(values).masked_fill(~keep, 0.0)
+        for block in self.blocks:
+            hidden = block(hidden, observed)
+        pooled = hidden.masked_fill(~keep, -torch.inf).amax(dim=1)
+        pooled = torch.where(observed.any(dim=1, keepdim=True), pooled, torch.zeros_like(pooled))
+
+        return Parcel(
+            payload=pooled + self.embeddings(state),
+            present=torch.ones(state.shape[0], dtype=torch.bool, device=state.device),
+            origin=self.origin,
+            destination=self.destination,
+            batch_size=state.shape[0],
+        )
+
+
+@series.register(Component.learn)
+def learn(
+    module: Model,
+    observation: TensorDict,
+    *,
+    address: Address,
+    strata: Strata,
+) -> None:
+    """Apply pristine per-channel statistics."""
+
+    if strata != Strata.train:
+        raise ValueError(f"series learner at '{address}' requires train strata, got {strata}")
+    embedder: Embedder = cast(Embedder, module.nodes[address].embedder)
+    embedder.normalizer.learn(cast(TensorDict, observation[TensorKey.content]))
