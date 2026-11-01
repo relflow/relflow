@@ -1,0 +1,216 @@
+project:
+  type: website
+  output-dir: site
+  pre-render:
+    - uv run --directory .. --project docs python -m evidence.render
+  resources:
+    - assets/fonts/OFL.txt
+    - evidence/_generated/*.py
+  render:
+    - index.qmd
+    - "**/*.qmd"
+    - "evidence/*/*.py"
+
+website:
+  site-url: https://relflow.ai/
+  repo-url: https://github.com/relflow/relflow
+  repo-subdir: docs
+  repo-branch: main
+  repo-actions: [edit, issue]
+  title: relflow
+  description: "A model factory for typed, nested data: generate custom neural architectures, train models, and serve predictions and learned representations."
+  favicon: assets/branding/logos/logo.svg
+  image: assets/branding/logos/logo.light.png
+  page-navigation: true
+  navbar:
+    title: relflow
+    logo: assets/branding/logos/logo.navbar.svg
+    logo-alt: relflow
+  sidebar:
+    style: floating
+    search: false
+    collapse-level: 1
+    contents:
+      - section: Start here
+        contents:
+          - href: index.qmd
+            text: Overview
+          - href: learn/your-first-model.qmd
+            text: Your first model
+          - href: learn/add-transaction-history.qmd
+            text: Add transaction history
+          - href: learn/featureless-models.qmd
+            text: Featureless models
+          - href: learn/prepare-observations.qmd
+            text: Prepare observations
+          - href: learn/train-and-save.qmd
+            text: Train and save
+          - href: learn/read-predictions.qmd
+            text: Read predictions
+          - href: learn/evaluation.qmd
+            text: Evaluation
+      - section: Extend the model
+        contents:
+          - href: learn/profile-context-and-a-second-outcome.qmd
+            text: Profile context and a second outcome
+          - href: learn/nested-context-and-account-outcomes.qmd
+            text: Nested context and account outcomes
+          - href: learn/pretraining-and-fine-tuning.qmd
+            text: Pretraining and fine-tuning
+          - href: learn/reusable-representations.qmd
+            text: Reusable representations
+      - section: Use cases
+        contents:
+          - href: use-cases/index.qmd
+            text: Overview
+          - href: use-cases/time-series-forecasting.qmd
+            text: Time series forecasting
+          - href: use-cases/recommendations.qmd
+            text: Recommendations
+          - href: use-cases/customer-outcomes.qmd
+            text: Customer outcomes
+          - href: use-cases/relational-prediction.qmd
+            text: Relational prediction
+          - href: use-cases/representation-learning.qmd
+            text: Representation learning
+      - section: Guides
+        contents:
+          - href: guides/data-modules.qmd
+            text: Data modules
+          - href: guides/preprocessing.qmd
+            text: Preprocessing
+          - href: guides/query-paths.qmd
+            text: Query paths
+          - href: guides/postprocessing.qmd
+            text: Postprocessing
+          - href: guides/batch-inference.qmd
+            text: Batch inference
+          - href: guides/serving.qmd
+            text: Serving
+          - href: guides/performance.qmd
+            text: Performance
+          - href: guides/training-options.qmd
+            text: Training options
+          - href: guides/checkpoints-ema-and-resuming.qmd
+            text: Checkpoints, EMA, and resuming
+          - href: guides/model-templates.qmd
+            text: Model templates
+          - href: guides/schema-mutation.qmd
+            text: Schema mutation
+      - section: Concepts
+        contents:
+          - href: concepts/model-tree.qmd
+            text: Model tree
+          - href: concepts/how-fields-interact.qmd
+            text: How fields interact
+          - href: concepts/branch-summaries.qmd
+            text: Branch summaries
+          - href: concepts/tree-routing-and-decoding.qmd
+            text: Tree routing and decoding
+          - href: concepts/masking-and-reconstruction.qmd
+            text: Masking and reconstruction
+          - href: concepts/online-vocabulary.qmd
+            text: Online vocabulary
+      - section: Datatypes
+        contents:
+          - href: datatypes/index.qmd
+            text: Overview
+          - href: datatypes/number.qmd
+            text: Number
+          - href: datatypes/boolean.qmd
+            text: Boolean
+          - href: datatypes/category.qmd
+            text: Category
+          - href: datatypes/enum.qmd
+            text: Enum
+          - href: datatypes/dateparts.qmd
+            text: DateParts
+          - href: datatypes/branch.qmd
+            text: Branch
+          - href: datatypes/hash.qmd
+            text: Hash
+          - href: datatypes/set.qmd
+            text: Set
+          - href: datatypes/text.qmd
+            text: Text
+          - href: datatypes/vector.qmd
+            text: Vector
+          - href: datatypes/quantile.qmd
+            text: Quantile
+          - href: datatypes/cluster.qmd
+            text: Cluster
+          - href: datatypes/custom-tensorfields.qmd
+            text: Custom tensorfields
+      - section: Reference
+        contents:
+          - href: reference/model-presets.qmd
+            text: Model presets
+          - href: reference/prediction-output.qmd
+            text: Prediction output
+          - href: reference/jitter.qmd
+            text: Jitter
+          - href: reference/api-map.qmd
+            text: API map
+          - href: reference/troubleshooting.qmd
+            text: Troubleshooting
+      - href: evidence.qmd
+        text: Evidence
+  page-footer:
+    border: true
+    left: Grantham Taylor
+    right:
+      - text: GitHub
+        icon: github
+        href: https://github.com/relflow/relflow
+      - text: Discord
+        icon: discord
+        href: https://discord.gg/DVyZUkvTFA
+      - text: LinkedIn
+        icon: linkedin
+        href: https://www.linkedin.com/in/granthamtaylor
+      - text: YouTube
+        icon: youtube
+        href: https://www.youtube.com/@relflow-ai
+  search: true
+
+format:
+  html:
+    css:
+      - assets/stylesheets/branding.css
+      - assets/stylesheets/layout.css
+    include-in-header: assets/color-scheme.html
+    include-after-body: assets/sidebar.html
+    theme:
+      light:
+        - flatly
+        - assets/stylesheets/theme-light.scss
+      dark:
+        - darkly
+        - assets/stylesheets/theme-dark.scss
+    toc: false
+    code-copy: true
+    code-overflow: scroll
+    respect-user-color-scheme: true
+
+engine: markdown
+execute:
+  enabled: false
+  eval: false
+
+filters:
+  - typst-render
+  - path: assets/filters/evidence-diagrams.lua
+    at: post-quarto
+  - path: assets/filters/tables.lua
+    # Include evidence tables inserted by evidence shortcodes.
+    at: post-quarto
+
+extensions:
+  typst-render:
+    root: /
+    format: svg
+    background:
+      light: none
+      dark: "#181c1b"
+    output-directory: /assets/diagrams
+    preamble: /assets/typst/preamble.typ

@@ -1,0 +1,24 @@
+<script>
+  for (const label of document.querySelectorAll('#quarto-sidebar .sidebar-item-text[data-bs-toggle="collapse"]')) {
+    if (label.hasAttribute("href")) continue;
+
+    const button = document.createElement("button");
+    for (const { name, value } of label.attributes) {
+      if (name !== "role") button.setAttribute(name, value);
+    }
+    button.type = "button";
+    button.classList.add("sidebar-item-toggle", "sidebar-section-toggle");
+    button.setAttribute("aria-controls", label.getAttribute("data-bs-target").slice(1));
+    button.append(...label.childNodes);
+
+    const toggle = label.parentElement.querySelector(".sidebar-item-toggle");
+    const icon = toggle?.querySelector(".bi-chevron-right");
+    if (icon) {
+      icon.classList.remove("ms-2");
+      icon.setAttribute("aria-hidden", "true");
+      button.append(icon);
+    }
+    toggle?.remove();
+    label.replaceWith(button);
+  }
+</script>

@@ -1,0 +1,64 @@
+name: Validate and publish documentation
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Validate and render static documentation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: docs/uv.lock
+      - name: Install documentation tools
+        run: uv sync --locked --project docs
+      - name: Check sources and evidence publication
+        run: make check
+      - name: Render and validate every page
+        run: make check-docs
+      - name: Upload review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-site
+          path: docs/site
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload Pages artifact
+        if: vars.PUBLISH_PAGES == 'true' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs/site
+
+  deploy:
+    name: Deploy main documentation
+    needs: build
+    if: vars.PUBLISH_PAGES == 'true' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - name: Publish validated site
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,182 @@
+---
+title: Customer outcomes
+description: "Define customer inactivity, review engagement, and future spending from customer attributes and related events."
+engine: markdown
+---
+
+Suppose you have a retailer's customer profiles, transaction records, and
+article metadata. You want to estimate which recently active customers will
+stop purchasing for a week, to help a team prioritize contact. Customer
+attributes and individual purchases provide possible context: what someone
+bought, through which channel, and how long before the decision it occurred.
+
+This page proposes a retail application with illustrative records. It extends
+the [account-outcome pattern](../learn/nested-context-and-account-outcomes.qmd)
+to customers; it does not report a measured retention result.
+
+## Define one customer decision
+
+At each daily cutoff, select customers with at least one purchase in
+the preceding seven days. Prepare one observation per eligible customer and
+cutoff. The target `inactive_next_7_days` is true when that customer makes no
+purchase after the cutoff through seven days later.
+
+This is the short-term inactivity formulation in
+[RelBench's H&M customer-churn task](https://github.com/snap-stanford/relbench/blob/v1.1.0/relbench/tasks/hm.py#L63-L111).
+Its recent-activity requirement is part of the task: a customer who last
+purchased a year ago is outside this scoring population. Seven days without a
+purchase also need not mean that a customer has permanently left.
+
+Join each transaction to the article attributes available at the cutoff. Keep
+the transaction's amount, article, channel, and booking time together in one
+record. Customer attributes belong at the root, with their values as known at
+that decision. Preserve the customer identifier and cutoff alongside each
+observation so results can be associated with the correct decision.
+
+## One observation and its model
+
+For a cutoff of May 28, 2026 at noon UTC, this illustrative training observation
+contains two purchases known then. Its label is attached after June 4 at noon,
+once the complete seven-day outcome window is available:
+
+```yaml
+customer_id: customer-42
+cutoff: "2026-05-28T12:00:00Z"
+customer_age: 34
+club_member_status: ACTIVE
+recent_purchases:
+  - booked_at: "2026-05-22T12:00:00Z"
+    age_days: 6
+    article_id: article-17
+    article_group: knitwear
+    amount: 32.00
+    sales_channel: online
+  - booked_at: "2026-05-26T12:00:00Z"
+    age_days: 2
+    article_id: article-03
+    article_group: trousers
+    amount: 56.20
+    sales_channel: store
+inactive_next_7_days: true
+```
+
+`customer_id` and `cutoff` identify the snapshot for retention and downstream
+joins. They stay outside the model fields declared below.
+
+Declare numeric and categorical inputs, a collection of purchase records,
+and a Boolean customer target at the root. RelFlow builds the corresponding
+encoders and prediction output from this task schema:
+
+```python
+import relflow as rf
+
+model = rf.Model.sm(
+    customer_age=rf.Number,
+    club_member_status=rf.Category,
+    recent_purchases=rf.Branch(
+        length=32,
+        overflow="tail",
+        booked_at=rf.DateParts(
+            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
+        ),
+        age_days=rf.Number,
+        article_id=rf.Category,
+        article_group=rf.Category,
+        amount=rf.Number,
+        sales_channel=rf.Category,
+    ),
+    inactive_next_7_days=rf.Boolean(mask=True),
+)
+```
+
+Your application orders purchases oldest to newest; the branch retains the
+latest 32 whole records. The model can use article, amount, and channel jointly
+within each purchase, alongside the customer's other purchases. `booked_at`
+provides calendar cycles. The application-supplied `age_days` expresses elapsed
+time from each booking to the cutoff; calendar cycles alone do not express it.
+
+`mask=True` excludes the future inactivity label from the inputs and uses it
+as supervision. New requests contain the same customer context and purchases
+with `inactive_next_7_days` omitted. Prepare application-owned Parquet files
+and follow [Train and save](../learn/train-and-save.qmd),
+[Data modules](../guides/data-modules.qmd), and
+[Read predictions](../learn/read-predictions.qmd) for the training and
+prediction workflow.
+
+After fitting this schema on your application's training and validation
+files, save the trained model:
+
+```python
+model.save("artifacts/customer-outcomes.rf")
+```
+
+[Representation learning](representation-learning.qmd) uses that
+application-produced artifact to explore reuse of the customer context.
+
+## Compare the contact decisions
+
+Start with the training population's inactivity rate. Then build a flat
+baseline from purchase recency, frequency, spending, and channel summaries,
+using a simple classifier or a boosted tree. Compare it with the nested model
+on the same customers, cutoffs, histories, and settled labels. A comparison
+with extra history available to only one model answers a different question.
+
+Use later decision windows for validation and a separate later test period.
+At each historical model-fit time, use only training labels whose complete
+outcome windows and reporting delays would have finished by then. Keep those
+windows from straddling split boundaries. If the same customer appears at
+many cutoffs, report whether the test measures later behavior of existing
+customers or performance on unseen customers.
+
+AUROC measures ranking across thresholds; average precision helps assess
+ranking when inactivity is uncommon. Also evaluate calibration and precision
+or recall at the team's actual contact budget. These checks connect a score
+to the proposed outreach policy. Predicting inactivity does not establish
+which customers benefit from contact; measure that effect with an
+intervention evaluation. [Evaluation](../learn/evaluation.qmd) covers temporal
+splits and baseline comparisons.
+
+## Change the outcome deliberately
+
+For **review engagement**, select customers who posted a review in the previous
+91 days, then label whether they post no review in the following 91 days.
+Use customer attributes and an earlier-review branch containing product,
+rating, and review date. This follows the review-activity definition in
+[RelBench's Amazon customer-churn task](https://github.com/snap-stanford/relbench/blob/v1.1.0/relbench/tasks/amazon.py#L18-L67).
+It measures participation in the review channel: purchasing can continue
+without a review. Review recency and frequency provide useful baselines for a
+policy that prioritizes invitations for feedback.
+
+For **future spending**, a retailer with complete transaction records could
+instead define `spend_next_30_days` as the sum of purchase amounts during the
+next 30 days and use a masked `rf.Number` target. Fix currency, refund handling,
+and whether the outcome is gross purchases or net revenue before preparing
+labels. Compare a training-label median and a recent-spending baseline, then
+report MAE in the chosen currency. A 30-day spend estimate has a finite horizon;
+calling it lifetime value would require a different definition.
+
+Both variants change the business question, label construction, and evaluation.
+Reusing the customer-and-events input pattern does not establish their
+predictability. To adapt a trained model, change its target schema, retain
+compatible learned state under the
+[schema-mutation rules](../guides/schema-mutation.qmd), and fit and evaluate
+the new task. Adding an outcome still requires its own settled labels.
+
+## Check what the history leaves out
+
+The scoring population excludes customers without a purchase in the eligibility
+window. Missing channels and delayed transactions can turn an apparent absence
+into a false inactivity label. Historical membership status and article
+attributes must use their values known at the cutoff. Empty history, incomplete
+coverage, and a genuine lack of activity require distinct preparation rules.
+
+The 32-purchase cap is an illustrative resource choice; check how often it
+truncates customer histories and whether older purchases matter. Nested input
+volume still affects memory and serving cost. See
+[Prepare observations](../learn/prepare-observations.qmd),
+[Preprocessing](../guides/preprocessing.qmd), and
+[Performance](../guides/performance.qmd) before choosing production limits.
+
+To turn related tables into deeper observations, continue with
+[Relational prediction](relational-prediction.qmd). To rank specific articles
+for a customer, see [Recommendations](recommendations.qmd).

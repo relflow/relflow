@@ -1,0 +1,50 @@
+/*-- scss:defaults --*/
+
+// One palette for the whole site, taken from the diagram renderer: a navy
+// chrome, one interactive blue, warm greenish neutrals for every surface and
+// border, and the logo's green as the only accent.
+
+$web-font-path: false;
+$font-family-sans-serif: system-ui, sans-serif;
+
+$body-bg: #ffffff;
+$body-color: #243029;
+$headings-color: #1b2621;
+$border-color: #ccd6cf;
+
+$primary: #375275;
+$link-color: #4679bc;
+$navbar-bg: #223144;
+$footer-bg: #f9faf7;
+$footer-fg: #35463b;
+$sidebar-hl: #4679bc;
+$toc-active-border: #4679bc;
+
+$code-color: #35463b;
+$code-bg: #eef2ee;
+$code-block-bg: #f9faf7;
+
+// One sidebar text size at every depth; hierarchy comes from indentation.
+$sidebar-font-size: 0.9rem;
+$sidebar-font-size-section: 0.9rem;
+$sidebar-font-size-collapse: 1rem;
+$sidebar-font-size-section-collapse: 1rem;
+
+/*-- scss:rules --*/
+
+:root {
+  --rf-surface: #f9faf7;
+  --rf-border: #ccd6cf;
+  --rf-accent: #94aa83;
+}
+
+.navbar-logo { max-height: 3rem; }
+
+.callout {
+  background-color: #f9faf7;
+  border-left-color: #94aa83;
+}
+
+.callout.callout-warning {
+  border-left-color: #d8b47e;
+}

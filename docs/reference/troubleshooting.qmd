@@ -1,0 +1,58 @@
+---
+title: Troubleshooting
+description: "Symptoms, the check to make first, and how to separate event logs from metrics."
+---
+
+Start with the error's schema address and the smallest affected observation.
+For a transaction amount error, inspect that payment and its
+`/trxns/amount` field after preprocessing. Confirm its structure
+against the schema before changing model capacity or optimization settings.
+
+| Symptom | Check |
+| --- | --- |
+| Constructor rejects an option | Use declared options; parents supply field names. Put notes in `description`. |
+| An input path cannot bind | Names and nesting must match, or the node needs an explicit structural `query`. |
+| A collection exceeds a finite limit | Check `length` and choose the intended `overflow` rule. |
+| Unbounded-branch warning or unexpectedly large batches | Set finite branch lengths and request-size limits; row batch size does not bound nested collections. |
+| Overflow is rejected without a length | Add a finite `length` or remove `overflow`. |
+| A mask selector fails | It must return one non-null Boolean per retained owner record. |
+| Fitting reports no objectives | Add `mask=True` or `Mask(reconstruct=True)` to an active supported field. |
+| Native `lit.Trainer` reports a missing optimizer | Configure `model.optimizer = rf.adamw(learning_rate=1e-3)` for direct Trainer use; ordinary `model.fit(...)` configures AdamW itself. |
+| AdamW options conflict with a configured optimizer | Use direct `fit(...)` options without a separate `model.optimizer` assignment, or configure the explicit optimizer factory instead. |
+| An optimizer or scheduler refers to replaced parameters | Start an ordinary fit on the current model, or supply custom factories that bind its current parameters and optimizer. |
+| A data module is not bound to a model | Pass it to a model loop, or call `bind(model)` before direct loader access outside a loop. |
+| A data module belongs to a different model | Construct a new module for that model; binding is single-owner, including for separately loaded copies. |
+| EMA rejects a checkpoint callback | Set `save_weights_only=False`; optimizer-consistent EMA resumes require full checkpoints. |
+| An attention checkpoint reports missing parameters | Check [checkpoint compatibility](../guides/checkpoints-ema-and-resuming.qmd#checkpoint-compatibility); saved weights must match the loading architecture. |
+| Training batches have no selected targets | Check masks, source presence, and target geometry; those batches are skipped. |
+| Expected decoded output is absent | Fractional reconstruction policies are inactive in ordinary prediction; use deterministic reconstruction to request outputs. |
+| Too many or too few embeddings | Inspect representation paths, ancestor coordinates, and output indices; summary counts need not equal item counts. |
+| Prediction reports no public outputs | Select a field with decoded public output or set `embed=True`; reconstruction alone does not guarantee a writable value. |
+| Parquet rejects a fixed-size list beneath a null container | Preserve the structure using Arrow IPC; see [Batch inference](../guides/batch-inference.qmd#fixed-size-vectors-and-null-containers). |
+| Mutation is rejected during a loop | Move the edit outside forward, predict, or Lightning execution. |
+| Compilation disappears after a change | Mutations and checkpoint rebuilds clear it; call `compile()` again. |
+
+Use [Prepare observations](../learn/prepare-observations.qmd),
+[Masking and reconstruction](../concepts/masking-and-reconstruction.qmd), and
+[Reusable representations](../learn/reusable-representations.qmd) for those contracts.
+
+## Separate events from metrics
+
+Model construction, mutation, checkpoint restoration, and numerical safeguards
+produce operational logs. Set `RELFLOW_LOG_LEVEL` before import or configure the
+logger directly:
+
+```python
+from relflow.logging import configure
+
+configure(level="DEBUG")
+```
+
+Supported levels are `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `CRITICAL`.
+This controls relflow event logging. Lightning experiment loggers, progress
+bars, and [evaluation metrics](../learn/evaluation.qmd) have their own configuration.
+
+When isolating a failure, retain the original field types, relevant nested
+structure, and mask selectors. Dropping a containing branch can change target
+geometry, while replacing a null with a missing key can change value state.
+Use the reported invariant to make the smallest meaningful correction.

@@ -1,0 +1,82 @@
+---
+title: DateParts
+description: "Recurring calendar patterns from a timestamp, such as weekday and hour."
+---
+
+`DateParts` represents recurring calendar patterns from a timestamp. In this
+payment example, `booked_at` supplies the weekday and hour as context for
+predicting a later dispute. Whether those patterns help is a question for
+held-out evaluation. The [transaction sequence](../learn/add-transaction-history.qmd)
+uses this field on every transaction, including the latest one. Calendar
+cycles and sequence order supply different evidence; neither is an exact
+elapsed duration.
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    amount=rf.Number,
+    merchant=rf.Category,
+    booked_at=rf.DateParts(dateparts=["day_of_week", "hour_of_day"]),
+    disputed=rf.Boolean(mask=True),
+)
+```
+
+One labeled payment:
+
+```yaml
+amount: 84.50
+merchant: North Market
+booked_at: "2026-05-28T14:30:45"
+disputed: false
+```
+
+## Input and options
+
+Accepts Arrow date, timestamp, or string values. Strings are parsed by Arrow
+using `pattern` when supplied; otherwise Arrow casts them to timestamps.
+Calendar extraction uses second-resolution timestamps. Naive timestamps are
+read as wall-clock time, and zone-aware timestamps are read in their own zone,
+so `hour_of_day` and `day_of_week` describe local time. Strings that carry an
+offset are normalized to UTC by Arrow before parts are taken; give such
+columns a zone upstream instead.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `dateparts` | required | Nonempty, unique list of parts; casing and separators are normalized. |
+| `pattern` | `None` | Optional strptime-style format for Arrow string parsing. |
+| `jitter` | `rf.Jitter()` | Training noise on the generated sine/cosine coordinates. |
+
+| Part | Period |
+| --- | ---: |
+| `day_of_year` | 366 |
+| `week_of_year` | 53 |
+| `month_of_year` | 12 |
+| `day_of_month` | 31 |
+| `week_of_month` | 6 |
+| `day_of_week` | 7 |
+| `hour_of_day` | 24 |
+| `minute_of_hour` | 60 |
+| `second_of_minute` | 60 |
+
+## Representation and output
+
+Each part becomes a sine/cosine pair: the end of a cycle is near its beginning.
+relflow projects each pair and combines the results with a state embedding.
+Null, padded, and masked content is zero; state remains separate.
+
+[Jitter](../reference/jitter.qmd) changes the circle coordinates, not the
+timestamp, and does not renormalize noisy pairs. Its magnitude is measured in
+coordinate units. Both settings of `jitter.normalize` use this same boundary.
+
+Reconstruction learns state cross entropy and mean per-part cosine distance.
+The per-part `mae` metric is angular error in radians, not elapsed time.
+
+DateParts has no decoded public content and does not generate timestamps.
+Use `embed=True` for a contextual embedding; see
+[shared leaf options](index.qmd#shared-leaf-options).
+
+The [month-inference evidence](../evidence/temporal/month-from-day-of-year.html)
+tests a recurring relationship on withheld dates and years. The
+[leap-boundary evidence](../evidence/temporal/leap-boundary-requires-context.html)
+shows how selecting too few calendar coordinates can make the answer ambiguous.

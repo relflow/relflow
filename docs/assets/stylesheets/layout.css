@@ -1,0 +1,197 @@
+#quarto-document-content figcaption.quarto-float-fig {
+  text-align: center;
+}
+
+#quarto-document-content .table-responsive {
+  max-width: 100%;
+  margin-bottom: 1rem;
+}
+
+#quarto-document-content .table-responsive > table {
+  margin-bottom: 0;
+}
+
+#quarto-document-content .table-responsive:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+
+#quarto-document-content .math.display {
+  display: block;
+  overflow-x: auto;
+}
+
+#quarto-document-content .math.display mjx-container {
+  /* Keep the left edge of a wide, centered equation inside its scroll area. */
+  min-width: min-content;
+}
+
+#quarto-document-content :not(pre) > code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+#quarto-document-content table code {
+  white-space: pre-wrap;
+  overflow-wrap: normal;
+}
+
+#quarto-document-content .evidence-diagram {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+#quarto-document-content .evidence-diagram:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+
+@media (max-width: 767.98px) {
+  #quarto-document-content .evidence-diagram {
+    text-align: left;
+  }
+
+  #quarto-document-content .evidence-diagram > img {
+    max-width: none;
+  }
+}
+
+#quarto-document-content .evidence-result {
+  border-left: 3px solid var(--bs-border-color);
+  padding-left: 1rem;
+  margin-bottom: 1rem;
+}
+
+#quarto-document-content .evidence-result-warning {
+  border-color: var(--bs-warning);
+}
+
+#quarto-sidebar .sidebar-section-toggle {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+#quarto-sidebar .sidebar-section-toggle .menu-text {
+  min-width: 0;
+}
+
+#quarto-sidebar .sidebar-section-toggle:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+  border-radius: 0.125rem;
+}
+
+/* Landing page. Surfaces and accents come from the diagram palette, through
+   variables each theme defines, so light and dark stay coherent. */
+body.home .quarto-title-breadcrumbs {
+  display: none !important;
+}
+
+body.home #title-block-header {
+  margin-top: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+body.home .quarto-title .title {
+  font-size: 3.25rem;
+  line-height: 1.1;
+}
+
+body.home .quarto-title .subtitle {
+  font-family: "Libertinus Serif", serif;
+  font-weight: 600;
+  font-size: 1.55rem;
+  line-height: 1.3;
+  max-width: 40rem;
+  margin-top: 0.75rem;
+  color: var(--bs-body-color);
+  opacity: 0.85;
+}
+
+body.home .lead {
+  max-width: 44rem;
+  font-size: 1.15rem;
+  line-height: 1.6;
+}
+
+body.home .home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 1.5rem 0 1rem;
+}
+
+body.home .home-actions .btn {
+  padding: 0.6rem 1.15rem;
+  border-radius: 0.5rem;
+  font-weight: 500;
+}
+
+body.home main.content > section.level2 > h2 {
+  margin-top: 3rem;
+}
+
+body.home .home-code,
+body.home .home-promises {
+  margin-top: 1.5rem;
+}
+
+body.home .home-code pre {
+  margin-bottom: 1rem;
+}
+
+body.home .home-promises > section {
+  margin: 0;
+  padding: 1.25rem 1.4rem 1.1rem;
+  background: var(--rf-surface);
+  border: 1px solid var(--rf-border);
+  border-top: 3px solid var(--rf-accent);
+  border-radius: 8px;
+}
+
+body.home .home-promises > section > h3 {
+  font-family: "Libertinus Serif", serif;
+  font-weight: 600;
+  font-size: 1.3rem;
+  line-height: 1.25;
+  margin: 0 0 0.6rem;
+  border: 0;
+}
+
+body.home .home-promises > section > p {
+  margin-bottom: 0;
+}
+
+body.home .home-promises > section > h3 .anchorjs-link {
+  display: none;
+}
+
+body.home .quarto-figure {
+  margin-top: 1.25rem;
+}
+
+body.home .quarto-figure img {
+  width: 100%;
+}
+
+body.home .column-screen-inset-right + p {
+  margin-top: 1.5rem;
+}
+
+/* Code blocks share the surface and border of cards and diagrams. */
+#quarto-document-content div.sourceCode {
+  background-color: var(--rf-surface);
+  border: 1px solid var(--rf-border);
+  border-radius: 6px;
+}

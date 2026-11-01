@@ -1,0 +1,180 @@
+---
+title: Your first model
+description: "Predict whether a payment will be disputed from its amount and merchant."
+engine: markdown
+---
+
+Suppose you have historical payment records and a risk team deciding which
+new payments deserve review just after they are booked. Each dataset row
+describes one payment's amount, merchant, and settled dispute outcome. The
+question is: will a dispute be reported in the 30 days after that review
+decision?
+
+Historical outcomes provide training labels. New payments supply only the
+amount and merchant known at the decision time; their outcomes are still
+unknown.
+
+Begin with the relationship between amount, merchant, and the later outcome
+across past payments. This first model has no account history. The next
+tutorial puts this payment and its predecessors in one transaction branch,
+with a dispute target on every item.
+
+## Before you start
+
+You need Python 3.11 or newer and historical payments with known outcomes.
+Install relflow in your project. If you use uv:
+
+```bash
+uv add relflow
+```
+
+In another Python environment, use `python -m pip install relflow`. Run the
+Python blocks below in order in your application script or notebook.
+
+The examples use files supplied by your application. Parquet is a table file
+format that preserves column types and nested records. The YAML blocks show
+what one row contains; they illustrate the data rather than supply files to
+train on. Use representative historical payments with settled outcomes for
+the training and validation files.
+
+## Describe one payment
+
+An **observation** is one example the model learns from or scores. Here it is
+one payment: its amount and merchant are the **inputs**, and its later dispute
+outcome is the **target** to predict. In a historical training record, that
+observed answer is also called its **label**:
+
+```yaml
+payment_id: payment-42
+amount: 84.50
+merchant: North Market
+disputed: false
+```
+
+`false` means the 30-day window finished without a dispute; `true` means a
+dispute was reported in that window. A payment still waiting for its outcome
+is not ready to be a negative training example.
+
+`payment_id` is an application identifier for joining a prediction back to
+its payment. The model reads only the fields you declare below, so this
+identifier stays outside its inputs.
+
+## Define the fields
+
+Declare those two inputs and the hidden outcome in a small model:
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    amount=rf.Number,
+    merchant=rf.Category,
+    disputed=rf.Boolean(mask=True),
+)
+```
+
+`Number` represents the amount, `Category` represents the merchant, and
+`Boolean` represents the yes-or-no outcome. `mask=True` marks `disputed` as
+a prediction target: the model learns from its value without seeing it as
+an input. `Model.xs` selects a small capacity preset and creates a fresh,
+untrained model.
+
+The names on the left of `=` come from your records. `amount`, `merchant`,
+and `disputed` are names chosen for this example; you can choose other names
+for your own fields. For example, if your records call the amount
+`total_paid`, write `total_paid=rf.Number`. The name selects the value to read;
+the datatype on the right determines how to represent it, and `mask=True`
+determines whether to predict it.
+
+Together these declarations form the **schema**: the field names, datatypes,
+structure, and targets. RelFlow acts as a **model factory**: calling
+`rf.Model.xs(...)` generates a custom neural architecture from those
+declarations, using the chosen preset for capacity. Adding fields or nesting
+them in branches changes the model it builds. Training then learns the
+weights and data-dependent state, such as the merchant vocabulary and amount
+normalization. [How declarations become a model](../concepts/model-tree.qmd#how-declarations-become-a-model)
+explains the construction process.
+
+```{typst}
+//| label: fig-first-payment
+//| fig-alt: "This example's payment record contains amount and merchant input fields, and a disputed Boolean prediction target."
+//| fig-cap: "Two input fields support one prediction."
+#tree(node("payment", kind: "root", children: (
+  node("amount", type: "Number"),
+  node("merchant", type: "Category"),
+  node("disputed", kind: "target", type: "Boolean"),
+)))
+```
+
+## Train the model
+
+Use your application's Parquet files, with one payment per row and the three
+model fields above. If your data needs preparation first, follow
+[Prepare observations](prepare-observations.qmd). Train on earlier payments and validate on a later period;
+both splits include the observed `disputed` labels. The **training split**
+teaches the model. The separate **validation split** measures predictions on
+examples that do not update its learned parameters, helping select the best
+training checkpoint.
+
+```python
+data = rf.ArrowDataModule(
+    train="payments/flat/train.parquet",
+    validate="payments/flat/validation.parquet",
+)
+model.fit(data, batch_size=128, max_epochs=20)
+```
+
+`batch_size=128` sets the number of payments per training batch on each device.
+A **batch** is a group of observations processed together, and an **epoch**
+is one pass through the training data. `max_epochs=20` allows up to 20 passes.
+`fit` updates this model's learned state; constructing it alone does not learn
+from the record shown above. relflow configures the training loop, stops early
+when validation loss stops improving, and restores the best validation
+checkpoint. Loss measures prediction error; lower validation loss is the
+selection criterion used here.
+
+Hardware is selected automatically. For a CPU run, add `accelerator="cpu"`
+and `devices=1` to `fit`; [Training options](../guides/training-options.qmd)
+covers explicit hardware and training settings.
+
+## Keep the trained model
+
+After fitting, save the model for later scoring:
+
+```python
+model.save("artifacts/payment-flat.rf")
+```
+
+The artifact stores the schema and learned model state so another process can
+load it for prediction. [Train and save](train-and-save.qmd) explains artifacts
+and checkpoints in more detail.
+
+## Predict new payments
+
+The request file contains `payment_id`, `amount`, and `merchant`. It omits `disputed`,
+because that is the outcome you want to predict.
+
+```python
+requests = rf.ArrowDataModule(
+    predict="payments/flat/requests.parquet",
+)
+predictions = model.predict(datamodule=requests, batch_size=256, devices=1)
+```
+
+`devices=1` collects the predictions on one device. `predictions` is an Arrow
+table, a column-oriented table that can also contain nested records. It has
+one row per request, with the target under `predictions.disputed`. To inspect
+the first payment's estimated dispute probability:
+
+```python
+first = predictions.slice(0, 1).to_pylist()[0]
+dispute_probability = first["predictions"]["disputed"]["content"]["probability"]
+```
+
+[Read predictions](read-predictions.qmd) shows the full result and how to keep
+payment identifiers. [Evaluation](evaluation.qmd) explains how to assess these
+scores before choosing which payments to review.
+
+Next, [add transaction history](add-transaction-history.qmd) to move the
+payment fields into `trxns` and score each transaction using the shared
+account context.

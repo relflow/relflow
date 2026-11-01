@@ -1,0 +1,153 @@
+---
+title: Recommendations
+description: "Score an eligible product or content candidate using customer context and earlier interactions."
+engine: markdown
+---
+
+Suppose an online shop has customer interaction logs, product metadata, and
+records of the products actually displayed in each recommendation request.
+It wants to rank eligible products for the next display. One observation
+will describe a customer, one candidate product, and the history known when
+that candidate was displayed.
+
+For this design, `clicked_in_session` is true if the customer clicked that
+logged impression before the session ended. A displayed product with no click
+receives `false` after the observation window closes. The task is candidate
+scoring from logged feedback.
+
+## Describe one candidate decision
+
+At the cutoff immediately before the display, the candidate's price and
+category are known. The history contains only earlier interactions; the
+current impression and its later click are outside it. For example:
+
+```yaml
+candidate_item_id: item-42
+candidate_category: running_shoes
+candidate_price: 89.00
+events:
+  - at: "2026-05-28T09:00:00Z"
+    age_hours: 1
+    item_id: item-17
+    category: running_shoes
+    action: view
+  - at: "2026-05-28T09:45:00Z"
+    age_hours: 0.25
+    item_id: item-42
+    category: running_shoes
+    action: cart
+clicked_in_session: true
+```
+
+This historical training row has a 10:00 cutoff. Its label is attached after
+the session closes. Keep a request identifier, impression identifier, customer
+identifier, and cutoff alongside the model fields so candidate scores can be
+grouped back into the right ranking decision.
+
+## Build a candidate scorer
+
+Declare the candidate's field types, the repeated interaction context, and
+the click objective together. These declarations generate the neural scorer
+for this observation structure:
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    candidate_item_id=rf.Hash,
+    candidate_category=rf.Category,
+    candidate_price=rf.Number,
+    events=rf.Branch(
+        length=64,
+        overflow="tail",
+        reduction=None,
+        at=rf.DateParts(dateparts=["day_of_month", "day_of_week", "hour_of_day"]),
+        age_hours=rf.Number,
+        item_id=rf.Hash,
+        category=rf.Category,
+        action=rf.Enum(values=("view", "cart", "purchase")),
+    ),
+    clicked_in_session=rf.Boolean(mask=True),
+)
+```
+
+The candidate fields describe what is being ranked; the event branch supplies
+the customer's earlier behavior. Order events oldest to newest so the cap
+retains the latest 64. Matching Hash configurations provide an
+identity-equality signal between a candidate and history items, including
+IDs absent from training. Category fields provide learned categorical context;
+price, actions, and elapsed time add other evidence.
+
+`reduction=None` keeps the history's encoded tokens available at the root for
+candidate comparisons. It increases the root's token count and compute cost.
+A reduced history is another configuration to evaluate, but a compact summary
+can lose item-level identity detail. The
+[identity](../datatypes/hash.qmd) and
+[retrieval capacity evidence](../evidence/relational/retrieval-capacity.html)
+explain why an equality representation alone does not guarantee successful
+retrieval.
+
+Prediction requests omit `clicked_in_session`. Each row returns that
+candidate's score under `predictions.clicked_in_session`. The application
+scores an eligible candidate set, groups results by request, and sorts them.
+Evaluate probability calibration separately if the numeric score is used as
+a click-rate estimate. After training and validation, the saved scorer can
+serve these predictions through the [HTTP interface](../guides/serving.qmd)
+in the application's serving infrastructure.
+
+## Keep retrieval and ranking explicit
+
+A large catalog usually needs a candidate-generation stage before an expensive
+scorer evaluates a smaller set. The separation is illustrated by
+[YouTube's candidate-generation and ranking design](https://research.google/pubs/deep-neural-networks-for-youtube-recommendations/).
+For this example, your application supplies that candidate set using its
+catalog, availability rules, and existing retrieval method.
+
+The model declaration constructs a scorer for the supplied rows. Candidate
+retrieval, diversity rules, inventory filtering, and final list assembly
+remain application decisions. Scoring many candidates also repeats customer
+context across rows; measure that cost at the actual candidate count.
+
+Exported context vectors can support experiments with separate retrieval
+systems, but their similarity must be evaluated for that purpose. See
+[Representation learning](representation-learning.qmd).
+
+## Construct labels from the available feedback
+
+An item that was never displayed has no observed click outcome for that
+impression task. Define negatives from displayed, unclicked impressions, or
+explicitly formulate a different sampled-candidate objective and record its
+sampling policy. For rating prediction, a missing rating is not a zero rating.
+
+Preserve which candidates were eligible, displayed, and at which positions.
+Historical exposure reflects the previous system's decisions. Offline scores
+therefore describe the logged feedback population, and may change when the
+serving policy changes. This selection issue is discussed in
+[Recommendations as Treatments](https://proceedings.mlr.press/v48/schnabel16.html).
+Use a controlled online evaluation to assess changes in customer behavior.
+
+Split by later requests and keep all candidates from a request together.
+Construct every history at that request's cutoff. Report performance for
+returning users, new users, familiar items, and new items when those cohorts
+matter. The item metadata supplies context for unfamiliar IDs; identity alone
+does not describe a new product's appeal.
+
+## Compare complete ranked decisions
+
+Start with popularity or recent category preference, then compare with an
+existing candidate scorer using the same feedback and candidate sets.
+For a next-item retrieval experiment, compare with a suitable collaborative
+filtering baseline as well. Keep the objective and negative-sampling policy
+consistent across the comparison.
+
+Evaluate ranking within each request using metrics such as NDCG@K and recall@K,
+with an explicit relevance definition. Impression-level AUROC or log loss
+alone does not measure a complete top-K list. Observe latency and memory at
+the chosen history length, candidate count, and traffic volume.
+
+The same structure can score content, offers, or marketplace listings when
+their eligibility, feedback, and exposure are defined. A purchase target
+needs its own attribution window; changing the label from a click to a purchase
+changes the task. Follow [Prepare observations](../learn/prepare-observations.qmd)
+and [Train and save](../learn/train-and-save.qmd) with application-owned files
+for that schema.

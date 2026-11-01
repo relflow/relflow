@@ -1,0 +1,242 @@
+---
+title: Training options
+description: "Logging, validation cadence, loops, batch size, optimization, and local distributed training."
+---
+
+[Train and save](../learn/train-and-save.qmd) covers the first run: one
+`model.fit(...)` call that binds the data, selects hardware, stops early, and
+restores the best checkpoint. This guide expands on that call: logging and
+validation cadence, loops, batch size, optimization, and
+local distributed training. Saving, parameter averaging, and resuming have
+their own page, [Checkpoints, EMA, and resuming](checkpoints-ema-and-resuming.qmd).
+
+## Fit a model
+
+Continue with the [transaction-history model](../learn/add-transaction-history.qmd)
+and independent, application-supplied Parquet files at `payments/history/train.parquet`
+and `payments/history/validation.parquet`. Each row keeps the latest payment and its
+predecessors together in `trxns`. Every transaction has a supervised
+`disputed` label, kept out of the input by `mask=True`.
+
+```python
+import relflow as rf
+
+datamodule = rf.ArrowDataModule(
+    train="payments/history/train.parquet",
+    validate="payments/history/validation.parquet",
+)
+model.fit(
+    datamodule,
+    batch_size=128,
+    learning_rate=1e-4,
+    weight_decay=0.01,
+    max_epochs=30,
+    checkpoint_dir="checkpoints/payments",
+)
+```
+
+For eager Polars frames, use `rf.PolarsDataModule`. It converts the frames to Arrow
+at ingress. See [Data modules](data-modules.qmd) for source and split choices.
+Each loop binds an unbound data module to its model before loading. See
+[automatic binding](data-modules.qmd#bind-a-model-when-the-loop-starts) for ownership
+and native Lightning behavior.
+
+Early stopping and rollback are enabled by default. Both monitor `loss/validate`
+in `min` mode; patience is ten validation checks and `min_delta` is zero. Full
+best and last checkpoints are saved. Without `checkpoint_dir`, the run uses a
+unique directory under `default_root_dir/checkpoints`. Fitting restores the best
+model state, including schema, vocabularies, and normalizers, before returning
+the model. Read [Evaluation](../learn/evaluation.qmd) before choosing a monitor.
+
+## Report progress and validate
+
+`Model.track` uses Lightning's native logging: training metrics are logged only
+per step. `log_every_n_steps`, defaulting to 50, controls
+how often attached loggers receive step metrics. Step values describe the latest
+batch, rather than an average over that interval. With gradient accumulation,
+logging follows optimizer updates. Set `log_every_n_steps=0` to disable step
+emission while retaining internal loss averages and validation/test metrics.
+
+Training metrics keep their names, such as `loss/train` and
+`.trxns.disputed/train.loss.content`. The training loss average is available to
+callbacks as `loss/train_epoch` and is not sent to attached loggers. Validation
+and test retain pass aggregates; `loss/validate` remains the default checkpoint
+and early-stopping monitor. `Model.track(..., on_epoch=True)` explicitly opts
+into epoch logging for a custom metric. More frequent logging does not run validation, save
+checkpoints, change patience, or advance schedulers. See
+[Evaluation](../learn/evaluation.qmd) for metric definitions.
+
+With a Lightning logger configured by your application as `application_logger`:
+
+```python
+model.fit(datamodule, logger=application_logger, log_every_n_steps=50)
+```
+
+For learning-rate logging, add Lightning's `LearningRateMonitor` to `callbacks`.
+
+Validation normally runs at the end of each epoch. To evaluate long training
+streams more frequently, supply an integer `val_check_interval` in **training
+batches**. With `check_val_every_n_epoch=None`, the interval continues across
+epoch boundaries:
+
+```python
+model.fit(
+    datamodule,
+    logger=application_logger,
+    log_every_n_steps=50,
+    val_check_interval=1_000,
+    check_val_every_n_epoch=None,
+)
+```
+
+Early stopping and best-checkpoint selection follow validation. Patience counts
+validation checks with no improvement, so increasing validation frequency can
+stop training sooner. Keep the held-out observations and masking policy
+consistent across checks. Checkpoint filenames include both epoch and optimizer
+step to distinguish evaluations within one epoch. Make sure a configured fit
+runs long enough to reach validation when its selection policies require it.
+
+All loops process their configured splits without automatic time or batch caps.
+Use explicit batch limits for smoke tests or deliberate sampling:
+
+```python
+model.fit(datamodule, max_epochs=1, limit_train_batches=10, limit_val_batches=2)
+model.validate(datamodule, limit_val_batches=100)
+model.test(datamodule, limit_test_batches=100)
+```
+
+Use integer batch counts for Arrow iterable loaders. Data-module sampling and
+`epoch_size` remain explicit data-selection choices. Lightning's `max_time` sets
+a budget for the whole fit. `fast_dev_run=True` skips automatic early stopping
+and rollback for Lightning's single-pass diagnostic run.
+
+## Choose the loop
+
+| Call | Required data split | Purpose |
+| --- | --- | --- |
+| `model.fit(datamodule)` | `train` and, for the default policies, `validate` | Optimize and restore the best model. |
+| `model.validate(datamodule)` | `validate` | Return one metric dictionary per loader. |
+| `model.test(datamodule)` | `test` | Return held-out metrics per loader. |
+| `model.predict(datamodule=...)` | `predict` | Collect an Arrow table on one device or stream with a Writer. |
+
+Stages also control masking and field-owned learning, such as vocabulary and
+normalizer updates. Use the corresponding split rather than repurposing a
+training loader for inference. For bounded requests, the separate
+`model.predict(observations)` convenience returns an Arrow table without a
+Trainer; see [Prediction output](../reference/prediction-output.qmd).
+
+Hardware defaults to `accelerator="auto"`, `devices="auto"`,
+`strategy="ddp_find_unused_parameters_true"` for multiple devices or nodes,
+and BF16 mixed precision when all selected devices support it. Otherwise
+precision is FP32. Unused-parameter detection supports parameters omitted from
+a batch's reconstruction objectives. Supply explicit `accelerator`, `devices`,
+`precision`, or `strategy` to override these choices. Other Trainer arguments
+pass through; `callbacks` works on all four loops. relflow installs its
+required callbacks automatically.
+Compile
+selected model regions before the loop with `model.compile()` if desired;
+[Performance](performance.qmd) describes exactly what this compiles.
+
+## Batch size
+
+Set `batch_size` on `fit`, `validate`, `test`, or `predict`. It must be a positive
+integer. The value updates `model.batch_size` and remains current for later
+loops; omitting it or passing `None` leaves that setting unchanged.
+
+```python
+model.fit(datamodule, batch_size=128, max_epochs=30)
+model.validate(validation_data, batch_size=256)
+model.test(test_data, batch_size=256)
+model.predict(datamodule=prediction_data, batch_size=256, devices=1)
+```
+
+Here `validation_data`, `test_data`, and `prediction_data` are application data
+modules supplying their corresponding named splits. `ArrowDataModule` reads
+the model's current batch size when creating each loader. Custom Lightning data
+modules own their loader configuration; changing the model setting does not
+reconfigure a custom prebuilt loader.
+
+Under DDP the size is per device. With two devices and `batch_size=128`, a
+complete distributed training batch contains 256 observations before gradient
+accumulation. The constructor's `batch_size` remains the initial setting,
+defaulting to one, and is saved in the model artifact. Native Trainer and Tuner
+workflows can continue to use it.
+
+For direct in-memory Arrow input, setting `batch_size=256` on `model.predict(...)` also
+chunks the processed observations before encoding. Omitting that override
+preserves whole-input execution. See
+[Direct prediction batches](../reference/prediction-output.qmd#batch-direct-requests).
+
+## Configure optimization and callbacks
+
+Configure AdamW on `fit(...)`. Omitted options use these effective defaults:
+
+| Option | Default | Controls |
+| --- | --- | --- |
+| `learning_rate` | `1e-3` | AdamW learning rate. |
+| `weight_decay` | `0.01` | Decay for eligible parameters. |
+| `betas` | `(0.9, 0.95)` | First- and second-moment coefficients. |
+| `eps` | `1e-8` | Numerical stability term. |
+| `fused` | `True` | Fused Torch AdamW; `False` disables it and `None` delegates to Torch. |
+| `decay_bias` | `False` | Allow decay on bias parameters. |
+| `decay_1d` | `False` | Allow decay on scalar and one-dimensional parameters. |
+| `no_decay_name_fragments` | `("norm",)` | Case-insensitive parameter-name fragments excluded from decay. |
+
+Built-in AdamW binds the current parameters when training starts. Every ordinary
+fit creates fresh optimizer state, including after schema mutation or rollback.
+Options supplied to one call do not become defaults for the next call:
+
+```python
+model.fit(datamodule, learning_rate=1e-3, max_epochs=30)
+model.fit(datamodule, learning_rate=1e-4, weight_decay=0.01, max_epochs=30)
+```
+
+The second run starts from the first run's restored best model, with new
+optimization state. Use [`ckpt_path`](checkpoints-ema-and-resuming.qmd#resume-training) to continue a saved
+run's optimizer, scheduler, and loop progress instead.
+
+Pass any scheduler as `fit(scheduler=...)` for that run. A scheduler factory
+receives `(model, optimizer)` and returns a scheduler or Lightning scheduler
+configuration. Prefer a factory so it binds the optimizer created for the
+current call; a scheduler bound to another optimizer is rejected. A scheduler
+supplied to a previous fit is not reused automatically.
+
+For custom optimization, `fit(optimizer=...)` accepts an optimizer instance or
+a factory receiving the model. Factories should collect the current parameters;
+reusing an optimizer built before mutation or rollback can refer to replaced
+modules and is rejected. Custom optimizer instances manage their own state.
+An explicit optimizer cannot be combined with the built-in AdamW options.
+Advanced `Model(optimizer=..., scheduler=...)` or model-attribute configurations
+remain defaults for native Lightning workflows and custom fits; ordinary fits
+need no separate optimizer assignment.
+
+Set `early_stopping=False` or `rollback=False` to disable either policy. Train-only
+fitting disables both or explicitly chooses a training monitor such as
+`loss/train_epoch`. Each policy also accepts a configured `rf.EarlyStopping` or
+`rf.RollbackCheckpoint` callback. Policy callbacks in `callbacks` replace their
+automatic defaults; other Lightning callbacks run alongside the built-ins.
+
+Direct `lit.Trainer.fit(...)` requires an explicit optimizer configuration,
+such as `model.optimizer = rf.adamw(learning_rate=1e-3)`. Use Trainer directly
+when a Lightning tool needs it; the model methods accept its execution options
+for ordinary loops.
+
+## Local distributed training
+
+For CPU distributed training on one Mac, if Gloo aborts with
+`uv_accept: invalid argument`, select the loopback interface before launching
+your training script:
+
+```bash
+GLOO_SOCKET_IFNAME=lo0 uv run python train.py
+```
+
+This keeps communication between local ranks on macOS's loopback interface.
+For training across machines, select a network interface reachable from every
+rank. PyTorch documents this setting under
+[Gloo network interface configuration](https://docs.pytorch.org/docs/stable/distributed.html#choosing-the-network-interface-to-use).
+
+To learn from unlabeled transaction records before the supervised task, see
+[Pretraining and fine-tuning](../learn/pretraining-and-fine-tuning.qmd). That is an optional separate workflow.
+If a run fails, [Troubleshooting](../reference/troubleshooting.qmd) lists the first checks
+for binding, optimizer, checkpoint, and EMA errors.

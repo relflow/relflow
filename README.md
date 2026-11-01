@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/relflow/docs/main/docs/assets/branding/banners/banner.dark.svg" />
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/relflow/docs/main/docs/assets/branding/banners/banner.light.svg" />
-    <img alt="relflow" src="https://raw.githubusercontent.com/relflow/docs/main/docs/assets/branding/banners/banner.light.svg" width="100%" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/relflow/relflow/main/docs/assets/branding/banners/banner.dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/relflow/relflow/main/docs/assets/branding/banners/banner.light.svg" />
+    <img alt="relflow" src="https://raw.githubusercontent.com/relflow/relflow/main/docs/assets/branding/banners/banner.light.svg" width="100%" />
   </picture>
 </p>
 
@@ -13,7 +13,7 @@
   <a href="https://github.com/relflow/relflow/actions/workflows/compatibility.yml?query=branch%3Amain"><img alt="Dependency compatibility" src="https://github.com/relflow/relflow/actions/workflows/compatibility.yml/badge.svg?branch=main" /></a>
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&amp;logoColor=white" />
   <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-2E8B57" /></a>
-  <a href="https://relflow.ai/"><img alt="Documentation build" src="https://github.com/relflow/docs/actions/workflows/docs.yml/badge.svg?branch=main&amp;event=push" /></a>
+  <a href="https://relflow.ai/"><img alt="Documentation build" src="https://github.com/relflow/relflow/actions/workflows/ci.yml/badge.svg?branch=main&amp;event=push" /></a>
   <!-- discord-invite:start -->
   <a href="https://discord.gg/DVyZUkvTFA"><img alt="Discord channel invite" src="https://img.shields.io/badge/discord-join%20the%20channel-5865F2?logo=discord&amp;logoColor=white" /></a>
   <!-- discord-invite:end -->
@@ -290,22 +290,26 @@ with the workload, record shape, hardware, and requested outputs stated.
 - [Streaming batch inference](https://relflow.ai/guides/batch-inference.html)
 - [Prediction output](https://relflow.ai/reference/prediction-output.html)
 
-Tutorials, guides, and canonical learning evidence live in the separate
-[relflow/docs repository](https://github.com/relflow/docs). For package
-development, see [CONTRIBUTING.md](CONTRIBUTING.md).
+Tutorials and guides live in [docs/](docs/README.md); canonical learning
+experiments and recorded results live in [evidence/](evidence/README.md).
+For package development, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 [Community](https://discord.gg/DVyZUkvTFA) · [Apache 2.0 license](LICENSE)
 
 ## Continuous Integration
 
 `ci.yml` is the entry point for PRs to main, merge groups, main pushes, and
-manual validation. PRs run the full Python/platform test matrix and the full
-paired evidence suite in parallel. `CI / required` rejects errors, cancellations,
-and missing required jobs. Evidence runs on lab through the pinned docs-owned
-executor, with a separate reviewed suite commit. See the
-[lab guide](https://github.com/relflow/docs/blob/main/evidence/lab.md).
+manual validation. PRs run the full Python/platform test matrix, static
+documentation checks, and the full paired evidence suite in parallel.
+`CI / required` rejects errors, cancellations,
+and missing required jobs. Evidence runs on lab through the pinned trusted
+executor, with the candidate commit supplying the suite from this repository. See the
+[lab guide](evidence/lab.md).
 
 Main pushes run the test matrix once and build the distributions consumed by
 release publication. Successful main CI also publishes coverage. Nightly
 dependency compatibility and configured accelerator checks remain independent.
 Local pre-commit continues to run formatting, lint, types, and fast tests.
+The reusable documentation workflow validates and renders the static site using its
+isolated environment; see [the documentation guide](docs/README.md) for preview
+and build commands.

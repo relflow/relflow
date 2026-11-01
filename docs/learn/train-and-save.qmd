@@ -1,0 +1,147 @@
+---
+title: Train and save
+description: "Fit the transaction model, keep the best checkpoint, and save an artifact for prediction and serving."
+---
+
+The first two tutorials show a minimal training call. This page continues
+with the history model and dataset from
+[Prepare observations](prepare-observations.qmd): each row is an account
+review, its inputs are the transactions known at the cutoff, and its targets
+are their later disputes. Configure a first full run, then keep the fitted
+model for prediction.
+
+## Prepare the data module
+
+Use the application-supplied history files, with one account-review
+observation and its nested `trxns` list per row. These have a different
+structure from the flat payment files in the first tutorial:
+
+```python
+import relflow as rf
+
+data = rf.ArrowDataModule(
+    train="payments/history/train.parquet",
+    validate="payments/history/validation.parquet",
+)
+```
+
+## Smoke-test before the long run
+
+Check that the files bind and the loop completes using a separate model and
+data module. Each data module binds to one model. This short fit updates
+`smoke_model` while the `model` from
+[Prepare observations](prepare-observations.qmd) waits for the full run:
+
+```python
+smoke_model = rf.Model.xs(
+    trxns=rf.Branch(
+        length=32,
+        overflow="tail",
+        booked_at=rf.DateParts(
+            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
+        ),
+        amount=rf.Number,
+        merchant=rf.Category,
+        disputed=rf.Boolean(mask=True),
+    ),
+)
+smoke_data = rf.ArrowDataModule(
+    train="payments/history/train.parquet",
+    validate="payments/history/validation.parquet",
+)
+smoke_model.fit(
+    smoke_data,
+    batch_size=128,
+    max_epochs=1,
+    limit_train_batches=10,
+    limit_val_batches=2,
+    checkpoint_dir="checkpoints/payment-smoke",
+)
+```
+
+## Fit with the options you need
+
+Train the original transaction model on the full splits:
+
+```python
+model.fit(
+    data,
+    batch_size=128,
+    learning_rate=1e-4,
+    weight_decay=0.01,
+    max_epochs=30,
+    checkpoint_dir="checkpoints/payments",
+)
+```
+
+`max_epochs=30` limits training to 30 passes through the training split.
+`learning_rate` controls the size of optimizer updates; `weight_decay`
+discourages large weights.
+
+One call does the following:
+
+- **Binds the data.** The loop binds the data module to the model, so the
+  module can read the schema and batch size. `batch_size` is per device and
+  becomes the model's current setting for later loops.
+- **Selects hardware.** The accelerator and device count default to `auto`,
+  with distributed training across multiple devices and BF16 mixed precision
+  where the devices support it.
+- **Configures AdamW.** Each fit binds a fresh optimizer with the options you
+  pass; omitted options use the defaults in
+  [Training options](../guides/training-options.qmd#configure-optimization-and-callbacks).
+- **Stops and restores.** Validation runs at the end of each epoch. Training
+  stops after ten validation checks without improvement in `loss/validate`,
+  and the best checkpoint is restored before `fit` returns. Best and last
+  checkpoints stay in `checkpoint_dir`.
+
+Loss measures prediction error on the declared targets; lower is better
+when comparing the same targets and observations. Validation measures that
+error without updating the model's weights.
+
+To record this run with an application-supplied Lightning logger, add
+`logger=application_logger` to the same `fit` call above.
+
+Training metrics are logged per step, every fifty optimizer updates by
+default; validation metrics summarize each pass. The dispute target reports
+`.trxns.disputed/validate.auc.content` beside `loss/validate`.
+[Evaluation](evaluation.qmd) explains the names.
+
+A new `fit` call starts fresh optimization from the model's current
+parameters; use `ckpt_path` to
+[resume](../guides/checkpoints-ema-and-resuming.qmd#resume-training) a saved run instead.
+
+## Save an artifact
+
+When the full fit returns, save its selected model state and load it again
+for later use:
+
+```python
+model.save("artifacts/payment-history.rf")
+loaded = rf.Model.load("artifacts/payment-history.rf")
+```
+
+The artifact contains the schema, the learned parameters, the batch size, and
+the relflow version that produced it. The learned state includes what a
+feature pipeline would otherwise store separately: each `Category` field's
+vocabulary and each `Number` field's normalization statistics.
+
+You can inspect those fitted encodings on the loaded model:
+
+```python
+merchants = rf.Category.vocabulary(loaded, rf.Address("trxns", "merchant"))
+amounts = rf.Number.normalization(loaded, rf.Address("trxns", "amount"))
+```
+
+It does not contain optimizer or scheduler state, data sources, or processor
+configuration; supply those again when fitting a loaded model. `load`
+constructs the model on CPU; move it to a device for direct inference, or let
+a loop place it.
+
+The same trained artifact supports batch prediction and
+[HTTP serving](../guides/serving.qmd) in a runtime you operate. To add targets
+or change a trained schema while retaining compatible learned state, follow
+[Schema mutation](../guides/schema-mutation.qmd). The later
+[pretraining workflow](pretraining-and-fine-tuning.qmd) uses this to adapt a
+saved model to a labeled task.
+
+Next, [read predictions](read-predictions.qmd) from the saved model.

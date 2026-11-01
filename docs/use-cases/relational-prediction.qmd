@@ -1,0 +1,189 @@
+---
+title: Relational prediction
+description: "Build a decision-time observation from an entity, related records, as-of lookups, and nested histories."
+engine: markdown
+---
+
+A racing team wants to prioritize reliability reviews before an upcoming race.
+Its database holds drivers, entries, race results, constructors, circuits, and
+pit stops. Each earlier result can keep its circuit, constructor, and pit
+stops attached, so the model can test whether those relationships help.
+
+RelBench's [racing tasks](https://huggingface.co/datasets/stanford-star/relbench-v1/blob/main/rel-f1/README.md)
+include future non-finishes, finishing positions, and top-three qualifying
+outcomes. The example below adapts the entity-and-related-records pattern to
+a hypothetical pre-race application with its own cohort and label definition.
+
+## Define one entry and its cutoff
+
+Prepare one observation per driver entry in a specified upcoming race, using
+the entry list known at the decision time. For this example the cutoff is
+June 5, 2026 at noon UTC, before a race scheduled for June 7. The team scores
+the entries to choose where to spend its review capacity.
+
+The Boolean `retired_next_race` describes whether that entry receives an
+official retirement result in that race. Map the application's result codes
+to this label explicitly: a classified finish, including a lapped finish, is
+false; a did-not-start result is also false for this particular retirement
+question. A cancelled race or missing final result leaves the label unavailable.
+Assess non-starts separately if they also matter to the decision.
+
+Retain the driver, race, and cutoff keys outside the model to associate every
+output with its entry. A training label becomes usable only after the final
+result is available. Upcoming circuit and constructor information may be inputs
+when already known at the cutoff; the upcoming race's result and pit stops may
+not.
+
+## Join related tables into one observation
+
+The application controls joins, availability, and multiplicity:
+
+| Source relation | Role in one entry observation |
+|---|---|
+| Driver and upcoming entry | Root attributes known at the cutoff |
+| Earlier results for the driver | One repeated record per earlier result |
+| Race, circuit, and constructor referenced by a result | Attributes looked up into that result's record |
+| Pit stops belonging to an earlier result | A repeated child collection under that result |
+| Final upcoming-race result | A later label, excluded from the inputs |
+
+Resolve each many-to-one lookup to one row with the values available at the
+cutoff. Group pit stops beneath their result before collecting results; a
+flat join would duplicate a result once for every stop. Keep each result's
+fields aligned when ordering or limiting histories.
+
+This illustrative record contains two earlier results. Every result and pit
+stop was available at the June 5 cutoff; the root label was attached later:
+
+```yaml
+driver_nationality: British
+upcoming_circuit: lakeside
+constructor: team-7
+past_results:
+  - occurred_at: "2026-05-10T12:00:00Z"
+    age_days: 26
+    circuit: hill-park
+    constructor: team-7
+    grid_position: 8
+    finishing_position: 6
+    retired: false
+    pit_stops:
+      - lap: 19
+        duration_seconds: 23.7
+      - lap: 42
+        duration_seconds: 24.1
+  - occurred_at: "2026-05-24T12:00:00Z"
+    age_days: 12
+    circuit: coast-ring
+    constructor: team-7
+    grid_position: 7
+    finishing_position: 18
+    retired: true
+    pit_stops:
+      - lap: 15
+        duration_seconds: 27.8
+retired_next_race: false
+```
+
+## Describe the nested records
+
+Declare field types and nested collections to match that prepared observation.
+Each branch can contain further branches, so the structure can follow records
+at additional depths. RelFlow generates the neural architecture from this
+tree, with the retirement objective attached to the entry at its root:
+
+```python
+import relflow as rf
+
+model = rf.Model.sm(
+    driver_nationality=rf.Category,
+    upcoming_circuit=rf.Category,
+    constructor=rf.Category,
+    past_results=rf.Branch(
+        length=32,
+        overflow="tail",
+        occurred_at=rf.DateParts(
+            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
+        ),
+        age_days=rf.Number,
+        circuit=rf.Category,
+        constructor=rf.Category,
+        grid_position=rf.Number,
+        finishing_position=rf.Number,
+        retired=rf.Boolean,
+        pit_stops=rf.Branch(
+            length=4,
+            overflow="tail",
+            lap=rf.Number,
+            duration_seconds=rf.Number,
+        ),
+    ),
+    retired_next_race=rf.Boolean(mask=True),
+)
+```
+
+Order earlier results oldest to newest and each pit-stop collection by lap.
+The illustrative caps retain the latest 32 results and latest four stops per
+retained result. The schema describes the prepared nested input; it does not
+discover database joins or enforce the historical availability contract.
+Relationships enter as attributes and nested record collections assembled by
+the application. The model consumes the resulting tree.
+
+The `retired` fields describe earlier races and can be inputs. The separate
+`retired_next_race` target is always masked and is omitted from prediction
+requests. Calendar parts express periodic context; application-supplied
+`age_days` expresses elapsed time to the cutoff. See
+[Nested context and account outcomes](../learn/nested-context-and-account-outcomes.qmd)
+for how targets and context can live at different tree levels.
+
+## Test whether the related records help
+
+Compare the nested model with the training-label retirement rate, a simple
+driver-history baseline, and a flat model using recent results and constructor
+history. Compare a version without pit stops to measure whether that extra
+collection helps. All variants need the same scoring entries, cutoffs, label
+availability, and training and evaluation periods.
+
+Split by later races and decision times, keeping all entries for one race in
+the same split. Report AUROC, average precision, calibration, and precision
+or recall at the team's review budget. Report label coverage as well: removing
+cancelled races and unavailable results changes which entries contribute to
+the evaluation. Performance on familiar drivers and circuits does not establish
+performance on new ones. See [Evaluation](../learn/evaluation.qmd).
+
+Preserve both event time and availability time in the preparation pipeline.
+A result amended after the cutoff cannot contribute its amended value to that
+observation. Version mutable entry and constructor data, retain deterministic
+join keys, and inspect row counts after every join. History caps and nested
+fan-out require explicit resource budgets; a small root batch can still
+contain many child records. [Prepare observations](../learn/prepare-observations.qmd),
+[Preprocessing](../guides/preprocessing.qmd), and
+[Performance](../guides/performance.qmd) cover these preparation and capacity
+decisions.
+
+## Adapt the entity and its related records
+
+The same preparation pattern supports other multi-table questions. A retail
+customer can own purchases with article attributes; a community member can own
+posts whose comments and votes remain nested under each post. The important
+choices are the scored entity, its cutoff, which relationships may contribute
+context, and the meaning of its later label.
+
+An **observational study-reporting** variant uses a study as the root, with
+known study attributes, conditions, sponsors, and earlier reports as context.
+For studies already started, define a 365-day numeric target as the sum of
+`subjects_affected` in reports marked `serious` or `deaths` that arrive after
+the cutoff through 365 days later. This adapts
+[RelBench's study-adverse definition](https://github.com/snap-stanford/relbench/blob/v1.1.0/relbench/tasks/trial.py#L74-L122).
+Compare a training-label median and a baseline using earlier report totals,
+then assess MAE on later fully observed reporting windows.
+
+That total can count a person in multiple reports. It measures reported
+affected-subject totals, rather than unique affected people or individual
+risk. Use report availability dates, version study attributes, and distinguish
+missing reporting from a verified zero. Define which studies have complete
+outcome windows before evaluating the task.
+
+For a customer-level decision, continue with
+[Customer outcomes](customer-outcomes.qmd). For a future sequence of numeric
+values, see [Time series forecasting](time-series-forecasting.qmd); for a
+ranked set of candidates, see [Recommendations](recommendations.qmd).

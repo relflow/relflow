@@ -1,0 +1,127 @@
+---
+title: API map
+description: "Every public name grouped by workflow, with the page that documents it."
+---
+
+RelFlow is a model factory for typed, nested data: your declared schema generates
+the neural architecture. Import it as `import relflow as rf`. This page maps the
+public API to its reference pages. For a first payment model, start with
+[Your first model](../learn/your-first-model.qmd).
+
+## Common workflow
+
+For a hypothetical dispute-prediction task, suppose each payment record has
+`amount`, `merchant`, and a settled Boolean `disputed` label. Define those
+fields, provide training and validation data, then fit and predict. The
+application supplies the Parquet files shown below. Training and validation
+records include `disputed`; prediction requests can omit it.
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    amount=rf.Number,
+    merchant=rf.Category,
+    disputed=rf.Boolean(mask=True),
+)
+datamodule = rf.ArrowDataModule(
+    train="payments/flat/train.parquet",
+    validate="payments/flat/validation.parquet",
+)
+model.fit(datamodule, batch_size=128, max_epochs=20)
+prediction_data = rf.ArrowDataModule(
+    predict="payments/flat/requests.parquet",
+)
+predictions = model.predict(datamodule=prediction_data, batch_size=256, devices=1)
+```
+
+`mask=True` declares the prediction target. Fitting restores the best validation
+checkpoint by default. Predictions are returned as an Arrow table.
+[Prediction output](prediction-output.qmd) uses nested field
+names for decoded results and a separate column for requested representations.
+
+## Build a model
+
+| API | Purpose |
+| --- | --- |
+| `rf.Model.xs`, `.sm`, `.md`, `.lg`, `.xl` | Build from fields with capacity defaults for the root, child branches, and leaf decoders; explicit node settings take precedence. |
+| `rf.Model(...)` | Build with explicit dimensions from named fields and branches, or accept an existing `rf.Schema`. |
+| `rf.Branch(...)` | Group repeated records, such as transactions, into a local context. |
+| `rf.Boolean`, `rf.Number`, `rf.Category` | Represent a dispute outcome, payment amount, or merchant label. |
+| `rf.Enum`, `rf.Set`, `rf.DateParts` | Represent declared currency codes, merchant tags, or booking calendar parts. |
+| `rf.Hash`, `rf.Quantile`, `rf.Text`, `rf.Vector`, `rf.Cluster` | Represent identifier equality, numeric percentiles, text, supplied vectors, or learned label groups. |
+| `rf.Attention`, `rf.Mean` | Choose branch reduction; `reduction=None` preserves routed tokens. |
+| `rf.Mask`, `rf.Jitter` | Configure visibility/objectives and continuous input perturbation. |
+
+See [Datatypes](../datatypes/index.qmd),
+[Model tree](../concepts/model-tree.qmd), and
+[Model presets](model-presets.qmd).
+Constructor options live with their owning type.
+
+## Train and evaluate
+
+| API | Purpose |
+| --- | --- |
+| `rf.ArrowDataModule` | Provide named splits from Arrow tables, files, datasets, or restartable Arrow factories; the model loop binds the module automatically. |
+| `rf.PolarsDataModule` | Convert eager DataFrames once into the Arrow pipeline. |
+| `rf.DuckDBDataModule` | Read restartable Arrow batches from configured DuckDB queries. |
+| `rf.source` | Configure Arrow file reading. |
+| `rf.preprocess`, `rf.Preprocessor` | Transform eager Polars frames before binding data. |
+| `rf.adamw` | Build an AdamW factory for custom or native Lightning workflows. |
+| `model.fit` | Configure AdamW and train a data module with automatic hardware selection, early stopping, and best-checkpoint rollback. |
+| `model.validate`, `model.test` | Evaluate the corresponding data-module split and return aggregate metrics. |
+| `model.track` | Log a custom metric through Lightning; training defaults to step logging and evaluation to pass aggregates. |
+| `rf.EarlyStopping`, `rf.RollbackCheckpoint` | Configure stopping and best-checkpoint restoration explicitly. |
+| `rf.EMA` | Optionally average learned parameters for validation, checkpoint selection, and the model returned by fitting. |
+| `model.compile` | Compile selected encoders and attention pools; returns the same model. |
+
+`rf.CustomDataModule` and `rf.SyntheticDataModule` support application-owned
+mapping streams. Prefer Arrow and Polars modules when the data already has
+that form. All five RelFlow data modules bind automatically when passed to a
+model loop. Use `bind(model)` before direct loader access outside a loop. See
+[Data modules](../guides/data-modules.qmd#bind-a-model-when-the-loop-starts),
+[Preprocessing](../guides/preprocessing.qmd),
+[Training options](../guides/training-options.qmd),
+[Evaluation](../learn/evaluation.qmd), and
+[Performance](../guides/performance.qmd).
+For an unlabeled training objective followed by a labeled task, see
+[Pretraining and fine-tuning](../learn/pretraining-and-fine-tuning.qmd).
+
+## Predict and save
+
+| API | Purpose |
+| --- | --- |
+| `model.predict` | Return an Arrow prediction table, with optional batch sizing for direct input or a prediction data module. |
+| `model.save`, `rf.Model.load` | Save and restore the schema and learned model state. |
+| `rf.Writer` | Write Lightning prediction batches to rank-partitioned Parquet files. |
+| `rf.postprocess`, `rf.Postprocessor` | Transform decoded prediction frames before returning responses or persisting files. |
+| `rf.Deployment` | Serve models through the optional HTTP runtime. |
+
+Serving types, including `rf.Accelerator`, `rf.JSONBackend`, and
+`rf.ModelSource`, require `relflow[serving]`. See
+[Prediction output](prediction-output.qmd),
+[Postprocessing](../guides/postprocessing.qmd), and [Serving](../guides/serving.qmd).
+
+## Advanced schema operations
+
+| API | Purpose |
+| --- | --- |
+| `rf.Address`, `rf.where`, `rf.predicate` | Address and select schema nodes, such as `rf.Address("trxns", "amount")`. |
+| `model.select`, `update`, `extend`, `delete`, `reset`, `override` | Inspect or evolve a trained schema; rebuilds retain compatible state, while reset reinitializes selected modules. |
+| `rf.presets.factory` | Bind an immutable preset configuration to a typed classmethod on a `Model` subclass. |
+| `model.encode`, `model.forward`, `model.write` | Access the encoding, Torch computation, and Arrow writing stages. |
+
+See [Schema mutation](../guides/schema-mutation.qmd) and
+[Model tree](../concepts/model-tree.qmd) before changing a fitted model.
+
+## Extensions
+
+`rf.Extension` registers a datatype's request, tensorfield, embedder, decoder,
+output, and related behavior. `rf.RequestBase`, `rf.TensorFieldBase`,
+`rf.EmbedderBase`, `rf.DecoderBase`, `rf.TensorInput`, `rf.Context`, and
+`rf.RaggedField` provide its shared contracts. See
+[Custom tensorfields](../datatypes/custom-tensorfields.qmd).
+
+An extension adds a field type to the model factory, including its
+representation, supported objectives, and decoded output contract. It can be
+used inside the same nested branches as built-in types.

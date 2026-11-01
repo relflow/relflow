@@ -1,0 +1,211 @@
+---
+title: Reusable representations
+description: "Export learned context as embeddings and evaluate them as inputs to separate predictors."
+engine: markdown
+---
+
+Suppose you have trained the payment-history model to predict disputes and
+now want a separate predictor of merchant-repeat payments. Each dataset row
+still describes one account at a review cutoff, using only the history known
+then. Export that row's learned context and test it as input to a predictor
+with settled merchant-repeat labels, alongside existing spending summaries.
+This evaluates reuse without fitting the history model again for the new
+task. Each predictor still needs its own labels and held-out assessment.
+
+An embedding is a numeric representation of the context the model has learned.
+Set `embed=True` where you want to export one. Exporting adds no learning
+objective; use a model already trained with supervision or reconstruction.
+It makes the generated model useful as a candidate source of learned
+representations as well as task predictions. The comparisons below establish
+whether those representations help the new decision.
+
+## Choose where to export
+
+Continue with the saved payment model from
+[Pretraining and fine-tuning](pretraining-and-fine-tuning.qmd). It already includes
+the account profile and transactions, including the latest payment once. Turn
+on exports at its root and `trxns` branch:
+
+```python
+import relflow as rf
+
+model = rf.Model.load("artifacts/payment-disputes.rf")
+model.update(
+    rf.where("address").is_in(
+        [rf.Address(), rf.Address("trxns")]
+    ),
+    embed=True,
+)
+```
+
+The transaction dispute targets remain in place. The same prediction
+pass can now return their estimates and the context vectors used for a separate
+task predictor.
+
+| `embed=True` location | Exported representation |
+| --- | --- |
+| Root | The root's reduced context. |
+| Branch | The branch's reduced context. |
+| Leaf | The decoder's pooled context before its datatype output head. |
+
+```{typst}
+//| label: fig-embedding-sites
+//| fig-cap: "Where embed=True is set decides what each exported vector describes: the observation, the transaction history, or one transaction."
+//| fig-alt: "An account root with embed=True exporting one vector per observation. It contains account_age_days Number and a repeated trxns branch with embed=True exporting one summary per observation under the xs preset. Inside the branch, booked_at DateParts, amount Number, merchant Category annotated that a leaf export would give one vector per transaction, channel Enum, and a hidden disputed Boolean target at every transaction."
+#tree(node("account", kind: "root", width: 150pt, detail: "embed=True", body: [One vector per observation.], children: (
+  node("account_age_days", width: 150pt, type: "Number"),
+  node("trxns", kind: "branch", repeated: true, width: 150pt, detail: "embed=True", body: [One summary per observation with the `xs` preset.], children: (
+    node("booked_at", type: "DateParts"),
+    node("amount", type: "Number"),
+    node("merchant", type: "Category", width: 165pt, body: [`embed=True` here would export one vector per transaction.]),
+    node("channel", type: "Enum"),
+    node("disputed", kind: "target", type: "Boolean", detail: "Every transaction"),
+  )),
+)))
+```
+
+The pretraining example uses the `xs` preset with one-output reductions. This
+therefore exports one vector for the account snapshot and one summary of its
+transactions per observation. It does not export one vector per transaction.
+A nested branch inside `trxns` would retain those outer transaction positions
+when exporting its own summary.
+
+For a separate predictor of transaction outcomes, pair the summary with the
+corresponding transaction's fields and label. A leaf embedding can instead
+provide a contextual vector at each transaction position.
+
+A leaf embedding is different from its raw input embedding: it can include
+ancestor context and visible, aligned sibling fields. A branch embedding
+summarizes the inputs controlled by that branch's reduction.
+
+## Read the output
+
+This example uses [prediction output](../reference/prediction-output.qmd),
+which keeps representations separate from decoded field results.
+
+Use the same account profile and `trxns` records in your application's request
+file, omitting `disputed` from every transaction. The snapshot cutoff remains
+the final booking time; all vectors describe the evidence available then.
+Export the vectors in prediction mode:
+
+```python
+requests = rf.ArrowDataModule(
+    predict="payments/finetuning/requests.parquet",
+)
+result = model.predict(datamodule=requests, batch_size=256, devices=1)
+```
+
+Each row's `representations` list holds one record per exported vector. An
+empty `path` is the anonymous root, and `["trxns"]` is the transaction
+summary. Rows come back in request order:
+
+```python
+snapshot_vectors = []
+history_vectors = []
+for row in result.to_pylist():
+    for record in row["representations"]:
+        if record["path"] == []:
+            snapshot_vectors.append(record["embedding"])
+        elif record["path"] == ["trxns"]:
+            history_vectors.append(record["embedding"])
+```
+
+For many rows, let Polars give you one row per vector, with an `observation`
+index that ties each vector back to its request row:
+
+```python
+import polars as pl
+
+vectors = (
+    pl.from_arrow(result)
+    .with_row_index("observation")
+    .select("observation", "representations")
+    .explode("representations")
+    .unnest("representations")
+    .with_columns(path=pl.col("path").list.join("/"))
+)
+snapshot_vectors = vectors.filter(pl.col("path") == "")
+history_vectors = vectors.filter(pl.col("path") == "trxns")
+```
+
+Field names cannot contain `/`, so joining path segments does not merge
+distinct paths.
+
+Exported vectors are float32 and L2-normalized along their fixed `d_model`
+axis; zero vectors remain zero. Each representation record also carries
+`parents` and `output_index`. If a later schema groups several accounts
+inside an `accounts` branch, an `/accounts/trxns`
+summary uses `parents=[a]` to select account `a`. For the merchant leaf inside it,
+`parents=[a,t]` selects transaction `t` of account `a`. These are retained
+coordinates after queries and overflow, including structural holes.
+
+`rf.Attention(n_outputs=3)` produces records with `output_index` 0, 1, and 2 at
+each summary site. `reduction=None` preserves the routed output stream,
+including its defined zero slots; its output indices do not claim an inferred
+source-record identity. A branch summary can exist for an empty collection
+when its reduction defines that output. A leaf embedding requires a valid
+item coordinate. Representation counts therefore need not match item counts.
+See [Branch](../datatypes/branch.qmd) and the full
+[Prediction output](../reference/prediction-output.qmd) contract.
+
+Evaluate an embedding on its intended downstream task. A useful dispute
+predictor does not by itself establish useful similarity or clustering.
+Preserve the schema and trained state with
+[the model artifact](../guides/checkpoints-ema-and-resuming.qmd#save-and-load).
+
+To evaluate a frozen representation, keep the exporting model fixed and
+generate vectors in prediction mode for the training and held-out
+observations. Fit separate task predictors using only the training vectors
+and labels. Keep the exporting model fixed throughout: this measures what a
+downstream predictor can learn from the representation as exported.
+
+Choose cohort and time boundaries before training. For an evaluation on
+unseen accounts, exclude held-out accounts from both representation learning
+and downstream predictor training. Each history vector represents the account
+at a defined decision cutoff; the task label records an outcome over a later
+period. Keep records after that cutoff out of the input snapshot.
+
+Compare existing features alone, vectors alone, and their combination on the
+same observations. Choose predictor settings on the same validation split and
+assess the fixed choices on test data. For merchant-repeat prediction, measure
+precision and recall for the defined 30-day outcome window. For payment review,
+measure dispute recall at a fixed review capacity. These task metrics help
+decide whether the reusable representation earns a place in the workflow.
+[Profile context and a second outcome](profile-context-and-a-second-outcome.qmd)
+explains how to prepare the observations and outcome windows for these
+experiments.
+
+## Learn without a label
+
+You can export context before adapting to a supervised outcome. Load the
+reconstruction-trained artifact from the same payment workflow and request
+the root and transaction summaries:
+
+```python
+reconstructed = rf.Model.load("artifacts/payment-pretrained.rf")
+reconstructed.update(
+    rf.where("address").is_in(
+        [rf.Address(), rf.Address("trxns")]
+    ),
+    embed=True,
+)
+```
+
+The pretraining fit uses sampled transaction amounts and merchants as its
+objectives, without dispute labels. Run prediction with that fitted model to
+generate vectors for a separately labeled task. `embed=True` alone creates no
+objective, and sampled reconstruction does not request ordinary decoded
+prediction output. [Masking and reconstruction](../concepts/masking-and-reconstruction.qmd) explains
+that distinction. Supervised and sampled reconstruction objectives can coexist,
+with each leaf's `weight` scaling its contribution.
+
+[Pretraining and fine-tuning](pretraining-and-fine-tuning.qmd) shows how to transfer
+reconstruction training to a labeled task. The
+[reconstruction transfer evidence](../evidence/representation/reconstruction-transfer.html)
+compares frozen root embeddings with raw features, an untrained encoder, and
+training on independently permuted views.
+
+Next, explore [Use cases](../use-cases/index.qmd) to organize forecasting,
+recommendations, customer outcomes, and related-record predictions around
+their own datasets and decisions. Define and evaluate the representation for
+each schema and task before relying on it.

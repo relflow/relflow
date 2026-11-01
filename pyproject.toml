@@ -115,6 +115,7 @@ output = "coverage.json"
 
 [tool.ruff]
 line-length = 120
+extend-exclude = ["docs", "evidence"]
 lint.extend-select = ["I"]
 
 [tool.pyrefly]

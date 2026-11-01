@@ -1,0 +1,113 @@
+---
+title: Branch summaries
+description: "What a branch passes to its parent, and why learned reduction keeps evidence a plain average loses."
+engine: markdown
+---
+
+In the [transaction-history example](../learn/add-transaction-history.qmd),
+the `trxns` branch encodes earlier payments and the latest payment available
+at one review cutoff. Reduction determines how much of that encoded
+collection reaches the parent. It follows the
+[field interactions](how-fields-interact.qmd) within the branch.
+
+This explanation follows RelFlow 0.4.1's
+[reduction implementation](https://github.com/relflow/relflow/blob/1b95c334d5a1251c37ac5323b7dcec750550908e/src/relflow/architecture/pool.py)
+and [branch encoder](https://github.com/relflow/relflow/blob/1b95c334d5a1251c37ac5323b7dcec750550908e/src/relflow/architecture/encoder.py).
+
+## Choose what reaches the parent
+
+| Reduction | Context passed to the parent | Main tradeoff |
+| --- | --- | --- |
+| `rf.Attention(n_outputs=K)` | `K` learned summary vectors | Learns which evidence to collect into a limited context. |
+| `rf.Mean()` | One average of present token vectors plus a count lane | Simple; one learned direction carries how many tokens were present. |
+| `None` | The encoded token sequence | Retains more detail and increases the parent's token count. |
+
+```{typst}
+//| label: fig-branch-reductions
+//| fig-cap: "Three reductions of the same encoded transactions. Attention and Mean send a fixed number of summaries; pass-through sends every slot."
+//| fig-alt: "Three lanes start from N encoded transaction tokens. The Attention lane passes them through K learned queries with additive sum and count lanes to K summaries. The Mean lane averages present tokens, adds a count lane, and sends one summary. The None lane passes all N routed slots to the parent."
+#flow(
+  (title: "Attention", steps: (
+    step("N encoded tokens", kind: "branch", note: "After coordinate and sequence attention"),
+    step("K learned queries", kind: "root", note: "Plus additive sum and count lanes"),
+    step("K summaries", kind: "root", note: "Bounded context for the parent"),
+  )),
+  (title: "Mean", steps: (
+    step("N encoded tokens", kind: "branch", note: "After coordinate and sequence attention"),
+    step("Average of present tokens", kind: "root", note: "Plus a count lane"),
+    step("1 summary", kind: "root", note: "Individual token slots not kept"),
+  )),
+  (title: "None", steps: (
+    step("N encoded tokens", kind: "branch", note: "After coordinate and sequence attention"),
+    step("Pass-through", note: "No reduction"),
+    step("N routed slots", kind: "branch", note: "Parent cost grows with N"),
+  )),
+)
+```
+
+These choices concern reduction. A mean reduction can still follow a learned
+branch encoder. Configure the branch's attention separately; see the
+[Branch reference](../datatypes/branch.qmd#reduce-branch-memory).
+
+Learned attention starts with trainable query vectors. A query supplies learned
+weights for combining the branch's present token vectors into a summary.
+Multiple outputs provide multiple learned views of the same history; their
+meanings emerge during training.
+
+## Why an average loses multiplicity
+
+An attention head combines values with normalized weights:
+
+$$
+s = \sum_i \alpha_i v_i, \qquad \sum_i \alpha_i = 1.
+$$
+
+If every value vector is the same vector $v$, this expression returns $v$
+whether the memory contains one copy or many. A plain mean has the same
+limitation, which is why both RelFlow reductions add a count lane: an extra
+learned vector contribution scaled by the number of present tokens over the
+branch capacity. It starts at zero, so it leaves the initial pooled result
+unchanged.
+This is a statement about that normalized combination of identical values.
+Other parts of a network, including positional signals and earlier encoder
+updates, can supply information about sequence length.
+
+At a common account-review cutoff, multiplicity may matter: several retained
+payments can carry different evidence from one payment even when their
+merchants and amounts are identical. RelFlow's learned branch reduction
+includes additive evidence alongside attention.
+
+## Additive evidence
+
+The learned reduction adds two trainable contributions to each normalized
+attention summary:
+
+- A projection of the sum of present branch input vectors, scaled by the square
+  root of the capacity.
+- A learned direction scaled by the number of present tokens divided by that
+  capacity.
+
+When collection caps and child outputs give the branch a finite maximum input
+token count, that count is its capacity. Always-hidden leaf targets do not add
+to this maximum. If no finite maximum exists, the model instead uses the
+largest present-token count observed during training, starting at one. This
+observed capacity is saved with the model and reused for validation, test, and
+prediction. Collection limits remain controlled by `length`.
+
+Both contributions start at zero, so training decides how much to use them.
+The branch provides the additive evidence from its tokens before the sequence
+encoder; these tokens already include any coordinate attention. Absent tokens
+contribute neither values nor counts.
+
+The count here is a **token count**. Each visible field contributes at each
+retained record position, and nested branch outputs can add further tokens.
+It is not directly a count of transactions or a sum of payment amounts. The model must learn how those
+vector and count signals relate to each transaction's dispute target.
+
+This mechanism supplies information that a normalized average can discard. It
+does not make the model an exact calculator or guarantee extrapolation to
+longer histories. Use the [canonical evidence](../evidence.qmd) to inspect
+recorded evidence, and validate the reduction choice on the application's
+held-out observations.
+
+Next, follow the summaries through [Tree routing and decoding](tree-routing-and-decoding.qmd).

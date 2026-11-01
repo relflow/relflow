@@ -1,0 +1,261 @@
+---
+title: Preprocessing
+description: "Derive values, rename, filter, join, and reshape records with eager Polars transforms before binding."
+---
+
+A preprocessor prepares records before relflow resolves schema fields or queries.
+Write it as an eager Polars transform and attach it to a data module or prediction
+call. Use it for derived values, renaming, filters, joins, and nested reshaping.
+
+## Derive a value
+
+Extend the example from [Add transaction history](../learn/add-transaction-history.qmd)
+with the elapsed time since each transaction's predecessor. Calendar features
+describe recurring patterns; this gap records the pace of account activity.
+For example, it distinguishes purchases minutes apart from purchases spread
+across a week. Evaluate whether that distinction helps the dispute task.
+
+The application's Parquet files contain oldest-to-newest `trxns` records with
+`booked_at` stored as ISO timestamp strings. Calculate the difference within
+each observation's list:
+
+```python
+import polars as pl
+import relflow as rf
+
+@rf.preprocess
+def prepare(
+    frame: pl.DataFrame,
+    *,
+    timestamp_format: str | None = None,
+) -> pl.DataFrame:
+    booked_at = (
+        pl.element().struct.field("booked_at")
+        .str.to_datetime(format=timestamp_format)
+    )
+    return frame.with_columns(
+        trxns=pl.col("trxns").list.eval(
+            pl.element().struct.with_fields(
+                hours_since_previous=(
+                    booked_at.diff().dt.total_milliseconds() / 3_600_000.0
+                ),
+            )
+        ),
+    )
+```
+
+The processor adds a numeric duration in hours to each transaction:
+
+```yaml
+payment_id: payment-42
+trxns:
+  - booked_at: "2026-05-21T10:00:00"
+    amount: 32.00
+    merchant: Station Cafe
+    hours_since_previous: null
+    disputed: false
+  - booked_at: "2026-05-27T18:15:00"
+    amount: 56.20
+    merchant: North Market
+    hours_since_previous: 152.25
+    disputed: true
+  - booked_at: "2026-05-28T14:30:00"
+    amount: 84.50
+    merchant: North Market
+    hours_since_previous: 20.25
+    disputed: false
+```
+
+The first supplied transaction has no predecessor in this observation, so its
+gap is null. Equal timestamps yield a zero gap. The calculation restarts for
+each list and preserves transaction order and the existing fields. Supply
+timestamps in a consistent timezone and sort before this processor runs.
+
+Add the derived value to the transaction model:
+
+```python
+model = rf.Model.xs(
+    trxns=rf.Branch(
+        length=32,
+        overflow="tail",
+        booked_at=rf.DateParts(
+            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
+        ),
+        hours_since_previous=rf.Number,
+        amount=rf.Number,
+        merchant=rf.Category,
+        disputed=rf.Boolean(mask=True),
+    ),
+)
+```
+
+`Number` reads the duration in hours; `DateParts` keeps the booking calendar
+features. If the source already stores Arrow timestamps, use the `booked_at`
+field directly in the calculation without the string-parsing step.
+Training labels remain intact. Prediction files omit `disputed`; the processor
+does not require that field.
+
+## Configure and compose
+
+The first parameter must be named `frame`; all others are keyword-only.
+`.partial(...)` returns a configured processor without changing the original:
+
+```python
+processor = prepare.partial(timestamp_format="%Y-%m-%dT%H:%M:%S")
+```
+
+A list or tuple runs left to right. Each stage receives the frames emitted by
+the previous stage. For an application that excludes empty transaction sequences:
+
+```python
+@rf.preprocess
+def nonempty(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.filter(pl.col("trxns").list.len() > 0)
+
+pipeline = (processor, nonempty)
+```
+
+Bind required application arguments before attaching the processor. Fit lookups
+or statistics on training data outside the pipeline, then bind and reuse that
+state for validation and prediction. Preprocessors run again during iteration;
+they are not automatically fitted or saved in the model checkpoint.
+
+## Attach to training and prediction
+
+Use `preprocessor=` on either [data module](data-modules.qmd):
+
+```python
+# Raw Parquet files come from the application.
+arrow_data = rf.ArrowDataModule(
+    train="payments/history/raw/train.parquet",
+    validate="payments/history/raw/validation.parquet",
+    preprocessor=pipeline,
+)
+```
+
+One value applies to every split. A mapping such as
+`preprocessor={"train": pipeline, "validate": processor}` configures splits
+separately; omitted splits receive no processors. Polars modules use the same
+Arrow pipeline, so callbacks receive eager Polars frames with either module.
+
+For file-backed prediction, configure the pipeline and retention on a
+prediction data module:
+
+```python
+requests = rf.ArrowDataModule(
+    predict="payments/history/raw/requests.parquet",
+    preprocessor=pipeline,
+    retain=("payment_id",),
+)
+predictions = model.predict(datamodule=requests, batch_size=256, devices=1)
+```
+
+The direct in-memory prediction API uses `preprocess=` on the prediction
+call. Direct preprocessing runs on the full input once, before its processed
+Arrow rows are divided into model batches. File-backed data modules apply
+processors at their configured [scope](#scope-and-context).
+
+Retention reads the processed columns. Before any
+[postprocessing](postprocessing.qmd), predictions contain one row per processed
+observation. Filtering removes observations; exploding or a one-to-many join can
+add them. Keep a business key when outputs must be joined back to source records;
+relflow does not restore the original rows or order.
+
+## Reshape nested input
+
+For a separate transfer model, suppose the source has named payer and payee
+accounts. This example illustrates a different record shape:
+
+```yaml
+payment_id: transfer-42
+accounts:
+  payer: account-17
+  payee: account-83
+amount: 120.00
+disputed: false
+```
+
+Build a repeated `parties` collection so both roles can share one account field:
+
+```python
+@rf.preprocess
+def reshape(frame: pl.DataFrame) -> pl.DataFrame:
+    accounts = pl.col("accounts")
+    return frame.with_columns(
+        parties=pl.concat_list(
+            pl.struct(account=accounts.struct.field("payer"), role=pl.lit("payer")),
+            pl.struct(account=accounts.struct.field("payee"), role=pl.lit("payee")),
+        ),
+    ).drop("accounts")
+```
+
+The processed record becomes:
+
+```yaml
+payment_id: transfer-42
+disputed: false
+amount: 120.00
+parties:
+  - account: account-17
+    role: payer
+  - account: account-83
+    role: payee
+```
+
+Define the model against this processed shape:
+
+```python
+transfer_model = rf.Model.xs(
+    parties=rf.Branch(
+        length=2,
+        overflow="error",
+        account=rf.Hash,
+        role=rf.Category,
+    ),
+    amount=rf.Number,
+    disputed=rf.Boolean(mask=True),
+)
+```
+
+Both account positions share the `Hash` field; `role` distinguishes payer from
+payee. Use `Category` instead if persistent identity embeddings are needed.
+`payment_id` stays available for retention without becoming a model input.
+The processor preserves `disputed` when present and does not require it on
+prediction requests.
+
+## Scope and context
+
+The default `scope="partition"` processes each frame from the preceding stage.
+These are source partitions, not necessarily model-sized batches. Processing
+runs before sampling, shuffling, and model batching.
+
+`@rf.preprocess(scope="dataset")` gathers the entire split at that stage into
+one eager frame. Use it for transforms that require a global sort or grouping;
+the split must fit in memory. File paths, globs, `rf.source(...)`, restartable
+factories, and DuckDB sources support partition scope only. Prepare a
+dataset-wide result upstream before supplying those sources.
+For direct prediction, the available dataset is only that call's input.
+
+The pipeline supplies these keyword-only arguments when the signature requests
+them; they cannot be bound with `.partial(...)`:
+
+| Parameter | Value |
+|---|---|
+| `strata: rf.Strata` | Current `train`, `validate`, `test`, or `predict` stage. |
+| `schema: rf.Schema` | The model's schema. |
+| `encoding_context: dict[rf.Address, object]` | Field-owned encoding state indexed by schema address. |
+
+A processor may return one eager `pl.DataFrame`, an iterable of frames, or `None`
+to discard its input. Every returned frame needs at least one column; collect
+`LazyFrame` results explicitly. Polars 2 collects lazy queries on its streaming
+engine, which does not preserve row order through `group_by` or joins, so pass
+`maintain_order` or sort before returning when order matters. Keep source and
+final processed Arrow schemas
+stable within each split across partitions and epochs, including empty and
+all-null columns. For an empty direct prediction result, return a typed empty
+frame: a pipeline that emits no frames raises an error.
+
+When the source only needs different names or nesting, a
+[query](query-paths.qmd) may be enough. Attach processors to
+the [data module](data-modules.qmd) for training and prediction, or to the
+[HTTP serving runtime](serving.qmd).

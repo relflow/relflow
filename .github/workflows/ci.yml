@@ -27,6 +27,14 @@ jobs:
     name: Tests
     uses: ./.github/workflows/tests.yml
 
+  docs:
+    name: Documentation
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/docs.yml
+
   evidence:
     name: Evidence
     if: github.event_name != 'push' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
@@ -59,7 +67,7 @@ jobs:
   required:
     name: CI / required
     if: always()
-    needs: [tests, evidence, package]
+    needs: [tests, docs, evidence, package]
     runs-on: ubuntu-24.04
     steps:
       - name: Require all jobs for this event
@@ -78,6 +86,7 @@ jobs:
               assert os.environ["PR_REPOSITORY"] == os.environ["REPOSITORY"], "Fork evidence needs a trusted run"
           expected = {
               "tests": "success",
+              "docs": "success",
               "evidence": "skipped" if event == "push" else "success",
               "package": "success" if event == "push" else "skipped",
           }

@@ -1,0 +1,72 @@
+---
+title: Vector
+description: "A fixed-width numeric vector supplied by another system."
+---
+
+Your application may already have a merchant representation from another
+system. `Vector` lets the payment model use that supplied numeric evidence
+alongside the amount and merchant name. The coordinates must have a fixed
+width and be available at the payment's decision time.
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    amount=rf.Number,
+    merchant=rf.Category,
+    merchant_embedding=rf.Vector(n_dim=4),
+    disputed=rf.Boolean(mask=True),
+)
+```
+
+One labeled payment:
+
+```yaml
+amount: 84.50
+merchant: North Market
+merchant_embedding: [0.12, -0.03, 0.44, 0.08]
+disputed: false
+```
+
+The four coordinates illustrate the supplied shape; set `n_dim` to the actual
+width your application supplies. Use [Text](text.qmd) to
+encode strings and [Branch](branch.qmd) for repeated transaction records.
+
+## Input and options
+
+Each valued input must be an Arrow list or fixed-size list with exactly
+`n_dim` numeric, non-null elements. Values convert to `float32`. A null vector
+is a separate field state; null elements inside a valued vector are invalid.
+A vector with a NaN or infinite element is not a measurement: it takes the
+`other` [value state](index.qmd#value-state) with zero content, for inputs and
+targets, so one bad element cannot poison training.
+relflow does not fit a vector normalizer: prepare coordinate scales upstream.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `n_dim` | required | Positive vector width. |
+| `jitter` | `rf.Jitter()` | Training noise in supplied coordinate units. |
+| `objective` | `"l2"` | Reconstruction loss: `"l1"` or `"l2"`. |
+
+Jitter changes finite coordinates of valued training inputs before projection.
+Targets remain pristine. Both settings of `jitter.normalize` use the same
+coordinate space; see [Jitter](../reference/jitter.qmd).
+
+## Learning and output
+
+Reconstruction combines state cross entropy with content loss on valued
+targets. MAE and RMSE metrics use the supplied coordinate scale.
+
+In [prediction output](../reference/prediction-output.qmd), null
+ancestor records preserve their structural holes. `rf.Writer` rejects these
+fixed-width vectors when PyArrow cannot round-trip them through Parquet; use
+Arrow IPC for affected tables.
+
+Prediction `content` is `fixed_size_list<float32>[n_dim]`. When the most likely
+predicted state is non-valued, the writer emits a zero vector. Zeros therefore
+do not establish whether a vector was observed; read the shared `state` and
+`inferred` members in the [prediction envelope](../reference/prediction-output.qmd).
+
+Use [shared leaf options](index.qmd#shared-leaf-options)
+to make the vector a target or export a contextual embedding. That exported
+embedding has the model width and is distinct from the supplied vector.

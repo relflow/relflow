@@ -1,0 +1,97 @@
+name: Run evidence on lab
+
+on:
+  workflow_call:
+    inputs:
+      suite_ref:
+        description: Reviewed full commit SHA of the evidence suite in relflow/docs
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  run:
+    name: Run full paired suite on lab
+    if: github.repository == 'relflow/relflow' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    concurrency:
+      group: relflow-evidence-lab
+      queue: max
+    steps:
+      - name: Validate the immutable suite reference
+        env:
+          SUITE_REF: ${{ inputs.suite_ref }}
+        run: '[[ "$SUITE_REF" =~ ^[0-9a-f]{40}$ ]]'
+      - name: Check out the trusted executor
+        uses: actions/checkout@v4
+        with:
+          repository: relflow/docs
+          ref: d7e7d111c1bfe37f5937de40440ea2f4be5ff0ea
+          path: executor
+          persist-credentials: false
+      - name: Check out experiment sources as data
+        uses: actions/checkout@v4
+        with:
+          repository: relflow/docs
+          ref: ${{ inputs.suite_ref }}
+          path: suite
+          persist-credentials: false
+      - name: Verify the selected checkout
+        env:
+          SUITE_REF: ${{ inputs.suite_ref }}
+        run: 'test "$(git -C suite rev-parse HEAD)" = "$SUITE_REF"'
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+          enable-cache: true
+          cache-dependency-glob: executor/uv.lock
+      - run: uv sync --locked --project executor
+      - uses: actions/download-artifact@v4
+        with:
+          name: evidence-inputs
+          path: inputs
+      - name: Require the configured Tailscale identity and lab target
+        env:
+          CLIENT_ID: ${{ vars.TAILSCALE_OIDC_CLIENT_ID }}
+          LAB_TARGET: ${{ vars.EVIDENCE_LAB_TARGET }}
+        run: |
+          test -n "$CLIENT_ID" || { echo 'Configure the TAILSCALE_OIDC_CLIENT_ID repository variable'; exit 1; }
+          test -n "$LAB_TARGET" || { echo 'Configure the EVIDENCE_LAB_TARGET repository variable'; exit 1; }
+      - name: Connect an ephemeral runner through Tailscale OIDC
+        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c
+        with:
+          oauth-client-id: ${{ vars.TAILSCALE_OIDC_CLIENT_ID }}
+          audience: api.tailscale.com/${{ vars.TAILSCALE_OIDC_CLIENT_ID }}
+          tags: tag:relflow-evidence-ci
+          ping: ${{ vars.EVIDENCE_LAB_HOST || 'lab' }}
+      - name: Dispatch isolated experiments and retrieve reports
+        id: dispatch
+        env:
+          LAB_TARGET: ${{ vars.EVIDENCE_LAB_TARGET }}
+          CANDIDATE_SHA: ${{ github.sha }}
+          BASELINE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}
+        run: uv run --project executor python -u executor/evidence/ssh_run.py --suite-root suite/evidence --transport tailscale --target "$LAB_TARGET" --candidate-wheel inputs/candidate/*.whl --baseline-wheel inputs/baseline/*.whl --candidate-sha "$CANDIDATE_SHA" --baseline-sha "$BASELINE_SHA" --requirements inputs/requirements.txt --output reports/gh-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Stop only this run's lab processes and containers
+        if: always() && steps.dispatch.outcome != 'skipped'
+        env:
+          PYTHONPATH: executor/evidence
+          LAB_TARGET: ${{ vars.EVIDENCE_LAB_TARGET }}
+          EVIDENCE_RUN_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          uv run --project executor python - <<'PY'
+          import os
+          from ssh_run import cleanup
+          cleanup(os.environ["LAB_TARGET"], "tailscale", os.environ["EVIDENCE_RUN_ID"])
+          PY
+      - name: Attach report on success or failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relflow-evidence
+          path: reports/gh-${{ github.run_id }}-${{ github.run_attempt }}/
+          retention-days: 90
+          if-no-files-found: warn

@@ -1,0 +1,103 @@
+---
+title: Use cases
+description: "Frame forecasting, recommendations, customer outcomes, and relational learning as concrete datasets and prediction tasks."
+engine: markdown
+---
+
+Suppose you have records about customers, products, devices, or other entities,
+with related events arriving over time. You want a prediction from the
+information available at a particular decision: tomorrow's demand, a candidate
+product's relevance, or a customer's next outcome.
+
+RelFlow is a model factory for typed, nested data. Declare the fields,
+record collections, and prediction objectives; that schema generates a custom
+neural architecture for your observations. The useful starting point is the
+decision and its dataset. Define what one observation contains, when its
+inputs are available, and what answer will eventually be observed.
+
+## Choose a prediction task
+
+| Application | One observation | What to predict | Worked design |
+| --- | --- | --- | --- |
+| Demand, load, or sensor forecasting | One series at a cutoff, with its observed history and requested future times | A number at each requested future time | [Time series forecasting](time-series-forecasting.qmd) |
+| Product or content recommendations | One customer, candidate, and decision, with the earlier interaction history | The candidate's later click, purchase, or rating | [Recommendations](recommendations.qmd) |
+| Retention and customer value | One eligible customer at a cutoff, with profile and purchase records | Inactivity or spending over a defined future window | [Customer outcomes](customer-outcomes.qmd) |
+| Predictions across related tables | One scored entity or entry, with related records grouped beneath it | A later Boolean or numeric outcome | [Relational prediction](relational-prediction.qmd) |
+| Reuse across tasks | One entity snapshot described by a trained model | Exported context used by a separate predictor | [Representation learning](representation-learning.qmd) |
+| Payment review | One payment or account review, with the information known then | A later dispute or account loss | [The payment learning path](../learn/your-first-model.qmd) |
+
+These pages contain illustrative model designs and the comparisons needed to
+assess them. The [evidence](../evidence.qmd) contains recorded experiments on
+individual mechanisms. A schema example describes a task the library can
+express; its quality on an application's data still needs measurement.
+
+## Match the structure to the decision
+
+Start with ordinary supervised learning: a [Boolean](../datatypes/boolean.qmd)
+for a yes-or-no outcome, a [Number](../datatypes/number.qmd) for a numeric
+outcome, or a [Category](../datatypes/category.qmd) for a label. A flat record
+is sufficient when those fields contain the evidence the decision needs.
+
+Add a [Branch](../datatypes/branch.qmd) when individual related records matter.
+An interaction can keep its item, action, and time together. A purchase can
+contain line items, with further record collections nested beneath them when
+the dataset calls for it. Separate histories can describe different event
+types, each with its own ordering and resource limit. Targets can belong to
+the whole observation or to records at different depths inside those branches.
+
+The field names come from your dataset. Your application chooses the types,
+nesting, and targets; RelFlow constructs the neural modules from those
+declarations. [Model tree](../concepts/model-tree.qmd#how-declarations-become-a-model)
+explains that construction. The type system is extensible: a
+[custom field type](../datatypes/custom-tensorfields.qmd) can supply its own
+data encoding and prediction behavior through the field protocol.
+
+## Define the dataset before fitting
+
+For any of these designs, make four decisions before writing the model:
+
+1. **Observation and cutoff.** Identify the entity or candidate being scored
+   and the instant at which its inputs become fixed.
+2. **Available context.** Assemble the fields and related records known then,
+   preserving time order, record identity, and nested relationships.
+3. **Outcome and horizon.** State what the target means, when its answer is
+   ready, and which observations have complete labels.
+4. **Comparison.** Select the same held-out decisions for the RelFlow model
+   and a useful simple baseline, then measure the application's objective.
+
+[Prepare observations](../learn/prepare-observations.qmd) demonstrates these
+choices for payments. [Data modules](../guides/data-modules.qmd) supplies the
+prepared data, and [Evaluation](../learn/evaluation.qmd) connects scores to
+decisions. Joins, observation construction, and split assignment belong to
+the application.
+
+## Train for one task or build for reuse
+
+For a labeled task, train the generated model on prepared observations and
+evaluate its predictions. A saved model can produce batch predictions or
+serve predictions and requested representations through
+[HTTP serving](../guides/serving.qmd) in your application's infrastructure.
+
+To build a foundation model for your own structured data, begin with a
+broader [reconstruction pretraining](../learn/pretraining-and-fine-tuning.qmd)
+task, then adapt its objectives and fine-tune for labeled decisions, or reuse
+its learned [representations](representation-learning.qmd) in separate
+predictors. Schema changes retain compatible learned state under the
+[mutation rules](../guides/schema-mutation.qmd). This pretraining and reuse
+workflow needs evaluation for each downstream task; a newly initialized
+task-specific model has not undergone it.
+
+## Related work and demonstrated behavior
+
+The customer and multi-table examples adapt public RelBench task formulations.
+Their task definitions and adaptations are cited on those pages. The examples
+show how to structure an application; they do not reproduce benchmark runs or
+report rankings.
+
+For the modeling mechanisms, inspect the recorded
+[identity comparison](../evidence/identity/unseen-identity-equality.html),
+[retrieval capacity](../evidence/relational/retrieval-capacity.html), and
+[representation transfer](../evidence/representation/reconstruction-transfer.html)
+experiments. Their results apply to their specified setups. Use the worked
+designs here to formulate an application, then compare it on the data and
+decision it is intended to support.

@@ -1,0 +1,106 @@
+---
+title: Batch inference
+description: "Score large request files to Parquet shards without holding every prediction in memory."
+---
+
+Supply your application's Parquet request files through `ArrowDataModule`.
+Use Lightning prediction with `rf.Writer` to write results directly to Parquet,
+keeping large jobs from accumulating every prediction in memory.
+
+The example uses the transaction-history model trained in
+[Train and save](../learn/train-and-save.qmd). Each request row keeps its
+`trxns` inputs and omits `disputed`, as shown in
+[Prediction output](../reference/prediction-output.qmd). The model returns a dispute result
+for every retained transaction.
+
+```python
+import relflow as rf
+
+# The application supplies the request files for the trained model.
+data = rf.ArrowDataModule(
+    predict="payments/history/scoring/*.parquet",
+    retain=("payment_id",),
+)
+model.predict(
+    datamodule=data,
+    batch_size=256,
+    callbacks=[rf.Writer("payment-predictions")],
+    return_predictions=False,
+)
+```
+
+Each rank writes `payment-predictions/rank-{global_rank}.parquet`. With
+[prediction output](../reference/prediction-output.qmd), these files preserve the
+selected `predictions`, `representations`, and retained `inputs` columns and
+schema metadata. Repeated records are variable lists of sibling result structs,
+even with finite branch limits. Retain a business key to join or sort distributed
+results downstream; RelFlow does not add row identity.
+
+Use a new output directory for each job. A Writer replaces its own rank's shard;
+it does not remove shards left by another job with a different rank count. Read
+the output only after prediction finishes successfully. During a run, shards
+have a `.partial` suffix and receive their final names at completion.
+
+To collect bounded batched output in memory, use
+`model.predict(datamodule=data, batch_size=256, devices=1)`. This returns one Arrow table.
+The batch size is per device and updates the model's current size.
+Prediction has no automatic time limit.
+
+With `drop_last=False` (the default), distributed prediction preserves the final
+partial group. Ranks receive disjoint rows; a short tail can leave some ranks
+with no rows in that step. Local prediction workers take turns on complete rank
+batches, preserving their order within each rank's shard. Combining shards does
+not restore global source order. Use retained identifiers to join or sort the
+results, or use one device when source order is needed without that step.
+
+As an alternative, a [postprocessor](postprocessing.qmd) can give files a
+consumer-specific schema. Configure a different Writer:
+
+```python
+writer = rf.Writer("warehouse-predictions", postprocessor=warehouse)
+```
+
+Here `warehouse` is an application-defined decorated processor. The first
+written batch fixes that rank's Parquet schema; later batches must match it.
+Pass this `writer` in `callbacks=[writer]` instead of the original Writer to
+produce `warehouse-predictions/`. Processors may change rows and columns for
+offline output.
+
+For the original job above, open its completed shards as one Arrow dataset
+for further batch processing:
+
+```python
+import pyarrow.dataset as ds
+
+result = ds.dataset("payment-predictions", format="parquet")
+```
+
+## Fixed-size vectors and null containers
+
+`rf.Writer` rejects a fixed-size list beneath a null ancestor or a null vector
+value because PyArrow 24 cannot round-trip that shape through Parquet. A Vector
+field in a structurally null repeated record can trigger this guard, as can a
+retained source vector. Null components inside a nonnull fixed-size vector are
+different and remain supported. The guard runs after configured postprocessing.
+
+Use Arrow IPC for affected tables to preserve their exact types and nulls.
+For a job small enough to collect in memory:
+
+```python
+import pyarrow.ipc as ipc
+
+table = model.predict(datamodule=data, batch_size=256, devices=1)
+with ipc.new_stream("payment-predictions.arrow", table.schema) as writer:
+    writer.write_table(table)
+```
+
+For streaming IPC, consume written prediction batches in an application callback;
+`rf.Writer` itself writes Parquet. An alternative application postprocessor may
+project away unneeded vectors, but it must deliberately define the resulting
+output contract.
+
+Direct prediction also supports bounded in-memory requests, processing rows in
+batches and collecting one Arrow table.
+[Prediction output](../reference/prediction-output.qmd#batch-direct-requests) explains its
+preprocessing and postprocessing order. Data-module prediction with a Writer
+streams file-backed datasets. Use [Serving](serving.qmd) for online requests.

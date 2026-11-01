@@ -1,0 +1,302 @@
+---
+title: Masking and reconstruction
+description: "Policies that hide inputs, sample reconstruction targets, or select them with application Booleans."
+engine: markdown
+---
+
+A mask controls which values the model can see and which values it learns to
+predict. The [transaction-history tutorial](../learn/add-transaction-history.qmd)
+uses `disputed=rf.Boolean(mask=True)`: every retained transaction's label is
+hidden and supervised. That simple policy needs no selector.
+
+This later guide introduces optional policies for hiding ordinary inputs or
+reconstructing selected parts of a record. These advanced choices are
+independent of [exporting embeddings](../learn/reusable-representations.qmd).
+
+## Choose the intended effect
+
+| Goal | Field configuration |
+| --- | --- |
+| Supervise every retained occurrence, never embedded | `mask=True` |
+| Ordinary input | `mask=False` |
+| Train-only learned-mask dropout | `mask=0.15` |
+| Train-only structural dropout | `mask=rf.Mask(rate=0.15, skip=True)` |
+| Reconstruct sampled values | `mask=rf.Mask(rate=0.15, reconstruct=True)` |
+| Reconstruct amounts selected by the application | `mask=rf.Mask(query="routing.hide_amount", reconstruct=True)` |
+| Remove an input in every stage without a target | `mask=rf.Mask(skip=True, dropout=False)` |
+
+```{typst}
+//| label: fig-masking-policies
+//| fig-cap: "What each policy does to one field across five retained transactions, by stage. Sampled policies select one position here for illustration."
+//| fig-alt: "A grid with one row per policy and columns for train, validate and test, and predict. mask=True hides and reconstructs every position in every stage. mask=0.15 replaces a sampled position with a learned mask during training only. Mask with rate 0.15 and skip drops a sampled position during training only. Mask with rate 0.15 and reconstruct hides and reconstructs a sampled position during training and validation and is off at prediction. Mask with a query selector and reconstruct hides and reconstructs the selected position in every stage. Mask with skip and dropout false removes the field in every stage."
+#policies(
+  ("Train", "Validate and test", "Predict"),
+  (
+    (label: [`mask=True`], cells: (repeat("target", 5), repeat("target", 5), repeat("target", 5))),
+    (label: [`mask=0.15`], cells: (("input", "input", "masked", "input", "input"), repeat("input", 5), repeat("input", 5))),
+    (label: [`rf.Mask(rate=0.15, skip=True)`], cells: (("input", "input", "skipped", "input", "input"), repeat("input", 5), repeat("input", 5))),
+    (label: [`rf.Mask(rate=0.15, reconstruct=True)`], cells: (("input", "input", "target", "input", "input"), ("input", "input", "target", "input", "input"), repeat("input", 5))),
+    (label: [`rf.Mask(query="routing.hide_amount", reconstruct=True)`], cells: (("input", "target", "input", "input", "input"), ("input", "target", "input", "input", "input"), ("input", "target", "input", "input", "input"))),
+    (label: [`rf.Mask(skip=True, dropout=False)`], cells: (repeat("skipped", 5), repeat("skipped", 5), repeat("skipped", 5))),
+  ),
+)
+```
+
+`mask=True` is shorthand for
+`rf.Mask(skip=True, dropout=False, reconstruct=True)`. Under a repeated branch,
+this selects every retained transaction. It differs from `mask=1.0`, which
+hides every input using learned-mask dropout during training and creates no
+reconstruction objective.
+
+Without `skip`, a selected value remains a present coordinate represented by a
+learned mask. With `skip=True`, its input content is not tensorized or embedded and
+its coordinate is absent from encoder attention. Reconstruction targets still
+retain their pristine values for the loss.
+
+A mask selects whole values: one Number, Text value, or Set, for example. It
+does not select individual tokens inside Text or members inside Set.
+
+## Configure a policy
+
+| Option | Meaning |
+| --- | --- |
+| `query` | Boolean selector in the input; omitted means every retained owner occurrence is eligible. |
+| `rate` | Fraction of eligible occurrences to sample; omitted means select all eligible occurrences. |
+| `skip` | Omit selected input representations instead of using a learned mask. |
+| `reconstruct` | Add an objective for selected observed values, or request predictions. |
+| `dropout` | Apply only during training; defaults to `not reconstruct`. |
+
+`dropout=True` and `reconstruct=True` cannot be combined. Rates must be between
+zero and one. A zero rate removes the policy; a rate of one normalizes to no
+rate, making selection deterministic.
+
+The normalized policy determines when selection runs:
+
+| Policy | Train | Validate/test | Predict |
+| --- | --- | --- | --- |
+| `dropout=True` | Active | Off | Off |
+| `dropout=False`, no rate | Active | Active | Active |
+| `dropout=False`, fractional rate | Sampled | Sampled with epoch fixed at zero | Off |
+
+Validation and test use different random streams. Sampling depends on seed,
+stage, owner address, epoch, and record layout; do not assume that changing
+batching preserves exactly the same selections.
+
+## Select within nested data
+
+A selector is an ordinary Boolean value prepared by the application. For an
+optional amount-reconstruction objective, attach `routing.hide_amount` to each
+transaction. Here it selects only the middle amount to hide and reconstruct;
+the ordinary dispute objective still supervises all three transactions:
+
+```yaml
+trxns:
+  - booked_at: "2026-05-21T10:00:00"
+    amount: 32.00
+    merchant: Station Cafe
+    disputed: false
+    routing:
+      hide_amount: false
+  - booked_at: "2026-05-27T18:15:00"
+    amount: 56.20
+    merchant: North Market
+    disputed: true
+    routing:
+      hide_amount: true
+  - booked_at: "2026-05-28T14:30:00"
+    amount: 84.50
+    merchant: North Market
+    disputed: false
+    routing:
+      hide_amount: false
+```
+
+The leaf's mask query starts from its containing transaction:
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    trxns=rf.Branch(
+        length=32,
+        overflow="tail",
+        booked_at=rf.DateParts(
+            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
+        ),
+        amount=rf.Number(
+            mask=rf.Mask(query="routing.hide_amount", reconstruct=True),
+        ),
+        merchant=rf.Category,
+        disputed=rf.Boolean(mask=True),
+    ),
+)
+```
+
+```{typst}
+//| label: fig-masking-selector
+//| fig-cap: "One field can be an input at some positions and a reconstruction target at others. The dispute target stays hidden everywhere."
+//| fig-alt: "A payment root owns a repeated trxns branch. Inside it, booked_at DateParts and merchant Category are inputs. The amount Number is hidden and reconstructed where routing.hide_amount is true and an ordinary input elsewhere. The disputed Boolean target is hidden and supervised at every transaction."
+#tree(node("payment", kind: "root", children: (
+  node("trxns", kind: "branch", repeated: true, children: (
+    node("booked_at", type: "DateParts"),
+    node("amount", type: "Number", width: 175pt, body: [Hidden and reconstructed where `routing.hide_amount` is true; an ordinary input elsewhere.]),
+    node("merchant", type: "Category"),
+    node("disputed", kind: "target", type: "Boolean", detail: "Every transaction"),
+  )),
+)))
+```
+
+`routing` is not declared as a model field. The selected amount is represented
+by a learned mask and reconstructed from the remaining context. The other
+amounts remain ordinary inputs and receive no amount-reconstruction loss.
+All dispute labels remain hidden and supervised independently of this choice.
+
+For conditional amount prediction, keep every amount field and selector in
+the source schema, using `amount: null` where the requested amount is unknown.
+Only selected amount positions have `inferred: true`. The directly bound,
+unconditional `disputed` field can be omitted from all prediction transactions.
+
+The selector must provide exactly one non-null Boolean per retained owner
+record; integers, lists, missing paths, and null selectors are rejected. A
+node's value `query` selects its source value; `Mask.query` independently
+selects which owner occurrences receive the policy.
+
+Place a policy on the branch when all descendants should share a decision:
+
+```python
+trxns = rf.Branch(
+    length=32,
+    overflow="tail",
+    mask=rf.Mask(rate=0.10, skip=True),
+    amount=rf.Number,
+    booked_at=rf.DateParts(
+        dateparts=["day_of_month", "day_of_week", "hour_of_day"],
+    ),
+    merchant=rf.Category,
+)
+```
+
+```{typst}
+//| label: fig-masking-branch-policy
+//| fig-cap: "A branch policy selects whole transactions. A selected transaction's fields are hidden together, along with any nested descendants."
+//| fig-alt: "A grid of three transactions by three fields. The middle transaction is selected by the branch policy, so its booked_at, amount, and merchant cells are all skipped. The other two transactions remain visible inputs."
+#tokens(
+  ("booked_at", "amount", "merchant"),
+  (
+    (label: [May 21], values: ([Thu 10:00], [32.00], [Station Cafe])),
+    (label: [May 27, selected], values: ([Wed 18:15], [56.20], [North Market])),
+    (label: [May 28, latest], values: ([Thu 14:30], [84.50], [North Market])),
+  ),
+  states: (repeat("input", 3), repeat("skipped", 3), repeat("input", 3)),
+  highlight: none, frame-first: false, summary: none,
+)
+```
+
+Each selected transaction hides all three fields and any nested descendants. A
+root mask similarly broadcasts through an observation. Reconstructing branch
+or root policies create objectives on active descendant leaves, whose
+extensions must support reconstruction.
+
+## Derive a selector
+
+For a separate amount-reconstruction task, a processor can derive a selector
+from each transaction's application verification flag. Keep this Boolean
+derivation outside the model:
+
+```python
+import polars as pl
+
+@rf.preprocess
+def select_unverified(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(
+        trxns=pl.col("trxns").list.eval(
+            pl.element().struct.with_fields(
+                predict_amount=pl.element()
+                .struct.field("amount_verified")
+                .fill_null(False)
+                .not_(),
+            )
+        )
+    )
+
+amount = rf.Number(
+    mask=rf.Mask(query="predict_amount", reconstruct=True),
+)
+```
+
+Include `amount` inside `trxns` and pass `preprocessor=select_unverified` to its
+data module. For direct prediction pass `preprocess=select_unverified` to
+`model.predict(...)`. Each source transaction retains the amount field and
+verification flag; the processor adds a non-null Boolean selector inside that
+transaction before mask resolution.
+
+## Combine policies
+
+Pass a tuple or list of `rf.Mask` objects to combine selections:
+
+```python
+amount = rf.Number(
+    mask=(
+        rf.Mask(rate=0.10),
+        rf.Mask(query="routing.hide_amount", skip=True, reconstruct=True),
+    ),
+)
+```
+
+```{typst}
+//| label: fig-masking-combined
+//| fig-cap: "Two policies on one field during training. Where both select a position, the skip wins and the reconstruction objective remains."
+//| fig-alt: "Three rows over five transactions. The sampled learned-mask policy masks the second and fifth positions. The selector policy hides and reconstructs the third and fifth positions. The combined row shows a learned mask at the second position and hidden reconstructed targets at the third and fifth."
+#policies(
+  ("Train",),
+  (
+    (label: [`rf.Mask(rate=0.10)`], cells: (("input", "masked", "input", "input", "masked"),)),
+    (label: [`rf.Mask(query="routing.hide_amount", skip=True, reconstruct=True)`], cells: (("input", "input", "target", "input", "target"),)),
+    (label: [Combined], cells: (("input", "masked", "target", "input", "target"),)),
+  ),
+  legend: false,
+)
+```
+
+Ancestor and local selections accumulate. A skip wins over a learned mask;
+reconstruction selections accumulate independently. A child policy cannot
+restore an input hidden by an ancestor. Duplicate policies are normalized
+away.
+
+## Targets during training and prediction
+
+Fitting needs observed target values. Explicit nulls can contribute value-state
+objectives for selected nullable fields; structurally absent positions do not
+invent labels. Use Boolean dispute labels for all retained transactions in
+the basic supervised example, rather than nulls standing in for unknown
+outcomes. A fractional reconstruction policy trains its decoder but does not
+request ordinary prediction output. To request deterministic reconstruction
+later, [update the policy](../guides/schema-mutation.qmd).
+
+A directly bound, unconditional target such as `disputed=rf.Boolean(mask=True)`
+may be omitted from prediction input. For a repeated target, its containing
+branch records must remain to establish output positions. Targets using an
+explicit value query or conditional reconstruction selector still need their
+source structure and selector to be bindable.
+
+For example, `disputed=rf.Boolean(query="was_disputed", mask=True)` reads an
+explicit source column. Prediction must keep `was_disputed` in every source
+transaction, with null for an unknown answer; the direct-binding omission
+shortcut does not apply to that query.
+
+Conditional predictions retain their structural positions. Finite and automatic
+branch lengths both write variable lists of sibling result structs; a finite
+cap does not add public padding. Null collections, empty collections, and null
+items remain distinct. See
+[repeated coordinates](../reference/prediction-output.qmd#repeated-coordinates).
+Use each coordinate's `inferred` flag to identify requested outputs. See
+[Prediction output](../reference/prediction-output.qmd) for the Arrow contract.
+
+[Pretraining and fine-tuning](../learn/pretraining-and-fine-tuning.qmd) shows how to change
+objectives between training stages. The [evidence catalog](../evidence.qmd)
+includes sampled reconstruction, nested selectors, branch ablation, and
+prefix-only sequence prediction in P051–P054. The
+[evidence from incomplete observations](../evidence/representation/incomplete-evidence.html)
+and [contextual-consistency evidence](../evidence/anomaly/contextual-consistency.html)
+study missing evidence and reconstruction-based anomaly scores, with their
+controls and limitations.
