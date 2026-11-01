@@ -2,6 +2,29 @@
 <script>
   (() => {
     let data;
+    let previewToolbar;
+    let previewToolbarObserver;
+
+    async function reservePreviewToolbar() {
+      const toolbar = document.querySelector("readthedocs-filetreediff");
+      if (!toolbar || toolbar === previewToolbar) return;
+      previewToolbar = toolbar;
+      try {
+        await toolbar.updateComplete;
+      } catch {
+        return;
+      }
+      // The host has no height: its rendered panel is fixed inside the shadow root.
+      const panel = toolbar.shadowRoot?.firstElementChild;
+      if (!panel) return;
+      previewToolbarObserver?.disconnect();
+      previewToolbarObserver = new ResizeObserver(() => {
+        document.documentElement.style.setProperty(
+          "--rf-preview-toolbar-height", `${panel.getBoundingClientRect().height}px`,
+        );
+      });
+      previewToolbarObserver.observe(panel, { box: "border-box" });
+    }
 
     function versionKey(version) {
       return version.id ?? `${version.type}:${version.slug}`;
@@ -126,6 +149,7 @@
     }
 
     function receiveVersions(event) {
+      reservePreviewToolbar();
       try {
         data = event.detail.data();
         renderVersions();

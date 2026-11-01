@@ -1,3 +1,9 @@
+#quarto-header::before {
+  content: "";
+  display: block;
+  height: var(--rf-preview-toolbar-height, 0px);
+}
+
 #quarto-header .navbar-brand-container {
   min-width: 0;
 }
