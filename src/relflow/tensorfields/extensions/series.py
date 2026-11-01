@@ -16,11 +16,12 @@ from pydantic import StrictInt
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
-from relflow.structs.enums import Component, Overflow, Strata, TensorKey, Tokens
-from relflow.structs.packages import Parcel
+from relflow.structs.enums import Component, Metric, Overflow, Strata, TensorKey, Tokens
+from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
     Context,
+    DecoderBase,
     EmbedderBase,
     Extension,
     RequestBase,
@@ -29,7 +30,7 @@ from relflow.tensorfields.base import (
 )
 from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.normalizer import GlobalOnlineNormalizer, moments, precise
-from relflow.tensorfields.shared.reconstruction import Metrics
+from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
@@ -400,3 +401,89 @@ def learn(
         raise ValueError(f"series learner at '{address}' requires train strata, got {strata}")
     embedder: Embedder = cast(Embedder, module.nodes[address].embedder)
     embedder.normalizer.learn(cast(TensorDict, observation[TensorKey.content]))
+    if address in module.schema.objectives:
+        decoder: Decoder = cast(Decoder, module.nodes[address].decoder)
+        decoder.normalizer.learn(cast(TensorDict, observation[TensorKey.content]))
+
+
+@series.register(Component.Decoder)
+class Decoder(DecoderBase):
+    coordinatewise = True
+
+    def __init__(self, schema: Schema, address: Address):
+        super().__init__(schema=schema, address=address)
+
+        request: Request = cast(Request, schema.requests[address])
+        self.classification = torch.nn.Linear(in_features=schema.d_model, out_features=len(Tokens))
+        if address not in schema.objectives:
+            return
+
+        horizon = cast(int, request.horizon)
+        self.horizon: int = horizon
+        self.channels: int = request.channels
+        self.regression = torch.nn.Linear(in_features=schema.d_model, out_features=horizon * request.channels)
+        # Target statistics per channel: the forecast starts at their mean and predicts standardized deviations.
+        self.normalizer: GlobalOnlineNormalizer = GlobalOnlineNormalizer(width=request.channels)
+        self.metrics = Scores(address, Errors)
+
+    @beartype
+    def decode(self, pooled: torch.Tensor) -> TensorDict:
+        state = self.classification(pooled)
+        if not hasattr(self, "regression"):
+            return TensorDict(source={TensorKey.state: state})
+
+        with precise(pooled.device):
+            scaled = self.regression(pooled.float()).reshape(*pooled.shape[:-1], self.horizon, self.channels)
+            scaled = scaled.to(dtype=self.normalizer.mean.dtype)
+            content = self.normalizer.mean + self.normalizer.scale * scaled
+        return TensorDict(source={TensorKey.state: state, TensorKey.content: content, "scaled": scaled})
+
+
+@series.register(Component.loss)
+def loss(
+    module: Model,
+    prediction: Prediction,
+    batch: TensorFieldBase,
+    strata: Strata,
+) -> torch.Tensor:
+    address: Address = prediction.address
+    request: Request = cast(Request, module.schema.requests[address])
+    decoder: Decoder = cast(Decoder, module.nodes[address].decoder)
+    horizon, channels = decoder.horizon, request.channels
+
+    N: int = cast(torch.Tensor, batch.targets[TensorKey.state]).numel()
+    trainable = batch.trainable.reshape(N)
+    state_targets = cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(N)
+    state_inputs = cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(N, len(Tokens))
+
+    output: torch.Tensor = module.track(
+        (address, strata, Metric.loss, TensorKey.state),
+        value=torch.nn.functional.cross_entropy(input=state_inputs, target=state_targets, reduction="none")
+        .masked_select(trainable)
+        .mean(),
+    )
+    module.track(
+        (address, strata, Metric.accuracy, TensorKey.state),
+        value=state_inputs.argmax(dim=1).eq(state_targets).masked_select(trainable).float().mean(),
+    )
+
+    target = cast(TensorDict, batch.targets[TensorKey.content])
+    scaled = cast(torch.Tensor, prediction.payload["scaled"]).reshape(N, horizon, channels)
+    values = cast(torch.Tensor, target["values"]).reshape(N, horizon, channels).to(dtype=scaled.dtype)
+    observed = cast(torch.Tensor, target["observed"]).reshape(N, horizon)
+    entries = (trainable & state_targets.eq(Tokens.valued.value)).unsqueeze(-1) & observed
+    if entries.any():
+        with precise(scaled.device):
+            standardized = (values - decoder.normalizer.mean) / decoder.normalizer.scale
+        output += module.track(
+            (address, strata, Metric.loss, TensorKey.content),
+            value=request.objective.loss(inputs=scaled[entries], targets=standardized[entries]).to(dtype=output.dtype),
+        )
+    else:
+        output += scaled.sum().to(dtype=output.dtype) * 0.0
+
+    # Error metrics report source units whatever the training scale.
+    content = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N, horizon, channels)
+    decoder.metrics.record(module, strata, *errors(content[entries], values[entries]))
+
+    return output
