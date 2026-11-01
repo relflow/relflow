@@ -12,7 +12,8 @@ from relflow.structs.enums import Overflow, Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.tree import Address
 from relflow.tensorfields.base import TENSORFIELDS, Context
-from relflow.tensorfields.extensions.series import TensorField, encode
+from relflow.tensorfields.extensions.series import Block, Embedder, TensorField, encode
+from relflow.tensorfields.shared.jitter import Jitter
 from tests.arrow import table as arrow_table
 from tests.tensorfields.helpers import tensorize
 
@@ -213,3 +214,86 @@ def test_observe_ignores_nan_records_and_unobserved_steps():
     assert (
         TENSORFIELDS["series"].observe(field=pristine, address=ADDRESS, schema=schema, state=None, learn=False) is None
     )
+
+
+def embed(rows: list, *, channels: int = 1, datatype: pa.DataType | None = None, **options) -> torch.Tensor:
+    schema = build_schema(channels=channels, **options)
+    field = tensorfield(rows, schema, datatype=datatype)
+    return Embedder(schema=schema, address=ADDRESS).eval().embed(field).payload
+
+
+def test_block_keeps_shape_and_zeroes_unobserved_steps():
+    observed = torch.tensor([[True, True, False, False, True]] * 2)
+    out = Block(width=8, dilation=2)(torch.randn(2, 5, 8), observed)
+    assert out.shape == (2, 5, 8)
+    assert not out[:, 2:4].any()
+
+
+def test_embedder_payload_shape():
+    assert embed([[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0]]], channels=2).shape == (2, 1, 1, 16)
+
+
+def test_unobserved_and_padded_values_do_not_change_embedding():
+    schema = build_schema(channels=2)
+    rows = [[[1.0, 2.0], [NAN, 2.0], [3.0, 4.0]], [[5.0, 6.0]]]
+    field = tensorfield(rows, schema)
+    embedder = Embedder(schema=schema, address=ADDRESS).eval()
+    expected = embedder.embed(field).payload
+
+    values = field.content["values"].clone()
+    values[~field.content["observed"]] = 1e6
+    field.content["values"] = values
+    assert torch.equal(embedder.embed(field).payload, expected)
+
+
+def test_embedding_does_not_depend_on_batch_width():
+    schema = build_schema(channels=1)
+    embedder = Embedder(schema=schema, address=ADDRESS).eval()
+    short = [[1.0, 2.0, 3.0]]
+    alone = embedder.embed(tensorfield(short, schema)).payload
+    padded = embedder.embed(tensorfield(short + [[float(i) for i in range(40)]], schema)).payload
+    torch.testing.assert_close(alone[0], padded[0], atol=1e-5, rtol=0)
+
+
+def test_single_step_series_embeds():
+    payload = embed([[[1.0, 2.0]]], channels=2)
+    assert payload.shape == (1, 1, 1, 16) and torch.isfinite(payload).all()
+
+
+def test_all_empty_batch_embeds_finite():
+    payload = embed([[], None], datatype=pa.list_(pa.float64()))
+    assert payload.shape == (2, 1, 1, 16) and torch.isfinite(payload).all()
+
+
+def test_horizon_rejected_on_inputs():
+    with pytest.raises(ValueError, match="horizon applies only to reconstruction targets"):
+        rf.Model.xs(d_model=8, signal=rf.Series(channels=1, horizon=4), label=rf.Boolean(mask=True))
+
+
+def test_learn_updates_per_channel_statistics():
+    model = rf.Model.xs(d_model=8, signal=rf.Series(channels=2), label=rf.Boolean(mask=True))
+    rows = pa.table({"signal": [[[1.0, 10.0], [3.0, 30.0]], [[5.0, 50.0]]], "label": [True, False]})
+    model.encode(rows, strata=Strata.train)
+    normalizer = model.nodes["/signal"].embedder.normalizer
+    assert normalizer.count.tolist() == [3, 3]
+    torch.testing.assert_close(normalizer.mean, torch.tensor([3.0, 30.0], dtype=torch.float64))
+
+
+def test_jitter_runs_only_in_training(monkeypatch: pytest.MonkeyPatch):
+    schema = build_schema(channels=1, jitter=Jitter(add=0.5))
+    embedder = Embedder(schema=schema, address=ADDRESS)
+    field = tensorfield([[1.0, 2.0]], schema)
+    calls: list[torch.Tensor] = []
+
+    def capture(self: Jitter, inputs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        calls.append(mask.clone())
+        return inputs
+
+    monkeypatch.setattr(Jitter, "apply", capture)
+    embedder.train()
+    embedder.embed(field)
+    embedder.eval()
+    embedder.embed(field)
+
+    assert len(calls) == 1
+    assert calls[0].reshape(-1).tolist() == [True, True]
