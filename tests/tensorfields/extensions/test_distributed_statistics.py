@@ -14,8 +14,8 @@ import relflow as rf
 from relflow.architecture.binding import bind
 from relflow.data.iterables import encode
 from relflow.tensorfields.extensions.category import Reconstruction
-from relflow.tensorfields.extensions.number import GlobalOnlineNormalizer, moments
 from relflow.tensorfields.extensions.quantile import Synchronize
+from relflow.tensorfields.shared.normalizer import GlobalOnlineNormalizer, moments
 
 pytestmark = pytest.mark.integration
 
