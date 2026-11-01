@@ -71,11 +71,11 @@ class Request(RequestBase):
     """
 
     type: Literal["series"] = "series"
-    channels: Annotated[int, pydantic.Field(gt=0)]
+    channels: Annotated[StrictInt, pydantic.Field(gt=0)]
     length: Annotated[StrictInt | None, pydantic.Field(gt=0)] = None
     overflow: Overflow | None = None
     horizon: Annotated[StrictInt | None, pydantic.Field(gt=0)] = None
-    n_blocks: Annotated[int, pydantic.Field(gt=0)] = 6
+    n_blocks: Annotated[StrictInt, pydantic.Field(gt=0)] = 6
     jitter: Jitter = pydantic.Field(default_factory=Jitter)
     objective: Objective = Objective.l2
 
@@ -184,13 +184,12 @@ def encode(
     excess = lengths - kept
     start = np.zeros_like(lengths)
     if excess.any():
-        policy = Overflow.error if target else request.overflow
         longest = int(lengths.max())
-        match policy:
-            case Overflow.error if target:
-                raise ValueError(
-                    f"series target at '{address}' holds {longest} steps but horizon={cap}; shorten it or raise horizon"
-                )
+        if target:
+            raise ValueError(
+                f"series target at '{address}' holds {longest} steps but horizon={cap}; shorten it or raise horizon"
+            )
+        match request.overflow:
             case Overflow.error:
                 raise ValueError(
                     f"series field at '{address}' holds {longest} steps but length={cap} with overflow='error'; "
@@ -376,6 +375,7 @@ class Embedder(EmbedderBase):
         hidden = self.projection(values).masked_fill(~keep, 0.0)
         for block in self.blocks:
             hidden = block(hidden, observed)
+        # Records with no observed step pool to zeros, so neither the value nor its gradient sees -inf.
         pooled = hidden.masked_fill(~keep, -torch.inf).amax(dim=1)
         pooled = torch.where(observed.any(dim=1, keepdim=True), pooled, torch.zeros_like(pooled))
 
@@ -416,7 +416,8 @@ class Decoder(DecoderBase):
 
         request: Request = cast(Request, schema.requests[address])
         self.classification = torch.nn.Linear(in_features=schema.d_model, out_features=len(Tokens))
-        if address not in schema.objectives:
+        self.forecast: bool = address in schema.objectives
+        if not self.forecast:
             return
 
         horizon = cast(int, request.horizon)
@@ -430,7 +431,7 @@ class Decoder(DecoderBase):
     @beartype
     def decode(self, pooled: torch.Tensor) -> TensorDict:
         state = self.classification(pooled)
-        if not hasattr(self, "regression"):
+        if not self.forecast:
             return TensorDict(source={TensorKey.state: state})
 
         with precise(pooled.device):
@@ -502,11 +503,11 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
     content = cast(torch.Tensor, prediction.payload[TensorKey.content])
     *coordinates, horizon, channels = content.shape
     records = math.prod(coordinates)
-    steps = datatype.field(TensorKey.content.name).type.value_type
+    nested = datatype.field(TensorKey.content.name).type
     values = variable(
         array(content, pa.float64()),
         torch.full((records * horizon,), channels),
-        datatype=steps,
+        datatype=nested.value_type,
     )
-    series = variable(values, torch.full((records,), horizon), datatype=datatype.field(TensorKey.content.name).type)
-    return struct({TensorKey.content.name: series}, datatype)
+    forecast = variable(values, torch.full((records,), horizon), datatype=nested)
+    return struct({TensorKey.content.name: forecast}, datatype)
