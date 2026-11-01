@@ -7,6 +7,8 @@ build:
   jobs:
     install:
       - python -m pip install uv==0.7.9
+      # Read the Docs uses asdf shims for console scripts installed by pip.
+      - asdf reshim python
       - uv sync --locked --project docs
     build:
       html:

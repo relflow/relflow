@@ -151,9 +151,12 @@ owner account:
    version and save; activation triggers its build. Inspect the build and its
    **View docs** link. The project branch selector only lists discovered
    branches, so changing the default branch is unnecessary for this preview.
-   Read the Docs synchronizes versions on repository pushes and builds; if
-   the branch is missing, resolve version discovery before retrying the
-   selector. See the [version synchronization reference](https://docs.readthedocs.com/platform/stable/versions.html#version-syncing).
+   If the branch is missing, sign in and open the project's version-sync API
+   page at `/api/v3/projects/<project-slug>/sync-versions/`. Use its **POST**
+   button; a successful request returns **202 Accepted** with
+   `{"triggered": true}`. Refresh **Versions** after the background sync.
+   This uses the signed-in browser session and needs no shared API token.
+   See the [version-sync API reference](https://docs.readthedocs.com/platform/stable/api/v3.html#project-versions-sync).
 4. In **Settings → Pull request builds**, enable previews. In
    **Settings → Addons → Flyout Menu**, enable the version menu; in
    **Settings → Search**, enable the search modal. Enable the pull request
