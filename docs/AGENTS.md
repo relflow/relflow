@@ -50,8 +50,9 @@ build from this checkout alone using the isolated static environment.
   metadata failures retain it as a fallback. Keep the host's injected Addons
   script, search, and ad-free handling; never hardcode its script URL or release
   list. Local Quarto preview and search remain available.
-  The preview diff toolbar reserves a header spacer from its measured border-box
-  height; let Quarto's header observer own page, sidebar, and anchor offsets.
+  Keep the Read the Docs File tree diff and Visual diff addons disabled: their
+  floating review controls interfere with Quarto's fixed navigation. Pull request
+  builds and the header version picker remain available without these addons.
   Account connection, Gold membership, project ad-free settings, and domain
   cutover are external setup steps in `docs/README.md`. The owner is
   `granthamtaylor`; Gold is assigned to `relflow` through the account's ad-free

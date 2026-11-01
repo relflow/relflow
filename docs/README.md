@@ -217,8 +217,9 @@ initializing successfully, retaining it as a fallback. Keep the Flyout Menu
 addon enabled in the dashboard. Host search and Gold remain independent;
 Quarto retains its own search for local and static builds. Do not hardcode a
 release list or the host's injected script URL.
-The fixed header reserves a spacer matching the preview's diff toolbar height;
-Quarto then updates its page, sidebar, and anchor offsets together.
+Keep **File tree diff** and **Visual diff** disabled in **Settings → Addons**.
+Their floating review controls interfere with Quarto's fixed navigation; pull
+request previews and the header version picker work without them.
 [Pull request previews](https://docs.readthedocs.com/platform/stable/pull-requests.html)
 use separate preview domains and carry a status check on GitHub.
 
