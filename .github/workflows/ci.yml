@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      evidence_ref:
+        description: Optional full docs commit SHA for an explicit suite validation
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.evidence_ref || '' }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests
+    uses: ./.github/workflows/tests.yml
+
+  evidence:
+    name: Evidence
+    if: github.event_name != 'push' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/evidence.yml
+    with:
+      suite_ref: ${{ inputs.evidence_ref || 'f86c4cc62d964e758a05faf5771691cb5a85276b' }}
+
+  package:
+    name: Build main distributions
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: '3.12'
+      - run: uv build --out-dir dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+          retention-days: 14
+          if-no-files-found: error
+
+  required:
+    name: CI / required
+    if: always()
+    needs: [tests, evidence, package]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require all jobs for this event
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          PR_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        shell: python
+        run: |
+          import json
+          import os
+          event = os.environ["EVENT_NAME"]
+          assert event in {"push", "pull_request", "merge_group", "workflow_dispatch"}, event
+          if event == "pull_request":
+              assert os.environ["PR_REPOSITORY"] == os.environ["REPOSITORY"], "Fork evidence needs a trusted run"
+          expected = {
+              "tests": "success",
+              "evidence": "skipped" if event == "push" else "success",
+              "package": "success" if event == "push" else "skipped",
+          }
+          actual = {name: job["result"] for name, job in json.loads(os.environ["RESULTS"]).items()}
+          assert actual == expected, {"expected": expected, "actual": actual}

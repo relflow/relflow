@@ -8,8 +8,8 @@
 
 <p align="center">
   <a href="https://pypi.org/project/relflow/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/relflow?logo=pypi&amp;logoColor=white" /></a>
-  <a href="https://github.com/relflow/relflow/actions/workflows/tests.yml?query=branch%3Amain"><img alt="Tests" src="https://github.com/relflow/relflow/actions/workflows/tests.yml/badge.svg?branch=main&amp;event=push" /></a>
-  <a href="https://github.com/relflow/relflow/actions/workflows/tests.yml?query=branch%3Amain"><img alt="Line coverage" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frelflow%2Frelflow%2Fbadges%2Fcoverage.json" /></a>
+  <a href="https://github.com/relflow/relflow/actions/workflows/ci.yml?query=branch%3Amain"><img alt="CI" src="https://github.com/relflow/relflow/actions/workflows/ci.yml/badge.svg?branch=main&amp;event=push" /></a>
+  <a href="https://github.com/relflow/relflow/actions/workflows/ci.yml?query=branch%3Amain"><img alt="Line coverage" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frelflow%2Frelflow%2Fbadges%2Fcoverage.json" /></a>
   <a href="https://github.com/relflow/relflow/actions/workflows/compatibility.yml?query=branch%3Amain"><img alt="Dependency compatibility" src="https://github.com/relflow/relflow/actions/workflows/compatibility.yml/badge.svg?branch=main" /></a>
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&amp;logoColor=white" />
   <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-2E8B57" /></a>
@@ -115,3 +115,17 @@ repository's instructions to run learning experiments explicitly.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development conventions.
 
 [Community](https://discord.gg/DVyZUkvTFA) · [Apache 2.0 license](LICENSE)
+
+## Continuous Integration
+
+`ci.yml` is the entry point for PRs to main, merge groups, main pushes, and
+manual validation. PRs run the full Python/platform test matrix and the full
+paired evidence suite in parallel. `CI / required` rejects errors, cancellations,
+and missing required jobs. Evidence runs on lab through the pinned docs-owned
+executor, with a separate reviewed suite commit. See the
+[lab guide](https://github.com/relflow/docs/blob/main/evidence/lab.md).
+
+Main pushes run the test matrix once and build the distributions consumed by
+release publication. Successful main CI also publishes coverage. Nightly
+dependency compatibility and configured accelerator checks remain independent.
+Local pre-commit continues to run formatting, lint, types, and fast tests.

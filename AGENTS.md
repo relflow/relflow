@@ -361,3 +361,13 @@ Package runtime and architectural tests belong in this repository's `tests/`;
 learning experiments and their canonical results belong in `relflow/docs`.
 Documentation builds remain static; learning proofs run only when explicitly
 invoked in that repository with RelFlow installed.
+
+## CI Ownership
+
+`ci.yml` owns PR, merge-group, main-push, and manual triggers. `tests.yml` and
+`evidence.yml` are reusable implementations. Require `CI / required` for PRs,
+including the full matrix and paired evidence. Release and coverage workflows
+consume successful main CI; do not add a second matrix invocation to release.
+The evidence helper and trusted executor are pinned separately from the suite.
+Keep selected suite code off the host execution path and preserve full evidence
+budgets, seeds, checks, and provenance. See the docs repository's lab guide.

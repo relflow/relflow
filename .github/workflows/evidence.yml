@@ -1,17 +1,14 @@
 name: Evidence
 
 on:
-  pull_request:
-    branches: [main]
-  merge_group:
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      suite_ref:
+        type: string
+        required: true
 
 permissions:
   contents: read
-
-concurrency:
-  group: evidence-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 
 jobs:
   wheels:
@@ -49,18 +46,6 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: relflow/docs/.github/workflows/evidence-lab.yml@bcf2697c51e98fa0d799fbeeac5a441299edd69d
-
-  required:
-    name: Evidence / required
-    if: always()
-    needs: [wheels, run]
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Require successful complete evidence execution
-        env:
-          BUILD_RESULT: ${{ needs.wheels.result }}
-          EVIDENCE_RESULT: ${{ needs.run.result }}
-        run: |
-          test "$BUILD_RESULT" = success
-          test "$EVIDENCE_RESULT" = success
+    with:
+      suite_ref: ${{ inputs.suite_ref }}
+    uses: relflow/docs/.github/workflows/evidence-lab.yml@748d7f932de36a81a031cc0e08c5896e3dc00103
