@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pyarrow as pa
+import pytest
 import torch
 from tensordict import TensorDict
 
@@ -175,33 +176,14 @@ def test_set_tensorfield_simulated_unavailable_zeros_content():
     assert field.content["unavailable"][0, 0, 0] == 2
 
 
-class _DummyVocab:
-    def labels(self) -> pa.Array:
-        return pa.array(["ALPHA", "BETA"], type=pa.large_string())
-
-
-class _DummyEmbedder:
-    def __init__(self):
-        self.vocab = _DummyVocab()
-
-
-class _DummyNode:
-    def __init__(self, embedder=None, decoder: Decoder | None = None):
-        self.embedder = embedder or _DummyEmbedder()
-        self.decoder = decoder
-
-
-class DummyModule:
-    def __init__(self, schema=None, embedder=None, decoder: Decoder | None = None):
-        self.nodes = {ADDRESS: _DummyNode(embedder=embedder, decoder=decoder)}
-        self.schema = schema
-
-    def track(self, names: tuple[str, ...], value: torch.Tensor) -> torch.Tensor:
-        return value
+def writer_module(schema, labels=("ALPHA", "BETA")):
+    vocabulary = OnlineVocabularyModel(size=8)
+    vocabulary.load_snapshot(labels)
+    return SimpleNamespace(schema=schema, nodes={ADDRESS: SimpleNamespace(embedder=SimpleNamespace(vocab=vocabulary))})
 
 
 def test_set_write_emits_candidates_for_each_known_vocab_item():
-    module = DummyModule(schema=build_schema())
+    module = writer_module(build_schema())
     state_logits = torch.zeros(2, 1, len(Tokens))
     state_logits[0, 0, Tokens.valued.value] = 10.0
     state_logits[1, 0, Tokens.padded.value] = 10.0
@@ -235,7 +217,7 @@ def test_set_write_emits_candidates_for_each_known_vocab_item():
 
 
 def test_set_write_filters_content_when_threshold_is_configured():
-    module = DummyModule(schema=build_schema(threshold=0.75))
+    module = writer_module(build_schema(threshold=0.75))
     state_logits = torch.zeros(2, 1, len(Tokens))
     content_logits = torch.tensor(
         [
@@ -266,7 +248,7 @@ def test_set_write_filters_content_when_threshold_is_configured():
 
 def test_set_empty_vocabulary_keeps_declared_schema():
     schema = build_schema()
-    module = DummyModule(schema=schema, embedder=SimpleNamespace(vocab=OnlineVocabularyModel(size=8)))
+    module = writer_module(schema, labels=())
     prediction = Prediction(
         address=ADDRESS,
         payload=TensorDict(
@@ -296,7 +278,11 @@ def test_set_loss_does_not_mutate_counter():
     )
     embedder = Embedder(schema=schema, address=ADDRESS)
     decoder = Decoder(schema=schema, address=ADDRESS)
-    module = DummyModule(schema=schema, embedder=embedder, decoder=decoder)
+    module = SimpleNamespace(
+        schema=schema,
+        nodes={ADDRESS: SimpleNamespace(embedder=embedder, decoder=decoder)},
+        track=lambda names, value: value,
+    )
     prediction = Prediction(
         address=ADDRESS,
         payload=TensorDict(
@@ -315,6 +301,7 @@ def test_set_loss_does_not_mutate_counter():
     assert torch.isfinite(result)
 
 
+@pytest.mark.integration
 def test_set_float_nan_members_are_dropped_like_nulls(tmp_path):
     model = rf.Model.xs(d_model=8, tags=rf.Set, label=rf.Boolean(mask=True))
     rows = pa.table(
@@ -344,6 +331,7 @@ def test_set_float_nan_members_are_dropped_like_nulls(tmp_path):
     assert indices[0].tolist()[:1] == [0] and (indices[1] < 0).all() and indices[2].tolist()[:1] == [1]
 
 
+@pytest.mark.integration
 def test_set_strip_and_cased_fold_look_alike_members(tmp_path):
     rows = pa.table({"tags": pa.array([["Foo", "bar "], [" foo"], ["BAR"]]), "label": [True, False, True]})
     model = rf.Model.xs(d_model=8, tags=rf.Set(strip=True, cased=False), label=rf.Boolean(mask=True))

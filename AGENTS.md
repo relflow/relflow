@@ -86,7 +86,15 @@ model = rf.Model(
   retained collection in each batch, without changing the schema or parameters.
   A positive integer sets a hard limit; omitted overflow then defaults to
   `"head"`. Use `length=N, overflow="tail"` for recency-ordered histories or
-  `overflow="error"` to reject excess rows. Unbounded branches require
+  `overflow="error"` to reject excess rows. With a finite cap,
+  `overflow="random"` draws a uniformly selected contiguous window during
+  training and retains the tail during validation, test, and prediction.
+  Whole records, their fields, and nested children stay aligned. The source
+  or preprocessor must provide more than the cap for cropping to vary; apply
+  a separate resource bound to that candidate pool. Crops repeat for a fixed
+  data seed, epoch, batch ordinal, branch address, and parent position;
+  changing batching, worker assignment, or row order can change them.
+  Unbounded branches require
   `overflow=None` and log one resource-exhaustion warning per model generation.
   The anonymous root remains `length=1, overflow="error"`.
 - Bounded axes also compact execution to the observed batch width, up to their
@@ -108,6 +116,11 @@ model = rf.Model(
   each node. The model root, child branches, and tensorfield decoders configure
   it independently. Hidden neural activations use tanh GELU and normalization
   uses RMSNorm; these have no configuration knobs.
+- Node `dropout` retains live-token encoder packing and selected-target decoding
+  for compatible modules. Attention and feed-forward dropout keep their declared
+  rates and locations; padding does not need dropout masks. Seeded masks follow
+  the execution layout, so they need not match a padded implementation. Attention
+  kernel memory still depends on device, dtype, and head configuration.
 - `Category`, `Set`, and `Enum` match string labels exactly; `strip=True` trims
   surrounding whitespace and `cased=False` lowercases labels before lookup, and
   the folded form is what vocabularies and predictions carry.
@@ -315,7 +328,23 @@ uv run ruff check
 uv run pyrefly check
 uv run pytest
 uv run pytest tests/test_public_api.py
+uv run pytest --full -n 2
+uv run pytest -m integration -n 2
 ```
+
+Plain `pytest` and pre-commit run the fast core serially (about 12 seconds on
+the development machine). An explicit `-m` expression overrides the default
+`not integration` selection. Use `--full` for the complete suite; every PR CI
+job selects it explicitly and retains its platform and Python version matrix.
+
+Mark tests with `pytest.mark.integration` when they run real Trainer/Tuner loops,
+compiler graph capture, worker or distributed processes, socket servers, optional
+encoder models, or accelerator execution. Mark individual parameters when CPU
+or mocked cases belong in the core. Keep cheap in-process data, serving, and
+extension checks in the core. New integration tests must remain in the full
+suite rather than being deleted to meet the local runtime target. Thread-pool
+and offline encoder defaults are set before collection; explicit environment
+values take precedence.
 
 ## Documentation And Learning Proofs
 

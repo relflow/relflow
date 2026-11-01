@@ -8,10 +8,9 @@ import pyarrow.parquet as pq
 import pytest
 
 import relflow as rf
-from relflow.inference.callback import Writer
 
 
-def write(writer: Writer, output: object, *, rank: int = 0, batch_idx: int = 0) -> None:
+def write(writer: rf.Writer, output: object, *, rank: int = 0, batch_idx: int = 0) -> None:
     writer.write_on_batch_end(
         trainer=SimpleNamespace(global_rank=rank),
         pl_module=SimpleNamespace(),
@@ -30,7 +29,7 @@ def test_writer_persists_the_written_arrow_table(tmp_path):
             "predictions": pa.array([{"score": 0.25}, {"score": 0.75}]),
         }
     )
-    writer = Writer(tmp_path)
+    writer = rf.Writer(tmp_path)
 
     write(writer, output, rank=7)
     writer.on_predict_end(SimpleNamespace(), SimpleNamespace())
@@ -64,7 +63,7 @@ def test_writer_applies_polars_postprocessors_in_order_before_persistence(tmp_pa
             "predictions": pa.array([{"score": 0.5}]),
         }
     )
-    writer = Writer(tmp_path, postprocessor=[compact, decide])
+    writer = rf.Writer(tmp_path, postprocessor=[compact, decide])
 
     write(writer, output)
     writer.close()
@@ -81,7 +80,7 @@ def test_writer_accepts_postprocessor_row_changes(tmp_path):
     def reorder(frame: pl.DataFrame) -> pl.DataFrame:
         return frame.sort("score", descending=True).head(1)
 
-    writer = Writer(tmp_path, postprocessor=reorder)
+    writer = rf.Writer(tmp_path, postprocessor=reorder)
     write(writer, pa.table({"score": [0.25, 0.75]}))
     writer.close()
 
@@ -89,7 +88,7 @@ def test_writer_accepts_postprocessor_row_changes(tmp_path):
 
 
 def test_writer_locks_the_exact_first_batch_schema_and_discards_on_drift(tmp_path):
-    writer = Writer(tmp_path)
+    writer = rf.Writer(tmp_path)
     write(writer, pa.table({"score": pa.array([1], type=pa.int64())}), batch_idx=0)
     assert (tmp_path / "rank-0.parquet.partial").exists()
 
@@ -102,7 +101,7 @@ def test_writer_locks_the_exact_first_batch_schema_and_discards_on_drift(tmp_pat
 
 
 def test_writer_locks_prediction_metadata_and_discards_on_provenance_drift(tmp_path):
-    writer = Writer(tmp_path)
+    writer = rf.Writer(tmp_path)
     output = pa.table({"score": [0.25]}).replace_schema_metadata({b"relflow.model_version": b"first"})
     write(writer, output)
 
@@ -119,7 +118,7 @@ def test_writer_preserves_metadata_through_postprocessing(tmp_path):
         return frame.select("score")
 
     output = pa.table({"score": [0.25], "other": [1]}).replace_schema_metadata({b"relflow.model_version": b"example"})
-    writer = Writer(tmp_path, postprocessor=select)
+    writer = rf.Writer(tmp_path, postprocessor=select)
     write(writer, output)
     writer.close()
 
@@ -138,7 +137,7 @@ def test_writer_rejects_null_fixed_size_list_coordinates_before_creating_a_shard
         column = pa.array([None], type=embedded)
     else:
         column = pa.array([[None]], type=pa.list_(pa.field("element", embedded)))
-    writer = Writer(tmp_path)
+    writer = rf.Writer(tmp_path)
 
     with pytest.raises(ValueError, match="fixed-size lists.*use Arrow IPC"):
         write(writer, pa.table({"predictions": column}))
@@ -156,7 +155,7 @@ def test_writer_accepts_null_collection_and_null_struct_with_scalar_descendants(
             )
         }
     )
-    writer = Writer(tmp_path)
+    writer = rf.Writer(tmp_path)
     write(writer, output)
     writer.close()
 
@@ -173,7 +172,7 @@ def test_writer_accepts_sliced_fixed_size_embeddings_in_nonnull_representation_r
             )
         }
     ).slice(1)
-    writer = Writer(tmp_path)
+    writer = rf.Writer(tmp_path)
     write(writer, output)
     writer.close()
 
@@ -181,7 +180,7 @@ def test_writer_accepts_sliced_fixed_size_embeddings_in_nonnull_representation_r
 
 
 def test_writer_treats_identity_as_an_ordinary_user_column(tmp_path):
-    writer = Writer(tmp_path)
+    writer = rf.Writer(tmp_path)
 
     write(writer, pa.table({"identity": ["user-owned"]}))
     writer.close()
@@ -190,7 +189,7 @@ def test_writer_treats_identity_as_an_ordinary_user_column(tmp_path):
 
 
 def test_writer_requires_predict_step_to_return_arrow_table(tmp_path):
-    writer = Writer(tmp_path)
+    writer = rf.Writer(tmp_path)
 
     with pytest.raises(TypeError, match="predict_step.*pyarrow.Table"):
         write(writer, [{"score": 1.0}])
@@ -199,7 +198,7 @@ def test_writer_requires_predict_step_to_return_arrow_table(tmp_path):
 
 
 def test_writer_renames_the_partial_shard_when_prediction_ends(tmp_path):
-    writer = Writer(tmp_path)
+    writer = rf.Writer(tmp_path)
     write(writer, pa.table({"score": [0.5]}))
 
     assert (tmp_path / "rank-0.parquet.partial").exists()
@@ -212,7 +211,7 @@ def test_writer_renames_the_partial_shard_when_prediction_ends(tmp_path):
 
 
 def test_writer_discards_the_partial_shard_on_exception_and_accepts_a_rerun(tmp_path):
-    writer = Writer(tmp_path)
+    writer = rf.Writer(tmp_path)
     write(writer, pa.table({"score": pa.array([1], type=pa.int64())}))
 
     writer.on_exception(SimpleNamespace(), SimpleNamespace(), RuntimeError("interrupted"))
@@ -229,7 +228,7 @@ def test_writer_discards_the_partial_shard_on_exception_and_accepts_a_rerun(tmp_
 
 
 def test_writer_buffers_batches_into_whole_row_groups(tmp_path):
-    writer = Writer(tmp_path, row_group_size=4)
+    writer = rf.Writer(tmp_path, row_group_size=4)
 
     for start, pending in ((0, 3), (3, 2), (6, 1)):
         write(writer, pa.table({"score": list(range(start, start + 3))}), batch_idx=start)
@@ -243,4 +242,4 @@ def test_writer_buffers_batches_into_whole_row_groups(tmp_path):
 
 def test_writer_rejects_a_non_positive_row_group_size(tmp_path):
     with pytest.raises(ValueError, match="row_group_size must be a positive integer"):
-        Writer(tmp_path, row_group_size=0)
+        rf.Writer(tmp_path, row_group_size=0)

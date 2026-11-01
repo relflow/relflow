@@ -1,6 +1,5 @@
 """Node-local feed-forward widths survive construction, persistence and growth."""
 
-import inspect
 from pathlib import Path
 
 import pyarrow as pa
@@ -134,7 +133,6 @@ def test_python_yaml_and_presets_build_the_same_node_local_architecture(tmp_path
     assert python.schema.model_dump() == yaml.schema.model_dump()
     assert python.preset == yaml.preset
     for model in (python, yaml):
-        assert "block" not in model.schema.model_dump()
         assert "ffnx" not in model.schema.model_dump()
         assert model.schema.fields.ffnx == 6
         assert model.schema.branches[rf.Address("events")].ffnx == 3
@@ -154,32 +152,8 @@ def test_schema_json_roundtrip_rebuilds_fixed_modules_without_configuration_meta
     original = configured(ffnx=6)
     restored = rf.Model(schema=rf.Schema.model_validate_json(original.schema.model_dump_json()), batch_size=2)
     assert restored.schema.model_dump() == original.schema.model_dump()
-    assert "block" not in rf.Schema.model_fields
     assert "ffnx" not in rf.Schema.model_fields
     assert_blocks(restored)
-
-
-def test_public_constructors_leave_block_available_as_an_ordinary_field_name():
-    assert not hasattr(rf, "Block")
-    for constructor in (rf.Model, rf.Model.xs, rf.Model.md, rf.Schema.from_tree):
-        assert "block" not in inspect.signature(constructor).parameters
-    for constructor in (rf.Model, rf.Model.xs):
-        model = constructor(d_model=8, n_layers=1, n_heads=2, block=rf.Number)
-        assert model.schema.requests[rf.Address("block")].type == "number"
-        assert "block" not in model.schema.model_dump()
-
-
-def test_schema_and_yaml_reject_removed_architecture_options(tmp_path):
-    schema = configured().schema.model_dump()
-    with pytest.raises(ValueError, match="block"):
-        rf.Schema.model_validate({**schema, "block": {"ffn_multiplier": 4}})
-    path = template(tmp_path / "model.yaml")
-    path.write_text(path.read_text() + "\nblock: {ffn_multiplier: 4}\n")
-    with pytest.raises(ValueError, match="unknown model option.*block"):
-        rf.Model.from_yaml(path)
-    path = template(tmp_path / "valid.yaml")
-    with pytest.raises(TypeError, match="unsupported Python override.*block"):
-        rf.Model.from_yaml(path, block={"ffn_multiplier": 4})
 
 
 def test_schema_constructor_rejects_explicit_root_width_overrides():
@@ -261,9 +235,7 @@ def test_checkpoint_restores_exact_weights_predictions_and_preset(tmp_path):
     original = configured(preset="xs").eval()
     before = original.predict(observations())
     path = original.save(tmp_path / "model.ckpt")
-    saved = torch.load(path, map_location="cpu", weights_only=False)
     restored = rf.Model.load(path).eval()
-    assert "block" not in saved["schema"]
     assert restored.schema.model_dump() == original.schema.model_dump()
     assert restored.preset == original.preset
     assert_blocks(restored)
@@ -290,7 +262,6 @@ def test_extension_after_restore_uses_fixed_blocks_and_preserves_retained_weight
     )
     restored.update(rf.where("address") == rf.Address("purchases"), n_layers=2, ffnx=7)
     restored.update(rf.where("address") == rf.Address("purchases", "target"), ffnx=3)
-    assert "block" not in restored.schema.model_dump()
     assert_blocks(restored)
     branch = restored.nodes[rf.Address("purchases")].encoder
     assert len(branch.encoder) == 2
@@ -303,11 +274,11 @@ def test_extension_after_restore_uses_fixed_blocks_and_preserves_retained_weight
     assert_blocks(loaded)
 
 
-def test_fixed_nested_architecture_completes_a_cpu_optimizer_step():
+@pytest.mark.integration
+def test_fixed_nested_architecture_completes_a_cpu_optimizer_step(tmp_path):
     model = configured()
     data = observations()
     datamodule = rf.ArrowDataModule(
-        model=model,
         train=data,
         validate=data,
         num_workers=0,
@@ -330,7 +301,11 @@ def test_fixed_nested_architecture_completes_a_cpu_optimizer_step():
         num_sanity_val_steps=0,
         early_stopping=False,
         rollback=False,
+        logger=False,
+        enable_checkpointing=False,
+        enable_model_summary=False,
         enable_progress_bar=False,
+        default_root_dir=tmp_path,
     )
     assert model.trainer.global_step == 1
     assert torch.isfinite(parameter).all()

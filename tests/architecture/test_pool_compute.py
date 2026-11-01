@@ -35,6 +35,7 @@ def test_pool_compacts_and_sanitizes_inputs_before_compute(monkeypatch):
         torch.testing.assert_close(value, expected, rtol=0, atol=0, equal_nan=True)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("grad_enabled", [False, True])
 def test_pool_compute_captures_seeded_dropout_and_accumulated_gradients(monkeypatch, grad_enabled):
     torch.manual_seed(1729)

@@ -89,7 +89,7 @@ def test_tensorfield_take_rejects_an_invalid_content_prefix(indices):
         field.take(None if indices is None else torch.tensor(indices))
 
 
-@pytest.mark.parametrize("device", ["cpu", "cuda"])
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.integration)])
 def test_tensorfield_take_preserves_empty_geometry_and_index_validation(device):
     if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA is unavailable")
@@ -118,7 +118,7 @@ def test_tensorfield_take_preserves_empty_geometry_and_index_validation(device):
     assert compact.content["nested", "vector"].shape == (0, 2)
 
 
-@pytest.mark.parametrize("device", ["cpu", "cuda"])
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.integration)])
 def test_all_present_extension_matches_padded_geometry_and_preserves_copy_isolation(device):
     if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA is unavailable")

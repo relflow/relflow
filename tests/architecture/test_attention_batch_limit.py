@@ -89,6 +89,7 @@ def test_packed_attention_accepts_no_live_groups(monkeypatch, kv_heads, capacity
     assert bias_gradient is not None and not bias_gradient.any()
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
 def test_packed_flash_attention_exceeds_cuda_batch_grid_with_finite_gradients(monkeypatch):
     if not torch.cuda.is_bf16_supported() or not torch.backends.cuda.is_flash_attention_available():

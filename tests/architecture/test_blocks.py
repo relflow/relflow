@@ -7,7 +7,7 @@ import relflow as rf
 from relflow.architecture import compiler
 from relflow.architecture.blocks import feed_forward, norm
 from relflow.architecture.encoder import BranchEncoder, RotaryTransformerEncoderLayer
-from relflow.architecture.packed import customized, pack, stochastic, unpack
+from relflow.architecture.packed import customized, pack, unpack
 from relflow.architecture.pool import LearnedQueryCrossAttention
 
 
@@ -129,51 +129,71 @@ def test_node_blocks_preserve_dense_and_packed_outputs_and_gradients(n_kv_heads,
         torch.testing.assert_close(parameter.grad, reference.grad, rtol=1e-10, atol=1e-10)
 
 
-def test_active_dropout_requires_dense_rng_schedule():
-    layer = RotaryTransformerEncoderLayer(16, 4, 4, 0.2)
-    assert stochastic((layer,))
-    layer.eval()
-    assert not stochastic((layer,))
-    layer.train()
-    layer.attention.dropout_p = 0.0
-    assert stochastic((layer,))
-    for module in layer.ffn.modules():
-        if isinstance(module, torch.nn.Dropout):
-            module.p = 0.0
-    assert not stochastic((layer,))
+@pytest.mark.parametrize("n_kv_heads", [4, 2, 1])
+@pytest.mark.parametrize("training", [True, False])
+def test_packed_node_passes_training_dropout_to_each_attention_group(monkeypatch, n_kv_heads, training):
+    torch.manual_seed(47)
+    layer = RotaryTransformerEncoderLayer(16, 4, n_kv_heads, 0.2).double().train(training)
+    assert not customized((layer,))
+    present = torch.tensor(
+        [[True, False, True, False, True], [False, False, False, False, False], [False, True, False, True, False]]
+    )
+    inputs = torch.randn(3, 5, 16, dtype=torch.float64).masked_fill(~present[..., None], torch.nan).requires_grad_()
+    values, packing = pack(inputs, present)
+    calls = []
+    sdpa = torch.nn.functional.scaled_dot_product_attention
+
+    def observe(query, key, value, **kwargs):
+        calls.append((query.shape, key.shape, kwargs))
+        return sdpa(query, key, value, **kwargs)
+
+    monkeypatch.setattr(torch.nn.functional, "scaled_dot_product_attention", observe)
+    output = unpack(layer(values, present, packing=packing), packing, inputs, present, (layer,))
+    output.square().sum().backward()
+
+    assert len(calls) == 2
+    assert {shape[-2] for shape, _, _ in calls} == {2, 3}
+    for query, key, options in calls:
+        assert query[1] == 4 and key[1] == n_kv_heads
+        assert options["dropout_p"] == (0.2 if training else 0.0)
+        assert options["enable_gqa"] is (n_kv_heads != 4)
+        assert options.get("attn_mask") is None
+    assert torch.isfinite(output).all() and not output[~present].any()
+    assert inputs.grad is not None and torch.isfinite(inputs.grad).all()
+    assert not inputs.grad[~present].any()
+    assert all(parameter.grad is not None and torch.isfinite(parameter.grad).all() for parameter in layer.parameters())
 
 
-def test_learned_pool_preserves_additive_evidence_and_count_after_rms_normalization():
-    pool = LearnedQueryCrossAttention(1, 4, 2, 0.0, position=False, mass_capacity=4, mass=True, ffnx=3).double()
+@pytest.mark.parametrize("direction,dtype,tolerance", [(0.0, torch.float32, 1e-5), (0.25, torch.float64, 1e-12)])
+def test_learned_pool_preserves_additive_evidence_and_count_after_rms_normalization(direction, dtype, tolerance):
+    pool = LearnedQueryCrossAttention(1, 4, 2, 0.0, position=False, mass_capacity=4, mass=True, ffnx=3).to(dtype)
     assert isinstance(pool.norm, torch.nn.RMSNorm)
     with torch.no_grad():
         pool.mass_projection.weight.copy_(torch.eye(4))
-        pool.mass_direction.fill_(0.25)
-    memory = torch.tensor([[[0.5, -1.0, 0.25, 2.0]]], dtype=torch.float64).expand(1, 4, 4).clone()
+        pool.mass_direction.fill_(direction)
+    memory = torch.tensor([[[0.5, -1.0, 0.25, 2.0]]], dtype=dtype).expand(1, 4, 4).clone()
     one = torch.tensor([[True, False, False, False]])
     three = torch.tensor([[True, True, True, False]])
     first = pool(memory, present=one, evidence=memory)
     second = pool(memory, present=three, evidence=memory)
-    torch.testing.assert_close(second - first, memory[:, :1] + 0.125, rtol=1e-12, atol=1e-12)
+    torch.testing.assert_close(second - first, memory[:, :1] + direction / 2, rtol=tolerance, atol=tolerance)
 
 
-@pytest.mark.parametrize("boundary", ["normalization", "projection", "activation"])
-def test_hooks_added_after_compiler_warmup_force_eager_and_resume(boundary):
+@pytest.mark.integration
+def test_hooks_added_after_compiler_warmup_force_eager_and_resume():
     pool = LearnedQueryCrossAttention(1, 8, 2, 0.0)
-    observed, executions = [], []
+    observed, graphs, executions = [], [], []
 
     def backend(graph, inputs):
+        graphs.append(graph)
+
         def execute(*args):
             executions.append(graph)
             return graph.forward(*args)
 
         return execute
 
-    descendant = {
-        "normalization": pool.blocks[0].ffn_norm,
-        "projection": pool.blocks[0].ffn[0],
-        "activation": pool.blocks[0].ffn[1],
-    }[boundary]
+    descendants = (pool.blocks[0].ffn_norm, pool.blocks[0].ffn[0], pool.blocks[0].ffn[1])
     memory = torch.randn(2, 3, 8)
     present = torch.ones(2, 3, dtype=torch.bool)
 
@@ -187,16 +207,19 @@ def test_hooks_added_after_compiler_warmup_force_eager_and_resume(boundary):
         compiler.compile(pool, encoders=False, pools=True, backend=backend, dynamic=None, options=None)
         first = pool.compute(memory, present, None, None)
         assert len(executions) == 1
-        handle = descendant.register_forward_hook(hook)
-        second = pool.compute(memory, present, None, None)
-        assert observed == [descendant]
-        assert len(executions) == 1
-        assert not torch.equal(second, first)
-        handle.remove()
-        handle = None
-        restored = pool.compute(memory, present, None, None)
-        assert len(executions) == 2
-        torch.testing.assert_close(restored, first, rtol=0, atol=0)
+        for index, descendant in enumerate(descendants, 1):
+            observed.clear()
+            handle = descendant.register_forward_hook(hook)
+            second = pool.compute(memory, present, None, None)
+            assert observed == [descendant]
+            assert len(executions) == index
+            assert not torch.equal(second, first)
+            handle.remove()
+            handle = None
+            restored = pool.compute(memory, present, None, None)
+            assert len(executions) == index + 1
+            torch.testing.assert_close(restored, first, rtol=0, atol=0)
+        assert len(graphs) == 1
     finally:
         if handle is not None:
             handle.remove()

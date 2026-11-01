@@ -30,8 +30,17 @@ def nested(values):
     )
 
 
-@pytest.mark.parametrize(("field_type", "values", "options"), CASES)
-@pytest.mark.parametrize("owner", ["root", "branch", "leaf"])
+@pytest.mark.parametrize(
+    ("field_type", "values", "options", "owner"),
+    [
+        pytest.param(field_type, values, options, owner, id=f"{field_type.model_fields['type'].default}-{owner}")
+        for field_type, values, options in CASES
+        for owner in ("root", "branch", "leaf")
+        # Inherited role selection is shared; every extension still covers every
+        # split and objective, and Set covers each inheritance boundary too.
+        if owner == "leaf" or field_type is rf.Set
+    ],
+)
 @pytest.mark.parametrize("objective", [False, True])
 @pytest.mark.parametrize("strata", list(Strata))
 def test_nested_target_roles_follow_reconstruction_owner(field_type, values, options, owner, objective, strata):

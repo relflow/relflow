@@ -18,15 +18,17 @@ import torch
 
 import relflow as rf
 
+pytestmark = pytest.mark.integration
+
 SERVER_SCRIPT = """
 import sys
 
-from relflow.inference.deployment import Deployment
+import relflow as rf
 
 checkpoint = sys.argv[1]
 port = int(sys.argv[2])
 
-Deployment(
+rf.Deployment(
     checkpoint=checkpoint,
     accelerator="cpu",
     max_batch_size=1,

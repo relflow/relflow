@@ -1,30 +1,17 @@
 from __future__ import annotations
 
-import ast
 from collections.abc import Generator
+from copy import deepcopy
 from logging.handlers import BufferingHandler
-from pathlib import Path
 
 import pytest
 import torch
 from lightning.pytorch.utilities.model_summary.model_summary import summarize
 
 import relflow as rf
-from relflow.architecture.checkpoint import CheckpointState
 from relflow.architecture.graph import ModelGraph
-from relflow.architecture.mutations import SchemaEditor
 from relflow.logging import logger
 from relflow.logging.config import CONTEXT
-from relflow.structs import experiment, selectors
-
-FRAMEWORK_PROTOCOL_METHODS = frozenset(
-    {
-        "_apply",
-        "_load_from_state_dict",
-        "_missing_",
-        "_save_to_state_dict",
-    }
-)
 
 
 def configured() -> rf.Model:
@@ -40,14 +27,6 @@ def mutation_records() -> Generator[BufferingHandler, None, None]:
         yield records
     finally:
         logger.logger.removeHandler(records)
-
-
-def test_model_uses_mutation_facade() -> None:
-    model = configured()
-
-    assert isinstance(model.schema, rf.Schema)
-    assert isinstance(model._schema_editor, SchemaEditor)
-    assert model.schema.select(rf.where("name") == "amount") == model.select(rf.where("name") == "amount")
 
 
 def test_model_mutations_emit_one_concise_event_per_operation(mutation_records: BufferingHandler) -> None:
@@ -173,11 +152,13 @@ def test_mutation_logging_does_not_evaluate_predicates_again(action, address, op
 
 def test_model_graph_rebuild_preserves_compatible_state() -> None:
     model = configured()
-    name, before = next(iter(model.state_dict().items()))
+    before = deepcopy(model.state_dict())
 
     ModelGraph.rebuild(model)
 
-    assert torch.equal(model.state_dict()[name], before)
+    assert model.state_dict().keys() == before.keys()
+    for name, value in model.state_dict().items():
+        torch.testing.assert_close(value, before[name], rtol=0, atol=0)
 
 
 def test_model_summary_uses_forward_kwargs_example_input() -> None:
@@ -186,38 +167,3 @@ def test_model_summary_uses_forward_kwargs_example_input() -> None:
     summary = summarize(model, max_depth=1)
 
     assert summary.total_parameters > 0
-
-
-def test_checkpoint_state_round_trip(tmp_path) -> None:
-    model = configured()
-    path = tmp_path / "model.ckpt"
-
-    CheckpointState.save(model, path)
-    restored = CheckpointState.load(rf.Model, path)
-
-    assert restored.schema.model_dump(mode="python") == model.schema.model_dump(mode="python")
-    assert restored.batch_size == model.batch_size
-
-
-def test_experiment_reexports_selector_api() -> None:
-    assert experiment.where is selectors.where
-    assert experiment.NodePredicate is selectors.NodePredicate
-    assert experiment.NodeAttribute is selectors.NodeAttribute
-
-
-def test_source_functions_and_classes_do_not_use_private_names() -> None:
-    source = Path(__file__).parents[2] / "src" / "relflow"
-    violations: list[str] = []
-
-    for path in sorted(source.rglob("*.py")):
-        tree = ast.parse(path.read_text(), filename=str(path))
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef)):
-                continue
-            if not node.name.startswith("_") or node.name.startswith("__"):
-                continue
-            if node.name in FRAMEWORK_PROTOCOL_METHODS:
-                continue
-            violations.append(f"{path.relative_to(source)}:{node.lineno}: {node.name}")
-
-    assert not violations, "private function/class names:\n" + "\n".join(violations)

@@ -63,6 +63,7 @@ def options(tmp_path):
         devices=1,
         precision="32-true",
         enable_progress_bar=False,
+        enable_model_summary=False,
         default_root_dir=tmp_path,
         num_sanity_val_steps=0,
     )
@@ -92,6 +93,7 @@ class Events(lit.Callback):
         self.validation_sizes.append(self.counts["validate"] - self.before_validation)
 
 
+@pytest.mark.integration
 def test_fit_stops_and_restores_the_best_full_model_state(model, data, options):
     class Scores(Events):
         def on_validation_epoch_end(self, trainer, pl_module):
@@ -129,6 +131,7 @@ def test_fit_stops_and_restores_the_best_full_model_state(model, data, options):
     assert saved["state_dict"]["nodes./amount.embedder.normalizers.raw.count"] == 8
 
 
+@pytest.mark.integration
 def test_callbacks_and_prediction_overloads_keep_every_row(model, data, options):
     callback = Events()
     model.fit(data, max_epochs=1, limit_train_batches=1, limit_val_batches=1, callbacks=[callback], **options)
@@ -145,6 +148,7 @@ def test_callbacks_and_prediction_overloads_keep_every_row(model, data, options)
     assert model.predict(data, limit_predict_batches=2, **options).num_rows == 4
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("loop", ["fit", "validate", "test", "predict"])
 def test_each_loop_can_first_bind_a_data_module(model, options, loop):
     table = pa.table({"amount": [1.0, 2.0, 3.0, 4.0], "label": [False, True, False, True], "id": [0, 1, 2, 3]})
@@ -180,6 +184,7 @@ def test_each_loop_can_first_bind_a_data_module(model, options, loop):
     assert data.options[rf.Strata.train].shuffle_rows == 8192
 
 
+@pytest.mark.integration
 def test_lazy_binding_keeps_model_ownership_across_loops(model, options):
     table = pa.table({"amount": [1.0, 2.0], "label": [False, True]})
     data = rf.ArrowDataModule(validate=table, predict=table)
@@ -200,6 +205,7 @@ def test_invalid_loop_configuration_does_not_bind_data(model, options):
     assert data.model is None
 
 
+@pytest.mark.integration
 def test_custom_lightning_data_module_can_own_lazy_binding(model, options):
     table = pa.table({"amount": [1.0, 2.0], "label": [False, True]})
 
@@ -245,6 +251,7 @@ def test_custom_model_owned_data_module_retains_ownership_guard(model, options):
         other.validate(Owned(), **options)
 
 
+@pytest.mark.integration
 def test_streamed_prediction_does_not_collect_tables(model, data, options, tmp_path):
     writer = rf.Writer(tmp_path / "predictions")
     assert model.predict(datamodule=data, callbacks=[writer], return_predictions=False, **options) is None
@@ -253,6 +260,7 @@ def test_streamed_prediction_does_not_collect_tables(model, data, options, tmp_p
     assert not model.trainer.predict_loop.predictions
 
 
+@pytest.mark.integration
 def test_loops_use_complete_splits_by_default(model, data, options):
     callback = Events()
     model.fit(data, max_epochs=1, callbacks=[callback], **options)
@@ -263,6 +271,7 @@ def test_loops_use_complete_splits_by_default(model, data, options):
     assert callback.counts == {"train": 24, "validate": 48, "test": 24}
 
 
+@pytest.mark.integration
 def test_explicit_limits_still_bound_each_loop(model, data, options):
     callback = Events()
     model.fit(data, max_epochs=1, limit_train_batches=2, limit_val_batches=3, callbacks=[callback], **options)
@@ -272,6 +281,7 @@ def test_explicit_limits_still_bound_each_loop(model, data, options):
     assert callback.counts["test"] == 4
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("report_interval", [1, 3])
 def test_logging_cadence_keeps_validation_selection_and_recovery_independent(
     model, data, options, tmp_path, report_interval
@@ -335,6 +345,7 @@ def test_logging_cadence_keeps_validation_selection_and_recovery_independent(
         torch.testing.assert_close(value, scores.best[name])
 
 
+@pytest.mark.integration
 def test_custom_policies_replace_defaults_and_train_only_requires_a_policy_choice(model, options, tmp_path):
     table = pa.table({"amount": [1.0, 2.0], "label": [True, False]})
     data = rf.ArrowDataModule(model, train=table)
@@ -364,6 +375,7 @@ def test_input_ownership_and_option_conflicts_fail_before_execution(model, data,
         model.validate(data, invented_option=True, **options)
 
 
+@pytest.mark.integration
 def test_inline_adamw_retains_the_default_recipe(model, data, options):
     model.fit(
         data,
@@ -385,6 +397,7 @@ def test_inline_adamw_retains_the_default_recipe(model, data, options):
     assert model.scheduler is None
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("fused", [None, False])
 @pytest.mark.parametrize("fragments", [("attention",), ()])
 def test_inline_adamw_options_control_the_live_optimizer(model, data, options, fused, fragments):
@@ -423,6 +436,7 @@ def test_inline_adamw_options_control_the_live_optimizer(model, data, options, f
     assert model.optimizer is None
 
 
+@pytest.mark.integration
 def test_a_new_fit_binds_the_live_graph_after_rollback_and_extension(model, data, options):
     model.fit(
         data,
@@ -454,6 +468,7 @@ def test_a_new_fit_binds_the_live_graph_after_rollback_and_extension(model, data
     assert model.optimizer is None
 
 
+@pytest.mark.integration
 def test_a_fit_scheduler_does_not_leak_into_the_next_fit(model, data, options):
     def schedule(module, optimizer):
         return {"scheduler": torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.5), "interval": "step"}
@@ -488,6 +503,7 @@ def test_a_fit_scheduler_does_not_leak_into_the_next_fit(model, data, options):
     assert model.scheduler is None
 
 
+@pytest.mark.integration
 def test_failed_fit_restores_the_models_explicit_configuration(model, data, options):
     previous_optimizer = rf.adamw(learning_rate=0.007)
 
@@ -539,6 +555,7 @@ def test_custom_optimizer_configuration_rejects_inline_adamw_options(model, data
         model.fit(data, **supplied, **inline, **options)
 
 
+@pytest.mark.integration
 def test_an_optimizer_factory_cannot_return_parameters_from_a_previous_graph(model, data, options):
     previous = rf.adamw(learning_rate=1e-3)(model)
     model.update(rf.where("address") == rf.Address(), description="Rebuilt payment model")
@@ -556,6 +573,7 @@ def test_an_optimizer_factory_cannot_return_parameters_from_a_previous_graph(mod
     assert model.optimizer is None
 
 
+@pytest.mark.integration
 def test_a_scheduler_factory_must_bind_the_optimizer_for_that_fit(model, data, options):
     previous = rf.adamw(learning_rate=1e-3)(model)
     scheduler = torch.optim.lr_scheduler.StepLR(previous, step_size=1)
@@ -611,6 +629,7 @@ def test_automatic_hardware_handles_unused_ddp_parameters_and_checks_all_selecte
     assert options["strategy"] is strategy
 
 
+@pytest.mark.integration
 def test_resume_restores_optimizer_progress_from_a_full_checkpoint(model, data, options):
     def schedule(module, optimizer):
         return {"scheduler": torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.5), "interval": "step"}
@@ -649,6 +668,7 @@ def test_resume_restores_optimizer_progress_from_a_full_checkpoint(model, data, 
     assert model.scheduler is None
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("accelerator", ["cpu", "auto"])
 def test_default_devices_precision_and_optimizer_run_on_the_selected_backend(model, data, options, accelerator):
     if accelerator == "auto" and torch.cuda.device_count() > 1:
@@ -663,6 +683,7 @@ def test_default_devices_precision_and_optimizer_run_on_the_selected_backend(mod
     assert rf.Number.normalization(model, "/amount")["count"] == 2
 
 
+@pytest.mark.integration
 def test_arbitrary_data_module_evaluates_complete_validation_loaders(model, data, options):
     class Validation(lit.LightningDataModule):
         def val_dataloader(self):
@@ -674,6 +695,7 @@ def test_arbitrary_data_module_evaluates_complete_validation_loaders(model, data
     assert callback.counts["validate"] == 48
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not torch.distributed.is_available() or not torch.distributed.is_gloo_available(), reason="requires CPU Gloo"
 )
@@ -712,6 +734,7 @@ def test_distributed_logging_and_rollback_complete_on_every_rank(model, data, op
     assert all(float(row["throughput/train"]) > 0.0 for row in reports)
 
 
+@pytest.mark.integration
 def test_explicit_precision_plugin_overrides_automatic_precision(model, data, options):
     from lightning.pytorch.plugins.precision import MixedPrecision
 
@@ -721,6 +744,7 @@ def test_explicit_precision_plugin_overrides_automatic_precision(model, data, op
     assert model.trainer.precision_plugin is plugin
 
 
+@pytest.mark.integration
 def test_fast_dev_run_skips_automatic_selection_policies(model, data, options):
     model.fit(data, fast_dev_run=True, **options)
     assert model.trainer.global_step == 1
@@ -754,6 +778,7 @@ class ModuleScheduler(torch.nn.Module):
         }
 
 
+@pytest.mark.integration
 def test_module_factories_remain_outside_the_graph_across_fit_calls(model, data, options):
     expected_state = set(model.state_dict())
 
@@ -831,6 +856,7 @@ def test_constructor_module_factories_do_not_become_checkpointed_architecture(tm
     assert set(restored.state_dict()) == set(model.state_dict())
 
 
+@pytest.mark.integration
 def test_loop_batch_size_controls_each_arrow_split_and_retains_partial_batches(model, options):
     class BatchRows(lit.Callback):
         def __init__(self):
@@ -934,6 +960,7 @@ class DistributedCapacity(lit.Callback):
         )
 
 
+@pytest.mark.integration
 def test_distributed_ranks_share_reduced_losses_and_observed_capacity(options, tmp_path):
     from lightning.pytorch.strategies import DDPStrategy
 

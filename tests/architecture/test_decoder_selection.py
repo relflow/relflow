@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pyarrow as pa
 import pytest
 import torch
+import torch.nn.functional as F
 from tensordict import TensorDict
 
 import relflow as rf
@@ -87,9 +88,9 @@ def test_objective_decodes_only_selected_coordinates_and_preserves_gradients(mon
             torch.testing.assert_close(actual, expected, rtol=2e-4, atol=2e-6, msg=lambda error: f"{name}: {error}")
 
 
-@pytest.mark.parametrize("case", ["all", "mostly", "empty", "embed", "dropout", "hook", "custom_pool"])
+@pytest.mark.parametrize("case", ["all", "mostly", "empty", "embed", "hook", "custom_pool"])
 def test_objective_retains_dense_execution_when_selection_is_unprofitable_or_observable(monkeypatch, case):
-    configured = decoder(dropout=0.2 if case == "dropout" else 0.0)
+    configured = decoder()
     parcels, kwargs, selection = arguments()
     original = configured.decode
     widths = []
@@ -123,6 +124,76 @@ def test_objective_retains_dense_execution_when_selection_is_unprofitable_or_obs
         assert widths == [8, 8]
         for key in reference.payload.keys():
             torch.testing.assert_close(actual.payload[key], reference.payload[key], rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("site", ["attention", "ffn", "all"])
+def test_selected_objectives_keep_dropout_compact_repeatable_and_deterministic_in_eval(monkeypatch, site):
+    configured = decoder(dropout=0.25)
+    for block in configured.pool.blocks:
+        if site == "ffn":
+            block.attention.dropout_p = 0.0
+        if site == "attention":
+            for module in block.ffn.modules():
+                if isinstance(module, torch.nn.Dropout):
+                    module.p = 0.0
+    parcels, kwargs, selection = arguments()
+    memory = parcels[0].payload
+    context = kwargs["contexts"][0].payload
+    attention_calls, dropout_calls = [], []
+    sdpa, dropout = F.scaled_dot_product_attention, F.dropout
+
+    def attend(*args, **options):
+        attention_calls.append((options["query"].shape[-2], options["dropout_p"]))
+        return sdpa(*args, **options)
+
+    def drop(inputs, p=0.5, training=True, inplace=False):
+        dropout_calls.append((tuple(inputs.shape), p, training))
+        return dropout(inputs, p=p, training=training, inplace=inplace)
+
+    monkeypatch.setattr(F, "scaled_dot_product_attention", attend)
+    monkeypatch.setattr(F, "dropout", drop)
+    outputs, gradients, random_states = [], [], []
+    for seed in (193, 193, 197):
+        configured.zero_grad(set_to_none=True)
+        memory.grad = context.grad = None
+        torch.manual_seed(seed)
+        output = configured.objective(parcels, selection=selection, **kwargs)
+        outputs.append({key: value.detach().clone() for key, value in output.payload.items()})
+        random_states.append(torch.get_rng_state())
+        assert all(torch.isfinite(value).all() and not value[~selection].any() for value in output.payload.values())
+        sum(value[selection].square().sum() for value in output.payload.values()).backward()
+        gradients.append({name: parameter.grad.clone() for name, parameter in configured.named_parameters()})
+        assert all(torch.isfinite(gradient).all() for gradient in gradients[-1].values())
+        assert torch.isfinite(memory.grad).all() and not memory.grad[0].any()
+        assert torch.isfinite(context.grad).all() and not context.grad.reshape(3, 8, 16)[~selection].any()
+    assert attention_calls == [(2, 0.0 if site == "ffn" else 0.25)] * 3
+    assert dropout_calls == [
+        ((2, 2, width), 0.0 if site == "attention" else 0.25, True) for _ in range(3) for width in (128, 16)
+    ]
+    for key in outputs[0]:
+        torch.testing.assert_close(outputs[0][key], outputs[1][key], rtol=0, atol=0)
+    for name in gradients[0]:
+        torch.testing.assert_close(gradients[0][name], gradients[1][name], rtol=0, atol=0)
+    assert torch.equal(random_states[0], random_states[1])
+    assert any(not torch.equal(outputs[0][key][selection], outputs[2][key][selection]) for key in outputs[0])
+
+    configured.eval()
+    attention_calls.clear()
+    dropout_calls.clear()
+    before = torch.get_rng_state()
+    with torch.no_grad():
+        first = configured.objective(parcels, selection=selection, **kwargs)
+        second = configured.objective(parcels, selection=selection, **kwargs)
+    assert torch.equal(torch.get_rng_state(), before)
+    assert attention_calls == [(2, 0.0)] * 2
+    assert all(not training for _, _, training in dropout_calls)
+    for key in first.payload.keys():
+        torch.testing.assert_close(first.payload[key], second.payload[key], rtol=0, atol=0)
+    with torch.no_grad():
+        dense = configured(parcels, **kwargs)
+    for key in dense.payload.keys():
+        torch.testing.assert_close(first.payload[key][selection], dense.payload[key][selection], rtol=1e-5, atol=1e-6)
+        assert not first.payload[key][~selection].any()
 
 
 def test_small_cuda_query_volume_bypasses_selection_without_device_reductions():

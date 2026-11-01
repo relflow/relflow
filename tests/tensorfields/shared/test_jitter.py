@@ -6,9 +6,7 @@ import relflow as rf
 from relflow.tensorfields.shared.jitter import Jitter
 
 
-def test_jitter_has_one_public_definition():
-    assert Jitter.__module__ == "relflow.tensorfields.shared.jitter"
-    assert Jitter.apply.__module__ == "relflow.tensorfields.shared.jitter"
+def test_jitter_public_export_matches_extension_configuration():
     assert rf.Jitter is Jitter
 
 

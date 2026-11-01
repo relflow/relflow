@@ -63,7 +63,6 @@ def test_identity_postprocessor_preserves_the_arrow_output_schema():
     result = apply(table, [identity])
 
     assert result.schema.equals(table.schema, check_metadata=True)
-    assert str(result.schema) == str(table.schema)
     assert result.to_pylist() == table.to_pylist()
 
 
@@ -73,7 +72,7 @@ def test_new_columns_keep_polars_types_while_source_columns_return():
     result = apply(table, [widen])
 
     assert result.schema.field("label").type == pa.large_string()
-    assert str(result.select(table.column_names).schema) == str(table.schema)
+    assert result.select(table.column_names).schema.equals(table.schema, check_metadata=True)
 
 
 def test_intentional_type_changes_survive():
@@ -85,19 +84,18 @@ def test_intentional_type_changes_survive():
 def test_preprocessor_output_returns_source_columns():
     events = pa.array([[{"x": 1}], []], type=pa.list_(pa.field("element", pa.struct([pa.field("x", pa.int64())]))))
     source = pa.table({"amount": [1.0, 2.0], "events": events, "name": pa.array(["a", "b"]).dictionary_encode()})
-    model = rf.Model.xs(d_model=8, amount=rf.Number)
 
     [processed] = list(
         process(
             (source,),
             preprocessor=double,
             strata=Strata.train,
-            schema=model.schema,
-            encoding_context=model.interprocess_encoding_context,
+            schema=None,
+            encoding_context={},
         )
     )
 
-    assert str(processed.schema.field("events").type) == str(source.schema.field("events").type)
+    assert processed.schema.field("events").equals(source.schema.field("events"), check_metadata=True)
     assert processed.schema.field("name").type == pa.dictionary(pa.int32(), pa.string())
     assert processed.schema.field("double").type == pa.float64()
     assert processed["events"].to_pylist() == source["events"].to_pylist()

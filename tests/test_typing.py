@@ -5,9 +5,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.integration
 def test_invalid_public_inputs_are_rejected(tmp_path):
     source = (ROOT / "tests/typing/rejected.py.txt").read_text()
     snippet = tmp_path / "rejected.py"
@@ -23,6 +26,8 @@ def test_invalid_public_inputs_are_rejected(tmp_path):
             "check",
             "--config",
             str(ROOT / "pyproject.toml"),
+            "--python-interpreter-path",
+            sys.executable,
             "--output-format",
             "json",
             str(snippet),

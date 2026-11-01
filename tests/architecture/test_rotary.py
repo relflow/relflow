@@ -3,7 +3,13 @@ import torch
 
 from relflow.architecture.rotary import RotaryEmbedding
 
-DEVICES = ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA"))]
+DEVICES = [
+    "cpu",
+    pytest.param(
+        "cuda",
+        marks=[pytest.mark.integration, pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")],
+    ),
+]
 
 
 @pytest.mark.parametrize("device", DEVICES)
@@ -73,6 +79,7 @@ def test_rotary_keeps_checkpoint_state_and_device_dtype_movement(device):
         assert rotary.state_dict() == {}
 
 
+@pytest.mark.integration
 def test_rotary_compiles_with_dynamic_sequence_lengths():
     rotary = RotaryEmbedding(7)
     compiled = torch.compile(rotary, backend="eager", fullgraph=True, dynamic=True)

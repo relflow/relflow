@@ -2,22 +2,39 @@ import os
 import sys
 
 import pytest
-import torch
+
+
+def pytest_addoption(parser):
+    parser.addoption("--full", action="store_true", help="Include integration tests in the test selection.")
+
+
+def pytest_configure(config):
+    if not config.getoption("--full") and not config.option.markexpr:
+        config.option.markexpr = "not integration"
+
+    # Set pool sizes before test collection imports Torch, NumPy, and Polars.
+    threads = os.environ.get("MKL_NUM_THREADS", os.environ.get("OMP_NUM_THREADS", "1"))
+    for name, value in {
+        "OMP_NUM_THREADS": threads,
+        "MKL_NUM_THREADS": threads,
+        "POLARS_MAX_THREADS": "2",
+        "HF_HUB_OFFLINE": "1",
+        "TOKENIZERS_PARALLELISM": "false",
+    }.items():
+        os.environ.setdefault(name, value)
 
 
 @pytest.fixture(scope="session", autouse=True)
 def cpu_threads():
     """Tiny test models should not multiply CPU thread pools across pytest workers."""
+    import torch
+
     previous = torch.get_num_threads()
-    with pytest.MonkeyPatch.context() as environment:
-        if not any(name in os.environ for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS")):
-            for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS"):
-                environment.setenv(name, "1")
-            torch.set_num_threads(1)
-        try:
-            yield
-        finally:
-            torch.set_num_threads(previous)
+    torch.set_num_threads(int(os.environ["MKL_NUM_THREADS"]))
+    try:
+        yield
+    finally:
+        torch.set_num_threads(previous)
 
 
 @pytest.fixture(scope="session", autouse=True)

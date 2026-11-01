@@ -9,7 +9,7 @@ from tensordict import TensorDict
 
 from relflow.architecture.attention import RotaryMultiheadAttention
 from relflow.architecture.blocks import feed_forward, norm
-from relflow.architecture.packed import SDPA_BATCH_MAX, Packed, block, customized, pack, stochastic, unpack
+from relflow.architecture.packed import SDPA_BATCH_MAX, Packed, block, customized, pack, unpack
 from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool, Pool
 from relflow.structs.packages import Parcel
 from relflow.structs.reduction import Attention, Mean
@@ -349,11 +349,7 @@ class BranchEncoder(torch.nn.Module):
                 None if conditioned is None else conditioned if complete else conditioned.index_select(0, indices)
             )
 
-            prepared = (
-                bool(self.encoder)
-                and not customized(self.encoder)
-                and not stochastic(cast(Iterable[RotaryTransformerEncoderLayer], self.encoder))
-            )
+            prepared = bool(self.encoder) and not customized(self.encoder)
             full = prepared and bool(selected_present.all())
             if prepared and not full:
                 values, packing = pack(selected, selected_present, selected_positions if positioned else None)
@@ -598,11 +594,7 @@ class BranchEncoder(torch.nn.Module):
         rows = math.prod(payload.shape[:-2])
         inputs = payload.reshape(rows, field_count, channel_count)
         presence = present.reshape(rows, field_count)
-        prepared = (
-            bool(field_count)
-            and not customized((self.coordinate_encoder,))
-            and not stochastic((self.coordinate_encoder,))
-        )
+        prepared = bool(field_count) and not customized((self.coordinate_encoder,))
         full = prepared and bool(presence.all())
         if prepared and not full:
             values, packing = pack(inputs, presence)

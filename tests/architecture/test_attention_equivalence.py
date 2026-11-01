@@ -8,7 +8,10 @@ from relflow.architecture.attention import RotaryMultiheadAttention
 
 DEVICES = [
     "cpu",
-    pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")),
+    pytest.param(
+        "cuda",
+        marks=[pytest.mark.integration, pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")],
+    ),
 ]
 
 

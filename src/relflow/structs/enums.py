@@ -87,11 +87,12 @@ class AttentionMode(enum.StrEnum):
 class Overflow(enum.StrEnum):
     head = "head"
     tail = "tail"
+    random = "random"
     error = "error"
 
 
 AttentionInput: TypeAlias = AttentionMode | Literal["mha", "gqa", "mqa"] | None
-OverflowInput: TypeAlias = Overflow | Literal["head", "tail", "error"]
+OverflowInput: TypeAlias = Overflow | Literal["head", "tail", "random", "error"]
 StrataInput: TypeAlias = Strata | Literal["train", "validate", "test", "predict"]
 
 

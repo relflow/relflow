@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pyarrow as pa
+import pytest
 import torch
 from tensordict import TensorDict
 
@@ -244,29 +245,17 @@ def test_category_embedder_zeroes_unavailable_and_non_valued_content_contributio
     assert torch.allclose(output, expected)
 
 
-class _DummyVocab:
-    def labels(self) -> pa.Array:
-        return pa.array(["ALPHA", "BETA", "GAMMA", "DELTA", "EPS"], type=pa.large_string())
-
-
-class _DummyEmbedder:
-    def __init__(self):
-        self.vocab = _DummyVocab()
-
-
-class _DummyNode:
-    def __init__(self):
-        self.embedder = _DummyEmbedder()
-
-
-class DummyModule:
-    def __init__(self):
-        self.nodes = {ADDRESS: _DummyNode()}
-        self.schema = SimpleNamespace(requests={ADDRESS: SimpleNamespace(topk=[2, 3, 5, 10])})
+def writer_module(labels=("ALPHA", "BETA", "GAMMA", "DELTA", "EPS")):
+    vocabulary = OnlineVocabularyModel(size=8)
+    vocabulary.load_snapshot(labels)
+    return SimpleNamespace(
+        nodes={ADDRESS: SimpleNamespace(embedder=SimpleNamespace(vocab=vocabulary))},
+        schema=build_schema(topk=[2, 3, 5, 10]),
+    )
 
 
 def test_category_write_emits_arrow_content_and_candidates():
-    module = DummyModule()
+    module = writer_module()
     state_logits = torch.zeros(2, 1, len(Tokens))
     state_logits[0, 0, Tokens.valued.value] = 10.0
     state_logits[1, 0, Tokens.padded.value] = 10.0
@@ -301,7 +290,7 @@ def test_category_write_emits_arrow_content_and_candidates():
 
 
 def test_category_write_ignores_logits_beyond_vocabulary_snapshot():
-    module = DummyModule()
+    module = writer_module()
     state_logits = torch.zeros(1, 1, len(Tokens))
     content_logits = torch.tensor([[[0.1, 0.2, 0.3, 0.4, 0.5, 0.0, 0.0, 100.0]]])
     prediction = Prediction(
@@ -322,8 +311,7 @@ def test_category_write_ignores_logits_beyond_vocabulary_snapshot():
 
 
 def test_category_empty_vocabulary_keeps_declared_schema():
-    module = DummyModule()
-    module.nodes[ADDRESS].embedder.vocab = OnlineVocabularyModel(size=8)
+    module = writer_module(labels=())
     prediction = Prediction(
         address=ADDRESS,
         payload=TensorDict(
@@ -433,6 +421,7 @@ def test_category_loss_retains_state_supervision_for_unavailable_content():
     )
 
 
+@pytest.mark.integration
 def test_category_float_nan_labels_take_the_other_state_and_never_enter_the_vocabulary(tmp_path):
     model = rf.Model.xs(d_model=8, code=rf.Category, label=rf.Boolean(mask=True))
     rows = pa.table({"code": pa.array([1.0, float("nan"), 2.0, None, 1.0]), "label": [True, False, True, False, True]})
@@ -461,6 +450,7 @@ def test_category_float_nan_labels_take_the_other_state_and_never_enter_the_voca
     assert all(torch.isfinite(parameter).all() for parameter in model.parameters())
 
 
+@pytest.mark.integration
 def test_category_strip_and_cased_fold_look_alike_labels(tmp_path):
     rows = pa.table({"code": pa.array(["Foo", "foo ", " FOO", "bar"]), "label": [True, True, True, False]})
 

@@ -55,6 +55,7 @@ def test_dateparts_content_loss_and_angle_exclude_null_targets(monkeypatch: pyte
     assert tracked[Metric.mae, TensorKey.content, "day_of_week"].item() == pytest.approx(angle / 2)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("batch_size", [1, 2, 3])
 def test_dateparts_evaluation_angles_count_valued_targets_across_unequal_batches(batch_size, tmp_path):
     model = rf.Model.xs(created=rf.DateParts(dateparts=["day_of_week"], mask=True), d_model=8)

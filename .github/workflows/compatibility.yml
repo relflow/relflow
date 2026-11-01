@@ -59,7 +59,7 @@ jobs:
         run: |
           uv run --no-sync python scripts/checkpoint.py create --output checkpoint-current
           uv run --no-sync python scripts/checkpoint.py check --input checkpoint-current --output checkpoint-check
-          uv run --no-sync pytest -n 2 --junitxml=junit.xml
+          uv run --no-sync pytest --full -n 2 --junitxml=junit.xml
       - name: Upload resolved dependencies and test reports
         if: always()
         uses: actions/upload-artifact@v4

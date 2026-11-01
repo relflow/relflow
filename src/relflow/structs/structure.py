@@ -46,7 +46,11 @@ class Branch(Node):
     ``fields`` mapping for names that collide with configuration options.
     ``length=None`` retains every collection slot and resolves its width per
     batch. A positive integer caps the collection and enables ``overflow`` to
-    choose which excess slots to retain. ``reduction`` controls the context
+    choose which excess slots to retain. ``overflow="random"`` draws a full,
+    contiguous window during training and keeps the tail during validation,
+    testing, and prediction. Crops replay from the data seed, epoch, batch
+    ordinal, branch address, and parent position within the batch; changing
+    batching or row order can change them. ``reduction`` controls the context
     passed to the parent branch.
 
     During inference, unbounded collections in untrusted input are a

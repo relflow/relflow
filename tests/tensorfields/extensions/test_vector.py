@@ -249,6 +249,7 @@ def test_vector_loss_uses_selected_objective(objective: str, expected: float):
     assert torch.isclose(output, torch.tensor(expected, dtype=output.dtype))
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("batch_size", [1, 2, 3])
 def test_vector_evaluation_metrics_count_valued_targets_across_unequal_batches(batch_size, tmp_path):
     model = rf.Model.xs(d_model=8, target=rf.Vector(n_dim=2, mask=True))
@@ -434,6 +435,7 @@ def test_vector_non_finite_elements_take_the_other_state_for_inputs_and_targets(
     assert field.targets[TensorKey.content].reshape(4, 2)[2].tolist() == [0.0, 0.0]
 
 
+@pytest.mark.integration
 def test_vector_training_survives_a_non_finite_element(tmp_path):
     model = rf.Model.xs(d_model=8, vec=rf.Vector(n_dim=2), label=rf.Boolean(mask=True))
     rows = pa.table(

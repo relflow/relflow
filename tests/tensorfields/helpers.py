@@ -21,7 +21,11 @@ def tensorize(
     strata: Strata,
     context: Context = Context(),
 ) -> TensorFieldBase:
-    """Prepare once, split by policy, and construct one tensorfield."""
+    """Exercise an isolated extension with coalesced geometry and caller-owned resources.
+
+    Model-level tests cover worker batching, binding, and resource learning;
+    component tests here deliberately control vocabulary snapshots and hash salts.
+    """
 
     address = Address(address)
     values = extension.prepare(projection.pristine.values, address=address)
