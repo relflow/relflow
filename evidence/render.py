@@ -219,7 +219,7 @@ def render(root: Path) -> None:
         group_order = GROUP_ORDER.index(group) if group in GROUP_ORDER else len(GROUP_ORDER)
         published = dict(
             header,
-            **{"evidence-status": state, "order": group_order * 10000 + int(identifier[1:]), "repo-actions": ["issue"]},
+            **{"evidence-status": state, "order": group_order * 10000 + int(identifier[1:]), "repo-actions": False},
         )
         write(page, frontmatter(code, published))
         kind = "warning" if state in {"Failing", "Error"} else "note"

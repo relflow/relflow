@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       suite_ref:
-        description: Reviewed full commit SHA of the evidence suite in relflow/docs
+        description: Full commit SHA of the evidence suite in relflow/relflow
         type: string
         required: true
 
@@ -29,14 +29,14 @@ jobs:
       - name: Check out the trusted executor
         uses: actions/checkout@v4
         with:
-          repository: relflow/docs
-          ref: d7e7d111c1bfe37f5937de40440ea2f4be5ff0ea
+          repository: relflow/relflow
+          ref: 349b2202e6390a5fe0cbdf09a0c5972e495351ed
           path: executor
           persist-credentials: false
       - name: Check out experiment sources as data
         uses: actions/checkout@v4
         with:
-          repository: relflow/docs
+          repository: relflow/relflow
           ref: ${{ inputs.suite_ref }}
           path: suite
           persist-credentials: false
@@ -48,8 +48,8 @@ jobs:
         with:
           python-version: '3.12'
           enable-cache: true
-          cache-dependency-glob: executor/uv.lock
-      - run: uv sync --locked --project executor
+          cache-dependency-glob: executor/docs/uv.lock
+      - run: uv sync --locked --project executor/docs
       - uses: actions/download-artifact@v4
         with:
           name: evidence-inputs
@@ -74,7 +74,7 @@ jobs:
           LAB_TARGET: ${{ vars.EVIDENCE_LAB_TARGET }}
           CANDIDATE_SHA: ${{ github.sha }}
           BASELINE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}
-        run: uv run --project executor python -u executor/evidence/ssh_run.py --suite-root suite/evidence --transport tailscale --target "$LAB_TARGET" --candidate-wheel inputs/candidate/*.whl --baseline-wheel inputs/baseline/*.whl --candidate-sha "$CANDIDATE_SHA" --baseline-sha "$BASELINE_SHA" --requirements inputs/requirements.txt --output reports/gh-${{ github.run_id }}-${{ github.run_attempt }}
+        run: uv run --project executor/docs python -u executor/evidence/ssh_run.py --suite-root suite/evidence --transport tailscale --target "$LAB_TARGET" --candidate-wheel inputs/candidate/*.whl --baseline-wheel inputs/baseline/*.whl --candidate-sha "$CANDIDATE_SHA" --baseline-sha "$BASELINE_SHA" --requirements inputs/requirements.txt --output reports/gh-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Stop only this run's lab processes and containers
         if: always() && steps.dispatch.outcome != 'skipped'
         env:
@@ -82,7 +82,7 @@ jobs:
           LAB_TARGET: ${{ vars.EVIDENCE_LAB_TARGET }}
           EVIDENCE_RUN_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
-          uv run --project executor python - <<'PY'
+          uv run --project executor/docs python - <<'PY'
           import os
           from ssh_run import cleanup
           cleanup(os.environ["LAB_TARGET"], "tailscale", os.environ["EVIDENCE_RUN_ID"])

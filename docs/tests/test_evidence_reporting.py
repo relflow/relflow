@@ -104,7 +104,7 @@ def test_statuses_match_catalog_callouts_legend_and_colors(
 
     published = metadata((root / "docs/evidence/family/signal.py").read_text())
     assert published["evidence-status"] == expected
-    assert published["repo-actions"] == ["issue"]
+    assert published["repo-actions"] is False
     notice = (root / "docs/evidence/_generated/P001-status.md").read_text()
     title = f"Current full run · {expected}" if outcome is not None else expected
     assert f'::: {{.evidence-result .evidence-result-{kind} role="note"}}' in notice
