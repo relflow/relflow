@@ -104,7 +104,8 @@ def floats(values: pa.Array, *, address: Address) -> np.ndarray:
             f"series field at '{address}' holds numbers float64 cannot represent exactly "
             "(integers beyond ±2^53); scale them in a preprocessor"
         ) from error
-    return pc.fill_null(values, math.nan).to_numpy(zero_copy_only=False)
+    filled = cast(pa.Array, pc.fill_null(values, pa.scalar(math.nan, pa.float64())))
+    return filled.to_numpy(zero_copy_only=False)
 
 
 def listlike(datatype: pa.DataType) -> bool:
