@@ -616,3 +616,9 @@ def test_forecast_smoke(tmp_path, nested):
         default_root_dir=tmp_path,
     )
     assert all(torch.isfinite(parameter).all() for parameter in model.parameters())
+
+
+@pytest.mark.parametrize("option", [{"channels": True}, {"channels": 2.0}, {"channels": 1, "n_blocks": "2"}])
+def test_series_rejects_lax_integer_sizes(option):
+    with pytest.raises(pydantic.ValidationError):
+        rf.Series(**option)
