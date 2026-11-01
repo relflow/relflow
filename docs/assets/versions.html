@@ -95,6 +95,16 @@
         menu.append(heading, list);
         details.append(summary, menu);
         picker.append(details);
+        function refreshLinks() {
+          for (const link of list.querySelectorAll("a")) {
+            const url = new URL(link.href);
+            url.search = location.search;
+            url.hash = location.hash;
+            link.href = url.href;
+          }
+        }
+        details.addEventListener("toggle", refreshLinks);
+        menu.addEventListener("click", refreshLinks);
         details.addEventListener("keydown", (event) => {
           if (event.key === "Escape" && details.open) {
             event.preventDefault();
