@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import enum
 import math
-from contextlib import AbstractContextManager, nullcontext
 from dataclasses import InitVar
 from typing import TYPE_CHECKING, Annotated, Literal, Unpack, cast
 
@@ -15,7 +14,6 @@ from beartype import beartype
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
-from relflow.distributed import all_gather
 from relflow.logging import logger
 from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
@@ -32,6 +30,7 @@ from relflow.tensorfields.base import (
 from relflow.tensorfields.output import array, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
 from relflow.tensorfields.shared.jitter import Jitter
+from relflow.tensorfields.shared.normalizer import GlobalOnlineNormalizer, moments, precise
 from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
 if TYPE_CHECKING:
@@ -50,22 +49,6 @@ FOURIER_SAFE_MAX_ANGLE = float(1e4)
 
 Lane = Literal["raw", "log"]
 LANES: tuple[Lane, ...] = ("raw", "log")
-
-
-def precise(device: torch.device) -> AbstractContextManager[object]:
-    """Disable mixed precision for source-value arithmetic; bf16 would quantize lanes and readouts."""
-    if device.type in {"cuda", "cpu", "mps"}:
-        return torch.autocast(device_type=device.type, enabled=False)
-    return nullcontext()
-
-
-def wide(device: torch.device) -> torch.dtype:
-    """The widest float the device holds.
-
-    Source values and their statistics stay float64 so that values far from
-    zero keep their spread; MPS has no float64 and keeps float32.
-    """
-    return torch.float32 if device.type == "mps" else torch.float64
 
 
 class Objective(enum.StrEnum):
@@ -288,138 +271,6 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             targets=targets,
             batch_size=input.batch_size,
         )
-
-
-def moments(values: torch.Tensor) -> TensorDict:
-    """Summarize finite values with an exact count and centered moments in the device's widest float."""
-
-    finite = values.reshape(-1).to(dtype=wide(values.device))
-    finite = finite.masked_select(torch.isfinite(finite))
-    if finite.numel():
-        variance, mean = torch.var_mean(finite, correction=0)
-    else:
-        variance, mean = finite.new_zeros(()), finite.new_zeros(())
-    return TensorDict(
-        {
-            "count": torch.tensor(finite.numel(), dtype=torch.int64, device=values.device),
-            "mean": mean,
-            "var": variance,
-        },
-        batch_size=[],
-    )
-
-
-class GlobalOnlineNormalizer(torch.nn.Module):
-    """Running mean and variance of one lane.
-
-    Statistics stay float64 where the device allows, so values far from zero
-    keep their spread. ``epsilon`` floors the standardizing scale at that
-    fraction of ``|mean| + 1``: a constant lane standardizes to zero instead of
-    dividing by zero, and a narrow lane keeps its spread rather than meeting an
-    absolute floor.
-    """
-
-    def __init__(self, alpha: float | None = None, epsilon: float = 1e-12):
-        super().__init__()
-
-        self.epsilon: float = epsilon
-        self.alpha: float | None = alpha
-
-        self.register_buffer("mean", torch.zeros(1, dtype=torch.float64))
-        self.register_buffer("var", torch.ones(1, dtype=torch.float64))
-        self.register_buffer("count", torch.zeros(1, dtype=torch.int64))
-
-    @property
-    def scale(self) -> torch.Tensor:
-        """Standard deviation floored at ``epsilon`` of the mean's magnitude."""
-        return torch.sqrt(self.var).clamp_min(self.epsilon * (self.mean.abs() + 1.0))
-
-    def _apply(self, fn, recurse=True):
-        # MPS cannot hold float64: keep the statistics in float32 there.
-        try:
-            fn(self.mean)
-        except TypeError:
-            self.mean = self.mean.to(dtype=torch.float32)
-            self.var = self.var.to(dtype=torch.float32)
-        return super()._apply(fn, recurse)
-
-    @torch.no_grad()
-    def update(self, values: torch.Tensor):
-        self.merge(moments(values))
-
-    @torch.no_grad()
-    def learn(self, observation: TensorDict) -> None:
-        """Synchronize and apply one pristine numeric observation.
-
-        Ranks exchange their (count, mean, var) triples in one collective and
-        merge them centered on the shared mean, so small variances survive
-        large offsets. Counts travel in the statistics' float: exact below
-        2^53 on float64 devices and below 2^24 on MPS, which has no DDP.
-        """
-
-        if not isinstance(observation, TensorDict):
-            raise TypeError(f"normalizer observation must be a TensorDict, got {type(observation).__name__}")
-        dtype = self.mean.dtype
-        local = torch.stack(
-            [cast(torch.Tensor, observation[name]).reshape(()).to(dtype=dtype) for name in ("count", "mean", "var")]
-        ).to(device=self.mean.device)
-        counts, means, variances = all_gather(local).unbind(dim=1)
-        count = counts.sum()
-        if not count:
-            return
-        weights = counts / count
-        mean = (weights * means).sum()
-        # Empty ranks contribute zero to the centered spread.
-        delta = torch.where(counts > 0, means - mean, 0.0)
-        variance = (weights * (variances + delta.square())).sum()
-        self.merge(TensorDict({"count": count.to(dtype=torch.int64), "mean": mean, "var": variance}, batch_size=[]))
-
-    @torch.no_grad()
-    def merge(self, observation: TensorDict) -> None:
-        """Merge centered moments into running statistics without retaining values."""
-
-        count = cast(torch.Tensor, observation["count"])
-        mean = cast(torch.Tensor, observation["mean"])
-        variance = cast(torch.Tensor, observation["var"])
-        if not all(torch.isfinite(value).all() for value in (count, mean, variance)):
-            raise ValueError("normalizer observation must contain only finite values")
-        if count < 0:
-            raise ValueError("normalizer observation count cannot be negative")
-        if variance < 0:
-            raise ValueError("normalizer observation variance cannot be negative")
-
-        batch_count = count.to(device=self.count.device, dtype=self.count.dtype)
-        if not batch_count:
-            return
-
-        batch_mean = mean.to(self.mean)
-        batch_var = variance.to(self.var)
-
-        if self.alpha is not None:
-            alpha: float = self.alpha
-            new_mean = (1 - alpha) * self.mean + alpha * batch_mean
-            new_var = (1 - alpha) * self.var + alpha * batch_var
-
-            self.mean = new_mean
-            self.var = new_var
-
-            return
-
-        new_count = self.count + batch_count
-        weight = batch_count.to(dtype=self.mean.dtype) / new_count
-        delta = batch_mean - self.mean
-        correction = delta * torch.sqrt((self.count.to(dtype=self.mean.dtype) / new_count) * weight)
-        self.mean = torch.lerp(self.mean, batch_mean, weight)
-        self.var = torch.lerp(self.var, batch_var, weight) + correction.square()
-        self.count = new_count
-
-    def forward(self, inputs: torch.Tensor, mask: torch.Tensor, update=True) -> torch.Tensor:
-        finite_mask = mask & torch.isfinite(inputs)
-        if self.training and update:
-            self.update(inputs[finite_mask])
-
-        normalized = (torch.atleast_1d(inputs) - self.mean) / self.scale
-        return torch.where(finite_mask, normalized.reshape_as(inputs), inputs)
 
 
 @number.register(Component.Embedder)
