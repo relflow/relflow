@@ -55,7 +55,7 @@ jobs:
             if (!run || run.conclusion !== 'success' || run.event !== 'push' ||
                 run.head_branch !== 'main' || run.head_sha !== main ||
                 run.head_repository.full_name !== `${repo.owner}/${repo.repo}` || run.path !== '.github/workflows/ci.yml') {
-              throw new Error('Release requires a successful CI push run for the current main commit. Run CI first.');
+              throw new Error('Release requires a successful CI push run for the current main commit. Re-run the main push CI first.');
             }
             core.setOutput('run_id', String(run.id));
             core.setOutput('source_sha', run.head_sha);
