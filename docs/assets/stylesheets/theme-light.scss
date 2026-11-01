@@ -33,6 +33,7 @@ $sidebar-font-size-section-collapse: 1rem;
 /*-- scss:rules --*/
 
 :root {
+  --rf-text: #{$body-color};
   --rf-surface: #f9faf7;
   --rf-border: #ccd6cf;
   --rf-accent: #94aa83;

@@ -172,11 +172,12 @@ owner account:
    links, evidence pages, version navigation, and search. Initial connection
    leaves DNS and the existing production deployment unchanged.
 
-Gold is **not yet enabled**. The owner will enable the agreed **$5/month**
-membership later through [Gold settings](https://app.readthedocs.org/accounts/gold/),
-then select the Gold-backed **Ad-free** option in the project's **Advertising**
-settings. Verify project-wide removal on hosted pages without an ad blocker at
-that time. Account subscription and billing are outside this source change.
+Gold is enabled, and `relflow` is assigned through the account's
+[ad-free projects list](https://app.readthedocs.org/accounts/gold/projects/).
+The anonymous hosted Addons response reports `addons.ethicalads.ad_free: true`.
+Manage membership through [Gold settings](https://app.readthedocs.org/accounts/gold/);
+the project's **Advertising** settings alone do not assign Gold sponsorship.
+Verify hosted pages without an ad blocker after changing the assignment.
 Gold's project-wide removal is described in the
 [advertising policy](https://docs.readthedocs.com/platform/stable/advertising/ethical-advertising.html#opting-out).
 
@@ -201,11 +202,22 @@ unsupported tag, a separately reviewed branch named `stable` can define a custom
 stable target until release numbering supersedes those tags. This migration does
 not retag or delete existing tags.
 
-The host injects its [flyout menu](https://docs.readthedocs.com/platform/stable/flyout-menu.html)
-with available versions and current-version search. Quarto retains its own
-search for local and static builds. Configure host features in the dashboard;
-do not add a second version selector or hardcode Read the Docs scripts into
-pages. [Pull request previews](https://docs.readthedocs.com/platform/stable/pull-requests.html)
+The header shows the current version beside the RelFlow logo. When multiple
+versions are available, it opens a keyboard-accessible menu of published
+versions, retaining the current page, query string, and fragment when switching.
+Release versions appear as they are activated and built; a single version is
+shown as a badge, and pull request previews identify their current PR. If a
+page does not exist in an older version, Read the Docs serves that version's
+404 page.
+
+The picker consumes the supported [Addons event](https://docs.readthedocs.com/platform/stable/addons.html#custom-event-integration)
+and host-provided URLs. It hides the injected
+[flyout](https://docs.readthedocs.com/platform/stable/flyout-menu.html) only after
+initializing successfully, retaining it as a fallback. Keep the Flyout Menu
+addon enabled in the dashboard. Host search and Gold remain independent;
+Quarto retains its own search for local and static builds. Do not hardcode a
+release list or the host's injected script URL.
+[Pull request previews](https://docs.readthedocs.com/platform/stable/pull-requests.html)
 use separate preview domains and carry a status check on GitHub.
 
 The production domain remains [relflow.ai](https://relflow.ai/) during setup;

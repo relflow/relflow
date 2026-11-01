@@ -178,7 +178,10 @@ format:
     css:
       - assets/stylesheets/branding.css
       - assets/stylesheets/layout.css
-    include-in-header: assets/color-scheme.html
+      - assets/stylesheets/versions.css
+    include-in-header:
+      - assets/color-scheme.html
+      - assets/versions.html
     include-after-body: assets/sidebar.html
     theme:
       light:

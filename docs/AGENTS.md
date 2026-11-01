@@ -42,13 +42,19 @@ build from this checkout alone using the isolated static environment.
   be numeric. The publisher validates output before copying it to
   `READTHEDOCS_OUTPUT/html`. Keep links, canonical URLs, assets, and search within
   the current hosted version.
-- Use Read the Docs' injected flyout for version selection and host search;
-  configure Addons in its dashboard, without embedding a separate selector or
-  hardcoded host script. Local Quarto preview and search remain available.
+- The header version picker in `assets/versions.html` consumes Read the Docs'
+  version 1 Addons event, using published versions and the host's resolver
+  filename to retain the current page. It includes the current pull request
+  preview and preserves query strings and fragments. A single published version
+  appears as a badge. Hide the native flyout only after this picker initializes;
+  metadata failures retain it as a fallback. Keep the host's injected Addons
+  script, search, and ad-free handling; never hardcode its script URL or release
+  list. Local Quarto preview and search remain available.
   Account connection, Gold membership, project ad-free settings, and domain
   cutover are external setup steps in `docs/README.md`. The owner is
-  `granthamtaylor`; Gold will be enabled by the owner later, and the production
-  domain remains unchanged during initial setup. Keep the default version on
+  `granthamtaylor`; Gold is assigned to `relflow` through the account's ad-free
+  projects list. Verify the anonymous Addons response's `ad_free` flag after
+  changes. Keep the default version on
   `latest`, deactivate unsupported `stable` targets, and activate only verified
   tags containing the consolidated documentation and build configuration.
   Existing tags through `v0.4.11` predate it. Do not automatically activate every
