@@ -25,6 +25,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+torchjd = [
+    "torch>=2.9",
+    "torchjd[quadprog_projector]>=0.18,<0.19",
+]
 serving = [
     "fastapi>=0.124.0",
     "orjson>=3.10.0",

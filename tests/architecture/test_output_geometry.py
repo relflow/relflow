@@ -11,8 +11,7 @@ from tensordict import TensorDict
 
 import relflow as rf
 import relflow.architecture.output as output
-from relflow.architecture.output import Projection, projection
-from relflow.architecture.runtime import OutputEntry
+from relflow.architecture.output import OutputEntry, Projection, projection
 from relflow.data.arrow import Geometry
 from relflow.data.iterables import geometry
 from relflow.data.ragged import coalesce

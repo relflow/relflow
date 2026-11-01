@@ -183,6 +183,16 @@ Supply any scheduler for that run through `fit(scheduler=...)`. Keep
 `rf.adamw(...)` factories for custom optimizers and direct `lit.Trainer` setup;
 ordinary examples do not assign `model.optimizer` before calling `fit`.
 
+`Model(..., jacobian=True)` or a factory such as `Model.xs(..., jacobian=True)`
+opts into TorchJD UPGrad for multiple reconstruction
+objectives and requires `relflow[torchjd]`. One weighted scalar per reconstruction
+address participates; Lightning retains automatic optimization. The session
+policy belongs outside serialized presets and YAML templates and is not checkpointed.
+For a model loaded from YAML, set `model.jacobian = True` before compiling or
+fitting. Enable it before `model.compile(...)`; after loading,
+opt in explicitly before fitting again. Single-device and unsharded DDP training
+are supported; validation and prediction keep ordinary loss/output behavior.
+
 Set `batch_size` on `fit`, `validate`, `test`, or `predict` to update the model's
 current positive integer batch size. Arrow data modules read it when creating
 loaders; custom Lightning data modules own their loader behavior. The size is per

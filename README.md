@@ -32,7 +32,8 @@ uv add relflow
 ```
 
 Add `relflow[text]` for Hugging Face text encoders or `relflow[serving]` for the
-HTTP runtime.
+HTTP runtime. Add `relflow[torchjd]` for optional Jacobian descent with multiple
+reconstruction targets (PyTorch 2.9 or newer).
 
 ## Describe One Record
 
@@ -89,11 +90,30 @@ using averaged learned parameters. Full checkpoints retain live weights and
 optimizer state for resuming with the same callback through `ckpt_path`.
 Parameter replacement starts a new average for that tensor, so vocabulary row
 growth and reordering preserve the extension's current values.
+
 Predictions are an Arrow table: decoded results use schema field names such as
 `predictions.disputed`, and repeated branches become lists of records. Requested
 embeddings appear separately in `representations`. Retention adds an `inputs`
 column. For larger file-backed jobs, use an Arrow data module with `rf.Writer`
 to stream predictions to Parquet.
+
+## Multiple Targets
+
+For multiple targets, pass `jacobian=True` to the model constructor or a factory
+such as `rf.Model.xs(...)`, or set `model.jacobian = True` before compiling or
+fitting. [TorchJD UPGrad](https://torchjd.org/stable/docs/aggregation/upgrad/)
+combines their gradients before Lightning's normal optimizer update. Each
+reconstruction field contributes one objective, including its configured
+weight. This adds gradient computation and memory use; compare each target's
+quality and training time. A single participating objective uses ordinary
+backward. Validation and prediction retain their usual behavior.
+
+The Jacobian policy belongs to the training session, outside serialized presets
+and YAML templates, and is not checkpointed.
+After loading, set `model.jacobian = True` before compiling or fitting to opt
+in again. Single-device training and unsharded DDP with dense objective gradients
+are supported; each DDP rank uses weights derived from the globally averaged
+objective gradients.
 
 ## Documentation
 

@@ -52,6 +52,9 @@ def schema_api() -> None:
     rf.Model(d_model=32, n_heads=4, n_layers=1, items=branch, label=rf.Boolean(mask=True))
     rf.Model.xs(value=rf.Quantile, target=quantile)
     rf.Model.sm(target=enum)
+    candidate = rf.Model.xs(jacobian=True, first=rf.Boolean(mask=True), second=rf.Number(mask=True))
+    assert_type(candidate.jacobian, bool)
+    rf.Model(d_model=32, n_heads=4, n_layers=1, jacobian=True, label=rf.Boolean(mask=True))
     rf.Model(d_model=32, n_heads=4, n_layers=1, attention=None, items=rf.Branch(attention=None, value=rf.Number))
 
 

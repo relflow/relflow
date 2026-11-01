@@ -7,7 +7,7 @@ import pytest
 import torch
 
 import relflow as rf
-from relflow.architecture.runtime import plan
+from relflow.architecture.output import plan
 
 
 def configured():
