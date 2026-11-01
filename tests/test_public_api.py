@@ -32,7 +32,7 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.Jitter.model_fields["add"].default == 0.0
     assert relflow.Jitter.model_fields["multiply"].default == 0.0
     assert relflow.Jitter.model_fields["normalize"].default is True
-    for tensorfield in (relflow.Number, relflow.Vector, relflow.DateParts, relflow.Text):
+    for tensorfield in (relflow.Number, relflow.Vector, relflow.Series, relflow.DateParts, relflow.Text):
         assert isinstance(tensorfield.model_fields["jitter"].default_factory(), relflow.Jitter)
     assert relflow.where("type").name == "type"
     assert relflow.preprocess.__name__ == "preprocess"
