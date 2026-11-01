@@ -1,4 +1,5 @@
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pyarrow as pa
 import pydantic
@@ -8,12 +9,14 @@ from tensordict import TensorDict
 
 import relflow as rf
 from relflow.data.ragged import coalesce
-from relflow.structs.enums import Overflow, Strata, TensorKey, Tokens
+from relflow.structs.enums import Metric, Overflow, Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
+from relflow.structs.packages import Prediction
 from relflow.structs.tree import Address
 from relflow.tensorfields.base import TENSORFIELDS, Context
-from relflow.tensorfields.extensions.series import Block, Embedder, TensorField, encode
+from relflow.tensorfields.extensions.series import Block, Decoder, Embedder, TensorField, encode, loss
 from relflow.tensorfields.shared.jitter import Jitter
+from relflow.tensorfields.shared.normalizer import GlobalOnlineNormalizer, moments
 from tests.arrow import table as arrow_table
 from tests.tensorfields.helpers import tensorize
 
@@ -297,3 +300,155 @@ def test_jitter_runs_only_in_training(monkeypatch: pytest.MonkeyPatch):
 
     assert len(calls) == 1
     assert calls[0].reshape(-1).tolist() == [True, True]
+
+
+def forecast_schema(*, channels: int = 1, horizon: int = 3, **options) -> Schema:
+    return rf.Schema.from_tree(
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+        items=rf.Branch(length=2, signal=rf.Series(channels=channels, horizon=horizon, mask=True, **options)),
+    )
+
+
+class DummyModule:
+    def __init__(self, schema: Schema):
+        self.schema = schema
+        self.nodes = {ADDRESS: SimpleNamespace(decoder=Decoder(schema=schema, address=ADDRESS))}
+        self.logged: list[tuple[tuple, float]] = []
+
+    def track(self, names: tuple, value: torch.Tensor) -> torch.Tensor:
+        self.logged.append((names, float(value.detach().cpu())))
+        return value
+
+    def content_losses(self) -> list[float]:
+        return [value for names, value in self.logged if names[-2:] == (Metric.loss, TensorKey.content)]
+
+
+def forecast(field: TensorField, module: DummyModule, scaled: torch.Tensor) -> Prediction:
+    """Prediction that classifies every target state correctly and forecasts ``scaled`` deviations."""
+    decoder = module.nodes[ADDRESS].decoder
+    logits = torch.full((*field.state.shape, len(Tokens)), -50.0)
+    logits.scatter_(-1, field.targets[TensorKey.state].unsqueeze(-1), 50.0)
+    content = decoder.normalizer.mean + decoder.normalizer.scale * scaled
+    return Prediction(
+        address=ADDRESS,
+        payload=TensorDict(
+            {TensorKey.state: logits, TensorKey.content: content, "scaled": scaled},
+            batch_size=field.state.shape[:1],
+        ),
+    )
+
+
+def test_horizon_required_on_targets():
+    with pytest.raises(ValueError, match="requires horizon"):
+        rf.Model.xs(d_model=8, signal=rf.Series(channels=1, mask=True))
+
+
+def test_horizon_allowed_when_ancestor_reconstructs():
+    rf.Model.xs(
+        d_model=8,
+        items=rf.Branch(length=2, mask=rf.Mask(reconstruct=True), signal=rf.Series(channels=1, horizon=2)),
+    )
+
+
+def test_target_tensorfield_rejects_longer_than_horizon_and_pads_shorter():
+    with pytest.raises(ValueError, match=r"/items/signal.*3 steps.*horizon=2"):
+        tensorfield([[1.0, 2.0, 3.0]], forecast_schema(horizon=2))
+
+    target = tensorfield([[7.0]], forecast_schema(horizon=3)).targets[TensorKey.content]
+    assert target["values"].shape[-2:] == (3, 1)
+    assert target["observed"][0, 0, 0].tolist() == [True, False, False]
+
+
+def test_decoder_shapes_for_target():
+    decoder = Decoder(schema=forecast_schema(channels=2, horizon=3), address=ADDRESS)
+    payload = decoder.decode(torch.randn(5, 16))
+    assert payload["scaled"].shape == (5, 3, 2)
+    assert payload[TensorKey.content].shape == (5, 3, 2)
+    assert payload[TensorKey.state].shape == (5, len(Tokens))
+
+
+def test_decoder_content_is_source_units():
+    decoder = Decoder(schema=forecast_schema(channels=2, horizon=1), address=ADDRESS)
+    decoder.normalizer.mean.copy_(torch.tensor([100.0, -5.0]))
+    decoder.normalizer.var.copy_(torch.tensor([4.0, 1.0]))
+    with torch.no_grad():
+        decoder.regression.weight.zero_()
+        decoder.regression.bias.copy_(torch.tensor([1.0, 3.0]))
+    content = decoder.decode(torch.randn(2, 16))[TensorKey.content]
+    torch.testing.assert_close(content[0, 0], torch.tensor([102.0, -2.0], dtype=torch.float64))
+
+
+def test_loss_counts_only_trainable_valued_observed_entries():
+    schema = forecast_schema(horizon=3)
+    field = tensorfield([[1.0, NAN, 3.0], None], schema, datatype=pa.list_(pa.float64()))
+    module = DummyModule(schema)
+    base = torch.zeros(*field.state.shape, 3, 1, dtype=torch.float64)
+    loss(module=module, prediction=forecast(field, module, base), batch=field, strata=Strata.train)
+    (expected,) = module.content_losses()
+    assert expected > 0
+
+    moved = base.clone()
+    moved[0, 0, 0, 1] = 50.0  # unobserved step of a valued record
+    moved[1:] = 50.0  # null record
+    loss(module=module, prediction=forecast(field, module, moved), batch=field, strata=Strata.train)
+    assert module.content_losses() == [expected, expected]
+
+    moved[0, 0, 0, 0] = 50.0  # observed step
+    loss(module=module, prediction=forecast(field, module, moved), batch=field, strata=Strata.train)
+    assert module.content_losses()[-1] != expected
+
+
+def test_loss_metrics_report_source_units():
+    schema = forecast_schema(horizon=1)
+    field = tensorfield([[103.0]], schema, Strata.validate)
+    module = DummyModule(schema)
+    decoder = module.nodes[ADDRESS].decoder
+    decoder.normalizer.mean.fill_(100.0)
+    decoder.normalizer.var.fill_(4.0)
+    loss(
+        module=module,
+        prediction=forecast(field, module, torch.zeros(*field.state.shape, 1, 1, dtype=torch.float64)),
+        batch=field,
+        strata=Strata.validate,
+    )
+    scores = decoder.metrics.compute(Strata.validate)
+    assert scores["mae.content"].item() == pytest.approx(3.0)
+    assert scores["rmse.content"].item() == pytest.approx(3.0)
+
+
+def test_large_offset_series_keeps_precision():
+    rows = [[1e9 + 0.01, 1e9 + 0.02, 1e9 + 0.03]]
+    values = tensorfield(rows, build_schema(channels=1))
+    steps_ = values.content["values"][0, 0, 0, :, 0]
+    assert steps_.dtype == torch.float64
+    assert (steps_[1:] - steps_[:-1]).tolist() == pytest.approx([0.01, 0.01], abs=1e-6)
+
+    normalizer = GlobalOnlineNormalizer(width=1)
+    normalizer.learn(moments(steps_))
+    assert normalizer.var.item() == pytest.approx(2 / 3 * 1e-4, rel=1e-3)
+
+    decoder = Decoder(schema=forecast_schema(horizon=1), address=ADDRESS)
+    decoder.normalizer.learn(moments(steps_))
+    with torch.no_grad():
+        decoder.regression.weight.zero_()
+        decoder.regression.bias.zero_()
+    content = decoder.decode(torch.zeros(1, 16))[TensorKey.content]
+    assert content.item() == pytest.approx(1e9 + 0.02, abs=1e-6)
+
+
+def test_embed_only_decoder_has_no_regression():
+    model = rf.Model.xs(d_model=8, signal=rf.Series(channels=1, embed=True), label=rf.Boolean(mask=True))
+    decoder = model.nodes["/signal"].decoder
+    assert not hasattr(decoder, "regression")
+    assert decoder.decode(torch.randn(2, 8)).keys() == {TensorKey.state}
+
+
+def test_learn_updates_decoder_normalizer_for_targets():
+    model = rf.Model.xs(d_model=8, past=rf.Series(channels=1), future=rf.Series(channels=2, horizon=2, mask=True))
+    rows = pa.table({"past": [[1.0, 2.0]] * 2, "future": [[[10.0, 100.0], [20.0, 200.0]]] * 2})
+    model.encode(rows, strata=Strata.train)
+    normalizer = model.nodes["/future"].decoder.normalizer
+    assert normalizer.count.tolist() == [4, 4]
+    torch.testing.assert_close(normalizer.mean, torch.tensor([15.0, 150.0], dtype=torch.float64))
