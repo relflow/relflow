@@ -1,7 +1,9 @@
 """Per-column online statistics shared by tensorfields that standardize values."""
 
+import numpy as np
 import pytest
 import torch
+from tensordict import TensorDict
 
 from relflow.tensorfields.shared.normalizer import GlobalOnlineNormalizer, moments
 
@@ -40,3 +42,39 @@ def test_width_one_matches_scalar_semantics():
 def test_update_path_rejects_vector_width():
     with pytest.raises(ValueError, match="width"):
         GlobalOnlineNormalizer(width=2).train()(torch.ones(4, 2), torch.ones(4, 2, dtype=torch.bool))
+
+
+def test_width_one_merges_pool_exactly_at_large_offset():
+    rng = np.random.default_rng(0)
+    sizes = (64, 64, 128)
+    batches = [1e9 + rng.integers(-40, 40, size=n) / 16 * scale for scale, n in zip((1, 3, 1), sizes)]
+    normalizer = GlobalOnlineNormalizer()
+    for batch in batches:
+        normalizer.merge(moments(torch.from_numpy(batch)))
+    pooled = np.concatenate(batches)
+    assert normalizer.count.tolist() == [len(pooled)]
+    np.testing.assert_allclose(normalizer.mean.numpy(), [pooled.mean()], rtol=1e-9)
+    np.testing.assert_allclose(normalizer.var.numpy(), [pooled.var()], rtol=1e-9)
+
+
+def test_width_one_ema_follows_exponential_update():
+    normalizer = GlobalOnlineNormalizer(alpha=0.1)
+    old_mean, old_var = 0.0, 1.0
+    for mean, var in ((10.0, 4.0), (20.0, 9.0)):
+        normalizer.merge(
+            TensorDict({"count": torch.tensor([5]), "mean": torch.tensor([mean]), "var": torch.tensor([var])})
+        )
+        old_mean, old_var = 0.9 * old_mean + 0.1 * mean, 0.9 * old_var + 0.1 * var
+    assert old_mean == pytest.approx(2.9) and old_var == pytest.approx(1.0 * 0.81 + 0.9 * 0.4 + 0.9)
+    np.testing.assert_allclose(normalizer.mean.numpy(), [2.9], rtol=1e-12)
+    np.testing.assert_allclose(normalizer.var.numpy(), [1.0 * 0.81 + 0.9 * 0.4 + 0.9], rtol=1e-12)
+
+
+@pytest.mark.parametrize("alpha", [None, 0.1])
+def test_width_one_zero_count_observation_changes_nothing(alpha):
+    normalizer = GlobalOnlineNormalizer(alpha=alpha)
+    normalizer.merge(moments(torch.tensor([1.0, 2.0, 6.0])))
+    before = (normalizer.mean.clone(), normalizer.var.clone(), normalizer.count.clone())
+    normalizer.merge(moments(torch.tensor([NAN])))
+    for kept, now in zip(before, (normalizer.mean, normalizer.var, normalizer.count)):
+        assert torch.equal(kept, now)
