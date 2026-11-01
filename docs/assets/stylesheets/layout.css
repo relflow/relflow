@@ -126,16 +126,37 @@ body.home .lead {
 }
 
 body.home .home-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  align-items: stretch;
   gap: 0.75rem;
   margin: 1.5rem 0 1rem;
 }
 
+body.home .home-actions > p {
+  min-width: 0;
+  margin: 0;
+}
+
 body.home .home-actions .btn {
-  padding: 0.6rem 1.15rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.9rem;
+  height: 100%;
+  padding: 0.7rem 1.1rem;
   border-radius: 0.5rem;
-  font-weight: 500;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  white-space: normal;
+}
+
+@media (max-width: 575.98px) {
+  body.home .home-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 body.home main.content > section.level2 > h2 {
@@ -187,11 +208,4 @@ body.home .quarto-figure img {
 
 body.home .column-screen-inset-right + p {
   margin-top: 1.5rem;
-}
-
-/* Code blocks share the surface and border of cards and diagrams. */
-#quarto-document-content div.sourceCode {
-  background-color: var(--rf-surface);
-  border: 1px solid var(--rf-border);
-  border-radius: 6px;
 }

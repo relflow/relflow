@@ -19,6 +19,7 @@ payment prediction, then adds nested context, pretraining, and reuse.
 
 ::: {.home-actions}
 [Build your first model →](learn/your-first-model.qmd){.btn .btn-primary}
+
 [See what it automates](learn/featureless-models.qmd){.btn .btn-outline-primary}
 :::
 

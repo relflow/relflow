@@ -178,6 +178,8 @@ format:
     css:
       - assets/stylesheets/branding.css
       - assets/stylesheets/layout.css
+      - assets/stylesheets/sidebar.css
+      - assets/stylesheets/code.css
       - assets/stylesheets/versions.css
     include-in-header:
       - assets/color-scheme.html

@@ -1,0 +1,158 @@
+#quarto-document-content {
+  --rf-code-radius: 0.65rem;
+  --rf-code-bar-height: 2.125rem;
+  --rf-code-bar: color-mix(in srgb, var(--rf-border) 16%, var(--rf-surface));
+}
+
+/* The traffic lights are background decoration, never controls or copied text. */
+#quarto-document-content :is(div.sourceCode, pre:not(.sourceCode), .code-with-filename) {
+  box-sizing: border-box;
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  margin-block: 1rem;
+  border: 1px solid var(--rf-border);
+  border-radius: var(--rf-code-radius);
+  background-color: var(--rf-surface);
+  background-image:
+    radial-gradient(circle closest-side, #ff5f57 82%, #e0443e 88% 96%, transparent 100%),
+    radial-gradient(circle closest-side, #febc2e 82%, #dea123 88% 96%, transparent 100%),
+    radial-gradient(circle closest-side, #28c840 82%, #1aab29 88% 96%, transparent 100%),
+    linear-gradient(var(--rf-border), var(--rf-border)),
+    linear-gradient(var(--rf-code-bar), var(--rf-code-bar));
+  background-position:
+    1rem calc((var(--rf-code-bar-height) - 0.7rem) / 2),
+    2.125rem calc((var(--rf-code-bar-height) - 0.7rem) / 2),
+    3.25rem calc((var(--rf-code-bar-height) - 0.7rem) / 2),
+    0 calc(var(--rf-code-bar-height) - 1px),
+    0 0;
+  background-size:
+    0.7rem 0.7rem,
+    0.7rem 0.7rem,
+    0.7rem 0.7rem,
+    100% 1px,
+    100% var(--rf-code-bar-height);
+  background-repeat: no-repeat;
+  box-shadow: 0 0.15rem 0.6rem rgb(0 0 0 / 6%);
+}
+
+#quarto-document-content div.sourceCode {
+  padding-block-start: var(--rf-code-bar-height);
+  overflow: visible;
+}
+
+#quarto-document-content pre:not(.sourceCode) {
+  padding: calc(var(--rf-code-bar-height) + 0.85rem) 1rem 0.85rem;
+  overflow-x: auto;
+}
+
+/* Scroll the code rather than its title bar, and keep Quarto's token styles. */
+#quarto-document-content div.sourceCode > pre {
+  max-width: 100%;
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border: 0;
+  border-radius: 0 0 calc(var(--rf-code-radius) - 1px) calc(var(--rf-code-radius) - 1px);
+  background: transparent;
+  box-shadow: none;
+  overflow-x: auto;
+}
+
+#quarto-document-content .code-copy-outer-scaffold {
+  margin-block: 1rem;
+}
+
+#quarto-document-content .code-copy-outer-scaffold > :is(div.sourceCode, pre) {
+  margin: 0;
+}
+
+#quarto-document-content .code-copy-outer-scaffold > .code-copy-button {
+  top: 0.1875rem;
+  right: 0.25rem;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin: 0;
+  padding: 0;
+  border-radius: 0.3rem;
+}
+
+#quarto-document-content .code-copy-button:hover,
+#quarto-document-content .code-copy-button:focus-visible {
+  background-color: color-mix(in srgb, var(--rf-text) 9%, transparent);
+}
+
+#quarto-document-content .code-copy-button:focus-visible {
+  outline: 2px solid var(--bs-link-color);
+  outline-offset: -2px;
+}
+
+/* A supplied filename occupies the same title bar, with one frame around it. */
+#quarto-document-content .code-with-filename .code-with-filename-file {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  min-height: var(--rf-code-bar-height);
+  margin: 0;
+  padding: 0.4rem 2.5rem 0.4rem 4.75rem;
+  border: 0;
+  border-bottom: 1px solid var(--rf-border);
+  border-radius: calc(var(--rf-code-radius) - 1px) calc(var(--rf-code-radius) - 1px) 0 0;
+  background: transparent;
+  color: var(--rf-text);
+  font-family: var(--bs-font-monospace);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+#quarto-document-content .code-with-filename :is(div.sourceCode, pre:not(.sourceCode)) {
+  margin: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+#quarto-document-content .code-with-filename div.sourceCode {
+  padding-block-start: 0;
+}
+
+#quarto-document-content .code-with-filename pre:not(.sourceCode) {
+  padding-block-start: 0.85rem;
+}
+
+#quarto-document-content .code-with-filename .code-with-filename-file pre {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+}
+
+#quarto-document-content .code-with-filename .code-copy-outer-scaffold {
+  position: static;
+  margin: 0;
+}
+
+#quarto-document-content .code-with-filename .code-copy-outer-scaffold > .code-copy-button {
+  top: 0.1875rem;
+}
+
+@media print {
+  #quarto-document-content :is(div.sourceCode, pre:not(.sourceCode), .code-with-filename) {
+    background-image: none;
+    box-shadow: none;
+  }
+
+  #quarto-document-content div.sourceCode {
+    padding-block-start: 0;
+  }
+
+  #quarto-document-content pre:not(.sourceCode) {
+    padding-block-start: 0.85rem;
+  }
+
+  #quarto-document-content .code-with-filename .code-with-filename-file {
+    padding-inline-start: 1rem;
+  }
+}

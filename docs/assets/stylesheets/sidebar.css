@@ -1,0 +1,41 @@
+/* Expanded labels and newly visible scrollbars must not resize navigation. */
+#quarto-sidebar {
+  width: 100%;
+  min-width: 0;
+  scrollbar-gutter: stable;
+}
+
+#quarto-sidebar .sidebar-menu-container {
+  width: 100%;
+  min-width: 0;
+  white-space: normal;
+}
+
+#quarto-sidebar .sidebar-item-container,
+#quarto-sidebar .sidebar-item-text {
+  min-width: 0;
+}
+
+#quarto-sidebar .sidebar-item-text {
+  overflow-wrap: anywhere;
+}
+
+#quarto-sidebar .sidebar-section-toggle .bi-chevron-right {
+  flex-shrink: 0;
+}
+
+@media (max-width: 991.98px) {
+  #quarto-sidebar {
+    --rf-sidebar-width: min(20rem, 100vw);
+    width: var(--rf-sidebar-width);
+  }
+
+  #quarto-sidebar.collapsing {
+    width: 0;
+  }
+
+  /* Bootstrap measures scrollWidth while the panel has zero width. */
+  #quarto-sidebar.collapsing .sidebar-menu-container {
+    width: calc(var(--rf-sidebar-width) - 20px);
+  }
+}
