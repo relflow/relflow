@@ -358,7 +358,7 @@ class Embedder(EmbedderBase):
 
         state = inputs.state
         content = cast(TensorDict, inputs.content)
-        observed = content["observed"] & state.eq(Tokens.valued).unsqueeze(-1)
+        observed = cast(torch.Tensor, content["observed"]) & state.eq(Tokens.valued).unsqueeze(-1)
         keep = observed.unsqueeze(-1)
 
         with precise(state.device):
