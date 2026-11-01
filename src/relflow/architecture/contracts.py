@@ -400,13 +400,13 @@ def require_core_tensors(
     if TensorKey.content in targets.keys():
         target_content_name = f"{TensorKey.targets}[{TensorKey.content}]"
         target_content = require_tensor_tree(address, target_content_name, targets[TensorKey.content])
-        require_matching_tree_shapes(
-            address,
-            actual_name=target_content_name,
-            actual=target_content,
-            expected_name=TensorKey.content,
-            expected=content,
-        )
+        # Targets share content's keys and leading coordinate axes (their TensorDict batch size);
+        # trailing axes belong to the extension, so a target may differ in width from its input.
+        if set(target_content) != set(content):
+            raise ForwardContractError(
+                f"forward input '{address}' {target_content_name} keys must match {TensorKey.content} keys: "
+                f"expected {format_paths(content)}, got {format_paths(target_content)}"
+            )
 
 
 def require_tensor_devices(module: "Model", address: Address, tensorfield: TensorFieldBase) -> None:
