@@ -19,3 +19,9 @@ must not import or run model code. Canonical learning experiments, their runtime
 tests, and recorded results live in `evidence/`; branding assets live under
 `docs/assets/branding/`. Package tests remain in `tests/`, and static
 documentation tests live in `docs/tests/`.
+
+Read the Docs owns versioned hosting and pull request previews through the root
+`.readthedocs.yaml`; GitHub documentation CI validates and retains an artifact.
+Preserve the Quarto layout and isolated build. Use `docs.publish` and the host's
+native version flyout; follow `docs/README.md` for external account, Gold,
+project ad-free, and domain setup. Verify a hosted preview before changing DNS.

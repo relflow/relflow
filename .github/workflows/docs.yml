@@ -1,4 +1,4 @@
-name: Validate and publish documentation
+name: Validate documentation
 
 on:
   workflow_call:
@@ -39,26 +39,3 @@ jobs:
           path: docs/site
           if-no-files-found: error
           retention-days: 7
-      - name: Upload Pages artifact
-        if: vars.PUBLISH_PAGES == 'true' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: docs/site
-
-  deploy:
-    name: Deploy main documentation
-    needs: build
-    if: vars.PUBLISH_PAGES == 'true' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/configure-pages@v5
-      - name: Publish validated site
-        id: deployment
-        uses: actions/deploy-pages@v4

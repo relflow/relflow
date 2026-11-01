@@ -29,6 +29,30 @@ build from this checkout alone using the isolated static environment.
 - Evidence execution is a separate, explicit task in an environment containing
   the target RelFlow version. Runtime tests live in `evidence/tests/runtime/` and are excluded from default
   static validation.
+- Read the Docs owns versioned hosting and pull request previews through the
+  root `.readthedocs.yaml`. Its custom build runs
+  `uv run --project docs python -m docs.publish`; GitHub documentation CI
+  validates and uploads an artifact. Preserve the Quarto design and static
+  dependency boundary when changing hosting.
+- Hosted rendering takes its version URL from `READTHEDOCS_CANONICAL_URL` and
+  its source revision from the checkout's Git `HEAD`; check
+  `READTHEDOCS_GIT_COMMIT_HASH` when supplied. The global **View source** action
+  links to that exact commit for branch, tag, and pull request builds. Do not use
+  `READTHEDOCS_GIT_IDENTIFIER` as a source revision: pull request identifiers may
+  be numeric. The publisher validates output before copying it to
+  `READTHEDOCS_OUTPUT/html`. Keep links, canonical URLs, assets, and search within
+  the current hosted version.
+- Use Read the Docs' injected flyout for version selection and host search;
+  configure Addons in its dashboard, without embedding a separate selector or
+  hardcoded host script. Local Quarto preview and search remain available.
+  Account connection, Gold membership, project ad-free settings, and domain
+  cutover are external setup steps in `docs/README.md`. The owner is
+  `granthamtaylor`; Gold will be enabled by the owner later, and the production
+  domain remains unchanged during initial setup. Keep the default version on
+  `latest`, deactivate unsupported `stable` targets, and activate only verified
+  tags containing the consolidated documentation and build configuration.
+  Existing tags through `v0.4.11` predate it. Do not automatically activate every
+  semantic tag or retag/delete old releases; backfilling is a separate change.
 
 ## Teach in order
 

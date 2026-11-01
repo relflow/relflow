@@ -16,7 +16,7 @@ website:
   repo-url: https://github.com/relflow/relflow
   repo-subdir: docs
   repo-branch: main
-  repo-actions: [edit, issue]
+  repo-actions: [source, issue]
   title: relflow
   description: "A model factory for typed, nested data: generate custom neural architectures, train models, and serve predictions and learned representations."
   favicon: assets/branding/logos/logo.svg

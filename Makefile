@@ -21,8 +21,8 @@ render: ## Render static HTML and Typst diagrams into docs/site/.
 	$(QUARTO) render docs --no-execute
 
 check: prepare ## Check static authoring, API references, and evidence reporting.
-	uv run --project docs ruff format --check --config docs/pyproject.toml docs/check.py docs/tests evidence
-	uv run --project docs ruff check --config docs/pyproject.toml docs/check.py docs/tests evidence
+	uv run --project docs ruff format --check --config docs/pyproject.toml docs/check.py docs/publish.py docs/tests evidence
+	uv run --project docs ruff check --config docs/pyproject.toml docs/check.py docs/publish.py docs/tests evidence
 	uv run --project docs pytest -c docs/pyproject.toml docs/tests evidence/tests
 	uv run --project docs python -m docs.check
 

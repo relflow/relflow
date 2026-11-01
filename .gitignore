@@ -41,3 +41,5 @@ docs/**/*_files/
 docs/**/*_cache/
 evidence/runs/
 /.quarto/
+/_readthedocs/
+/docs/_quarto-readthedocs-*.yml

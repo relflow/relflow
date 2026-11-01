@@ -186,3 +186,10 @@ make dev
 it at `http://127.0.0.1:4200`. The build uses pinned Quarto and never imports
 RelFlow or executes models. Library checks do not build the site or run learning
 experiments; explicit evidence execution requires the intended RelFlow wheel.
+
+Read the Docs builds hosted versions and pull request previews using the root
+[.readthedocs.yaml](.readthedocs.yaml). GitHub documentation CI retains source
+and rendered-site validation with a downloadable artifact. Keep documentation
+changes in the same PR as their API changes, then review the Read the Docs
+preview before merging. See [docs/README.md](docs/README.md) for initial account
+setup, version activation, Gold-backed ad-free hosting, and domain cutover.

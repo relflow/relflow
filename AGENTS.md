@@ -378,6 +378,15 @@ site. From the repository root, run `uv sync --project docs --locked`,
 for HTML output. Learning experiments run only when explicitly invoked with
 the intended RelFlow wheel; ordinary package checks do not run them.
 
+Read the Docs builds versioned hosting and pull request previews from the root
+`.readthedocs.yaml`, using `uv run --project docs python -m docs.publish`.
+GitHub documentation CI validates and uploads a review artifact. Preserve
+Quarto's visuals and the isolated static environment; the host supplies version
+URLs and its native version flyout, while source views use the actual checkout
+commit. See `docs/README.md`
+for account connection, Gold/project ad-free setup, eligible release tags, and
+the verified-preview requirement before any production domain cutover.
+
 ## CI Ownership
 
 `ci.yml` owns PR, merge-group, main-push, and manual triggers. `tests.yml`,

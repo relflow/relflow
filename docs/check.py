@@ -8,7 +8,7 @@ import re
 from collections import Counter
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urljoin, urlsplit
 
 import yaml
 
@@ -145,6 +145,7 @@ class Page(HTMLParser):
         self.ids: Counter[str] = Counter()
         self.anchors: Counter[str] = Counter()
         self.links: list[str] = []
+        self.canonical: list[str] = []
         self.in_head = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -152,6 +153,9 @@ class Page(HTMLParser):
             self.in_head = True
         elif tag == "body":
             self.in_head = False
+        attributes = dict(attrs)
+        if tag == "link" and "canonical" in (attributes.get("rel") or "").lower().split():
+            self.canonical.append(attributes.get("href") or "")
         resource = self.in_head and tag in {"link", "script", "style", "meta"}
         for name, value in attrs:
             if name == "id" and value:
@@ -166,12 +170,26 @@ class Page(HTMLParser):
             self.in_head = False
 
 
-def rendered_checks(root: Path = ROOT) -> list[str]:
-    """Check the actual site, including generated links, anchors, and diagrams."""
+def rendered_checks(root: Path = ROOT, *, site_url: str | None = None) -> list[str]:
+    """Check rendered links, anchors, and diagrams; an explicit URL also requires canonical tags."""
+    root = root.resolve()
     site = root / "docs/site"
     errors: list[str] = []
     if not (site / "index.html").is_file():
         return ["Rendered site is missing docs/site/index.html; run make render first"]
+    config = yaml.safe_load((root / "docs/_quarto.yml").read_text())
+    address = site_url if site_url is not None else config.get("website", {}).get("site-url", "")
+    try:
+        location = urlsplit(address)
+    except ValueError as error:
+        return [f"Invalid rendered site URL {address!r}: {error}"]
+    if address and (
+        location.scheme not in {"http", "https"} or not location.netloc or location.query or location.fragment
+    ):
+        return [f"Rendered site URL must be an absolute HTTP(S) URL without query or fragment: {address}"]
+    if site_url is not None and not address:
+        return ["Rendered site URL must be an absolute HTTP(S) URL without query or fragment: ''"]
+    base = unquote(location.path).rstrip("/")
     pages: dict[Path, Page] = {}
     for source in site.rglob("*.html"):
         text = source.read_text()
@@ -183,16 +201,31 @@ def rendered_checks(root: Path = ROOT) -> list[str]:
         duplicates = [name for name, count in page.anchors.items() if count > 1]
         if duplicates:
             errors.append(f"{source.relative_to(root)}: duplicate anchors {duplicates}")
-    config = yaml.safe_load((root / "docs/_quarto.yml").read_text())
-    base = urlsplit(config.get("website", {}).get("site-url", "")).path.rstrip("/")
     for source, page in pages.items():
+        label = source.relative_to(root)
+        if site_url is not None and not page.canonical:
+            errors.append(f"{label}: missing canonical URL for rendered site {address}")
+        if len(page.canonical) > 1:
+            errors.append(f"{label}: expected one canonical URL, found {len(page.canonical)}")
+        relative = quote(source.relative_to(site).as_posix())
+        expected = urljoin(
+            address.rstrip("/") + "/", relative.removesuffix("index.html") if source.name == "index.html" else relative
+        )
+        for canonical in page.canonical:
+            if canonical != expected:
+                errors.append(f"{label}: incorrect canonical URL {canonical!r}; expected {expected!r}")
         for target in page.links:
             link = urlsplit(target)
-            if link.scheme or link.netloc:
+            if link.scheme and link.scheme not in {"http", "https"}:
                 continue
-            pathname = unquote(link.path)
+            if link.netloc and link.netloc.lower() != location.netloc.lower():
+                continue
+            pathname = unquote(link.path or ("/" if link.netloc else ""))
             if pathname.startswith("/"):
-                if base and (pathname == base or pathname.startswith(base + "/")):
+                if base:
+                    if pathname != base and not pathname.startswith(base + "/"):
+                        errors.append(f"{label}: rendered link escapes site base {base}/: {target}")
+                        continue
                     pathname = pathname[len(base) :]
                 destination = (site / pathname.lstrip("/")).resolve()
             else:
@@ -200,19 +233,24 @@ def rendered_checks(root: Path = ROOT) -> list[str]:
             if destination.is_dir():
                 destination /= "index.html"
             if not destination.is_relative_to(site) or not destination.is_file():
-                errors.append(f"{source.relative_to(root)}: missing rendered link {target}")
-            elif link.fragment and destination in pages and link.fragment not in pages[destination].ids:
-                errors.append(f"{source.relative_to(root)}: missing rendered anchor {target}")
+                errors.append(f"{label}: missing rendered link {target}")
+            elif link.fragment and destination in pages and unquote(link.fragment) not in pages[destination].ids:
+                errors.append(f"{label}: missing rendered anchor {target}")
     return errors
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rendered", action="store_true")
+    parser.add_argument(
+        "--site-url", help="Deployment URL used to validate rendered version paths and canonical links."
+    )
     arguments = parser.parse_args()
+    if arguments.site_url is not None and not arguments.rendered:
+        parser.error("--site-url requires --rendered")
     errors = source_checks()
     if arguments.rendered:
-        errors.extend(rendered_checks())
+        errors.extend(rendered_checks(site_url=arguments.site_url))
     if errors:
         raise SystemExit("\n".join(errors))
     print(

@@ -312,4 +312,7 @@ dependency compatibility and configured accelerator checks remain independent.
 Local pre-commit continues to run formatting, lint, types, and fast tests.
 The reusable documentation workflow validates and renders the static site using its
 isolated environment; see [the documentation guide](docs/README.md) for preview
-and build commands.
+and build commands. Read the Docs builds the hosted versions and pull request
+previews from [.readthedocs.yaml](.readthedocs.yaml), with `latest` following the
+default branch and verified release versions activated separately. Hosting setup
+and the eventual `relflow.ai` domain cutover are described in that guide.

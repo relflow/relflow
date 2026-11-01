@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -70,6 +71,127 @@ def test_rendered_checks_resolve_github_pages_base_paths_and_real_anchors(projec
     (site / "index.html").write_text('<a href="/docs/next.html#details">Next</a>')
     (site / "next.html").write_text('<h1 id="details">Details</h1><a href="index.html">Back</a>')
     assert rendered_checks(project) == []
+
+
+@pytest.mark.parametrize(
+    "site_url",
+    [
+        "https://relflow.ai/",
+        "https://relflow.ai/en/latest/",
+        "https://relflow.readthedocs.io/en/v0.4.2/",
+        "https://relflow--66.org.readthedocs.build/en/66/",
+    ],
+)
+@pytest.mark.parametrize("page", ["next.html", "guides/index.html"])
+def test_rendered_checks_validate_deployment_hosts_version_paths_and_canonical_urls(
+    project: Path, site_url: str, page: str
+) -> None:
+    site = project / "docs/site"
+    (site / "assets").mkdir(parents=True)
+    (site / "assets/site.js").write_text("// Static asset\n")
+    (site / "assets/logo.svg").write_text("<svg />")
+    location = urlsplit(site_url)
+    (site / "index.html").write_text(
+        f'<link rel="canonical" href="{site_url}">'
+        f'<script src="{site_url}assets/site.js"></script>'
+        f'<img src="{location.path}assets/logo.svg">'
+        f'<a href="//{location.netloc}{location.path}{page}#details">Next</a>'
+        '<a href="https://external.example/missing.html">External page</a>'
+    )
+    destination = site / page
+    destination.parent.mkdir(exist_ok=True)
+    canonical = site_url + ("guides/" if page == "guides/index.html" else page)
+    destination.write_text(
+        f'<link rel="canonical" href="{canonical}"><h1 id="details">Details</h1><a href="{site_url}">Home</a>'
+    )
+    assert rendered_checks(project, site_url=site_url) == []
+
+
+def test_rendered_checks_resolve_encoded_filenames_and_fragments(project: Path) -> None:
+    site = project / "docs/site"
+    site.mkdir()
+    site_url = "https://relflow.ai/en/latest/"
+    (site / "index.html").write_text(
+        f'<link rel="canonical" href="{site_url}"><a href="{site_url}a%20guide.html#deep%20section">Guide</a>'
+    )
+    (site / "a guide.html").write_text(
+        f'<link rel="canonical" href="{site_url}a%20guide.html"><h1 id="deep section">Details</h1>'
+    )
+    assert rendered_checks(project, site_url=site_url) == []
+
+
+@pytest.mark.parametrize(
+    ("target", "message"),
+    [
+        ("https://relflow.ai/en/latest/missing.html", "missing rendered link"),
+        ("https://relflow.ai/en/latest/#absent", "missing rendered anchor"),
+        ("//relflow.ai/en/latest/assets/missing.svg", "missing rendered link"),
+        ("/assets/logo.svg", "escapes site base"),
+        ("/en/latestish/assets/logo.svg", "escapes site base"),
+        ("https://relflow.ai/en/v0.4.2/", "escapes site base"),
+        ("https://relflow.ai/", "escapes site base"),
+        ("/en/latest/%2e%2e/outside.html", "missing rendered link"),
+    ],
+)
+def test_rendered_checks_reject_broken_internal_absolute_links_and_version_escapes(
+    project: Path, target: str, message: str
+) -> None:
+    site = project / "docs/site"
+    (site / "assets").mkdir(parents=True)
+    (site / "assets/logo.svg").write_text("<svg />")
+    (site / "index.html").write_text(
+        f'<link rel="canonical" href="https://relflow.ai/en/latest/"><a href="{target}">Broken internal target</a>'
+    )
+    assert any(message in error for error in rendered_checks(project, site_url="https://relflow.ai/en/latest/"))
+
+
+@pytest.mark.parametrize(
+    "canonical",
+    [
+        "https://previous.example/en/latest/",
+        "https://relflow.ai/",
+        "https://relflow.ai/en/v0.4.2/",
+        "https://relflow.ai/en/latest/next.html",
+        "https://relflow.ai/en/latest/?old=true",
+        "https://relflow.ai/en/latest/#fragment",
+    ],
+)
+def test_rendered_checks_reject_canonical_urls_for_other_hosts_versions_or_pages(project: Path, canonical: str) -> None:
+    site = project / "docs/site"
+    site.mkdir()
+    (site / "index.html").write_text(f'<link rel="canonical" href="{canonical}">')
+    assert any(
+        "incorrect canonical URL" in error
+        for error in rendered_checks(project, site_url="https://relflow.ai/en/latest/")
+    )
+
+
+@pytest.mark.parametrize(
+    ("canonical", "message"),
+    [
+        ("", "missing canonical URL"),
+        (
+            '<link rel="canonical" href="https://relflow.ai/en/latest/">'
+            '<link rel="canonical" href="https://relflow.ai/en/latest/">',
+            "expected one canonical URL",
+        ),
+    ],
+)
+def test_rendered_checks_require_one_canonical_url_for_an_explicit_deployment(
+    project: Path, canonical: str, message: str
+) -> None:
+    site = project / "docs/site"
+    site.mkdir()
+    (site / "index.html").write_text(canonical)
+    assert any(message in error for error in rendered_checks(project, site_url="https://relflow.ai/en/latest/"))
+
+
+@pytest.mark.parametrize("site_url", ["", "/en/latest/", "ftp://relflow.ai/", "https://relflow.ai/?old=true"])
+def test_rendered_checks_reject_invalid_deployment_urls(project: Path, site_url: str) -> None:
+    site = project / "docs/site"
+    site.mkdir()
+    (site / "index.html").write_text("<h1>Start</h1>")
+    assert any("absolute HTTP(S) URL" in error for error in rendered_checks(project, site_url=site_url))
 
 
 @pytest.mark.parametrize(
