@@ -48,4 +48,4 @@ jobs:
       id-token: write
     with:
       suite_ref: ${{ inputs.suite_ref }}
-    uses: relflow/docs/.github/workflows/evidence-lab.yml@748d7f932de36a81a031cc0e08c5896e3dc00103
+    uses: relflow/relflow/.github/workflows/evidence-lab.yml@7cba2bf2fe3082e643a95aa43c6bad8395569420

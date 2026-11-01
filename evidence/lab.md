@@ -34,7 +34,7 @@ page. Configure:
 | Issuer | GitHub Actions, `https://token.actions.githubusercontent.com` |
 | Subject | `repo:relflow@312307812/relflow@1217201723:*` |
 | Custom claim `repository` | `relflow/relflow` |
-| Custom claim `job_workflow_ref` | `relflow/relflow/.github/workflows/evidence-lab.yml@<exact-helper-commit>` |
+| Custom claim `job_workflow_ref` | `relflow/relflow/.github/workflows/evidence-lab.yml@7cba2bf2fe3082e643a95aa43c6bad8395569420` |
 | Scope | `auth_keys` write, restricted to `tag:relflow-evidence-ci` |
 | Device tag | `tag:relflow-evidence-ci` |
 
@@ -50,6 +50,13 @@ tailnet access by changing its own workflow. Moving the helper from relflow/docs
 to this repository requires updating this external Tailscale claim to the new
 exact reference before the consolidated workflow can run. Importing the source
 does not change the federated identity configuration.
+
+The trusted executor is pinned to import commit
+`349b2202e6390a5fe0cbdf09a0c5972e495351ed`; the helper is pinned to
+`7cba2bf2fe3082e643a95aa43c6bad8395569420`. Push both commits with the
+migration branch and merge while preserving this history so these immutable
+references remain reachable. Squashing or rebasing this migration requires
+recreating the pins and updating the exact Tailscale claim before validation.
 
 Grant the CI tag access to lab's SSH service and allow noninteractive Tailscale
 SSH for the selected account using an `accept` rule. Retain existing human

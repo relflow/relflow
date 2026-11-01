@@ -24,7 +24,7 @@ uv run pytest
 ```
 
 The commit hooks apply Ruff formatting and lint fixes, then run Pyrefly and the
-full test suite. Review any files changed by the hooks before committing again.
+fast test suite. Review any files changed by the hooks before committing again.
 
 Distributed tests launch every rank on the same machine. On macOS, the test
 suite defaults `GLOO_SOCKET_IFNAME` to the loopback interface `lo0`. An explicitly
