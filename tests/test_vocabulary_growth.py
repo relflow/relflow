@@ -64,10 +64,10 @@ def assert_shapes(model, kind, capacity, *, address=ADDRESS):
     assert counter.counts.shape == (rows,)
     if kind == "group":
         embedding = node.embedder.embeddings["group"]
-        assert embedding.weight.shape == (rows, 1)
+        assert embedding.weight.shape == (rows, 3)
         assert node.embedder.size == 3
         assert node.embedder.embeddings["content"].weight.shape == (8, 3)
-        assert node.decoder.linears["group"].weight.shape == (1, 8)
+        assert node.decoder.linears["group"].weight.shape == (3, 8)
         assert model.schema.requests[ADDRESS].n_groups == 3
     else:
         embedding = node.embedder.embeddings["content"]

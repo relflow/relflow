@@ -13,7 +13,6 @@ representation.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import InitVar
@@ -22,7 +21,6 @@ from weakref import ReferenceType, ref
 
 import numpy as np
 import pyarrow as pa
-import pyarrow.compute as pc
 import pydantic
 import torch
 from beartype import beartype
@@ -41,7 +39,7 @@ from relflow.tensorfields.base import (
     TensorFieldBase,
     TensorInput,
 )
-from relflow.tensorfields.output import array, labels, struct
+from relflow.tensorfields.output import array, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
 from relflow.tensorfields.shared.resize import Resize
 from relflow.tensorfields.shared.rows import Embedding
@@ -74,27 +72,19 @@ _OVERRIDE_LOCK: str = "group assignment overrides"
 Assignment = int
 
 
-def centroids(size: int, reference: torch.Tensor) -> torch.Tensor:
-    return torch.arange(size, dtype=reference.dtype, device=reference.device) * (math.tau / size)
-
-
-def distance(values: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
-    """Return shortest angular distances on the unit circle."""
-    return torch.remainder(values - reference + math.pi, math.tau).sub(math.pi).abs()
-
-
 @group.register(Component.Request)
 class Request(RequestBase):
     """Scalar labels represented through shared, learned latent groups.
 
     Training grows label storage automatically. ``p_unavailable``
     routes known training labels through shared unavailable content.
-    A reconstructing mask trains the state head only; the group angle head has
-    no built-in reconstruction objective. Assignment angles can learn through
-    downstream objectives when the field is visible as context. Predictions
-    expose the best group and known vocabulary label. Their probabilities are
-    softmaxes of negative circular distances to group centroids and known label
-    angles, respectively.
+    Each identity stores one logit per group. Embedding selects the argmax as a
+    one-hot vector, with straight-through softmax gradients during training and
+    no sampling noise. Assignment logits can learn through downstream objectives
+    when the field is visible as context. A reconstructing mask trains the state
+    head only; the group head has no built-in reconstruction objective.
+    Predictions expose the argmax of the decoder's group softmax and its
+    probability, without vocabulary labels.
     """
 
     model_config = pydantic.ConfigDict(populate_by_name=True, serialize_by_alias=True)
@@ -181,16 +171,16 @@ class Request(RequestBase):
         embedder = resolve_group_embedder(model, address)
         with embedder.vocab.lock:
             vocabulary = tuple(embedder.vocab.master)
-            angles = (
+            logits = (
                 cast(torch.Tensor, embedder.embeddings[TensorKey.group.name].weight)[: len(vocabulary)].detach().clone()
             )
 
         if not vocabulary:
             return {}
 
-        if angles.dtype in (torch.float16, torch.bfloat16):
-            angles = angles.float()
-        probabilities = (-distance(angles, centroids(embedder.size, angles))).softmax(dim=-1)
+        if logits.dtype in (torch.float16, torch.bfloat16):
+            logits = logits.float()
+        probabilities = logits.softmax(dim=-1)
         groups: list[int] = probabilities.argmax(dim=-1).cpu().tolist()
         rows: list[list[float]] = probabilities.cpu().tolist()
         return {
@@ -333,7 +323,7 @@ class Embedder(EmbedderBase):
                 ),
                 TensorKey.group.name: Embedding(
                     num_embeddings=self.capacity + 1,
-                    embedding_dim=1,
+                    embedding_dim=self.size,
                 ),
                 TensorKey.content.name: torch.nn.Linear(
                     in_features=self.size,
@@ -371,16 +361,13 @@ class Embedder(EmbedderBase):
         valued = state.eq(Tokens.valued.value)
 
         safe_content = content.masked_fill(content.eq(-1), self.capacity).masked_fill(~valued, 0)
-        embedding_values = self.embeddings[TensorKey.group.name](safe_content)
-        radial_distance = distance(embedding_values, centroids(self.size, embedding_values))
+        embedding_values: torch.Tensor = self.embeddings[TensorKey.group.name](safe_content)
+        hard = torch.zeros_like(embedding_values)
+        hard.scatter_(-1, embedding_values.argmax(dim=-1, keepdim=True), 1.0)
         if self.training:
-            hard = torch.zeros_like(radial_distance)
-            hard.scatter_(-1, radial_distance.argmin(dim=-1, keepdim=True), 1.0)
-            soft = torch.softmax(radial_distance, dim=-1)
+            soft = torch.softmax(embedding_values, dim=-1)
             group_assignments = hard.detach() - soft.detach() + soft
         else:
-            hard = torch.zeros_like(radial_distance)
-            hard.scatter_(-1, radial_distance.argmin(dim=-1, keepdim=True), 1.0)
             group_assignments = hard
         group_assignments = group_assignments * valued.unsqueeze(-1)
         group_embeddings = self.embeddings[TensorKey.content.name](group_assignments)
@@ -401,7 +388,7 @@ class Embedder(EmbedderBase):
     def context(self) -> VocabularyState:
         return self.vocab.state
 
-    def assignment_angle(self, assignment: Assignment) -> torch.Tensor:
+    def assignment(self, assignment: Assignment) -> torch.Tensor:
         weight = cast(torch.Tensor, self.embeddings[TensorKey.group.name].weight)
         if isinstance(assignment, bool) or not isinstance(assignment, int):
             raise TypeError(
@@ -409,10 +396,12 @@ class Embedder(EmbedderBase):
             )
         if not 0 <= assignment < self.size:
             raise ValueError(f"group must be in [0, {self.size}); got {assignment}")
-        return weight.new_tensor([math.tau * assignment / self.size])
+        values = weight.new_zeros(self.size)
+        values[assignment] = 1.0
+        return values
 
     def assign_token(self, token: Any, assignment: Assignment) -> int:
-        angle = self.assignment_angle(assignment)
+        values = self.assignment(assignment)
         weight = cast(torch.Tensor, self.embeddings[TensorKey.group.name].weight)
         index = self.vocab.state.index.get(token)
         if index is None:
@@ -423,7 +412,7 @@ class Embedder(EmbedderBase):
             self.vocab._snapshot_size = -1
             index = len(self.vocab.master) - 1
         with torch.no_grad():
-            weight[index].copy_(angle)
+            weight[index].copy_(values)
         return index
 
     @contextmanager
@@ -482,7 +471,7 @@ def bind(
     strata: Strata,
     resize: Resize,
 ) -> None:
-    """Grow source identities while preserving the unavailable row and group count."""
+    """Grow identity vectors while preserving group columns and the unavailable row."""
     if not isinstance(binding, VocabularyBatch):
         raise TypeError(f"group binding at '{address}' requires VocabularyBatch, got {type(binding).__name__}")
     embedder = cast(Embedder, module.nodes[address].embedder)
@@ -569,7 +558,7 @@ class GroupRuntime:
         model, embedder = self.resolve()
         with embedder.vocab.lock:
             self.assert_writable(model, embedder)
-            embedder.assignment_angle(assignment)
+            embedder.assignment(assignment)
             required = len(embedder.vocab.master) + int(token not in embedder.vocab.state.index)
             resize = Resize(optimizers(model))
             embedder.resize(capacity(embedder.capacity, required), resize)
@@ -585,7 +574,7 @@ class GroupRuntime:
             self.assert_writable(model, embedder)
             index = embedder.vocab.state.index
             for assignment in assignments.values():
-                embedder.assignment_angle(assignment)
+                embedder.assignment(assignment)
             required = len(index) + sum(token not in index for token in assignments)
             resize = Resize(optimizers(model))
             embedder.resize(capacity(embedder.capacity, required), resize)
@@ -617,7 +606,11 @@ class Decoder(DecoderBase):
                     in_features=schema.d_model,
                     out_features=len(Tokens),
                 ),
-                TensorKey.group.name: torch.nn.Linear(in_features=schema.d_model, out_features=1, bias=False),
+                TensorKey.group.name: torch.nn.Linear(
+                    in_features=schema.d_model,
+                    out_features=cast(Request, schema.requests[address]).n_groups,
+                    bias=False,
+                ),
             }
         )
 
@@ -705,43 +698,22 @@ def output(module: Model, address: Address) -> pa.StructType:
             pa.field(TensorKey.probability.name, pa.float32(), nullable=False),
         ]
     )
-    content_type = pa.struct(
-        [
-            pa.field(TensorKey.value.name, pa.large_string()),
-            pa.field(TensorKey.probability.name, pa.float32(), nullable=False),
-        ]
-    )
-    return pa.struct(
-        [
-            pa.field(TensorKey.group.name, group_type, nullable=False),
-            pa.field(TensorKey.content.name, content_type, nullable=False),
-        ]
-    )
+    return pa.struct([pa.field(TensorKey.group.name, group_type, nullable=False)])
 
 
 @group.register(Component.write)
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
     group_type = datatype.field(TensorKey.group.name).type
-    content_type = datatype.field(TensorKey.content.name).type
     embedder: Embedder = cast(Embedder, module.nodes[prediction.address].embedder)
     values = cast(torch.Tensor, prediction.payload[TensorKey.group]).detach()
-    if values.ndim == 0 or values.shape[-1] != 1:
+    if values.ndim == 0 or values.shape[-1] != embedder.size:
         raise ValueError(
-            f"group prediction at {prediction.address!s} requires one angle per coordinate; "
+            f"group prediction at {prediction.address!s} requires {embedder.size} logits per coordinate; "
             f"got shape {tuple(values.shape)}"
         )
-    assignments = cast(torch.Tensor, embedder.embeddings[TensorKey.group.name].weight).detach()
-    if assignments.ndim != 2 or assignments.shape[0] == 0 or assignments.shape[1] != 1:
-        raise ValueError(
-            f"group assignments at {prediction.address!s} require shape (capacity + 1, 1); "
-            f"got {tuple(assignments.shape)}"
-        )
-    dtype = torch.promote_types(values.dtype, assignments.dtype)
-    if dtype in (torch.float16, torch.bfloat16):
-        dtype = torch.float32
-    angles = values.reshape(-1, 1).to(dtype=dtype)
-    group_logits = -distance(angles, centroids(embedder.size, angles))
-    group_probabilities = group_logits.softmax(dim=-1)
+    if values.dtype in (torch.float16, torch.bfloat16):
+        values = values.float()
+    group_probabilities = values.reshape(-1, embedder.size).softmax(dim=-1)
     group_probability, group_ids = group_probabilities.max(dim=-1)
     group_values = struct(
         {
@@ -751,34 +723,4 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
         group_type,
     )
 
-    vocabulary = labels(embedder.vocab)
-    size = len(vocabulary)
-    capacity = assignments.shape[0] - 1
-    if size > capacity:
-        raise ValueError(
-            f"group vocabulary at {prediction.address!s} has {size} values but assignment capacity is {capacity}"
-        )
-
-    count = angles.shape[0]
-    content_labels: pa.Array = pa.nulls(count, type=pa.large_string())
-    content_probability = torch.zeros(count, dtype=torch.float32, device=angles.device)
-    if size:
-        known = assignments[:size].reshape(1, -1).to(dtype=dtype)
-        probabilities = (-distance(angles, known)).softmax(dim=-1)
-        content_probability, indices = probabilities.max(dim=-1)
-        content_labels = pc.take(vocabulary, array(indices, pa.int64()))
-
-    content_values = struct(
-        {
-            TensorKey.value.name: content_labels,
-            TensorKey.probability.name: array(content_probability, pa.float32()),
-        },
-        content_type,
-    )
-    return struct(
-        {
-            TensorKey.group.name: group_values,
-            TensorKey.content.name: content_values,
-        },
-        datatype,
-    )
+    return struct({TensorKey.group.name: group_values}, datatype)

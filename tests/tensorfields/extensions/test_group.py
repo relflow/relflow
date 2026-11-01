@@ -122,23 +122,24 @@ def test_group_tensorfield_simulates_unavailable_during_training():
     assert field.content.tolist() == [[[-1, 0]], [[-1, 0]]]
 
 
-def test_group_embedder_and_decoder_use_scalar_angles_and_fixed_group_count():
+def test_group_embedder_and_decoder_use_fixed_width_group_vectors():
     schema = build_schema(n_groups=4)
     embedder = build_embedder(schema)
     decoder = Decoder(schema=schema, address=ADDRESS)
 
     assert embedder.size == 4
-    assert embedder.embeddings["group"].weight.shape == (9, 1)
+    assert embedder.embeddings["group"].weight.shape == (9, 4)
     assert embedder.embeddings["content"].weight.shape == (16, 4)
-    assert decoder.linears["group"].weight.shape == (1, 16)
-    assert decoder.decode(torch.randn(3, 16))[TensorKey.group].shape == (3, 1)
+    assert decoder.linears["group"].weight.shape == (4, 16)
+    assert decoder.decode(torch.randn(3, 16))[TensorKey.group].shape == (3, 4)
 
 
-def test_group_embedder_routes_angles_to_fixed_groups():
+@pytest.mark.parametrize("training", [False, True], ids=["evaluate", "train"])
+def test_group_embedder_routes_argmax_as_a_one_hot_vector(training):
     embedder = build_embedder(build_schema())
-    embedder.eval()
+    embedder.train(training)
     with torch.no_grad():
-        embedder.embeddings["group"].weight[:4, 0] = torch.tensor([0.0, math.pi / 2, math.pi, 3 * math.pi / 2])
+        embedder.embeddings["group"].weight[:4].copy_(torch.eye(4))
     state = torch.full((4, 1), Tokens.valued.value, dtype=torch.int64)
     field = input_field(state, torch.arange(4).reshape(4, 1))
 
@@ -149,11 +150,12 @@ def test_group_embedder_routes_angles_to_fixed_groups():
     torch.testing.assert_close(actual, expected)
 
 
-def test_group_embedder_routes_angles_across_the_circle_boundary():
+@pytest.mark.parametrize("training", [False, True], ids=["evaluate", "train"])
+def test_group_embedder_breaks_assignment_ties_at_the_first_maximum(training):
     embedder = build_embedder(build_schema())
-    embedder.eval()
+    embedder.train(training)
     with torch.no_grad():
-        embedder.embeddings["group"].weight[:4, 0] = torch.tensor([-0.1, math.tau - 0.1, 0.1, math.tau + 0.1])
+        embedder.embeddings["group"].weight[:4].zero_()
     state = torch.full((4, 1), Tokens.valued.value, dtype=torch.int64)
     field = input_field(state, torch.arange(4).reshape(4, 1))
 
@@ -168,7 +170,7 @@ def test_group_embedder_training_forward_is_deterministic():
     embedder.train()
     field = input_field(torch.tensor([[Tokens.valued.value]]), torch.tensor([[3]]))
     with torch.no_grad():
-        embedder.embeddings["group"].weight[3, 0] = 0.3
+        embedder.embeddings["group"].weight[3].copy_(torch.tensor([0.3, 1.0, -0.5, 0.0]))
 
     torch.manual_seed(1)
     first = embedder.embed(field).payload
@@ -182,17 +184,35 @@ def test_group_embedder_straight_through_routes_gradient_to_assignment():
     embedder = build_embedder(build_schema())
     embedder.train()
     with torch.no_grad():
-        embedder.embeddings["group"].weight[0, 0] = 0.2
+        embedder.embeddings["group"].weight[0].copy_(torch.tensor([0.2, 1.0, -0.7, 0.4]))
         embedder.embeddings["content"].weight.zero_()
         embedder.embeddings["content"].weight[0] = torch.tensor([0.0, 1.0, 3.0, 7.0])
     field = input_field(torch.tensor([[Tokens.valued.value]]), torch.tensor([[0]]))
 
-    embedder.embed(field).payload[..., 0].sum().backward()
+    actual = embedder.embed(field).payload
+    expected = embedder.embeddings["state"](field.state) + embedder.embeddings["content"].weight[:, 1]
+    torch.testing.assert_close(actual, expected)
+    actual[..., 0].sum().backward()
 
     gradient = embedder.embeddings["group"].weight.grad
     assert gradient is not None
     assert torch.isfinite(gradient).all()
     assert gradient[0].abs().sum() > 0
+    logits = embedder.embeddings["group"].weight[0].detach().clone().requires_grad_()
+    soft_output = logits.softmax(dim=-1) @ embedder.embeddings["content"].weight[0].detach()
+    expected_gradient = torch.autograd.grad(soft_output, logits)[0]
+    torch.testing.assert_close(gradient[0], expected_gradient)
+    assert not gradient[1:].any()
+
+
+def test_group_embedder_evaluation_has_no_assignment_gradient():
+    embedder = build_embedder(build_schema())
+    embedder.eval()
+    field = input_field(torch.tensor([[Tokens.valued.value]]), torch.tensor([[0]]))
+
+    embedder.embed(field).payload.sum().backward()
+
+    assert embedder.embeddings["group"].weight.grad is None
 
 
 def test_group_assignments_learn_from_downstream_supervision():
@@ -221,7 +241,8 @@ def test_group_embedder_routes_oov_to_the_sentinel_row():
     embedder = build_embedder(build_schema())
     embedder.eval()
     with torch.no_grad():
-        embedder.embeddings["group"].weight[embedder.capacity, 0] = math.pi
+        embedder.embeddings["group"].weight[embedder.capacity].zero_()
+        embedder.embeddings["group"].weight[embedder.capacity, 2] = 1.0
     state = torch.tensor([[Tokens.valued.value]])
     field = input_field(state, torch.tensor([[-1]]))
 
@@ -240,6 +261,19 @@ def test_group_embedder_ignores_content_for_nonvalued_states():
     actual = embedder.embed(field).payload
 
     torch.testing.assert_close(actual, embedder.embeddings["state"](state))
+
+
+def test_group_embedder_nonvalued_states_have_zero_assignment_gradients():
+    embedder = build_embedder(build_schema())
+    embedder.train()
+    state = torch.tensor([[Tokens.padded.value], [Tokens.null.value], [Tokens.masked.value]])
+    field = input_field(state, torch.tensor([[0], [1], [2]]))
+
+    embedder.embed(field).payload.sum().backward()
+
+    gradient = embedder.embeddings["group"].weight.grad
+    assert gradient is not None
+    torch.testing.assert_close(gradient, torch.zeros_like(gradient))
 
 
 def test_group_embedder_preserves_repeated_branch_geometry():
@@ -281,6 +315,30 @@ def test_group_bind_rejects_worker_ids_outside_the_batch():
         bind(model, field, None, binding, address=address, strata=Strata.validate, resize=Resize())
 
 
+def test_group_bind_grows_vectors_and_preserves_assignments_and_sentinel():
+    model = rf.Model.xs(d_model=8, group=rf.Group(n_groups=4, p_unavailable=0.0))
+    address = rf.Address("/group")
+    rf.Group.assign(model, address, "A", 2)
+    embedder = model.nodes[address].embedder
+    with torch.no_grad():
+        embedder.embeddings["group"].weight[-1].copy_(torch.tensor([1.0, 2.0, 3.0, 4.0]))
+    before = embedder.embeddings["group"].weight.detach().clone()
+    field = input_field(torch.full((3, 1), Tokens.valued.value), torch.tensor([[0], [1], [-1]]))
+    field.targets = TensorDict({TensorKey.content: torch.tensor([[1], [2], [-1]])}, batch_size=field.state.shape)
+    binding = VocabularyBatch(labels=pa.array(["B", "A", "C"]), size=3)
+    resize = Resize()
+
+    bind(model, field, None, binding, address=address, strata=Strata.train, resize=resize)
+    resize.commit()
+
+    assert embedder.embeddings["group"].weight.shape == (embedder.capacity + 1, 4)
+    assert rf.Group.vocabulary(model, address) == ("A", "B", "C")
+    torch.testing.assert_close(embedder.embeddings["group"].weight[0], before[0])
+    torch.testing.assert_close(embedder.embeddings["group"].weight[-1], before[-1])
+    assert field.content.flatten().tolist() == [1, 0, -1]
+    assert field.targets[TensorKey.content].flatten().tolist() == [0, 2, -1]
+
+
 def test_group_float_nan_labels_take_the_other_state(tmp_path):
     model = rf.Model.xs(d_model=8, label=rf.Group(n_groups=2, mask=True), signal=rf.Number)
     rows = pa.table({"label": [1.0, 2.0, float("nan"), 0.0], "signal": [1.0, 2.0, 3.0, 4.0]})
@@ -316,123 +374,67 @@ def test_group_float_nan_labels_take_the_other_state(tmp_path):
     assert model.predict(rows).num_rows == 4
 
 
-class Vocabulary:
-    def __init__(self, tokens: list[str]):
-        self.tokens = tokens
-
-    def labels(self) -> pa.Array:
-        return pa.array(self.tokens, type=pa.large_string())
-
-
-def write_module(tokens: list[str], angles: list[float], count: int):
-    embedder = SimpleNamespace(
-        vocab=Vocabulary(tokens),
-        capacity=len(angles) - 1,
-        size=count,
-        embeddings={"group": SimpleNamespace(weight=torch.tensor(angles).reshape(-1, 1))},
-    )
+def write_module(count: int = 4):
+    embedder = SimpleNamespace(size=count)
     return SimpleNamespace(nodes={ADDRESS: SimpleNamespace(embedder=embedder)})
 
 
-def group_prediction(angles: list[float], *, dtype: torch.dtype = torch.float32) -> Prediction:
-    values = torch.tensor(angles, dtype=dtype).reshape(len(angles), 1, 1)
+def group_prediction(logits: list[list[float]], *, count: int = 4, dtype: torch.dtype = torch.float32) -> Prediction:
+    values = torch.tensor(logits, dtype=dtype).reshape(len(logits), 1, count)
     return Prediction(
         address=ADDRESS,
         payload=TensorDict(
-            {TensorKey.state: torch.zeros(len(angles), 1, len(Tokens)), TensorKey.group: values},
-            batch_size=[len(angles)],
+            {TensorKey.state: torch.zeros(len(logits), 1, len(Tokens)), TensorKey.group: values},
+            batch_size=[len(logits)],
         ),
     )
 
 
-def test_group_write_emits_arrow_group_and_content_payloads():
-    module = write_module(
-        ["ALPHA", "BETA", "GAMMA", "DELTA"],
-        [0.0, math.pi / 2, math.pi, 3 * math.pi / 2, 0.0],
-        count=4,
-    )
+def test_group_write_emits_only_arrow_group_argmax_and_probability():
+    module = write_module()
     datatype = output(module, ADDRESS)
+    prediction = group_prediction([[0.0, 2.0, 1.0, -1.0], [0.0, -1.0, 3.0, 1.0]])
 
-    result = write(module=module, prediction=group_prediction([math.pi / 2, math.pi]), datatype=datatype)
+    result = write(module=module, prediction=prediction, datatype=datatype)
 
     assert result.type == datatype
-    assert result.type.names == ["group", "content"]
+    assert result.type.names == ["group"]
     groups = result.field("group")
     assert groups.field("value").to_pylist() == [1, 2]
-    expected = 1 / (1 + 2 * math.exp(-math.pi / 2) + math.exp(-math.pi))
-    assert groups.field("probability").to_pylist() == pytest.approx([expected, expected])
-    content = result.field("content")
-    assert content.field("value").to_pylist() == ["BETA", "GAMMA"]
-    assert content.field("probability").to_pylist() == pytest.approx([expected, expected])
+    expected = prediction.payload[TensorKey.group].softmax(dim=-1).max(dim=-1).values.flatten()
+    assert groups.field("probability").to_pylist() == pytest.approx(expected.tolist())
 
 
-def test_group_write_does_not_predict_the_unavailable_row():
-    module = write_module(["A", "B"], [2 * math.pi / 3, 4 * math.pi / 3, 0.0, 0.0, 0.0], count=3)
+@pytest.mark.parametrize("count", [2, 3, 7])
+def test_group_write_uses_the_configured_vector_width(count):
+    module = write_module(count)
+    logits = torch.eye(count).tolist()
 
-    result = write(module=module, prediction=group_prediction([0.0]), datatype=output(module, ADDRESS))
-
-    content = result.field("content")
-    assert content.field("value").to_pylist()[0] in ("A", "B")
-    assert content.field("probability").to_pylist() == pytest.approx([0.5])
-
-
-def test_group_write_returns_none_labels_when_vocabulary_is_empty():
-    module = write_module([], [0.0], count=4)
-
-    result = write(module=module, prediction=group_prediction([0.0]), datatype=output(module, ADDRESS))
-
-    content = result.field("content")
-    assert content.field("value").to_pylist() == [None]
-    assert content.field("probability").to_pylist() == [0.0]
-
-
-@pytest.mark.parametrize("count", [1, 2, 3, 7])
-def test_group_write_uses_the_configured_number_of_centroids(count):
-    angles = [math.tau * index / count for index in range(count)]
-    tokens = [f"label-{index}" for index in range(count)]
-    module = write_module(tokens, [*angles, 0.0], count=count)
-
-    result = write(module=module, prediction=group_prediction(angles), datatype=output(module, ADDRESS))
+    result = write(module=module, prediction=group_prediction(logits, count=count), datatype=output(module, ADDRESS))
 
     assert result.field("group").field("value").to_pylist() == list(range(count))
-    assert result.field("content").field("value").to_pylist() == tokens
+    assert result.field("group").field("probability").to_pylist() == pytest.approx(
+        [math.e / (math.e + count - 1)] * count
+    )
 
 
-def test_group_write_wraps_angles_before_scoring():
-    module = write_module(["A", "B"], [0.0, math.pi, 0.0], count=4)
-    prediction = group_prediction([-0.1, math.tau - 0.1, 0.1, math.tau + 0.1])
+def test_group_write_breaks_ties_at_the_first_maximum():
+    module = write_module()
 
-    result = write(module=module, prediction=prediction, datatype=output(module, ADDRESS))
-
-    groups = result.field("group")
-    assert groups.field("value").to_pylist() == [0, 0, 0, 0]
-    probabilities = groups.field("probability").to_pylist()
-    assert probabilities[0] == pytest.approx(probabilities[1])
-    assert probabilities[2] == pytest.approx(probabilities[3])
-    assert result.field("content").field("value").to_pylist() == ["A"] * 4
-
-
-def test_group_write_distinguishes_known_angles_within_one_group():
-    module = write_module(["A", "B"], [0.0, 0.3, 0.0], count=2)
-
-    result = write(module=module, prediction=group_prediction([0.28]), datatype=output(module, ADDRESS))
+    result = write(module=module, prediction=group_prediction([[0.0] * 4]), datatype=output(module, ADDRESS))
 
     assert result.field("group").field("value").to_pylist() == [0]
-    assert result.field("content").field("value").to_pylist() == ["B"]
+    assert result.field("group").field("probability").to_pylist() == pytest.approx([0.25])
 
 
 def test_group_write_flattens_repeated_coordinates_in_row_order():
-    module = write_module(
-        ["A", "B", "C", "D"],
-        [0.0, math.pi / 2, math.pi, 3 * math.pi / 2, 0.0],
-        count=4,
-    )
+    module = write_module()
     prediction = Prediction(
         address=ADDRESS,
         payload=TensorDict(
             {
                 TensorKey.state: torch.zeros(2, 2, len(Tokens)),
-                TensorKey.group: torch.tensor([[[0.0], [math.pi]], [[math.pi / 2], [3 * math.pi / 2]]]),
+                TensorKey.group: torch.eye(4)[torch.tensor([[0, 2], [1, 3]])],
             },
             batch_size=[2],
         ),
@@ -441,57 +443,67 @@ def test_group_write_flattens_repeated_coordinates_in_row_order():
     result = write(module=module, prediction=prediction, datatype=output(module, ADDRESS))
 
     assert result.field("group").field("value").to_pylist() == [0, 2, 1, 3]
-    assert result.field("content").field("value").to_pylist() == ["A", "C", "B", "D"]
+    assert result.type.names == ["group"]
 
 
-def test_group_write_preserves_assignment_precision():
-    module = write_module(["A", "B"], [0.0, 2.0, 0.0], count=2)
-    module.nodes[ADDRESS].embedder.embeddings["group"].weight = torch.tensor([[0.0], [2.0], [0.0]], dtype=torch.float64)
+def test_group_write_preserves_prediction_precision():
+    module = write_module()
 
     result = write(
-        module=module, prediction=group_prediction([1.0 + 1e-8], dtype=torch.float64), datatype=output(module, ADDRESS)
+        module=module,
+        prediction=group_prediction([[1.0, 1.0 + 1e-8, 0.0, 0.0]], dtype=torch.float64),
+        datatype=output(module, ADDRESS),
     )
 
-    assert result.field("content").field("value").to_pylist() == ["B"]
+    assert result.field("group").field("value").to_pylist() == [1]
 
 
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-def test_group_write_supports_low_precision_angles(dtype):
-    module = write_module(["A", "B"], [0.0, math.pi, 0.0], count=4)
-    embedding = module.nodes[ADDRESS].embedder.embeddings["group"]
-    embedding.weight = embedding.weight.to(dtype=dtype)
+def test_group_write_supports_low_precision_logits(dtype):
+    module = write_module()
 
-    result = write(module=module, prediction=group_prediction([math.pi], dtype=dtype), datatype=output(module, ADDRESS))
+    result = write(
+        module=module,
+        prediction=group_prediction([[0.0, 1.0, 2.0, -1.0]], dtype=dtype),
+        datatype=output(module, ADDRESS),
+    )
 
     assert result.field("group").field("value").to_pylist() == [2]
-    assert result.field("content").field("value").to_pylist() == ["B"]
-    assert math.isfinite(result.field("content").field("probability").to_pylist()[0])
+    expected = torch.tensor([0.0, 1.0, 2.0, -1.0]).softmax(dim=-1)[2].item()
+    assert result.field("group").field("probability").to_pylist() == pytest.approx([expected])
 
 
 def test_group_write_supports_empty_predictions():
-    module = write_module(["A"], [0.0, 0.0], count=3)
+    module = write_module(3)
     datatype = output(module, ADDRESS)
 
-    result = write(module=module, prediction=group_prediction([]), datatype=datatype)
+    result = write(module=module, prediction=group_prediction([], count=3), datatype=datatype)
 
     assert result.type == datatype
     assert len(result) == 0
 
 
-def test_group_write_rejects_non_scalar_predictions():
-    module = write_module(["A"], [0.0, 0.0], count=4)
-    prediction = group_prediction([0.0])
-    prediction.payload[TensorKey.group] = torch.zeros(1, 1, 4)
+@pytest.mark.parametrize("width", [0, 1, 2, 5])
+def test_group_write_rejects_wrong_prediction_width(width):
+    module = write_module()
+    prediction = group_prediction([[0.0] * 4])
+    prediction.payload[TensorKey.group] = torch.zeros(1, 1, width)
 
-    with pytest.raises(ValueError, match="one angle per coordinate"):
+    with pytest.raises(ValueError, match="4 logits per coordinate"):
         write(module=module, prediction=prediction, datatype=output(module, ADDRESS))
 
 
-def test_group_write_rejects_vocabulary_beyond_assignment_capacity():
-    module = write_module(["A", "B"], [0.0, math.pi], count=2)
+def test_group_write_does_not_consult_identity_storage():
+    module = write_module()
+    datatype = output(module, ADDRESS)
+    prediction = group_prediction([[0.0, 1.0, 2.0, -1.0]])
+    before = write(module=module, prediction=prediction, datatype=datatype)
+    module.nodes[ADDRESS].embedder.vocab = object()
+    module.nodes[ADDRESS].embedder.embeddings = {"group": object()}
 
-    with pytest.raises(ValueError, match="2 values but assignment capacity is 1"):
-        write(module=module, prediction=group_prediction([0.0]), datatype=output(module, ADDRESS))
+    after = write(module=module, prediction=prediction, datatype=datatype)
+
+    assert before.equals(after)
 
 
 @pytest.mark.parametrize(
@@ -503,19 +515,17 @@ def test_group_write_rejects_vocabulary_beyond_assignment_capacity():
     ],
 )
 def test_group_write_uses_the_prediction_device(device):
-    module = write_module(["A", "B"], [0.0, math.pi, 0.0], count=4)
-    embedding = module.nodes[ADDRESS].embedder.embeddings["group"]
-    embedding.weight = embedding.weight.to(device)
-    prediction = group_prediction([math.pi]).to(device)
+    module = write_module()
+    prediction = group_prediction([[0.0, 1.0, 2.0, -1.0]]).to(device)
 
     result = write(module=module, prediction=prediction, datatype=output(module, ADDRESS))
 
     assert result.field("group").field("value").to_pylist() == [2]
-    assert result.field("content").field("value").to_pylist() == ["B"]
+    assert result.type.names == ["group"]
 
 
 @pytest.mark.parametrize("known", [False, True], ids=["empty-vocabulary", "known-labels"])
-def test_group_predict_writes_scalar_angles(known):
+def test_group_predict_writes_group_probabilities_without_vocabulary_labels(known):
     model = rf.Model.xs(d_model=8, label=rf.Group(n_groups=4, mask=True), signal=rf.Number)
     if known:
         rf.Group.assign(model, "/label", "A", 0)
@@ -527,12 +537,9 @@ def test_group_predict_writes_scalar_angles(known):
     result = model.predict(pa.table({"signal": [1.0]}))
 
     label = result["predictions"][0].as_py()["label"]
-    expected_group = 1 / (1 + 2 * math.exp(-math.pi / 2) + math.exp(-math.pi))
     assert label["group"]["value"] == 0
-    assert label["group"]["probability"] == pytest.approx(expected_group)
-    assert label["content"]["value"] == ("A" if known else None)
-    expected_content = 1 / (1 + math.exp(-math.pi)) if known else 0
-    assert label["content"]["probability"] == pytest.approx(expected_content)
+    assert label["group"]["probability"] == pytest.approx(0.25)
+    assert set(label) == {"state", "group", "inferred"}
 
 
 class TrackingModule:
@@ -581,7 +588,7 @@ def test_group_state_loss_respects_trainable_coordinates(trainable, strata, nonf
     prediction = Prediction(
         address=ADDRESS,
         payload=TensorDict(
-            {TensorKey.state: state_logits, TensorKey.group: torch.zeros(len(trainable), 1, 1, device=device)},
+            {TensorKey.state: state_logits, TensorKey.group: torch.zeros(len(trainable), 1, 4, device=device)},
             batch_size=[len(trainable)],
         ),
     )
@@ -621,7 +628,7 @@ def test_group_state_loss_logs_zero_without_accuracy(monkeypatch: pytest.MonkeyP
     prediction = Prediction(
         address="/label",
         payload=TensorDict(
-            {TensorKey.state: state_logits, TensorKey.group: torch.zeros(2, 1, 1)},
+            {TensorKey.state: state_logits, TensorKey.group: torch.zeros(2, 1, 4)},
             batch_size=[2],
         ),
     )

@@ -58,7 +58,7 @@ def check_allocation(model, kind, size):
     assert counter.counts.shape == counter._pending_counts.shape == (rows,)
     embedding = node.embedder.embeddings["group" if kind == "group" else "content"]
     assert embedding.num_embeddings == rows
-    assert embedding.weight.shape == (rows, 1 if kind == "group" else 8)
+    assert embedding.weight.shape == (rows, 3 if kind == "group" else 8)
     if kind != "group":
         linear = node.decoder.linears["content"]
         assert linear.out_features == size
@@ -127,19 +127,17 @@ def test_group_count_change_retains_grown_capacity_and_reinitializes_changed_col
     model = build("group")
     old = model.nodes[ADDRESS]
     counts = old.embedder.counters["content"].counts.clone()
-    assignments = old.embedder.embeddings["group"].weight.detach().clone()
-    decoder = old.decoder.linears["group"].weight.detach().clone()
 
     model.update(rf.where("address") == ADDRESS, n_groups=5)
 
     node = model.nodes[ADDRESS]
     assert node.embedder.capacity == 8
     assert node.embedder.size == 5
-    assert node.embedder.embeddings["group"].weight.shape == (9, 1)
+    assert node.embedder.embeddings["group"].weight.shape == (9, 5)
     assert node.embedder.embeddings["content"].weight.shape == (8, 5)
-    assert node.decoder.linears["group"].weight.shape == (1, 8)
-    torch.testing.assert_close(node.embedder.embeddings["group"].weight, assignments)
-    torch.testing.assert_close(node.decoder.linears["group"].weight, decoder)
+    assert node.decoder.linears["group"].weight.shape == (5, 8)
+    assert not torch.all(node.embedder.embeddings["group"].weight == 7.25)
+    assert not torch.all(node.decoder.linears["group"].weight == 7.25)
     assert not torch.all(node.embedder.embeddings["content"].weight == 7.25)
     torch.testing.assert_close(node.embedder.counters["content"].counts, counts)
     assert node.embedder.vocab.snapshot() == list(dict.fromkeys(LABELS))

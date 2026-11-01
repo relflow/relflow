@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-
 import pytest
 import torch
 
@@ -92,6 +90,8 @@ def test_group_assignments_return_immutable_snapshots_without_sentinel() -> None
     assert snapshot["BETA"]["group"] == 0
     assert len(snapshot["ALPHA"]["probabilities"]) == N_GROUPS
     assert sum(snapshot["ALPHA"]["probabilities"]) == pytest.approx(1.0)
+    expected = torch.tensor([0.0, 0.0, 1.0]).softmax(dim=-1).tolist()
+    assert snapshot["ALPHA"]["probabilities"] == pytest.approx(expected)
 
     rf.Group.assign(model, ADDRESS, "ALPHA", 0)
 
@@ -120,16 +120,18 @@ def test_group_assignments_use_the_model_device(device: str) -> None:
     assert rf.Group.assignments(model, ADDRESS)["ALPHA"]["group"] == 2
 
 
-def test_group_assignments_preserve_source_precision_at_group_boundary() -> None:
+def test_group_assignments_preserve_source_precision_near_tied_logits() -> None:
     model = build().double()
     learn(model, "ALPHA")
     weight = embedder(model).embeddings["group"].weight
     with torch.no_grad():
-        weight[0, 0] = math.pi / N_GROUPS + 1e-8
+        weight[0].copy_(torch.tensor([1.0, 1.0 + 1e-8, 0.0], dtype=torch.float64))
 
     snapshot = rf.Group.assignments(model, ADDRESS)["ALPHA"]
 
     assert snapshot["group"] == 1
+    expected = weight[0].detach().softmax(dim=-1).tolist()
+    assert snapshot["probabilities"] == pytest.approx(expected, abs=1e-12)
 
 
 def test_group_decoder_does_not_condition_identity_on_row_siblings() -> None:
