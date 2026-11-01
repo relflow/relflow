@@ -1,181 +1,139 @@
 name: Release
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - pyproject.toml
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
+  group: release-main
+  queue: max
 
 jobs:
   detect_version:
-    runs-on: ubuntu-latest
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
     outputs:
       should_publish: ${{ steps.version.outputs.should_publish }}
       version: ${{ steps.version.outputs.version }}
+      ci_run_id: ${{ steps.ci.outputs.run_id }}
+      source_sha: ${{ steps.ci.outputs.source_sha }}
     steps:
-      - name: Check out source
-        uses: actions/checkout@v4
+      - name: Identify successful CI for the exact current main commit
+        id: ci
+        uses: actions/github-script@v9
         with:
-          fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+          script: |
+            const repo = context.repo;
+            const main = (await github.rest.git.getRef({ ...repo, ref: 'heads/main' })).data.object.sha;
+            let run = context.payload.workflow_run;
+            if (run && run.head_sha !== main) {
+              core.info('Skipping a superseded main commit.');
+              core.setOutput('current', 'false');
+              return;
+            }
+            if (!run) {
+              const response = await github.rest.actions.listWorkflowRuns({
+                ...repo, workflow_id: 'ci.yml', branch: 'main', event: 'push',
+                head_sha: main, status: 'success', per_page: 100,
+              });
+              run = response.data.workflow_runs.find(item => item.head_sha === main);
+            }
+            if (!run || run.conclusion !== 'success' || run.event !== 'push' ||
+                run.head_branch !== 'main' || run.head_sha !== main ||
+                run.head_repository.full_name !== `${repo.owner}/${repo.repo}` || run.path !== '.github/workflows/ci.yml') {
+              throw new Error('Release requires a successful CI push run for the current main commit. Run CI first.');
+            }
+            core.setOutput('run_id', String(run.id));
+            core.setOutput('source_sha', run.head_sha);
+            core.setOutput('current', 'true');
+      - uses: actions/checkout@v4
+        if: steps.ci.outputs.current == 'true'
         with:
-          python-version: "3.12"
-
-      - name: Detect new package version
+          ref: ${{ steps.ci.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        if: steps.ci.outputs.current == 'true'
+        with:
+          python-version: '3.12'
+      - name: Detect an unpublished package version
         id: version
+        if: steps.ci.outputs.current == 'true'
         shell: python
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
-          from pathlib import Path
           import os
-          import subprocess
-          import sys
           import tomllib
+          from pathlib import Path
           from urllib.error import HTTPError
           from urllib.request import urlopen
-
-          def project_version(pyproject: str) -> str:
-              return tomllib.loads(pyproject)["project"]["version"]
-
-          def set_output(name: str, value: str) -> None:
-              with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
-                  output.write(f"{name}={value}\n")
-
-          current_version = project_version(Path("pyproject.toml").read_text())
-          previous_version = None
-          before_sha = os.environ.get("BEFORE_SHA", "")
-
-          if os.environ.get("EVENT_NAME") == "push" and before_sha:
-              check = subprocess.run(
-                  ["git", "cat-file", "-e", f"{before_sha}:pyproject.toml"],
-                  check=False,
-              )
-              if check.returncode == 0:
-                  previous_pyproject = subprocess.check_output(
-                      ["git", "show", f"{before_sha}:pyproject.toml"],
-                      text=True,
-                  )
-                  previous_version = project_version(previous_pyproject)
-
-          set_output("version", current_version)
-
-          if current_version == previous_version:
-              set_output("should_publish", "false")
-              print(f"pyproject.toml changed, but project.version is still {current_version}")
-              sys.exit(0)
-
+          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
           try:
-              url = f"https://pypi.org/pypi/relflow/{current_version}/json"
-              with urlopen(url, timeout=10) as response:
-                  already_published = response.status == 200
+              with urlopen(f"https://pypi.org/pypi/relflow/{version}/json", timeout=15) as response:
+                  published = response.status == 200
           except HTTPError as error:
               if error.code != 404:
                   raise
-              already_published = False
-
-          if already_published:
-              set_output("should_publish", "false")
-              print(f"relflow {current_version} already exists on PyPI")
-              sys.exit(0)
-
-          set_output("should_publish", "true")
-          print(f"relflow {current_version} is new and will be published")
-
-  validate:
-    needs: detect_version
-    if: needs.detect_version.outputs.should_publish == 'true'
-    uses: ./.github/workflows/tests.yml
-
-  build:
-    needs: [detect_version, validate]
-    if: needs.detect_version.outputs.should_publish == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Build distributions
-        run: |
-          python -m pip install --upgrade build
-          python -m build
-
-      - name: Upload distributions
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-package-distributions-${{ needs.detect_version.outputs.version }}
-          path: dist/
+              published = False
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
+              output.write(f"version={version}\nshould_publish={str(not published).lower()}\n")
+          print(f"relflow {version}: {'already published' if published else 'ready to publish from checked CI artifacts'}")
 
   release:
-    needs:
-      - detect_version
-      - build
+    needs: detect_version
     if: needs.detect_version.outputs.should_publish == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
+      actions: read
       contents: write
     steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-
-      - name: Download distributions
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: python-package-distributions-${{ needs.detect_version.outputs.version }}
+          name: python-package-distributions
           path: dist/
-
-      - name: Create or update GitHub release
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.detect_version.outputs.ci_run_id }}
+      - name: Create or update GitHub release from checked distributions
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.detect_version.outputs.version }}
+          SOURCE_SHA: ${{ needs.detect_version.outputs.source_sha }}
         run: |
           if gh release view "v${VERSION}" >/dev/null 2>&1; then
             gh release upload "v${VERSION}" dist/* --clobber
           else
-            gh release create "v${VERSION}" dist/* \
-              --target "${GITHUB_SHA}" \
-              --title "relflow ${VERSION}" \
-              --generate-notes
+            gh release create "v${VERSION}" dist/* --target "$SOURCE_SHA" --title "relflow ${VERSION}" --generate-notes
           fi
 
   publish:
-    needs:
-      - detect_version
-      - build
-      - release
+    needs: [detect_version, release]
     if: needs.detect_version.outputs.should_publish == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: pypi
       url: https://pypi.org/p/relflow
     permissions:
+      actions: read
       contents: read
       id-token: write
     steps:
-      - name: Download distributions
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: python-package-distributions-${{ needs.detect_version.outputs.version }}
+          name: python-package-distributions
           path: dist/
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.detect_version.outputs.ci_run_id }}
+      - uses: pypa/gh-action-pypi-publish@release/v1
