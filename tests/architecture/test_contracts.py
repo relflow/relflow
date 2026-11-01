@@ -122,6 +122,23 @@ def test_forward_contract_rejects_content_without_state_shape_prefix() -> None:
         model(inputs, strata=Strata.train)
 
 
+def test_forward_contract_allows_target_content_wider_than_input_content() -> None:
+    model = rf.Model.xs(
+        d_model=8,
+        attention=None,
+        history=rf.Series(channels=1),
+        future=rf.Series(channels=1, horizon=3, mask=True),
+    )
+    inputs = model.encode(
+        arrow_table([{"history": [1.0, 2.0], "future": [3.0, 4.0, 5.0]}] * 2),
+        strata=Strata.train,
+    )
+    future = inputs[Address("/future")]
+    assert future.content["values"].shape[-2] != future.targets["content"]["values"].shape[-2]
+
+    model(inputs, strata=Strata.train)
+
+
 def test_forward_contract_allows_masked_non_trainable_input() -> None:
     model = rf.Model.xs(d_model=8, attention=None, color=rf.Category)
     inputs = prepared(model)

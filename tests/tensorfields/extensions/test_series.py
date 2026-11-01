@@ -2,6 +2,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pydantic
 import pytest
 import torch
@@ -14,7 +15,8 @@ from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
 from relflow.structs.tree import Address
 from relflow.tensorfields.base import TENSORFIELDS, Context
-from relflow.tensorfields.extensions.series import Block, Decoder, Embedder, TensorField, encode, loss
+from relflow.tensorfields.extensions.series import Block, Decoder, Embedder, TensorField, encode, loss, write
+from relflow.tensorfields.extensions.series import output as output_type
 from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.normalizer import GlobalOnlineNormalizer, moments
 from tests.arrow import table as arrow_table
@@ -452,3 +454,37 @@ def test_learn_updates_decoder_normalizer_for_targets():
     normalizer = model.nodes["/future"].decoder.normalizer
     assert normalizer.count.tolist() == [4, 4]
     torch.testing.assert_close(normalizer.mean, torch.tensor([15.0, 150.0], dtype=torch.float64))
+
+
+def test_output_schema():
+    module = DummyModule(forecast_schema())
+    element = pa.field("element", pa.list_(pa.field("element", pa.float64())))
+    assert output_type(module, ADDRESS) == pa.struct([pa.field("content", pa.list_(element), nullable=False)])
+
+
+def test_write_outputs_horizon_steps_even_for_null_state():
+    module = DummyModule(forecast_schema(channels=3, horizon=2))
+    logits = torch.full((2, 2, len(Tokens)), -50.0)
+    logits[0, :, Tokens.valued.value] = 50.0
+    logits[1, :, Tokens.null.value] = 50.0
+    content = torch.arange(24, dtype=torch.float64).reshape(2, 2, 2, 3)
+    prediction = Prediction(
+        address=ADDRESS,
+        payload=TensorDict({TensorKey.state: logits, TensorKey.content: content}, batch_size=[2]),
+    )
+    written = write(module=module, prediction=prediction, datatype=output_type(module, ADDRESS))
+    rows = written.field("content").to_pylist()
+    assert len(rows) == 4
+    assert all(len(row) == 2 and all(len(step) == 3 for step in row) for row in rows)
+    assert rows[2] == [[12.0, 13.0, 14.0], [15.0, 16.0, 17.0]]
+
+
+def test_predict_inside_branch_with_null_items_round_trips_parquet(tmp_path):
+    model = rf.Model.xs(
+        d_model=8,
+        items=rf.Branch(length=3, future=rf.Series(channels=2, horizon=2, mask=True), x=rf.Number),
+    )
+    rows = pa.table({"items": [[{"future": [[1.0, 2.0]], "x": 1.0}, None], None]})
+    table = model.predict(rows)
+    pq.write_table(table, tmp_path / "p.parquet")
+    assert pq.read_table(tmp_path / "p.parquet").equals(table)

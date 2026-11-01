@@ -28,6 +28,7 @@ from relflow.tensorfields.base import (
     TensorFieldBase,
     TensorInput,
 )
+from relflow.tensorfields.output import array, struct, variable
 from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.normalizer import GlobalOnlineNormalizer, moments, precise
 from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
@@ -487,3 +488,25 @@ def loss(
     decoder.metrics.record(module, strata, *errors(content[entries], values[entries]))
 
     return output
+
+
+@series.register(Component.output)
+def output(module: Model, address: Address) -> pa.StructType:
+    step = pa.list_(pa.field("element", pa.float64()))
+    return pa.struct([pa.field(TensorKey.content.name, pa.list_(pa.field("element", step)), nullable=False)])
+
+
+@series.register(Component.write)
+def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
+    """Write ``horizon`` steps of every channel for every coordinate; the rich result's state decides validity."""
+    content = cast(torch.Tensor, prediction.payload[TensorKey.content])
+    *coordinates, horizon, channels = content.shape
+    records = math.prod(coordinates)
+    steps = datatype.field(TensorKey.content.name).type.value_type
+    values = variable(
+        array(content, pa.float64()),
+        torch.full((records * horizon,), channels),
+        datatype=steps,
+    )
+    series = variable(values, torch.full((records,), horizon), datatype=datatype.field(TensorKey.content.name).type)
+    return struct({TensorKey.content.name: series}, datatype)
