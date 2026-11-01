@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import inspect
-import math
 from pathlib import Path
 
 import pyarrow as pa
@@ -73,8 +72,8 @@ def test_assign_grows_vocab_and_writes_row_for_int_group():
     assert index == 0
     assert list(embedder.vocab.master) == ["brand-new"]
     row = embedder.embeddings["group"].weight[index]
-    assert row.shape == (1,)
-    assert row.item() == pytest.approx(math.pi)
+    assert row.shape == (K,)
+    torch.testing.assert_close(row, torch.tensor([0.0, 0.0, 1.0, 0.0]))
     assert assignment(model, "brand-new") == 2
 
 
@@ -273,9 +272,9 @@ def test_override_replaces_encoder_row_for_oov_token():
         overridden_index = embedder.vocab.state.index["overridden-oov"]
         overridden_output = embedder.embed(valued_token(overridden_index)).payload.clone()
 
-    # The reference angle is the center of group 2.
     with torch.no_grad():
-        embedder.embeddings["group"].weight[0].fill_(2 * math.pi * 2 / K)
+        embedder.embeddings["group"].weight[0].zero_()
+        embedder.embeddings["group"].weight[0, 2] = 1.0
     reference_output = embedder.embed(valued_token(0)).payload.clone()
 
     assert torch.allclose(overridden_output, reference_output)

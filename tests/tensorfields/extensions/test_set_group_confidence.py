@@ -71,16 +71,16 @@ def test_input_augmentation_preserves_pristine_answers(kind):
 
 def test_group_state_loss_ignores_simulated_input_unavailability():
     module = model("group", p_unavailable=1.0, mask=rf.Mask(reconstruct=True))
-    angles = torch.zeros(4, 1, requires_grad=True)
+    logits = torch.zeros(4, 4, requires_grad=True)
 
-    objective = evaluate(module, ["a", "b", "b", "a"], angles, rf.Strata.train, encode_strata=rf.Strata.train)
+    objective = evaluate(module, ["a", "b", "b", "a"], logits, rf.Strata.train, encode_strata=rf.Strata.train)
 
     expected = torch.nn.functional.cross_entropy(
         torch.zeros(4, len(rf.Tokens)), torch.full((4,), rf.Tokens.valued.value)
     )
     torch.testing.assert_close(objective, expected)
     objective.backward()
-    assert angles.grad is None
+    assert logits.grad is None
     assert module.nodes["/label"].embedder.embeddings["group"].weight.grad is None
 
 
@@ -150,7 +150,7 @@ def test_group_unknown_targets_do_not_change_assignments():
     module = model("group")
     embedder = module.nodes["/label"].embedder
     assignments = embedder.embeddings["group"].weight.detach().clone()
-    logits = torch.randn(6, 1, requires_grad=True)
+    logits = torch.randn(6, 4, requires_grad=True)
     objective = evaluate(module, ["new"] * 6, logits, rf.Strata.train)
     objective.backward()
     assert torch.isfinite(objective)
@@ -163,8 +163,8 @@ def test_group_known_and_unknown_targets_use_only_state_loss():
     base, mixed = model("group"), model("group")
     mixed.load_state_dict(base.state_dict())
     mixed.nodes["/label"].embedder.counters["content"].counts[0] = 1000
-    known_logits = torch.randn(4, 1, requires_grad=True)
-    mixed_logits = torch.cat((known_logits.detach(), torch.full((7, 1), 30.0))).requires_grad_()
+    known_logits = torch.randn(4, 4, requires_grad=True)
+    mixed_logits = torch.cat((known_logits.detach(), torch.full((7, 4), 30.0))).requires_grad_()
     known_loss = evaluate(base, ["a", "b", "a", "b"], known_logits, rf.Strata.train)
     mixed_loss = evaluate(mixed, ["a", "b", "a", "b"] + ["new"] * 7, mixed_logits, rf.Strata.train)
     torch.testing.assert_close(known_loss, mixed_loss)
@@ -181,7 +181,7 @@ def test_empty_vocabulary_keeps_state_loss_finite(kind):
     request = rf.Set(mask=True) if kind == "set" else rf.Group(n_groups=4, mask=True)
     module = rf.Model.xs(d_model=8, x=rf.Number, label=request)
     module.track = lambda names, value: value
-    logits = torch.randn(2, 8 if kind == "set" else 1, requires_grad=True)
+    logits = torch.randn(2, 8 if kind == "set" else 4, requires_grad=True)
     labels = [["new"], []] if kind == "set" else ["new", "new"]
     objective = evaluate(module, labels, logits)
     objective.backward()
