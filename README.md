@@ -11,7 +11,7 @@
   <a href="https://github.com/relflow/relflow/actions/workflows/ci.yml?query=branch%3Amain"><img alt="CI" src="https://github.com/relflow/relflow/actions/workflows/ci.yml/badge.svg?branch=main&amp;event=push" /></a>
   <a href="https://github.com/relflow/relflow/actions/workflows/ci.yml?query=branch%3Amain"><img alt="Line coverage" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frelflow%2Frelflow%2Fbadges%2Fcoverage.json" /></a>
   <a href="https://github.com/relflow/relflow/actions/workflows/compatibility.yml?query=branch%3Amain"><img alt="Dependency compatibility" src="https://github.com/relflow/relflow/actions/workflows/compatibility.yml/badge.svg?branch=main" /></a>
-  <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&amp;logoColor=white" />
+  <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&amp;logoColor=white" />
   <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-2E8B57" /></a>
   <a href="https://www.relflow.ai/en/latest/"><img alt="Documentation build" src="https://github.com/relflow/relflow/actions/workflows/ci.yml/badge.svg?branch=main&amp;event=push" /></a>
   <!-- discord-invite:start -->
@@ -101,7 +101,7 @@ The headline is the median of these three passes.
 
 ## Install
 
-Requires Python 3.11 or newer:
+Requires Python 3.12 or newer:
 
 ```bash
 uv add relflow

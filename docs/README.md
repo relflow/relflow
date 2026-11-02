@@ -45,8 +45,7 @@ metrics, and evaluation protocols.
 
 ## Work locally
 
-Install Python 3.12 or newer and uv for this documentation build, then run from
-the repository root (the relflow runtime itself supports Python 3.11 or newer):
+Install Python 3.12 or newer and uv, then run from the repository root:
 
 ```bash
 uv sync --project docs --locked
