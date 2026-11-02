@@ -49,6 +49,12 @@ CustomModel.compact(rf.presets.SM, value=rf.Number)  # rejected
 
 rf.Number("amount")  # rejected
 rf.Number(name="amount")  # rejected
+rf.Period(7)  # rejected
+rf.Period(dateparts=None)  # rejected
+rf.DateParts(7)  # rejected
+rf.Period("day_of_week", pattern=7)  # rejected
+rf.Period("day_of_week", name="created")  # rejected
+rf.Period("day_of_week", unknown=True)  # rejected
 rf.Branch(rf.Number())  # rejected
 rf.Branch(name="items", value=rf.Number)  # rejected
 rf.Branch(fields=[rf.Number()])  # rejected

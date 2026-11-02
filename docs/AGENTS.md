@@ -108,7 +108,7 @@ finance. The first flat payment has `amount`, `merchant`, and
 containing earlier transactions and the latest payment exactly once. Put
 `booked_at`, `amount`, `merchant`, and `disputed` inside it; do not duplicate
 current-payment fields at the root. Use
-`rf.DateParts(dateparts=["day_of_month", "day_of_week", "hour_of_day"])`
+`rf.Period("day_of_month", "day_of_week", "hour_of_day")`
 for booking-time calendar features. Calendar cycles do not encode exact
 elapsed durations. Oldest-to-newest order plus `overflow="tail"` keeps the
 latest transactions, with no events after the scoring cutoff.
@@ -125,8 +125,9 @@ teach them only on their later dedicated pages.
 ## Public examples
 
 Use `import relflow as rf`, `rf.Model(...)` or a size factory, and
-`rf.Branch(...)`. Parent keywords name children; definitions have no `name` or
-positional arguments. Use bare field classes for defaults. The model root is
+`rf.Branch(...)`. Parent keywords name children; definitions have no `name`
+argument. `Period` accepts positional calendar parts; other fields and branches
+use keyword options. Use bare field classes for defaults. The model root is
 anonymous at `rf.Address()`; diagrams may label it `payment` or `account`.
 Use one argument per address component, such as
 `rf.Address("trxns", "amount")`.

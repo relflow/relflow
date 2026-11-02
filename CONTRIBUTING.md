@@ -58,6 +58,13 @@ required.
 
 ## Compatibility CI
 
+The installed-wheel import job uses required dependencies only, with no development
+or package extras. It verifies training, checkpoint reload, and prediction without
+Matplotlib, reproduces the upstream incomplete-namespace failure, then installs
+Matplotlib 3.10.7 and checks modeling plus TorchMetrics plotting. See
+[installation troubleshooting](docs/guides/installation-troubleshooting.qmd) for
+the diagnosis and environment remedy tracked in issue 67.
+
 The Tests workflow runs the complete suite on Linux with Python 3.11, 3.12,
 3.13, and 3.14, plus macOS ARM and Windows with Python 3.12. It installs a wheel
 with all extras from the lockfile and verifies that imports come from site-packages.

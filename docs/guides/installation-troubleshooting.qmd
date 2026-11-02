@@ -1,0 +1,81 @@
+---
+title: Installation troubleshooting
+description: "Diagnose optional plotting imports in container and Modal environments."
+---
+
+relflow's core modeling and training dependencies do not require Matplotlib.
+CI installs the built wheel with only its required dependencies, then checks
+import, one training step, checkpoint reload, and prediction. A second check
+installs a complete plotting stack and exercises TorchMetrics plotting too.
+
+## `No module named 'matplotlib.axes'`
+
+This error can occur before model construction through Lightning and
+TorchMetrics. In TorchMetrics 1.9.0,
+[`utilities.plot`](https://github.com/Lightning-AI/torchmetrics/blob/v1.9.0/src/torchmetrics/utilities/plot.py)
+imports Matplotlib when Lightning Utilities reports it as available. Lightning
+Utilities 0.15.3
+[`RequirementCache`](https://github.com/Lightning-AI/utilities/blob/v0.15.3/src/lightning_utilities/core/imports.py)
+falls back to importing the top-level module when distribution metadata is
+absent. An empty `matplotlib/` directory on Python's search path can import as
+a namespace package and pass that check while providing no `matplotlib.axes`.
+
+Run this inside the failing container or deployed function before importing
+relflow:
+
+```python
+from importlib import metadata, util
+
+for package in ("lightning", "torchmetrics", "lightning-utilities", "matplotlib"):
+    try:
+        print(package, metadata.version(package))
+    except metadata.PackageNotFoundError:
+        print(package, "no distribution metadata")
+
+spec = util.find_spec("matplotlib")
+print("matplotlib origin:", None if spec is None else spec.origin)
+print("matplotlib paths:", None if spec is None else spec.submodule_search_locations)
+```
+
+No spec and no distribution metadata describe an absent plotting dependency.
+A spec with `origin=None` and search locations describes a namespace package;
+inspect those paths for incomplete copied packages or source mounts. A normal
+installation has distribution metadata and an `__init__.py` origin. Check the
+deployed function as well as the image build, since their import paths may differ.
+
+Remove unintended package directories from the image or mounted source. If the
+workload uses plotting, install the complete distribution in the image rather
+than copying selected Python files. For example, the Modal benchmark recorded
+in [issue 67](https://github.com/relflow/relflow/issues/67) recovered with:
+
+```python
+image = image.uv_pip_install("matplotlib==3.10.7")
+```
+
+Set `MPLBACKEND=Agg` for noninteractive plotting. Verify `import relflow` and a
+small training/prediction round trip in the deployed function after rebuilding.
+A successful build-time import alone does not verify the deployed runtime.
+
+The namespace-package reproduction matches the recorded exception and missing
+distribution metadata locally and in the original Modal base image
+(`im-euLinO1NW1JO5bbYRfpBAE`). A CPU sandbox using its installed relflow 0.4.0,
+Lightning 2.6.6, TorchMetrics 1.9.0, and Lightning Utilities 0.15.3 imported
+successfully without Matplotlib, failed with `matplotlib.axes` after adding an
+empty namespace, and imported successfully after removing it. This tests the
+base image; the source of the incomplete package in the original deployed 0.4.2
+function remains unconfirmed. relflow does not replace upstream plotting
+modules, patch dependency detection, or suppress unrelated import failures.
+
+From a source checkout, the wheel smoke checks can be run in a separate virtual
+environment containing the wheel and its required dependencies:
+
+```bash
+python scripts/imports.py --plotting absent
+python scripts/imports.py --plotting namespace
+# Install matplotlib==3.10.7 in this environment, then:
+python scripts/imports.py --plotting installed
+```
+
+The namespace check creates an empty temporary package and verifies the specific
+upstream failure in its own process. It leaves the installation untouched; the
+other checks require successful modeling with absent or complete plotting support.

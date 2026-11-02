@@ -97,6 +97,8 @@ website:
             text: Model templates
           - href: guides/schema-mutation.qmd
             text: Schema mutation
+          - href: guides/installation-troubleshooting.qmd
+            text: Installation troubleshooting
       - section: Concepts
         contents:
           - href: concepts/model-tree.qmd
@@ -124,7 +126,7 @@ website:
           - href: datatypes/enum.qmd
             text: Enum
           - href: datatypes/dateparts.qmd
-            text: DateParts
+            text: Period
           - href: datatypes/branch.qmd
             text: Branch
           - href: datatypes/hash.qmd

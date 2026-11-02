@@ -72,6 +72,16 @@ def test_common_resources_are_available_from_package_root():
     assert "hash" in relflow.TENSORFIELDS
 
 
+def test_period_is_the_registered_dateparts_request_under_both_public_names():
+    from relflow import DateParts, Period
+
+    assert Period is DateParts is relflow.TENSORFIELDS["dateparts"].Request
+    assert "Periods" not in relflow.__all__
+    namespace: dict[str, object] = {}
+    exec("from relflow import *", namespace)
+    assert namespace["Period"] is namespace["DateParts"] is Period
+
+
 def test_data_module_constructor_annotations_resolve_at_runtime():
     for module in (
         relflow.ArrowDataModule,

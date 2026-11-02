@@ -19,11 +19,11 @@ and [branch encoder](https://github.com/relflow/relflow/blob/1b95c334d5a1251c37a
 
 ```{typst}
 //| label: fig-mechanism-tree-routing
-//| fig-alt: "An account snapshot has one repeated trxns branch containing earlier and latest payments. Each transaction has DateParts booked_at, Number amount, Category merchant, and Boolean disputed. Every dispute label is hidden and supervised for the same 30-day window after the common review cutoff."
+//| fig-alt: "An account snapshot has one repeated trxns branch containing earlier and latest payments. Each transaction has Period booked_at, Number amount, Category merchant, and Boolean disputed. Every dispute label is hidden and supervised for the same 30-day window after the common review cutoff."
 //| fig-cap: "Connections show schema ownership. The transaction collection builds context, and the dispute decoder reads its path at every retained position."
 #tree(node("account", kind: "root", body: [One decision snapshot.], children: (
   node("trxns", kind: "branch", repeated: true, body: [Earlier and latest payments.], children: (
-    node("booked_at", type: "DateParts", body: [Selected calendar cycles.]),
+    node("booked_at", type: "Period", body: [Selected calendar cycles.]),
     node("amount", type: "Number"),
     node("merchant", type: "Category"),
     node("disputed", kind: "target", type: "Boolean", body: [Hidden and supervised for every transaction.]),

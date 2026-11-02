@@ -120,9 +120,7 @@ model = rf.Model.xs(
     trxns=rf.Branch(
         length=32,
         overflow="tail",
-        booked_at=rf.DateParts(
-            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
-        ),
+        booked_at=rf.Period("day_of_month", "day_of_week", "hour_of_day"),
         amount=rf.Number(
             mask=rf.Mask(query="routing.hide_amount", reconstruct=True),
         ),
@@ -135,10 +133,10 @@ model = rf.Model.xs(
 ```{typst}
 //| label: fig-masking-selector
 //| fig-cap: "One field can be an input at some positions and a reconstruction target at others. The dispute target stays hidden everywhere."
-//| fig-alt: "A payment root owns a repeated trxns branch. Inside it, booked_at DateParts and merchant Category are inputs. The amount Number is hidden and reconstructed where routing.hide_amount is true and an ordinary input elsewhere. The disputed Boolean target is hidden and supervised at every transaction."
+//| fig-alt: "A payment root owns a repeated trxns branch. Inside it, booked_at Period and merchant Category are inputs. The amount Number is hidden and reconstructed where routing.hide_amount is true and an ordinary input elsewhere. The disputed Boolean target is hidden and supervised at every transaction."
 #tree(node("payment", kind: "root", children: (
   node("trxns", kind: "branch", repeated: true, children: (
-    node("booked_at", type: "DateParts"),
+    node("booked_at", type: "Period"),
     node("amount", type: "Number", width: 175pt, body: [Hidden and reconstructed where `routing.hide_amount` is true; an ordinary input elsewhere.]),
     node("merchant", type: "Category"),
     node("disputed", kind: "target", type: "Boolean", detail: "Every transaction"),
@@ -169,9 +167,7 @@ trxns = rf.Branch(
     overflow="tail",
     mask=rf.Mask(rate=0.10, skip=True),
     amount=rf.Number,
-    booked_at=rf.DateParts(
-        dateparts=["day_of_month", "day_of_week", "hour_of_day"],
-    ),
+    booked_at=rf.Period("day_of_month", "day_of_week", "hour_of_day"),
     merchant=rf.Category,
 )
 ```

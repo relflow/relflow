@@ -106,9 +106,7 @@ model = rf.Model.xs(
     trxns=rf.Branch(
         length=32,
         overflow="tail",
-        booked_at=rf.DateParts(
-            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
-        ),
+        booked_at=rf.Period("day_of_month", "day_of_week", "hour_of_day"),
         amount=rf.Number(mask=rf.Mask(rate=0.15, reconstruct=True)),
         merchant=rf.Category(
             mask=rf.Mask(rate=0.15, reconstruct=True),
@@ -192,7 +190,7 @@ outcomes together.
 #tree(node("account", kind: "root", children: (
   node("account_age_days", width: 150pt, type: "Number"),
   node("trxns", kind: "branch", repeated: true, children: (
-    node("booked_at", type: "DateParts"),
+    node("booked_at", type: "Period"),
     node("amount", type: "Number", detail: "Pretraining objective"),
     node("merchant", type: "Category", detail: "Pretraining objective"),
     node("channel", type: "Enum"),

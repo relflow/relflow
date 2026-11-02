@@ -101,9 +101,7 @@ model = rf.Model.sm(
     past_results=rf.Branch(
         length=32,
         overflow="tail",
-        occurred_at=rf.DateParts(
-            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
-        ),
+        occurred_at=rf.Period("day_of_month", "day_of_week", "hour_of_day"),
         age_days=rf.Number,
         circuit=rf.Category,
         constructor=rf.Category,

@@ -103,7 +103,7 @@ and `overflow="tail"` on a bounded branch keeps the most recent records,
 including the latest payment, when a history is longer than its cap. relflow
 does not sort, deduplicate, or join; do that before the row exists.
 
-`booked_at` becomes recurring calendar positions through `DateParts`: day of
+`booked_at` becomes recurring calendar positions through `Period`: day of
 month, day of week, and hour of day. Those cycles say when something
 happened, not how long ago. When the pace of activity matters, derive the gap
 between transactions in a [preprocessor](../guides/preprocessing.qmd) and read
@@ -143,9 +143,7 @@ model = rf.Model.xs(
     trxns=rf.Branch(
         length=32,
         overflow="tail",
-        booked_at=rf.DateParts(
-            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
-        ),
+        booked_at=rf.Period("day_of_month", "day_of_week", "hour_of_day"),
         amount=rf.Number,
         merchant=rf.Category,
         disputed=rf.Boolean(mask=True),

@@ -61,7 +61,7 @@ model = rf.Model.xs(
         length=64,
         overflow="tail",
         reduction=None,
-        at=rf.DateParts(dateparts=["day_of_month", "day_of_week", "hour_of_day"]),
+        at=rf.Period("day_of_month", "day_of_week", "hour_of_day"),
         age_hours=rf.Number,
         item_id=rf.Hash,
         category=rf.Category,

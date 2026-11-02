@@ -96,7 +96,7 @@ coordinate has its own field state; replacing it with zero changes what the
 model observes. See [field states](../datatypes/index.qmd).
 
 Rotary position information gives attention a signal about token positions.
-`booked_at=rf.DateParts(dateparts=["day_of_month", "day_of_week", "hour_of_day"])`
+`booked_at=rf.Period("day_of_month", "day_of_week", "hour_of_day")`
 supplies calendar cycles, not elapsed time. Input ordering still belongs to
 the application, as [Prepare observations](../learn/prepare-observations.qmd)
 describes; position information does not repair an incorrectly ordered
