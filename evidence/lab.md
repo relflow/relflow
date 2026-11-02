@@ -95,8 +95,9 @@ including multi-commit pushes. Manual validation uses the first parent or an
 explicit full ancestor SHA supplied as `evidence_base`. The
 helper checks the retained input request against the actual GitHub event.
 Reports preserve the original measured revisions even when reused.
-Successful main runs feed the evidence publisher, which retains verified
-reports and opens a PR for the selected results.
+Version releases select their successful main CI run and retain verified reports
+plus frozen publication JSON assets before the package tag is published. Ordinary
+main CI keeps its gate and artifacts without opening publication PRs.
 
 The shared package build supplies the same candidate wheel to SDK tests,
 Evidence, and release. Before training, the trusted helper probes the actual

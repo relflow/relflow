@@ -60,7 +60,8 @@ HTTPS, and response decoding. The setup and three measured passes are below.
 
 The [evidence catalog](https://www.relflow.ai/en/latest/evidence.html) adds **79 controlled
 learning experiments** with code, comparisons, seeds, and recorded results.
-Examples from the published full runs:
+Examples from the recorded 0.4.2 snapshot; each version's documentation uses
+the evidence assets frozen for that release:
 
 <!-- evidence-results:start -->
 
@@ -314,10 +315,11 @@ and missing required jobs. Evidence runs on lab through the pinned trusted
 executor, with the candidate commit supplying the suite from this repository. See the
 [lab guide](evidence/lab.md).
 
-Main pushes compare against the pre-push revision. Successful main CI also publishes coverage and retains
-verified evidence reports in this repository. The evidence publisher opens a
-PR updating the selected experiment results and README measurements; merging
-that PR updates the Read the Docs build. Nightly
+Main pushes compare against the pre-push revision. Successful main CI also
+publishes coverage. Version releases retain verified evidence reports and
+publication JSON assets in this repository before publishing the package tag.
+Hosted documentation reads those versioned assets; ordinary CI creates no
+publication commits or follow-up PRs. Nightly
 dependency compatibility and configured accelerator checks remain independent.
 Local pre-commit continues to run formatting, lint, types, and fast tests.
 Manual CI accepts `force_fresh_evidence=true` to execute every task again.

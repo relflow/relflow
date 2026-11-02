@@ -404,9 +404,10 @@ and release consume the same candidate wheel. Verified reuse must preserve
 original measurements and revisions and separately attest the current inputs;
 missing, changed, or invalid inputs require fresh execution. Release, coverage, and evidence publication workflows consume
 successful main CI; do not add a second matrix invocation to publication.
-The evidence publisher retains verified reports and opens a publication PR
-for the selected experiment results and generated README measurements.
-Publication-only changes must not recursively create another publication PR.
+Version releases retain verified evidence reports and a frozen publication JSON
+asset before publishing the package tag. Documentation consumes these assets;
+ordinary CI must not create publication commits or pull requests. Experiments
+keep definitions and prose, with measured results outside their source files.
 The evidence helper and trusted executor are pinned separately from the suite.
 Keep selected suite code off the host execution path and preserve full evidence
 budgets, seeds, checks, and provenance. See [evidence/lab.md](evidence/lab.md).

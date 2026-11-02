@@ -13,7 +13,7 @@ import publication
 import pytest
 import reuse
 from evidence_ci import collect, digest, finish, plan, write_json
-from experiments.source import frontmatter, metadata
+from experiments.source import frontmatter, metadata, registry
 from record import select
 
 EXECUTOR = "a" * 40
@@ -31,6 +31,18 @@ def commit(root, message):
     git(root, "add", ".")
     git(root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", message)
     return git(root, "rev-parse", "HEAD")
+
+
+def legacy_selection(root, reports):
+    """Model a historical inline selection so retained-report normalization stays covered."""
+    document = select(reports, root=root / "evidence", readme_target=root / "README.md")
+    for identifier, entry in registry(root / "evidence").items():
+        script = root / "evidence" / entry["script"]
+        header = dict(
+            entry["header"],
+            **{"evidence-result": document["results"][identifier], "evidence-report": document["report"]},
+        )
+        script.write_text(frontmatter(script.read_text(), header))
 
 
 def wheel(path, readme, code=b"runtime", *, headers=None, mode=0o100644 << 16, corrupt=False, extra=False):
@@ -261,7 +273,7 @@ def test_input_equivalence_fails_closed_except_exact_measured_selection(bundle, 
 def test_selection_only_pr_must_match_archived_records_and_bounded_readme(bundle):
     root, reports, _, _, requested = bundle
     original_candidate = requested["candidate"]
-    select(reports, root=root / "evidence", readme_target=root / "README.md")
+    legacy_selection(root, reports)
     selected = commit(root, "select actual complete measurements")
     requested["candidate"] = requested["suite"] = selected
     requested["baseline"] = original_candidate
@@ -277,7 +289,7 @@ def test_selection_only_pr_must_match_archived_records_and_bounded_readme(bundle
 def test_selection_normalization_requires_exact_values_types_and_retained_report_identity(bundle, fault):
     root, reports, _, _, requested = bundle
     original = requested["candidate"]
-    select(reports, root=root / "evidence", readme_target=root / "README.md")
+    legacy_selection(root, reports)
     script = root / "evidence/experiments/example/p021.py"
     header = metadata(script.read_text())
     if fault == "check-type":
@@ -647,6 +659,8 @@ def test_publisher_retains_original_pr_measurements_for_authenticated_multicommi
         "baseline": "candidate",
         "candidate": "candidate",
     }
-    for script in (root / "evidence/experiments/example").glob("*.py"):
-        assert metadata(script.read_text())["evidence-result"]["provenance"]["relflow_revision"] == tested
+    selected = json.loads((output / "publication.json").read_text())
+    assert selected["revision"] == main
+    assert all(result["provenance"]["relflow_revision"] == tested for result in selected["results"].values())
+    assert not git(root, "diff", "--name-only")
     assert reuse.delivered(reports) == original

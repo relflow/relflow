@@ -21,7 +21,6 @@ from publication import (
     publish,
     retain,
     selection_changes,
-    selection_only,
 )
 
 SCRIPT = """# %% [markdown]
@@ -101,7 +100,7 @@ def test_run_boundary_accepts_only_successful_exact_main(event):
 
 
 def test_selection_classifier_preserves_program_other_headers_and_readme_boundaries(repository):
-    root, before = repository
+    root, _ = repository
     path = root / "evidence/experiments/example/p021.py"
     original = path.read_text()
     updated = frontmatter(
@@ -110,9 +109,11 @@ def test_selection_classifier_preserves_program_other_headers_and_readme_boundar
     )
     path.write_text(updated)
     (root / "README.md").write_text(README.replace("Old table", "New table"))
-    selected = commit(root, "selected result")
-    assert selection_only(root, before, selected)
-    assert not selection_only(root, selected, selected)
+    commit(root, "selected result")
+    assert selection_changes(
+        {"evidence/experiments/example/p021.py": original, "README.md": README},
+        {"evidence/experiments/example/p021.py": updated, "README.md": README.replace("Old table", "New table")},
+    )
     for invalid in [
         updated.replace("seed=7", "seed=8"),
         updated.replace("An experiment", "Other question"),
@@ -153,7 +154,6 @@ def test_first_parent_merge_classification_and_bootstrap_runtime_guard(repositor
         capture_output=True,
     )
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
-    assert selection_only(root, head + "^1", head)
     compatible(root, base, head)
     (root / "pyproject.toml").write_text("changed runtime dependencies")
     changed = commit(root, "runtime changed")
@@ -257,7 +257,7 @@ def test_report_inventory_and_every_task_log_are_required(artifacts, fault):
 
 
 @pytest.mark.parametrize("failure", [None, "render", "stale-main"])
-def test_manual_bootstrap_creates_validated_patch_before_any_external_write(
+def test_release_publication_creates_validated_assets_without_changing_sources(
     repository, artifacts, tmp_path, monkeypatch, failure
 ):
     root, main = repository
@@ -295,7 +295,6 @@ def test_manual_bootstrap_creates_validated_patch_before_any_external_write(
     )
     monkeypatch.setattr(publication.subprocess, "run", execute)
     monkeypatch.setattr(publication, "retain", lambda *args: retained.append(args))
-    monkeypatch.setattr(publication, "propose", lambda *args: pytest.fail("Manual mode must not push or create a PR"))
     output = tmp_path / "publication"
     if failure:
         with pytest.raises((ValueError, subprocess.CalledProcessError)):
@@ -305,10 +304,15 @@ def test_manual_bootstrap_creates_validated_patch_before_any_external_write(
         publish(root, output, 123)
         assert retained[0][1] == main
         assert (output / "docs-base.txt").read_text().strip() == checkout
-        patch = (output / "evidence-update.patch").read_text()
-        assert "evidence-result" in patch and "evidence-results:start" in patch
-        assert "relflow_revision: " + main in patch
-        assert "guide.md" not in patch
+        selected = json.loads((output / "publication.json").read_text())
+        assert selected["version"] == "0.4.2"
+        assert selected["revision"] == main
+        assert selected["report"]["release"].endswith("/evidence-v0.4.2")
+        assert all(result["provenance"]["relflow_revision"] == main for result in selected["results"].values())
+        assert not subprocess.check_output(["git", "diff", "--name-only"], cwd=root).strip()
+        assert "publication.json" in retained[0][3]
+        assert "measurements.md" in retained[0][3]
+        assert not (output / "evidence-update.patch").exists()
 
 
 @pytest.mark.parametrize("corrupt", [False, True])
@@ -349,16 +353,19 @@ def test_workflow_never_promotes_pr_runs_or_installs_model_runtime():
         (Path(__file__).resolve().parents[2] / ".github/workflows/publish-evidence.yml").read_text()
     )
     triggers = workflow.get("on", workflow.get(True))
-    assert triggers["workflow_run"] == {"workflows": ["CI"], "branches": ["main"], "types": ["completed"]}
     job = workflow["jobs"]["publish"]
-    assert "head_branch == 'main'" in job["if"]
-    assert "workflow_run.event == 'push'" in job["if"] and "workflow_run.event == 'workflow_dispatch'" in job["if"]
+    triggers = workflow.get("on", workflow.get(True))
+    assert set(triggers) == {"workflow_call", "workflow_dispatch"}
+    assert "pull-requests" not in job["permissions"]
     checkout = next(step["with"] for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@"))
     assert checkout["persist-credentials"] is False and checkout["fetch-depth"] == 0
     commands = "\n".join(step.get("run", "") for step in job["steps"])
     assert "uv sync --locked --project docs" in commands
-    assert "--automatic" in commands
+    assert "--version" in commands and "--automatic" not in commands
     assert "uv pip install" not in commands and "--with" not in commands
+    release = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/release.yml").read_text())
+    assert release["jobs"]["evidence"]["uses"] == "./.github/workflows/publish-evidence.yml"
+    assert "evidence" in release["jobs"]["publish"]["needs"]
 
 
 @pytest.mark.parametrize("fault", ["attempt", "candidate", "baseline", "suite", "executor", "regression"])
@@ -385,110 +392,15 @@ def test_report_cannot_relabel_other_attempts_revisions_or_failed_gates(fault):
         publication.check_report(manifest, summary, run("main"), "main")
 
 
-@pytest.mark.parametrize("changed_branch", [False, True])
-def test_rerun_reuses_exact_remote_branch_without_recommit_force_or_overwriting_human_changes(
-    repository, tmp_path, monkeypatch, changed_branch
-):
-    root, main = repository
-    (root / "README.md").write_text(README.replace("Old table", "New table"))
-
-    def api(path, **kwargs):
-        if "/git/ref/heads/automation/" in path:
-            return {"object": {"sha": "existing-commit"}}
-        if "/git/commits/" in path:
-            tree = subprocess.check_output(["git", "write-tree"], cwd=root, text=True).strip()
-            return {"tree": {"sha": "human-changed" if changed_branch else tree}, "parents": [{"sha": main}]}
-        return {"object": {"sha": main}}
-
-    real_output, real_run = subprocess.check_output, subprocess.run
-
-    def output(command, *args, **kwargs):
-        if command[:3] == ["gh", "pr", "list"]:
-            return '[{"number":456}]'
-        return real_output(command, *args, **kwargs)
-
-    def execute(command, *args, **kwargs):
-        if command[0] == "gh" or any(part in {"push", "commit", "checkout"} for part in command):
-            pytest.fail("An existing matching bot branch must never be recommitted, force-pushed, or replaced")
-        return real_run(command, *args, **kwargs)
-
-    monkeypatch.setattr(publication, "api", api)
-    monkeypatch.setattr(publication.subprocess, "check_output", output)
-    monkeypatch.setattr(publication.subprocess, "run", execute)
-    if changed_branch:
-        with pytest.raises(ValueError, match="Existing evidence bot branch differs"):
-            publication.propose(root, tmp_path, run(main), "evidence-test", main, ["README.md"])
-    else:
-        publication.propose(root, tmp_path, run(main), "evidence-test", main, ["README.md"])
-    assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip() == main
-
-
-@pytest.mark.parametrize("event", ["push", "workflow_dispatch"])
-def test_selection_only_main_skips_recursive_pushes_but_publishes_explicit_manual_results(
-    repository, artifacts, tmp_path, monkeypatch, event
-):
-    root, base = repository
-    reports, inputs = artifacts
-    (root / "README.md").write_text(README.replace("Old table", "New table"))
-    main = commit(root, "selection-only merge")
-    (inputs / "request.json").write_text(
-        json.dumps(
-            {
-                "candidate": main,
-                "baseline": base,
-                "suite": main,
-                "run_id": 123,
-                "run_attempt": 2,
-                "event": event,
-            }
-        )
-    )
-    manifest = json.loads((reports / "manifest.json").read_text())
-    manifest["candidate"]["revision"] = manifest["evidence_sha"] = main
-    (reports / "manifest.json").write_text(json.dumps(manifest))
-    for path in (reports / "results").rglob("*.json"):
-        record = json.loads(path.read_text())
-        provenance = record["result"]["provenance"]
-        provenance["evidence_revision"] = main
-        if record["task"]["role"] == "candidate":
-            provenance["relflow_revision"] = main
-        path.write_text(json.dumps(record))
-    for name in ("summary.json", "report.html", "checksums.json"):
-        (reports / name).unlink()
-    assert finish(reports, root=root / "evidence")["passed"]
-
-    def api(path, **kwargs):
-        if "/git/ref/" in path:
-            return {"object": {"sha": main}}
-        if "/actions/runs/" in path:
-            return run(main) | {"event": event}
-        return {"id": 42}
-
-    monkeypatch.setattr(publication, "api", api)
+def test_published_version_never_reselects_results_or_creates_a_pull_request(repository, tmp_path, monkeypatch):
+    root, _ = repository
+    monkeypatch.setattr(publication, "api", lambda *args, **kwargs: {"tag_name": "v0.4.2", "draft": False})
+    monkeypatch.setattr(publication, "verified_artifact", lambda *args: pytest.fail("A released version is frozen"))
     monkeypatch.setattr(
-        publication,
-        "verified_artifact",
-        lambda run_id, name, target: shutil.copytree(reports if name == "relflow-evidence" else inputs, target),
+        publication.subprocess, "run", lambda *args, **kwargs: pytest.fail("No external write is needed")
     )
-    retained, proposed = [], []
-    monkeypatch.setattr(publication, "retain", lambda *args: retained.append(args))
-    monkeypatch.setattr(publication, "propose", lambda *args: proposed.append(args))
-    real_run = subprocess.run
-
-    def execute(command, *args, **kwargs):
-        if command[0] == "make":
-            return subprocess.CompletedProcess(command, 0)
-        return real_run(command, *args, **kwargs)
-
-    monkeypatch.setattr(publication.subprocess, "run", execute)
-    output = tmp_path / "publication"
-    publish(root, output, 123, automatic=True)
-    if event == "push":
-        assert not output.exists() and not retained and not proposed
-    else:
-        assert retained and proposed
-        assert retained[0][1] == main
-        assert "evidence-result" in (output / "evidence-update.patch").read_text()
+    publish(root, tmp_path / "publication", 456)
+    assert not (tmp_path / "publication").exists()
 
 
 @pytest.mark.parametrize("interrupted_after_upload", [False, True])

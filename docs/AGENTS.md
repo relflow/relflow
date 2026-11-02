@@ -9,7 +9,8 @@ build from this checkout alone using the isolated static environment.
 
 - Authored website pages, assets, extensions, and `_quarto.yml` live in `docs/`.
   Canonical experiments, runners, protocol, and results live under `evidence/`.
-  Each experiment owns its metadata and current result in frontmatter. Page folders
+  Each experiment owns its definition and prose; versioned JSON assets own
+  measured results. Page folders
   mirror the sidebar groups (`learn/`, `use-cases/`, `guides/`, `concepts/`, `datatypes/`,
   `reference/`) and
   file names match page titles; when a page moves or is renamed, update every
@@ -205,14 +206,16 @@ masking policies, use `flow`, `timeline`, `tokens`, and `policies` from
 rather than hyperparameters. Keep nearby code, YAML, labels, captions, and text
 alternatives consistent. Preserve bundled extension and font licenses.
 
-`evidence/render.py` publishes local canonical sources and reviewed
-results without executing them. Generated pages and fragments under
+`evidence/render.py` combines canonical sources with the selected publication
+JSON without executing models. Generated pages and fragments under
 `docs/evidence/` are ignored; never edit them as a second source. Follow
 `evidence/SPEC.md` when changing experiments. Execution writes independent JSON
-records. Select complete reports with `evidence/record.py` and review updates to
-the experiment frontmatter; never alter measurements to make a check pass. Preserve
-source fingerprints and provenance. Successful full main CI runs automatically
-retain verified reports in `relflow/relflow` and open a publication PR for the
-selected results and generated README measurements. Merging that PR updates
-the hosted docs. Keep publication-only updates from recursively publishing.
-Clean only generated publication output.
+records. `evidence/record.py` creates result assets from complete validated
+reports; it never writes results into experiment headers. Preserve source
+fingerprints and original execution provenance. Only version releases freeze
+new publication assets in `evidence-v<version>` Releases. Ordinary CI creates no
+publication PR. Local builds use the preserved `evidence/results.json`
+bootstrap snapshot. Hosted builds fetch matching versioned assets, validate
+their digests and source revisions, and cache them outside canonical sources;
+unreleased previews use the last released data. Keep the static environment
+free of model imports and credentials. Clean only generated publication output.

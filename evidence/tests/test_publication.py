@@ -53,6 +53,7 @@ def publication(tmp_path):
         target = root / entry["script"]
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+    shutil.copy2(ROOT / "results.json", root / "results.json")
     return root
 
 
@@ -60,9 +61,11 @@ def test_selection_preserves_candidate_and_github_provenance(reports, publicatio
     github_run = tmp_path / "github-run.json"
     github_run.write_text(json.dumps({"run_id": 123, "run_attempt": 2, "head_sha": "pr-head"}))
     before = {path: path.read_bytes() for path in publication.rglob("*.py")}
-    select(reports, root=publication, github_run=github_run, release="evidence-test")
+    select(
+        reports, root=publication, github_run=github_run, release="evidence-test", output=publication / "results.json"
+    )
     results = registry(publication)
-    selection = results["P001"]["header"]["evidence-report"]
+    selection = results["P001"]["report"]
     assert selection["release"] == "https://github.com/relflow/relflow/releases/tag/evidence-test"
     assert selection["evidence_revision"] == "tested-suite"
     assert selection["github_run"]["head_sha"] == "pr-head"
@@ -70,7 +73,7 @@ def test_selection_preserves_candidate_and_github_provenance(reports, publicatio
     assert all(entry["run"]["provenance"]["relflow_revision"] == "candidate" for entry in results.values())
     for path, source in before.items():
         selected = path.read_bytes()
-        assert selected.split(b"# ---", 2)[2] == source.split(b"# ---", 2)[2]
+        assert selected == source
         assert fingerprint(selected.decode()) == fingerprint(source.decode())
 
 
@@ -188,12 +191,11 @@ def test_selection_refreshes_readme_from_candidate_metrics_with_exact_boundaries
 
 
 def test_readme_reads_current_selection_instead_of_an_old_report(reports, publication, readme_target):
-    select(reports, root=publication)
-    entry = registry(publication)["P021"]
-    source = publication / entry["script"]
-    header = entry["header"]
-    header["evidence-result"]["metrics"]["hash_auc"] = 0.912345
-    source.write_text(frontmatter(source.read_text(), header))
+    selected = publication / "results.json"
+    select(reports, root=publication, output=selected)
+    document = json.loads(selected.read_text())
+    document["results"]["P021"]["metrics"]["hash_auc"] = 0.912345
+    selected.write_text(json.dumps(document))
     readme(publication, readme_target)
     assert "**0.9123 AUC**" in readme_target.read_text()
     assert "**0.9812 AUC**" not in readme_target.read_text()
@@ -220,11 +222,10 @@ def test_invalid_readme_boundaries_leave_every_selection_unchanged(reports, publ
 
 @pytest.mark.parametrize("measured", [None, True, "0.9", float("nan"), float("inf"), -0.1, 1.1])
 def test_readme_rejects_unusable_metrics_without_writing(publication, readme_target, measured):
-    entry = registry(publication)["P021"]
-    source = publication / entry["script"]
-    header = entry["header"]
-    header["evidence-result"]["metrics"]["hash_auc"] = measured
-    source.write_text(frontmatter(source.read_text(), header))
+    selected = publication / "results.json"
+    document = json.loads(selected.read_text())
+    document["results"]["P021"]["metrics"]["hash_auc"] = measured
+    selected.write_text(json.dumps(document))
     before = readme_target.read_bytes()
     with pytest.raises(ValueError, match="metric|measurements"):
         readme(publication, readme_target)
