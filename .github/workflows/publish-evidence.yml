@@ -48,9 +48,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          gh release create "$RELEASE_TAG" --draft --target "$GITHUB_SHA" --title "Evidence $RELEASE_TAG" --notes 'Complete paired execution records, logs, HTML report, tested wheels, runtime lock, and provenance. Docs publication is a separate reviewed change.'
+          gh release create "$RELEASE_TAG" --draft --latest=false --target "$GITHUB_SHA" --title "Evidence $RELEASE_TAG" --notes 'Complete paired execution records, logs, HTML report, tested wheels, runtime lock, and provenance. Docs publication is a separate reviewed change.'
           gh release upload "$RELEASE_TAG" evidence-reports.tar.gz evidence-inputs.tar.gz github-run.json SHA256SUMS
-          gh release edit "$RELEASE_TAG" --draft=false
+          gh release edit "$RELEASE_TAG" --draft=false --latest=false
       - name: Select the measured candidate results for review
         env:
           RELEASE_TAG: ${{ inputs.tag }}

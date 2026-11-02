@@ -15,7 +15,7 @@ def project(tmp_path: Path) -> Path:
     docs.mkdir()
     (docs / "_quarto.yml").write_text(
         "engine: markdown\nexecute: {enabled: false, eval: false}\n"
-        "website:\n  site-url: https://relflow.github.io/docs/\n"
+        "website:\n  site-url: https://www.relflow.ai/en/latest/\n"
         "  sidebar:\n    contents:\n      - href: index.qmd\n"
     )
     (root / "README.md").write_text("# relflow\n\n[Documentation](docs/README.md)\n")
@@ -65,10 +65,10 @@ def test_static_checks_reject_a_document_execution_override(project: Path) -> No
     assert any("executable document" in error for error in source_checks(project))
 
 
-def test_rendered_checks_resolve_github_pages_base_paths_and_real_anchors(project: Path) -> None:
+def test_rendered_checks_resolve_version_base_paths_and_real_anchors(project: Path) -> None:
     site = project / "docs/site"
     site.mkdir()
-    (site / "index.html").write_text('<a href="/docs/next.html#details">Next</a>')
+    (site / "index.html").write_text('<a href="/en/latest/next.html#details">Next</a>')
     (site / "next.html").write_text('<h1 id="details">Details</h1><a href="index.html">Back</a>')
     assert rendered_checks(project) == []
 

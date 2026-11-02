@@ -46,17 +46,14 @@ The helper commit is the complete SHA in the library workflow's `uses:` line.
 Keep the custom workflow claim exact; do not replace it with a wildcard. The
 immutable helper validates the calling repository and PR source, then checks
 out a separately pinned, tested evidence implementation. A fork cannot gain
-tailnet access by changing its own workflow. Moving the helper from relflow/docs
-to this repository requires updating this external Tailscale claim to the new
-exact reference before the consolidated workflow can run. Importing the source
-does not change the federated identity configuration.
+tailnet access by changing its own workflow.
 
-The trusted executor is pinned to import commit
+The trusted executor is pinned to
 `349b2202e6390a5fe0cbdf09a0c5972e495351ed`; the helper is pinned to
-`7cba2bf2fe3082e643a95aa43c6bad8395569420`. Push both commits with the
-migration branch and merge while preserving this history so these immutable
-references remain reachable. Squashing or rebasing this migration requires
-recreating the pins and updating the exact Tailscale claim before validation.
+`7cba2bf2fe3082e643a95aa43c6bad8395569420`. Keep these immutable commits
+reachable. Routine experiment and publication changes do not change the pins.
+A trusted-mechanics update requires a separately reviewed executor/helper
+revision and the corresponding exact Tailscale workflow claim before validation.
 
 Grant the CI tag access to lab's SSH service and allow noninteractive Tailscale
 SSH for the selected account using an `accept` rule. Retain existing human
@@ -88,9 +85,9 @@ pins its trusted executor. `ci.yml` supplies the candidate SHA as the suite, or
 the explicit manual override. The combined
 `CI / required` job always evaluates their results. Main pushes build package
 distributions alongside tests and documentation checks; release and coverage workflows consume the
-successful main CI run without repeating its test matrix. Configure branch protection only after a
-real successful run exists, requiring that check and an up-to-date base or
-merge queue. Preserve the repository's existing requirements and bypass policy.
+successful main CI run without repeating its test matrix. Require
+`CI / required` and an up-to-date base or merge queue in branch protection. Preserve the
+repository's existing requirements and bypass policy.
 
 Missing trust configuration fails the job with a clear setup message. It never
 turns a skipped or missing evidence run into a successful required check.

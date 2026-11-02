@@ -1,4 +1,4 @@
-# Canonical RelFlow evidence
+# Canonical relflow evidence
 
 Preserve stable P identifiers, generators, seeds, budgets, optimizers, capacities,
 checks, and current result provenance. Read SPEC.md before changing semantics. Never
@@ -18,4 +18,6 @@ home nor Docker socket into workers. Keep credentials outside worker containers.
 Smoke, partial coverage, invalid provenance, execution failures, and regressions
 of baseline-passing checks cannot satisfy the required gate. Reports use Actions
 artifacts and immutable Releases in relflow/relflow, with no AWS dependency.
-Preserve historical release URLs in selected experiment records.
+Publish candidate measurements from a newly completed full paired CI run in
+relflow/relflow, retaining its report Release and actual execution provenance.
+A publication update must not relabel an older result as a fresh run.

@@ -1,6 +1,6 @@
-# RelFlow evidence protocol
+# relflow evidence protocol
 
-This repository owns the RelFlow package, website, and canonical controlled experiments.
+This repository owns the relflow package, website, and canonical controlled experiments.
 Each script's frontmatter declares its stable P identifier, title, group, and
 current selected full run. CI discovers experiments directly from those headers
 and the website lists their generated pages. Builds read these files locally and never execute models.
@@ -85,18 +85,19 @@ and logs, then checks completeness and provenance before producing the JSON
 summary, HTML report, and file checksums. Preserve separate attempts.
 
 Routine reports are GitHub Actions artifacts for 90 days; input wheels and
-requirements are retained for seven days. Promote selected complete reports
-before expiry with `publish-evidence.yml`. It verifies input hashes and report
+requirements are retained for seven days. To publish current measurements,
+start a fresh full CI run on `main` in `relflow/relflow`. After it succeeds,
+promote that run before expiry with `publish-evidence.yml`. It verifies input hashes and report
 integrity, publishes immutable report assets in relflow/relflow, and prepares
 a validated update to the experiment frontmatter for review. No AWS storage or
 account is required.
 
 Publication replaces each experiment's current full-run record. Keep its
 metrics, checks, source fingerprints, package versions, and execution provenance
-intact, including historical release links in relflow/docs. Smoke or incomplete
-execution cannot be selected. There is no result
-history, archived snapshot, or legacy reader in the checkout. A source edit or
-output-reader update does not establish a fresh learning measurement.
+bound to the newly selected execution. Link its retained report Release in
+`relflow/relflow`; do not relabel an older measurement as a new run. Smoke or
+incomplete execution cannot be selected. A source edit or output-reader update
+does not establish a fresh learning measurement.
 
 ## Documentation
 

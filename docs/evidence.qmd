@@ -64,9 +64,11 @@ runs, do not replace full learning results.
 | [Missing]{.evidence-status data-evidence-status="Missing"} | No full run has been recorded. |
 
 Each page shows one selected full run, with its measurements, checks, seed,
-and source provenance. The [run reports](https://github.com/relflow/docs/releases)
-retain the complete paired execution records. A single seed provides provisional evidence
-about repeatability; internal seed panels are described by each experiment.
+and source provenance. Publication retains selected complete CI runs as
+[run reports](https://github.com/relflow/relflow/releases) in the package
+repository. Each published selection links its retained paired execution
+records. A single seed provides provisional evidence about repeatability;
+internal seed panels are described by each experiment.
 
 Learned arithmetic is approximate. Use
 [preprocessing](guides/preprocessing.qmd) for business rules that require exact results.

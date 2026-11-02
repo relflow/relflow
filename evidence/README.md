@@ -1,9 +1,9 @@
-# RelFlow evidence
+# relflow evidence
 
 This directory owns the 79 controlled synthetic experiments, their protocol,
 lab runner, runtime tests, and current publication results.
-The package, website, and evidence share this repository. Stable P identifiers remain
-unchanged. Each script's frontmatter records its ID, group, selected full run,
+Stable P identifiers identify experiments throughout the runner, reports, and
+website. Each script's frontmatter records its ID, group, selected full run,
 metrics, checks, seed, environment, source provenance, and retained report link.
 
 Run from the repository root:
@@ -41,14 +41,20 @@ in this repository. A new suite can be validated explicitly with
 This tests the selected suite without changing the trusted executor or
 Tailscale trust.
 
-See [lab.md](lab.md) for trust and repository variables. No AWS account,
-Modal setup, stored Tailscale secret, or self-hosted GitHub runner is required.
+See [lab.md](lab.md) for trust and repository variables. No cloud account, stored
+Tailscale secret, or self-hosted GitHub runner is required.
 
 ## Reports and publication
 
 Routine CI reports are Actions artifacts in relflow/relflow, retained for 90
-days; input wheels and requirements are retained for seven days. Before expiry,
-promote a selected complete run to an immutable Release in relflow/relflow:
+days; input wheels and requirements are retained for seven days. Start a fresh
+full run on `main` when publishing current measurements:
+
+```sh
+gh workflow run ci.yml --repo relflow/relflow --ref main
+```
+
+After the full CI run succeeds, promote that run before its artifacts expire to an immutable Release in `relflow/relflow`:
 
 ```sh
 gh workflow run publish-evidence.yml --repo relflow/relflow \
@@ -60,9 +66,10 @@ lock; preserves reports and inputs with checksums; and generates a validated
 publication patch for experiment frontmatter. Download evidence-publication-update,
 review the patch on a branch at its recorded repository base, and open a normal PR.
 The site's normal build reads the committed records and canonical sources.
-There are no snapshot bundles, importers/exporters, or old Proofs redirects.
+Report Releases belong to `relflow/relflow` and do not replace the latest package
+release.
 
-Existing report links in relflow/docs retain their original location. Raw
-report releases retain execution provenance. Updating source or output
-readers does not establish a fresh learning result. The checkout keeps the
-current selection without archived result snapshots or history readers.
+Select the candidate records from that completed full run, preserving their
+actual metrics, checks, seeds, environment, tested revisions, and source digests.
+Updating source or output readers does not establish a fresh learning result;
+replacing the current selection requires new complete execution.

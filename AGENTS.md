@@ -387,9 +387,11 @@ Read the Docs builds versioned hosting and pull request previews from the root
 GitHub documentation CI validates and uploads a review artifact. Preserve
 Quarto's visuals and the isolated static environment; the host supplies version
 URLs and its native version flyout, while source views use the actual checkout
-commit. See `docs/README.md`
-for account connection, Gold/project ad-free setup, eligible release tags, and
-the verified-preview requirement before any production domain cutover.
+commit. The default branch is `main`, the default documentation version is
+`latest`, and the canonical host is `www.relflow.ai`. See `docs/README.md` for
+hosted settings, Gold, release versions, and apex HTTPS forwarding. Use complete
+version URLs for public pages and assets; do not add unversioned compatibility
+aliases.
 
 ## CI Ownership
 
