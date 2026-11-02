@@ -397,8 +397,11 @@ aliases.
 
 `ci.yml` owns PR, merge-group, main-push, and manual triggers. `tests.yml`,
 `docs.yml`, and `evidence.yml` are reusable implementations. Require `CI / required`
-for every event, including the full matrix, static documentation checks, and
-paired evidence. Release, coverage, and evidence publication workflows consume
+for every event, including the shared package build, full matrix, static
+documentation checks, and complete paired evidence validation. Tests, Evidence,
+and release consume the same candidate wheel. Verified reuse must preserve
+original measurements and revisions and separately attest the current inputs;
+missing, changed, or invalid inputs require fresh execution. Release, coverage, and evidence publication workflows consume
 successful main CI; do not add a second matrix invocation to publication.
 The evidence publisher retains verified reports and opens a publication PR
 for the selected experiment results and generated README measurements.

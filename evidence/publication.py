@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 import argparse
-import gzip
 import hashlib
-import io
 import json
 import re
+import shutil
 import subprocess
-import tarfile
 import tempfile
 from pathlib import Path
 
 from evidence_ci import task_key
 from experiments.source import fingerprint, frontmatter, metadata, registry
 from record import readme, select, validate
+from reuse import SHA, archive, verify_receipt
+from reuse import artifact as verified_artifact
 
 REPOSITORY = "relflow/relflow"
 EXECUTOR = "349b2202e6390a5fe0cbdf09a0c5972e495351ed"
@@ -52,12 +52,12 @@ def check_run(run: dict, main: str, run_id: int) -> None:
         raise ValueError("Publication requires successful internal CI for the exact current main commit")
 
 
-def check_report(manifest: dict, summary: dict, run: dict, main: str) -> None:
+def check_report(manifest: dict, summary: dict, run: dict, main: str, *, baseline: str | None = None) -> None:
     if (
         not summary["passed"]
         or manifest["run_id"] != f"gh-{run['id']}-{run['run_attempt']}"
         or manifest["candidate"]["revision"] != main
-        or manifest["baseline"]["revision"] != main
+        or manifest["baseline"]["revision"] != (baseline or main)
         or manifest["evidence_sha"] != main
         or manifest["executor_sha"] != EXECUTOR
     ):
@@ -150,21 +150,6 @@ def compatible(root: Path, tested: str, checkout: str) -> None:
         new = (root / name).read_text()
         if not selection_changes({name: old}, {name: new}):
             raise ValueError(f"Bootstrap checkout changes tested experiment source: {name}")
-
-
-def archive(source: Path, destination: Path) -> None:
-    """Produce reproducible bytes and reject linked or special artifact payloads."""
-    with destination.open("wb") as output, gzip.GzipFile(fileobj=output, mode="wb", filename="", mtime=0) as compressed:
-        with tarfile.open(fileobj=compressed, mode="w") as bundle:
-            for path in sorted(source.rglob("*")):
-                if path.is_symlink() or not (path.is_file() or path.is_dir()):
-                    raise ValueError(f"Evidence artifact must contain regular files: {path}")
-                if path.is_file():
-                    content = path.read_bytes()
-                    entry = tarfile.TarInfo(path.relative_to(source).as_posix())
-                    entry.size = len(content)
-                    entry.mode = 0o644
-                    bundle.addfile(entry, io.BytesIO(content))
 
 
 def integrity(reports: Path) -> None:
@@ -290,7 +275,7 @@ def propose(root: Path, output: Path, run: dict, tag: str, main: str, changed: l
     if not json.loads(existing):
         body = output / "pr-body.md"
         body.write_text(
-            f"Publish the complete passing paired run {run['html_url']}.\n\nTested main: `{main}`.\nReport: https://github.com/{REPOSITORY}/releases/tag/{tag}\n\nOnly result/report frontmatter and the bounded README metrics table change. Normal required CI and review apply; GitHub may require approval to start the generated PR workflows.\n"
+            f"Select the complete paired evidence verified by CI {run['html_url']}.\n\nValidated main: `{main}`.\nReport: https://github.com/{REPOSITORY}/releases/tag/{tag}\n\nMeasurements retain their original execution revisions and run identity; a reused report includes its verified request/source receipt. Individual unmet learning checks remain visible. Only result/report frontmatter and the bounded README metrics table change. Normal required CI and review apply; GitHub may require approval to start the generated PR workflows.\n"
         )
         subprocess.run(
             [
@@ -330,46 +315,76 @@ def publish(root: Path, output: Path, run_id: int, *, automatic: bool = False, t
     if automatic and checkout != main:
         raise ValueError("Automatic publication must execute the current trusted main checkout")
     compatible(root, main, checkout)
-    if automatic:
-        parent = subprocess.check_output(["git", "rev-parse", f"{main}^1"], cwd=root, text=True).strip()
-        if selection_only(root, parent, main):
-            print("Skipping recursive publication of selection-only main changes; required CI has still run.")
-            return
     tag = tag or f"evidence-ci-{run_id}-attempt-{run['run_attempt']}"
     output.mkdir(parents=True, exist_ok=False)
     reports, inputs = output / "retained", output / "retained-inputs"
-    for name, target in (("relflow-evidence", reports), ("evidence-inputs", inputs)):
-        subprocess.run(
-            ["gh", "run", "download", str(run_id), "--repo", REPOSITORY, "--name", name, "--dir", str(target)],
-            check=True,
-        )
+    verified_artifact(run_id, "relflow-evidence", reports)
+    retained_manifest = json.loads((reports / "manifest.json").read_text())
+    reused = retained_manifest["run_id"] != f"gh-{run_id}-{run['run_attempt']}"
+    current_inputs = output / "current-inputs" if reused else inputs
+    verified_artifact(run_id, "evidence-inputs", current_inputs)
+    request = json.loads((current_inputs / "request.json").read_text())
+    baseline = request.get("baseline", "")
+    expected_request = {
+        "candidate": main,
+        "baseline": baseline,
+        "suite": main,
+        "run_id": run_id,
+        "run_attempt": run["run_attempt"],
+        "event": run["event"],
+    }
+    if not SHA.fullmatch(baseline) or request != expected_request:
+        raise ValueError("Authenticated input request does not bind the exact current main CI attempt")
+    if automatic and selection_only(root, baseline, main):
+        shutil.rmtree(output)
+        print("Skipping recursive publication of selection-only main changes; required CI has still run.")
+        return
+    names = [("evidence-reused-inputs", inputs)] if reused else []
+    if reused:
+        names.append(("evidence-reuse", output / "reuse-context"))
+    for name, target in names:
+        verified_artifact(run_id, name, target)
     integrity(reports)
+    execution_run = run
+    if reused:
+        reuse_receipt = json.loads((output / "reuse-context/reuse.json").read_text())
+        execution_run = verify_receipt(
+            root, reports, inputs, reuse_receipt, run, baseline, current_inputs=current_inputs, executor=EXECUTOR
+        )
+        (output / "evidence-reuse.json").write_text(json.dumps(reuse_receipt, sort_keys=True, indent=2) + "\n")
+    suite_revision = retained_manifest["evidence_sha"]
     with tempfile.TemporaryDirectory() as temporary:
         tested = Path(temporary) / "evidence"
         names = subprocess.check_output(
-            ["git", "ls-tree", "-r", "--name-only", main, "--", "evidence/experiments"], cwd=root, text=True
+            ["git", "ls-tree", "-r", "--name-only", suite_revision, "--", "evidence"], cwd=root, text=True
         ).splitlines()
         for name in names:
-            mode = subprocess.check_output(["git", "ls-tree", main, "--", name], cwd=root, text=True).split()[0]
+            mode = subprocess.check_output(["git", "ls-tree", suite_revision, "--", name], cwd=root, text=True).split()[
+                0
+            ]
             if mode not in {"100644", "100755"}:
                 raise ValueError(f"Tested source must be a regular tracked file: {name}")
             destination = Path(temporary) / name
             destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(subprocess.check_output(["git", "show", f"{main}:{name}"], cwd=root))
+            destination.write_bytes(subprocess.check_output(["git", "show", f"{suite_revision}:{name}"], cwd=root))
+            destination.chmod(0o755 if mode == "100755" else 0o644)
         manifest, _, summary = validate(reports, inputs, root=tested)
         if json.loads((reports / "summary.json").read_text()) != summary:
             raise ValueError("Retained report summary differs from the validated task records")
-        check_report(manifest, summary, run, main)
+        if not reused:
+            check_report(manifest, summary, run, main, baseline=baseline)
         receipt = {
-            key: run[key]
+            key: execution_run[key]
             for key in ("run_attempt", "head_sha", "head_branch", "event", "html_url", "workflow_id", "path")
         }
-        receipt["run_id"] = run_id
+        receipt["run_id"] = execution_run["id"]
         github_run = output / "github-run.json"
         github_run.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n")
         archive(reports, output / "evidence-reports.tar.gz")
         archive(inputs, output / "evidence-inputs.tar.gz")
         assets = ["evidence-reports.tar.gz", "evidence-inputs.tar.gz", "github-run.json"]
+        if reused:
+            assets.append("evidence-reuse.json")
         (output / "SHA256SUMS").write_text(
             "".join(f"{hashlib.sha256((output / name).read_bytes()).hexdigest()}  {name}\n" for name in assets)
         )
@@ -406,7 +421,7 @@ def publish(root: Path, output: Path, run_id: int, *, automatic: bool = False, t
     retain(tag, main, output, assets)
     if automatic:
         propose(root, output, run, tag, main, changed)
-    print(f"Retained {tag} for tested main {main}; publication patch: {output / 'evidence-update.patch'}")
+    print(f"Retained {tag} for validated main {main}; publication patch: {output / 'evidence-update.patch'}")
 
 
 def main() -> None:

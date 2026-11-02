@@ -18,6 +18,11 @@ home nor Docker socket into workers. Keep credentials outside worker containers.
 Smoke, partial coverage, invalid provenance, execution failures, and regressions
 of baseline-passing checks cannot satisfy the required gate. Reports use Actions
 artifacts and immutable Releases in relflow/relflow, with no AWS dependency.
-Publish candidate measurements from a newly completed full paired CI run in
+Publish candidate measurements from a complete passing paired CI run in
 relflow/relflow, retaining its report Release and actual execution provenance.
+Equivalent requests may reuse that execution only through the trusted verifier
+and a separate receipt binding the current source, wheel payloads, comparison,
+and actual lab runtime. Baseline references retain original immutable records;
+candidate tasks execute freshly when no full-report reuse applies. The required
+gate verifies the complete catalog even when no new training is needed.
 A publication update must not relabel an older result as a fresh run.

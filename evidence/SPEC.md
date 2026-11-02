@@ -60,13 +60,25 @@ full SHA override available for manual validation. Host code reads it as data an
 runs experiment code only in isolated containers. Require `CI / required` and an up-to-date base so a changed
 main cannot reuse stale validation.
 
-Run the complete catalog against both wheels in the same CPU environment,
+Validate the complete catalog against both wheels in the same CPU environment,
 using every experiment's declared default seed, full budget, and internal seed
 panel. Every check that passes on the baseline must pass on the candidate.
 Baseline-unmet checks remain visible, and improvements are allowed. An error on
 either side, changed check sets, missing or duplicate records, altered tasks,
 invalid provenance, cancellation, timeout, partial coverage, or a smoke budget
 must prevent a successful gate. Preserve the named numerical checks unchanged.
+
+The required job may authenticate a complete successful original report and
+reuse it after proving the current source, actual wheel payloads, comparison,
+and lab runtime equivalent. It retains all original records and measured
+revisions, with a separate receipt for the current request. An unchanged
+candidate may satisfy both requested roles through an explicit mapping to
+that original execution; this creates no new measurement or record. Selection
+updates must exactly match archived candidate measurements and provenance.
+Unchanged baseline tasks may reference original immutable executions retained
+inside the report. Every logical slot still requires a validated full-budget
+execution. Missing or invalid proofs require fresh tasks, and an explicit
+force-fresh request bypasses both forms of reuse.
 
 Lab uses one disposable Docker container per task, bounded to two CPU cores,
 4 GiB of memory, and 512 PIDs, with eight workers by default. A shared lab queue serializes CI runs, while
@@ -85,8 +97,8 @@ and logs, then checks completeness and provenance before producing the JSON
 summary, HTML report, and file checksums. Preserve separate attempts.
 
 Routine reports are GitHub Actions artifacts for 90 days; input wheels and
-requirements are retained for seven days. Main pushes run the complete paired
-suite. A successful main CI run automatically feeds `publish-evidence.yml`,
+requirements are retained for seven days. Main pushes validate the complete
+paired suite against their pre-push base. A successful main CI run automatically feeds `publish-evidence.yml`,
 which verifies complete coverage, checks, provenance, tested source and input
 hashes, and report integrity. It publishes immutable report assets in
 `relflow/relflow` and opens a PR updating selected frontmatter and generated
@@ -96,7 +108,8 @@ No AWS storage or account is required.
 
 Publication replaces each experiment's current full-run record. Keep its
 metrics, checks, source fingerprints, package versions, and execution provenance
-bound to the newly selected execution. Link its retained report Release in
+bound to the selected execution. Verified reuse also retains its separate
+current-request receipt. Link its retained report Release in
 `relflow/relflow`; do not relabel an older measurement as a new run. Smoke or
 incomplete execution cannot be selected. A source edit or output-reader update
 does not establish a fresh learning measurement.

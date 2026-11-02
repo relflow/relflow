@@ -98,8 +98,14 @@ this repository. `CI / required` requires the full library test matrix, static
 documentation checks, and evidence before merging into main.
 The [lab guide](../evidence/lab.md) describes its OIDC trust and isolation.
 
-Every main push runs the complete paired evidence suite alongside the SDK and
-documentation checks. After a successful main CI run, `publish-evidence.yml`
+Every main push validates complete paired evidence alongside the SDK and
+documentation checks. The trusted verifier may reuse a completed full report
+when source inputs, actual wheel payloads, comparison, and lab runtime match;
+the report keeps its original measured revisions. A separate receipt binds it
+to the new request. Result-only updates validate selected values against that
+report and keep the required gate without retraining. Other changes execute
+the suite; unchanged baselines may reuse verified original task records.
+After a successful main CI run, `publish-evidence.yml`
 automatically validates its reports, retains them in an immutable Release in
 this repository, and opens a PR updating experiment frontmatter and the
 README's generated measurements. A successful manual full CI run on `main`

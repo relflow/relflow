@@ -23,13 +23,15 @@ directory. Execution never edits the reviewed publication selection.
 
 ## Required lab execution
 
-The library's workflow builds exact baseline and merge-candidate wheels and
+The library's workflow shares one candidate wheel across tests, Evidence, and
+release, and builds an exact baseline wheel when needed. It
 calls .github/workflows/evidence-lab.yml at a reviewed full commit SHA, passing
 a separate reviewed suite SHA. The helper pins the trusted executor. GitHub
 joins Tailscale using short-lived OIDC and dispatches one experiment per Docker
 container on lab. Containers have bounded CPU/memory, no network, a read-only
 root, and no host home or Docker socket. The full catalog runs for both wheels
-with the original seeds and budgets. Every baseline-passing check must pass on
+with the original seeds and budgets, using verified references for unchanged
+baselines. Every baseline-passing check must pass on
 the candidate; baseline misses remain reported. CI queues lab work across PRs
 and cancels superseded attempts within each PR. Errors, missing records, invalid
 provenance, smoke execution, and partial coverage fail CI / required.
@@ -41,12 +43,29 @@ in this repository. A new suite can be validated explicitly with
 This tests the selected suite without changing the trusted executor or
 Tailscale trust.
 
+Before training, the pinned helper probes the actual cached container image,
+host CPU/kernel, and resource/thread settings. It authenticates complete
+successful CI reports and proves their source and wheel-payload equivalence
+to the current request. Report-only updates must exactly match archived
+candidate measurements and their provenance. A reuse receipt records the
+current request, original run/artifacts, explicit role mapping, and all hashes;
+it does not change or clone an original execution record. A miss runs the
+suite. The required Evidence job always performs validation.
+
+Baseline execution reuse is local to the trusted lab controller. Its cache is
+outside worker mounts, limited to eight source reports and 1 GiB. Retained
+reports carry self-contained source proofs, bounded to two levels and 256 MiB.
+Missing, invalid, changed, or overly deep proofs cause fresh execution.
+
 See [lab.md](lab.md) for trust and repository variables. No cloud account, stored
 Tailscale secret, or self-hosted GitHub runner is required.
 
 ## Reports and publication
 
-Every main push runs the complete paired suite. After the complete CI run
+Every main push validates the complete paired suite against the pre-push
+revision. PRs and merge groups use their actual comparison base; manual runs
+use the current commit's first parent by default; `evidence_base=<full-sha>`
+selects an explicit ancestor for repeatable manual comparisons. After the complete CI run
 succeeds, the evidence publisher automatically validates and retains its
 reports in an immutable Release in `relflow/relflow`. It opens a publication
 PR updating experiment results and the README measurements. Merge that PR
@@ -59,6 +78,13 @@ measurements explicitly, start another full run on `main`:
 
 ```sh
 gh workflow run ci.yml --repo relflow/relflow --ref main
+```
+
+To execute every task without reusing a report or baseline:
+
+```sh
+gh workflow run ci.yml --repo relflow/relflow --ref main \
+  -f force_fresh_evidence=true
 ```
 
 Successful manual main runs also feed automatic publication. To retain a
@@ -76,5 +102,6 @@ sources. Report Releases do not replace the latest package release.
 
 Select the candidate records from that completed full run, preserving their
 actual metrics, checks, seeds, environment, tested revisions, and source digests.
-Updating source or output readers does not establish a fresh learning result;
-replacing the current selection requires new complete execution.
+Updating source or output readers does not establish a fresh learning result.
+A newly measured selection requires complete execution; a verified reused
+selection retains the original execution identity and its separate receipt.

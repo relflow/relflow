@@ -72,7 +72,7 @@ References: [Tailscale workload identity federation](https://tailscale.com/docs/
 
 Set these Actions variables in `relflow/relflow`:
 
-- `TAILSCALE_OIDC_CLIENT_ID`: the federated identity's Client ID.
+- `TAILSCALE_EVIDENCE_OIDC_CLIENT_ID`: the federated identity's Client ID.
 - `EVIDENCE_LAB_TARGET`: the permitted SSH account and machine, such as
   `evidence@lab`.
 - `EVIDENCE_LAB_HOST`: optional connectivity probe target; defaults to `lab`.
@@ -89,12 +89,24 @@ successful main CI run without repeating its test matrix. Require
 `CI / required` and an up-to-date base or merge queue in branch protection. Preserve the
 repository's existing requirements and bypass policy.
 
-Main pushes also run the complete paired suite. PRs and merge groups compare
-their exact candidate and base revisions; main pushes and manual validation
-use the current revision for both roles. Reports preserve those actual
-revisions. Current-version publication is not a previous-release comparison.
+Every event validates complete paired evidence. PRs and merge groups compare
+their actual candidate and base revisions; main pushes use the pre-push base,
+including multi-commit pushes. Manual validation uses the first parent or an
+explicit full ancestor SHA supplied as `evidence_base`. The
+helper checks the retained input request against the actual GitHub event.
+Reports preserve the original measured revisions even when reused.
 Successful main runs feed the evidence publisher, which retains verified
 reports and opens a PR for the selected results.
+
+The shared package build supplies the same candidate wheel to SDK tests,
+Evidence, and release. Before training, the trusted helper probes the actual
+pinned Docker image, host CPU/kernel, and resource/thread policy, then checks
+authenticated complete reports for equivalent source and package payloads.
+Full-report reuse uploads a separate receipt and original input artifacts;
+the report's records and provenance remain unchanged. The collector may also
+reference unchanged baseline executions from its bounded host cache. Workers
+cannot mount or modify that cache. Failed or incomplete executions never seed
+it, and a missing proof runs fresh tasks.
 
 Missing trust configuration fails the job with a clear setup message. It never
 turns a skipped or missing evidence run into a successful required check.

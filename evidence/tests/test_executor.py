@@ -75,6 +75,8 @@ def test_dispatch_keeps_executor_and_suite_in_separate_namespaces(tmp_path, monk
             workers=8,
             steps=None,
             ids=None,
+            force_fresh=False,
+            probe=False,
         )
     )
     with tarfile.open(fileobj=io.BytesIO(payload[0]), mode="r:gz") as archive:

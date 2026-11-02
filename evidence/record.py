@@ -17,7 +17,7 @@ from experiments.source import frontmatter, registry
 def validate(reports: Path, inputs: Path | None = None, *, root: Path | None = None) -> tuple[dict, list[dict], dict]:
     manifest = json.loads((reports / "manifest.json").read_text())
     records = [json.loads(path.read_text()) for path in sorted((reports / "results").rglob("*.json"))]
-    summary = evaluate(manifest, records, root=root if root is not None else ROOT)
+    summary = evaluate(manifest, records, root=root if root is not None else ROOT, reports=reports)
     if not summary["complete"] or not summary["passed"] or summary["errors"] or summary["regressions"]:
         raise ValueError(
             "Publication requires a complete full-catalog run without execution or provenance errors or regressions"

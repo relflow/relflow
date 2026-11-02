@@ -187,6 +187,17 @@ def artifacts(repository, tmp_path):
         path.write_bytes(b"not imported or installed")
         identities[role] = {"revision": main, "wheel_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
     (inputs / "requirements.txt").write_text("locked==1\n")
+    write_json(
+        inputs / "request.json",
+        {
+            "candidate": main,
+            "baseline": main,
+            "suite": main,
+            "run_id": 123,
+            "run_attempt": 2,
+            "event": "workflow_dispatch",
+        },
+    )
     manifest = plan(
         run_id="gh-123-2",
         candidate=identities["candidate"],
@@ -277,6 +288,11 @@ def test_manual_bootstrap_creates_validated_patch_before_any_external_write(
         return real_run(command, *args, **kwargs)
 
     monkeypatch.setattr(publication, "api", api)
+    monkeypatch.setattr(
+        publication,
+        "verified_artifact",
+        lambda run_id, name, target: shutil.copytree(reports if name == "relflow-evidence" else inputs, target),
+    )
     monkeypatch.setattr(publication.subprocess, "run", execute)
     monkeypatch.setattr(publication, "retain", lambda *args: retained.append(args))
     monkeypatch.setattr(publication, "propose", lambda *args: pytest.fail("Manual mode must not push or create a PR"))
@@ -407,10 +423,23 @@ def test_rerun_reuses_exact_remote_branch_without_recommit_force_or_overwriting_
     assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip() == main
 
 
-def test_automatic_selection_only_main_skips_publication_but_not_ci(repository, tmp_path, monkeypatch):
-    root, _ = repository
+def test_automatic_selection_only_main_skips_publication_but_not_ci(repository, artifacts, tmp_path, monkeypatch):
+    root, base = repository
+    reports, inputs = artifacts
     (root / "README.md").write_text(README.replace("Old table", "New table"))
     main = commit(root, "selection-only merge")
+    (inputs / "request.json").write_text(
+        json.dumps(
+            {
+                "candidate": main,
+                "baseline": base,
+                "suite": main,
+                "run_id": 123,
+                "run_attempt": 2,
+                "event": "workflow_dispatch",
+            }
+        )
+    )
 
     def api(path, **kwargs):
         if "/git/ref/" in path:
@@ -420,6 +449,11 @@ def test_automatic_selection_only_main_skips_publication_but_not_ci(repository, 
         return {"id": 42}
 
     monkeypatch.setattr(publication, "api", api)
+    monkeypatch.setattr(
+        publication,
+        "verified_artifact",
+        lambda run_id, name, target: shutil.copytree(reports if name == "relflow-evidence" else inputs, target),
+    )
     monkeypatch.setattr(publication, "retain", lambda *args: pytest.fail("No recursive release"))
     monkeypatch.setattr(publication, "propose", lambda *args: pytest.fail("No recursive publication PR"))
     output = tmp_path / "not-created"

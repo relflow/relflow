@@ -27,7 +27,6 @@ jobs:
       contents: read
       actions: read
     outputs:
-      should_publish: ${{ steps.version.outputs.should_publish }}
       version: ${{ steps.version.outputs.version }}
       ci_run_id: ${{ steps.ci.outputs.run_id }}
       source_sha: ${{ steps.ci.outputs.source_sha }}
@@ -69,7 +68,7 @@ jobs:
         if: steps.ci.outputs.current == 'true'
         with:
           python-version: '3.12'
-      - name: Detect an unpublished package version
+      - name: Read the checked project version
         id: version
         if: steps.ci.outputs.current == 'true'
         shell: python
@@ -77,63 +76,47 @@ jobs:
           import os
           import tomllib
           from pathlib import Path
-          from urllib.error import HTTPError
-          from urllib.request import urlopen
           version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
-          try:
-              with urlopen(f"https://pypi.org/pypi/relflow/{version}/json", timeout=15) as response:
-                  published = response.status == 200
-          except HTTPError as error:
-              if error.code != 404:
-                  raise
-              published = False
           with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
-              output.write(f"version={version}\nshould_publish={str(not published).lower()}\n")
-          print(f"relflow {version}: {'already published' if published else 'ready to publish from checked CI artifacts'}")
-
-  release:
-    needs: detect_version
-    if: needs.detect_version.outputs.should_publish == 'true'
-    runs-on: ubuntu-24.04
-    permissions:
-      actions: read
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: python-package-distributions
-          path: dist/
-          github-token: ${{ github.token }}
-          run-id: ${{ needs.detect_version.outputs.ci_run_id }}
-      - name: Create or update GitHub release from checked distributions
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          VERSION: ${{ needs.detect_version.outputs.version }}
-          SOURCE_SHA: ${{ needs.detect_version.outputs.source_sha }}
-        run: |
-          if gh release view "v${VERSION}" >/dev/null 2>&1; then
-            gh release upload "v${VERSION}" dist/* --clobber
-          else
-            gh release create "v${VERSION}" dist/* --target "$SOURCE_SHA" --title "relflow ${VERSION}" --generate-notes
-          fi
+              output.write(f"version={version}\n")
 
   publish:
-    needs: [detect_version, release]
-    if: needs.detect_version.outputs.should_publish == 'true'
+    needs: detect_version
+    if: needs.detect_version.outputs.source_sha != ''
     runs-on: ubuntu-24.04
     environment:
       name: pypi
       url: https://pypi.org/p/relflow
     permissions:
       actions: read
-      contents: read
+      contents: write
       id-token: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.detect_version.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
           name: python-package-distributions
-          path: dist/
+          path: package/
           github-token: ${{ github.token }}
           run-id: ${{ needs.detect_version.outputs.ci_run_id }}
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Reconcile the original checked build with GitHub and PyPI
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.detect_version.outputs.version }}
+          SOURCE_SHA: ${{ needs.detect_version.outputs.source_sha }}
+        run: >-
+          python scripts/release.py prepare package --source-sha "$SOURCE_SHA"
+          --version "$VERSION" --repository "$GH_REPO" --output dist --retained release-package
+      - name: Publish only absent original distributions
+        if: steps.prepare.outputs.should_publish == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Verify the complete published PyPI file inventory
+        run: python scripts/release.py verify-pypi release-package

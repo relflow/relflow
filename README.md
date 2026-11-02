@@ -303,20 +303,27 @@ For package development, see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Continuous Integration
 
 `ci.yml` is the entry point for PRs to main, merge groups, main pushes, and
-manual validation. Every event runs the full Python/platform test matrix,
-static documentation checks, and the full paired evidence suite in parallel.
+manual validation. Each run builds one package wheel and source distribution;
+the full Python/platform test matrix installs that same wheel. Documentation
+checks and complete Evidence validation run alongside the matrix. Evidence
+reuses an authenticated full report when the requested package payloads,
+source inputs, comparison, and actual lab runtime match. Other requests run
+the full suite, with unchanged baselines eligible for verified reuse.
 `CI / required` rejects errors, cancellations,
 and missing required jobs. Evidence runs on lab through the pinned trusted
 executor, with the candidate commit supplying the suite from this repository. See the
 [lab guide](evidence/lab.md).
 
-Main pushes run the test matrix once and build the distributions consumed by
-release publication. Successful main CI also publishes coverage and retains
+Main pushes compare against the pre-push revision. Successful main CI also publishes coverage and retains
 verified evidence reports in this repository. The evidence publisher opens a
 PR updating the selected experiment results and README measurements; merging
 that PR updates the Read the Docs build. Nightly
 dependency compatibility and configured accelerator checks remain independent.
 Local pre-commit continues to run formatting, lint, types, and fast tests.
+Manual CI accepts `force_fresh_evidence=true` to execute every task again.
+Release publication consumes the shared distributions, verifies existing tag
+targets and published bytes, and repairs incomplete publication using its
+original checked build. It never overwrites a different published artifact.
 The reusable documentation workflow validates and renders the static site using its
 isolated environment; see [the documentation guide](docs/README.md) for preview
 and build commands. Read the Docs builds the hosted versions and pull request

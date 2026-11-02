@@ -6,9 +6,19 @@ on:
       suite_ref:
         type: string
         required: true
+      distribution_artifact:
+        type: string
+        default: python-package-distributions
+      force_fresh:
+        type: boolean
+        default: false
+      baseline_ref:
+        type: string
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   wheels:
@@ -19,26 +29,60 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: candidate
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          path: baseline
-          ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.distribution_artifact }}
+          path: package/
       - name: Build supplied revisions without tailnet credentials
+        id: inputs
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+          BASELINE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.baseline_ref }}
+          SUITE_REF: ${{ inputs.suite_ref }}
         run: |
-          uv build --project "$GITHUB_WORKSPACE/candidate" --wheel --out-dir "$GITHUB_WORKSPACE/inputs/candidate"
-          uv build --project "$GITHUB_WORKSPACE/baseline" --wheel --out-dir "$GITHUB_WORKSPACE/inputs/baseline"
+          if [[ -z "$BASELINE_SHA" || "$BASELINE_SHA" =~ ^0+$ ]]; then
+            BASELINE_SHA="$(git -C candidate rev-parse HEAD^1)"
+          fi
+          [[ "$BASELINE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git -C candidate worktree add --detach "$GITHUB_WORKSPACE/baseline" "$BASELINE_SHA"
+          python candidate/scripts/release.py verify package --source-sha "$CANDIDATE_SHA"
+          mkdir -p inputs/candidate inputs/baseline
+          cp package/* inputs/candidate/
+          if [[ "$BASELINE_SHA" == "$CANDIDATE_SHA" ]]; then
+            cp inputs/candidate/*.whl inputs/baseline/
+          else
+            uv build --project "$GITHUB_WORKSPACE/baseline" --wheel --out-dir "$GITHUB_WORKSPACE/inputs/baseline"
+          fi
           uv export --project "$GITHUB_WORKSPACE/candidate" --locked --no-dev --no-emit-project --no-hashes --format requirements-txt --output-file "$GITHUB_WORKSPACE/inputs/requirements.txt"
+          export BASELINE_SHA
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          request = {
+              "candidate": os.environ["CANDIDATE_SHA"],
+              "baseline": os.environ["BASELINE_SHA"],
+              "suite": os.environ["SUITE_REF"],
+              "run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "event": os.environ["GITHUB_EVENT_NAME"],
+          }
+          Path("inputs/request.json").write_text(json.dumps(request, sort_keys=True, indent=2) + "\n")
+          PY
+          echo "baseline_sha=$BASELINE_SHA" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: evidence-inputs
           path: inputs/
           retention-days: 7
           if-no-files-found: error
+    outputs:
+      baseline_sha: ${{ steps.inputs.outputs.baseline_sha }}
 
   run:
     name: Run full paired suite on lab
@@ -46,6 +90,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      actions: read
     with:
       suite_ref: ${{ inputs.suite_ref }}
+      baseline_sha: ${{ needs.wheels.outputs.baseline_sha }}
+      force_fresh: ${{ inputs.force_fresh }}
     uses: relflow/relflow/.github/workflows/evidence-lab.yml@7cba2bf2fe3082e643a95aa43c6bad8395569420
