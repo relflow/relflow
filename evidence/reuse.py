@@ -437,11 +437,15 @@ def trusted(run: dict, manifest: dict, *, helper: str, executor: str, root: Path
         ):
             raise ValueError("PR source merge candidate does not bind the workflow head and actual comparison base")
         if candidate != run["head_sha"]:
-            parents = subprocess.check_output(
-                ["git", "show", "-s", "--format=%P", candidate], cwd=root, text=True
-            ).split()
-            if parents != [pulls[0]["base"]["sha"], pulls[0]["head"]["sha"]]:
-                raise ValueError("PR source merge candidate does not bind the workflow head and actual comparison base")
+            commit = subprocess.check_output(["git", "cat-file", "-p", candidate], cwd=root, text=True)
+            parents = [
+                line.removeprefix("parent ")
+                for line in commit.partition("\n\n")[0].splitlines()
+                if line.startswith("parent ")
+            ]
+            expected = [pulls[0]["base"]["sha"], pulls[0]["head"]["sha"]]
+            if parents != expected:
+                raise ValueError(f"PR source merge parents differ: expected {expected}; found {parents}")
     elif candidate != run.get("head_sha"):
         raise ValueError("Reuse source candidate differs from the trusted workflow commit")
 
@@ -707,6 +711,13 @@ def release_bundle(release: dict, staging: Path) -> tuple[dict, dict]:
     }
 
 
+def reason(error: Exception) -> str:
+    """Bound public-input validation diagnostics without exposing subprocess context."""
+    if isinstance(error, (ValueError, KeyError)):
+        return type(error).__name__ + ": " + " ".join(str(error).split())[:240]
+    return type(error).__name__
+
+
 def find(root: Path, output: Path, requested: dict, *, current_inputs: Path, helper: str, force: bool = False) -> bool:
     if output.exists():
         raise ValueError("Reuse output must be a fresh directory")
@@ -767,7 +778,7 @@ def find(root: Path, output: Path, requested: dict, *, current_inputs: Path, hel
             tarfile.TarError,
             zipfile.BadZipFile,
         ) as error:
-            print(f"Full evidence reuse miss for CI {run.get('id')}: {type(error).__name__}")
+            print(f"Full evidence reuse miss for CI {run.get('id')}: {reason(error)}")
     return False
 
 
@@ -873,7 +884,7 @@ def main() -> None:
             helper = args.helper or helper_sha(api(f"repos/{REPOSITORY}/actions/runs/{requested['run_id']}"))
             hit = find(root, args.output.resolve(), requested, current_inputs=args.inputs.resolve(), helper=helper)
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
-        print(f"Full evidence reuse miss: {type(error).__name__}")
+        print(f"Full evidence reuse miss: {reason(error)}")
         hit = False
     values = {"hit": str(hit).lower()}
     if hit:

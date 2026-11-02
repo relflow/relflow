@@ -351,6 +351,63 @@ def test_pr_synthetic_merge_binds_head_and_actual_base_without_relabelling(bundl
         )
 
 
+def test_original_pr_merge_parent_proof_survives_real_depth_one_fetch(bundle, tmp_path, monkeypatch):
+    root, reports, _, run, _ = bundle
+    manifest = json.loads((reports / "manifest.json").read_text())
+    base = manifest["baseline"]["revision"]
+    head = manifest["candidate"]["revision"]
+    tree = git(root, "rev-parse", head + "^{tree}")
+    merge = git(
+        root,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit-tree",
+        tree,
+        "-p",
+        base,
+        "-p",
+        head,
+        input=("PR merge\n\nparent " + "d" * 40 + "\n").encode(),
+    )
+    runner = tmp_path / "runner-executor"
+    runner.mkdir()
+    git(runner, "init", "-q")
+    git(runner, "fetch", "--quiet", "--depth=1", str(root), base)
+    assert (
+        subprocess.run(["git", "cat-file", "-e", merge + "^{commit}"], cwd=runner, capture_output=True).returncode != 0
+    )
+    real_run = subprocess.run
+    fetched = []
+
+    def execute(command, *args, **kwargs):
+        if command[:2] == ["git", "fetch"] and f"https://github.com/{reuse.REPOSITORY}.git" in command:
+            fetched.append(command)
+            command = [str(root) if part == f"https://github.com/{reuse.REPOSITORY}.git" else part for part in command]
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(reuse.subprocess, "run", execute)
+    reuse.ensure(runner, merge)
+    assert len(fetched) == 1 and "--depth=1" in fetched[0]
+    assert merge in (runner / ".git/shallow").read_text().splitlines()
+    assert git(runner, "show", "-s", "--format=%P", merge) == ""
+    run.update(event="pull_request", pull_requests=[{"base": {"sha": base}, "head": {"sha": head}}])
+    manifest["candidate"]["revision"] = merge
+    reuse.trusted(run, manifest, helper=HELPER, executor=EXECUTOR, root=runner)
+    manifest["candidate"]["revision"] = head
+    run["head_sha"] = "e" * 40
+    with pytest.raises(ValueError, match="actual comparison base"):
+        reuse.trusted(run, manifest, helper=HELPER, executor=EXECUTOR, root=runner)
+
+
+def test_miss_diagnostics_are_bounded_and_do_not_expose_subprocess_arguments():
+    message = reuse.reason(ValueError("Public source mismatch\n" + "x" * 1000))
+    assert len(message) <= 256 and "\n" not in message
+    assert message.startswith("ValueError: Public source mismatch ")
+    assert reuse.reason(subprocess.CalledProcessError(1, ["command", "private-argument"])) == "CalledProcessError"
+
+
 @pytest.mark.parametrize("name", ["../escape", "/absolute", "same\\windows"])
 def test_archive_handoff_rejects_traversal_and_links(tmp_path, name):
     data = io.BytesIO()
