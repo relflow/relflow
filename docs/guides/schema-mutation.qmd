@@ -1,0 +1,154 @@
+---
+title: Schema mutation
+description: "Select, update, extend, delete, reset, and temporarily override nodes of a live model."
+---
+
+Schema evolution lets a trained model accept new inputs or learn additional
+targets while reusing compatible learned state. This supports adaptation after
+[pretraining](../learn/pretraining-and-fine-tuning.qmd) or an earlier supervised
+fit; train and evaluate the changed model for its new task.
+
+Use model methods to change a live schema. They validate the edit, rebuild the
+runtime graph, and retain state-dictionary entries whose names, types, and
+tensor shapes still match. An edit can therefore retain some learned state
+while initializing incompatible parts anew.
+
+Runtime resources can own their rebuild rules. Online vocabularies preserve
+their grown storage, label IDs, and compatible learned rows across schema
+edits. Storage is managed automatically, not configured through field options.
+Changing Cluster bounds can reinitialize assignment columns while preserving
+its vocabulary; changing embedding dimensions likewise resets incompatible weights.
+
+## Select and update
+
+Predicates combine with logical AND. Inspect selected addresses before making
+a broad change. This example uses `model` from
+[Add transaction history](../learn/add-transaction-history.qmd), whose `trxns`
+collection includes earlier payments and the latest payment:
+
+```python
+import relflow as rf
+
+amounts = rf.where("address") == rf.Address("trxns", "amount")
+selected = model.select(amounts)
+model.update(amounts, description="Transaction amount in account currency")
+```
+
+Selection is read-only and evaluates predicates against the current schema on
+every call. Plain callables are accepted; `rf.predicate(func)` wraps one for
+composition with `&`, `|`, or `~`.
+
+Updates are strict by default: every matched node must support each supplied
+option. Narrow the predicate rather than mixing unrelated
+node types. `strict=False` permits partial application to supporting nodes;
+an option supported by none of the selected nodes still raises.
+
+`mask=False` removes the selected node's policies; `mask=True` makes every
+retained occurrence an always-hidden reconstruction target. This is the
+transaction-history model's policy for `/trxns/disputed`. Optional sampled or
+conditional reconstruction belongs in the later
+[masking guide](../concepts/masking-and-reconstruction.qmd). Use `description` for
+notes and declared field options for configuration.
+
+Batch-dependent widths need no schema mutation. To deliberately remove an
+existing branch limit, clear its overflow policy in the same update:
+
+```python
+history = rf.where("address") == rf.Address("trxns")
+model.update(history, length=None, overflow=None)
+```
+
+Changing only `length=None` while retaining `"head"`, `"tail"`, or `"error"`
+is invalid and restores the previous schema and graph. See
+[automatic lengths and limits](../datatypes/branch.qmd#automatic-lengths-and-limits).
+
+## Make a temporary change
+
+```python
+prediction_data = rf.ArrowDataModule(
+    predict="payments/history/requests.parquet",
+)
+
+with model.override(amounts, active=False):
+    ablated = model.predict(datamodule=prediction_data, batch_size=256, devices=1)
+
+ordinary = model.predict(datamodule=prediction_data, batch_size=256, devices=1)
+```
+
+`payments/history/requests.parquet` is an application-supplied Parquet file. Its `trxns`
+records retain the inputs; the directly bound `disputed` target can be omitted
+from every transaction. The data module reads the model's current schema for
+each prediction loop. The context manager restores the previous schema
+attributes, even on exit through an exception. It does not snapshot all
+weights, vocabularies, or normalizers: compatible learned-state changes inside
+the context remain. See [Evaluation](../learn/evaluation.qmd) for an ablation example.
+
+## Change the tree or reinitialize state
+
+| Method | Effect |
+| --- | --- |
+| `extend(...)` | Add named children to exactly one selected branch. |
+| `delete(...)` | Remove selected nodes and their descendant subtrees. |
+| `reset(...)` | Keep the schema and reinitialize selected runtime modules. |
+
+```python
+transactions = rf.where("address") == rf.Address("trxns")
+model.extend(transactions, card_present=rf.Boolean, country=rf.Category)
+model.reset(rf.where("address") == rf.Address("trxns", "country"))
+model.delete(rf.where("address") == rf.Address("trxns", "card_present"))
+```
+
+An extension accepts keyword children or a `fields` mapping, following the same
+parent-owned naming rules as construction. Names must remain unique.
+Prepare the added fields inside each transaction before the next data loop.
+Deletion cannot remove the generated root or leave an invalid empty tree.
+`reset(..., descendants=True)` includes a selected branch's subtree; resetting
+a field discards its learned runtime state, including any owned vocabulary.
+
+## Edit between loops
+
+Mutation is prohibited during active forward, inference, and Lightning loops.
+Change the model between complete operations. Avoid direct attribute edits that
+bypass graph rebuilding.
+
+Rebuilds replace runtime modules. After editing a trained model, prepare a data
+module for the updated schema, including any added fields. Calling
+`model.fit(updated_data, batch_size=128, learning_rate=1e-4, max_epochs=30)`
+with that module starts fresh optimization on the current parameters. Supply
+any scheduler for this new run. Custom optimizer instances must also bind the current parameters;
+an old instance can refer to replaced modules. Existing data modules keep the
+model reference and use its current schema; application caches and exported
+artifacts remain your responsibility.
+
+A failed update that cannot rebuild restores its previous schema and graph.
+Successful changes clear compilation and cached output contracts. Call
+`model.compile()` again if wanted, reevaluate the changed model, and save the
+artifact you intend to use.
+
+## Evidence for learned behavior
+
+The mutation evidence start with trained models, evaluate immediately after an
+edit, and measure adaptation separately:
+
+- [Neutral edits](../evidence/mutations/neutral-edits-preserve-learning.py)
+  check prediction, normalization, and vocabulary retention.
+- [Adding a hidden target](../evidence/mutations/extend-prediction-target.py)
+  checks immediate retention and learning with continuation and scratch controls.
+- [Selective reset](../evidence/mutations/reset-prediction-target.py)
+  checks localized loss and relearning of one hidden output.
+- [Deactivation and restoration](../evidence/mutations/deactivate-and-restore-input.py)
+  removes an informative input, then checks updates, override exits, and
+  reactivation from an inactive checkpoint.
+- [Deletion and adaptation](../evidence/mutations/delete-input-and-adapt.py)
+  compares retraining with inactive, scratch, and continuation controls against
+  the best prediction possible from the remaining information.
+
+These experiments cover specific edits and synthetic tasks. Consult their
+recorded outcomes: retaining state entries does not establish identical
+predictions when a schema-derived computation changes.
+
+Hidden targets never reach the encoder, so adding one no longer changes a
+branch's capacity or shifts its siblings' positions; old predictions are
+retained up to floating-point reassociation. The recorded added-target
+experiment predates that change and still shows the earlier capacity shift
+until it is re-run. The new output learns successfully during adaptation.

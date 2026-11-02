@@ -1,0 +1,343 @@
+---
+title: Pretraining and fine-tuning
+description: "Learn from unlabeled histories by reconstructing hidden values, then adapt the model to a labeled outcome."
+engine: markdown
+---
+
+Suppose you have many account histories but only a smaller collection with
+settled dispute labels. Use the profile and transaction records from the
+[event-history example](profile-context-and-a-second-outcome.qmd), with one
+account snapshot per row. For now, leave out future outcomes and the extra
+line-item and withdrawal context introduced in the
+[account example](nested-context-and-account-outcomes.qmd).
+
+Give those histories a learning role by hiding selected amounts or merchants
+and recovering them from the remaining context. Then use labeled payments to
+adapt the learned context to the operational outcome.
+
+Pretraining uses a reconstruction task on a broad collection of records.
+Fine-tuning starts from those learned weights and adapts the model to a specific
+task. In relflow, both use `model.fit(...)`; the data and reconstruction
+objectives determine what the model learns.
+
+The foundation-model workflow is broad pretraining followed by adaptation to
+downstream tasks, following [Stanford's description](https://crfm.stanford.edu/report.html).
+For your own structured data, this means learning from histories, adapting
+the trained schema to new objectives, and evaluating the resulting predictions
+or reused representations. A newly constructed model starts untrained.
+Establishing useful reuse across tasks requires held-out evaluation on those
+tasks.
+
+| Stage | Data | Objectives |
+| --- | --- | --- |
+| Self-supervised pretraining | Records without task labels | Reconstruct sampled observed values with `rf.Mask(rate=..., reconstruct=True)`. |
+| Supervised fine-tuning | Labeled task records | Predict always-hidden transaction labels with `mask=True`, optionally retaining reconstruction objectives. |
+| Resume a run | The same training task | Restore the model, optimizer, scheduler, and loop progress from a full Lightning checkpoint. |
+
+```{typst}
+//| label: fig-pretraining-stages
+//| fig-cap: "The same transaction fields under each stage. Pretraining reconstructs sampled amounts and merchants; fine-tuning makes them visible and hides every dispute label; prediction omits the labels."
+//| fig-alt: "A grid with rows for amount, merchant, channel, and disputed and columns for pretraining, fine-tuning, and prediction. During pretraining a sampled amount position and a sampled merchant position are hidden and reconstructed, channel stays visible, and disputed is not in the schema. During fine-tuning amount, merchant, and channel are visible and disputed is hidden and supervised at every position. At prediction the inputs stay visible and disputed is predicted at every position."
+#policies(
+  ("Pretraining", "Fine-tuning", "Prediction"),
+  (
+    (label: [`amount` #linebreak() sampled reconstruction, then visible], cells: (("input", "input", "target", "input", "input"), repeat("input", 5), repeat("input", 5))),
+    (label: [`merchant` #linebreak() sampled reconstruction, then visible], cells: (("input", "target", "input", "input", "input"), repeat("input", 5), repeat("input", 5))),
+    (label: [`channel` #linebreak() visible throughout], cells: (repeat("input", 5), repeat("input", 5), repeat("input", 5))),
+    (label: [`disputed` #linebreak() added at fine-tuning with `mask=True`], cells: (repeat("none", 5), repeat("target", 5), repeat("target", 5))),
+  ),
+)
+```
+
+Pretraining is optional. A supervised model can also start from newly
+initialized weights. An ordinary float mask, such as `mask=0.15`, only supplies
+input dropout; pretraining needs `reconstruct=True` to create an objective.
+
+Reconstruction recovers amounts and merchants already present in the saved
+sequence. The supervised labels keep their definitions from
+[Profile context and a second outcome](profile-context-and-a-second-outcome.qmd): one
+cutoff per observation and a 30-day window after it.
+
+Once the model has learned from your histories, you can adapt it with labeled
+examples or keep it fixed and test exported
+[embeddings](reusable-representations.qmd) as inputs to separate task
+predictors. Evaluate both choices against the existing task workflow on the
+same held-out observations. The
+[event-history guide](profile-context-and-a-second-outcome.qmd) explains how to define
+observations, decision cutoffs, and future outcome windows.
+
+## Pretrain on histories
+
+Each pretraining row keeps `account_age_days` at the root and the booking
+time, amount, merchant, and channel inside each transaction. The last booking
+defines the snapshot cutoff; nothing after it enters the row. Observed
+amounts and merchants provide their own supervision when selected values are
+hidden, so no dispute or merchant-repeat label is needed:
+
+```yaml
+account_age_days: 420
+trxns:
+  - booked_at: "2026-03-28T09:00:00"
+    amount: 24.00
+    merchant: Harbor Internet
+    channel: direct_debit
+  - booked_at: "2026-04-28T09:00:00"
+    amount: 24.00
+    merchant: Harbor Internet
+    channel: direct_debit
+  - booked_at: "2026-05-27T08:00:00"
+    amount: 32.00
+    merchant: Station Cafe
+    channel: card
+  - booked_at: "2026-05-28T09:00:00"
+    amount: 24.00
+    merchant: Harbor Internet
+    channel: direct_debit
+```
+
+Configure sampled reconstruction on `amount` and `merchant`, then fit using
+separate application-supplied training and validation files in this shape:
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    account_age_days=rf.Number,
+    trxns=rf.Branch(
+        length=32,
+        overflow="tail",
+        booked_at=rf.DateParts(
+            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
+        ),
+        amount=rf.Number(mask=rf.Mask(rate=0.15, reconstruct=True)),
+        merchant=rf.Category(
+            mask=rf.Mask(rate=0.15, reconstruct=True),
+        ),
+        channel=rf.Enum(values=("card", "direct_debit", "bank_transfer")),
+    ),
+)
+pretraining_data = rf.ArrowDataModule(
+    train="payments/pretraining/train.parquet",
+    validate="payments/pretraining/validation.parquet",
+)
+model.fit(
+    pretraining_data,
+    batch_size=128,
+    max_epochs=50,
+    checkpoint_dir="checkpoints/payment-pretraining",
+)
+model.save("artifacts/payment-pretrained.rf")
+```
+
+The two paths identify independent, application-supplied Parquet files with
+this richer record structure. Histories are sorted oldest to newest for
+`overflow="tail"`. The profile, booking calendar, and channels remain visible
+while selected transaction amounts and merchants are hidden. Keep preparation
+consistent through the [preprocessing pipeline](../guides/preprocessing.qmd).
+
+Each sampled value is predicted from the remaining context; unselected values
+remain inputs. These fractional reconstruction policies also sample during
+validation and test, but are inactive during ordinary prediction. See
+[Masking and reconstruction](../concepts/masking-and-reconstruction.qmd) for selection and stage rules.
+
+Fitting restores the best validation checkpoint before the artifact is saved.
+See [Training options](../guides/training-options.qmd) for checkpoint selection.
+
+## Adapt to a labeled task
+
+For this adaptation, add a settled Boolean `disputed` label to every
+transaction. Each answers the common-cutoff question above. All labeled
+transaction positions contribute to the supervised objective.
+
+Pretraining and fine-tuning splits must respect the same evaluation boundaries;
+pretraining on held-out accounts or future observations changes what the
+downstream evaluation measures.
+
+Load the pretrained artifact, remove its sampled reconstruction policies, and
+add a supervised label:
+
+`rf.where("address")` selects nodes by their path in the declared model tree.
+The first selector below chooses the amount and merchant fields for `update`;
+the second chooses `trxns` as the parent for `extend` to add the new target.
+
+```python
+finetuned = rf.Model.load("artifacts/payment-pretrained.rf")
+reconstructed_inputs = rf.where("address").is_in(
+    [
+        rf.Address("trxns", "amount"),
+        rf.Address("trxns", "merchant"),
+    ]
+)
+finetuned.update(reconstructed_inputs, mask=False)
+finetuned.extend(
+    rf.where("address") == rf.Address("trxns"),
+    disputed=rf.Boolean(mask=True),
+)
+```
+
+Amount and merchant remain visible inputs. `mask=True` keeps every dispute
+label out of the input and uses it as supervision. If the target already
+exists, update its mask to `True` instead of adding it again.
+
+The profile, booking dates, and channel fields stay in place. To adapt to the
+merchant-repeat outcome instead, add `repeats_next_30_days=rf.Boolean(mask=True)`
+to `trxns` and supply every transaction's label for the same future window.
+The [event-history guide](profile-context-and-a-second-outcome.qmd) shows both supervised
+outcomes together.
+
+```{typst}
+//| label: fig-pretraining-transfer
+//| fig-alt: "Account context contains account age and a trxns branch. Each transaction has booking date, amount, merchant, and channel. Pretraining reconstructs sampled amounts and merchants; fine-tuning predicts disputed for every transaction."
+//| fig-cap: "The same transaction sequence supplies reconstruction context and each transaction's dispute prediction."
+#tree(node("account", kind: "root", children: (
+  node("account_age_days", width: 150pt, type: "Number"),
+  node("trxns", kind: "branch", repeated: true, children: (
+    node("booked_at", type: "DateParts"),
+    node("amount", type: "Number", detail: "Pretraining objective"),
+    node("merchant", type: "Category", detail: "Pretraining objective"),
+    node("channel", type: "Enum"),
+    node("disputed", kind: "target", type: "Boolean", detail: "Each transaction"),
+  )),
+)))
+```
+
+Evolving the trained schema rebuilds modules and retains state entries whose
+names, types, and tensor shapes still match. The new target starts with newly
+initialized state; changing widths, field types, or structure can also reinitialize incompatible
+parts. Keep existing addresses and geometry stable when reusing a pretrained
+model. Adding a field can change context and reduction behavior even when
+existing weights transfer. [Schema mutation](../guides/schema-mutation.qmd) describes
+these boundaries.
+
+## Start a new training run
+
+Start a new fit with labeled Parquet files supplied by your application.
+The call binds a fresh optimizer to the edited model, including its new target.
+A smaller learning rate is a starting point to evaluate:
+
+```python
+finetuning_data = rf.ArrowDataModule(
+    train="payments/finetuning/train.parquet",
+    validate="payments/finetuning/validation.parquet",
+)
+finetuned.fit(
+    finetuning_data,
+    batch_size=128,
+    learning_rate=1e-4,
+    weight_decay=0.01,
+    max_epochs=20,
+    checkpoint_dir="checkpoints/payment-finetuning",
+)
+finetuned.save("artifacts/payment-disputes.rf")
+```
+
+This starts new optimization from the transferred model state. Use `ckpt_path`
+with a full Lightning checkpoint when [resuming the same task](../guides/checkpoints-ema-and-resuming.qmd#resume-training),
+including its optimizer and loop progress.
+Reapply processors and desired compilation after loading and schema edits.
+Pass any scheduler to this fit call; it is not inherited from pretraining.
+For DDP, every rank must construct the same final schema.
+
+Fine-tuning here updates the model end to end, including the new decoder and
+existing encoders. Loaded [vocabularies](../concepts/online-vocabulary.qmd) and
+Number normalization statistics also
+continue learning from training observations; loading does not freeze them.
+Validation, test, and prediction reuse that state. For a fixed feature extractor,
+continue with [embeddings](reusable-representations.qmd): add `embed=True`
+to this saved model's root or `trxns` branch, export in prediction mode, and
+fit a separate predictor without updating the exporting model. This lets you
+test the learned context for another outcome before choosing to fine-tune it.
+
+At inference, omit `disputed` from every transaction and keep the transaction
+records. The schema address is `/trxns/disputed`; prediction output
+returns each retained transaction's result inside `predictions.trxns`, with
+`inferred: true` at every position. See [Prediction output](../reference/prediction-output.qmd).
+
+## Keep auxiliary objectives deliberately
+
+To retain amount reconstruction alongside dispute, keep that policy when
+adapting the pretrained artifact. Replace the earlier
+`finetuned.update(reconstructed_inputs, mask=False)` call with:
+
+```python
+finetuned.update(
+    rf.where("address") == rf.Address("trxns", "merchant"),
+    mask=False,
+)
+finetuned.update(
+    rf.where("address") == rf.Address("trxns", "amount"),
+    weight=0.1,
+)
+```
+
+Then add the dispute target and start the new run as above. Keeping the amount
+policy preserves its trained decoder; removing reconstruction and later
+reenabling it creates a new decoder. Both amount and dispute losses are now
+optimized. `weight` scales the amount loss rather than its sampling rate or a
+fixed fraction of the combined loss.
+
+Compare fine-tuning against the same supervised task trained from scratch.
+Use the same held-out data and dispute metric: pretraining loss and fine-tuning
+loss have different objective sets and are not directly comparable. Retaining
+auxiliary objectives may help or hurt the task, so evaluate that choice rather
+than assuming pretraining guarantees a better model. See [Evaluation](evaluation.qmd).
+
+## Evaluate vocabulary coverage
+
+For large-vocabulary reconstruction, report how many selected answers the
+model can express as well as how well it predicts them. For example, monitor
+`.trxns.merchant/validate.coverage.content` alongside
+`.trxns.merchant/validate.nll.content` and
+`.trxns.merchant/validate.accuracy.all`.
+The [Category metrics](../datatypes/category.qmd#vocabulary-and-learning) and
+[Cluster metrics](../datatypes/cluster.qmd#learning-and-inspection)
+define these denominators and count unavailable targets explicitly.
+
+An unknown Category or Cluster target contributes no label gradient. Forcing its
+prediction to be uniform over known labels would teach a different task, not
+recover the missing answer. With no known targets, conditional reconstruction
+quality is `NaN`; zero coverage means the validation objective is unmeasurable,
+not that the model reconstructed everything perfectly. Cluster balancing and
+adaptive-cluster updates also exclude unknown answers. Do not select a
+checkpoint from such a conditional score without checking coverage.
+
+Vocabulary growth can change the evaluated known-target population between
+epochs. NLL can increase when newly admitted, difficult labels join it even
+if predictions on the old labels improve. The summed validation loss is not a
+coverage-adjusted model-quality score. Keep a fixed validation source, monitor
+coverage, and compare known-target quality at comparable coverage. If necessary,
+retain a fixed cohort of training-established labels for an additional stable
+diagnostic; do not populate the model vocabulary from validation or test data.
+
+Random reconstruction masks introduce another source of variation. For a
+repeatable diagnostic, supply application-owned Boolean selection fields and
+use `Mask(query=..., reconstruct=True)`. This fixes selected coordinates;
+it does not freeze vocabulary growth or make unknown answers learnable.
+Keep any held-out calibration set separate from model selection, and evaluate
+downstream confidence separately for familiar and unseen input identities.
+
+[P062](../evidence/vocabulary/pretraining-coverage.py) isolates vocabulary
+coverage with fixed query-selected masks and checks that rebatching the same
+targets cannot change the reported counts or conditional scores.
+[P065](../evidence/vocabulary/cluster-pretraining-coverage.py) tests Cluster coverage.
+
+[P066](../evidence/vocabulary/rolling-input-admission.py) separately checks cold
+Category inputs across successive training cohorts. Its selected run records
+zero admission drift and unchanged reconstruction NLL before an optimizer
+step. One cold-cohort prediction-quality check remains unmet, so the overall
+result remains unmet. Target coverage does not measure input familiarity:
+keep input cohorts separate when assessing pretraining quality. These are
+the selected run's measurements and retain its recorded library revision;
+they are not a new execution against the current source.
+
+[Set metrics](../datatypes/set.qmd#vocabulary-and-learning) count positive
+memberships rather than scalar targets. A partial-OOV Set retains its known
+positive and negative supervision; dropping the whole set would discard valid
+evidence. An all-OOV set still supplies known negatives when annotations are
+complete. Report member coverage, complete-set coverage, exact-set accuracy,
+and micro F1 together. Empty sets are valued, complete annotations, although
+an all-empty evaluation has no positive-member denominator. These semantics
+are not appropriate for incompletely annotated labels without further masking.
+
+Next, [reuse the learned context](reusable-representations.qmd) as input
+to separate predictors, with the exporting model kept fixed.

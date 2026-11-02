@@ -3,7 +3,7 @@ import pyarrow as pa
 import pytest
 
 import relflow as rf
-from relflow.architecture.runtime import ModelRuntime
+from relflow.architecture import runtime
 from relflow.data.arrow import Encoded
 from relflow.structs.enums import Component, Strata, TensorKey
 from relflow.structs.packages import Prediction
@@ -96,7 +96,7 @@ def test_predict_bounds_preparation_and_forward_without_reordering(
     configured = model()
     source = pa.table({"request_id": ["a", "b", "c", "d", "e"], "value": [1.0, 2.0, 3.0, 4.0, 5.0]})
     inputs = source if kind == "table" else source.to_batches()[0] if kind == "record_batch" else source.to_pylist()
-    prepare = ModelRuntime.prepare
+    prepare = runtime.prepare
     prepared: list[int] = []
     forwarded: list[int] = []
 
@@ -107,7 +107,7 @@ def test_predict_bounds_preparation_and_forward_without_reordering(
     def record_forward(module, args):
         forwarded.append(args[0][Address("value")].state.shape[0])
 
-    monkeypatch.setattr(ModelRuntime, "prepare", staticmethod(record_prepare))
+    monkeypatch.setattr(runtime, "prepare", record_prepare)
     configured.register_forward_pre_hook(record_forward)
 
     result = configured.predict(inputs, batch_size=batch_size, retain=("request_id",))
@@ -144,7 +144,7 @@ def test_predict_batches_after_global_preprocessor_expansion_and_postprocesses_o
     configured = model()
     calls = {"pre": 0, "post": 0}
     prepared: list[int] = []
-    prepare = ModelRuntime.prepare
+    prepare = runtime.prepare
 
     def record_prepare(module, batch, **options):
         prepared.append(batch.num_rows)
@@ -161,7 +161,7 @@ def test_predict_batches_after_global_preprocessor_expansion_and_postprocesses_o
         calls["post"] += 1
         return frame.select(request_id=pl.col("inputs").struct.field("request_id")).with_row_index("row")
 
-    monkeypatch.setattr(ModelRuntime, "prepare", staticmethod(record_prepare))
+    monkeypatch.setattr(runtime, "prepare", record_prepare)
     result = configured.predict(
         pa.table({"request_id": ["a", "b", "c", "d"], "value": [0.0, 1.0, 2.0, 3.0]}),
         batch_size=4,
@@ -573,7 +573,7 @@ def test_output_plan_declares_once_and_passes_that_type_to_writer(
 
 def test_write_rejects_an_ordinary_unplanned_forward_address():
     configured = model()
-    encoded = ModelRuntime.prepare(
+    encoded = runtime.prepare(
         configured,
         pa.table({"value": [1.0]}),
         preprocess=None,
@@ -593,7 +593,7 @@ def test_write_rejects_an_ordinary_unplanned_forward_address():
 
 def test_output_plan_rejects_runtime_embedding_width_drift():
     configured = model(embed=True)
-    encoded = ModelRuntime.prepare(
+    encoded = runtime.prepare(
         configured,
         pa.table({"value": [1.0]}),
         preprocess=None,

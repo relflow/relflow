@@ -25,8 +25,8 @@ from pydantic import AliasChoices, Field, field_validator
 from pydantic_core import to_jsonable_python
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from relflow.architecture.output import metadata
 from relflow.architecture.root import Model
-from relflow.architecture.runtime import metadata
 from relflow.data.arrow import Retain, mappings, retention
 from relflow.data.processors import Postprocessor, PostprocessorInput, Preprocessor, PreprocessorInput
 from relflow.logging import logger

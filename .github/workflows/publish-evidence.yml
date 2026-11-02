@@ -1,0 +1,83 @@
+name: Publish selected evidence reports
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Unique immutable report release tag
+        required: true
+      library_run_id:
+        description: Library Actions run containing the complete relflow-evidence and evidence-inputs artifacts
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: publish-evidence-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+      - run: uv sync --locked --project docs
+      - name: Download the selected report and exact tested inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LIBRARY_RUN_ID: ${{ inputs.library_run_id }}
+        run: |
+          gh run download "$LIBRARY_RUN_ID" --repo relflow/relflow --name relflow-evidence --dir retained
+          gh run download "$LIBRARY_RUN_ID" --repo relflow/relflow --name evidence-inputs --dir retained-inputs
+          gh api "repos/relflow/relflow/actions/runs/$LIBRARY_RUN_ID" --jq '{run_id:.id,run_attempt,head_sha,head_branch,event,html_url,pull_requests:[.pull_requests[]|{number,head_sha:.head.sha,base_sha:.base.sha}]}' > github-run.json
+      - name: Validate and package the retained report
+        run: |
+          uv run --project docs python evidence/record.py validate retained --inputs retained-inputs
+          uv run --project docs python evidence/evidence_ci.py bundle retained evidence-reports.tar.gz
+          uv run --project docs python evidence/evidence_ci.py bundle retained-inputs evidence-inputs.tar.gz
+          sha256sum evidence-reports.tar.gz evidence-inputs.tar.gz github-run.json > SHA256SUMS
+      - name: Publish immutable report assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          gh release create "$RELEASE_TAG" --draft --target "$GITHUB_SHA" --title "Evidence $RELEASE_TAG" --notes 'Complete paired execution records, logs, HTML report, tested wheels, runtime lock, and provenance. Docs publication is a separate reviewed change.'
+          gh release upload "$RELEASE_TAG" evidence-reports.tar.gz evidence-inputs.tar.gz github-run.json SHA256SUMS
+          gh release edit "$RELEASE_TAG" --draft=false
+      - name: Select the measured candidate results for review
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: uv run --project docs python evidence/record.py select retained --github-run github-run.json --release "$RELEASE_TAG" --bundle evidence-reports.tar.gz
+      - run: make check check-docs
+      - name: Prepare the publication patch
+        run: |
+          git add evidence/experiments
+          git diff --cached --binary > evidence-update.patch
+          git rev-parse HEAD > docs-base.txt
+          sha256sum evidence-update.patch docs-base.txt > publication-SHA256SUMS
+          cat <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          The complete report is retained in an immutable release. The selected measurements passed static and rendered-site validation.
+          Download `evidence-publication-update` and apply `evidence-update.patch` in a branch at the recorded docs base, then open a normal review PR.
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evidence-publication-update
+          path: |
+            evidence-update.patch
+            docs-base.txt
+            publication-SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: documentation-site
+          path: docs/site
+          if-no-files-found: error
+          retention-days: 7

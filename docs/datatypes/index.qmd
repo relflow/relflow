@@ -1,0 +1,149 @@
+---
+title: Datatypes
+description: "Choose a type by what a value means, with value states, shared leaf options, and decoded payloads."
+---
+
+Choose a type by what a value means in your task. These examples use a
+hypothetical payment dataset to predict later disputes: `Number` represents
+the amount, `Category` the merchant, and `Boolean` the dispute label. A
+`Branch` adds repeated transaction records as context. Leaf types are also
+called **tensorfields**.
+
+A datatype supplies the field's encoding, supported learning objectives, and
+decoded output contract. Built-in and [custom types](custom-tensorfields.qmd)
+participate in the same schema and generated architecture, including fields
+inside nested branches.
+
+Other types enrich that same record: a declared currency, calendar timing,
+merchant tags, or a payment description. Choose them when the distinction
+matters to the task; the first model does not need every available type.
+
+## Available types
+
+| Value | Type |
+| --- | --- |
+| Payment amount, balance, or item quantity | [Number](number.qmd) |
+| Whether a payment was disputed | [Boolean](boolean.qmd) |
+| Merchant name or another label learned from training observations | [Category](category.qmd) |
+| Recent transactions, each with its own fields | [Branch](branch.qmd) |
+| Payment channel from a declared fixed set | [Enum](enum.qmd) |
+| Unordered transaction tags | [Set](set.qmd) |
+| Recurring calendar position of a payment timestamp | [DateParts](dateparts.qmd) |
+| Account identifier equality without a learned vocabulary | [Hash](hash.qmd) |
+| Amount represented by its learned distribution | [Quantile](quantile.qmd) |
+| Merchant labels sharing learned latent groups | [Cluster](cluster.qmd) |
+| Merchant representation supplied by another system | [Vector](vector.qmd) |
+| Meaning of a payment description from a frozen text encoder | [Text](text.qmd) |
+
+Choose by meaning rather than storage format: a numeric merchant code is
+usually a Category. Unordered tags belong in a Set; transactions with amounts
+and dates belong in a Branch.
+
+Category, Set, and Cluster learn labels through an
+[online vocabulary](../concepts/online-vocabulary.qmd). Its capacity, admission timing, and unknown
+values affect both training and prediction.
+Enum uses the labels declared in its schema and rejects values outside that set.
+
+## Value state {#value-state}
+
+State describes a position; content carries its value. They are separate model
+inputs, so zero content does not have to mean null or padding.
+
+| State | Meaning |
+| --- | --- |
+| `valued` | A source value exists, including zero, false, empty strings, and empty sets. |
+| `null` | The source explicitly contains null. |
+| `padded` | The batch's execution geometry has no source position. |
+| `masked` | An input has been replaced by a learned mask representation. |
+| `other` | A source value that is not a usable value of its type: a floating-point NaN in [Number](number.qmd) or [Category](category.qmd), a NaN or infinite [Quantile](quantile.qmd), or a [Vector](vector.qmd) with a NaN or infinite element. Extensions may define further states. |
+
+One record can contain both empty and null sets:
+
+```yaml
+trxns:
+  - booked_at: "2026-05-21T10:00:00"
+    amount: 32.00
+    merchant: Station Cafe
+    tags: []
+    disputed: false
+  - booked_at: "2026-05-27T18:15:00"
+    amount: 56.20
+    merchant: North Market
+    tags: null
+    disputed: true
+  - booked_at: "2026-05-28T14:30:00"
+    amount: 84.50
+    merchant: North Market
+    tags: []
+    disputed: false
+```
+
+If another observation in the batch has a longer retained history, this
+sequence's unused execution positions are padded. A cap alone does not force
+every history to that width. The first `tags` value is valued: the application
+recorded an empty tag list. The second explicitly records null. Structurally
+skipped inputs use separate presence information rather than a sixth state token.
+
+An unknown Category is still valued; its categorical content is unavailable.
+Unknown Set members simply have no active vocabulary bit. Neither case is
+null. Keep one compatible Arrow value family per identity field: strings,
+binary values, integers, floats, and Booleans are distinct families. Number,
+Quantile, and Vector allow integer/float promotion. Datatypes own these contracts;
+[custom tensorfields](custom-tensorfields.qmd) can declare their own.
+
+## Shared leaf options {#shared-leaf-options}
+
+The parent names a field with `amount=rf.Number(...)`. Definitions have no
+`name` argument. Use a `fields` mapping for generated schemas or names that
+collide with configuration, and `description` for notes. Undeclared options
+are rejected.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `query` | `None` | Read the parent's same-named child; an explicit [query](../guides/query-paths.qmd) selects another structural path. |
+| `description` | `None` | Human-readable meaning or units. |
+| `active` | `True` | Inactive leaves remain in the schema but do not encode, train, or predict. |
+| `nullable` | `True` | Whether explicit nulls are allowed in the projected input. |
+| `mask` | `False` | Use `True` to keep a supervised answer out of the input. |
+| `weight` | `1.0` | Positive multiplier on this field's total loss. |
+| `embed` | `False` | Export a normalized contextual embedding during prediction. |
+| `pooling` | `"query"` | Decoder context pooling: `"query"` or `"mean"`. |
+| `n_heads` | `4` | Positive, even query-pooling head count; attention requires it to divide `d_model` with at least two dimensions per head. |
+| `ffnx` | `8` | Positive integer feed-forward multiplier for this field's query decoder and aligned context projection. See [model-tree configuration](../concepts/model-tree.qmd#configure-the-context). |
+| `dropout` | `None` | Optional query-pooling dropout in `[0, 1)`. |
+| `n_linear` | `1` | Positive number of learned-query decoder pooling blocks. |
+| `decoder_position` | `None` | Automatic: off for scalar targets, on for repeated targets. A Boolean overrides it. |
+
+These are the ordinary constructor defaults. Model
+[size factories](../concepts/model-tree.qmd#choose-a-size) supply omitted decoder settings
+from their preset; explicit field options take precedence.
+
+`mask=True` makes a supervised target.
+`embed=True` exports a representation; it does not create an objective.
+
+The transaction tutorial uses `disputed=rf.Boolean(mask=True)` on every
+transaction. Its training records contain settled Boolean labels for all
+retained transactions. A null label is not a general instruction to ignore it.
+
+## What predictions contain
+
+Decoded fields share `state` probabilities and a Boolean `inferred` flag.
+`inferred` marks requested reconstruction, not confidence. Each datatype owns
+its remaining payload:
+
+| Type | Decoded content |
+| --- | --- |
+| Number | Scalar in source units |
+| Quantile | Scalar in source units; null before learning a distribution |
+| Boolean | Probability of true |
+| Category, Enum | Best label, probability, and optional candidates |
+| Cluster | Best cluster and best vocabulary label, each with probability |
+| Set | Label/probability pairs |
+| Vector | Fixed-width reconstructed vector |
+| DateParts, Hash, Text | No decoded public payload |
+
+All types can export an embedding when configured. These vectors live in the
+separate `representations` column, with paths and ancestor coordinates.
+Branches export context embeddings but never decode a typed branch value. See
+[Reusable representations](../learn/reusable-representations.qmd) for representation roles and
+[Prediction output](../reference/prediction-output.qmd) for Arrow shapes and access.

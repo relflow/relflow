@@ -24,7 +24,7 @@ uv run pytest
 ```
 
 The commit hooks apply Ruff formatting and lint fixes, then run Pyrefly and the
-full test suite. Review any files changed by the hooks before committing again.
+fast test suite. Review any files changed by the hooks before committing again.
 
 Distributed tests launch every rank on the same machine. On macOS, the test
 suite defaults `GLOO_SOCKET_IFNAME` to the loopback interface `lo0`. An explicitly
@@ -163,8 +163,33 @@ subsystem. For extension-boundary changes, include a minimal third-party
 extension that exercises registration, validation, encoding, and schema
 round-tripping. The [agent guide](AGENTS.md) describes the contracts to preserve.
 
-User documentation, executable learning proofs, recorded results, and branding
-assets live in the separate [relflow/docs repository](https://github.com/relflow/docs).
-Coordinate public API changes there and follow that repository's README and
-agent guide for writing, previewing, checking, and publishing. Library checks
-do not build the site or run learning experiments.
+User documentation and branding assets live in [docs/](docs/README.md).
+Canonical learning experiments, runtime tests, and recorded results live in
+[evidence/](evidence/README.md). Coordinate those changes with public API changes
+in the same branch. Follow the [documentation agent guide](docs/AGENTS.md) for
+writing and diagrams, and the [evidence protocol](evidence/SPEC.md) for learning
+experiments. Static documentation tests live in `docs/tests/`; package runtime
+and architectural tests remain in `tests/`.
+
+The documentation environment is isolated from the package environment. Run
+these commands from the repository root:
+
+```bash
+uv sync --project docs --locked
+make check
+make check-docs
+make dev
+```
+
+`make check` validates static examples, links, and evidence reporting;
+`make check-docs` also renders and validates the full site. `make dev` previews
+it at `http://127.0.0.1:4200`. The build uses pinned Quarto and never imports
+RelFlow or executes models. Library checks do not build the site or run learning
+experiments; explicit evidence execution requires the intended RelFlow wheel.
+
+Read the Docs builds hosted versions and pull request previews using the root
+[.readthedocs.yaml](.readthedocs.yaml). GitHub documentation CI retains source
+and rendered-site validation with a downloadable artifact. Keep documentation
+changes in the same PR as their API changes, then review the Read the Docs
+preview before merging. See [docs/README.md](docs/README.md) for initial account
+setup, version activation, Gold-backed ad-free hosting, and domain cutover.

@@ -20,7 +20,7 @@ from torchmetrics import Metric as TorchMetric
 
 from relflow import presets
 from relflow._version import __version__
-from relflow.architecture import compiler, template, training
+from relflow.architecture import compiler, output, runtime, template, training
 from relflow.architecture.binding import bind
 from relflow.architecture.checkpoint import CheckpointState, RollbackCheckpoint
 from relflow.architecture.contracts import ContractScheduler
@@ -32,11 +32,10 @@ from relflow.architecture.mutations import (
     immutable,
 )
 from relflow.architecture.node import NodeModule
+from relflow.architecture.output import OutputPlan
 from relflow.architecture.runtime import (
     ExecutionPlan,
-    ModelRuntime,
     Output,
-    OutputPlan,
     PredictionInput,
     step,
     transfer,
@@ -149,6 +148,7 @@ class Model(lit.LightningModule):
         mask: MaskInput = False,
         optimizer: OptimizerConfig | None = None,
         scheduler: SchedulerConfig | None = None,
+        jacobian: bool = False,
         **field_kwargs: TreeFieldInput,
     ) -> None: ...
 
@@ -160,6 +160,7 @@ class Model(lit.LightningModule):
         batch_size: int = 1,
         optimizer: OptimizerConfig | None = None,
         scheduler: SchedulerConfig | None = None,
+        jacobian: bool = False,
     ) -> None: ...
 
     @beartype
@@ -182,6 +183,7 @@ class Model(lit.LightningModule):
         mask: MaskInput = False,
         optimizer: OptimizerConfig | None = None,
         scheduler: Any = None,  # Lightning validates custom schedulers at fit time.
+        jacobian: bool = False,
         **field_kwargs: Any,
     ) -> None:
         """Build a model from tree fields, or from an existing ``schema``.
@@ -205,6 +207,11 @@ class Model(lit.LightningModule):
         Custom schedulers also work with an overridden ``lr_scheduler_step``.
         ``Model.fit`` supplies AdamW when no optimizer is configured. Direct
         Trainer fitting requires an optimizer; neither factory is checkpointed.
+
+        ``jacobian=True`` uses TorchJD UPGrad to combine reconstruction
+        objectives during training and requires ``relflow[torchjd]``.
+        Lightning retains automatic backward and optimization. This training
+        policy is not saved in model checkpoints; select it before compiling.
 
         A positional ``Schema`` or ``schema=...`` restores an existing
         architecture and cannot be combined with tree fields or dimensions.
@@ -254,6 +261,7 @@ class Model(lit.LightningModule):
         # Training recipes remain configuration even when their callables are Modules.
         object.__setattr__(self, "optimizer", optimizer)
         object.__setattr__(self, "scheduler", scheduler)
+        self.jacobian: bool = jacobian
         self.locks: Counter[str | Strata] = Counter()
         self.nodes: torch.nn.ModuleDict = torch.nn.ModuleDict()
         self._schema_editor: SchemaEditor = SchemaEditor(self)
@@ -378,7 +386,15 @@ class Model(lit.LightningModule):
             raise TypeError(
                 f"model.compile requires Boolean region switches, got encoders={encoders!r}, pools={pools!r}"
             )
-        compiler.compile(self, encoders=encoders, pools=pools, backend=backend, dynamic=dynamic, options=options)
+        compiler.compile(
+            self,
+            encoders=encoders,
+            pools=pools,
+            backend=backend,
+            dynamic=dynamic,
+            options=options,
+            retain_graph=self.jacobian,
+        )
         return self
 
     def select(
@@ -506,6 +522,10 @@ class Model(lit.LightningModule):
                 "model has no reconstruction objectives; configure at least one active node "
                 "with mask=True or Mask(reconstruct=True) before fitting"
             )
+        if self.jacobian:
+            from relflow.architecture.jacobian import validate
+
+            validate(self)
 
     def track(
         self,
@@ -573,7 +593,7 @@ class Model(lit.LightningModule):
         strata: Strata | str,
         dataloader_idx: int = 0,
     ) -> list[Prediction]:
-        return ModelRuntime.forward(self, inputs, strata=strata, dataloader_idx=dataloader_idx)
+        return runtime.forward(self, inputs, strata=strata, dataloader_idx=dataloader_idx)
 
     if TYPE_CHECKING:
         __call__ = forward
@@ -810,7 +830,7 @@ class Model(lit.LightningModule):
     ) -> pa.Table:
         """Convert tensor predictions into the canonical Arrow output table."""
 
-        return ModelRuntime.write(self, predictions, source=source, retain=retain)
+        return output.write(self, predictions, source=source, retain=retain)
 
     @immutable("inference")
     def encode(
@@ -827,7 +847,7 @@ class Model(lit.LightningModule):
         ``strata`` selects training, validation, test, or prediction masking;
         ``seed`` and ``epoch`` control deterministic batch randomness.
         """
-        return ModelRuntime.encode(
+        return runtime.encode(
             self,
             batch=batch,
             preprocess=preprocess,
@@ -946,7 +966,7 @@ class Model(lit.LightningModule):
                 raise TypeError("callbacks, checkpoint loading, and Trainer options require predict(datamodule=...)")
             if batch_size is not None:
                 self.batch_size = batch_size
-            return ModelRuntime.predict(
+            return runtime.predict(
                 self, batch=batch, preprocess=preprocess, postprocess=postprocess, retain=retain, batch_size=batch_size
             )
         if preprocess != () or postprocess != () or retain != ():
@@ -977,7 +997,7 @@ class Model(lit.LightningModule):
         tables = [table for output in outputs or () for table in (output if isinstance(output, list) else [output])]
         if any(not isinstance(table, pa.Table) for table in tables):
             raise TypeError("data-module predict_step must return pyarrow.Table batches")
-        return pa.concat_tables(tables) if tables else ModelRuntime.write(self, [], source=pa.table({}))
+        return pa.concat_tables(tables) if tables else output.write(self, [], source=pa.table({}))
 
     def on_before_batch_transfer(self, batch: Any, dataloader_idx: int) -> Any:
         """Commit extension resources before DDP starts this batch's graph."""

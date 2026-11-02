@@ -5,8 +5,8 @@ import pytest
 import torch
 
 import relflow as rf
+from relflow.architecture import runtime
 from relflow.architecture.binding import bind
-from relflow.architecture.runtime import ModelRuntime
 
 
 @pytest.mark.parametrize("workers", [0, pytest.param(1, marks=pytest.mark.integration)])
@@ -39,7 +39,7 @@ def test_prefetch_preserves_enum_ids_and_consumes_each_quantile_delta_once(worke
         assert batch.tensors["/status"].targets[rf.TensorKey.content].flatten().tolist() == expected
 
     consumed = bind(configured, batches[0], rf.Strata.train)
-    ModelRuntime.learn(configured, consumed.observations, strata=rf.Strata.train)
+    runtime.learn(configured, consumed.observations, strata=rf.Strata.train)
     assert not consumed.bindings
     assert rf.Enum.counts(configured, "/status") == {"pending": 0, "complete": 1, "rejected": 1}
     assert rf.Enum.vocabulary(configured, "/status") == labels
@@ -49,7 +49,7 @@ def test_prefetch_preserves_enum_ids_and_consumes_each_quantile_delta_once(worke
 
     pending = batches[1].tensors["/amount"].targets[rf.TensorKey.content].clone()
     second = bind(configured, batches[1], rf.Strata.train)
-    ModelRuntime.learn(configured, second.observations, strata=rf.Strata.train)
+    runtime.learn(configured, second.observations, strata=rf.Strata.train)
     assert rf.Quantile.normalization(configured, "/amount")["count"] == 4
     assert not torch.equal(second.tensors["/amount"].targets[rf.TensorKey.content], pending)
     assert rf.Enum.counts(configured, "/status") == {"pending": 2, "complete": 1, "rejected": 1}

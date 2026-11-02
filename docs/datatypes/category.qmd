@@ -1,0 +1,126 @@
+---
+title: Category
+description: "A label learned from training data, such as a merchant name."
+---
+
+`Category` represents a label learned from training data. In the payment
+example below, `merchant` names the business receiving the payment, and
+`disputed` is the prediction target. A learned merchant representation gives
+the model label-specific context alongside the amount. `North Market` is one
+label; its words are not processed as a text description.
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    amount=rf.Number,
+    merchant=rf.Category,
+    disputed=rf.Boolean(mask=True),
+)
+```
+
+One labeled payment:
+
+```yaml
+amount: 84.50
+merchant: North Market
+disputed: false
+```
+
+Use [Enum](enum.qmd) for a fixed list such as currency codes,
+[Set](set.qmd) for multiple labels, [Hash](hash.qmd) for identifier equality,
+and [Text](text.qmd) for word meaning.
+
+## Input and options
+
+Accepts scalar Boolean, integer, floating-point, string, or binary labels.
+Keep one compatible Arrow type family per field; normalize inconsistent labels
+upstream, or fold look-alike spellings with `strip` and `cased`. A null is a
+[value state](index.qmd#value-state), not a vocabulary member, and a
+floating-point NaN label is not a label: it takes the `other` state and never
+enters the vocabulary.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `p_unavailable` | `0.01` | Training probability of replacing known valued **input** content with unavailable content. Reconstruction targets are unchanged. |
+| `topk` | `[]` | Sorted, unique integer accuracy cutoffs greater than one; also controls prediction candidates. Each cutoff is capped by the discovered label count at runtime. |
+| `strip` | `False` | Trim surrounding whitespace from string labels before vocabulary lookup. |
+| `cased` | `True` | `False` lowercases string labels before lookup. Vocabulary snapshots and written labels hold the folded form; other label types are unaffected. |
+
+Vocabulary storage grows automatically; there is no size option to configure.
+See [shared leaf options](index.qmd#shared-leaf-options)
+for reconstruction and embedding configuration.
+
+## Vocabulary and learning
+
+Pristine training observations add labels before forward, growing storage as
+needed. The training process resolves batch-local dictionaries from encoding
+workers and gathers labels across DDP ranks. Validation, test, and prediction
+reuse the frozen mapping; checkpoints preserve it and the grown tables.
+
+See [Online vocabulary](../concepts/online-vocabulary.qmd) for admission order,
+growth and state preservation, supported training strategies, and reuse during
+fine-tuning.
+
+An unknown label stays `valued` but contributes zero categorical content to
+the encoder. Its internal sentinel is not an extra embedding row or decoder
+class. Known labels contribute learned content plus their state embedding. A
+label admitted while training keeps a zero content row, and so embeds exactly
+like an unknown one, until the next training batch starts the row with a
+normal draw; admission alone never changes a prediction.
+
+Reconstruction uses unweighted state and categorical cross entropy. Class
+frequencies remain observable through `counts`, but do not silently change
+the probability objective. Training scores only discovered labels; spare
+storage does not contribute classes or gradients. Unavailable valued targets have no categorical loss or
+gradient: an unknown answer does not imply a uniform distribution over known
+answers. State supervision is retained.
+
+For each reconstruction objective, metrics separate coverage from quality:
+
+| Metric suffix | Meaning |
+| --- | --- |
+| `targets.known`, `targets.unavailable` | Counts of selected valued targets inside and outside the vocabulary. |
+| `coverage.content` | Known targets divided by all selected valued targets. |
+| `accuracy.content`, `accuracy.topK` | Correct predictions among known targets, using populated candidates. |
+| `accuracy.all` | Correct predictions divided by all selected valued targets; unavailable answers count as wrong. |
+| `nll.content` | Unweighted negative log likelihood over populated candidates, matching written probabilities. |
+| `loss.content` | Unweighted categorical training objective over populated labels, averaged over known targets; equal to `nll.content`. |
+
+Names include the field address and stage, for example
+`.merchant/validate.coverage.content`. Training scores describe the
+latest batch; validation and test aggregate counts and sums across batches and
+ranks before division. With no known targets, conditional
+accuracy, NLL, and content loss are `NaN`, not zero; coverage and all-target
+accuracy are zero when selected valued targets exist. With no selected valued
+targets, coverage and all-target accuracy are also undefined.
+
+For an application-supplied trained `model`:
+
+```python
+labels = rf.Category.vocabulary(model, rf.Address("merchant"))
+counts = rf.Category.counts(model, rf.Address("merchant"))
+```
+
+`vocabulary` returns a tuple snapshot in index order; `counts` returns pristine
+valued training exposures, excluding nulls, unavailable values, unused slots,
+and the smoothing prior. Repeated epochs count again; DDP counts synchronize
+at epoch end. `vocabulary` also accepts a preprocessor's `encoding_context`.
+Consult it for inference preprocessing only: training preprocessing occurs
+before new labels are reserved.
+
+## Prediction
+
+`content` contains `value`, `probability`, and `topk`. The candidate list has
+up to `max(topk)` entries, capped by the populated vocabulary; it is empty
+when no cutoffs are configured. Labels are written as `large_string`.
+
+Probabilities are renormalized over **populated labels**, excluding unused
+capacity and the unavailable sentinel. An empty vocabulary yields a null best
+label and probability zero. Confidence is not an unknown-label detector.
+With only one populated label, its conditional probability is one even before
+learning; vocabulary membership is not evidence of predictive competence.
+Unweighted cross entropy removes a systematic class-weighting distortion, but
+does not guarantee calibration under finite data or distribution shift.
+See the [prediction envelope](../reference/prediction-output.qmd) for shared state
+probabilities, `inferred`, and repeated shapes.

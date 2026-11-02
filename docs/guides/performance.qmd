@@ -1,0 +1,252 @@
+---
+title: Performance
+description: "Control work through branch limits, feed the device, tune batch size, and compile selected regions."
+---
+
+Measure the complete workload: source reading and preprocessing, tensorization,
+model computation, and prediction writing. Schema shape and requested outputs
+can matter as much as model width. Compare quality and throughput under the
+same data, hardware, precision, and optimization budget.
+
+## Define the measurement
+
+Training throughput counts training observations processed per elapsed second;
+inference throughput counts observations whose selected outputs have been
+produced per second. State the timing boundary: a model-compute rate and an
+end-to-end rate include different work. For an end-to-end rate, include source
+reading, preprocessing, encoding, device completion, and output writing where
+applicable. Report HTTP requests per second separately when a request can
+contain multiple observations.
+
+One observation can contain many transactions, nested purchases, and prediction
+targets. Report retained record counts and active target positions as well as
+observation counts, so a change in nested shape is visible in the comparison.
+Record these conditions alongside any measured rate:
+
+| Condition | What to report |
+| --- | --- |
+| Workload | Task, source format, record count, schema depth, retained collection-length distribution and caps, and target counts at each depth. |
+| Model and output | Resolved architecture, vocabulary sizes, selected predictions and representations, and output format. |
+| Hardware and runtime | CPU and accelerator models, device count and memory, precision, package versions, and compilation mode. |
+| Batching | Observations per device, worker count, gradient accumulation for training, and concurrency or microbatching for HTTP serving. |
+| Timing | Warmup, accelerator synchronization, timed stages, and whether validation, checkpointing, compilation, and startup are included. |
+
+Compare task quality alongside throughput under the same protocol. A rate
+measured for one schema and machine establishes performance for that workload;
+use [recorded evidence](../evidence.qmd) with its stated conditions when
+making a measured claim.
+
+## Control work first
+
+Repeated branches use the largest retained collection length in each batch.
+The default `length=None` retains all slots; a finite limit bounds retention
+and permits an overflow policy. Even bounded branches compact their internal
+width below the cap when possible. Nested batch maxima can multiply coordinate
+counts. Choose limits that retain the context the task needs; reductions
+determine how much reaches the parent. These choices also affect model quality.
+See [Branch](../datatypes/branch.qmd#automatic-lengths-and-limits).
+
+Padding and structurally skipped coordinates are absent from attention.
+Eligible encoder work packs present coordinates when the layers have no
+customizations or active stochastic dropout. This is automatic; it does not
+require changing the input schema. Null and learned-mask coordinates remain
+present model inputs.
+
+Padding is not free. Dense embedding buffers, concatenation, unpacking, and
+learned pooling still consume memory. Packed attention operates on real
+sequences, whose pairwise work grows quadratically with their lengths. One long
+record can dominate a batch even when its neighbors are short. Set finite
+limits for untrusted inputs.
+
+On CUDA, eligible encoder sequences with every coordinate present omit padding
+masks, allowing PyTorch to select native FlashAttention. The same presence
+check chooses between this path and packing; no extra device synchronization is
+needed. Active stochastic dropout, custom implementations, and hooks retain
+their ordinary contracts. Oversized sequence batches retain masks to respect
+the native FlashAttention batch limit.
+
+Export only needed outputs. Root or branch embeddings, repeated leaf outputs,
+and Category top-k values enlarge the prediction payload. Selecting a larger
+batch can improve utilization but also changes updates per epoch; account for
+that when comparing training runs.
+
+## Let Lightning select training hardware
+
+`model.fit(...)` selects available hardware by default: `accelerator="auto"`,
+`devices="auto"`, DDP with unused-parameter detection for multiple devices, and
+BF16 mixed precision where the selected devices support it. Otherwise it uses
+FP32. Override these choices only when the workload needs it; see
+[Training options](training-options.qmd#choose-the-loop).
+
+BF16 mixed precision keeps neural parameters in float32 while eligible
+computation uses BF16. Number source values, normalization statistics, and
+source-unit readout stay float64 on CPU and CUDA, outside mixed precision;
+Apple MPS uses float32 because it has no float64 support. See
+[Number precision](../datatypes/number.qmd). When using `lit.Trainer` directly,
+configure its hardware and precision explicitly; it does not inherit the
+model-method defaults.
+
+On a single-device machine, add Lightning's native `BatchSizeFinder` to tune
+`model.batch_size` before training. `ArrowDataModule.batch_size` reads and
+writes that same value, and rebuilt loaders use the selected size. The
+example uses the [transaction-history model](../learn/add-transaction-history.qmd)
+as `model` and application-supplied training and validation Parquet files:
+
+```python
+from lightning.pytorch.callbacks import BatchSizeFinder
+import relflow as rf
+
+datamodule = rf.ArrowDataModule(
+    train="payments/history/train.parquet",
+    validate="payments/history/validation.parquet",
+)
+finder = BatchSizeFinder(mode="binsearch", steps_per_trial=3, max_val=64)
+model.fit(datamodule, fused=None, devices=1, callbacks=[finder], max_epochs=20)
+```
+
+`fused=None` delegates AdamW implementation selection to Torch, including on
+MPS. The finder restores its temporary checkpoint before the real fit;
+`finder.optimal_batch_size` reports its selected size.
+
+The finder does not support distributed strategies. On a multi-GPU machine,
+`devices="auto"` normally selects all visible GPUs, so tune on one device
+first with Lightning's `Tuner` (which uses `BatchSizeFinder` internally),
+then train with automatic device count and no finder callback. The native
+Trainer probe needs an explicit optimizer factory. This CUDA example assumes
+BF16 support for both the probe and the real fit:
+
+```python
+import lightning.pytorch as lit
+from lightning.pytorch.tuner import Tuner
+
+model.optimizer = rf.adamw(learning_rate=1e-3, fused=None)
+tuning = lit.Trainer(accelerator="auto", devices=1, precision="bf16-mixed")
+Tuner(tuning).scale_batch_size(
+    model, datamodule=datamodule, mode="binsearch", max_val=64,
+)
+model.optimizer = None
+model.fit(datamodule, max_epochs=20)
+```
+
+The probe's optimizer assignment is cleared before the ordinary fit, which
+configures its own optimization for the current model.
+
+Keep a conservative cap and supply enough representative records to fill the
+candidate batches, including dense histories and participating targets.
+Lightning's finder is a short capacity heuristic, not a throughput benchmark
+or a guarantee for unseen records, later vocabulary growth, or DDP overhead.
+Its `margin` reduces the selected batch in binsearch mode; it is not a GPU
+memory reservation. Lightning temporarily disables callbacks during its probes,
+so extension callbacks that allocate additional state still need a real-fit
+smoke test. A cap reached during the search is not necessarily itself probed.
+
+Retune when HPO changes model shape, context lengths, precision, or optimizer.
+The nominal effective batch is the batch size multiplied by the device count
+and gradient-accumulation count on one node; set accumulation explicitly when
+comparing trials, and account for incomplete final accumulation windows.
+
+## Feed the device
+
+Loop `batch_size` overrides set the model's current encoded batch size, for
+example `model.fit(datamodule, batch_size=128, max_epochs=30)`. The value is per
+device under DDP. Loader settings belong on the data module; tune them after
+measuring whether input preparation leaves the device idle:
+
+```python
+datamodule = rf.ArrowDataModule(
+    train="payments/history/train.parquet",
+    validate="payments/history/validation.parquet",
+    num_workers=4,
+    persistent_workers=True,
+    pin_memory=True,
+    prefetch_factor=2,
+)
+```
+
+Workers and prefetching consume host memory. Arrow sources and retained data
+remain on CPU while encoded tensors move to the model's device. Local data
+workers divide the source before preprocessing: file sources split their
+manifests so each worker reads only its files, streams are still read by every
+worker but each keeps alternate units, and in-memory tables stride rows. Each
+worker then preprocesses, samples, shuffles, and encodes only its share.
+Distributed ranks replay the source before disjoint row selection, so adding
+ranks does not reduce source I/O. Keep Arrow/Polars transformations columnar
+instead of repeatedly converting observations to Python rows.
+
+Throughput uses the actual number of observations in each Arrow or TensorDict
+batch, including a partial final batch. Other custom batch types fall back to
+the configured model batch size. It measures elapsed host time around batch
+processing.
+It logs with `on_step=True, on_epoch=False`. `throughput/train` reaches attached
+loggers every `log_every_n_steps` optimizer updates; validation, test, and
+prediction throughput are reported per batch. With gradient accumulation, the
+training rate describes the latest microbatch. Timing excludes input loading
+and encoding before the batch start hook. Rates remain per rank and do not wait for CUDA work
+to complete; they are not an end-to-end or synchronized GPU benchmark.
+Compare runs with the same batch geometry and measure application loading,
+encoding, device completion, and writing separately when reporting throughput.
+Prediction throughput is retained by the callback and
+sent directly to attached loggers; it is not a `trainer.callback_metrics` result.
+
+## Configure AdamW {#use-the-adamw-factory}
+
+```python
+model.fit(datamodule, learning_rate=1e-4, weight_decay=0.01, fused=True, max_epochs=30)
+```
+
+Ordinary fits default to fused Torch AdamW. Use `fused=False` for an unsupported
+device or `fused=None` for Torch's selection. Biases, scalar and one-dimensional
+parameters, and names containing `"norm"` receive no weight decay by default.
+See [Optimization](training-options.qmd#configure-optimization-and-callbacks) for all
+options and per-run state. When resuming, keep optimizer settings consistent
+with the saved run.
+
+## Compile encoder and pool regions
+
+`model.compile()` updates the existing model and returns it, so it can follow
+a constructor or be called programmatically before training or inference.
+
+```python
+model.compile()
+model.compile(encoders=True, pools=False)
+model.compile(encoders=False, pools=True)
+model.compile(encoders=False, pools=False)
+```
+
+Each call replaces the previous selection. The last call above restores eager
+execution.
+
+| Switch | Selected region |
+| --- | --- |
+| `encoders=True` | Branch sequence encoder stacks. |
+| `pools=True` | Learned attention reductions in branches and decoders. |
+
+Coordinate encoders, routing, tensorfield operations, mean pooling, losses,
+metrics, and optimizer execution keep their ordinary paths. Each selected
+dense region uses `torch.compile(fullgraph=True)`. Packed grouping and its
+grouped encoder execution stay eager so changing batch composition does not
+create a compiler specialization for every group layout. Custom compute
+implementations remain eager, as do customized regions and regions with
+nested hooks, including hooks added after compilation.
+
+```python
+model.compile(backend="inductor", dynamic=True, options={})
+```
+
+`backend="inductor"`, `dynamic=None`, and `options=None` are the defaults.
+Omitting `dynamic`, or passing `None`, enables dynamic shapes; `True` also
+enables them and `False` specializes shapes. Inductor defaults preserve eager
+random draws and disable CUDA graphs and automatic tensor padding.
+Backend-specific `options` override those defaults. Floating-point results can
+still differ.
+
+Compilation happens lazily on real inputs. Measure initial compilation and
+steady-state execution separately, covering the batch sizes, branch occupancy,
+training mode, and inference mode used by the application. Compilation is not
+a guaranteed speedup: first establish a useful result on representative work.
+Compiler errors in selected regions propagate rather than silently selecting
+an eager fallback.
+
+Schema mutations, checkpoint rebuilds, and model copies do not preserve
+compilation. Reapply it after loading or changing the model. Compilation is
+not stored in checkpoints.

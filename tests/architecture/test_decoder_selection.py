@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from tensordict import TensorDict
 
 import relflow as rf
-from relflow.architecture.runtime import ModelRuntime
+from relflow.architecture import runtime
 from relflow.structs.packages import Parcel
 from relflow.tensorfields.base import DecoderBase
 from relflow.tensorfields.extensions.number import Decoder as NumberDecoder
@@ -327,7 +327,7 @@ def test_ragged_extension_losses_and_full_model_gradients_match_dense_execution(
         with monkeypatch.context() as mode:
             if not optimized:
                 mode.setattr(type(configured), "coordinatewise", False)
-            output = ModelRuntime.step(model, fields, 0, strata=rf.Strata.validate)
+            output = runtime.step(model, fields, 0, strata=rf.Strata.validate)
             assert output is not None
             loss = output["loss"]
             assert torch.isfinite(loss)

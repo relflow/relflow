@@ -7,7 +7,7 @@ import torch
 from tensordict import TensorDict
 
 import relflow as rf
-from relflow.architecture.runtime import ModelRuntime
+from relflow.architecture import runtime
 from relflow.data.ragged import coalesce
 from relflow.helpers.optimizers import adamw
 from relflow.structs.enums import Strata, TensorKey, Tokens
@@ -386,7 +386,7 @@ def test_vector_unused_target_omission_preserves_training(monkeypatch: pytest.Mo
                 {"embedding": [0.4, 0.5, 0.6], "label": -1.0},
             ]
         )
-        batch = ModelRuntime.prepare(model, source, preprocess=(), strata=Strata.train, seed=2718)
+        batch = runtime.prepare(model, source, preprocess=(), strata=Strata.train, seed=2718)
         field = batch.tensors["/embedding"]
         assert field.targets.is_empty()
         if padded_targets:

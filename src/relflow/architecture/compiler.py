@@ -26,12 +26,14 @@ class Region(Generic[P]):
         eager: MethodType,
         local: bool,
         *,
+        retain_graph: bool,
         backend: str | Callable,
         dynamic: bool | None,
         options: dict[str, Any],
     ) -> None:
         self.eager = eager
         self.local = local
+        self.retain_graph = retain_graph
         original = eager.__func__
         # Dynamo caches by code object. Independent regions must not exhaust a
         # shared method's specialization limit as the number of nodes grows.
@@ -70,6 +72,13 @@ class Region(Generic[P]):
         # callbacks added after warmup and custom replacements still run eager.
         if customized(layers, additional=(CrossAttentionBlock,)):
             return cast(torch.Tensor, self.eager(*args, **kwargs))
+        if self.retain_graph:
+            from torch._functorch import config
+
+            # Repeated objective VJPs reuse saved tensors. Limit these compiler
+            # settings to this region's lazy tracing and backward generation.
+            with config.patch(donated_buffer=False, backward_pass_autocast="off"):
+                return self.compiled(*args, **kwargs)
         return self.compiled(*args, **kwargs)
 
     def __deepcopy__(self, memo: dict[int, object]) -> MethodType:
@@ -104,6 +113,7 @@ def compile(
     backend: str | Callable,
     dynamic: bool | None,
     options: dict[str, Any] | None,
+    retain_graph: bool = False,
 ) -> None:
     """Prepare all replacements before changing the model's active selection."""
     settings = {}
@@ -131,7 +141,9 @@ def compile(
         if not canonical(module, current):
             continue
         local = current.local if isinstance(current, Region) else "compute" in module.__dict__
-        region = Region(eager, local, backend=backend, dynamic=dynamic, options=settings.copy())
+        region = Region(
+            eager, local, retain_graph=retain_graph, backend=backend, dynamic=dynamic, options=settings.copy()
+        )
         replacements.append((module, region))
     clear(model)
     for module, region in replacements:

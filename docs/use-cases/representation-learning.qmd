@@ -1,0 +1,127 @@
+---
+title: Representation learning
+description: "Reuse learned customer or event context as features for separate prediction tasks."
+engine: markdown
+---
+
+Suppose a retailer has trained the [customer-outcome model](customer-outcomes.qmd)
+on purchase histories and seven-day inactivity labels. A different team wants
+to predict spending over the next 30 days. It can test whether the first
+model's learned customer context helps that new task before fitting another
+history model end to end.
+
+An embedding is a vector representation of an observation's context. This
+use case keeps the exporting model fixed, produces vectors for customer
+snapshots, and trains a separate predictor with the new task's labels.
+The new predictor still needs training data and an independent evaluation.
+
+## Reuse an already trained model
+
+The customer example saves its trained schema and learned state as
+`artifacts/customer-outcomes.rf`. Suppose your application has produced that
+artifact and prepared snapshot requests with the same customer fields and
+`recent_purchases` records, omitting `inactive_next_7_days`. Keep `customer_id`
+and `cutoff` as source metadata.
+
+This comparison keeps the original eligibility rule: each customer purchased
+within the seven days before the snapshot cutoff. A spending task covering all
+customers would need its own training population and evaluation of representation
+coverage and quality.
+
+Load that artifact and enable a root context export:
+
+```python
+import relflow as rf
+
+model = rf.Model.load("artifacts/customer-outcomes.rf")
+model.update(rf.where("address") == rf.Address(), embed=True)
+requests = rf.ArrowDataModule(
+    predict="customers/representation-requests.parquet",
+    retain=("customer_id", "cutoff"),
+)
+result = model.predict(datamodule=requests, batch_size=256, devices=1)
+```
+
+`embed=True` requests an export. It creates no new learning objective and does
+not itself train the representation. Prediction uses the learned state from
+the customer model.
+
+The `sm` schema in that example uses two root summary outputs. Keep them in
+`output_index` order when assembling features for one snapshot:
+
+```python
+snapshot_features = []
+for row in result.to_pylist():
+    root_outputs = sorted(
+        (record for record in row["representations"] if record["path"] == []),
+        key=lambda record: record["output_index"],
+    )
+    snapshot_features.append({
+        "customer_id": row["inputs"]["customer_id"],
+        "cutoff": row["inputs"]["cutoff"],
+        "features": [value for record in root_outputs for value in record["embedding"]],
+    })
+```
+
+The result is one feature vector per customer snapshot. A customer can have
+many snapshots, so join the new spending label by both customer and cutoff.
+Root context describes the whole observation. An event-level task instead
+needs a representation at the matching event positions; see
+[Reusable representations](../learn/reusable-representations.qmd) for branch
+and leaf export choices, shapes, and a columnar extraction example.
+
+## Train the separate task predictor
+
+Prepare `spend_next_30_days` from the completed 30-day window after each
+snapshot, with a fixed currency and refund policy. Fit a regressor on the
+training snapshots' vectors and those labels. The exporting model stays fixed
+while that regressor is trained.
+
+Compare three inputs for the same predictor family and held-out snapshots:
+
+| Input | Question |
+| --- | --- |
+| Existing customer features | How well does the current workflow perform? |
+| Exported context vectors | What does the learned history representation contribute on its own? |
+| Both together | Does the representation add useful information to existing features? |
+
+Also compare with fitting the 30-day target directly in a history model when
+that is affordable. MAE in source currency measures spending error; any
+contact or offer policy needs its own decision metric.
+
+Choose entity and time boundaries before training the exporting model or
+the downstream predictor. A vector computed at a past cutoff must come from
+an extractor whose training respects the evaluation boundary. Using future
+records or held-out customer labels to train the extractor changes what the
+downstream test measures.
+
+## Choose the representation's learning signal
+
+Supervised customer outcomes are one training signal. A reconstruction model
+can instead learn by predicting selected values hidden inside historical
+records. Its declared field types and nesting define the architecture; the
+hidden values define the pretraining objectives.
+
+Building a foundation model for your own structured data starts with this
+broader pretraining and an intended reuse workflow. You can then adapt the
+schema and fine-tune for labeled outcomes, or keep the pretrained model fixed
+and export context for separate predictors. The
+[pretraining tutorial](../learn/pretraining-and-fine-tuning.qmd) shows the
+first route. Schema edits retain compatible learned state and initialize
+incompatible parts according to the
+[mutation rules](../guides/schema-mutation.qmd); reevaluate the adapted model.
+For the reuse comparison on this page, keep the extractor fixed while fitting
+the separate spending predictor.
+
+A representation useful for inactivity need not provide useful product
+similarity, segmentation, or anomaly scores. Define those tasks and test
+their metrics explicitly. In particular, a candidate scorer does not
+automatically produce user and item vectors whose dot product is a retrieval
+score. [Recommendations](recommendations.qmd) separates that retrieval design
+from candidate scoring.
+
+The [representation-transfer evidence](../evidence/representation/reconstruction-transfer.html)
+compares exported context with raw inputs, an untrained encoder, and a
+corrupted-input control in its own synthetic task. Use that experiment to
+understand the mechanism, then evaluate reuse on the customer outcome and
+data population that matter to the application.

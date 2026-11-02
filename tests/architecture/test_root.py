@@ -10,9 +10,9 @@ import pytest
 import torch
 
 import relflow as rf
+from relflow.architecture import runtime
 from relflow.architecture.binding import bind
 from relflow.architecture.root import Model, MutationLockCallback, RollbackCheckpoint, RuntimePlacementCallback
-from relflow.architecture.runtime import ModelRuntime
 from relflow.data.iterables import encode
 from relflow.logging.throughput import ThroughputLogger
 from relflow.structs.enums import Strata, TensorKey, Tokens
@@ -358,7 +358,7 @@ def test_training_counters_observe_all_encoded_fields() -> None:
     )
 
     inputs = bind(model, inputs, Strata.train)
-    ModelRuntime.learn(model, inputs.observations, strata=Strata.train)
+    runtime.learn(model, inputs.observations, strata=Strata.train)
 
     for address in (Address("/", "color"), Address("/", "label")):
         embedder = model.nodes[address].embedder
@@ -440,7 +440,7 @@ def test_training_counters_learn_fixed_width_empty_observations() -> None:
     spy = SpyCounter()
     model.nodes[address].embedder.counters[TensorKey.content.name] = spy
 
-    ModelRuntime.learn(model, inputs.observations, strata=Strata.train)
+    runtime.learn(model, inputs.observations, strata=Strata.train)
 
     assert len(spy.calls) == 1
     assert tuple(spy.calls[0].shape) == (model.nodes[address].embedder.vocab.size,)

@@ -1,0 +1,6 @@
+title: Evidence publication
+author: relflow
+version: 1.0.0
+contributes:
+  shortcodes:
+    - evidence.lua

@@ -3,7 +3,8 @@ import pytest
 import torch
 
 import relflow as rf
-from relflow.architecture.runtime import ModelRuntime, execution
+from relflow.architecture import runtime
+from relflow.architecture.runtime import execution
 from relflow.structs.enums import Strata, TensorKey
 from relflow.structs.tree import Address
 from relflow.tensorfields.base import TENSORFIELDS
@@ -24,13 +25,13 @@ def test_forward_and_training_step_share_compute_after_host_preparation(monkeypa
     batch = next(iter(data.train_dataloader()))
     assert rf.Number.normalization(model, "/value")["count"] == 0
     calls = []
-    original = ModelRuntime.compute
+    original = runtime.compute
 
     def compute(module, inputs, *, plan, decoders, predict):
         calls.append((module, inputs, decoders, predict, rf.Number.normalization(module, "/value")))
         return original(module, inputs, plan=plan, decoders=decoders, predict=predict)
 
-    monkeypatch.setattr(ModelRuntime, "compute", staticmethod(compute))
+    monkeypatch.setattr(runtime, "compute", compute)
     monkeypatch.setattr(model, "log", lambda *args, **kwargs: None)
     if entry == "forward":
         predictions = model(batch.tensors, strata=" TrAiN ")
@@ -63,7 +64,7 @@ def test_host_validation_rejects_invalid_inputs_before_compute(monkeypatch, entr
     def compute(*args, **kwargs):
         pytest.fail("invalid inputs reached the tensor computation")
 
-    monkeypatch.setattr(ModelRuntime, "compute", staticmethod(compute))
+    monkeypatch.setattr(runtime, "compute", compute)
     with pytest.raises(TypeError, match="state must use an integer dtype"):
         if entry == "forward":
             model(inputs, strata="train")
@@ -84,7 +85,7 @@ def test_compute_preserves_late_extension_nested_content_and_module_hooks():
         handle = embedder.register_forward_pre_hook(lambda module, args: seen.append(args[0]))
         try:
             public = model(inputs, strata=Strata.train)
-            computed = ModelRuntime.compute(model, inputs, plan=execution(model), decoders=(), predict=False)
+            computed = runtime.compute(model, inputs, plan=execution(model), decoders=(), predict=False)
         finally:
             handle.remove()
 

@@ -1,0 +1,229 @@
+---
+title: Evaluation
+description: "Measure whether the model finds more disputes at the team's review capacity, and compare each addition fairly."
+---
+
+Suppose the risk team from the payment tutorials can investigate a fixed
+number of payments in each review period. Use a held-out dataset of past
+review decisions, model scores, and settled dispute labels to ask whether
+the ranking would have found more later disputes at that capacity.
+Assess that decision alongside validation loss before adding profile fields
+or another task. With several targets, an improving combined loss can hide
+a regression in an individual outcome.
+
+## Measure the review decision
+
+Choose the same eligible payments and review cutoff for every model. For
+the first comparison, use the latest payment from each account-review
+observation: the flat model scores that payment, and the history model's
+last transaction result scores the same payment with more context. Keep
+the settled dispute labels and 30-day outcome windows identical.
+
+For each review period, rank those payments by score and select the number
+the team can investigate. **Precision** is the fraction of reviewed payments
+that later receive disputes. **Recall** is the fraction of all later disputes
+among the eligible payments that the review found. Higher recall at the same
+review capacity means the ranking found more of those disputes.
+
+Here `scored_payments` is an application-supplied collection of records for
+one review period, each with `payment_id`, settled Boolean `disputed`, and
+the model's `probability`. `review_capacity` is the team's maximum payment
+count for that period:
+
+```python
+ranked = sorted(scored_payments, key=lambda payment: payment["probability"], reverse=True)
+reviewed = ranked[:review_capacity]
+found = sum(payment["disputed"] for payment in reviewed)
+total = sum(payment["disputed"] for payment in ranked)
+precision = found / len(reviewed) if reviewed else float("nan")
+recall = found / total if total else float("nan")
+```
+
+Use the same periods, capacities, and tie handling for each model. Aggregate
+the counts across periods before computing overall precision and recall.
+If the application instead uses a probability threshold, it may select a
+different number of payments each period. Choose that policy on validation
+data, then assess the fixed choice on test data.
+
+## Read the metrics
+
+Here `model` is the fitted history model from
+[Train and save](train-and-save.qmd). The validation file contains separate
+account-review rows with the same `trxns` structure and settled labels:
+
+```python
+import relflow as rf
+
+validation_data = rf.ArrowDataModule(validate="payments/history/validation.parquet")
+metrics = model.validate(validation_data, batch_size=256)
+validation_loss = metrics[0]["loss/validate"]
+dispute_auc = metrics[0][".trxns.disputed/validate.auc.content"]
+```
+
+Loss measures the model's target-prediction error; lower is better for the
+same objectives and observations. relflow calls this reconstruction loss
+because it predicts hidden values, including the supervised dispute labels.
+AUC measures how well scores rank disputed payments above undisputed ones
+across thresholds; higher is better, with 0.5 indicating chance ranking.
+It does not measure recall at a particular review capacity.
+
+The history model's built-in dispute metrics pool **every retained
+transaction target**, including earlier transactions. The flat model has
+one target per row. Compare these models on the same latest-payment scores
+as above; their default pooled AUCs describe different target populations.
+If the application reviews all historical transactions, instead prepare
+matching flat-model observations and outcomes for that same population.
+For a controlled test of history inputs alone, also match the training
+target population and target weighting.
+
+Set the evaluation batch size on the method call; see
+[Batch size](../guides/training-options.qmd#batch-size) for its persistent model setting and
+per-device meaning.
+
+relflow uses Lightning's native logging. Attached loggers receive training
+metrics only at the configured step cadence, every `log_every_n_steps` optimizer
+updates. Validation and test losses and content metrics summarize each pass.
+Throughput is logged per step. Each tensorfield determines which content
+metrics are available. [Training options](../guides/training-options.qmd#report-progress-and-validate)
+explains how logging, validation, and checkpoint schedules are configured.
+
+| Metric | Interpretation |
+| --- | --- |
+| `loss/train` | Training loss from the latest batch: the sum of active leaf losses after each leaf's `weight` is applied. |
+| `loss/train_epoch` | Internal training loss average for callbacks; not sent to attached loggers. |
+| `loss/validate`, `loss/test` | Aggregate reconstruction loss for each evaluation pass. |
+| `.trxns.disputed/validate.loss.state` | Reconstruction loss for dispute value states at `/trxns/disputed`. |
+| `.trxns.disputed/validate.loss.content` | Datatype-specific content loss across transaction dispute labels. |
+| `.trxns.disputed/validate.auc.content` | Example Boolean content metric over the retained transactions. |
+| `throughput/train` | Observations processed per second per rank for the latest batch, using its actual row count and reported at the configured step logging cadence. |
+| `throughput/validate`, `throughput/test`, `throughput/predict` | Observations processed per second per rank for each evaluation or prediction batch, using its actual row count. |
+
+Metric names join schema-address components with periods, preserve case,
+and prefix the address group with a period before appending `/stage.metric.component`.
+For example, `/trxns/disputed` becomes `.trxns.disputed/validate.auc.content`.
+The leading period distinguishes address groups from aggregate groups
+such as `loss` and `throughput`. The root uses `.`, as in `./validate.loss.state`.
+A leaf can contribute both state and content loss. State metrics describe valued, null, padded,
+masked, and other states; content metrics describe the value being predicted.
+Leaf metrics are logged before weighting, so their unweighted sum need not
+match the total loss.
+
+If no reconstruction coordinate is selected anywhere across distributed ranks,
+the training batch is skipped. Validation/test return zero loss for that
+batch. Repeated empty-objective warnings suggest a mismatch among masks,
+source geometry, and split contents; they do not demonstrate learning.
+
+## Check probability calibration {#check-probability-calibration}
+
+A useful ranking can still give inaccurate probability estimates.
+Calibration asks whether, for example, payments assigned probabilities near
+0.1 actually receive disputes about 10% of the time. Group held-out scores
+into ranges and compare their average probabilities with their observed
+dispute rates. Boolean training uses frequency-weighted loss, so the raw
+probability output alone does not establish calibration.
+
+Fit any calibration adjustment on a separate held-out calibration split,
+and evaluate the adjusted scores on test data. Use the same eligible
+payment population and outcome window as the review comparison.
+
+## Numeric targets and missing values
+
+For a numeric target such as the later
+[account-loss outcome](nested-context-and-account-outcomes.qmd), Number content loss and error
+metrics include selected reconstruction coordinates only when the true value
+is `valued`. Null outcomes still teach the state objective, but do not act as
+numeric zero targets. Validation/test MAE and RMSE accumulate error totals and
+valued-target counts across the full pass and distributed ranks. For example,
+one eligible target in a batch has one tenth the weight of ten targets in
+another batch. RMSE takes its square root after the squared errors have been
+combined; it is not an average of batch RMSEs. See [Number](../datatypes/number.qmd).
+
+Compare candidate models on the same source and eligible coordinates before
+setting early-stopping thresholds.
+Loss aggregation remains separate from the target-counted content metrics.
+
+## Compare models fairly
+
+Use the same held-out observations, target definitions, preprocessing, and
+masking policy across comparisons. Keep entity groups and time boundaries
+consistent with deployment; construct those splits before supplying them to
+the [data module](../guides/data-modules.qmd).
+
+Choose an output-specific metric alongside `loss/validate`. Number errors and
+categorical accuracy measure different things; their scale and eligible
+coordinates differ. A state-accuracy improvement alone does not establish
+better content predictions. Use validation data to choose thresholds and
+checkpoints, leaving the test split for a final assessment.
+
+Hash validation uses fixed salt zero, matching test and prediction; training
+still resalts each batch. Keep this encoding policy consistent when comparing
+validation scores. If using
+[EMA](../guides/checkpoints-ema-and-resuming.qmd#average-learned-parameters-with-ema), validation and checkpoint
+selection during fit use the averaged parameters. Record that choice alongside
+the architecture and dataset split.
+
+Evaluate the additions in the same order as the examples. Change one modeling
+choice at a time:
+
+| Question | Comparison |
+| --- | --- |
+| Does the history help? | Compare the payment-only model, the history model, and a tuned tabular baseline with spending counts, totals, and recency on the same latest-payment decisions. |
+| Do richer transaction and profile fields help? | Add payment channel and account tenure to the same history model. |
+| Do shared outcomes help? | Compare the joint dispute/repeat model with a separate model for each task, inspecting each outcome's metric. |
+| Does deeper account context help? | Add purchase line items, then the separate withdrawal history in the [account example](nested-context-and-account-outcomes.qmd), keeping the same transaction-level targets. |
+| Does pretraining help? | Compare fine-tuning with the same supervised architecture trained from scratch. |
+| Is the representation reusable? | Keep the exporting model fixed and compare downstream predictors using existing features, exported vectors, and both together. |
+
+Keep the prediction time and future outcome window identical across these
+comparisons. A payment without a recorded dispute yet may still be awaiting
+its outcome; define when a negative label is ready before building the splits.
+See [Customer outcomes](../use-cases/customer-outcomes.qmd) for concrete
+entity, history, and outcome-window definitions.
+
+Preserving individual events has a cost: more preparation, retained records,
+and model computation. Choose that representation when its task improvement
+justifies those costs. A good aggregate-feature model remains a useful option
+and a necessary comparison.
+
+Record the generated architecture and capacity preset with each result.
+Changing the schema can change both the available context and the model's
+size. Measure training cost and serving latency for the actual record
+lengths and hardware alongside predictive quality. A result on one dataset
+does not establish the same advantage for another task or a reused embedding.
+
+Boolean fields accept one threshold or a list of thresholds for metrics.
+When constructing the model, replace the `disputed=rf.Boolean(mask=True)`
+field inside `trxns` with this declaration:
+
+```python
+disputed=rf.Boolean(
+    mask=True,
+    threshold=[0.5, 0.7, 0.9],
+)
+```
+
+This changes threshold-qualified accuracy, precision, recall, and specificity
+metrics. It does not change the training loss or the probability-only
+prediction payload. Category `topk` likewise adds datatype-specific metrics;
+see the relevant [datatype reference](../datatypes/index.qmd).
+
+## Measure dependence on an input
+
+An ablation temporarily removes an input and reevaluates the trained model.
+For example, removing amount evidence from every transaction, including the
+latest, measures how the same model performs without those values. Compare
+the target's task metric as well as total loss. Missing-input
+behavior can be out of distribution for a model that never saw such absence;
+training with suitable structural dropout can make the comparison more useful.
+An ablation shows dependence under this experiment, not causation.
+
+[Schema mutation](../guides/schema-mutation.qmd) shows how to select inputs and
+temporarily override their settings, including what is restored afterward.
+
+The [modeling evidence](../evidence.qmd) give worked examples of held-out
+metrics, corrupted-input controls, and deliberately lossy representations.
+Each scenario includes its model tree and the current evidence for its claim.
+
+Next, extend the model with
+[profile context and a second outcome](profile-context-and-a-second-outcome.qmd), and
+evaluate each addition in the order above.

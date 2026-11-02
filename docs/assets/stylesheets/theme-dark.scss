@@ -1,0 +1,74 @@
+/*-- scss:defaults --*/
+
+// The dark palette mirrors the light one: the same navy chrome, a lighter
+// interactive blue for contrast, and the diagram renderer's dark neutrals for
+// the page, surfaces, borders, and text.
+
+$web-font-path: false;
+$font-family-sans-serif: system-ui, sans-serif;
+
+$body-bg: #1e2322;
+$body-color: #e0e7e1;
+$headings-color: #eef2ef;
+$border-color: #3a4541;
+
+$primary: #4f78a6;
+$link-color: #7f9fc4;
+$navbar-bg: #223144;
+$footer-bg: #161a19;
+$footer-fg: #b9c4bd;
+$sidebar-hl: #7f9fc4;
+$toc-active-border: #7f9fc4;
+
+$code-color: #e0e7e1;
+$code-bg: #262d2b;
+$code-block-bg: #181c1b;
+$breadcrumb-bg: transparent;
+
+// One sidebar text size at every depth; hierarchy comes from indentation.
+$sidebar-font-size: 0.9rem;
+$sidebar-font-size-section: 0.9rem;
+$sidebar-font-size-collapse: 1rem;
+$sidebar-font-size-section-collapse: 1rem;
+
+/*-- scss:rules --*/
+
+:root {
+  --rf-text: #{$body-color};
+  --rf-surface: #181c1b;
+  --rf-border: #52645b;
+  --rf-accent: #627a60;
+}
+
+.navbar-logo { max-height: 3rem; }
+
+.callout {
+  background-color: #181c1b;
+  border-left-color: #627a60;
+}
+
+.callout.callout-warning {
+  border-left-color: #947950;
+}
+
+.breadcrumb {
+  background-color: transparent;
+  padding-left: 0;
+}
+
+main.content :not(pre) > code:not(.sourceCode) {
+  background-color: #262d2b !important;
+}
+
+/* The outline button needs lighter text than the primary blue on this background. */
+body.home .btn-outline-primary {
+  color: #e0e7e1;
+  border-color: #4f78a6;
+}
+
+body.home .btn-outline-primary:hover,
+body.home .btn-outline-primary:focus {
+  background-color: #2b3f54;
+  border-color: #7f9fc4;
+  color: #fff;
+}

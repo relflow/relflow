@@ -1,0 +1,41 @@
+name: Validate documentation
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Validate and render static documentation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: docs/uv.lock
+      - name: Install documentation tools
+        run: uv sync --locked --project docs
+      - name: Check sources and evidence publication
+        run: make check
+      - name: Render and validate every page
+        run: make check-docs
+      - name: Upload review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-site
+          path: docs/site
+          if-no-files-found: error
+          retention-days: 7

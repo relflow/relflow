@@ -1,0 +1,129 @@
+---
+title: Number
+description: "A magnitude such as a payment amount, standardized with learned online statistics."
+---
+
+`Number` represents a numeric magnitude. In the payment example below,
+`amount` is recorded in a common currency, so `84.50` and `8.45` describe
+different-sized purchases. The model uses that value alongside the merchant
+to predict a later dispute. Keep the amount's units consistent across
+training and prediction.
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    amount=rf.Number,
+    merchant=rf.Category,
+    disputed=rf.Boolean(mask=True),
+)
+```
+
+One labeled payment:
+
+```yaml
+amount: 84.50
+merchant: North Market
+disputed: false
+```
+
+Use `rf.Number(mask=True)` to predict a numeric value, such as a refund amount.
+Use [Quantile](quantile.qmd) for percentile-based values,
+[Category](category.qmd) for numeric-looking labels, and
+[DateParts](dateparts.qmd) for recurring calendar positions.
+
+## Input and representation
+
+The Arrow leaf must contain integers or floating-point values. Values stay in
+float64 from tensorization through normalization and the readout (float32 on
+Apple MPS, which has no float64), so values far from zero keep their spread.
+A floating-point NaN is not a number: it takes the `other`
+[value state](index.qmd#value-state) with zero content, so it is neither
+embedded as a value nor regressed against. Infinite values stay `valued`; the
+embedder clamps them and they never enter the regression loss. Integers beyond
+±2^53 are rejected; represent identifiers with [Hash](hash.qmd). Put repeated
+measurements inside a [Branch](branch.qmd). Nulls and absent branch slots have
+separate value states.
+
+The embedder standardizes two lanes of every value, the source value and its
+signed log scale `sign(x) * ln(1 + |x|)`, each with its own online statistics,
+Fourier features, and a monotone channel, so additive structure reads from the
+raw lane and multiplicative or heavy-tailed structure from the log lane without
+a per-field choice. Standardized values beyond the Fourier safe range are
+clamped; this is not application-level range validation.
+
+## Options
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `jitter` | `rf.Jitter()` | Training noise; `normalize=True` uses standardized units, `False` uses source units. See [Jitter](../reference/jitter.qmd). |
+| `n_bands` | `8` | Positive lower Fourier exponent bound; frequencies start at `2 ** -n_bands`. |
+| `offset` | `4` | Positive upper Fourier exponent bound; frequencies end at `2 ** offset`. |
+| `alpha` | `None` | Cumulative normalization; a value strictly between `0` and `1` selects exponential updates. |
+| `objective` | `"mae"` | Reconstruction loss. `"mae"` trains on the signed log scale with a standardized readout and adds the source-unit absolute error; `"mse"` and `"huber"` train in source units. |
+
+There are `n_bands + offset + 1` Fourier frequencies.
+[Shared leaf options](index.qmd#shared-leaf-options)
+control masking, decoder pooling, and exported embeddings.
+
+## Learned state and output
+
+Each lane's normalization observes finite, valued **pristine training
+values**, before masking and jitter; a hidden target keeps statistics for its
+readout the same way. Validation, test, and prediction reuse these statistics;
+checkpoints preserve them. Distributed training combines each batch's
+sufficient statistics across ranks before updating. The standardizing scale is
+the standard deviation with a small positive floor to avoid division by zero.
+A constant lane standardizes to zero.
+
+The decoder's readout starts at the training mean of its scale and predicts
+standardized deviations, so targets far from zero or with heavy tails need no
+option. Under `"mae"` the readout lives on the signed log scale, where the
+median-optimal prediction is unchanged by the monotone map, and the loss adds
+the source-unit absolute error, bounded six training-scale deviations from the
+mean, so the bulk stays sharp while tails cannot dominate. `"mse"` and
+`"huber"` keep source units because their optimum is not transform-invariant.
+Predictions and the MAE and RMSE metrics always report source units.
+
+Statistics and the readout stay float64 and outside mixed precision, so BF16
+never quantizes source values; counts remain int64. Centered batch moments
+avoid subtracting nearly equal squared sums when values have large offsets.
+
+For an application-supplied trained `model`:
+
+```python
+normalization = rf.Number.normalization(model, rf.Address("amount"))
+```
+
+The snapshot describes the raw lane: `mean`, `variance`, `std` (the
+standardizing scale), `count`, and `alpha`. Repeated training presentations
+count again; `count` is `None` for exponential updates.
+
+Content reconstruction loss scales errors by the training-scale deviation and
+includes only selected reconstruction targets whose true state is `valued` and
+whose value is finite. A selected null or NaN contributes state loss but no
+numeric content loss; zero remains a valid numeric target. If a batch has no
+eligible valued targets, the numeric content loss contributes zero.
+
+MAE and RMSE metrics use source units. Validation and test accumulate absolute
+or squared errors and eligible target counts across the pass and distributed
+ranks. Thus MAE is total absolute error divided by target count, and RMSE is
+the square root of total squared error divided by target count. Transactions
+in longer histories count individually; this is not a mean of per-account or
+per-batch errors. Training reports the current batch's valued-target metric,
+or `NaN` when it has no such targets. A pass with no eligible numeric targets
+does not establish prediction quality. See
+[numeric evaluation](../learn/evaluation.qmd#numeric-targets-and-missing-values).
+
+Prediction `content` is a `float64` scalar, even
+when the most likely predicted state is not `valued`; read it alongside
+`state` and `inferred` in the [prediction envelope](../reference/prediction-output.qmd).
+
+The [number lanes evidence](../evidence/representation/number-lanes.html) checks that
+the raw and log lanes with the log-scale readout stay within a tenth of the
+best single representation across additive, moderate, heavy-tailed, and
+far-from-zero targets. The
+[null-versus-zero evidence](../evidence/state/null-versus-zero.html) isolates the
+information in validity state. The [weighted-sum evidence](../evidence/aggregation/raw-value-weight-sum.html)
+tests learned interaction between visible numeric fields, with controls for
+their pairing and order.

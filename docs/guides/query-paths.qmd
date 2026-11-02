@@ -1,0 +1,155 @@
+---
+title: Query paths
+description: "Read differently named or nested source values without renaming the model's fields."
+engine: markdown
+---
+
+Use `query=` when a model node reads a differently named or nested source.
+Every path starts from the value selected by its parent node. When names and
+nesting already match the schema, no query is needed; see
+[Prepare observations](../learn/prepare-observations.qmd).
+
+Suppose the account-review observation from
+[Prepare observations](../learn/prepare-observations.qmd) arrives inside a
+`payload`, with different names for its fields:
+
+```yaml
+payment_id: payment-42
+payload:
+  transactions:
+    - booked_at: "2026-05-21T10:00:00"
+      gross_amount: 32.00
+      merchant_info:
+        name: Station Cafe
+      was_disputed: false
+    - booked_at: "2026-05-27T18:15:00"
+      gross_amount: 56.20
+      merchant_info:
+        name: North Market
+      was_disputed: true
+    - booked_at: "2026-05-28T14:30:00"
+      gross_amount: 84.50
+      merchant_info:
+        name: North Market
+      was_disputed: false
+```
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    query="payload",
+    trxns=rf.Branch(
+        query="transactions[-32:]",
+        length=32,
+        booked_at=rf.DateParts(
+            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
+        ),
+        amount=rf.Number(query="gross_amount"),
+        merchant=rf.Category(query="merchant_info.name"),
+        disputed=rf.Boolean(query="was_disputed", mask=True),
+    ),
+)
+```
+
+The root selects `payload`. The branch selects the last 32 transaction records,
+then each child reads relative to a transaction. Children do not repeat the
+parent's path. The list includes the latest payment exactly once at its end,
+and `mask=True` hides and predicts every transaction's dispute label as
+before.
+
+```{typst}
+//| label: fig-query-order
+//| fig-cap: "Queries select source values while the model keeps its own readable field names."
+//| fig-alt: "Payment selects payload and owns one repeated trxns branch selected from transactions[-32:]. Each transaction reads booked_at DateParts, gross_amount as amount, merchant_info.name as merchant, and was_disputed as a hidden disputed target. Every transaction is supervised."
+#tree(node("payment", kind: "root", detail: "payload", children: (
+  node("trxns", kind: "branch", repeated: true, detail: "transactions[-32:]", children: (
+    node("booked_at", type: "DateParts"),
+    node("amount", type: "Number", detail: "gross_amount"),
+    node("merchant", type: "Category", detail: "merchant_info.name"),
+    node("disputed", kind: "target", type: "Boolean", detail: "was_disputed; every transaction"),
+  )),
+)))
+```
+
+Without a query, the root uses the source row and a child selects its own name.
+A child branch must select a list of structs. Branch queries select source
+positions before branch geometry is resolved. With `length=None`, the branch
+keeps all selected slots. A finite `length` applies its overflow policy to that
+selection; each batch then uses its largest retained width. Descendant widths
+are determined from the retained parent records. See
+[Branch](../datatypes/branch.qmd#automatic-lengths-and-limits).
+
+## Path syntax
+
+| Path | Selection |
+| --- | --- |
+| `merchant_info.name` | A nested struct member |
+| `["gross amount"]` | A member whose name needs quoting |
+| `transactions[*].gross_amount` | A leaf value across one list axis |
+| `transactions[0].merchant_info.name` | One position; negative indices count from the end |
+| `transactions[-10:]` | A slice of each list |
+| `attributes["country"]` | One literal Arrow map key |
+
+`[*]` retains a list axis; it does not flatten it. Use it when a leaf path
+crosses an unmodeled list. Children of a modeled branch already operate on each
+branch element.
+
+Slices use half-open, clamped bounds; steps such as `[::2]` are unsupported.
+Map keys may be strings, integers, or booleans that match the Arrow key type
+exactly. Duplicate matches are errors. Paths have no `$` source-root prefix.
+
+## Structural absence
+
+| Source condition | Result |
+| --- | --- |
+| Present, non-null value | `valued` |
+| Present field with a null value | `null` |
+| Null ancestor, out-of-range list index, or absent map key | `padded` |
+| Required field absent from the Arrow schema | Binding error |
+
+An omitted key in a Python record and an explicit null can become the same
+Arrow null slot. Represent a distinction explicitly if your application needs it.
+
+## Transform values before querying
+
+Queries navigate structure. They do not filter, join, sort, compute expressions,
+or stack fields. If source transactions also include a `kind` field, a Polars
+preprocessor can retain purchases before the query reads `payload`. Filter whole
+transaction structs so their timestamps, amounts, merchants, and labels stay aligned:
+
+```python
+import polars as pl
+
+@rf.preprocess
+def purchases(frame: pl.DataFrame) -> pl.DataFrame:
+    payload = pl.col("payload")
+    return frame.with_columns(
+        payload=payload.struct.with_fields(
+            transactions=payload.struct.field("transactions").list.eval(
+                pl.element().filter(
+                    pl.element().struct.field("kind").eq("purchase").fill_null(False)
+                )
+            )
+        )
+    )
+```
+
+Keep the review cutoff and future label window unchanged when filtering the
+source records.
+
+## Targets at prediction time
+
+A directly bound `mask=True` target may be omitted from prediction input. Its
+containing repeated branches must remain: their lists define output positions.
+Training, validation, and testing still need target values.
+
+An explicitly queried target, such as `disputed` above, must retain its queried
+source structure and field schema at prediction time. Keep `was_disputed: null`
+on every transaction for this model. Prefer direct binding when prediction
+requests should omit the label entirely.
+
+When a query fails, inspect the **processed** Arrow schema, then read the path
+from its parent's selected value. Errors identify the query segment and model
+address. See [Preprocessing](preprocessing.qmd) for preparing nested
+records and shared roles.

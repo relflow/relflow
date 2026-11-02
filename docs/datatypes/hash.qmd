@@ -1,0 +1,84 @@
+---
+title: Hash
+description: "Identifier equality without a learned vocabulary."
+---
+
+An account's current payment and an earlier payment may share a merchant ID,
+even when that ID was not seen during training. `Hash` supplies an equality
+signal without learning a lasting vocabulary for the IDs. Here, the application
+provides the previous payment's merchant ID alongside the current payment.
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    merchant_id=rf.Hash,
+    previous_merchant_id=rf.Hash,
+    amount=rf.Number,
+    merchant=rf.Category,
+    disputed=rf.Boolean(mask=True),
+)
+```
+
+One labeled payment:
+
+```yaml
+merchant_id: merchant-8042
+previous_merchant_id: merchant-8042
+amount: 84.50
+merchant: North Market
+disputed: false
+```
+
+Both IDs identify North Market in this example; the earlier payment must be
+known before the current one. The [Category](category.qmd) field separately
+lets the model learn persistent patterns for merchant labels seen in training.
+
+## Input and options
+
+Accepts scalar Arrow integers, strings, and binary values. Normalize other
+identifier types upstream. A null has its own state.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `n_hashes` | `1` | Positive number of independent signed 64-bit fingerprint lanes. |
+| `n_bands` | `8` | Positive lower exponent bound for Fourier features. |
+| `offset` | `4` | Positive upper exponent bound for Fourier features. |
+| `n_buckets` | `4` | Reconstruction classes per lane; must exceed one. |
+
+## Equality and learning
+
+Every Hash field shares a salt within one local-rank batch. Matching values of
+the same Arrow family and matching Hash configuration therefore have the same
+representation across fields. Training derives a new salt for every batch
+from the run seed, the epoch, and the batch ordinal, so a seeded run encodes
+the same batches identically on every repeat; validation, test, and prediction
+use zero. Validation uses the same deterministic encoding as inference, so
+checkpoint selection is not perturbed by the training salt. Other stochastic
+model or masking choices can still affect results. Hashes are not durable
+identifiers across library versions.
+
+Hash lanes become Fourier features directly in model space; there is no learned
+content vocabulary or projection. Non-valued positions use state embeddings.
+Reconstruction predicts quantized hash lanes, with `n_buckets ** n_hashes`
+possible fingerprints, rather than recovering the original identifier.
+
+Equal fingerprints provide an equality signal while the tokens remain together.
+They do not guarantee a join or item correspondence after branch reduction.
+Use `reduction=None` on a transaction-history branch when the root needs its
+individual tokens for comparison; see
+[Branch reduction](branch.qmd#reduce-branch-memory).
+
+Compare the [unseen-identity equality evidence](../evidence/identity/unseen-identity-equality.html)
+with the [sibling-collection overlap boundary](../evidence/relational/direct-sibling-hash-overlap.html).
+Their trees show why a working equality representation alone does not establish
+successful comparison across collections.
+The [retrieval capacity evidence](../evidence/relational/retrieval-capacity.html)
+extends this evaluation to distractors, larger collections, and a separately
+trained two-hop task, with a separate result for each condition.
+
+## Output
+
+Hash has no decoded public content. `embed=True` can export a contextual
+embedding, as described in [shared leaf options](index.qmd#shared-leaf-options).
+Keep IDs outside the model schema when equality itself is not useful.
