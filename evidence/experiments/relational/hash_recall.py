@@ -37,7 +37,7 @@
 #     Median broken identities nRMSE >= 0.80: true
 #     Median corruption gap >= 0.50: true
 #     Median identity recall nRMSE <= 0.25: true
-#   duration_seconds: 474.703
+#   duration_seconds: 413.084
 #   metrics:
 #     median:
 #       broken_nrmse: 1.4012215913221622
@@ -67,9 +67,9 @@
 #   provenance:
 #     code_sha256: 47897136c68014b2b6f05ac4792428cfd059acd054b9f9791c6ff63941000255
 #     cuda: null
-#     evidence_revision: 7dec5e860dc389c37c3642d8904867249e831773
+#     evidence_revision: d2857b43bd13e08d36a8bd921c6ecbfa16e11595
 #     gpu: null
-#     host: 5d20943363b4
+#     host: d95b225c14c2
 #     packages:
 #       lightning: 2.6.4
 #       numpy: 2.4.6
@@ -83,38 +83,40 @@
 #     platform: Linux-6.8.0-138-generic-x86_64-with-glibc2.41
 #     python: 3.12.16
 #     relflow_path: /tmp/runtime/lib/python3.12/site-packages/relflow
-#     relflow_revision: 7dec5e860dc389c37c3642d8904867249e831773
+#     relflow_revision: d2857b43bd13e08d36a8bd921c6ecbfa16e11595
 #     relflow_source_sha256: 77953506049ed76c92adc5f32a9bcc32432a788068a4e366b2f78bcf709f29a2
-#     script_sha256: cb9e0e7162cf645bd120d51261b0d3b639265fbcd40481e4bab3b94114270dc1
-#     source_sha256: 392d66993fce2c21982e8585fa02e24b771abc3f366df1463475889ecf10f32f
-#     wheel_sha256: f38d698e13bd1bfa65f22f7eaf89bab8a17db0bb401d89e19c4112afcc467c37
+#     script_sha256: a50c2a8a9359d25aa1143c6149c74b23c192526dc022a114db3d799def41873c
+#     source_sha256: 0484a0cc76f73d88ef90640e617b8e62cfc821a2f9416e1dfe9461cf0ed04ae9
+#     wheel_sha256: 2d56b21a29d294a412f67d17223f38d49b25ae4b2151cee12eb6e6c19073355d
 #   seed: 17
-#   started_at: '2026-11-02T04:09:35.427600+00:00'
+#   started_at: '2026-11-02T17:48:45.394958+00:00'
 #   steps_override: null
 #   threads: 1
 # evidence-report:
-#   run_id: gh-41386396488-1
+#   run_id: gh-41494093900-1
 #   candidate:
-#     revision: 7dec5e860dc389c37c3642d8904867249e831773
-#     wheel_sha256: f38d698e13bd1bfa65f22f7eaf89bab8a17db0bb401d89e19c4112afcc467c37
+#     payload_sha256: 2169c968a7733085889a6eed6e895bcb2590059bcc46243d49a61ffacc42f67f
+#     revision: d2857b43bd13e08d36a8bd921c6ecbfa16e11595
+#     wheel_sha256: 2d56b21a29d294a412f67d17223f38d49b25ae4b2151cee12eb6e6c19073355d
 #   baseline:
+#     payload_sha256: 2a6af4bd3869faac23f6b7327f2c59e8f5b367580b2f2fa609710958775c08ed
 #     revision: 7dec5e860dc389c37c3642d8904867249e831773
-#     wheel_sha256: f38d698e13bd1bfa65f22f7eaf89bab8a17db0bb401d89e19c4112afcc467c37
-#   evidence_revision: 7dec5e860dc389c37c3642d8904867249e831773
-#   executor_revision: 349b2202e6390a5fe0cbdf09a0c5972e495351ed
-#   manifest_sha256: 1f096d9b4dcdf1b2235963715e8b41c325d2a989f2cf15da7c154ddfb9bfb08d
+#     wheel_sha256: d3da50b65e0c0c7b98059f095b82bf6bf5d0ea0c5ccd0f302015118075f1dd85
+#   evidence_revision: d2857b43bd13e08d36a8bd921c6ecbfa16e11595
+#   executor_revision: 92b3c887eabc598ee2fc6c9dba4e05b9166cb8ba
+#   manifest_sha256: 4f0926f3fc366fd8d14bf728b2d06f4a475d61852679176704816c110ae51cfd
 #   passed: true
 #   github_run:
-#     event: workflow_dispatch
+#     event: push
 #     head_branch: main
-#     head_sha: 7dec5e860dc389c37c3642d8904867249e831773
-#     html_url: https://github.com/relflow/relflow/actions/runs/41386396488
+#     head_sha: d2857b43bd13e08d36a8bd921c6ecbfa16e11595
+#     html_url: https://github.com/relflow/relflow/actions/runs/41494093900
 #     path: .github/workflows/ci.yml
 #     run_attempt: 1
-#     run_id: 41386396488
+#     run_id: 41494093900
 #     workflow_id: 403231172
-#   release: https://github.com/relflow/relflow/releases/tag/evidence-ci-41386396488-attempt-1
-#   reports_sha256: fca05e4cdb79410b5090075bab03e4fc6d4f2fbc70e798f208976f4f1d8a7ff9
+#   release: https://github.com/relflow/relflow/releases/tag/evidence-ci-41494093900-attempt-1
+#   reports_sha256: b1bfee5622ffbd389b1777443dc05e6d8f08dccff9e2540a601f0c2608948594
 # ---
 #
 # ## Example
