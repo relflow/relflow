@@ -13,7 +13,7 @@
   <a href="https://github.com/relflow/relflow/actions/workflows/compatibility.yml?query=branch%3Amain"><img alt="Dependency compatibility" src="https://github.com/relflow/relflow/actions/workflows/compatibility.yml/badge.svg?branch=main" /></a>
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&amp;logoColor=white" />
   <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-2E8B57" /></a>
-  <a href="https://www.relflow.ai/en/latest/"><img alt="Documentation build" src="https://github.com/relflow/relflow/actions/workflows/ci.yml/badge.svg?branch=main&amp;event=push" /></a>
+  <a href="https://www.relflow.ai/en/latest/"><img alt="Documentation build" src="https://app.readthedocs.org/projects/relflow/badge/?version=latest" /></a>
   <!-- discord-invite:start -->
   <a href="https://discord.gg/DVyZUkvTFA"><img alt="Discord channel invite" src="https://img.shields.io/badge/discord-join%20the%20channel-5865F2?logo=discord&amp;logoColor=white" /></a>
   <!-- discord-invite:end -->
