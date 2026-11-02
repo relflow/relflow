@@ -51,11 +51,11 @@ task predictor.
 ```{typst}
 //| label: fig-embedding-sites
 //| fig-cap: "Where embed=True is set decides what each exported vector describes: the observation, the transaction history, or one transaction."
-//| fig-alt: "An account root with embed=True exporting one vector per observation. It contains account_age_days Number and a repeated trxns branch with embed=True exporting one summary per observation under the xs preset. Inside the branch, booked_at DateParts, amount Number, merchant Category annotated that a leaf export would give one vector per transaction, channel Enum, and a hidden disputed Boolean target at every transaction."
+//| fig-alt: "An account root with embed=True exporting one vector per observation. It contains account_age_days Number and a repeated trxns branch with embed=True exporting one summary per observation under the xs preset. Inside the branch, booked_at Period, amount Number, merchant Category annotated that a leaf export would give one vector per transaction, channel Enum, and a hidden disputed Boolean target at every transaction."
 #tree(node("account", kind: "root", width: 150pt, detail: "embed=True", body: [One vector per observation.], children: (
   node("account_age_days", width: 150pt, type: "Number"),
   node("trxns", kind: "branch", repeated: true, width: 150pt, detail: "embed=True", body: [One summary per observation with the `xs` preset.], children: (
-    node("booked_at", type: "DateParts"),
+    node("booked_at", type: "Period"),
     node("amount", type: "Number"),
     node("merchant", type: "Category", width: 165pt, body: [`embed=True` here would export one vector per transaction.]),
     node("channel", type: "Enum"),

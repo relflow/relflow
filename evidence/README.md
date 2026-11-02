@@ -3,8 +3,9 @@
 This directory owns the 79 controlled synthetic experiments, their protocol,
 lab runner, runtime tests, and current publication results.
 Stable P identifiers identify experiments throughout the runner, reports, and
-website. Each script's frontmatter records its ID, group, selected full run,
-metrics, checks, seed, environment, source provenance, and retained report link.
+website. Scripts declare their ID, group, and presentation options. Measured
+runs, checks, seeds, environment, source provenance, and report links live in
+separate publication JSON assets.
 
 Run from the repository root:
 
@@ -62,46 +63,63 @@ Tailscale secret, or self-hosted GitHub runner is required.
 
 ## Reports and publication
 
-Every main push validates the complete paired suite against the pre-push
+Every main push still validates the complete paired suite against the pre-push
 revision. PRs and merge groups use their actual comparison base; manual runs
 use the current commit's first parent by default; `evidence_base=<full-sha>`
-selects an explicit ancestor for repeatable manual comparisons. After the complete CI run
-succeeds, the evidence publisher automatically validates and retains its
-reports in an immutable Release in `relflow/relflow`. It opens a publication
-PR updating experiment results and the README measurements. Merge that PR
-through the normal checks and review to update the Read the Docs build.
-Publication-only changes do not recursively open another publication PR.
+selects an explicit ancestor for repeatable manual comparisons. Routine
+reports remain Actions artifacts for 90 days, with tested input wheels and
+requirements retained for seven days.
 
-Routine CI reports are Actions artifacts retained for 90 days; input wheels
-and requirements are retained for seven days. To refresh the current
-measurements explicitly, start another full run on `main`:
+**Only package version releases publish new evidence selections.** The release
+workflow passes its exact successful main CI run, source revision, and version
+to `publish-evidence.yml`. After validating complete coverage, behavioral
+checks, provenance, source/wheel digests, the runtime lock, and report integrity,
+the publisher renders a review site from the selected records and freezes
+`evidence-v<version>` before the package's `v<version>` tag is published.
+
+The immutable evidence Release contains:
+
+- `publication.json`: the versioned selection and original candidate results.
+- `measurements.md`: generated comparison figures for publication.
+- `evidence-reports.tar.gz`: records, logs, summary, and HTML report.
+- `evidence-inputs.tar.gz`: exact tested wheels and runtime requirements.
+- `github-run.json`, `SHA256SUMS`, and the reuse receipt when applicable.
+
+Publication never edits experiment headers or the source README, commits a
+bot branch, or opens a follow-up PR. An already published package version
+keeps its evidence selection frozen. New measurements for publication require
+a new version. Report Releases do not replace the latest package Release.
+
+The checked-in `results.json` preserves the existing historical snapshot for
+offline builds. `evidence/render.py` combines it, or an explicitly selected
+publication JSON, with experiment definitions. Hosted docs read their matching
+public release asset after verifying its digest and source revision. Unreleased
+previews use the last released selection; before the first asset-based release
+they use the bootstrap snapshot. No model import, cloud account, or new API
+credential is required.
+
+To execute another complete CI run without publishing a new selection:
 
 ```sh
 gh workflow run ci.yml --repo relflow/relflow --ref main
 ```
 
-To execute every task without reusing a report or baseline:
+To execute every task without report or baseline reuse:
 
 ```sh
 gh workflow run ci.yml --repo relflow/relflow --ref main \
   -f force_fresh_evidence=true
 ```
 
-Successful manual main runs also feed automatic publication. To retain a
-completed run explicitly and obtain a publication patch for review, use:
+The release workflow normally publishes evidence automatically. To prepare
+assets explicitly for an unreleased version using its verified main CI run:
 
 ```sh
 gh workflow run publish-evidence.yml --repo relflow/relflow \
-  -f tag=<unique-release-tag> -f library_run_id=<library-actions-run-id>
+  -f version=0.4.3 -f library_run_id=<successful-main-ci-run-id>
 ```
 
-The publisher verifies complete coverage, checks, provenance, source and wheel
-digests, and the runtime lock. Failed, stale, partial, or regressing runs cannot
-be selected. The site's normal build reads committed records and canonical
-sources. Report Releases do not replace the latest package release.
-
-Select the candidate records from that completed full run, preserving their
-actual metrics, checks, seeds, environment, tested revisions, and source digests.
-Updating source or output readers does not establish a fresh learning result.
-A newly measured selection requires complete execution; a verified reused
-selection retains the original execution identity and its separate receipt.
+Keep actual metrics, checks, seeds, environment, tested revisions, and source
+digests bound to the measured execution. A verified reused selection retains
+its original identity and separate current-request receipt. Source edits and
+reader changes do not establish fresh learning results.

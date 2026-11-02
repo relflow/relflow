@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -59,9 +60,37 @@ def frontmatter(source: str, header: dict[str, Any]) -> str:
     return "".join(lines[: start + 1]) + comments + "".join(lines[end:])
 
 
-def registry(root: Path | None = None) -> dict[str, dict[str, Any]]:
+def snapshot(path: Path) -> dict[str, Any]:
+    """Read a finite result selection without importing any experiment or model."""
+    document = json.loads(path.read_text())
+    if (
+        not isinstance(document, dict)
+        or set(document) != {"schema", "version", "revision", "report", "results"}
+        or type(document["schema"]) is not int
+        or document["schema"] != 1
+        or not isinstance(document["version"], str)
+        or not isinstance(document["revision"], str)
+        or not isinstance(document["report"], dict)
+        or not isinstance(document["results"], dict)
+        or any(
+            not re.fullmatch(r"P\d+", key) or not isinstance(value, dict) for key, value in document["results"].items()
+        )
+    ):
+        raise ValueError(
+            f"Evidence publication {path} must contain a versioned result selection keyed by P identifiers"
+        )
+    try:
+        json.dumps(document, allow_nan=False)
+    except ValueError as error:
+        raise ValueError(f"Evidence publication {path} contains nonfinite measurements") from error
+    return document
+
+
+def registry(root: Path | None = None, *, publication: Path | None = None) -> dict[str, dict[str, Any]]:
     """Discover canonical experiments directly from their frontmatter."""
     root = root or Path(__file__).resolve().parents[1]
+    selected = publication or root / "results.json"
+    recorded = snapshot(selected) if publication is not None or selected.is_file() else {"report": {}, "results": {}}
     entries = {}
     for script in sorted((root / "experiments").glob("*/*.py")):
         if script.is_symlink() or script.parent.is_symlink():
@@ -74,9 +103,10 @@ def registry(root: Path | None = None) -> dict[str, dict[str, Any]]:
             "script": script.relative_to(root).as_posix(),
             "page": f"docs/evidence/{script.parent.name}/{script.stem.replace('_', '-')}.py",
             "header": header,
-            "run": header.get("evidence-result"),
+            "run": recorded["results"].get(identifier),
+            "report": recorded["report"],
         }
     return dict(sorted(entries.items()))
 
 
-__all__ = ["fingerprint", "frontmatter", "metadata", "registry"]
+__all__ = ["fingerprint", "frontmatter", "metadata", "registry", "snapshot"]

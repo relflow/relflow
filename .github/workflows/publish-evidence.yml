@@ -1,71 +1,75 @@
-name: Publish selected evidence reports
+name: Publish release evidence assets
 
 on:
-  workflow_run:
-    workflows: [CI]
-    branches: [main]
-    types: [completed]
+  workflow_call:
+    inputs:
+      library_run_id:
+        description: Successful main CI run containing the complete paired report
+        type: string
+        required: true
+      version:
+        description: Package version being released
+        type: string
+        required: true
+      source_sha:
+        description: Exact source checked by release CI
+        type: string
+        required: true
   workflow_dispatch:
     inputs:
-      tag:
-        description: Optional unique immutable report release tag
-        required: false
       library_run_id:
-        description: Successful main CI run containing complete paired reports and tested inputs
+        description: Successful main CI run containing the complete paired report
+        required: true
+      version:
+        description: Package version being released
         required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: publish-evidence
+  group: evidence-release-${{ inputs.version }}
   queue: max
 
 jobs:
   publish:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch') &&
-       github.event.workflow_run.head_branch == 'main' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: write
       actions: read
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.source_sha || 'main' }}
           fetch-depth: 0
           persist-credentials: false
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: '3.12'
       - run: uv sync --locked --project docs
-      - name: Validate, retain, and propose the selected main results
+      - name: Validate and freeze the versioned evidence assets
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_RUN: ${{ github.event.workflow_run.id || inputs.library_run_id }}
-          RELEASE_TAG: ${{ inputs.tag }}
-          AUTOMATIC: ${{ github.event_name == 'workflow_run' }}
-        run: |
-          arguments=(--run-id "$SOURCE_RUN" --output "$RUNNER_TEMP/evidence-publication")
-          if [[ -n "$RELEASE_TAG" ]]; then arguments+=(--tag "$RELEASE_TAG"); fi
-          if [[ "$AUTOMATIC" == true ]]; then arguments+=(--automatic); fi
-          uv run --project docs python evidence/publication.py "${arguments[@]}"
-      - name: Attach the validated publication patch
+          SOURCE_RUN: ${{ inputs.library_run_id }}
+          VERSION: ${{ inputs.version }}
+        run: >-
+          uv run --project docs python evidence/publication.py
+          --run-id "$SOURCE_RUN" --version "$VERSION"
+          --output "$RUNNER_TEMP/evidence-publication"
+      - name: Attach the validated publication assets
         uses: actions/upload-artifact@v4
         with:
-          name: evidence-publication-update
+          name: evidence-release-assets
           path: |
-            ${{ runner.temp }}/evidence-publication/evidence-update.patch
+            ${{ runner.temp }}/evidence-publication/publication.json
+            ${{ runner.temp }}/evidence-publication/measurements.md
             ${{ runner.temp }}/evidence-publication/docs-base.txt
             ${{ runner.temp }}/evidence-publication/github-run.json
+            ${{ runner.temp }}/evidence-publication/SHA256SUMS
           if-no-files-found: ignore
           retention-days: 30
-      - name: Attach the rendered review site
+      - name: Attach the rendered release review site
         uses: actions/upload-artifact@v4
         with:
           name: documentation-site

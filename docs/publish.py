@@ -15,6 +15,8 @@ from urllib.parse import urlsplit
 import yaml
 
 from docs.check import ROOT, rendered_checks
+from evidence.assets import fetch
+from evidence.experiments.source import snapshot
 
 
 def publish(root: Path = ROOT, *, environ: Mapping[str, str] | None = None, quarto: str | None = None) -> Path:
@@ -56,6 +58,18 @@ def publish(root: Path = ROOT, *, environ: Mapping[str, str] | None = None, quar
     expected = environment.get("READTHEDOCS_GIT_COMMIT_HASH", revision)
     if expected != revision:
         raise ValueError(f"Read the Docs revision {expected!r} does not match checkout {revision!r}")
+
+    if (root / "evidence/experiments").is_dir():
+        version = (
+            environment.get("READTHEDOCS_GIT_IDENTIFIER")
+            if environment.get("READTHEDOCS_VERSION_TYPE") == "tag"
+            else None
+        )
+        publication = fetch(root, version.removeprefix("v") if version else None, required=bool(version))
+        if publication is not None:
+            if version and snapshot(publication)["revision"] != revision:
+                raise ValueError("Released evidence does not match the documentation tag's source revision")
+            environment["RELFLOW_EVIDENCE_PUBLICATION"] = str(publication)
 
     subprocess.run(["make", "check"], cwd=root, env=environment, check=True)
     with tempfile.NamedTemporaryFile(

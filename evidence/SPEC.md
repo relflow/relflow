@@ -2,8 +2,10 @@
 
 This repository owns the relflow package, website, and canonical controlled experiments.
 Each script's frontmatter declares its stable P identifier, title, group, and
-current selected full run. CI discovers experiments directly from those headers
-and the website lists their generated pages. Builds read these files locally and never execute models.
+presentation options. CI discovers experiments directly from those headers.
+Measured runs and report provenance are separate JSON publication assets; they
+never rewrite the scripts. Website builds read static sources and result data
+without executing models.
 
 ## Experimental contract
 
@@ -33,7 +35,7 @@ internal seed panels already implemented by an experiment.
 
 Each script exposes `run(seed, steps, accelerator)` and calls the shared
 reporter under a main guard. Execution produces a new immutable JSON record,
-including failures. It never edits the reviewed publication file. A `--steps`
+including failures. It never edits sources or a selected publication. A `--steps`
 cap always identifies a smoke run and cannot establish learning capability.
 
 Run these commands from the repository root with the intended wheel:
@@ -97,22 +99,28 @@ and logs, then checks completeness and provenance before producing the JSON
 summary, HTML report, and file checksums. Preserve separate attempts.
 
 Routine reports are GitHub Actions artifacts for 90 days; input wheels and
-requirements are retained for seven days. Main pushes validate the complete
-paired suite against their pre-push base. A successful main CI run automatically feeds `publish-evidence.yml`,
-which verifies complete coverage, checks, provenance, tested source and input
-hashes, and report integrity. It publishes immutable report assets in
-`relflow/relflow` and opens a PR updating selected frontmatter and generated
-README measurements. A successful manual full main run uses the same flow.
-Publication-only changes must not recursively open another publication PR.
-No AWS storage or account is required.
+requirements are retained for seven days. Every main push still validates the
+complete paired suite against its pre-push base. Publication happens only for
+package version releases. `release.yml` calls `publish-evidence.yml` with the
+exact successful main CI run, source revision, and package version. The
+publisher verifies coverage, checks, provenance, input hashes, and report
+integrity before rendering a review site from the selected data.
 
-Publication replaces each experiment's current full-run record. Keep its
-metrics, checks, source fingerprints, package versions, and execution provenance
-bound to the selected execution. Verified reuse also retains its separate
-current-request receipt. Link its retained report Release in
-`relflow/relflow`; do not relabel an older measurement as a new run. Smoke or
-incomplete execution cannot be selected. A source edit or output-reader update
-does not establish a fresh learning measurement.
+The immutable `evidence-v<version>` Release retains `publication.json`, a
+generated `measurements.md` table, complete report and input archives,
+`github-run.json`, checksums, and the reuse receipt when applicable. The
+publication must exist before the package's `v<version>` tag can be published.
+Already published package versions keep their original evidence selection.
+Publishing creates no source commits or follow-up PRs. No AWS storage or new
+credential is required.
+
+Publication JSON uses schema 1 with `version`, `revision`, `report`, and
+`results` keyed by stable P identifiers. Keep metrics, checks, source
+fingerprints, package versions, and execution provenance bound to the selected
+execution. A reused report keeps its original measured revision and separate
+current-request receipt; `revision` identifies the verified release request.
+Smoke, incomplete, or regressing reports cannot be selected. A source edit or
+output-reader update does not establish a fresh learning measurement.
 
 ## Documentation
 
@@ -129,8 +137,14 @@ metric paths and formats. Explain the measured limit; AUC is not accuracy and
 learned arithmetic is not exact accounting.
 
 `evidence/render.py` generates ignored `docs/evidence/` pages from canonical
-scripts and the current selected records. Never edit generated pages as a
-second source. `make check` validates static sources and tooling;
+scripts and the selected publication JSON. The checked-in `results.json` is an
+unchanged bootstrap snapshot for offline builds. Hosted release versions fetch
+their matching public asset; unreleased branch and PR builds use the most
+recent released version, or the bootstrap snapshot before the first asset-based
+release. Missing or invalid assets for an actual release fail the build.
+Downloaded data is cached outside experiment sources and checked against
+GitHub's asset digest and the package source revision. Never edit generated
+pages as a second source. `make check` validates static sources and tooling;
 `make check-docs` renders and checks the full site. Neither imports RelFlow,
 Torch, or Lightning. `make clean` removes generated output and caches while
 retaining canonical sources and current measurements.

@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 
 from evidence_ci import ROOT, digest, evaluate
-from experiments.source import frontmatter, registry
+from experiments.source import registry
 
 
 def validate(reports: Path, inputs: Path | None = None, *, root: Path | None = None) -> tuple[dict, list[dict], dict]:
@@ -107,7 +107,7 @@ def readme_content(entries: dict, source: str) -> str:
 
 
 def readme(root: Path, target: Path) -> None:
-    """Refresh the bounded README comparison table from current selected frontmatter."""
+    """Render an explicitly requested comparison table from the selected results."""
     content = readme_content(registry(root), target.read_bytes().decode("utf-8"))
     target.write_bytes(content.encode("utf-8"))
 
@@ -120,7 +120,10 @@ def select(
     release: str | None = None,
     bundle: Path | None = None,
     readme_target: Path | None = None,
-) -> None:
+    output: Path | None = None,
+    version: str = "unversioned",
+    revision: str | None = None,
+) -> dict:
     manifest, records, summary = validate(reports, root=root)
     entries = registry(root)
     selection = {
@@ -138,14 +141,22 @@ def select(
         selection["release"] = "https://github.com/relflow/relflow/releases/tag/" + release
     if bundle:
         selection["reports_sha256"] = digest(bundle)
-    updates = {}
+    results = {}
     for record in records:
         if record["task"]["role"] == "candidate":
             entry = entries[record["task"]["id"]]
-            script = root / entry["script"]
-            header = dict(entry["header"], **{"evidence-result": record["result"], "evidence-report": selection})
-            updates[script] = frontmatter(script.read_bytes().decode("utf-8"), header)
-            entries[record["task"]["id"]] = dict(entry, header=header, run=record["result"])
+            results[record["task"]["id"]] = record["result"]
+            entries[record["task"]["id"]] = dict(entry, report=selection, run=record["result"])
+    document = {
+        "schema": 1,
+        "version": version,
+        "revision": revision or manifest["candidate"]["revision"],
+        "report": selection,
+        "results": results,
+    }
+    updates = {}
+    if output is not None:
+        updates[output] = json.dumps(document, sort_keys=True, indent=2, allow_nan=False) + "\n"
     if readme_target is not None:
         updates[readme_target] = readme_content(entries, readme_target.read_bytes().decode("utf-8"))
     for script, content in updates.items():
@@ -155,10 +166,12 @@ def select(
             handle.write(content)
             pending = Path(handle.name)
         try:
-            shutil.copymode(script, pending)
+            if script.exists():
+                shutil.copymode(script, pending)
             pending.replace(script)
         finally:
             pending.unlink(missing_ok=True)
+    return document
 
 
 def main() -> None:
@@ -170,17 +183,23 @@ def main() -> None:
     parser.add_argument("--release")
     parser.add_argument("--bundle", type=Path)
     parser.add_argument("--readme", type=Path)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--version", default="unversioned")
     options = parser.parse_args()
     if options.command == "validate":
         _, _, summary = validate(options.reports, options.inputs)
         print(json.dumps(summary, indent=2))
     else:
+        if options.output is None:
+            parser.error("select requires --output for the publication JSON asset")
         select(
             options.reports,
             github_run=options.github_run,
             release=options.release,
             bundle=options.bundle,
             readme_target=options.readme,
+            output=options.output,
+            version=options.version,
         )
 
 

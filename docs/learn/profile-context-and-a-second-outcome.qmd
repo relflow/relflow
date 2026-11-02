@@ -95,9 +95,7 @@ model = rf.Model.xs(
     trxns=rf.Branch(
         length=32,
         overflow="tail",
-        booked_at=rf.DateParts(
-            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
-        ),
+        booked_at=rf.Period("day_of_month", "day_of_week", "hour_of_day"),
         amount=rf.Number,
         merchant=rf.Category,
         channel=rf.Enum(values=("card", "direct_debit", "bank_transfer")),
@@ -115,11 +113,11 @@ model.fit(data, batch_size=128, max_epochs=30)
 ```{typst}
 //| label: fig-profile-context-two-outcomes
 //| fig-cap: "Profile context sits at the root. Every transaction carries its own evidence and two hidden targets that share the same context."
-//| fig-alt: "An account root contains account_age_days Number and one repeated trxns branch. Each transaction has booked_at DateParts, amount Number, merchant Category, channel Enum, and two Boolean targets, disputed and repeats_next_30_days, each hidden and supervised at every transaction."
+//| fig-alt: "An account root contains account_age_days Number and one repeated trxns branch. Each transaction has booked_at Period, amount Number, merchant Category, channel Enum, and two Boolean targets, disputed and repeats_next_30_days, each hidden and supervised at every transaction."
 #tree(node("account", kind: "root", children: (
   node("account_age_days", width: 150pt, type: "Number", detail: "Profile context"),
   node("trxns", kind: "branch", repeated: true, width: 150pt, detail: "Event history", children: (
-    node("booked_at", type: "DateParts"),
+    node("booked_at", type: "Period"),
     node("amount", type: "Number"),
     node("merchant", type: "Category"),
     node("channel", type: "Enum"),

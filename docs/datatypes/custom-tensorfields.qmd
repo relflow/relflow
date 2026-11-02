@@ -208,7 +208,7 @@ callback classes or factories with `rf.Extension(..., callbacks=(...))`; every
 rank must declare the same callbacks.
 
 Start from a nearby built-in and its tests: Boolean for a scalar, Number for
-normalization, Set for vocabularies, or DateParts for structured content.
+normalization, Set for vocabularies, or Period for structured content.
 Verify schema round trips, nested axes, null/padded/masked/skipped positions,
 source-less prediction, compact embedding shapes, finite losses, stable Arrow
 output, checkpoint state, and the devices/process modes your extension claims

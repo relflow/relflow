@@ -21,7 +21,7 @@ with a dispute target on every item.
 
 ## Before you start
 
-You need Python 3.11 or newer and historical payments with known outcomes.
+You need Python 3.12 or newer and historical payments with known outcomes.
 Install relflow in your project. If you use uv:
 
 ```bash

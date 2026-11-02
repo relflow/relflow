@@ -45,8 +45,7 @@ metrics, and evaluation protocols.
 
 ## Work locally
 
-Install Python 3.12 or newer and uv for this documentation build, then run from
-the repository root (the relflow runtime itself supports Python 3.11 or newer):
+Install Python 3.12 or newer and uv, then run from the repository root:
 
 ```bash
 uv sync --project docs --locked
@@ -86,45 +85,51 @@ task described in [its README](assets/branding/README.md).
 
 ## Evidence
 
-Canonical experiments, the protocol, lab runner, and results live under
-[`evidence/`](../evidence/README.md). Each script owns its metadata and current result in frontmatter; `evidence/render.py` generates ignored pages under
-`docs/evidence/` directly from local canonical sources. Rendering reads the
-committed selection and never executes experiments.
+Canonical experiments, protocol, lab runner, and tests live under
+[`evidence/`](../evidence/README.md). Scripts own definitions, explanatory prose,
+and presentation metadata. Measured results are separate JSON publication
+assets; rendering never rewrites or executes experiments.
 
-The reusable `evidence-lab.yml` workflow runs all 79 experiments against the
-library's exact base and candidate wheels on lab over Tailscale. The trusted
-workflow and executor remain pinned separately from the candidate suite in
-this repository. `CI / required` requires the full library test matrix, static
-documentation checks, and evidence before merging into main.
-The [lab guide](../evidence/lab.md) describes its OIDC trust and isolation.
+The complete paired evidence gate still runs for PRs, merge groups, and main
+CI. It requires valid full-budget results for both exact wheels and blocks
+execution errors, incomplete coverage, invalid provenance, and regressions of
+baseline-passing checks. Verified reuse keeps the original execution records
+and adds a separate receipt binding the current request. See the
+[lab guide](../evidence/lab.md).
 
-Every main push validates complete paired evidence alongside the SDK and
-documentation checks. The trusted verifier may reuse a completed full report
-when source inputs, actual wheel payloads, comparison, and lab runtime match;
-the report keeps its original measured revisions. A separate receipt binds it
-to the new request. Result-only updates validate selected values against that
-report and keep the required gate without retraining. Other changes execute
-the suite; unchanged baselines may reuse verified original task records.
-After a successful main CI run, `publish-evidence.yml`
-automatically validates its reports, retains them in an immutable Release in
-this repository, and opens a PR updating experiment frontmatter and the
-README's generated measurements. A successful manual full CI run on `main`
-uses the same publication flow. The retained assets contain JSON results,
-logs, an HTML report, tested wheels, runtime requirements, and checksums.
+Publication happens **only with package version releases**. Before publishing
+`v<version>`, the release workflow freezes a validated `evidence-v<version>`
+Release containing `publication.json`, a generated measurements table, complete
+report and input archives, checksums, and execution/reuse provenance. Published
+versions retain their original selection. Ordinary CI creates no publication
+commits or follow-up pull requests.
 
-Enable **Allow GitHub Actions to create and approve pull requests** under
-**Settings → Actions → General → Workflow permissions**. GitHub combines these
-permissions in one setting; this publisher only creates PRs. GitHub may require
-an owner to approve the generated PR workflows before
-normal required CI starts. Merge the publication PR through the normal checks
-and review. Read the Docs then builds the selected measurements from `main`;
-PR previews show them before merge. Publication-only commits do not create another publication
-PR. Ordinary builds read committed results and need no runtime or cloud
-credentials; they never fetch a live report or run experiments.
+Local `make check`, `make render`, and preview builds read the preserved
+[`evidence/results.json`](../evidence/results.json) bootstrap snapshot, so they
+remain offline and independent of model packages. The Read the Docs publisher
+fetches the public asset for the version it is building and checks its GitHub
+SHA256 digest and package source revision. A missing or invalid asset for a
+published version fails the build. Unreleased branches and PRs use the latest
+released measurements, or the bootstrap snapshot before the first asset-based
+release. Downloaded JSON is cached under `.cache/evidence/`; it never becomes
+an experiment-source edit or a new measurement.
 
-Runtime tests are explicit and excluded from default checks. See
-[evidence/README.md](../evidence/README.md) for execution and publication commands.
-Each experiment publishes one selected full run with its complete provenance.
+Tagged documentation builds require their matching release asset. The `latest`
+site reads the latest released selection when it builds; existing HTML changes
+only after a rebuild. If its main-push build finished before release publication,
+rebuild `latest` from the Read the Docs dashboard after the release completes.
+
+To render a specific released selection locally:
+
+```bash
+uv run --project docs python -m evidence.assets --version 0.4.3 --required
+RELFLOW_EVIDENCE_PUBLICATION="$PWD/.cache/evidence/evidence-v0.4.3.json" make check-docs
+```
+
+The ordinary README measurement table is a labeled historical snapshot. New
+release measurements are published as assets and in the versioned docs, without
+rewriting that table. See [evidence/README.md](../evidence/README.md) for explicit
+execution and release publication commands.
 
 ## Publication
 

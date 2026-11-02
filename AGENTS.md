@@ -68,7 +68,8 @@ model = rf.Model(
 - Do not use a public `Struct(...)` constructor. Public examples should use `Model(...)` and `Branch(...)`.
 - `Model(...)` has no root-name option. `name=rf.Category` defines an ordinary
   child field at `/name`; neither `name="customer"` nor `root="customer"` names the model.
-- Branch and leaf definitions have no `name` argument or positional arguments.
+- Branch and leaf names come from their parent; definitions have no `name` argument.
+  `Period` accepts positional calendar parts; other fields and branches use keyword options.
   Their parent supplies names through keywords, such as
   `amount=rf.Number` or `events=rf.Branch(...)`. Use a `fields` mapping for
   generated schemas or child names that collide with parent configuration:
@@ -140,7 +141,7 @@ model = rf.Model(
   MPS, which has no float64), so large offsets keep their spread. A float NaN
   tensorizes as the `other` state, not as a value or a null; ±inf stays valued
   but is never a regression target. Integers beyond ±2^53 are rejected.
-- `DateParts` is for calendar parts. If elapsed time or recency matters, derive a `Number`.
+- `Period` is for calendar parts (`DateParts` remains a compatible alias). If elapsed time or recency matters, derive a `Number`.
   Zone-aware timestamps describe their own wall clock; strings carrying an offset
   are read as UTC. A `Vector` with a NaN or infinite element, and a float NaN label
   in `Category`, take the `other` state; a NaN `Set` member is dropped like a null.
@@ -156,7 +157,7 @@ model = rf.Model(
 - `rf.Jitter(add=..., multiply=..., normalize=...)` is a shared frozen
   configuration whose `apply(inputs, mask)` method owns the vectorized affine
   tensor operation. Consumers own training activation, eligible coordinates,
-  and normalization placement. `Number`, `Vector`, `DateParts`, and `Text`
+  and normalization placement. `Number`, `Vector`, `Period`, and `Text`
   consume it. `Number` uses `normalize` to choose between raw and standardized
   values. The other built-ins have one continuous representation and apply
   jitter there without creating another normalizer.
@@ -403,9 +404,10 @@ and release consume the same candidate wheel. Verified reuse must preserve
 original measurements and revisions and separately attest the current inputs;
 missing, changed, or invalid inputs require fresh execution. Release, coverage, and evidence publication workflows consume
 successful main CI; do not add a second matrix invocation to publication.
-The evidence publisher retains verified reports and opens a publication PR
-for the selected experiment results and generated README measurements.
-Publication-only changes must not recursively create another publication PR.
+Version releases retain verified evidence reports and a frozen publication JSON
+asset before publishing the package tag. Documentation consumes these assets;
+ordinary CI must not create publication commits or pull requests. Experiments
+keep definitions and prose, with measured results outside their source files.
 The evidence helper and trusted executor are pinned separately from the suite.
 Keep selected suite code off the host execution path and preserve full evidence
 budgets, seeds, checks, and provenance. See [evidence/lab.md](evidence/lab.md).

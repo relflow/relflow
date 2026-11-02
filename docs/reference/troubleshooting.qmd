@@ -10,6 +10,7 @@ against the schema before changing model capacity or optimization settings.
 
 | Symptom | Check |
 | --- | --- |
+| `import relflow` fails with `No module named 'matplotlib.axes'` | Inspect incomplete package directories and deployed import paths; see [Installation troubleshooting](../guides/installation-troubleshooting.qmd). |
 | Constructor rejects an option | Use declared options; parents supply field names. Put notes in `description`. |
 | An input path cannot bind | Names and nesting must match, or the node needs an explicit structural `query`. |
 | A collection exceeds a finite limit | Check `length` and choose the intended `overflow` rule. |

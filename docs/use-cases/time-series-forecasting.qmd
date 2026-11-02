@@ -69,14 +69,14 @@ model = rf.Model.xs(
     history=rf.Branch(
         length=168,
         overflow="tail",
-        at=rf.DateParts(dateparts=["day_of_month", "day_of_week", "hour_of_day"]),
+        at=rf.Period("day_of_month", "day_of_week", "hour_of_day"),
         age_hours=rf.Number,
         units=rf.Number,
     ),
     horizon=rf.Branch(
         length=24,
         overflow="error",
-        at=rf.DateParts(dateparts=["day_of_month", "day_of_week", "hour_of_day"]),
+        at=rf.Period("day_of_month", "day_of_week", "hour_of_day"),
         lead_hours=rf.Number,
         promotion=rf.Boolean,
         units=rf.Number(mask=True),
@@ -90,7 +90,7 @@ up to 24 requested hours; the three slots above request three forecasts.
 `length=24` sets a limit. The application still constructs each future record
 and timestamp.
 
-`DateParts` supplies calendar cycles, while `age_hours` and `lead_hours` express
+`Period` supplies calendar cycles, while `age_hours` and `lead_hours` express
 elapsed time relative to the cutoff. Your application calculates those
 durations. The model can learn relationships between recent demand, calendar
 position, and planned promotions across the training observations.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -125,6 +126,48 @@ def test_publish_uses_checkout_revision_when_service_does_not_supply_one(project
     revision = environment.pop("READTHEDOCS_GIT_COMMIT_HASH")
     publishing.publish(project, environ=environment)
     assert renderer[0]["website"]["repo-branch"] == revision
+
+
+@pytest.mark.parametrize("matching", [True, False])
+def test_tag_build_consumes_only_its_release_asset_and_passes_it_to_every_build_step(
+    project, environment, renderer, monkeypatch, matching
+):
+    (project / "evidence/experiments").mkdir(parents=True)
+    environment.update(READTHEDOCS_VERSION_TYPE="tag", READTHEDOCS_GIT_IDENTIFIER="v0.4.3")
+    selected = project.parent / "publication.json"
+    selected.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "version": "0.4.3",
+                "revision": environment["READTHEDOCS_GIT_COMMIT_HASH"] if matching else "a" * 40,
+                "report": {},
+                "results": {},
+            }
+        )
+    )
+    calls = []
+
+    def fetch(root, version, *, required):
+        assert root == project and version == "0.4.3" and required is True
+        return selected
+
+    execute = publishing.subprocess.run
+
+    def run(command, **options):
+        if command[0] == "make":
+            calls.append(options["env"]["RELFLOW_EVIDENCE_PUBLICATION"])
+        return execute(command, **options)
+
+    monkeypatch.setattr(publishing, "fetch", fetch)
+    monkeypatch.setattr(publishing.subprocess, "run", run)
+    if matching:
+        publishing.publish(project, environ=environment)
+        assert calls == [str(selected), str(selected)]
+    else:
+        with pytest.raises(ValueError, match="tag's source revision"):
+            publishing.publish(project, environ=environment)
+        assert not calls and not renderer
 
 
 def test_publish_accepts_a_prepared_empty_output_directory(project, environment, renderer):

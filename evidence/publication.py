@@ -1,19 +1,20 @@
-"""Retain trusted main evidence and propose its validated publication selection."""
+"""Publish immutable evidence assets once per verified package version."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import os
 import re
-import shutil
 import subprocess
 import tempfile
+import tomllib
 from pathlib import Path
 
 from evidence_ci import task_key
-from experiments.source import fingerprint, frontmatter, metadata, registry
-from record import readme, select, validate
+from experiments.source import fingerprint, frontmatter, metadata
+from record import select, validate
 from reuse import SHA, archive, verify_receipt
 from reuse import artifact as verified_artifact
 
@@ -97,27 +98,6 @@ def selection_changes(before: dict[str, str], after: dict[str, str]) -> bool:
     except (ValueError, SyntaxError, KeyError):
         return False
     return True
-
-
-def selection_only(root: Path, before: str, after: str) -> bool:
-    names = (
-        subprocess.check_output(["git", "diff", "--name-only", "-z", before, after], cwd=root)
-        .decode()
-        .strip("\0")
-        .split("\0")
-    )
-    if names == [""]:
-        return False
-    versions = []
-    for revision in (before, after):
-        values = {}
-        for name in names:
-            result = subprocess.run(["git", "show", f"{revision}:{name}"], cwd=root, capture_output=True, text=True)
-            if result.returncode:
-                return False
-            values[name] = result.stdout
-        versions.append(values)
-    return selection_changes(*versions)
 
 
 def compatible(root: Path, tested: str, checkout: str) -> None:
@@ -239,67 +219,20 @@ def retain(tag: str, tested: str, output: Path, names: list[str]) -> None:
                 raise ValueError(f"Published report asset differs: {name}")
 
 
-def propose(root: Path, output: Path, run: dict, tag: str, main: str, changed: list[str]) -> None:
-    """Create one bot branch per immutable attempt, without replacing human changes."""
-    branch = f"automation/evidence-{run['id']}-{run['run_attempt']}"
-    subprocess.run(["git", "add", "--", *changed], cwd=root, check=True)
-    tree = subprocess.check_output(["git", "write-tree"], cwd=root, text=True).strip()
-    reference = api(f"repos/{REPOSITORY}/git/ref/heads/{branch}", missing=True)
-    if reference:
-        commit = api(f"repos/{REPOSITORY}/git/commits/{reference['object']['sha']}")
-        if commit["tree"]["sha"] != tree or [parent["sha"] for parent in commit["parents"]] != [main]:
-            raise ValueError("Existing evidence bot branch differs; refusing to replace its changes")
-    if api(f"repos/{REPOSITORY}/git/ref/heads/main")["object"]["sha"] != main:
-        raise ValueError("Main advanced before opening the evidence publication PR")
-    if not reference:
-        subprocess.run(["git", "checkout", "-b", branch], cwd=root, check=True)
-        subprocess.run(
-            [
-                "git",
-                "-c",
-                "user.name=github-actions[bot]",
-                "-c",
-                "user.email=41898282+github-actions[bot]@users.noreply.github.com",
-                "commit",
-                "-m",
-                f"docs: publish evidence from CI {run['id']} attempt {run['run_attempt']}",
-            ],
-            cwd=root,
-            check=True,
-        )
-        subprocess.run(["gh", "auth", "setup-git"], cwd=root, check=True)
-        subprocess.run(["git", "push", "origin", f"HEAD:refs/heads/{branch}"], cwd=root, check=True)
-    existing = subprocess.check_output(
-        ["gh", "pr", "list", "--repo", REPOSITORY, "--head", branch, "--state", "all", "--json", "number"], text=True
-    )
-    if not json.loads(existing):
-        body = output / "pr-body.md"
-        body.write_text(
-            f"Select the complete paired evidence verified by CI {run['html_url']}.\n\nValidated main: `{main}`.\nReport: https://github.com/{REPOSITORY}/releases/tag/{tag}\n\nMeasurements retain their original execution revisions and run identity; a reused report includes its verified request/source receipt. Individual unmet learning checks remain visible. Only result/report frontmatter and the bounded README metrics table change. Normal required CI and review apply; GitHub may require approval to start the generated PR workflows.\n"
-        )
-        subprocess.run(
-            [
-                "gh",
-                "pr",
-                "create",
-                "--repo",
-                REPOSITORY,
-                "--base",
-                "main",
-                "--head",
-                branch,
-                "--title",
-                f"docs: publish evidence from CI {run['id']}",
-                "--body-file",
-                str(body),
-            ],
-            check=True,
-        )
-
-
-def publish(root: Path, output: Path, run_id: int, *, automatic: bool = False, tag: str | None = None) -> None:
-    if run_id < 1 or (tag is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", tag)):
-        raise ValueError("Use a positive CI run ID and a simple immutable report tag")
+def publish(root: Path, output: Path, run_id: int, *, version: str | None = None) -> None:
+    declared = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
+    version = version or declared
+    if (
+        run_id < 1
+        or version != declared
+        or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*(?:(?:a|b|rc)[0-9]+)?(?:\.post[0-9]+)?(?:\.dev[0-9]+)?", version)
+    ):
+        raise ValueError("Publication requires a positive CI run ID and the checkout package version")
+    tag = "evidence-v" + version
+    released = api(f"repos/{REPOSITORY}/releases/tags/v{version}", missing=True)
+    if released.get("tag_name") == "v" + version and released.get("draft") is False:
+        print(f"relflow {version} is already published; its evidence selection remains frozen")
+        return
     root, output = root.resolve(), output.resolve()
     if output.is_relative_to(root):
         raise ValueError("Evidence publication output must be outside the checkout")
@@ -312,10 +245,7 @@ def publish(root: Path, output: Path, run_id: int, *, automatic: bool = False, t
     workflow = api(f"repos/{REPOSITORY}/actions/workflows/ci.yml")
     if run.get("workflow_id") != workflow["id"]:
         raise ValueError("Evidence run belongs to a different CI workflow")
-    if automatic and checkout != main:
-        raise ValueError("Automatic publication must execute the current trusted main checkout")
     compatible(root, main, checkout)
-    tag = tag or f"evidence-ci-{run_id}-attempt-{run['run_attempt']}"
     output.mkdir(parents=True, exist_ok=False)
     reports, inputs = output / "retained", output / "retained-inputs"
     verified_artifact(run_id, "relflow-evidence", reports)
@@ -335,10 +265,6 @@ def publish(root: Path, output: Path, run_id: int, *, automatic: bool = False, t
     }
     if not SHA.fullmatch(baseline) or request != expected_request:
         raise ValueError("Authenticated input request does not bind the exact current main CI attempt")
-    if automatic and run["event"] == "push" and selection_only(root, baseline, main):
-        shutil.rmtree(output)
-        print("Skipping recursive publication of selection-only main changes; required CI has still run.")
-        return
     names = [("evidence-reused-inputs", inputs)] if reused else []
     if reused:
         names.append(("evidence-reuse", output / "reuse-context"))
@@ -385,58 +311,48 @@ def publish(root: Path, output: Path, run_id: int, *, automatic: bool = False, t
         assets = ["evidence-reports.tar.gz", "evidence-inputs.tar.gz", "github-run.json"]
         if reused:
             assets.append("evidence-reuse.json")
+        measurements = output / "measurements.md"
+        measurements.write_text(
+            f"# relflow {version} evidence\n\n<!-- evidence-results:start -->\n<!-- evidence-results:end -->\n"
+        )
+        select(
+            reports,
+            root=tested,
+            github_run=github_run,
+            release=tag,
+            bundle=output / "evidence-reports.tar.gz",
+            readme_target=measurements,
+            output=output / "publication.json",
+            version=version,
+            revision=main,
+        )
+        assets += ["publication.json", "measurements.md"]
         (output / "SHA256SUMS").write_text(
             "".join(f"{hashlib.sha256((output / name).read_bytes()).hexdigest()}  {name}\n" for name in assets)
         )
         assets.append("SHA256SUMS")
-        select(reports, root=tested, github_run=github_run, release=tag, bundle=output / "evidence-reports.tar.gz")
-        before, after = {}, {}
-        for entry in registry(tested).values():
-            name = "evidence/" + entry["script"]
-            path = root / name
-            before[name] = path.read_text()
-            header = metadata(before[name])
-            header.update({key: entry["header"][key] for key in RESULTS})
-            after[name] = frontmatter(before[name], header)
-        before["README.md"] = (root / "README.md").read_text()
-        pending = Path(temporary) / "README.md"
-        pending.write_text(before["README.md"])
-        readme(tested, pending)
-        after["README.md"] = pending.read_text()
-        if not selection_changes(before, after):
-            raise ValueError("Publication changed more than result headers and the bounded README table")
-        for name, content in after.items():
-            (root / name).write_text(content)
-    subprocess.run(["make", "check", "check-docs"], cwd=root, check=True)
-    changed = subprocess.check_output(["git", "diff", "--name-only"], cwd=root, text=True).splitlines()
-    actual = {name: (root / name).read_text() for name in changed}
-    original = {name: subprocess.check_output(["git", "show", f"HEAD:{name}"], cwd=root, text=True) for name in changed}
-    if not selection_changes(original, actual):
-        raise ValueError("Validated publication contains unexpected source changes")
-    patch = subprocess.check_output(["git", "diff", "--binary", "--", *changed], cwd=root)
-    (output / "evidence-update.patch").write_bytes(patch)
+    environment = dict(os.environ, RELFLOW_EVIDENCE_PUBLICATION=str(output / "publication.json"))
+    subprocess.run(["make", "check", "check-docs"], cwd=root, env=environment, check=True)
+    if subprocess.check_output(["git", "diff", "--name-only"], cwd=root).strip():
+        raise ValueError("Evidence publication must not change tracked experiment, README, or documentation sources")
     (output / "docs-base.txt").write_text(checkout + "\n")
     if api(f"repos/{REPOSITORY}/git/ref/heads/main")["object"]["sha"] != main:
         raise ValueError("Main advanced during validation; rerun publication against current main")
     retain(tag, main, output, assets)
-    if automatic:
-        propose(root, output, run, tag, main, changed)
-    print(f"Retained {tag} for validated main {main}; publication patch: {output / 'evidence-update.patch'}")
+    print(f"Retained {tag} for verified relflow {version}; publication asset: {output / 'publication.json'}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-id", type=int, required=True)
-    parser.add_argument("--tag")
-    parser.add_argument("--automatic", action="store_true")
+    parser.add_argument("--version")
     parser.add_argument("--output", type=Path, required=True)
     options = parser.parse_args()
     publish(
         Path(__file__).resolve().parents[1],
         options.output,
         options.run_id,
-        automatic=options.automatic,
-        tag=options.tag,
+        version=options.version,
     )
 
 

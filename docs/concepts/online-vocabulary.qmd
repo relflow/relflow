@@ -46,9 +46,7 @@ model = rf.Model.xs(
     trxns=rf.Branch(
         length=32,
         overflow="tail",
-        booked_at=rf.DateParts(
-            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
-        ),
+        booked_at=rf.Period("day_of_month", "day_of_week", "hour_of_day"),
         amount=rf.Number,
         merchant=rf.Category,
         tags=rf.Set,

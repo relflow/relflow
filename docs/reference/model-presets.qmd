@@ -72,9 +72,7 @@ model = rf.Model.sm(
         length=32,
         overflow="tail",
         ffnx=4,
-        booked_at=rf.DateParts(
-            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
-        ),
+        booked_at=rf.Period("day_of_month", "day_of_week", "hour_of_day"),
         amount=rf.Number,
         merchant=rf.Category,
         disputed=rf.Boolean(mask=True, n_heads=2),
@@ -90,10 +88,10 @@ Each `ffnx` must be a positive integer; its hidden feed-forward width is
 ```{typst}
 //| label: fig-preset-ownership
 //| fig-cap: "The payment root, transaction branch, and field decoders have separate settings. Their ownership follows the schema."
-//| fig-alt: "A payment root contains one repeated trxns branch with booked_at DateParts, amount Number, merchant Category, and a hidden disputed Boolean target for every transaction. Root and branch own separate contexts; the nested dispute target owns its decoder."
+//| fig-alt: "A payment root contains one repeated trxns branch with booked_at Period, amount Number, merchant Category, and a hidden disputed Boolean target for every transaction. Root and branch own separate contexts; the nested dispute target owns its decoder."
 #tree(node("payment", kind: "root", detail: "Root context", children: (
   node("trxns", kind: "branch", repeated: true, detail: "Local context", children: (
-    node("booked_at", type: "DateParts"),
+    node("booked_at", type: "Period"),
     node("amount", type: "Number"),
     node("merchant", type: "Category"),
     node("disputed", kind: "target", type: "Boolean", detail: "Every transaction; own decoder"),
@@ -205,9 +203,7 @@ payment_model = PaymentModel.compact(
     trxns=rf.Branch(
         length=32,
         overflow="tail",
-        booked_at=rf.DateParts(
-            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
-        ),
+        booked_at=rf.Period("day_of_month", "day_of_week", "hour_of_day"),
         amount=rf.Number,
         merchant=rf.Category,
         disputed=rf.Boolean(mask=True),

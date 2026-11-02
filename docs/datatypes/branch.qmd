@@ -18,9 +18,7 @@ model = rf.Model.xs(
     trxns=rf.Branch(
         length=32,
         overflow="tail",
-        booked_at=rf.DateParts(
-            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
-        ),
+        booked_at=rf.Period("day_of_month", "day_of_week", "hour_of_day"),
         amount=rf.Number,
         merchant=rf.Category,
         disputed=rf.Boolean(mask=True),
@@ -55,11 +53,11 @@ defines the cutoff and label window these records follow.
 
 ```{typst}
 //| label: fig-branch-context
-//| fig-alt: "An account review observation owns one repeated trxns branch with booked_at DateParts, amount Number, merchant Category, and disputed Boolean. Every transaction's dispute label is hidden and supervised."
+//| fig-alt: "An account review observation owns one repeated trxns branch with booked_at Period, amount Number, merchant Category, and disputed Boolean. Every transaction's dispute label is hidden and supervised."
 //| fig-cap: "The branch holds the complete review-time sequence and a target for each transaction."
 #tree(node("payment", kind: "root", children: (
   node("trxns", kind: "branch", repeated: true, children: (
-    node("booked_at", type: "DateParts"),
+    node("booked_at", type: "Period"),
     node("amount", type: "Number"),
     node("merchant", type: "Category"),
     node("disputed", kind: "target", type: "Boolean", detail: "Every transaction"),

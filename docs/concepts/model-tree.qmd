@@ -25,9 +25,7 @@ model = rf.Model.xs(
     trxns=rf.Branch(
         length=32,
         overflow="tail",
-        booked_at=rf.DateParts(
-            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
-        ),
+        booked_at=rf.Period("day_of_month", "day_of_week", "hour_of_day"),
         amount=rf.Number,
         merchant=rf.Category,
         disputed=rf.Boolean(mask=True),
@@ -37,11 +35,11 @@ model = rf.Model.xs(
 
 ```{typst}
 //| label: fig-model-tree
-//| fig-alt: "The anonymous payment root at address slash owns a repeated trxns branch at slash trxns. Its children are booked_at DateParts, amount Number, and merchant Category at slash trxns slash booked_at, amount, and merchant, and a hidden disputed Boolean target at slash trxns slash disputed."
+//| fig-alt: "The anonymous payment root at address slash owns a repeated trxns branch at slash trxns. Its children are booked_at Period, amount Number, and merchant Category at slash trxns slash booked_at, amount, and merchant, and a hidden disputed Boolean target at slash trxns slash disputed."
 //| fig-cap: "Each node has an address formed from the names along its path. The root is anonymous."
 #tree(node("payment", kind: "root", detail: "Address: /", children: (
   node("trxns", kind: "branch", repeated: true, detail: "/trxns", children: (
-    node("booked_at", type: "DateParts", detail: "/trxns/booked_at"),
+    node("booked_at", type: "Period", detail: "/trxns/booked_at"),
     node("amount", type: "Number", detail: "/trxns/amount"),
     node("merchant", type: "Category", detail: "/trxns/merchant"),
     node("disputed", kind: "target", type: "Boolean", detail: "/trxns/disputed"),
@@ -266,9 +264,7 @@ model = rf.Model(
         length=32,
         overflow="tail",
         ffnx=4,
-        booked_at=rf.DateParts(
-            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
-        ),
+        booked_at=rf.Period("day_of_month", "day_of_week", "hour_of_day"),
         amount=rf.Number,
         merchant=rf.Category,
         disputed=rf.Boolean(mask=True, ffnx=6),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import importlib.util
+import json
 import os
 import sys
 from pathlib import Path
@@ -12,7 +13,7 @@ from types import ModuleType
 import pytest
 import yaml
 
-from evidence.experiments.source import frontmatter, metadata, registry
+from evidence.experiments.source import metadata, registry
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "evidence"))
@@ -50,9 +51,14 @@ def result(*, seed: int = 11, outcome: str = "met", mode: str = "full") -> dict:
 
 
 def set_result(identifier: str, recorded: dict, root: Path) -> None:
-    entry = registry(root / "evidence")[identifier]
-    script = root / "evidence" / entry["script"]
-    script.write_text(frontmatter(script.read_text(), dict(entry["header"], **{"evidence-result": recorded})))
+    path = root / "evidence/results.json"
+    document = (
+        json.loads(path.read_text())
+        if path.exists()
+        else {"schema": 1, "version": "test", "revision": "tested", "report": {}, "results": {}}
+    )
+    document["results"][identifier] = recorded
+    path.write_text(json.dumps(document))
 
 
 @pytest.fixture
@@ -246,12 +252,11 @@ def test_changed_script_warns_without_rewriting_recorded_results(
     evidence: tuple[ModuleType, ModuleType, Path],
 ) -> None:
     reporting, renderer, root = evidence
-    source = root / "evidence/experiments/family/signal.py"
     script = root / "evidence/experiments/family/signal.py"
     measured = result(seed=43)
     measured["provenance"]["code_sha256"] = renderer.fingerprint(script.read_text())
     set_result("P001", measured, root)
-    before = metadata(source.read_text())["evidence-result"]
+    before = (root / "evidence/results.json").read_bytes()
     generated = root / "docs/evidence/_generated"
 
     renderer.render(root)
@@ -270,7 +275,7 @@ def test_changed_script_warns_without_rewriting_recorded_results(
     assert "Seed **43**" in evidence_text
     assert "| held_out_rmse | 0.125 |" in evidence_text
     assert "experiment_size = 2048" in (generated / "P001.py").read_text()
-    assert metadata(source.read_text())["evidence-result"] == before
+    assert (root / "evidence/results.json").read_bytes() == before
     assert not (root / "executed").exists()
 
 

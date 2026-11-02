@@ -6,7 +6,7 @@ contract and the invariants affected by the change.
 
 ## Development Setup
 
-Use Python 3.11 or newer and install the development environment with uv:
+Use Python 3.12 or newer and install the development environment with uv:
 
 ```bash
 uv sync
@@ -58,8 +58,15 @@ required.
 
 ## Compatibility CI
 
-The Tests workflow runs the complete suite on Linux with Python 3.11, 3.12,
-3.13, and 3.14, plus macOS ARM and Windows with Python 3.12. It installs a wheel
+The installed-wheel import job uses required dependencies only, with no development
+or package extras. It verifies training, checkpoint reload, and prediction without
+Matplotlib, reproduces the upstream incomplete-namespace failure, then installs
+Matplotlib 3.10.7 and checks modeling plus TorchMetrics plotting. See
+[installation troubleshooting](docs/guides/installation-troubleshooting.qmd) for
+the diagnosis and environment remedy tracked in issue 67.
+
+The Tests workflow runs the complete suite on Linux with Python 3.12, 3.13,
+and 3.14, plus macOS ARM and Windows with Python 3.12. It installs a wheel
 with all extras from the lockfile and verifies that imports come from site-packages.
 Linux/Python 3.12 also runs formatting, lint, typing, and coverage checks. Each
 job uploads its environment and JUnit results; the coverage job adds HTML, XML,
@@ -99,7 +106,7 @@ when needed. It saves installation diagnostics and resolved package versions,
 then runs the same checkpoint and test checks. This preview does not gate releases.
 
 Dependency compatibility runs nightly or manually. Its minimum profile resolves
-the lowest compatible direct dependencies on Python 3.11; its latest profile
+the lowest compatible direct dependencies on Python 3.12; its latest profile
 resolves fresh dependencies on Python 3.14. A separate Python 3.15 advisory probe
 checks stable dependency availability, without the preview's nightly Torch index.
 These jobs resolve in disposable checkouts and save their resulting lockfiles.

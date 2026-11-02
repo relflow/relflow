@@ -10,7 +10,8 @@ supplied RelFlow wheel; use `uv run --project docs --with /path/to/matching-relf
 to keep the intended wheel separate from the root editable SDK. Runtime tests
 are excluded from default checks. Builds must never
 import RelFlow, Torch, or Lightning. Execution writes independent immutable JSON
-records; only a reviewed publication change updates experiment frontmatter.
+records. Experiment frontmatter owns definitions and prose; measured results live
+in publication JSON assets. Never write results back into experiment sources.
 
 Lab uses exact supplied baseline and candidate wheels, with one bounded,
 network-disabled, read-only Docker container per task. Mount neither the host
@@ -18,8 +19,14 @@ home nor Docker socket into workers. Keep credentials outside worker containers.
 Smoke, partial coverage, invalid provenance, execution failures, and regressions
 of baseline-passing checks cannot satisfy the required gate. Reports use Actions
 artifacts and immutable Releases in relflow/relflow, with no AWS dependency.
-Publish candidate measurements from a complete passing paired CI run in
-relflow/relflow, retaining its report Release and actual execution provenance.
+Publish candidate measurements only with a package version release, from its
+complete passing paired CI run in relflow/relflow. Freeze the publication JSON,
+reports, and actual execution provenance in an immutable `evidence-v<version>`
+Release before publishing the package tag. Ordinary CI must not create publication
+commits, branches, or pull requests. Keep the recorded bootstrap snapshot in
+`results.json` for offline builds; it is historical data, not an automatically
+updated selection. Hosted builds verify the public release asset's digest and
+source revision, without model dependencies or credentials.
 Equivalent requests may reuse that execution only through the trusted verifier
 and a separate receipt binding the current source, wheel payloads, comparison,
 and actual lab runtime. Baseline references retain original immutable records;

@@ -78,9 +78,7 @@ model = rf.Model.xs(
     trxns=rf.Branch(
         length=32,
         overflow="tail",
-        booked_at=rf.DateParts(
-            dateparts=["day_of_month", "day_of_week", "hour_of_day"],
-        ),
+        booked_at=rf.Period("day_of_month", "day_of_week", "hour_of_day"),
         hours_since_previous=rf.Number,
         amount=rf.Number,
         merchant=rf.Category,
@@ -89,7 +87,7 @@ model = rf.Model.xs(
 )
 ```
 
-`Number` reads the duration in hours; `DateParts` keeps the booking calendar
+`Number` reads the duration in hours; `Period` keeps the booking calendar
 features. If the source already stores Arrow timestamps, use the `booked_at`
 field directly in the calculation without the string-parsing step.
 Training labels remain intact. Prediction files omit `disputed`; the processor

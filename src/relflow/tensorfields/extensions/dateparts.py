@@ -23,6 +23,7 @@ from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
+    OMITTED,
     Context,
     DecoderBase,
     EmbedderBase,
@@ -251,8 +252,9 @@ def parse(
 class Request(RequestBase):
     """Calendar components represented as cyclical sine/cosine pairs.
 
-    ``dateparts`` is a nonempty, unique sequence of ``DatePart`` members or
-    names such as ``"day_of_week"``; names normalize to a list of enum members.
+    ``Period("day_of_week", "hour_of_day")`` selects a nonempty, unique
+    sequence of ``DatePart`` members or names. Names normalize to a list of
+    enum members. ``DateParts`` and the ``dateparts=`` keyword remain compatible.
     Inputs may be dates, datetimes, or strings, with optional ``pattern``
     specifying string parsing. Zone-aware timestamps describe their own wall
     clock; strings carrying an offset are read as UTC. ``jitter`` perturbs
@@ -270,13 +272,26 @@ class Request(RequestBase):
 
         def __init__(
             self,
-            *,
-            dateparts: list[DatePart | str] | tuple[DatePart | str, ...],
+            *parts: DatePart | str,
+            dateparts: list[DatePart | str] | tuple[DatePart | str, ...] = ...,
             pattern: str | None = None,
             jitter: Jitter = ...,
             type: Literal["dateparts"] = "dateparts",
             **options: Unpack[FieldOptions],
         ) -> None: ...
+    else:
+
+        def __init__(
+            self,
+            *parts: DatePart | str,
+            dateparts: list[DatePart | str] | tuple[DatePart | str, ...] = cast(
+                list[DatePart | str] | tuple[DatePart | str, ...], OMITTED
+            ),
+            **options: Any,
+        ) -> None:
+            if parts and dateparts is not OMITTED:
+                raise TypeError("Period selects calendar parts positionally or with dateparts=; use one form")
+            super().__init__(dateparts=parts if dateparts is OMITTED else dateparts, **options)
 
     @pydantic.field_validator("dateparts", mode="before", check_fields=False)
     @classmethod

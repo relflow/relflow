@@ -80,8 +80,20 @@ jobs:
           with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
               output.write(f"version={version}\n")
 
-  publish:
+  evidence:
     needs: detect_version
+    if: needs.detect_version.outputs.source_sha != ''
+    uses: ./.github/workflows/publish-evidence.yml
+    permissions:
+      contents: write
+      actions: read
+    with:
+      library_run_id: ${{ needs.detect_version.outputs.ci_run_id }}
+      version: ${{ needs.detect_version.outputs.version }}
+      source_sha: ${{ needs.detect_version.outputs.source_sha }}
+
+  publish:
+    needs: [detect_version, evidence]
     if: needs.detect_version.outputs.source_sha != ''
     runs-on: ubuntu-24.04
     environment:

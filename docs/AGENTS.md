@@ -9,7 +9,8 @@ build from this checkout alone using the isolated static environment.
 
 - Authored website pages, assets, extensions, and `_quarto.yml` live in `docs/`.
   Canonical experiments, runners, protocol, and results live under `evidence/`.
-  Each experiment owns its metadata and current result in frontmatter. Page folders
+  Each experiment owns its definition and prose; versioned JSON assets own
+  measured results. Page folders
   mirror the sidebar groups (`learn/`, `use-cases/`, `guides/`, `concepts/`, `datatypes/`,
   `reference/`) and
   file names match page titles; when a page moves or is renamed, update every
@@ -108,7 +109,7 @@ finance. The first flat payment has `amount`, `merchant`, and
 containing earlier transactions and the latest payment exactly once. Put
 `booked_at`, `amount`, `merchant`, and `disputed` inside it; do not duplicate
 current-payment fields at the root. Use
-`rf.DateParts(dateparts=["day_of_month", "day_of_week", "hour_of_day"])`
+`rf.Period("day_of_month", "day_of_week", "hour_of_day")`
 for booking-time calendar features. Calendar cycles do not encode exact
 elapsed durations. Oldest-to-newest order plus `overflow="tail"` keeps the
 latest transactions, with no events after the scoring cutoff.
@@ -125,8 +126,9 @@ teach them only on their later dedicated pages.
 ## Public examples
 
 Use `import relflow as rf`, `rf.Model(...)` or a size factory, and
-`rf.Branch(...)`. Parent keywords name children; definitions have no `name` or
-positional arguments. Use bare field classes for defaults. The model root is
+`rf.Branch(...)`. Parent keywords name children; definitions have no `name`
+argument. `Period` accepts positional calendar parts; other fields and branches
+use keyword options. Use bare field classes for defaults. The model root is
 anonymous at `rf.Address()`; diagrams may label it `payment` or `account`.
 Use one argument per address component, such as
 `rf.Address("trxns", "amount")`.
@@ -204,14 +206,16 @@ masking policies, use `flow`, `timeline`, `tokens`, and `policies` from
 rather than hyperparameters. Keep nearby code, YAML, labels, captions, and text
 alternatives consistent. Preserve bundled extension and font licenses.
 
-`evidence/render.py` publishes local canonical sources and reviewed
-results without executing them. Generated pages and fragments under
+`evidence/render.py` combines canonical sources with the selected publication
+JSON without executing models. Generated pages and fragments under
 `docs/evidence/` are ignored; never edit them as a second source. Follow
 `evidence/SPEC.md` when changing experiments. Execution writes independent JSON
-records. Select complete reports with `evidence/record.py` and review updates to
-the experiment frontmatter; never alter measurements to make a check pass. Preserve
-source fingerprints and provenance. Successful full main CI runs automatically
-retain verified reports in `relflow/relflow` and open a publication PR for the
-selected results and generated README measurements. Merging that PR updates
-the hosted docs. Keep publication-only updates from recursively publishing.
-Clean only generated publication output.
+records. `evidence/record.py` creates result assets from complete validated
+reports; it never writes results into experiment headers. Preserve source
+fingerprints and original execution provenance. Only version releases freeze
+new publication assets in `evidence-v<version>` Releases. Ordinary CI creates no
+publication PR. Local builds use the preserved `evidence/results.json`
+bootstrap snapshot. Hosted builds fetch matching versioned assets, validate
+their digests and source revisions, and cache them outside canonical sources;
+unreleased previews use the last released data. Keep the static environment
+free of model imports and credentials. Clean only generated publication output.

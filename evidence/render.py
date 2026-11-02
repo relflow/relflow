@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -141,7 +142,7 @@ def evidence(entry: dict[str, Any]) -> str:
                 + "\n".join(f"| {value(name)} | {'Met' if met else 'Not met'} |" for name, met in run["checks"].items())
                 + "\n\n</details>"
             )
-    report = entry["header"].get("evidence-report", {})
+    report = entry["report"]
     report_url = report.get("release") or report.get("github_run", {}).get("html_url")
     if report_url:
         sections.append(f"[Complete run report]({report_url}).")
@@ -171,9 +172,9 @@ GROUP_ORDER = [
 ]
 
 
-def render(root: Path) -> None:
+def render(root: Path, *, publication: Path | None = None) -> None:
     docs = root / "docs/evidence"
-    entries = registry(root / "evidence")
+    entries = registry(root / "evidence", publication=publication)
     output = docs / "_generated"
     output.mkdir(parents=True, exist_ok=True)
     pages = set()
@@ -256,4 +257,5 @@ if __name__ == "__main__":
     if options.clean:
         clean(root)
     else:
-        render(root)
+        selected = os.environ.get("RELFLOW_EVIDENCE_PUBLICATION")
+        render(root, publication=Path(selected) if selected else None)

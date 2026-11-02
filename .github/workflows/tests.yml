@@ -23,6 +23,36 @@ defaults:
     shell: bash
 
 jobs:
+  imports:
+    name: Minimal wheel / optional plotting
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.distribution_artifact }}
+          path: package/
+      - name: Verify the shared CI distributions
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: python scripts/release.py verify package --source-sha "$SOURCE_SHA"
+      - name: Install only the wheel and its required dependencies
+        run: |
+          uv venv .venv-imports
+          uv pip install --python .venv-imports/bin/python --torch-backend cpu package/*.whl
+      - name: Model without Matplotlib and reproduce an incomplete namespace
+        run: |
+          .venv-imports/bin/python scripts/imports.py --plotting absent
+          .venv-imports/bin/python scripts/imports.py --plotting namespace
+      - name: Verify the complete plotting-stack remedy
+        run: |
+          uv pip install --python .venv-imports/bin/python matplotlib==3.10.7
+          .venv-imports/bin/python scripts/imports.py --plotting installed
+
   checkpoint:
     name: Produce current-release checkpoint
     runs-on: ubuntu-24.04
@@ -67,8 +97,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-24.04
-            python: "3.11"
           - os: ubuntu-24.04
             python: "3.12"
             coverage: true

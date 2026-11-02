@@ -28,7 +28,7 @@ matters to the task; the first model does not need every available type.
 | Recent transactions, each with its own fields | [Branch](branch.qmd) |
 | Payment channel from a declared fixed set | [Enum](enum.qmd) |
 | Unordered transaction tags | [Set](set.qmd) |
-| Recurring calendar position of a payment timestamp | [DateParts](dateparts.qmd) |
+| Recurring calendar position of a payment timestamp | [Period](dateparts.qmd) |
 | Account identifier equality without a learned vocabulary | [Hash](hash.qmd) |
 | Amount represented by its learned distribution | [Quantile](quantile.qmd) |
 | Merchant labels sharing learned latent groups | [Cluster](cluster.qmd) |
@@ -140,7 +140,7 @@ its remaining payload:
 | Cluster | Best cluster and best vocabulary label, each with probability |
 | Set | Label/probability pairs |
 | Vector | Fixed-width reconstructed vector |
-| DateParts, Hash, Text | No decoded public payload |
+| Period, Hash, Text | No decoded public payload |
 
 All types can export an embedding when configured. These vectors live in the
 separate `representations` column, with paths and ancestor coordinates.
