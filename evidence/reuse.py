@@ -19,7 +19,7 @@ import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
-from evidence_ci import digest, resolved, task_key
+from evidence_ci import digest, identity, resolved, task_key
 from experiments.source import metadata, registry
 from record import readme_content, validate
 
@@ -34,10 +34,8 @@ def wheel_equivalence(source: Path, current: Path, source_readme: bytes, current
     """Compare validated runtime payloads; the Git-bound README description is presentation only."""
     start = b"<!-- evidence-results:start -->"
     end = b"<!-- evidence-results:end -->"
-    readmes = []
     for content in (source_readme, current_readme):
         if start not in content and end not in content:
-            readmes.append(content)
             continue
         if (
             content.count(start) != 1
@@ -47,7 +45,6 @@ def wheel_equivalence(source: Path, current: Path, source_readme: bytes, current
             or content.index(start) >= content.index(end)
         ):
             raise ValueError("Wheel README normalization requires one ordered standalone result marker pair")
-        readmes.append(content[: content.index(start) + len(start)] + b"\n" + content[content.index(end) :])
     identities = []
     raw_hashes = []
     for path, expected_readme in ((source, source_readme), (current, current_readme)):
@@ -593,6 +590,17 @@ def verify(
         execution = json.loads((reports / "execution.json").read_text())
         if not requested.get("execution_identity") or execution.get("identity") != requested["execution_identity"]:
             raise ValueError("Requested image/environment policy is missing or differs from the original execution")
+        if execution["identity"].get("resources", {}).get("input_layout") == "declared-files-v1":
+            current_runtime = {
+                name.removeprefix("evidence/"): {
+                    "sha256": hashlib.sha256(content).hexdigest(),
+                    "mode": int(mode, 8) & 0o777,
+                }
+                for name, (mode, content) in tree(root, requested["suite"]).items()
+                if name.startswith("evidence/experiments/") and "__pycache__" not in PurePosixPath(name).parts
+            }
+            if identity(current_runtime) != manifest["runtime_sha256"]:
+                raise ValueError("Requested runtime input bytes differ from the original execution")
         bundle = Path(temporary) / "original-reports.tar.gz"
         archive(reports, bundle)
         reports_sha256 = digest(bundle)

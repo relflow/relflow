@@ -173,6 +173,9 @@ while preserving other unchanged experiments. Documentation, static result
 assets, publication tooling, and tests do not invalidate training. The complete
 source snapshot and raw fingerprints remain retained for audit. Runtime helper
 or dependency changes still invalidate affected execution.
+Each worker receives a read-only copy of exactly its declared runtime files:
+its experiment and shared helpers/data. Other experiment scripts and publication
+files are absent, and the input copy is outside the writable results mount.
 
 Full-report reuse authenticates the original input request and verifies a PR's
 synthetic merge parents against its recorded base and GitHub workflow head.

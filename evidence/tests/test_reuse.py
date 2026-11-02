@@ -689,6 +689,21 @@ def test_presentation_changes_reuse_verified_runtime_without_training(bundle, ch
     assert verify(bundle)["passed"] is True
 
 
+def test_declared_input_profile_rejects_changes_to_any_exposed_script_bytes(bundle):
+    root, reports, _, _, requested = bundle
+    runtime = dict(IDENTITY, resources={"input_layout": "declared-files-v1"})
+    for name in ("execution.json", "summary.json", "checksums.json"):
+        (reports / name).unlink()
+    write_json(reports / "execution.json", {"identity": runtime})
+    finish(reports, root=root / "evidence")
+    requested["execution_identity"] = runtime
+    assert verify(bundle)["passed"] is True
+    legacy_selection(root, reports)
+    requested["candidate"] = requested["suite"] = commit(root, "inline selection changes exposed script bytes")
+    with pytest.raises(ValueError, match="runtime input bytes"):
+        verify(bundle)
+
+
 @pytest.mark.parametrize("association", [[], [{"head": {"sha": "d" * 40}, "base": {"sha": "e" * 40}}]])
 def test_pr_provenance_uses_authenticated_request_when_github_associations_change(bundle, association):
     root, reports, inputs, run, _ = bundle

@@ -342,6 +342,11 @@ def test_runner_only_schedules_missing_baselines_and_keeps_task_isolation(tmp_pa
             mount = next(value for value in command if value.endswith(",dst=/results"))
             scratch = lab_run.Path(mount.removeprefix("type=bind,src=").removesuffix(",dst=/results"))
             task = json.loads((scratch / "task.json").read_text())
+            mount = next(value for value in command if value.endswith(",dst=/suite,readonly"))
+            view = lab_run.Path(mount.removeprefix("type=bind,src=").removesuffix(",dst=/suite,readonly"))
+            assert view != suite and scratch not in view.parents and view not in scratch.parents
+            assert (view / task["script"]).read_bytes() == (suite / task["script"]).read_bytes()
+            assert not (view / "results.json").exists()
             reports = next(parent for parent in scratch.parents if (parent / "manifest.json").exists())
             manifest = json.loads((reports / "manifest.json").read_text())
             write_json(scratch / "record.json", fresh(manifest, task))
@@ -497,3 +502,68 @@ def test_one_experiment_change_preserves_other_baseline_execution_keys(tmp_path)
         old = next(task for task in before["tasks"] if task["id"] == identifier and task["role"] == "baseline")
         new = next(task for task in after["tasks"] if task["id"] == identifier and task["role"] == "baseline")
         assert (execution_key(before, old, execution) == execution_key(after, new, execution)) is (identifier == "P902")
+
+
+def test_worker_inputs_exclude_unbound_files_and_preserve_shared_data(tmp_path):
+    from evidence_ci import identity, runtime_inputs
+    from lab_run import isolate
+
+    suite = tmp_path / "suite"
+    script = source(suite)
+    other = script.with_name("other.py")
+    other.write_text(script.read_text().replace("P901", "P902"))
+    data = suite / "experiments/data.bin"
+    data.write_bytes(b"\x00training input")
+    data.chmod(0o640)
+    (suite / "results.json").write_text("unbound publication input")
+    manifest = plan(
+        run_id="isolated", candidate={}, baseline={}, evidence_sha="source", executor_sha="trusted", root=suite
+    )
+    task = manifest["tasks"][0]
+    inputs = runtime_inputs(suite)
+    scripts = {script.relative_to(suite).as_posix(), other.relative_to(suite).as_posix()}
+    view = isolate(suite, tmp_path / "inputs", task, inputs, scripts)
+    assert identity(runtime_inputs(view)) == task["inputs_sha256"]
+    assert (view / task["script"]).read_bytes() == script.read_bytes()
+    assert (view / "experiments/reporting.py").is_file()
+    assert (view / "experiments/data.bin").read_bytes() == data.read_bytes()
+    assert (view / "experiments/data.bin").stat().st_mode & 0o777 == 0o640
+    assert not (view / other.relative_to(suite)).exists()
+    assert not (view / "results.json").exists()
+    # A separate copy prevents writes through any accidental alias to the source.
+    (view / "experiments/data.bin").write_bytes(b"changed copy")
+    assert data.read_bytes() == b"\x00training input"
+
+
+@pytest.mark.parametrize("change", ["bytes", "mode", "symlink"])
+def test_worker_rejects_input_changes_after_planning(tmp_path, change):
+    from evidence_ci import runtime_inputs
+    from lab_run import isolate
+
+    suite = tmp_path / "suite"
+    script = source(suite)
+    manifest = plan(
+        run_id="isolated", candidate={}, baseline={}, evidence_sha="source", executor_sha="trusted", root=suite
+    )
+    task = manifest["tasks"][0]
+    inputs = runtime_inputs(suite)
+    if change == "bytes":
+        script.write_text(script.read_text() + "changed = True\n")
+    elif change == "mode":
+        script.chmod(0o755)
+    else:
+        script.unlink()
+        script.symlink_to(suite / "experiments/reporting.py")
+    with pytest.raises(ValueError, match="Execution input"):
+        isolate(suite, tmp_path / "inputs", task, inputs, {task["script"]})
+
+
+def test_runtime_keys_bind_every_byte_exposed_to_the_worker(tmp_path):
+    from evidence_ci import runtime_inputs
+    from experiments.source import frontmatter, metadata
+
+    script = source(tmp_path)
+    original = runtime_inputs(tmp_path)
+    text = script.read_text()
+    script.write_text(frontmatter(text, dict(metadata(text), **{"evidence-result": {"metrics": {"x": 5}}})))
+    assert runtime_inputs(tmp_path) != original

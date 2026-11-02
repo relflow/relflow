@@ -79,7 +79,6 @@ def suite_identity(root: Path) -> str:
 
 def runtime_inputs(root: Path) -> dict:
     """Bind experiment code and shared runtime files, excluding publication and test tooling."""
-    scripts = {entry["script"] for entry in registry(root, measurements=False).values()}
     inputs = {}
     for path in sorted((root / "experiments").rglob("*")):
         name = path.relative_to(root).as_posix()
@@ -91,14 +90,7 @@ def runtime_inputs(root: Path) -> dict:
             continue
         if not path.is_file():
             raise ValueError(f"Execution inputs reject special files: {name}")
-        content = path.read_bytes()
-        if name in scripts:
-            text = content.decode()
-            header = metadata(text)
-            header.pop("evidence-result", None)
-            header.pop("evidence-report", None)
-            content = frontmatter(text, header).encode()
-        inputs[name] = {"sha256": hashlib.sha256(content).hexdigest(), "mode": path.stat().st_mode & 0o777}
+        inputs[name] = {"sha256": digest(path), "mode": path.stat().st_mode & 0o777}
     return inputs
 
 

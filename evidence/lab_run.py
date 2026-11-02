@@ -28,6 +28,7 @@ from evidence_ci import (
     integrity,
     plan,
     resolved,
+    runtime_inputs,
     suite_identity,
     task_key,
     wheel_payload,
@@ -112,6 +113,7 @@ def environment(requirements: Path, workers: int) -> dict:
             "cap_drop": "ALL",
             "no_new_privileges": True,
             "runtime_layout": "installed-wheel-v1",
+            "input_layout": "declared-files-v1",
             "scheduler": "longest-first-v1",
             "task_timeout_seconds": 1850,
             "experiment_timeout_seconds": 1700,
@@ -163,6 +165,25 @@ def schedule(tasks: list[dict], suite: Path) -> list[dict]:
             duration if type(duration) in {int, float} and math.isfinite(duration) and duration > 0 else 0
         )
     return sorted(tasks, key=lambda task: (-durations[task["id"]], task_key(task)))
+
+
+def isolate(suite: Path, destination: Path, task: dict, inputs: dict, scripts: set[str]) -> Path:
+    """Expose exactly the selected experiment and shared files bound by its task key."""
+    selected = {name: value for name, value in inputs.items() if name not in scripts or name == task["script"]}
+    if identity(selected) != task["inputs_sha256"]:
+        raise ValueError(f"Execution inputs differ from the planned task: {task['id']}")
+    destination.mkdir(parents=True)
+    for name, expected in selected.items():
+        source = suite / name
+        if source.is_symlink() or not source.is_file():
+            raise ValueError(f"Execution inputs require regular files: {name}")
+        target = destination / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        actual = {"sha256": digest(target), "mode": target.stat().st_mode & 0o777}
+        if actual != expected:
+            raise ValueError(f"Execution input changed after planning: {name}")
+    return destination
 
 
 def cached(
@@ -319,12 +340,15 @@ def run(options: argparse.Namespace) -> None:
         execution["role_images"] = images
         timings["prepare_seconds"] = round(time.monotonic() - started, 3)
         write_json(output / "execution.json", execution)
+        inputs = runtime_inputs(suite)
+        scripts = {entry["script"] for entry in registry(suite, measurements=False).values()}
 
         def one(task: dict) -> dict:
             launched = time.monotonic()
             scratch = output / "tasks" / task_key(task)
             scratch.mkdir(parents=True)
             write_json(scratch / "task.json", task)
+            view = isolate(suite, output / "task-inputs" / task_key(task), task, inputs, scripts)
             role = task["role"]
             name = "evidence-" + label + "-" + hashlib.sha256(task_key(task).encode()).hexdigest()[:12]
             command = [
@@ -355,7 +379,7 @@ def run(options: argparse.Namespace) -> None:
                 "--mount",
                 f"type=bind,src={ROOT},dst=/executor,readonly",
                 "--mount",
-                f"type=bind,src={suite},dst=/suite,readonly",
+                f"type=bind,src={view},dst=/suite,readonly",
                 "--mount",
                 f"type=bind,src={scratch},dst=/results",
                 "--env",
@@ -407,6 +431,7 @@ def run(options: argparse.Namespace) -> None:
                 subprocess.run(
                     ["docker", "rm", "--force", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
                 )
+                shutil.rmtree(view)
 
         tasks = []
         validated_sources = {}
