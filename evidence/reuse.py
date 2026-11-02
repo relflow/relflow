@@ -31,7 +31,7 @@ LIMIT = 512 * 1024 * 1024
 
 
 def wheel_equivalence(source: Path, current: Path, source_readme: bytes, current_readme: bytes) -> dict:
-    """Compare complete validated wheels, normalizing only a measured README table and its RECORD row."""
+    """Compare validated runtime payloads; the Git-bound README description is presentation only."""
     start = b"<!-- evidence-results:start -->"
     end = b"<!-- evidence-results:end -->"
     readmes = []
@@ -48,8 +48,6 @@ def wheel_equivalence(source: Path, current: Path, source_readme: bytes, current
         ):
             raise ValueError("Wheel README normalization requires one ordered standalone result marker pair")
         readmes.append(content[: content.index(start) + len(start)] + b"\n" + content[content.index(end) :])
-    if readmes[0] != readmes[1]:
-        raise ValueError("Wheel README differs outside its measured results block")
     identities = []
     raw_hashes = []
     for path, expected_readme in ((source, source_readme), (current, current_readme)):
@@ -93,7 +91,7 @@ def wheel_equivalence(source: Path, current: Path, source_readme: bytes, current
             body = payload[metadata_name][boundary.end() :]
             if body != expected_readme:
                 raise ValueError("Wheel METADATA description must equal the exact Git README")
-            normalized_metadata = header + separator + readmes[0]
+            normalized_metadata = header + separator
             lines = payload[record_name].splitlines(keepends=True)
             recorded = set()
             normalized_rows = []
@@ -159,6 +157,53 @@ def wheel_equivalence(source: Path, current: Path, source_readme: bytes, current
 
 def api(path: str) -> dict:
     return json.loads(subprocess.check_output(["gh", "api", path]))
+
+
+def attempt(run: dict, number: int) -> dict:
+    """Keep original Evidence provenance when a later retry completes the remaining CI jobs."""
+    if type(number) is not int or number < 1 or number > run["run_attempt"]:
+        raise ValueError("Evidence input attempt is outside the authenticated CI run")
+    if number == run["run_attempt"]:
+        return run
+    if run.get("status") != "completed" or run.get("conclusion") != "success":
+        raise ValueError("Earlier Evidence artifacts require the complete CI run to finish successfully")
+    original = api(f"repos/{REPOSITORY}/actions/runs/{run['id']}/attempts/{number}")
+    fields = (
+        "id",
+        "head_sha",
+        "event",
+        "head_branch",
+        "workflow_id",
+        "path",
+        "head_repository",
+    )
+    original_workflows = sorted(
+        original.get("referenced_workflows", []), key=lambda row: (row.get("path", ""), row.get("sha", ""))
+    )
+    current_workflows = sorted(
+        run.get("referenced_workflows", []), key=lambda row: (row.get("path", ""), row.get("sha", ""))
+    )
+    if (
+        original.get("run_attempt") != number
+        or original_workflows != current_workflows
+        or any(original.get(name) != run.get(name) for name in fields)
+    ):
+        raise ValueError("Retried CI does not bind the original Evidence source and workflow")
+    jobs = api(f"repos/{REPOSITORY}/actions/runs/{run['id']}/attempts/{number}/jobs?per_page=100")["jobs"]
+    evidence = [
+        job for job in jobs if job["name"].endswith("Run full paired suite on lab / Run full paired suite on lab")
+    ]
+    if len(evidence) != 1 or evidence[0].get("conclusion") != "success" or evidence[0].get("status") != "completed":
+        raise ValueError("The original attempt has no complete successful Evidence job")
+    return dict(
+        original,
+        validation={
+            "run_attempt": run["run_attempt"],
+            "head_sha": run["head_sha"],
+            "conclusion": "success",
+            "evidence_job_id": evidence[0]["id"],
+        },
+    )
 
 
 def helper_sha(run: dict) -> str:
@@ -329,9 +374,35 @@ def equivalent(
     reports_sha256: str,
     run: dict,
     release: str | None,
+    *,
+    scope: str = "all",
 ) -> str:
     """Compare complete trees, allowing only measured publication selection changes."""
     before, after = tree(root, original), tree(root, requested)
+    if scope == "package":
+        before = {
+            name: value
+            for name, value in before.items()
+            if name.startswith("src/") or name in {"pyproject.toml", "uv.lock"}
+        }
+        after = {
+            name: value
+            for name, value in after.items()
+            if name.startswith("src/") or name in {"pyproject.toml", "uv.lock"}
+        }
+    elif scope == "suite":
+        before = {
+            name: value
+            for name, value in before.items()
+            if name.startswith("evidence/experiments/") or name == "README.md"
+        }
+        after = {
+            name: value
+            for name, value in after.items()
+            if name.startswith("evidence/experiments/") or name == "README.md"
+        }
+    elif scope != "all":
+        raise ValueError(f"Unknown execution input scope: {scope}")
     if before.keys() != after.keys():
         raise ValueError("Evidence input paths differ")
     headers = {}
@@ -369,23 +440,17 @@ def equivalent(
         if old != new:
             if any(old.count(marker) != 1 or new.count(marker) != 1 for marker in MARKERS):
                 raise ValueError("README normalization requires one bounded marker pair")
-            if new != readme_content(headers, new):
-                raise ValueError("README metrics differ from the selected archived measurements")
-            for identifier in ("P021", "P025", "P038"):
-                selected(
-                    headers[identifier]["header"], manifest, records, manifest_sha256, reports_sha256, run, release
-                )
-            left = old.split(MARKERS[0])
-            right = new.split(MARKERS[0])
-            if left[0] != right[0] or left[1].split(MARKERS[1])[1] != right[1].split(MARKERS[1])[1]:
-                raise ValueError("README prose outside measured results differs")
-        if all(after["README.md"][1].decode().count(marker) == 1 for marker in MARKERS):
-            text = after["README.md"][1].decode()
-            first, tail = text.split(MARKERS[0])
-            normalized["README.md"] = (
-                after["README.md"][0],
-                (first + MARKERS[0] + MARKERS[1] + tail.split(MARKERS[1])[1]).encode(),
-            )
+            old_table = old.split(MARKERS[0])[1].split(MARKERS[1])[0]
+            new_table = new.split(MARKERS[0])[1].split(MARKERS[1])[0]
+            if old_table != new_table:
+                if new != readme_content(headers, new):
+                    raise ValueError("README metrics differ from the selected archived measurements")
+                for identifier in ("P021", "P025", "P038"):
+                    selected(
+                        headers[identifier]["header"], manifest, records, manifest_sha256, reports_sha256, run, release
+                    )
+        # The description is verified against Git by wheel_equivalence; it never changes execution.
+        normalized.pop("README.md", None)
     checksum = hashlib.sha256()
     for name, (mode, content) in sorted(normalized.items()):
         checksum.update(name.encode() + b"\0" + mode.encode() + b"\0" + hashlib.sha256(content).digest())
@@ -408,11 +473,20 @@ def integrity(reports: Path) -> None:
         raise ValueError("Evidence report is missing execution identity, summary, report or task logs")
 
 
-def trusted(run: dict, manifest: dict, *, helper: str, executor: str, root: Path) -> None:
+def trusted(run: dict, manifest: dict, *, helper: str, executor: str, root: Path, request: dict) -> None:
     """Bind actual tested commits to an immutable successful internal workflow attempt."""
     if (
         run.get("status") != "completed"
-        or run.get("conclusion") != "success"
+        or (
+            run.get("conclusion") != "success"
+            and not (
+                run.get("validation", {}).get("conclusion") == "success"
+                and run["validation"].get("head_sha") == run.get("head_sha")
+                and type(run["validation"].get("run_attempt")) is int
+                and run["validation"]["run_attempt"] > run["run_attempt"]
+                and type(run["validation"].get("evidence_job_id")) is int
+            )
+        )
         or run.get("head_repository", {}).get("full_name") != REPOSITORY
         or run.get("path") != ".github/workflows/ci.yml"
         or run.get("event") not in {"pull_request", "push", "workflow_dispatch", "merge_group"}
@@ -427,25 +501,32 @@ def trusted(run: dict, manifest: dict, *, helper: str, executor: str, root: Path
         )
     ):
         raise ValueError("Reuse source is not a successful internal immutable evidence workflow attempt")
-    candidate = manifest["candidate"]["revision"]
+    expected = {
+        "candidate": manifest["candidate"]["revision"],
+        "baseline": manifest["baseline"]["revision"],
+        "suite": manifest["evidence_sha"],
+        "run_id": run["id"],
+        "run_attempt": run["run_attempt"],
+        "event": run["event"],
+    }
+    if request != expected:
+        raise ValueError("Original input request differs from its actual execution and trusted CI attempt")
+    candidate = request["candidate"]
     if run["event"] == "pull_request":
-        pulls = run.get("pull_requests", [])
-        if (
-            len(pulls) != 1
-            or run["head_sha"] != pulls[0]["head"]["sha"]
-            or manifest["baseline"]["revision"] != pulls[0]["base"]["sha"]
-        ):
-            raise ValueError("PR source merge candidate does not bind the workflow head and actual comparison base")
-        if candidate != run["head_sha"]:
+        if candidate == run["head_sha"]:
+            subprocess.run(["git", "merge-base", "--is-ancestor", request["baseline"], candidate], cwd=root, check=True)
+        else:
             commit = subprocess.check_output(["git", "cat-file", "-p", candidate], cwd=root, text=True)
             parents = [
                 line.removeprefix("parent ")
                 for line in commit.partition("\n\n")[0].splitlines()
                 if line.startswith("parent ")
             ]
-            expected = [pulls[0]["base"]["sha"], pulls[0]["head"]["sha"]]
-            if parents != expected:
-                raise ValueError(f"PR source merge parents differ: expected {expected}; found {parents}")
+            expected_parents = [request["baseline"], run["head_sha"]]
+            if parents != expected_parents:
+                raise ValueError(
+                    f"PR source merge parents differ from its actual comparison base and head: expected {expected_parents}; found {parents}"
+                )
     elif candidate != run.get("head_sha"):
         raise ValueError("Reuse source candidate differs from the trusted workflow commit")
 
@@ -473,7 +554,14 @@ def verify(
         raise ValueError("Requested runtime requirements differ from the original locked environment")
     for revision in (manifest["evidence_sha"], manifest["candidate"]["revision"], manifest["baseline"]["revision"]):
         ensure(root, revision)
-    trusted(run, manifest, helper=helper, executor=requested["executor"], root=root)
+    trusted(
+        run,
+        manifest,
+        helper=helper,
+        executor=requested["executor"],
+        root=root,
+        request=json.loads((inputs / "request.json").read_text()),
+    )
     with tempfile.TemporaryDirectory() as temporary:
         suite = Path(temporary) / "evidence"
         for name, (mode, content) in tree(root, manifest["evidence_sha"]).items():
@@ -522,6 +610,7 @@ def verify(
                         reports_sha256,
                         run,
                         source.get("release"),
+                        scope="package",
                     )
                     original_wheels = list((inputs / source_role).glob("*.whl"))
                     requested_wheels = list((current_inputs / role).glob("*.whl"))
@@ -549,6 +638,7 @@ def verify(
             reports_sha256,
             run,
             source.get("release"),
+            scope="suite",
         )
         measured = (
             resolved(manifest, records, reports, root=suite)
@@ -695,7 +785,7 @@ def release_bundle(release: dict, staging: Path) -> tuple[dict, dict]:
     original = re.fullmatch(r"gh-(\d+)-(\d+)", manifest["run_id"])
     if not original:
         raise ValueError("Retained report does not identify its terminal execution")
-    run = api(f"repos/{REPOSITORY}/actions/runs/{original[1]}/attempts/{original[2]}")
+    run = attempt(api(f"repos/{REPOSITORY}/actions/runs/{original[1]}"), int(original[2]))
     recorded = json.loads(payloads["github-run.json"])
     if (
         recorded.get("run_id", recorded.get("id")) != run["id"]
@@ -729,7 +819,11 @@ def find(root: Path, output: Path, requested: dict, *, current_inputs: Path, hel
     releases = [
         row
         for row in api(f"repos/{REPOSITORY}/releases?per_page=20")
-        if re.fullmatch(r"evidence-ci-\d+-attempt-\d+", row["tag_name"]) and not row["draft"]
+        if re.fullmatch(
+            r"evidence-(?:ci-\d+-attempt-\d+|v[0-9]+(?:\.[0-9]+)*(?:(?:a|b|rc)[0-9]+)?(?:\.post[0-9]+)?(?:\.dev[0-9]+)?)",
+            row["tag_name"],
+        )
+        and not row["draft"]
     ][:3]
     for kind, candidate in [("actions", run) for run in runs] + [("release", release) for release in releases]:
         run = candidate
@@ -755,8 +849,9 @@ def find(root: Path, output: Path, requested: dict, *, current_inputs: Path, hel
                 original = re.fullmatch(r"gh-(\d+)-(\d+)", manifest["run_id"])
                 if not original:
                     raise ValueError("Original report run identity is invalid")
-                if (int(original[1]), int(original[2])) != (run["id"], run["run_attempt"]):
+                if int(original[1]) != run["id"]:
                     continue
+                run = attempt(run, int(original[2]))
                 receipt = verify(
                     root,
                     staging / "reports",
@@ -819,7 +914,7 @@ def verify_receipt(
     ):
         raise ValueError("Reuse receipt does not bind the current main CI request and actual baseline")
     source = receipt["source"]
-    run = api(f"repos/{REPOSITORY}/actions/runs/{source['run_id']}/attempts/{source['run_attempt']}")
+    run = attempt(api(f"repos/{REPOSITORY}/actions/runs/{source['run_id']}"), source["run_attempt"])
     if run.get("workflow_id") != current["workflow_id"]:
         raise ValueError("Reuse source belongs to a different CI workflow")
     with tempfile.TemporaryDirectory() as temporary:

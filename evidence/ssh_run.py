@@ -169,7 +169,7 @@ def main() -> None:
     parser.add_argument("--baseline-sha", required=True)
     parser.add_argument("--requirements", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--steps", type=int)
     parser.add_argument("--ids", nargs="+")
     parser.add_argument("--force-fresh", action="store_true")

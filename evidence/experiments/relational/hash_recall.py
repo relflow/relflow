@@ -117,7 +117,10 @@ Run this file with --help for seed, training-budget, and reporting options.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from concurrent.futures import ProcessPoolExecutor
 from functools import partial
+from itertools import repeat
+from multiprocessing import get_context
 
 import lightning.pytorch as lit
 import numpy as np
@@ -217,7 +220,16 @@ def trial(seed: int, steps: int | None, accelerator: str) -> dict:
 
 
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
-    trials = [trial(seed + offset, steps, accelerator) for offset in PANEL]
+    if accelerator == "cpu":
+        with ProcessPoolExecutor(
+            max_workers=2,
+            mp_context=get_context("spawn"),
+            initializer=torch.set_num_threads,
+            initargs=(torch.get_num_threads(),),
+        ) as pool:
+            trials = list(pool.map(trial, [seed + offset for offset in PANEL], repeat(steps), repeat(accelerator)))
+    else:
+        trials = [trial(seed + offset, steps, accelerator) for offset in PANEL]
     keys = ("intact_nrmse", "broken_nrmse", "corruption_gap")
     median = {key: float(np.median([result[key] for result in trials])) for key in keys}
     worst = {

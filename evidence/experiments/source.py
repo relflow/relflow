@@ -86,11 +86,17 @@ def snapshot(path: Path) -> dict[str, Any]:
     return document
 
 
-def registry(root: Path | None = None, *, publication: Path | None = None) -> dict[str, dict[str, Any]]:
+def registry(
+    root: Path | None = None, *, publication: Path | None = None, measurements: bool = True
+) -> dict[str, dict[str, Any]]:
     """Discover canonical experiments directly from their frontmatter."""
     root = root or Path(__file__).resolve().parents[1]
     selected = publication or root / "results.json"
-    recorded = snapshot(selected) if publication is not None or selected.is_file() else {"report": {}, "results": {}}
+    recorded = (
+        snapshot(selected)
+        if measurements and (publication is not None or selected.is_file())
+        else {"report": {}, "results": {}}
+    )
     entries = {}
     for script in sorted((root / "experiments").glob("*/*.py")):
         if script.is_symlink() or script.parent.is_symlink():

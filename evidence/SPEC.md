@@ -148,3 +148,17 @@ pages as a second source. `make check` validates static sources and tooling;
 `make check-docs` renders and checks the full site. Neither imports RelFlow,
 Torch, or Lightning. `make clean` removes generated output and caches while
 retaining canonical sources and current measurements.
+
+## Execution equivalence
+
+The complete source snapshot retains its raw integrity hash. Separate runtime
+fingerprints bind each experiment and shared runtime files under `experiments/`;
+publication assets, documentation, and tests are outside this execution identity.
+The installed wheel payload, dependency export, seed, budget, trusted executor,
+and actual resource/thread policy must also match before baseline reuse.
+
+Scheduling order and cached image layers never reduce budgets or remove seeds.
+Independent seed trials may execute in isolated processes when their original
+ordered aggregation and checks remain identical. The collector still requires
+every canonical baseline/candidate result. Timing data cannot satisfy a learning
+check. GPU calibration remains deferred and cannot replace the required CPU gate.

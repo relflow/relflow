@@ -6,6 +6,7 @@ import argparse
 import concurrent.futures
 import hashlib
 import json
+import math
 import os
 import platform
 import shlex
@@ -13,6 +14,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from evidence_ci import (
@@ -31,6 +33,7 @@ from evidence_ci import (
     wheel_payload,
     write_json,
 )
+from experiments.source import registry
 
 
 def image_definition(torch_version: str) -> str:
@@ -108,6 +111,8 @@ def environment(requirements: Path, workers: int) -> dict:
             "read_only": True,
             "cap_drop": "ALL",
             "no_new_privileges": True,
+            "runtime_layout": "installed-wheel-v1",
+            "scheduler": "longest-first-v1",
             "task_timeout_seconds": 1850,
             "experiment_timeout_seconds": 1700,
         },
@@ -128,6 +133,36 @@ def environment(requirements: Path, workers: int) -> dict:
         "cpu_per_task": 2,
         "memory_per_task": "4g",
     }
+
+
+def wheel_image(execution: dict, wheel: Path) -> str:
+    """Install the exact wheel once in a cached layer; tasks still get fresh containers."""
+    recipe = (
+        f"FROM {execution['image']}\n"
+        f"COPY {wheel.name} /tmp/{wheel.name}\n"
+        "RUN python -m pip install --no-deps --no-index " + shlex.quote("/tmp/" + wheel.name) + "\n"
+    )
+    tag = (
+        "relflow-evidence-wheel:"
+        + identity({"base": execution["image_id"], "wheel": digest(wheel), "recipe": recipe})[:20]
+    )
+    with tempfile.TemporaryDirectory(prefix="evidence-wheel-") as temporary:
+        context = Path(temporary)
+        (context / "Dockerfile").write_text(recipe)
+        shutil.copy2(wheel, context / wheel.name)
+        subprocess.run(["docker", "build", "--network", "none", "--tag", tag, str(context)], check=True)
+    return subprocess.check_output(["docker", "image", "inspect", tag, "--format", "{{.Id}}"], text=True).strip()
+
+
+def schedule(tasks: list[dict], suite: Path) -> list[dict]:
+    """Use recorded durations only as scheduling hints, never as execution evidence."""
+    durations = {}
+    for identifier, entry in registry(suite).items():
+        duration = (entry["run"] or {}).get("duration_seconds", 0)
+        durations[identifier] = (
+            duration if type(duration) in {int, float} and math.isfinite(duration) and duration > 0 else 0
+        )
+    return sorted(tasks, key=lambda task: (-durations[task["id"]], task_key(task)))
 
 
 def cached(
@@ -234,6 +269,9 @@ def retain(cache: Path, output: Path, manifest: dict, execution: dict) -> None:
 
 
 def run(options: argparse.Namespace) -> None:
+    started = time.monotonic()
+    timings = {"cpu_seconds": 0.0, "peak_rss_bytes": 0}
+    measurements = []
     suite = options.suite_root.resolve()
     output = options.output.resolve()
     if output == suite or suite in output.parents:
@@ -277,16 +315,18 @@ def run(options: argparse.Namespace) -> None:
     cache = Path.home() / "relflow-evidence/cache/v1"
     try:
         execution = environment(options.requirements, options.workers)
-        image = execution["image_id"]
+        images = {role: wheel_image(execution, wheel) for role, wheel in wheels.items()}
+        execution["role_images"] = images
+        timings["prepare_seconds"] = round(time.monotonic() - started, 3)
         write_json(output / "execution.json", execution)
 
         def one(task: dict) -> dict:
+            launched = time.monotonic()
             scratch = output / "tasks" / task_key(task)
             scratch.mkdir(parents=True)
             write_json(scratch / "task.json", task)
             role = task["role"]
             name = "evidence-" + label + "-" + hashlib.sha256(task_key(task).encode()).hexdigest()[:12]
-            wheel = wheels[role]
             command = [
                 "docker",
                 "run",
@@ -317,8 +357,6 @@ def run(options: argparse.Namespace) -> None:
                 "--mount",
                 f"type=bind,src={suite},dst=/suite,readonly",
                 "--mount",
-                f"type=bind,src={wheel},dst=/wheels/{wheel.name},readonly",
-                "--mount",
                 f"type=bind,src={scratch},dst=/results",
                 "--env",
                 "HOME=/tmp/home",
@@ -332,13 +370,10 @@ def run(options: argparse.Namespace) -> None:
                 "EVIDENCE_RELFLOW_REVISION=" + manifest[role]["revision"],
                 "--env",
                 "EVIDENCE_WHEEL_SHA256=" + manifest[role]["wheel_sha256"],
-                image,
-                "sh",
-                "-c",
-                "python -m venv --system-site-packages /tmp/runtime && "
-                "/tmp/runtime/bin/python -m pip install --no-deps "
-                + shlex.quote("/wheels/" + wheel.name)
-                + " && exec /tmp/runtime/bin/python /executor/lab_worker.py /results/task.json",
+                images[role],
+                "python",
+                "/executor/lab_worker.py",
+                "/results/task.json",
             ]
             try:
                 process = subprocess.run(
@@ -366,6 +401,9 @@ def run(options: argparse.Namespace) -> None:
             except (subprocess.TimeoutExpired, ValueError, OSError) as error:
                 return {"task": task, "result": None, "error": str(error), "log": ""}
             finally:
+                measurements.append(
+                    {"task": task_key(task), "container_seconds": round(time.monotonic() - launched, 3)}
+                )
                 subprocess.run(
                     ["docker", "rm", "--force", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
                 )
@@ -381,11 +419,18 @@ def run(options: argparse.Namespace) -> None:
             else:
                 collect(output, record)
                 print(f"Reused baseline {task['id']} from {record['reuse']['report']}", flush=True)
+        tasks = schedule(tasks, suite)
+        timings.update(
+            fresh_tasks=len(tasks), reused_baselines=len(manifest["tasks"]) - len(tasks), workers=options.workers
+        )
+        dispatched = time.monotonic()
         pool = concurrent.futures.ThreadPoolExecutor(max_workers=options.workers)
         try:
             futures = [pool.submit(one, task) for task in tasks]
             for future in concurrent.futures.as_completed(futures):
                 record = future.result()
+                timings["cpu_seconds"] += record.get("cpu_seconds", 0)
+                timings["peak_rss_bytes"] = max(timings["peak_rss_bytes"], record.get("peak_rss_bytes", 0))
                 collect(output, record)
                 print(
                     f"Collected {record['task']['role']} {record['task']['id']}: "
@@ -394,6 +439,7 @@ def run(options: argparse.Namespace) -> None:
                 )
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
+            timings["dispatch_seconds"] = round(time.monotonic() - dispatched, 3)
             active = subprocess.check_output(
                 ["docker", "ps", "--quiet", "--filter", "label=relflow.evidence=" + label], text=True
             ).split()
@@ -401,6 +447,11 @@ def run(options: argparse.Namespace) -> None:
                 subprocess.run(["docker", "rm", "--force", *active], check=False)
     finally:
         try:
+            timings.update(
+                wall_seconds=round(time.monotonic() - started, 3),
+                containers=sorted(measurements, key=lambda value: value["task"]),
+            )
+            write_json(output / "timing.json", timings)
             summary = finish(output, root=suite)
             print(json.dumps(summary, indent=2), flush=True)
         finally:
@@ -429,7 +480,7 @@ def main() -> None:
     parser.add_argument("--suite-root", required=True, type=Path)
     parser.add_argument("--requirements", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--steps", type=int)
     parser.add_argument("--ids", nargs="+")
     parser.add_argument("--force-fresh", action="store_true")

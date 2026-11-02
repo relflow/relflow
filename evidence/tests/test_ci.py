@@ -11,7 +11,7 @@ from evidence_ci import ROOT, default_seed, evaluate, plan, registry, write_json
 @pytest.fixture
 def paired(monkeypatch):
     entries = registry()
-    monkeypatch.setattr(evidence_ci, "registry", lambda *args: {"P001": entries["P001"]})
+    monkeypatch.setattr(evidence_ci, "registry", lambda *args, **kwargs: {"P001": entries["P001"]})
     manifest = plan(
         run_id="test",
         candidate={"revision": "candidate", "wheel_sha256": "candidate-wheel"},

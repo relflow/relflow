@@ -223,7 +223,6 @@ def test_exact_input_reuse_preserves_records_revisions_and_unmet_checks(bundle):
         "path",
         "gate",
         "comment",
-        "readme-prose",
         "readme-forgery",
         "header-forgery",
         "unrelated-header",
@@ -245,7 +244,7 @@ def test_input_equivalence_fails_closed_except_exact_measured_selection(bundle, 
         elif fault == "mode":
             script.chmod(0o755)
         elif fault == "path":
-            (root / "extra-policy.txt").write_text("new tracked input")
+            (root / "evidence/experiments/extra-policy.txt").write_text("new tracked runtime input")
         elif fault == "gate":
             script.write_text(script.read_text() + "check_threshold = 0.9\n")
         elif fault == "comment":
@@ -280,7 +279,7 @@ def test_selection_only_pr_must_match_archived_records_and_bounded_readme(bundle
     receipt = verify(bundle)
     assert receipt["source"]["candidate"]["revision"] == original_candidate
     assert receipt["requested"]["candidate"] == selected
-    assert receipt["input_sha256"]["candidate"] == receipt["input_sha256"]["suite"]
+    assert set(receipt["input_sha256"]) == {"candidate", "baseline", "suite"}
     assert receipt["role_mapping"] == {"baseline": "candidate", "candidate": "candidate"}
     assert receipt["source"]["baseline"]["revision"] != receipt["requested"]["baseline"]
 
@@ -352,19 +351,21 @@ def test_pr_synthetic_merge_binds_head_and_actual_base_without_relabelling(bundl
     )
     manifest = dict(original, candidate=dict(original["candidate"], revision=synthetic))
     run.update(event="pull_request", pull_requests=[{"base": {"sha": base}, "head": {"sha": candidate}}])
-    reuse.trusted(run, manifest, helper=HELPER, executor=EXECUTOR, root=root)
-    with pytest.raises(ValueError, match="actual comparison base"):
+    request = dict(json.loads((inputs / "request.json").read_text()), candidate=synthetic, event="pull_request")
+    reuse.trusted(run, manifest, helper=HELPER, executor=EXECUTOR, root=root, request=request)
+    with pytest.raises(ValueError, match="actual comparison base|Original input request"):
         reuse.trusted(
             run,
             dict(manifest, baseline=dict(manifest["baseline"], revision=candidate)),
             helper=HELPER,
             executor=EXECUTOR,
             root=root,
+            request=request,
         )
 
 
 def test_original_pr_merge_parent_proof_survives_real_depth_one_fetch(bundle, tmp_path, monkeypatch):
-    root, reports, _, run, _ = bundle
+    root, reports, inputs, run, _ = bundle
     manifest = json.loads((reports / "manifest.json").read_text())
     base = manifest["baseline"]["revision"]
     head = manifest["candidate"]["revision"]
@@ -406,11 +407,15 @@ def test_original_pr_merge_parent_proof_survives_real_depth_one_fetch(bundle, tm
     assert git(runner, "show", "-s", "--format=%P", merge) == ""
     run.update(event="pull_request", pull_requests=[{"base": {"sha": base}, "head": {"sha": head}}])
     manifest["candidate"]["revision"] = merge
-    reuse.trusted(run, manifest, helper=HELPER, executor=EXECUTOR, root=runner)
+    request = dict(json.loads((inputs / "request.json").read_text()), candidate=merge, event="pull_request")
+    reuse.trusted(run, manifest, helper=HELPER, executor=EXECUTOR, root=runner, request=request)
     manifest["candidate"]["revision"] = head
+    reuse.ensure(runner, head)
     run["head_sha"] = "e" * 40
-    with pytest.raises(ValueError, match="actual comparison base"):
-        reuse.trusted(run, manifest, helper=HELPER, executor=EXECUTOR, root=runner)
+    with pytest.raises(ValueError, match="actual comparison base|Original input request"):
+        reuse.trusted(
+            run, manifest, helper=HELPER, executor=EXECUTOR, root=runner, request=dict(request, candidate=head)
+        )
 
 
 def test_miss_diagnostics_are_bounded_and_do_not_expose_subprocess_arguments():
@@ -530,7 +535,7 @@ def test_privileged_publication_reauthenticates_terminal_source_and_every_delive
 
 
 @pytest.mark.parametrize("fault", [None, "runtime", "headers", "mode", "record", "extra", "body", "outside"])
-def test_wheel_payload_requires_every_byte_except_proven_bounded_readme_metrics(tmp_path, fault):
+def test_wheel_payload_keeps_runtime_and_metadata_headers_while_allowing_git_bound_description(tmp_path, fault):
     old = README.encode()
     new = old.replace(b"Old measurements", b"New measurements")
     source, current = tmp_path / "source.whl", tmp_path / "current.whl"
@@ -552,11 +557,11 @@ def test_wheel_payload_requires_every_byte_except_proven_bounded_readme_metrics(
     elif fault == "outside":
         body = new.replace(b"Intro", b"Other introduction")
     wheel(current, body, **kwargs)
-    if fault:
+    if fault not in {None, "outside"}:
         with pytest.raises(ValueError):
-            reuse.wheel_equivalence(source, current, old, body if fault == "outside" else new)
+            reuse.wheel_equivalence(source, current, old, new)
     else:
-        proof = reuse.wheel_equivalence(source, current, old, new)
+        proof = reuse.wheel_equivalence(source, current, old, body)
         assert proof["source_raw_sha256"] != proof["requested_raw_sha256"]
         assert len(proof["payload_sha256"]) == 64
 
@@ -664,3 +669,118 @@ def test_publisher_retains_original_pr_measurements_for_authenticated_multicommi
     assert all(result["provenance"]["relflow_revision"] == tested for result in selected["results"].values())
     assert not git(root, "diff", "--name-only")
     assert reuse.delivered(reports) == original
+
+
+@pytest.mark.parametrize("change", ["docs", "tests", "publication", "readme"])
+def test_presentation_changes_reuse_verified_runtime_without_training(bundle, change):
+    root, _, _, _, requested = bundle
+    path = {
+        "docs": "docs/example.qmd",
+        "tests": "tests/test_example.py",
+        "publication": "evidence/results.json",
+        "readme": "README.md",
+    }[change]
+    target = root / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        README.replace("Intro", "New badge and documentation") if change == "readme" else "presentation only\n"
+    )
+    requested["candidate"] = requested["suite"] = commit(root, change)
+    assert verify(bundle)["passed"] is True
+
+
+@pytest.mark.parametrize("association", [[], [{"head": {"sha": "d" * 40}, "base": {"sha": "e" * 40}}]])
+def test_pr_provenance_uses_authenticated_request_when_github_associations_change(bundle, association):
+    root, reports, inputs, run, _ = bundle
+    manifest = json.loads((reports / "manifest.json").read_text())
+    head, base = manifest["candidate"]["revision"], manifest["baseline"]["revision"]
+    merge = git(
+        root,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit-tree",
+        git(root, "rev-parse", head + "^{tree}"),
+        "-p",
+        base,
+        "-p",
+        head,
+        input=b"synthetic PR merge\n",
+    )
+    manifest["candidate"]["revision"] = merge
+    run.update(event="pull_request", pull_requests=association)
+    request = dict(json.loads((inputs / "request.json").read_text()), candidate=merge, event="pull_request")
+    reuse.trusted(run, manifest, helper=HELPER, executor=EXECUTOR, root=root, request=request)
+    with pytest.raises(ValueError, match="Original input request"):
+        reuse.trusted(run, manifest, helper=HELPER, executor=EXECUTOR, root=root, request=dict(request, baseline=head))
+
+
+@pytest.mark.parametrize("fault", [None, "running", "changed-head", "failed-evidence", "missing-evidence", "future"])
+def test_partial_ci_retry_preserves_original_successful_evidence_attempt(bundle, monkeypatch, fault):
+    _, _, _, original, _ = bundle
+    original = copy.deepcopy(original)
+    original["conclusion"] = "failure"
+    original["referenced_workflows"].append(
+        {"path": "relflow/relflow/.github/workflows/tests.yml@" + "a" * 40, "sha": "a" * 40}
+    )
+    latest = dict(
+        original,
+        run_attempt=3,
+        conclusion="success",
+        referenced_workflows=list(reversed(original["referenced_workflows"])),
+    )
+    job = {
+        "id": 42,
+        "name": "Evidence / Run full paired suite on lab / Run full paired suite on lab",
+        "status": "completed",
+        "conclusion": "success",
+    }
+    if fault == "running":
+        latest["status"] = "in_progress"
+    elif fault == "changed-head":
+        latest["head_sha"] = "d" * 40
+    elif fault == "failed-evidence":
+        job["conclusion"] = "failure"
+    monkeypatch.setattr(
+        reuse,
+        "api",
+        lambda path: (
+            {"jobs": [] if fault == "missing-evidence" else [job]} if path.endswith("jobs?per_page=100") else original
+        ),
+    )
+    if fault is not None:
+        with pytest.raises(ValueError):
+            reuse.attempt(latest, 4 if fault == "future" else 2)
+    else:
+        verified = reuse.attempt(latest, 2)
+        assert verified["run_attempt"] == 2 and verified["conclusion"] == "failure"
+        assert verified["validation"] == {
+            "run_attempt": 3,
+            "head_sha": original["head_sha"],
+            "conclusion": "success",
+            "evidence_job_id": 42,
+        }
+        assert "validation" not in original
+
+
+def test_versioned_release_assets_are_considered_for_report_reuse(tmp_path, monkeypatch):
+    seen = []
+    release = {"id": 77, "tag_name": "evidence-v0.4.3", "draft": False}
+    monkeypatch.setattr(
+        reuse,
+        "api",
+        lambda path: (
+            {"id": 42} if path.endswith("ci.yml") else {"workflow_runs": []} if "/runs?" in path else [release]
+        ),
+    )
+
+    def retained(candidate, destination):
+        seen.append(candidate)
+        raise ValueError("invalid test archive remains a miss")
+
+    monkeypatch.setattr(reuse, "release_bundle", retained)
+    assert not reuse.find(
+        tmp_path, tmp_path / "out", {"execution_identity": IDENTITY}, current_inputs=tmp_path, helper=HELPER
+    )
+    assert seen == [release]
