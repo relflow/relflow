@@ -106,8 +106,10 @@ README's generated measurements. A successful manual full CI run on `main`
 uses the same publication flow. The retained assets contain JSON results,
 logs, an HTML report, tested wheels, runtime requirements, and checksums.
 
-Allow GitHub Actions to create pull requests in the repository settings.
-GitHub may require an owner to approve the generated PR workflows before
+Enable **Allow GitHub Actions to create and approve pull requests** under
+**Settings → Actions → General → Workflow permissions**. GitHub combines these
+permissions in one setting; this publisher only creates PRs. GitHub may require
+an owner to approve the generated PR workflows before
 normal required CI starts. Merge the publication PR through the normal checks
 and review. Read the Docs then builds the selected measurements from `main`;
 PR previews show them before merge. Publication-only commits do not create another publication
