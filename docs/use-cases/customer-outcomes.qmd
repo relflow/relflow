@@ -64,7 +64,7 @@ inactive_next_7_days: true
 joins. They stay outside the model fields declared below.
 
 Declare numeric and categorical inputs, a collection of purchase records,
-and a Boolean customer target at the root. RelFlow builds the corresponding
+and a Boolean customer target at the root. relflow builds the corresponding
 encoders and prediction output from this task schema:
 
 ```python

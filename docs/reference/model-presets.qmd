@@ -35,7 +35,7 @@ branch. Leaf decoders use query pooling, one cross-attention block
 Automatic positioning is off for a single predicted position and on when the
 target has more than one position.
 
-RelFlow's hidden activations use tanh GELU, and its neural normalization uses
+relflow's hidden activations use tanh GELU, and its neural normalization uses
 RMSNorm with epsilon `1e-5`. These choices are fixed. Pretrained text encoders
 retain their own architectures.
 

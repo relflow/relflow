@@ -11,7 +11,7 @@ cutoff, with the latest payment last. The model can use an amount together
 with its merchant and the account's other transactions when predicting each
 retained transaction's later dispute label.
 
-RelFlow builds that context at two scales: fields belonging to one event
+relflow builds that context at two scales: fields belonging to one event
 record, then events belonging to the same history. This keeps the relationship
 between an amount and its merchant available when the model compares
 transactions.

@@ -78,8 +78,8 @@ There is no appended per-row `model` field or reserved application name.
 
 Arrow schema metadata records `relflow.model_version`, and HTTP exposes the
 same value through the `X-RelFlow-Model-Version` header: the model's recorded
-RelFlow package version, not a checkpoint fingerprint. The output layout carries
-no separate version; each RelFlow release defines the current one.
+relflow package version, not a checkpoint fingerprint. The output layout carries
+no separate version; each relflow release defines the current one.
 Keep checkpoint identity in application metadata when it is needed.
 
 A failed JSON item carries an explicit error in its original request position;
@@ -109,7 +109,7 @@ depth, and apply rate and concurrency limits appropriate to the service.
 `max_batch_size` bounds observation rows, not items inside each row or request
 bytes. One row can contain an oversized nested collection.
 
-RelFlow logs one aggregate warning per model generation for active unbounded
+relflow logs one aggregate warning per model generation for active unbounded
 paths; serving startup checks the same guard after queued schema changes. The
 warning does not reject requests or impose a cap. See
 [branch limits](../datatypes/branch.qmd#automatic-lengths-and-limits).

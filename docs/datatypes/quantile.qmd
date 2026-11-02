@@ -74,8 +74,8 @@ prefetching a batch does not update it. Validation, test, and prediction reuse
 the learned state. Repeated training presentations count again; nulls and
 padding do not contribute. Checkpoints preserve the distribution.
 
-RelFlow keeps a weighted-centroid t-digest in Arrow data rather than retaining
-training rows. This is RelFlow's implementation, not PyArrow's native t-digest
+relflow keeps a weighted-centroid t-digest in Arrow data rather than retaining
+training rows. This is relflow's implementation, not PyArrow's native t-digest
 kernel. Compression controls approximation detail, not a guaranteed percentile
 error bound.
 

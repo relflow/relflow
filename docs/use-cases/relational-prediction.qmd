@@ -88,7 +88,7 @@ retired_next_race: false
 
 Declare field types and nested collections to match that prepared observation.
 Each branch can contain further branches, so the structure can follow records
-at additional depths. RelFlow generates the neural architecture from this
+at additional depths. relflow generates the neural architecture from this
 tree, with the retirement objective attached to the entry at its root:
 
 ```python

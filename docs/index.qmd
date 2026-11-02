@@ -1,14 +1,14 @@
 ---
 title: relflow
 subtitle: Build and adapt foundation models for your own structured data.
-description: "A model factory that generates, trains, and serves neural models from typed, nested schemas, with extensible field types and learned representations."
+description-meta: "A model factory that generates, trains, and serves neural models from typed, nested schemas, with extensible field types and learned representations."
 body-classes: home
 toc: false
 engine: markdown
 ---
 
 ::: {.lead}
-RelFlow is a model factory for typed, nested data. Describe your records and
+relflow is a model factory for typed, nested data. Describe your records and
 prediction targets, and it generates a custom neural architecture, trains
 the model, and serves predictions and learned representations.
 :::
@@ -18,7 +18,7 @@ learned model to downstream objectives. The learning path begins with one
 payment prediction, then adds nested context, pretraining, and reuse.
 
 ::: {.home-actions}
-[Build your first model →](learn/your-first-model.qmd){.btn .btn-primary}
+[Build your first model](learn/your-first-model.qmd){.btn .btn-primary}
 
 [See what it automates](learn/featureless-models.qmd){.btn .btn-outline-primary}
 :::

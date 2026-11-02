@@ -5,7 +5,7 @@ description: "Supply named train, validate, test, and predict sources from Parqu
 
 A data module groups sources into named splits: training learns the model,
 validation selects it, testing evaluates it, and prediction scores new records.
-RelFlow uses Lightning, a training framework, to iterate these sources in batches.
+relflow uses Lightning, a training framework, to iterate these sources in batches.
 Passing a module to a model loop binds it to that model's schema and batch size.
 Each row is one observation prepared as in
 [Prepare observations](../learn/prepare-observations.qmd): nested lists and
@@ -61,7 +61,7 @@ model raises `ValueError`. Create a separate data module for each model in a
 comparison, including a separately loaded copy of the same artifact.
 
 Native Lightning `Trainer` loops also bind in data-module `setup` using the
-attached RelFlow model. Their optimizer requirements remain those described
+attached relflow model. Their optimizer requirements remain those described
 in [Training options](training-options.qmd#configure-optimization-and-callbacks).
 
 The default shuffle window is resolved once at binding as
@@ -209,7 +209,7 @@ The data pipeline also closes suspended scans when preprocessing fails or an
 
 This matters for native S3: Arrow's process-wide shutdown callback can block
 while native clients remain alive, as described in an
-[upstream report](https://github.com/apache/arrow/issues/50188). RelFlow releases
+[upstream report](https://github.com/apache/arrow/issues/50188). relflow releases
 its scan resources before interpreter shutdown and continues to use native
 PyArrow S3 without another transport dependency. Application-owned datasets,
 filesystems, and unfinished iterators have their own lifetimes; close active

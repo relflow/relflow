@@ -111,7 +111,7 @@ the numeric result envelope.
 Choose whether a series is regular hourly data or an irregular event history.
 For hourly demand, assemble the hourly grid before making observations. A
 verified hour with no sales can be zero; an unavailable hour is missing data.
-RelFlow's branch ordering and calendar fields do not infer which situation
+relflow's branch ordering and calendar fields do not infer which situation
 occurred or fill missing hours.
 
 Here `units` measures recorded sales. A stockout can suppress those sales, so

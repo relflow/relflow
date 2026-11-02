@@ -18,7 +18,7 @@ def project(tmp_path: Path) -> Path:
         "website:\n  site-url: https://relflow.github.io/docs/\n"
         "  sidebar:\n    contents:\n      - href: index.qmd\n"
     )
-    (root / "README.md").write_text("# RelFlow\n\n[Documentation](docs/README.md)\n")
+    (root / "README.md").write_text("# relflow\n\n[Documentation](docs/README.md)\n")
     (docs / "README.md").write_text("# Documentation\n\n[Start](index.qmd)\n")
     (docs / "index.qmd").write_text("# Start\n\n[More](next.qmd#details)\n")
     (docs / "next.qmd").write_text("# Next\n\n## Details\n")

@@ -34,7 +34,7 @@ Each rank writes `payment-predictions/rank-{global_rank}.parquet`. With
 selected `predictions`, `representations`, and retained `inputs` columns and
 schema metadata. Repeated records are variable lists of sibling result structs,
 even with finite branch limits. Retain a business key to join or sort distributed
-results downstream; RelFlow does not add row identity.
+results downstream; relflow does not add row identity.
 
 Use a new output directory for each job. A Writer replaces its own rank's shard;
 it does not remove shards left by another job with a different rank count. Read

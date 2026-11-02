@@ -101,7 +101,7 @@ otherwise available in the written table. A `Writer` requires the same output
 schema across batches in its shard.
 
 HTTP serving has an additional requirement: preserve one final row per valid
-request with the same identity and order. RelFlow checks the count; processors
+request with the same identity and order. relflow checks the count; processors
 own identity and order, including when row counts happen to be equal.
 
 For file output at scale, see [Batch inference](batch-inference.qmd); for the

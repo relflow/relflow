@@ -203,7 +203,7 @@ until training moves it. Admission does not train the representation. Keep
 serving vocabularies frozen, and evaluate a separately continued-training
 artifact before promotion. Counts measure exposures, not representation competence.
 
-At the start of each Lightning validation, test, or prediction loop, RelFlow
+At the start of each Lightning validation, test, or prediction loop, relflow
 warns when any learned label has fewer than **10 training observations**.
 The warning identifies the field and exposure counts without logging label
 values. It changes neither predictions nor losses. This includes sanity
@@ -260,12 +260,12 @@ resolved when consumed. Labels are available to their first training batch,
 including with multiple workers.
 
 Under DDP, every rank gathers that batch's dictionaries and applies the same
-ordered admission. When parameters grow, RelFlow replaces the DDP wrapper
+ordered admission. When parameters grow, relflow replaces the DDP wrapper
 during the current fit, before the affected batch enters forward, and migrates
 optimizer state to the grown parameters.
 
 Growth also happens before the affected batch during gradient accumulation
-(`accumulate_grad_batches > 1`). Before replacing the DDP wrapper, RelFlow
+(`accumulate_grad_batches > 1`). Before replacing the DDP wrapper, relflow
 synchronizes which parameters have gradients and their partial gradients across
 ranks. Resizing preserves these gradients, including contributions from
 parameters used only in earlier microbatches, and accumulation continues.

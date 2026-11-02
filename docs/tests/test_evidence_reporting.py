@@ -141,7 +141,7 @@ def test_docs_refresh_from_yaml_and_embed_scripts_without_executing(
     assert "Passing" in (generated / "P001-status.md").read_text()
     text = (generated / "P001-evidence.md").read_text()
     assert "Seed **29**" in text and "| held_out_rmse | 0.125 |" in text
-    assert "RelFlow 0.4.1" in text and "tested-library" in text and "tested-evidence" in text
+    assert "relflow 0.4.1" in text and "tested-library" in text and "tested-evidence" in text
     assert "| held_out_rmse | 0.875 |" not in text
     assert "<details>\n<summary>Behavioral checks</summary>\n\n" in text
     assert "| Held-out RMSE is below 0.2 | Met |\n\n</details>" in text

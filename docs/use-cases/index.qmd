@@ -9,7 +9,7 @@ with related events arriving over time. You want a prediction from the
 information available at a particular decision: tomorrow's demand, a candidate
 product's relevance, or a customer's next outcome.
 
-RelFlow is a model factory for typed, nested data. Declare the fields,
+relflow is a model factory for typed, nested data. Declare the fields,
 record collections, and prediction objectives; that schema generates a custom
 neural architecture for your observations. The useful starting point is the
 decision and its dataset. Define what one observation contains, when its
@@ -46,7 +46,7 @@ types, each with its own ordering and resource limit. Targets can belong to
 the whole observation or to records at different depths inside those branches.
 
 The field names come from your dataset. Your application chooses the types,
-nesting, and targets; RelFlow constructs the neural modules from those
+nesting, and targets; relflow constructs the neural modules from those
 declarations. [Model tree](../concepts/model-tree.qmd#how-declarations-become-a-model)
 explains that construction. The type system is extensible: a
 [custom field type](../datatypes/custom-tensorfields.qmd) can supply its own
@@ -62,7 +62,7 @@ For any of these designs, make four decisions before writing the model:
    preserving time order, record identity, and nested relationships.
 3. **Outcome and horizon.** State what the target means, when its answer is
    ready, and which observations have complete labels.
-4. **Comparison.** Select the same held-out decisions for the RelFlow model
+4. **Comparison.** Select the same held-out decisions for the relflow model
    and a useful simple baseline, then measure the application's objective.
 
 [Prepare observations](../learn/prepare-observations.qmd) demonstrates these

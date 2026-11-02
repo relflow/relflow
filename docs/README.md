@@ -1,20 +1,20 @@
-# RelFlow documentation
+# relflow documentation
 
 **Build and adapt foundation models for your own structured data.**
 
-[RelFlow](https://github.com/relflow/relflow) is a model factory for typed,
+[relflow](https://github.com/relflow/relflow) is a model factory for typed,
 nested data. Describe your records and prediction targets, and it generates
 a custom neural architecture, trains the model, and serves predictions and
 learned representations.
 
-This directory owns the documentation for the RelFlow package in this repository, published at
+This directory owns the documentation for the relflow package in this repository, published at
 [relflow.ai](https://relflow.ai/). Examples start with one payment prediction,
 then add nested histories, multiple objectives, pretraining, and reuse.
 
 The site and its assets live under `docs/`; canonical experiments, runners, and
 recorded results live under [`evidence/`](../evidence/README.md). Building uses
 the isolated static environment in `docs/pyproject.toml` and does not require
-installing the RelFlow package.
+installing the relflow package.
 
 ## What the documentation teaches
 
@@ -46,7 +46,7 @@ metrics, and evaluation protocols.
 ## Work locally
 
 Install Python 3.12 or newer and uv for this documentation build, then run from
-the repository root (the RelFlow runtime itself supports Python 3.11 or newer):
+the repository root (the relflow runtime itself supports Python 3.11 or newer):
 
 ```bash
 uv sync --project docs --locked
@@ -70,7 +70,7 @@ Quarto is pinned to **1.10.18** through an isolated uv tool invocation and uses
 its bundled Typst. To use that exact Quarto version already installed locally,
 pass `QUARTO=quarto` to make. Python tooling installs only PyYAML, pytest, and
 Ruff into `docs/.venv`, separately from the package environment. Building never
-imports RelFlow, executes model examples, trains models, or downloads model
+imports relflow, executes model examples, trains models, or downloads model
 weights.
 
 ## Write documentation
@@ -202,7 +202,7 @@ unsupported tag, a separately reviewed branch named `stable` can define a custom
 stable target until release numbering supersedes those tags. This migration does
 not retag or delete existing tags.
 
-The header shows the current version beside the RelFlow logo. When multiple
+The header shows the current version beside the relflow logo. When multiple
 versions are available, it opens a keyboard-accessible menu of published
 versions, retaining the current page, query string, and fragment when switching.
 Release versions appear as they are activated and built; a single version is
@@ -258,7 +258,7 @@ DNS change; redirects do not apply on pull request preview domains. See the
 [Read the Docs redirect reference](https://docs.readthedocs.com/platform/stable/user-defined-redirects.html).
 These dashboard changes remain a later manual task.
 
-RelFlow-authored material retains the [Apache 2.0 license](../LICENSE) and
+relflow-authored material retains the [Apache 2.0 license](../LICENSE) and
 [NOTICE](../NOTICE). The vendored Typst extension retains its
 [MIT license](_extensions/mcanouil/typst-render/LICENSE), and the bundled
 font retains its [SIL Open Font License](assets/fonts/OFL.txt).

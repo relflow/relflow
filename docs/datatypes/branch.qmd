@@ -133,7 +133,7 @@ distributed denial-of-service (DDoS) attack.
 
 Set finite branch lengths and enforce request-size limits before
 [public serving](../guides/serving.qmd#bound-public-requests). A batch-size limit
-alone does not bound nested collections. RelFlow logs one aggregate warning per
+alone does not bound nested collections. relflow logs one aggregate warning per
 model generation for active unbounded branches; the warning enforces no limit.
 No hidden cap is applied to `length=None`.
 :::

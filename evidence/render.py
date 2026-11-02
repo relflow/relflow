@@ -122,7 +122,7 @@ def evidence(entry: dict[str, Any]) -> str:
         if origin:
             sections.append(
                 f"Source fingerprint: `{origin['source_sha256']}`. "
-                f"RelFlow {origin['packages']['relflow']}; Python {origin['python']}; "
+                f"relflow {origin['packages']['relflow']}; Python {origin['python']}; "
                 f"Torch {origin['packages']['torch']}. "
                 f"Library revision: `{origin['relflow_revision']}`; "
                 f"evidence revision: `{origin['evidence_revision']}`."
@@ -232,7 +232,7 @@ def render(root: Path) -> None:
         write(
             output / f"{identifier}-script.md",
             "Evidence execution is optional and separate from building this site. "
-            "Use a RelFlow build matching the recorded provenance; replace the wheel path below with that artifact. "
+            "Use a relflow build matching the recorded provenance; replace the wheel path below with that artifact. "
             "Run from the relflow/relflow repository's root:\n\n"
             f"```bash\nuv run --project docs --with /path/to/matching-relflow.whl "
             f"python evidence/experiments/run.py {identifier}\n```\n\n"

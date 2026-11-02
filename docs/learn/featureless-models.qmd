@@ -25,7 +25,7 @@ their state. The same jobs run again before every scoring run, and a serving
 path has to reproduce them exactly. Each new idea about the data is a new
 column, and the model only ever sees the columns someone thought to build.
 
-RelFlow is a model factory for typed, nested data. You declare field names,
+relflow is a model factory for typed, nested data. You declare field names,
 datatypes, nesting, and prediction targets; it generates the corresponding
 neural architecture. You choose the schema and capacity preset explicitly.
 Training then learns encodings, context, and predictions from your records.

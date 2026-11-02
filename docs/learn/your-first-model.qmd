@@ -87,7 +87,7 @@ the datatype on the right determines how to represent it, and `mask=True`
 determines whether to predict it.
 
 Together these declarations form the **schema**: the field names, datatypes,
-structure, and targets. RelFlow acts as a **model factory**: calling
+structure, and targets. relflow acts as a **model factory**: calling
 `rf.Model.xs(...)` generates a custom neural architecture from those
 declarations, using the chosen preset for capacity. Adding fields or nesting
 them in branches changes the model it builds. Training then learns the

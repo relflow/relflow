@@ -5,7 +5,7 @@ description: "Free-form strings encoded by a frozen text model."
 
 A payment description can carry detail beyond the merchant label, such as
 whether the charge is a delivery order. `Text` encodes those free-form strings
-with a frozen Hugging Face model. RelFlow learns to combine their representations
+with a frozen Hugging Face model. relflow learns to combine their representations
 with the amount and other fields. It does not fine-tune that encoder or
 generate text.
 

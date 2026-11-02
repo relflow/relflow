@@ -1,6 +1,6 @@
-# RelFlow documentation guide
+# relflow documentation guide
 
-This repository owns the RelFlow package, its static documentation and assets,
+This repository owns the relflow package, its static documentation and assets,
 and canonical evidence experiments, runners, and recorded results. The root
 [agent guide](../AGENTS.md) applies alongside this authoring guide. The site must
 build from this checkout alone using the isolated static environment.
@@ -21,13 +21,13 @@ build from this checkout alone using the isolated static environment.
   environment. Documentation tests live in `docs/tests/`.
 - The build uses pinned Quarto 1.10.18, bundled Typst, and the committed
   extension. PyYAML is the only Python runtime dependency; pytest and Ruff are
-  development tools. Never install or import RelFlow, Torch, Lightning, or a
+  development tools. Never install or import relflow, Torch, Lightning, or a
   sibling checkout to render or validate the site.
 - Python examples are static illustrations. Use ordinary `python` fences and
   the Markdown engine. Never execute examples, train models, read application
   data, or download model weights during a build.
 - Evidence execution is a separate, explicit task in an environment containing
-  the target RelFlow version. Runtime tests live in `evidence/tests/runtime/` and are excluded from default
+  the target relflow version. Runtime tests live in `evidence/tests/runtime/` and are excluded from default
   static validation.
 - Read the Docs owns versioned hosting and pull request previews through the
   root `.readthedocs.yaml`. Its custom build runs
@@ -101,7 +101,7 @@ decision and what each addition contributes before its implementation. Adapt
 research use cases and terminology into native examples. Attribute specific
 research claims where they are used.
 
-Use coherent financial examples without implying that RelFlow is restricted to
+Use coherent financial examples without implying that relflow is restricted to
 finance. The first flat payment has `amount`, `merchant`, and
 `disputed=rf.Boolean(mask=True)`. Sequence examples use one `trxns` branch
 containing earlier transactions and the latest payment exactly once. Put
@@ -189,7 +189,7 @@ and postprocesses the combined output once. Omission or `None` preserves direct
 whole-input behavior. Constructor batch size remains the initial/checkpoint
 setting and supports native Trainer/Tuner workflows.
 
-Verify API claims against the targeted RelFlow version in upstream source;
+Verify API claims against the targeted relflow version in upstream source;
 existing prose alone is not evidence. Keep documentation builds independent of
 installed model packages.
 

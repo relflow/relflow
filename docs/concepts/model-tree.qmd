@@ -4,7 +4,7 @@ description: "How named field declarations become a schema and neural model, wit
 engine: markdown
 ---
 
-RelFlow is a model factory for typed, nested data. Your declared schema generates
+relflow is a model factory for typed, nested data. Your declared schema generates
 the neural architecture: field types select encodings, branches build context,
 and targets define what the model learns to predict.
 
@@ -88,7 +88,7 @@ source data or search over candidate architectures.
 ```{typst}
 //| label: fig-schema-construction
 //| fig-cap: "Construction resolves your declarations into a schema and builds the neural modules. Training learns their state afterward."
-//| fig-alt: "Three stages connected by arrows: application declarations supply names, types, branches, and targets; RelFlow resolves a schema tree with addresses and defaults; RelFlow builds field encoders, branch encoders, and target decoders."
+//| fig-alt: "Three stages connected by arrows: application declarations supply names, types, branches, and targets; relflow resolves a schema tree with addresses and defaults; relflow builds field encoders, branch encoders, and target decoders."
 #flow(
   (title: "Construction", steps: (
     step("Your declarations", note: "Names, types, branches, targets", width: 114pt),
@@ -147,7 +147,7 @@ payment_model_from_mapping = rf.Model.xs(fields=payment_fields)
 ```
 
 Python's `**payment_fields` passes the mapping's entries as keyword
-arguments. RelFlow accepts child definitions through `**field_kwargs` and
+arguments. relflow accepts child definitions through `**field_kwargs` and
 binds each name to its definition. Application code can assemble this mapping
 programmatically, including nested `rf.Branch(fields=...)` definitions.
 The [YAML template](../guides/model-templates.qmd) loader provides another way
@@ -176,7 +176,7 @@ to restore a trained model.
 
 In the implementation, [name binding](https://github.com/relflow/relflow/blob/1b95c334d5a1251c37ac5323b7dcec750550908e/src/relflow/structs/experiment.py#L56-L100)
 creates the schema children, and [graph construction](https://github.com/relflow/relflow/blob/1b95c334d5a1251c37ac5323b7dcec750550908e/src/relflow/architecture/graph.py#L42-L60)
-creates their modules. These links describe RelFlow 0.4.1.
+creates their modules. These links describe relflow 0.4.1.
 
 ## Names and addresses
 
@@ -185,7 +185,7 @@ Use the bare class for defaults; call it for options, as in
 `disputed=rf.Boolean(mask=True)` in the transaction branch.
 
 An address identifies a location in the schema. Use one argument per child
-name; RelFlow adds the leading slash and separators:
+name; relflow adds the leading slash and separators:
 
 ```python
 root = rf.Address()                                      # /
@@ -276,7 +276,7 @@ model = rf.Model(
 )
 ```
 
-RelFlow's hidden neural activations use tanh GELU and its neural normalization
+relflow's hidden neural activations use tanh GELU and its neural normalization
 uses RMSNorm with epsilon `1e-5`. Pretrained text encoders retain their own
 architectures.
 

@@ -168,7 +168,7 @@ what the model binds.
 ## Assemble histories from transaction tables
 
 If your source has one row per transaction, prepare one review observation
-before passing it to RelFlow:
+before passing it to relflow:
 
 1. Create the review decisions with an account identifier, `payment_id`, and
    cutoff time. The payment being reviewed is the latest item at that cutoff.

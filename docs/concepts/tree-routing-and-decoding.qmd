@@ -11,7 +11,7 @@ has one `trxns` branch containing earlier payments and the latest payment.
 Its fields build transaction context, and `disputed=rf.Boolean(mask=True)`
 requests a dispute prediction at every retained transaction coordinate.
 
-This explanation follows RelFlow 0.4.1's
+This explanation follows relflow 0.4.1's
 [execution plan](https://github.com/relflow/relflow/blob/1b95c334d5a1251c37ac5323b7dcec750550908e/src/relflow/architecture/runtime.py)
 and [branch encoder](https://github.com/relflow/relflow/blob/1b95c334d5a1251c37ac5323b7dcec750550908e/src/relflow/architecture/encoder.py).
 

@@ -207,7 +207,7 @@ tokens and then its child-branch tokens in field order. See
 
 Retention changes output selection, not model inputs. Missing retained columns
 raise an error. Retain a business key to identify rows across distributed shards;
-RelFlow does not invent an application identity or promise global shard order.
+relflow does not invent an application identity or promise global shard order.
 
 ## Batch direct requests
 

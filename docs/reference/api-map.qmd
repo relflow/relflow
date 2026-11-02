@@ -3,7 +3,7 @@ title: API map
 description: "Every public name grouped by workflow, with the page that documents it."
 ---
 
-RelFlow is a model factory for typed, nested data: your declared schema generates
+relflow is a model factory for typed, nested data: your declared schema generates
 the neural architecture. Import it as `import relflow as rf`. This page maps the
 public API to its reference pages. For a first payment model, start with
 [Your first model](../learn/your-first-model.qmd).
@@ -77,7 +77,7 @@ Constructor options live with their owning type.
 
 `rf.CustomDataModule` and `rf.SyntheticDataModule` support application-owned
 mapping streams. Prefer Arrow and Polars modules when the data already has
-that form. All five RelFlow data modules bind automatically when passed to a
+that form. All five relflow data modules bind automatically when passed to a
 model loop. Use `bind(model)` before direct loader access outside a loop. See
 [Data modules](../guides/data-modules.qmd#bind-a-model-when-the-loop-starts),
 [Preprocessing](../guides/preprocessing.qmd),

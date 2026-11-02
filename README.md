@@ -21,12 +21,12 @@
 
 **Build and adapt foundation models for your own structured data.**
 
-RelFlow is a model factory for typed, nested data. Describe your records and
+relflow is a model factory for typed, nested data. Describe your records and
 prediction targets, and it generates a custom neural architecture, trains
 the model, and serves predictions and learned representations.
 
 Suppose your dataset contains purchases with line items, accounts with
-transaction histories, and several types of values inside each record. RelFlow lets you keep those relationships in the model
+transaction histories, and several types of values inside each record. relflow lets you keep those relationships in the model
 instead of hand-designing a fixed set of aggregate features. Describe the
 records and the fields to predict; the schema defines the architecture.
 One declaration gives you field encodings, attention over related records,
@@ -37,7 +37,7 @@ reusable embeddings built in.
 
 1. **Fields represent values.** Tensorfields such as `Number`, `Category`, and
    `Text` convert typed inputs into embeddings. Learned state, including
-   numeric normalization and categorical vocabularies, stays with the model. Relflow supports nearly dozen different data types, and you can build and register your own.
+   numeric normalization and categorical vocabularies, stays with the model. relflow supports nearly dozen different data types, and you can build and register your own.
 2. **Branches build context.** Branches describe arbitrarily nested records
    and variable-length collections. Attention combines their fields and
    repeated records; nested branches pass learned context toward the root.
@@ -46,7 +46,7 @@ reusable embeddings built in.
    can live at the root or inside repeated records.
 
 Apache Arrow carries the data, and PyTorch Lightning runs training. Your
-application prepares the observations; RelFlow builds their encoders,
+application prepares the observations; relflow builds their encoders,
 decoders, and objectives. Built-in and custom field types use the same
 extension protocol, so new representations and objectives plug into the
 model factory.
@@ -62,7 +62,7 @@ The [evidence catalog](https://relflow.ai/evidence.html) adds **79 controlled
 learning experiments** with code, comparisons, seeds, and recorded results.
 Examples from the published full runs:
 
-| Experiment | RelFlow result | Control |
+| Experiment | relflow result | Control |
 | --- | --- | --- |
 | [Match IDs absent from training](https://relflow.ai/evidence/identity/unseen-identity-equality.html) | **0.9991 AUC** with `Hash` | 0.5000 with unknown `Category` labels |
 | [Recall a value by an unfamiliar ID](https://relflow.ai/evidence/relational/hash-recall.html) | **0.100 normalized RMSE**, median of three seeds | 1.401 after corrupting the lookup IDs |

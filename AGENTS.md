@@ -1,10 +1,14 @@
-# RelFlow Agent Guide
+# relflow Agent Guide
 
 This file is the high-signal context for AI coding agents working in this repo. Prefer it over rediscovering package conventions from scattered tests.
 
+Write the project name as `relflow` in documentation, navigation, metadata,
+and other user-facing prose. `Relflow` is acceptable when capitalization is
+needed; do not use camel-case branding.
+
 ## Package Mental Model
 
-RelFlow builds PyTorch/Lightning models from JSON-like schemas. Users normally import the package as:
+relflow builds PyTorch/Lightning models from JSON-like schemas. Users normally import the package as:
 
 ```python
 import relflow as rf
@@ -76,8 +80,8 @@ model = rf.Model(
   mapping with `**options`. Use `description` for notes, and declare extension
   options on `RequestBase` subclasses. Undeclared options are rejected.
 - Processed observation names and nesting match the schema by default. A node
-  may opt into RelFlow's node-relative structural query syntax with paths such
-  as `query="source.path"` or `query="items[-32:][*].sku"`; RelFlow never
+  may opt into relflow's node-relative structural query syntax with paths such
+  as `query="source.path"` or `query="items[-32:][*].sku"`; relflow never
   infers queries. Filters, joins, sorting, and derived values belong in an
   `rf.Preprocessor`.
 - `transactions=rf.Branch(...)` reads the same-named child collection, and its
@@ -238,7 +242,7 @@ and `inferred`. Requested embeddings are separate `representations` records:
 `path` segments (root `[]`), repeated ancestor `parents` ordinals, intrinsic
 `output_index`, and a fixed-width `embedding`. Omit unconfigured output columns;
 `inputs` appears only when retention is selected. Models with no public output
-reject prediction. The model's recorded RelFlow version travels with Arrow tables
+reject prediction. The model's recorded relflow version travels with Arrow tables
 and HTTP headers. Extension output list children must be named `element`.
 
 PyArrow Parquet cannot round-trip fixed-size lists below null containers.
@@ -256,7 +260,7 @@ Top-level inference exports:
 
 ## Code Style
 
-RelFlow code should read as a short sequence of domain operations.
+relflow code should read as a short sequence of domain operations.
 
 - Prefer the shortest precise noun or verb, such as `Plan`, `compile`,
   `bind`, `query`, `coalesce`, and `write`. Use a longer name when one word
@@ -372,11 +376,11 @@ tests belong in `docs/tests/`, and learning experiments, runtime tests, and
 their canonical results belong in `evidence/`.
 
 Documentation builds use the isolated `docs/pyproject.toml` environment and
-remain static: never install or import RelFlow, Torch, or Lightning to build the
+remain static: never install or import relflow, Torch, or Lightning to build the
 site. From the repository root, run `uv sync --project docs --locked`,
 `make check`, and `make check-docs`. Use `make dev` for preview and `make render`
 for HTML output. Learning experiments run only when explicitly invoked with
-the intended RelFlow wheel; ordinary package checks do not run them.
+the intended relflow wheel; ordinary package checks do not run them.
 
 Read the Docs builds versioned hosting and pull request previews from the root
 `.readthedocs.yaml`, using `uv run --project docs python -m docs.publish`.

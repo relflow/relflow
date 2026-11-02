@@ -10,7 +10,7 @@ at one review cutoff. Reduction determines how much of that encoded
 collection reaches the parent. It follows the
 [field interactions](how-fields-interact.qmd) within the branch.
 
-This explanation follows RelFlow 0.4.1's
+This explanation follows relflow 0.4.1's
 [reduction implementation](https://github.com/relflow/relflow/blob/1b95c334d5a1251c37ac5323b7dcec750550908e/src/relflow/architecture/pool.py)
 and [branch encoder](https://github.com/relflow/relflow/blob/1b95c334d5a1251c37ac5323b7dcec750550908e/src/relflow/architecture/encoder.py).
 
@@ -64,7 +64,7 @@ $$
 
 If every value vector is the same vector $v$, this expression returns $v$
 whether the memory contains one copy or many. A plain mean has the same
-limitation, which is why both RelFlow reductions add a count lane: an extra
+limitation, which is why both relflow reductions add a count lane: an extra
 learned vector contribution scaled by the number of present tokens over the
 branch capacity. It starts at zero, so it leaves the initial pooled result
 unchanged.
@@ -74,7 +74,7 @@ updates, can supply information about sequence length.
 
 At a common account-review cutoff, multiplicity may matter: several retained
 payments can carry different evidence from one payment even when their
-merchants and amounts are identical. RelFlow's learned branch reduction
+merchants and amounts are identical. relflow's learned branch reduction
 includes additive evidence alongside attention.
 
 ## Additive evidence

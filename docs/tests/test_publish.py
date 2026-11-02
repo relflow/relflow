@@ -15,7 +15,7 @@ def project(tmp_path: Path) -> Path:
     root = tmp_path / "checkout"
     (root / "docs").mkdir(parents=True)
     (root / "docs/_quarto.yml").write_text("website:\n  site-url: https://relflow.ai/\n")
-    (root / "docs/index.qmd").write_text("# RelFlow documentation\n")
+    (root / "docs/index.qmd").write_text("# relflow documentation\n")
     subprocess.run(["git", "init", "--quiet", str(root)], check=True)
     subprocess.run(["git", "add", "."], cwd=root, check=True)
     subprocess.run(
