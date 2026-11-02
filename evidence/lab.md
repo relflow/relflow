@@ -34,7 +34,7 @@ page. Configure:
 | Issuer | GitHub Actions, `https://token.actions.githubusercontent.com` |
 | Subject | `repo:relflow@312307812/relflow@1217201723:*` |
 | Custom claim `repository` | `relflow/relflow` |
-| Custom claim `job_workflow_ref` | `relflow/relflow/.github/workflows/evidence-lab.yml@7cba2bf2fe3082e643a95aa43c6bad8395569420` |
+| Custom claim `job_workflow_ref` | `relflow/relflow/.github/workflows/evidence-lab.yml@41fad4471120a7a2796442dd8642024ed331e322` |
 | Scope | `auth_keys` write, restricted to `tag:relflow-evidence-ci` |
 | Device tag | `tag:relflow-evidence-ci` |
 
@@ -49,8 +49,8 @@ out a separately pinned, tested evidence implementation. A fork cannot gain
 tailnet access by changing its own workflow.
 
 The trusted executor is pinned to
-`349b2202e6390a5fe0cbdf09a0c5972e495351ed`; the helper is pinned to
-`7cba2bf2fe3082e643a95aa43c6bad8395569420`. Keep these immutable commits
+`0176c2f527f4e98058dbbb37ebb36b77765526db`; the helper is pinned to
+`41fad4471120a7a2796442dd8642024ed331e322`. Keep these immutable commits
 reachable. Routine experiment and publication changes do not change the pins.
 A trusted-mechanics update requires a separately reviewed executor/helper
 revision and the corresponding exact Tailscale workflow claim before validation.
