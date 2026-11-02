@@ -21,6 +21,7 @@ def validate(reports: Path, inputs: Path | None = None, *, root: Path | None = N
     if not summary["complete"] or not summary["passed"] or summary["errors"] or summary["regressions"]:
         raise ValueError(
             "Publication requires a complete full-catalog run without execution or provenance errors or regressions"
+            + (": " + "; ".join(summary["errors"][:3]) if summary["errors"] else "")
         )
     if root is not None:
         entries = registry(root)

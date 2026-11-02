@@ -54,7 +54,7 @@ def wheel_payload(path: Path) -> str:
 
 def suite_identity(root: Path) -> str:
     """Bind suite files and modes; normalize only the two selected result fields."""
-    scripts = {entry["script"] for entry in registry(root).values()}
+    scripts = {entry["script"] for entry in registry(root, measurements=False).values()}
     sources = {}
     for path in sorted(root.rglob("*")):
         if "__pycache__" in path.relative_to(root).parts:
@@ -77,6 +77,23 @@ def suite_identity(root: Path) -> str:
     return identity(sources)
 
 
+def runtime_inputs(root: Path) -> dict:
+    """Bind experiment code and shared runtime files, excluding publication and test tooling."""
+    inputs = {}
+    for path in sorted((root / "experiments").rglob("*")):
+        name = path.relative_to(root).as_posix()
+        if "__pycache__" in path.parts:
+            continue
+        if path.is_symlink():
+            raise ValueError(f"Execution inputs require regular files: {name}")
+        if path.is_dir():
+            continue
+        if not path.is_file():
+            raise ValueError(f"Execution inputs reject special files: {name}")
+        inputs[name] = {"sha256": digest(path), "mode": path.stat().st_mode & 0o777}
+    return inputs
+
+
 def execution_key(manifest: dict, task: dict, execution: dict) -> str:
     """An execution equivalence key, never a replacement for original provenance."""
     return identity(
@@ -84,7 +101,7 @@ def execution_key(manifest: dict, task: dict, execution: dict) -> str:
             "schema": 1,
             "wheel_payload": manifest[task["role"]]["payload_sha256"],
             "requirements": manifest["requirements_sha256"],
-            "suite": manifest["suite_sha256"],
+            "suite": task.get("inputs_sha256", manifest["suite_sha256"]),
             "executor": manifest["executor_sha"],
             "policy": manifest["policy"],
             "environment": execution["identity"],
@@ -227,11 +244,13 @@ def plan(
     identifiers: list[str] | None = None,
     steps: int | None = None,
 ) -> dict:
-    entries = registry(root)
+    entries = registry(root, measurements=False)
     selected = identifiers if identifiers is not None else list(entries)
     if not selected or len(set(selected)) != len(selected) or set(selected) - entries.keys():
         raise ValueError("Select distinct registered experiment IDs")
     tasks = []
+    inputs = runtime_inputs(root)
+    scripts = {entry["script"] for entry in entries.values()}
     for identifier in selected:
         script = root / entries[identifier]["script"]
         for role in ("baseline", "candidate"):
@@ -245,6 +264,13 @@ def plan(
                     "steps": steps,
                     "script": entries[identifier]["script"],
                     "script_sha256": digest(script),
+                    "inputs_sha256": identity(
+                        {
+                            name: value
+                            for name, value in inputs.items()
+                            if name not in scripts or name == entries[identifier]["script"]
+                        }
+                    ),
                     "executor_sha": executor_sha,
                 }
             )
@@ -260,6 +286,7 @@ def plan(
         "full_catalog": set(selected) == set(entries),
         "mode": "full" if steps is None else "smoke",
         "tasks": tasks,
+        "runtime_sha256": identity(inputs),
     }
 
 
@@ -360,7 +387,19 @@ def evaluate(
     expected = {task_key(task): task for task in manifest["tasks"]}
     seen = {}
     errors = reuse_errors
-    catalog = registry(root)
+    catalog = registry(root, measurements=False)
+    if "runtime_sha256" in manifest:
+        inputs = runtime_inputs(root)
+        scripts = {entry["script"] for entry in catalog.values()}
+        if manifest["runtime_sha256"] != identity(inputs):
+            errors.append("Experiment runtime inputs differ from the manifest")
+        for task in manifest["tasks"]:
+            if task.get("script") not in scripts:
+                errors.append(f"Unknown experiment source path: {task.get('script')}")
+            elif task.get("inputs_sha256") != identity(
+                {name: value for name, value in inputs.items() if name not in scripts or name == task["script"]}
+            ):
+                errors.append(f"Experiment execution inputs differ: {task['id']}")
     if manifest.get("schema") not in {2, 3} or not manifest.get("executor_sha"):
         errors.append("Expected a current manifest with an independently pinned executor")
     if any(task.get("executor_sha") != manifest.get("executor_sha") for task in manifest["tasks"]):
@@ -394,12 +433,12 @@ def evaluate(
         if key in reused_keys:
             continue
         task = record["task"]
-        identity = manifest.get(task["role"], {})
+        package = manifest.get(task["role"], {})
         provenance = result.get("provenance", {})
         for field, wanted in (
             ("evidence_revision", manifest["evidence_sha"]),
-            ("relflow_revision", identity.get("revision")),
-            ("wheel_sha256", identity.get("wheel_sha256")),
+            ("relflow_revision", package.get("revision")),
+            ("wheel_sha256", package.get("wheel_sha256")),
             ("script_sha256", task["script_sha256"]),
         ):
             if wanted is None or provenance.get(field) != wanted:

@@ -123,3 +123,15 @@ Keep actual metrics, checks, seeds, environment, tested revisions, and source
 digests bound to the measured execution. A verified reused selection retains
 its original identity and separate current-request receipt. Source edits and
 reader changes do not establish fresh learning results.
+
+## Runtime efficiency
+
+Lab defaults to 16 workers, with the longest recorded experiments scheduled
+first. Wheels are installed in cached, isolated image layers rather than in
+every task. P025 keeps all three seeds and runs two trials concurrently within
+its existing CPU limit. Every report retains timing and CPU/memory telemetry.
+
+Verified reuse compares execution inputs. Publication, documentation, and test
+changes do not retrain unchanged models. Runtime, dependency, seed, budget, and
+policy changes invalidate the affected measurements. Complete coverage and the
+paired regression gate remain required. See [lab.md](lab.md#execution-cost-and-timing).

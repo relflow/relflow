@@ -9,6 +9,7 @@ from pathlib import Path
 
 import publication
 import pytest
+import reuse
 import yaml
 from evidence_ci import collect, finish, plan, write_json
 from experiments.source import frontmatter, metadata
@@ -257,8 +258,9 @@ def test_report_inventory_and_every_task_log_are_required(artifacts, fault):
 
 
 @pytest.mark.parametrize("failure", [None, "render", "stale-main"])
+@pytest.mark.parametrize("retry", [False, True])
 def test_release_publication_creates_validated_assets_without_changing_sources(
-    repository, artifacts, tmp_path, monkeypatch, failure
+    repository, artifacts, tmp_path, monkeypatch, failure, retry
 ):
     root, main = repository
     reports, inputs = artifacts
@@ -270,10 +272,24 @@ def test_release_publication_creates_validated_assets_without_changing_sources(
         if path.endswith("/git/ref/heads/main"):
             calls.append("main")
             return {"object": {"sha": "advanced" if failure == "stale-main" and len(calls) > 1 else main}}
+        if path.endswith("jobs?per_page=100"):
+            return {
+                "jobs": [
+                    {
+                        "id": 91,
+                        "name": "Evidence / Run full paired suite on lab / Run full paired suite on lab",
+                        "status": "completed",
+                        "conclusion": "success",
+                    }
+                ]
+            }
+        if "/attempts/2" in path:
+            return dict(run(main), conclusion="failure")
         if "/actions/runs/" in path:
-            return run(main)
+            return dict(run(main), run_attempt=3 if retry else 2)
         return {"id": 42}
 
+    monkeypatch.setattr(reuse, "api", api)
     real_run = subprocess.run
 
     def execute(command, *args, **kwargs):
@@ -306,6 +322,7 @@ def test_release_publication_creates_validated_assets_without_changing_sources(
         assert (output / "docs-base.txt").read_text().strip() == checkout
         selected = json.loads((output / "publication.json").read_text())
         assert selected["version"] == "0.4.2"
+        assert selected["report"]["github_run"]["run_attempt"] == 2
         assert selected["revision"] == main
         assert selected["report"]["release"].endswith("/evidence-v0.4.2")
         assert all(result["provenance"]["relflow_revision"] == main for result in selected["results"].values())

@@ -156,8 +156,10 @@ def test_any_changed_execution_input_is_a_miss(reuse_pair, field):
     task = manifest["tasks"][0]
     if field == "payload":
         manifest["baseline"]["payload_sha256"] = "changed"
-    elif field in {"requirements", "suite"}:
-        manifest[field + "_sha256"] = "changed"
+    elif field == "requirements":
+        manifest["requirements_sha256"] = "changed"
+    elif field == "suite":
+        task["inputs_sha256"] = "changed"
     elif field == "executor":
         manifest["executor_sha"] = "new-policy-source"
     elif field == "cpu":
@@ -322,8 +324,13 @@ def test_runner_only_schedules_missing_baselines_and_keeps_task_isolation(tmp_pa
     baseline = wheel(tmp_path / "baseline/relflow.whl", payload=b"prior-sdk")
     lock = tmp_path / "requirements.txt"
     lock.write_text("torch==2.5.0\n")
-    runtime = {"identity": {"image_id": "sha256:actual-image"}, "image_id": "sha256:actual-image"}
+    runtime = {
+        "identity": {"image_id": "sha256:actual-image"},
+        "image_id": "sha256:actual-image",
+        "image": "cached-runtime",
+    }
     monkeypatch.setattr(lab_run, "environment", lambda *args: runtime)
+    monkeypatch.setattr(lab_run, "wheel_image", lambda environment, path: "installed-" + digest(path))
     monkeypatch.setattr(lab_run.Path, "home", lambda: tmp_path / "lab-home")
     monkeypatch.setattr(lab_run.subprocess, "check_output", lambda *args, **kwargs: "")
     calls = []
@@ -335,6 +342,11 @@ def test_runner_only_schedules_missing_baselines_and_keeps_task_isolation(tmp_pa
             mount = next(value for value in command if value.endswith(",dst=/results"))
             scratch = lab_run.Path(mount.removeprefix("type=bind,src=").removesuffix(",dst=/results"))
             task = json.loads((scratch / "task.json").read_text())
+            mount = next(value for value in command if value.endswith(",dst=/suite,readonly"))
+            view = lab_run.Path(mount.removeprefix("type=bind,src=").removesuffix(",dst=/suite,readonly"))
+            assert view != suite and scratch not in view.parents and view not in scratch.parents
+            assert (view / task["script"]).read_bytes() == (suite / task["script"]).read_bytes()
+            assert not (view / "results.json").exists()
             reports = next(parent for parent in scratch.parents if (parent / "manifest.json").exists())
             manifest = json.loads((reports / "manifest.json").read_text())
             write_json(scratch / "record.json", fresh(manifest, task))
@@ -373,6 +385,8 @@ def test_runner_only_schedules_missing_baselines_and_keeps_task_isolation(tmp_pa
     for command in calls:
         assert command[command.index("--network") + 1] == "none"
         assert "--read-only" in command and "--cap-drop" in command
+        assert any(value.startswith("installed-") for value in command)
+        assert not any("pip install" in value or "venv" in value for value in command)
         assert command[command.index("--cpus") + 1] == "2"
         assert command[command.index("--memory") + 1] == "4g"
         assert not any("cache/v1" in value or "docker.sock" in value for value in command)
@@ -458,3 +472,98 @@ def test_suite_identity_includes_binary_fixtures_and_modes(tmp_path):
     before = suite_identity(tmp_path)
     (tmp_path / "README.md").write_text("supplementary suite input")
     assert suite_identity(tmp_path) != before
+
+
+def test_execution_keys_ignore_publication_files_but_bind_runtime_dependencies(tmp_path):
+    from evidence_ci import runtime_inputs
+
+    source(tmp_path)
+    original = runtime_inputs(tmp_path)
+    for name in ("README.md", "results.json", "tests/test_example.py", "publication.py"):
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("presentation only\n")
+    assert runtime_inputs(tmp_path) == original
+    (tmp_path / "experiments/reporting.py").write_text("# different shared runtime\n")
+    assert runtime_inputs(tmp_path) != original
+
+
+def test_one_experiment_change_preserves_other_baseline_execution_keys(tmp_path):
+    from evidence_ci import execution_key
+
+    suite = tmp_path / "suite"
+    first = source(suite)
+    other = first.with_name("other.py")
+    other.write_text(first.read_text().replace("P901", "P902"))
+    before, execution = setup_report(tmp_path / "before", suite)
+    first.write_text(first.read_text() + "check_threshold = 0.25\n")
+    after, _ = setup_report(tmp_path / "after", suite)
+    for identifier in ("P901", "P902"):
+        old = next(task for task in before["tasks"] if task["id"] == identifier and task["role"] == "baseline")
+        new = next(task for task in after["tasks"] if task["id"] == identifier and task["role"] == "baseline")
+        assert (execution_key(before, old, execution) == execution_key(after, new, execution)) is (identifier == "P902")
+
+
+def test_worker_inputs_exclude_unbound_files_and_preserve_shared_data(tmp_path):
+    from evidence_ci import identity, runtime_inputs
+    from lab_run import isolate
+
+    suite = tmp_path / "suite"
+    script = source(suite)
+    other = script.with_name("other.py")
+    other.write_text(script.read_text().replace("P901", "P902"))
+    data = suite / "experiments/data.bin"
+    data.write_bytes(b"\x00training input")
+    data.chmod(0o640)
+    (suite / "results.json").write_text("unbound publication input")
+    manifest = plan(
+        run_id="isolated", candidate={}, baseline={}, evidence_sha="source", executor_sha="trusted", root=suite
+    )
+    task = manifest["tasks"][0]
+    inputs = runtime_inputs(suite)
+    scripts = {script.relative_to(suite).as_posix(), other.relative_to(suite).as_posix()}
+    view = isolate(suite, tmp_path / "inputs", task, inputs, scripts)
+    assert identity(runtime_inputs(view)) == task["inputs_sha256"]
+    assert (view / task["script"]).read_bytes() == script.read_bytes()
+    assert (view / "experiments/reporting.py").is_file()
+    assert (view / "experiments/data.bin").read_bytes() == data.read_bytes()
+    assert (view / "experiments/data.bin").stat().st_mode & 0o777 == 0o640
+    assert not (view / other.relative_to(suite)).exists()
+    assert not (view / "results.json").exists()
+    # A separate copy prevents writes through any accidental alias to the source.
+    (view / "experiments/data.bin").write_bytes(b"changed copy")
+    assert data.read_bytes() == b"\x00training input"
+
+
+@pytest.mark.parametrize("change", ["bytes", "mode", "symlink"])
+def test_worker_rejects_input_changes_after_planning(tmp_path, change):
+    from evidence_ci import runtime_inputs
+    from lab_run import isolate
+
+    suite = tmp_path / "suite"
+    script = source(suite)
+    manifest = plan(
+        run_id="isolated", candidate={}, baseline={}, evidence_sha="source", executor_sha="trusted", root=suite
+    )
+    task = manifest["tasks"][0]
+    inputs = runtime_inputs(suite)
+    if change == "bytes":
+        script.write_text(script.read_text() + "changed = True\n")
+    elif change == "mode":
+        script.chmod(0o755)
+    else:
+        script.unlink()
+        script.symlink_to(suite / "experiments/reporting.py")
+    with pytest.raises(ValueError, match="Execution input"):
+        isolate(suite, tmp_path / "inputs", task, inputs, {task["script"]})
+
+
+def test_runtime_keys_bind_every_byte_exposed_to_the_worker(tmp_path):
+    from evidence_ci import runtime_inputs
+    from experiments.source import frontmatter, metadata
+
+    script = source(tmp_path)
+    original = runtime_inputs(tmp_path)
+    text = script.read_text()
+    script.write_text(frontmatter(text, dict(metadata(text), **{"evidence-result": {"metrics": {"x": 5}}})))
+    assert runtime_inputs(tmp_path) != original

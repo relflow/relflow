@@ -12,14 +12,15 @@ or stored Tailscale client secret is required.
 - Docker Engine available to the chosen SSH user.
 - Python 3.10 or newer with PyYAML for the trusted coordinator.
 - Tailscale SSH enabled and sufficient disk space for the cached runtime image.
-- Eight workers use at most 16 CPU cores and 32 GiB of container memory. Each
+- Sixteen workers use at most 32 logical CPUs and 64 GiB of container memory. Each
   experiment keeps its original seed, budget, and CPU behavior profile. The
   host GPU is not used for the CPU behavioral gate.
 
 The dispatcher writes only under `~/relflow-evidence/runs/<run-id>/`, with unique
 run directories. It never installs RelFlow or its runtime dependencies on the
-host. Containers mount the pinned source and the selected wheel read-only,
-plus a per-task output directory. They have no network, dropped capabilities,
+host. Each exact wheel is installed once in a cached image layer with network access
+disabled. Fresh containers mount the pinned executor and suite read-only, plus a
+per-task output directory. They have no network, dropped capabilities,
 no new privileges, a read-only root, and explicit CPU, memory, and PID limits.
 Interruptions clean up containers belonging to that run and retain incomplete
 reports; incomplete execution cannot pass the required gate.
@@ -34,7 +35,7 @@ page. Configure:
 | Issuer | GitHub Actions, `https://token.actions.githubusercontent.com` |
 | Subject | `repo:relflow@312307812/relflow@1217201723:*` |
 | Custom claim `repository` | `relflow/relflow` |
-| Custom claim `job_workflow_ref` | `relflow/relflow/.github/workflows/evidence-lab.yml@ed5f863c887f5cb672efeb73083265af0a18e69e` |
+| Custom claim `job_workflow_ref` | `relflow/relflow/.github/workflows/evidence-lab.yml@5b3607fffe3100df354c41e9c9f776b34fb113df` |
 | Scope | `auth_keys` write, restricted to `tag:relflow-evidence-ci` |
 | Device tag | `tag:relflow-evidence-ci` |
 
@@ -49,8 +50,8 @@ out a separately pinned, tested evidence implementation. A fork cannot gain
 tailnet access by changing its own workflow.
 
 The trusted executor is pinned to
-`92b3c887eabc598ee2fc6c9dba4e05b9166cb8ba`; the helper is pinned to
-`ed5f863c887f5cb672efeb73083265af0a18e69e`. Keep these immutable commits
+`5d8adbb44fefb5d82ee5e2246db62dc26f94c5c2`; the helper is pinned to
+`5b3607fffe3100df354c41e9c9f776b34fb113df`. Keep these immutable commits
 reachable. Routine experiment and publication changes do not change the pins.
 A trusted-mechanics update requires a separately reviewed executor/helper
 revision and the corresponding exact Tailscale workflow claim before validation.
@@ -149,3 +150,37 @@ then update the exact Tailscale workflow claim as part of that review.
 A shared `relflow-evidence-lab` concurrency group uses `queue: max` so different
 PRs wait for lab capacity. The outer CI workflow cancels superseded runs of the
 same PR. No long-lived tailnet credential or self-hosted runner is needed.
+
+## Execution cost and timing
+
+The default is 16 containers on lab's 16 physical cores and 128 GiB of RAM.
+Each container keeps its two-CPU ceiling, 4 GiB memory limit, isolation, and
+full task timeout. Each training process retains one Torch thread. P025 runs
+its original three seed trials in two isolated processes inside that ceiling;
+the ordered results feed the same median and worst-case checks. GPU calibration
+is deferred; the required profile remains CPU.
+
+Tasks start in descending recorded duration. Publication results supply
+scheduling hints only: they cannot establish a passing task or authorize reuse.
+Each report includes `timing.json` with preparation and execution wall time,
+container durations, summed fresh-task CPU seconds, and peak child-process RSS.
+These distinguish less waiting from less computation.
+
+Cache keys bind the exact wheel payload, exported runtime requirements, trusted
+executor, resource/thread policy, seed, budget, experiment source, and shared
+files under `experiments/`. An edit to one experiment invalidates its baseline
+while preserving other unchanged experiments. Documentation, static result
+assets, publication tooling, and tests do not invalidate training. The complete
+source snapshot and raw fingerprints remain retained for audit. Runtime helper
+or dependency changes still invalidate affected execution.
+Each worker receives a read-only copy of exactly its declared runtime files:
+its experiment and shared helpers/data. Other experiment scripts and publication
+files are absent, and the input copy is outside the writable results mount.
+
+Full-report reuse authenticates the original input request and verifies a PR's
+synthetic merge parents against its recorded base and GitHub workflow head.
+It does not depend on GitHub preserving a PR association after a merge. Reuse
+can recover original Actions artifacts or frozen `evidence-v<version>` assets.
+A partial CI retry may retain an earlier successful Evidence job only after
+the complete CI run succeeds for the same revision and workflow; its measured
+attempt remains unchanged.

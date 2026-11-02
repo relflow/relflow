@@ -15,11 +15,11 @@ from pathlib import Path
 from evidence_ci import task_key
 from experiments.source import fingerprint, frontmatter, metadata
 from record import select, validate
-from reuse import SHA, archive, verify_receipt
+from reuse import SHA, archive, attempt, verify_receipt
 from reuse import artifact as verified_artifact
 
 REPOSITORY = "relflow/relflow"
-EXECUTOR = "92b3c887eabc598ee2fc6c9dba4e05b9166cb8ba"
+EXECUTOR = "5d8adbb44fefb5d82ee5e2246db62dc26f94c5c2"
 RESULTS = {"evidence-result", "evidence-report"}
 MARKERS = ("<!-- evidence-results:start -->", "<!-- evidence-results:end -->")
 
@@ -250,10 +250,14 @@ def publish(root: Path, output: Path, run_id: int, *, version: str | None = None
     reports, inputs = output / "retained", output / "retained-inputs"
     verified_artifact(run_id, "relflow-evidence", reports)
     retained_manifest = json.loads((reports / "manifest.json").read_text())
-    reused = retained_manifest["run_id"] != f"gh-{run_id}-{run['run_attempt']}"
-    current_inputs = output / "current-inputs" if reused else inputs
+    current_inputs = output / "current-inputs"
     verified_artifact(run_id, "evidence-inputs", current_inputs)
     request = json.loads((current_inputs / "request.json").read_text())
+    run = attempt(run, request.get("run_attempt"))
+    reused = retained_manifest["run_id"] != f"gh-{run_id}-{run['run_attempt']}"
+    if not reused:
+        current_inputs.rename(inputs)
+        current_inputs = inputs
     baseline = request.get("baseline", "")
     expected_request = {
         "candidate": main,

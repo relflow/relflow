@@ -53,6 +53,8 @@ def publication(tmp_path):
         target = root / entry["script"]
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+    for helper in ("source.py", "reporting.py", "run.py"):
+        shutil.copy2(ROOT / "experiments" / helper, root / "experiments" / helper)
     shutil.copy2(ROOT / "results.json", root / "results.json")
     return root
 
