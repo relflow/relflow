@@ -335,7 +335,7 @@ def publish(root: Path, output: Path, run_id: int, *, automatic: bool = False, t
     }
     if not SHA.fullmatch(baseline) or request != expected_request:
         raise ValueError("Authenticated input request does not bind the exact current main CI attempt")
-    if automatic and selection_only(root, baseline, main):
+    if automatic and run["event"] == "push" and selection_only(root, baseline, main):
         shutil.rmtree(output)
         print("Skipping recursive publication of selection-only main changes; required CI has still run.")
         return

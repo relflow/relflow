@@ -423,7 +423,10 @@ def test_rerun_reuses_exact_remote_branch_without_recommit_force_or_overwriting_
     assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip() == main
 
 
-def test_automatic_selection_only_main_skips_publication_but_not_ci(repository, artifacts, tmp_path, monkeypatch):
+@pytest.mark.parametrize("event", ["push", "workflow_dispatch"])
+def test_selection_only_main_skips_recursive_pushes_but_publishes_explicit_manual_results(
+    repository, artifacts, tmp_path, monkeypatch, event
+):
     root, base = repository
     reports, inputs = artifacts
     (root / "README.md").write_text(README.replace("Old table", "New table"))
@@ -436,16 +439,29 @@ def test_automatic_selection_only_main_skips_publication_but_not_ci(repository, 
                 "suite": main,
                 "run_id": 123,
                 "run_attempt": 2,
-                "event": "workflow_dispatch",
+                "event": event,
             }
         )
     )
+    manifest = json.loads((reports / "manifest.json").read_text())
+    manifest["candidate"]["revision"] = manifest["evidence_sha"] = main
+    (reports / "manifest.json").write_text(json.dumps(manifest))
+    for path in (reports / "results").rglob("*.json"):
+        record = json.loads(path.read_text())
+        provenance = record["result"]["provenance"]
+        provenance["evidence_revision"] = main
+        if record["task"]["role"] == "candidate":
+            provenance["relflow_revision"] = main
+        path.write_text(json.dumps(record))
+    for name in ("summary.json", "report.html", "checksums.json"):
+        (reports / name).unlink()
+    assert finish(reports, root=root / "evidence")["passed"]
 
     def api(path, **kwargs):
         if "/git/ref/" in path:
             return {"object": {"sha": main}}
         if "/actions/runs/" in path:
-            return run(main)
+            return run(main) | {"event": event}
         return {"id": 42}
 
     monkeypatch.setattr(publication, "api", api)
@@ -454,11 +470,25 @@ def test_automatic_selection_only_main_skips_publication_but_not_ci(repository, 
         "verified_artifact",
         lambda run_id, name, target: shutil.copytree(reports if name == "relflow-evidence" else inputs, target),
     )
-    monkeypatch.setattr(publication, "retain", lambda *args: pytest.fail("No recursive release"))
-    monkeypatch.setattr(publication, "propose", lambda *args: pytest.fail("No recursive publication PR"))
-    output = tmp_path / "not-created"
+    retained, proposed = [], []
+    monkeypatch.setattr(publication, "retain", lambda *args: retained.append(args))
+    monkeypatch.setattr(publication, "propose", lambda *args: proposed.append(args))
+    real_run = subprocess.run
+
+    def execute(command, *args, **kwargs):
+        if command[0] == "make":
+            return subprocess.CompletedProcess(command, 0)
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(publication.subprocess, "run", execute)
+    output = tmp_path / "publication"
     publish(root, output, 123, automatic=True)
-    assert not output.exists()
+    if event == "push":
+        assert not output.exists() and not retained and not proposed
+    else:
+        assert retained and proposed
+        assert retained[0][1] == main
+        assert "evidence-result" in (output / "evidence-update.patch").read_text()
 
 
 @pytest.mark.parametrize("interrupted_after_upload", [False, True])
