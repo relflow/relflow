@@ -95,4 +95,4 @@ jobs:
       suite_ref: ${{ inputs.suite_ref }}
       baseline_sha: ${{ needs.wheels.outputs.baseline_sha }}
       force_fresh: ${{ inputs.force_fresh }}
-    uses: relflow/relflow/.github/workflows/evidence-lab.yml@41fad4471120a7a2796442dd8642024ed331e322
+    uses: relflow/relflow/.github/workflows/evidence-lab.yml@ed5f863c887f5cb672efeb73083265af0a18e69e
