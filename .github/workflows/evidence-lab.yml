@@ -40,7 +40,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
-          ref: 349b2202e6390a5fe0cbdf09a0c5972e495351ed
+          ref: 0176c2f527f4e98058dbbb37ebb36b77765526db
           path: executor
           fetch-depth: 0
           persist-credentials: false
