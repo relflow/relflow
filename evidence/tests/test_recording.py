@@ -17,6 +17,7 @@ def test_independent_json_records_preserve_each_attempt(tmp_path):
     assert json.loads(first.read_text())["seed"] == 1
 
 
-def test_nonfinite_metrics_are_rejected(tmp_path):
+@pytest.mark.parametrize("metric", [float("nan"), float("inf"), -float("inf")])
+def test_nonfinite_metrics_are_rejected(tmp_path, metric):
     with pytest.raises(ValueError):
-        save({"metric": float("nan")}, tmp_path / "result.json")
+        save({"metrics": {"nested": [metric]}}, tmp_path / "result.json")

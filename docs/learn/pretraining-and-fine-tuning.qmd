@@ -326,9 +326,8 @@ Category inputs across successive training cohorts. Its selected run records
 zero admission drift and unchanged reconstruction NLL before an optimizer
 step. One cold-cohort prediction-quality check remains unmet, so the overall
 result remains unmet. Target coverage does not measure input familiarity:
-keep input cohorts separate when assessing pretraining quality. These are
-the selected run's measurements and retain its recorded library revision;
-they are not a new execution against the current source.
+keep input cohorts separate when assessing pretraining quality. Measurements
+and test conditions are recorded with the selected run.
 
 [Set metrics](../datatypes/set.qmd#vocabulary-and-learning) count positive
 memberships rather than scalar targets. A partial-OOV Set retains its known

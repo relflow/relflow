@@ -88,8 +88,8 @@ task described in [its README](assets/branding/README.md).
 
 Canonical experiments, the protocol, lab runner, and results live under
 [`evidence/`](../evidence/README.md). Each script owns its metadata and current result in frontmatter; `evidence/render.py` generates ignored pages under
-`docs/evidence/` directly from local canonical sources. There is no vendored
-snapshot or import/export step, and rendering never executes experiments.
+`docs/evidence/` directly from local canonical sources. Rendering reads the
+committed selection and never executes experiments.
 
 The reusable `evidence-lab.yml` workflow runs all 79 experiments against the
 library's exact base and candidate wheels on lab over Tailscale. The trusted
@@ -98,15 +98,33 @@ this repository. `CI / required` requires the full library test matrix, static
 documentation checks, and evidence before merging into main.
 The [lab guide](../evidence/lab.md) describes its OIDC trust and isolation.
 
-`publish-evidence.yml` retains a selected complete run in an immutable Release
-in this repository, with JSON results, logs, an HTML report, tested wheels,
-runtime requirements, and checksums. It also validates a candidate update to
-the experiment frontmatter and uploads a review patch. Apply the patch on a branch
-at the recorded repository base and open a normal PR to publish those measurements.
-Ordinary builds read the committed results and need no runtime or cloud credentials.
+Every main push validates complete paired evidence alongside the SDK and
+documentation checks. The trusted verifier may reuse a completed full report
+when source inputs, actual wheel payloads, comparison, and lab runtime match;
+the report keeps its original measured revisions. A separate receipt binds it
+to the new request. Result-only updates validate selected values against that
+report and keep the required gate without retraining. Other changes execute
+the suite; unchanged baselines may reuse verified original task records.
+After a successful main CI run, `publish-evidence.yml`
+automatically validates its reports, retains them in an immutable Release in
+this repository, and opens a PR updating experiment frontmatter and the
+README's generated measurements. A successful manual full CI run on `main`
+uses the same publication flow. The retained assets contain JSON results,
+logs, an HTML report, tested wheels, runtime requirements, and checksums.
+
+Enable **Allow GitHub Actions to create and approve pull requests** under
+**Settings → Actions → General → Workflow permissions**. GitHub combines these
+permissions in one setting; this publisher only creates PRs. GitHub may require
+an owner to approve the generated PR workflows before
+normal required CI starts. Merge the publication PR through the normal checks
+and review. Read the Docs then builds the selected measurements from `main`;
+PR previews show them before merge. Publication-only commits do not create another publication
+PR. Ordinary builds read committed results and need no runtime or cloud
+credentials; they never fetch a live report or run experiments.
 
 Runtime tests are explicit and excluded from default checks. See
-[evidence/README.md](../evidence/README.md) for execution commands. Each experiment publishes one selected full run with its complete provenance. Old Proofs routes are no longer published.
+[evidence/README.md](../evidence/README.md) for execution and publication commands.
+Each experiment publishes one selected full run with its complete provenance.
 
 ## Publication
 
@@ -121,9 +139,9 @@ uv run --project docs python -m docs.publish
 The publisher validates sources, renders with pinned Quarto, checks the
 rendered site, and copies the validated HTML to `READTHEDOCS_OUTPUT/html`.
 `READTHEDOCS_CANONICAL_URL` supplies the full URL of that hosted version.
-After setting `www.relflow.ai` as the canonical domain, rebuild the hosted
-versions so this URL uses `https://www.relflow.ai/en/<version>/`. Pull request
-builds keep their separate preview domains and version URLs.
+Published versions use `https://www.relflow.ai/en/<version>/`, with `latest`
+following `main`. Pull request builds keep their separate preview domains and
+version URLs. Rebuild affected versions after changing the canonical domain.
 Source links use the actual checkout's Git `HEAD`, checked against
 `READTHEDOCS_GIT_COMMIT_HASH` when that variable is supplied. The **View source**
 action therefore opens the exact commit for a branch, release, or pull request
@@ -135,45 +153,16 @@ review artifact. It does not deploy the site. Dispatch `docs.yml` manually to
 validate documentation on a branch; Read the Docs owns hosting and pull request
 previews.
 
-### Connect the project
+### Hosted project
 
-The Read the Docs owner is **`granthamtaylor`**. The source configuration does not
-create a hosted project or configure the account. Complete these steps in that
-owner account:
-
-1. Sign in to [Read the Docs Community](https://app.readthedocs.org/), install
-   its GitHub App for `relflow/relflow`, and grant that repository access.
-   Choose **Projects → Add project**, select `relflow/relflow`, and retain the
-   repository URL. Follow the [GitHub connection guide](https://docs.readthedocs.com/platform/stable/reference/git-integration.html).
-2. Create the project using the connected repository's default branch,
-   `main`, and the root configuration path `.readthedocs.yaml`. The import
-   wizard does not expose a branch override. Before this migration merges,
-   the initial `latest` build will fail because `main` lacks that file.
-3. Open **Versions**, include inactive versions, and find the branch
-   `stage/0.4.2` (normally the URL identifier `stage-0.4.2`). Activate that
-   version and save; activation triggers its build. Inspect the build and its
-   **View docs** link. The project branch selector only lists discovered
-   branches, so changing the default branch is unnecessary for this preview.
-   If the branch is missing, sign in and open the project's version-sync API
-   page at `/api/v3/projects/<project-slug>/sync-versions/`. Use its **POST**
-   button; a successful request returns **202 Accepted** with
-   `{"triggered": true}`. Refresh **Versions** after the background sync.
-   This uses the signed-in browser session and needs no shared API token.
-   See the [version-sync API reference](https://docs.readthedocs.com/platform/stable/api/v3.html#project-versions-sync).
-4. In **Settings → Pull request builds**, enable previews. In
-   **Settings → Addons → Flyout Menu**, enable the version menu; in
-   **Settings → Search**, enable the search modal. Enable the pull request
-   notification under **Settings → Addons → Notifications**. Verify these
-   controls on hosted pages; the local preview does not receive host injection.
-5. After this branch merges, confirm the project's **Default branch** is `main`
-   and rebuild `latest`. Keep `latest` as the default documentation version
-   during setup. In **Versions**, deactivate an unsupported `stable` alias and
-   leave older tags inactive. Activate a release tag only after verifying that
-   it contains the consolidated docs and root build configuration. Backfilling
-   older release documentation is a separate change.
-6. Verify a hosted branch or pull request preview, including assets, nested
-   links, evidence pages, version navigation, and search. Initial connection
-   leaves DNS and the existing production deployment unchanged.
+The Read the Docs project is connected to `relflow/relflow`; the owner is
+**`granthamtaylor`**. Its default branch is `main`, its configuration path is
+`.readthedocs.yaml`, and its default documentation version is `latest`.
+Manage the GitHub connection, pull request builds, Addons, search, and domain
+settings in the [project settings](https://app.readthedocs.org/dashboard/relflow/edit/).
+Verify hosted changes anonymously, including assets, nested links, evidence
+pages, version navigation, and search. Local previews do not receive host
+injection.
 
 Gold is enabled, and `relflow` is assigned through the account's
 [ad-free projects list](https://app.readthedocs.org/accounts/gold/projects/).
@@ -184,26 +173,14 @@ Verify hosted pages without an ad blocker after changing the assignment.
 Gold's project-wide removal is described in the
 [advertising policy](https://docs.readthedocs.com/platform/stable/advertising/ethical-advertising.html#opting-out).
 
-### Versions and domain cutover
+### Versions and navigation
 
-Read the Docs provides native [versions](https://docs.readthedocs.com/platform/stable/versions.html):
-`latest` follows the configured default branch, release tags get their own
-versions, and `stable` normally follows the greatest stable semantic release.
-Pre-release tags do not become the automatic `stable` version.
-
-At migration time, GitHub already has tags through `v0.4.11`, while the latest
-published GitHub Release is `v0.4.1`. Those older tags lack this consolidated
-build configuration, so automatic `stable` selection may point to an unsupported
-tag. Keep the default version on `latest`, deactivate an unsupported `stable`,
-and leave unsupported tags inactive. Do not enable automatic activation of all
-semantic tags. Activate and build only verified supported releases in the
-**Versions** tab.
-
-Select `stable` as the default only after its target contains the consolidated
-docs and builds successfully. If version ordering continues to select an old
-unsupported tag, a separately reviewed branch named `stable` can define a custom
-stable target until release numbering supersedes those tags. This migration does
-not retag or delete existing tags.
+Read the Docs provides native [versions](https://docs.readthedocs.com/platform/stable/versions.html).
+The default version, `latest`, follows `main`. Activate release versions only
+after verifying that the tag includes the current documentation and build
+configuration and builds successfully. Keep unsupported versions inactive;
+do not automatically activate every semantic tag. Use `stable` only when it
+resolves to the intended, successfully built release.
 
 The header shows the current version beside the relflow logo. When multiple
 versions are available, it opens a keyboard-accessible menu of published
@@ -226,53 +203,26 @@ request previews and the header version picker work without them.
 [Pull request previews](https://docs.readthedocs.com/platform/stable/pull-requests.html)
 use separate preview domains and carry a status check on GitHub.
 
-Use [www.relflow.ai](https://www.relflow.ai/) as the canonical public address.
-Complete the domain setup as follows:
+### Domains
 
-1. Set `www.relflow.ai` as the canonical domain in Read the Docs and point its
-   CNAME to `readthedocs.io`. Rebuild the hosted versions and verify their
-   canonical URLs, assets, search, version navigation, and ad-free behavior.
-2. In Squarespace, configure forwarding for the apex `relflow.ai` only, with
-   destination `https://www.relflow.ai` (include HTTPS explicitly), a **301 permanent redirect**,
-   **Maintain paths**, and **Automatic HTTPS**. Keep the `www` CNAME and email
-   records intact.
-3. Verify that the first redirect from both HTTP and HTTPS points directly to
-   HTTPS on `www`, including nested paths and the legacy routes below.
-   Automatic HTTPS provides the incoming certificate; it does not select the
-   destination scheme. Keep the previous GitHub Pages deployment
-   active until public HTTPS forwarding and the first Read the Docs build from
-   `main` are verified; retire it only afterward.
+[www.relflow.ai](https://www.relflow.ai/) is the canonical public address. Its
+CNAME points to `readthedocs.io`. The root URL redirects to the default version
+at `/en/latest/`. Link to complete version URLs for pages and assets, such as
+`https://www.relflow.ai/en/latest/guides/serving.html`; unversioned page and
+asset paths have no compatibility aliases. Pull request previews keep their
+own domains and version paths.
 
-Squarespace's apex forwarding drops query strings. This limitation is accepted;
-use direct `www` URLs when a query string must survive. Direct `www` URLs and
-the header version picker retain query strings and fragments. Source
-configuration alone does not complete or verify the domain setup.
+Squarespace forwards only the apex `relflow.ai` to `https://www.relflow.ai`
+with a **301 permanent redirect**, **Maintain paths**, and **Automatic HTTPS**.
+Keep the destination scheme explicitly HTTPS: Automatic HTTPS provides the
+incoming certificate and does not select the destination scheme. After a
+forwarding change, verify that the first redirect from both HTTP and HTTPS
+points directly to HTTPS on `www`, preserving a complete version path. Keep
+the `www` CNAME and email records intact.
 
-The built-in `/` redirect handles the root URL; it does not preserve links such
-as `/guides/serving.html`. These ten **Exact Redirects** are already saved in the
-Read the Docs dashboard. Keep **Force redirect disabled** for every entry:
-
-| From URL | To URL |
-| --- | --- |
-| `/learn/*` | `/page/learn/:splat` |
-| `/use-cases/*` | `/page/use-cases/:splat` |
-| `/guides/*` | `/page/guides/:splat` |
-| `/concepts/*` | `/page/concepts/:splat` |
-| `/datatypes/*` | `/page/datatypes/:splat` |
-| `/reference/*` | `/page/reference/:splat` |
-| `/evidence/*` | `/page/evidence/:splat` |
-| `/evidence.html` | `/page/evidence.html` |
-| `/index.html` | `/` |
-| `/assets/*` | `/en/latest/assets/:splat` |
-
-The built-in `/page/` prefix resolves pages in the default version. The asset
-alias retains existing root asset URLs used by README branding and diagrams.
-These ten rules fit within Community's 100-redirect limit. Do not add a `/*`
-catchall: it could intercept native version URLs or create redirect loops.
-Verify representative old URLs from every directory, the evidence catalog,
-the index, and public assets on `www.relflow.ai` after completing forwarding.
-These redirects do not apply on pull request preview domains. See the
-[Read the Docs redirect reference](https://docs.readthedocs.com/platform/stable/user-defined-redirects.html).
+Squarespace's apex forwarding drops query strings. Use direct `www` URLs when
+a query string must survive. Direct `www` URLs and the header version picker
+retain query strings and fragments.
 
 relflow-authored material retains the [Apache 2.0 license](../LICENSE) and
 [NOTICE](../NOTICE). The vendored Typst extension retains its

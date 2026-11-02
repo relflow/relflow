@@ -1,9 +1,9 @@
-# RelFlow evidence
+# relflow evidence
 
 This directory owns the 79 controlled synthetic experiments, their protocol,
 lab runner, runtime tests, and current publication results.
-The package, website, and evidence share this repository. Stable P identifiers remain
-unchanged. Each script's frontmatter records its ID, group, selected full run,
+Stable P identifiers identify experiments throughout the runner, reports, and
+website. Each script's frontmatter records its ID, group, selected full run,
 metrics, checks, seed, environment, source provenance, and retained report link.
 
 Run from the repository root:
@@ -23,13 +23,15 @@ directory. Execution never edits the reviewed publication selection.
 
 ## Required lab execution
 
-The library's workflow builds exact baseline and merge-candidate wheels and
+The library's workflow shares one candidate wheel across tests, Evidence, and
+release, and builds an exact baseline wheel when needed. It
 calls .github/workflows/evidence-lab.yml at a reviewed full commit SHA, passing
 a separate reviewed suite SHA. The helper pins the trusted executor. GitHub
 joins Tailscale using short-lived OIDC and dispatches one experiment per Docker
 container on lab. Containers have bounded CPU/memory, no network, a read-only
 root, and no host home or Docker socket. The full catalog runs for both wheels
-with the original seeds and budgets. Every baseline-passing check must pass on
+with the original seeds and budgets, using verified references for unchanged
+baselines. Every baseline-passing check must pass on
 the candidate; baseline misses remain reported. CI queues lab work across PRs
 and cancels superseded attempts within each PR. Errors, missing records, invalid
 provenance, smoke execution, and partial coverage fail CI / required.
@@ -41,28 +43,65 @@ in this repository. A new suite can be validated explicitly with
 This tests the selected suite without changing the trusted executor or
 Tailscale trust.
 
-See [lab.md](lab.md) for trust and repository variables. No AWS account,
-Modal setup, stored Tailscale secret, or self-hosted GitHub runner is required.
+Before training, the pinned helper probes the actual cached container image,
+host CPU/kernel, and resource/thread settings. It authenticates complete
+successful CI reports and proves their source and wheel-payload equivalence
+to the current request. Report-only updates must exactly match archived
+candidate measurements and their provenance. A reuse receipt records the
+current request, original run/artifacts, explicit role mapping, and all hashes;
+it does not change or clone an original execution record. A miss runs the
+suite. The required Evidence job always performs validation.
+
+Baseline execution reuse is local to the trusted lab controller. Its cache is
+outside worker mounts, limited to eight source reports and 1 GiB. Retained
+reports carry self-contained source proofs, bounded to two levels and 256 MiB.
+Missing, invalid, changed, or overly deep proofs cause fresh execution.
+
+See [lab.md](lab.md) for trust and repository variables. No cloud account, stored
+Tailscale secret, or self-hosted GitHub runner is required.
 
 ## Reports and publication
 
-Routine CI reports are Actions artifacts in relflow/relflow, retained for 90
-days; input wheels and requirements are retained for seven days. Before expiry,
-promote a selected complete run to an immutable Release in relflow/relflow:
+Every main push validates the complete paired suite against the pre-push
+revision. PRs and merge groups use their actual comparison base; manual runs
+use the current commit's first parent by default; `evidence_base=<full-sha>`
+selects an explicit ancestor for repeatable manual comparisons. After the complete CI run
+succeeds, the evidence publisher automatically validates and retains its
+reports in an immutable Release in `relflow/relflow`. It opens a publication
+PR updating experiment results and the README measurements. Merge that PR
+through the normal checks and review to update the Read the Docs build.
+Publication-only changes do not recursively open another publication PR.
+
+Routine CI reports are Actions artifacts retained for 90 days; input wheels
+and requirements are retained for seven days. To refresh the current
+measurements explicitly, start another full run on `main`:
+
+```sh
+gh workflow run ci.yml --repo relflow/relflow --ref main
+```
+
+To execute every task without reusing a report or baseline:
+
+```sh
+gh workflow run ci.yml --repo relflow/relflow --ref main \
+  -f force_fresh_evidence=true
+```
+
+Successful manual main runs also feed automatic publication. To retain a
+completed run explicitly and obtain a publication patch for review, use:
 
 ```sh
 gh workflow run publish-evidence.yml --repo relflow/relflow \
   -f tag=<unique-release-tag> -f library_run_id=<library-actions-run-id>
 ```
 
-The workflow verifies completeness, provenance, wheel digests, and the runtime
-lock; preserves reports and inputs with checksums; and generates a validated
-publication patch for experiment frontmatter. Download evidence-publication-update,
-review the patch on a branch at its recorded repository base, and open a normal PR.
-The site's normal build reads the committed records and canonical sources.
-There are no snapshot bundles, importers/exporters, or old Proofs redirects.
+The publisher verifies complete coverage, checks, provenance, source and wheel
+digests, and the runtime lock. Failed, stale, partial, or regressing runs cannot
+be selected. The site's normal build reads committed records and canonical
+sources. Report Releases do not replace the latest package release.
 
-Existing report links in relflow/docs retain their original location. Raw
-report releases retain execution provenance. Updating source or output
-readers does not establish a fresh learning result. The checkout keeps the
-current selection without archived result snapshots or history readers.
+Select the candidate records from that completed full run, preserving their
+actual metrics, checks, seeds, environment, tested revisions, and source digests.
+Updating source or output readers does not establish a fresh learning result.
+A newly measured selection requires complete execution; a verified reused
+selection retains the original execution identity and its separate receipt.

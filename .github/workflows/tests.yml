@@ -2,6 +2,10 @@ name: Tests
 
 on:
   workflow_call:
+    inputs:
+      distribution_artifact:
+        type: string
+        default: python-package-distributions
 
 permissions:
   contents: read
@@ -31,8 +35,18 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.0
         with:
           enable-cache: true
-      - name: Install locked dependencies and package wheel
-        run: uv sync --locked --all-extras --no-editable
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.distribution_artifact }}
+          path: package/
+      - name: Verify the shared CI distributions
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: python scripts/release.py verify package --source-sha "$SOURCE_SHA"
+      - name: Install locked dependencies and shared package wheel
+        run: |
+          uv sync --locked --all-extras --no-install-project
+          uv pip install --python .venv --no-deps package/*.whl
       - name: Create trained checkpoint and expected predictions
         run: uv run --no-sync python scripts/checkpoint.py create --output checkpoint-baseline
       - uses: actions/upload-artifact@v4
@@ -74,8 +88,18 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.0
         with:
           enable-cache: true
-      - name: Install locked dependencies and package wheel
-        run: uv sync --locked --all-extras --no-editable
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.distribution_artifact }}
+          path: package/
+      - name: Verify the shared CI distributions
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: python scripts/release.py verify package --source-sha "$SOURCE_SHA"
+      - name: Install locked dependencies and shared package wheel
+        run: |
+          uv sync --locked --all-extras --no-install-project
+          uv pip install --python .venv --no-deps package/*.whl
       - name: Verify wheel installation and record environment
         run: |
           uv run --no-sync python - <<'PY' > environment.txt
@@ -159,11 +183,20 @@ jobs:
         run: |
           python -VV > environment.txt
           python -c "import platform; print(platform.platform(), platform.machine())" >> environment.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.distribution_artifact }}
+          path: package/
+      - name: Verify the shared CI distributions
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: python scripts/release.py verify package --source-sha "$SOURCE_SHA"
       - name: Install preview dependencies with nightly CPU Torch
         run: |
           uv venv
           uv pip install --no-deps --index https://download.pytorch.org/whl/nightly/cpu --prerelease allow torch 2>&1 | tee torch-resolution.log
-          uv pip install --group dev -r pyproject.toml --all-extras --no-editable . --only-binary torch,duckdb --prerelease if-necessary-or-explicit 2>&1 | tee resolution.log
+          uv pip install --python .venv --group dev -r pyproject.toml --all-extras --only-binary torch --only-binary duckdb --prerelease if-necessary-or-explicit 2>&1 | tee resolution.log
+          uv pip install --python .venv --no-deps package/*.whl
       - name: Record resolved dependencies
         run: uv pip freeze >> environment.txt
       - uses: actions/download-artifact@v4

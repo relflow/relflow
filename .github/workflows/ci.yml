@@ -14,6 +14,14 @@ on:
         description: Optional full repository commit SHA for an explicit suite validation
         type: string
         required: false
+      evidence_base:
+        description: Optional full comparison-base SHA for manual Evidence validation
+        type: string
+        required: false
+      force_fresh_evidence:
+        description: Execute every Evidence task without reusing completed reports or baselines
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -23,9 +31,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  package:
+    name: Package
+    uses: ./.github/workflows/package.yml
+
   tests:
     name: Tests
+    needs: package
     uses: ./.github/workflows/tests.yml
+    with:
+      distribution_artifact: ${{ needs.package.outputs.artifact_name }}
 
   docs:
     name: Documentation
@@ -35,32 +50,18 @@ jobs:
 
   evidence:
     name: Evidence
-    if: github.event_name != 'push' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    needs: package
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
       id-token: write
+      actions: read
     uses: ./.github/workflows/evidence.yml
     with:
       suite_ref: ${{ inputs.evidence_ref || github.sha }}
-
-  package:
-    name: Build main distributions
-    if: github.event_name == 'push'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@v10.3.0
-        with:
-          python-version: '3.12'
-      - run: uv build --out-dir dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: python-package-distributions
-          path: dist/
-          retention-days: 14
-          if-no-files-found: error
+      distribution_artifact: ${{ needs.package.outputs.artifact_name }}
+      force_fresh: ${{ inputs.force_fresh_evidence || false }}
+      baseline_ref: ${{ inputs.evidence_base || '' }}
 
   required:
     name: CI / required
@@ -85,8 +86,8 @@ jobs:
           expected = {
               "tests": "success",
               "docs": "success",
-              "evidence": "skipped" if event == "push" else "success",
-              "package": "success" if event == "push" else "skipped",
+              "evidence": "success",
+              "package": "success",
           }
           actual = {name: job["result"] for name, job in json.loads(os.environ["RESULTS"]).items()}
           assert actual == expected, {"expected": expected, "actual": actual}

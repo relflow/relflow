@@ -13,7 +13,7 @@
   <a href="https://github.com/relflow/relflow/actions/workflows/compatibility.yml?query=branch%3Amain"><img alt="Dependency compatibility" src="https://github.com/relflow/relflow/actions/workflows/compatibility.yml/badge.svg?branch=main" /></a>
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&amp;logoColor=white" />
   <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-2E8B57" /></a>
-  <a href="https://relflow.ai/"><img alt="Documentation build" src="https://github.com/relflow/relflow/actions/workflows/ci.yml/badge.svg?branch=main&amp;event=push" /></a>
+  <a href="https://www.relflow.ai/en/latest/"><img alt="Documentation build" src="https://github.com/relflow/relflow/actions/workflows/ci.yml/badge.svg?branch=main&amp;event=push" /></a>
   <!-- discord-invite:start -->
   <a href="https://discord.gg/DVyZUkvTFA"><img alt="Discord channel invite" src="https://img.shields.io/badge/discord-join%20the%20channel-5865F2?logo=discord&amp;logoColor=white" /></a>
   <!-- discord-invite:end -->
@@ -58,15 +58,19 @@ Arrow IPC serving benchmark, a tiny, attention-free XS model processed
 **50.3 million rows with zero failed requests**, including client encoding,
 HTTPS, and response decoding. The setup and three measured passes are below.
 
-The [evidence catalog](https://relflow.ai/evidence.html) adds **79 controlled
+The [evidence catalog](https://www.relflow.ai/en/latest/evidence.html) adds **79 controlled
 learning experiments** with code, comparisons, seeds, and recorded results.
 Examples from the published full runs:
 
+<!-- evidence-results:start -->
+
 | Experiment | relflow result | Control |
 | --- | --- | --- |
-| [Match IDs absent from training](https://relflow.ai/evidence/identity/unseen-identity-equality.html) | **0.9991 AUC** with `Hash` | 0.5000 with unknown `Category` labels |
-| [Recall a value by an unfamiliar ID](https://relflow.ai/evidence/relational/hash-recall.html) | **0.100 normalized RMSE**, median of three seeds | 1.401 after corrupting the lookup IDs |
-| [Distinguish nulls from zero](https://relflow.ai/evidence/state/null-versus-zero.html) | **100% accuracy** with value states preserved | 50% after filling nulls with zero |
+| [Match IDs absent from training](https://www.relflow.ai/en/latest/evidence/identity/unseen-identity-equality.html) | **0.9991 AUC** with `Hash` | 0.5000 with unknown `Category` labels |
+| [Recall a value by an unfamiliar ID](https://www.relflow.ai/en/latest/evidence/relational/hash-recall.html) | **0.100 normalized RMSE**, median of three seeds | 1.401 after corrupting the lookup IDs |
+| [Distinguish nulls from zero](https://www.relflow.ai/en/latest/evidence/state/null-versus-zero.html) | **100% accuracy** with value states preserved | 50% after filling nulls with zero |
+
+<!-- evidence-results:end -->
 
 These are controlled synthetic tasks. Each page includes its protocol,
 comparisons, limitations, and complete run report.
@@ -131,7 +135,7 @@ the decoder but is never included in the inputs. Mark additional fields to
 train multiple targets in the same model.
 
 `xs` supplies architecture defaults for the root, child branches, and field
-decoders. The [preset ladder](https://relflow.ai/reference/model-presets.html)
+decoders. The [preset ladder](https://www.relflow.ai/en/latest/reference/model-presets.html)
 runs from `rf.Model.xs(...)` through `.sm(...)`, `.md(...)`, `.lg(...)`, and
 `.xl(...)`; each creates a fresh, untrained model from your declared schema.
 Override options such
@@ -139,10 +143,10 @@ as `d_model`, `n_layers`, or `n_heads` when needed. Use `fields={...}` for
 generated schemas or field names that collide with configuration options.
 
 <p align="center">
-  <a href="https://relflow.ai/learn/your-first-model.html">
+  <a href="https://www.relflow.ai/en/latest/learn/your-first-model.html">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://relflow.ai/assets/diagrams/fig-first-payment-dark.svg" />
-      <img alt="A payment model combines Number amount and Category merchant inputs to predict the masked Boolean disputed target." src="https://relflow.ai/assets/diagrams/fig-first-payment-light.svg" width="640" />
+      <source media="(prefers-color-scheme: dark)" srcset="https://www.relflow.ai/en/latest/assets/diagrams/fig-first-payment-dark.svg" />
+      <img alt="A payment model combines Number amount and Category merchant inputs to predict the masked Boolean disputed target." src="https://www.relflow.ai/en/latest/assets/diagrams/fig-first-payment-light.svg" width="640" />
     </picture>
   </a>
 </p>
@@ -233,10 +237,10 @@ context while the exporting model stays fixed.
 
 A supervised model can also start from fresh initialization. Evaluate reuse
 on the intended downstream tasks and populations. See
-[Pretraining and fine-tuning](https://relflow.ai/learn/pretraining-and-fine-tuning.html)
-and [Reusable representations](https://relflow.ai/learn/reusable-representations.html).
+[Pretraining and fine-tuning](https://www.relflow.ai/en/latest/learn/pretraining-and-fine-tuning.html)
+and [Reusable representations](https://www.relflow.ai/en/latest/learn/reusable-representations.html).
 
-[Schema mutation](https://relflow.ai/guides/schema-mutation.html) can add targets
+[Schema mutation](https://www.relflow.ai/en/latest/guides/schema-mutation.html) can add targets
 or change the input tree while retaining compatible learned state. New or
 incompatible components initialize as the schema changes.
 
@@ -251,7 +255,7 @@ types and validated Pydantic options, then register its tensorization,
 embedder, decoder, loss, and output writer by `rf.Component` role. The shared
 engine handles nesting, masking, batching, and device transfer. Your datatype
 owns its semantics without adding special cases to the model or data loader.
-See [Custom tensorfields](https://relflow.ai/datatypes/custom-tensorfields.html)
+See [Custom tensorfields](https://www.relflow.ai/en/latest/datatypes/custom-tensorfields.html)
 for the full contract.
 
 ## Serve the trained model
@@ -273,22 +277,22 @@ uvicorn serve_payments:app --host 127.0.0.1 --port 8000
 
 The application chooses the hosting infrastructure and can attach shared
 preprocessors and postprocessors. Batch prediction and HTTP serving use the
-saved schema and learned state. See [Serving](https://relflow.ai/guides/serving.html)
+saved schema and learned state. See [Serving](https://www.relflow.ai/en/latest/guides/serving.html)
 for requests, validation, and resource controls, and
-[Performance](https://relflow.ai/guides/performance.html) for measuring throughput
+[Performance](https://www.relflow.ai/en/latest/guides/performance.html) for measuring throughput
 with the workload, record shape, hardware, and requested outputs stated.
 
 ## Learn more
 
-- [Your first model](https://relflow.ai/learn/your-first-model.html)
-- [Use cases](https://relflow.ai/use-cases/index.html)
-- [Pretraining and fine-tuning](https://relflow.ai/learn/pretraining-and-fine-tuning.html)
-- [Reusable representations](https://relflow.ai/learn/reusable-representations.html)
-- [Model structure and configuration](https://relflow.ai/concepts/model-tree.html)
-- [Data types](https://relflow.ai/datatypes/index.html)
-- [Arrow data loading](https://relflow.ai/guides/data-modules.html)
-- [Streaming batch inference](https://relflow.ai/guides/batch-inference.html)
-- [Prediction output](https://relflow.ai/reference/prediction-output.html)
+- [Your first model](https://www.relflow.ai/en/latest/learn/your-first-model.html)
+- [Use cases](https://www.relflow.ai/en/latest/use-cases/index.html)
+- [Pretraining and fine-tuning](https://www.relflow.ai/en/latest/learn/pretraining-and-fine-tuning.html)
+- [Reusable representations](https://www.relflow.ai/en/latest/learn/reusable-representations.html)
+- [Model structure and configuration](https://www.relflow.ai/en/latest/concepts/model-tree.html)
+- [Data types](https://www.relflow.ai/en/latest/datatypes/index.html)
+- [Arrow data loading](https://www.relflow.ai/en/latest/guides/data-modules.html)
+- [Streaming batch inference](https://www.relflow.ai/en/latest/guides/batch-inference.html)
+- [Prediction output](https://www.relflow.ai/en/latest/reference/prediction-output.html)
 
 Tutorials and guides live in [docs/](docs/README.md); canonical learning
 experiments and recorded results live in [evidence/](evidence/README.md).
@@ -299,21 +303,31 @@ For package development, see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Continuous Integration
 
 `ci.yml` is the entry point for PRs to main, merge groups, main pushes, and
-manual validation. PRs run the full Python/platform test matrix, static
-documentation checks, and the full paired evidence suite in parallel.
+manual validation. Each run builds one package wheel and source distribution;
+the full Python/platform test matrix installs that same wheel. Documentation
+checks and complete Evidence validation run alongside the matrix. Evidence
+reuses an authenticated full report when the requested package payloads,
+source inputs, comparison, and actual lab runtime match. Other requests run
+the full suite, with unchanged baselines eligible for verified reuse.
 `CI / required` rejects errors, cancellations,
 and missing required jobs. Evidence runs on lab through the pinned trusted
 executor, with the candidate commit supplying the suite from this repository. See the
 [lab guide](evidence/lab.md).
 
-Main pushes run the test matrix once and build the distributions consumed by
-release publication. Successful main CI also publishes coverage. Nightly
+Main pushes compare against the pre-push revision. Successful main CI also publishes coverage and retains
+verified evidence reports in this repository. The evidence publisher opens a
+PR updating the selected experiment results and README measurements; merging
+that PR updates the Read the Docs build. Nightly
 dependency compatibility and configured accelerator checks remain independent.
 Local pre-commit continues to run formatting, lint, types, and fast tests.
+Manual CI accepts `force_fresh_evidence=true` to execute every task again.
+Release publication consumes the shared distributions, verifies existing tag
+targets and published bytes, and repairs incomplete publication using its
+original checked build. It never overwrites a different published artifact.
 The reusable documentation workflow validates and renders the static site using its
 isolated environment; see [the documentation guide](docs/README.md) for preview
 and build commands. Read the Docs builds the hosted versions and pull request
-previews from [.readthedocs.yaml](.readthedocs.yaml), with `latest` following the
-default branch and verified release versions activated separately. That guide
-describes the canonical `www.relflow.ai` address, apex HTTPS forwarding, and
-the checks required before retiring the previous GitHub Pages deployment.
+previews from [.readthedocs.yaml](.readthedocs.yaml), with `latest` following
+`main` and verified release versions activated separately. Public pages and
+assets use `https://www.relflow.ai/en/<version>/`; the root redirects to
+`latest`. That guide describes hosted settings, Gold, and apex HTTPS forwarding.

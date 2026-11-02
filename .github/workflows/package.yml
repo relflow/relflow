@@ -1,0 +1,52 @@
+name: Package
+
+on:
+  workflow_call:
+    outputs:
+      artifact_name:
+        value: ${{ jobs.build.outputs.artifact_name }}
+      source_sha:
+        value: ${{ jobs.build.outputs.source_sha }}
+      version:
+        value: ${{ jobs.build.outputs.version }}
+      wheel_name:
+        value: ${{ jobs.build.outputs.wheel_name }}
+      wheel_sha256:
+        value: ${{ jobs.build.outputs.wheel_sha256 }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build checked distributions
+    runs-on: ubuntu-24.04
+    outputs:
+      artifact_name: ${{ steps.inventory.outputs.artifact_name }}
+      source_sha: ${{ steps.inventory.outputs.source_sha }}
+      version: ${{ steps.inventory.outputs.version }}
+      wheel_name: ${{ steps.inventory.outputs.wheel_name }}
+      wheel_sha256: ${{ steps.inventory.outputs.wheel_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: '3.12'
+      - name: Build once and stage the two distribution files
+        run: |
+          uv build --out-dir dist
+          mkdir package
+          cp dist/*.whl dist/*.tar.gz package/
+      - name: Validate archives and record the exact CI build
+        id: inventory
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: python scripts/release.py inventory package --source-sha "$SOURCE_SHA"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: package/
+          retention-days: 14
+          if-no-files-found: error

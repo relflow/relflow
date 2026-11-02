@@ -14,16 +14,190 @@ import tarfile
 import tempfile
 import time
 import traceback
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from experiments.source import registry
+from experiments.source import frontmatter, metadata, registry
 
 ROOT = Path(__file__).resolve().parent
 
 
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def identity(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    ).hexdigest()
+
+
+def wheel_payload(path: Path) -> str:
+    """Bind all wheel payload bytes while ignoring ZIP transport timestamps."""
+    with zipfile.ZipFile(path) as archive:
+        files = [item for item in archive.infolist() if not item.is_dir()]
+        names = [item.filename for item in files]
+        if len(set(names)) != len(names) or sum(item.file_size for item in files) > 1024**3:
+            raise ValueError("Wheel payload has duplicate members or exceeds 1 GiB")
+        return identity(
+            {
+                item.filename: {
+                    "sha256": hashlib.sha256(archive.read(item)).hexdigest(),
+                    "mode": item.external_attr,
+                    "system": item.create_system,
+                }
+                for item in files
+            }
+        )
+
+
+def suite_identity(root: Path) -> str:
+    """Bind suite files and modes; normalize only the two selected result fields."""
+    scripts = {entry["script"] for entry in registry(root).values()}
+    sources = {}
+    for path in sorted(root.rglob("*")):
+        if "__pycache__" in path.relative_to(root).parts:
+            continue
+        if path.is_symlink():
+            raise ValueError("Execution identity requires regular suite sources")
+        if path.is_dir():
+            continue
+        if not path.is_file():
+            raise ValueError("Execution identity rejects special suite files")
+        name = path.relative_to(root).as_posix()
+        content = path.read_bytes()
+        if name in scripts:
+            text = content.decode()
+            header = metadata(text)
+            header.pop("evidence-result", None)
+            header.pop("evidence-report", None)
+            content = frontmatter(text, header).encode()
+        sources[name] = {"sha256": hashlib.sha256(content).hexdigest(), "mode": path.stat().st_mode & 0o777}
+    return identity(sources)
+
+
+def execution_key(manifest: dict, task: dict, execution: dict) -> str:
+    """An execution equivalence key, never a replacement for original provenance."""
+    return identity(
+        {
+            "schema": 1,
+            "wheel_payload": manifest[task["role"]]["payload_sha256"],
+            "requirements": manifest["requirements_sha256"],
+            "suite": manifest["suite_sha256"],
+            "executor": manifest["executor_sha"],
+            "policy": manifest["policy"],
+            "environment": execution["identity"],
+            "task": {key: value for key, value in task.items() if key not in {"role", "script_sha256"}},
+        }
+    )
+
+
+def integrity(reports: Path) -> None:
+    """Validate the complete immutable report inventory, including every task log."""
+    if reports.is_symlink() or not reports.is_dir():
+        raise ValueError("Retained report must be a regular directory")
+    files = {}
+    total = 0
+    for path in reports.rglob("*"):
+        if path.is_symlink():
+            raise ValueError("Retained reports must contain only regular files")
+        if path.is_file() and path != reports / "checksums.json":
+            total += path.stat().st_size
+            if total > 256 * 1024 * 1024:
+                raise ValueError("Retained baseline proof exceeds 256 MiB")
+            files[path.relative_to(reports).as_posix()] = digest(path)
+    if json.loads((reports / "checksums.json").read_text()) != files:
+        raise ValueError("Retained report checksum inventory differs from its files")
+    manifest = json.loads((reports / "manifest.json").read_text())
+    for task in manifest["tasks"]:
+        if not (reports / "logs" / (task_key(task) + ".txt")).is_file():
+            raise ValueError("Retained report is missing a task log")
+
+
+def resolved(
+    manifest: dict,
+    records: list[dict],
+    reports: Path,
+    *,
+    root: Path,
+    reuse_depth: int = 0,
+    validated_sources: dict | None = None,
+) -> list[dict]:
+    """Resolve baseline slots to unchanged fresh originals, validating source runs first."""
+    if reuse_depth >= 2:
+        raise ValueError("Baseline proof nesting exceeds two retained source runs")
+    sources = validated_sources if validated_sources is not None else {}
+    values = []
+    for record in records:
+        if "reuse" not in record:
+            values.append(record)
+            continue
+        task = record["task"]
+        reference = record["reuse"]
+        name = reference.get("report", "")
+        parts = Path(name).parts
+        if (
+            task["role"] != "baseline"
+            or set(record) != {"task", "reuse"}
+            or len(parts) != 2
+            or parts[0] != "reused"
+            or len(parts[1]) != 64
+            or any(value not in "0123456789abcdef" for value in parts[1])
+        ):
+            raise ValueError("Only baseline slots may reference retained source reports")
+        source = reports / name
+        if name not in sources:
+            integrity(source)
+            if digest(source / "checksums.json") != parts[1]:
+                raise ValueError("Retained source checksum identity differs from its reference")
+            archived_summary = json.loads((source / "summary.json").read_text())
+            if not archived_summary.get("complete") or not archived_summary.get("passed"):
+                raise ValueError("Baseline reuse cannot promote an incomplete or failed original run")
+            original = json.loads((source / "manifest.json").read_text())
+            originals = [json.loads(path.read_text()) for path in sorted((source / "results").rglob("*.json"))]
+            json.dumps(originals, allow_nan=False)
+            summary = evaluate(original, originals, root=source / "source", reports=source, reuse_depth=reuse_depth + 1)
+            if not summary["passed"] or not summary["complete"]:
+                raise ValueError("Baseline reuse requires a complete passing original run")
+            if original.get("suite_sha256") != suite_identity(source / "source"):
+                raise ValueError("Retained suite identity differs from its source")
+            for original_task in original["tasks"]:
+                if digest(source / "source" / original_task["script"]) != original_task["script_sha256"]:
+                    raise ValueError("Retained original script differs from its execution")
+            for role in ("baseline", "candidate"):
+                wheels = list((source / "artifacts" / role).glob("*.whl"))
+                if len(wheels) != 1 or digest(wheels[0]) != original[role]["wheel_sha256"]:
+                    raise ValueError("Retained original wheel differs from its execution")
+                if wheel_payload(wheels[0]) != original[role]["payload_sha256"]:
+                    raise ValueError("Retained wheel payload identity differs")
+            if digest(source / "artifacts/requirements.txt") != original["requirements_sha256"]:
+                raise ValueError("Retained original requirements differ")
+            sources[name] = (
+                original,
+                {task_key(value["task"]): value for value in originals},
+                json.loads((source / "execution.json").read_text()),
+            )
+        original, originals, environment = sources[name]
+        value = originals.get(reference.get("task"))
+        current_environment = json.loads((reports / "execution.json").read_text())
+        if (
+            value is None
+            or "reuse" in value
+            or execution_key(original, value["task"], environment) != execution_key(manifest, task, current_environment)
+        ):
+            raise ValueError("Reused baseline execution identity differs from the current slot")
+        # The original object and its provenance remain untouched in the retained source.
+        values.append(
+            {
+                "task": task,
+                "result": value["result"],
+                "error": value.get("error"),
+                "duration_seconds": value.get("duration_seconds"),
+                "reused_from": reference,
+            }
+        )
+    return values
 
 
 def write_json(path: Path, value: object) -> None:
@@ -75,7 +249,7 @@ def plan(
                 }
             )
     return {
-        "schema": 2,
+        "schema": 3,
         "run_id": run_id,
         "created_at": datetime.now(timezone.utc).isoformat(),  # noqa: UP017 - lab host runs Python 3.10
         "evidence_sha": evidence_sha,
@@ -167,12 +341,27 @@ def collect(output: Path, record: dict) -> None:
         handle.write(log)
 
 
-def evaluate(manifest: dict, records: list[dict], *, root: Path = ROOT) -> dict:
+def evaluate(
+    manifest: dict, records: list[dict], *, root: Path = ROOT, reports: Path | None = None, reuse_depth: int = 0
+) -> dict:
+    reuse_errors = []
+    reused_keys = set()
+    if any("reuse" in record for record in records):
+        try:
+            if manifest.get("schema") != 3 or reports is None:
+                raise ValueError("Reused baseline slots require a schema3 report directory")
+            if manifest.get("suite_sha256") != suite_identity(root):
+                raise ValueError("Current suite differs from the execution identity")
+            reused_keys = {task_key(record["task"]) for record in records if "reuse" in record}
+            records = resolved(manifest, records, reports, root=root, reuse_depth=reuse_depth)
+        except (ValueError, KeyError, OSError, TypeError) as error:
+            reuse_errors.append(f"Invalid baseline reuse: {error}")
+            reused_keys.clear()
     expected = {task_key(task): task for task in manifest["tasks"]}
     seen = {}
-    errors = []
+    errors = reuse_errors
     catalog = registry(root)
-    if manifest.get("schema") != 2 or not manifest.get("executor_sha"):
+    if manifest.get("schema") not in {2, 3} or not manifest.get("executor_sha"):
         errors.append("Expected a current manifest with an independently pinned executor")
     if any(task.get("executor_sha") != manifest.get("executor_sha") for task in manifest["tasks"]):
         errors.append("Task executor differs from the manifest")
@@ -202,6 +391,8 @@ def evaluate(manifest: dict, records: list[dict], *, root: Path = ROOT) -> dict:
             errors.append(f"Run identity differs from task: {key}")
         if result.get("mode") != manifest["mode"]:
             errors.append(f"Run budget differs from manifest: {key}")
+        if key in reused_keys:
+            continue
         task = record["task"]
         identity = manifest.get(task["role"], {})
         provenance = result.get("provenance", {})
@@ -243,16 +434,22 @@ def evaluate(manifest: dict, records: list[dict], *, root: Path = ROOT) -> dict:
         "baseline_unmet_checks": limitations,
         "expected_tasks": len(expected),
         "received_tasks": len(seen),
+        **(
+            {"reused_baseline_tasks": len(reused_keys), "fresh_tasks": len(seen) - len(reused_keys)}
+            if manifest.get("schema") == 3
+            else {}
+        ),
     }
 
 
 def finish(output: Path, *, root: Path = ROOT) -> dict:
     manifest = json.loads((output / "manifest.json").read_text())
     records = [json.loads(path.read_text()) for path in sorted((output / "results").rglob("*.json"))]
-    summary = evaluate(manifest, records, root=root)
+    summary = evaluate(manifest, records, root=root, reports=output)
     write_json(output / "summary.json", summary)
     rows = []
-    for record in records:
+    displayed = resolved(manifest, records, output, root=root) if summary["passed"] else records
+    for record in displayed:
         result = record.get("result") or {}
         checks = result.get("checks", {})
         task = record["task"]
@@ -267,6 +464,7 @@ def finish(output: Path, *, root: Path = ROOT) -> dict:
                     result.get("outcome", "error"),
                     f"{sum(checks.values())}/{len(checks)}",
                     record.get("duration_seconds"),
+                    (record.get("reused_from") or {}).get("report", "fresh"),
                 )
             )
             + "</tr>"
@@ -278,7 +476,7 @@ def finish(output: Path, *, root: Path = ROOT) -> dict:
         f"<h1>Evidence: {html.escape(manifest['run_id'])}</h1>"
         f"<p>Required gate: {'passed' if summary['passed'] else 'failed'}</p>"
         f"<pre>{html.escape(json.dumps(summary, indent=2))}</pre><table>"
-        "<tr><th>Role</th><th>Experiment</th><th>Seed</th><th>Outcome</th><th>Checks</th><th>Seconds</th></tr>"
+        "<tr><th>Role</th><th>Experiment</th><th>Seed</th><th>Outcome</th><th>Checks</th><th>Seconds</th><th>Execution source</th></tr>"
         + "".join(rows)
         + "</table></html>"
     )

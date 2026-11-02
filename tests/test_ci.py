@@ -37,8 +37,8 @@ def test_complete_jobs_satisfy_the_gate(gate, event):
         {
             "tests": "success",
             "docs": "success",
-            "evidence": "skipped" if event == "push" else "success",
-            "package": "success" if event == "push" else "skipped",
+            "evidence": "success",
+            "package": "success",
         },
     )
 
@@ -48,8 +48,8 @@ def test_normal_tests_are_always_required(gate, event, status):
     results = {
         "tests": status,
         "docs": "success",
-        "evidence": "skipped" if event == "push" else "success",
-        "package": "success" if event == "push" else "skipped",
+        "evidence": "success",
+        "package": "success",
     }
     with pytest.raises(AssertionError):
         gate(event, results)
@@ -57,11 +57,19 @@ def test_normal_tests_are_always_required(gate, event, status):
 
 @pytest.mark.parametrize(
     "event,status",
-    itertools.product(["pull_request", "merge_group", "workflow_dispatch"], ["failure", "cancelled", "skipped"]),
+    itertools.product(EVENTS, ["failure", "cancelled", "skipped"]),
 )
-def test_evidence_errors_or_skips_never_satisfy_premerge_validation(gate, event, status):
+def test_evidence_errors_or_skips_never_satisfy_validation(gate, event, status):
     with pytest.raises(AssertionError):
-        gate(event, {"tests": "success", "docs": "success", "evidence": status, "package": "skipped"})
+        gate(
+            event,
+            {
+                "tests": "success",
+                "docs": "success",
+                "evidence": status,
+                "package": "success",
+            },
+        )
 
 
 @pytest.mark.parametrize("event,status", itertools.product(EVENTS, ["failure", "cancelled", "skipped"]))
@@ -69,18 +77,24 @@ def test_documentation_is_required_for_every_event(gate, event, status):
     results = {
         "tests": "success",
         "docs": status,
-        "evidence": "skipped" if event == "push" else "success",
-        "package": "success" if event == "push" else "skipped",
+        "evidence": "success",
+        "package": "success",
     }
     with pytest.raises(AssertionError):
         gate(event, results)
+
+
+@pytest.mark.parametrize("event,status", itertools.product(EVENTS, ["failure", "cancelled", "skipped"]))
+def test_shared_package_is_required_for_every_event(gate, event, status):
+    with pytest.raises(AssertionError):
+        gate(event, {"tests": "success", "docs": "success", "evidence": "success", "package": status})
 
 
 def test_forks_and_missing_jobs_cannot_report_a_passing_gate(gate):
     with pytest.raises(AssertionError):
         gate(
             "pull_request",
-            {"tests": "success", "docs": "success", "evidence": "success", "package": "skipped"},
+            {"tests": "success", "docs": "success", "evidence": "success", "package": "success"},
             head="fork/relflow",
         )
     with pytest.raises(AssertionError):

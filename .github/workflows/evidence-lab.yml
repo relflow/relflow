@@ -7,10 +7,19 @@ on:
         description: Full commit SHA of the evidence suite in relflow/relflow
         type: string
         required: true
+      baseline_sha:
+        description: Exact comparison base from the triggering GitHub event
+        type: string
+        required: true
+      force_fresh:
+        description: Ignore completed report and baseline reuse
+        type: boolean
+        default: false
 
 permissions:
   contents: read
   id-token: write
+  actions: read
 
 jobs:
   run:
@@ -25,13 +34,15 @@ jobs:
       - name: Validate the immutable suite reference
         env:
           SUITE_REF: ${{ inputs.suite_ref }}
-        run: '[[ "$SUITE_REF" =~ ^[0-9a-f]{40}$ ]]'
+          BASELINE_SHA: ${{ inputs.baseline_sha }}
+        run: '[[ "$SUITE_REF" =~ ^[0-9a-f]{40}$ && "$BASELINE_SHA" =~ ^[0-9a-f]{40}$ ]]'
       - name: Check out the trusted executor
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
-          ref: 349b2202e6390a5fe0cbdf09a0c5972e495351ed
+          ref: 92b3c887eabc598ee2fc6c9dba4e05b9166cb8ba
           path: executor
+          fetch-depth: 0
           persist-credentials: false
       - name: Check out experiment sources as data
         uses: actions/checkout@v4
@@ -54,27 +65,92 @@ jobs:
         with:
           name: evidence-inputs
           path: inputs
+      - name: Bind the requested inputs to the GitHub event
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+          BASELINE_SHA: ${{ inputs.baseline_sha }}
+          SUITE_REF: ${{ inputs.suite_ref }}
+        run: |
+          git -C executor fetch --no-tags origin "$CANDIDATE_SHA" "$BASELINE_SHA" "$SUITE_REF"
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+          name = os.environ["GITHUB_EVENT_NAME"]
+          if name not in {"pull_request", "merge_group", "push", "workflow_dispatch"}:
+              raise ValueError("Evidence requires a supported CI event")
+          candidate = os.environ["CANDIDATE_SHA"]
+          if name == "pull_request":
+              baseline = event["pull_request"]["base"]["sha"]
+          elif name == "merge_group":
+              baseline = event["merge_group"]["base_sha"]
+          elif name == "push" and event.get("before", "").strip("0"):
+              baseline = event["before"]
+          elif name == "workflow_dispatch" and event.get("inputs", {}).get("evidence_base"):
+              baseline = event["inputs"]["evidence_base"]
+          else:
+              baseline = subprocess.check_output(["git", "-C", "executor", "rev-parse", candidate + "^1"], text=True).strip()
+          expected = {
+              "candidate": candidate,
+              "baseline": baseline,
+              "suite": os.environ["SUITE_REF"],
+              "run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "event": name,
+          }
+          if baseline != os.environ["BASELINE_SHA"] or json.loads(Path("inputs/request.json").read_text()) != expected:
+              raise ValueError("Evidence inputs differ from the triggering GitHub event")
+          subprocess.run(["git", "-C", "executor", "merge-base", "--is-ancestor", baseline, candidate], check=True)
+          PY
+          python executor/scripts/release.py verify inputs/candidate --source-sha "$CANDIDATE_SHA"
       - name: Require the configured Tailscale identity and lab target
         env:
-          CLIENT_ID: ${{ vars.TAILSCALE_OIDC_CLIENT_ID }}
+          CLIENT_ID: ${{ vars.TAILSCALE_EVIDENCE_OIDC_CLIENT_ID }}
           LAB_TARGET: ${{ vars.EVIDENCE_LAB_TARGET }}
         run: |
-          test -n "$CLIENT_ID" || { echo 'Configure the TAILSCALE_OIDC_CLIENT_ID repository variable'; exit 1; }
+          test -n "$CLIENT_ID" || { echo 'Configure the TAILSCALE_EVIDENCE_OIDC_CLIENT_ID repository variable'; exit 1; }
           test -n "$LAB_TARGET" || { echo 'Configure the EVIDENCE_LAB_TARGET repository variable'; exit 1; }
       - name: Connect an ephemeral runner through Tailscale OIDC
         uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c
         with:
-          oauth-client-id: ${{ vars.TAILSCALE_OIDC_CLIENT_ID }}
-          audience: api.tailscale.com/${{ vars.TAILSCALE_OIDC_CLIENT_ID }}
+          oauth-client-id: ${{ vars.TAILSCALE_EVIDENCE_OIDC_CLIENT_ID }}
+          audience: api.tailscale.com/${{ vars.TAILSCALE_EVIDENCE_OIDC_CLIENT_ID }}
           tags: tag:relflow-evidence-ci
           ping: ${{ vars.EVIDENCE_LAB_HOST || 'lab' }}
+      - name: Resolve the current isolated lab runtime
+        env:
+          LAB_TARGET: ${{ vars.EVIDENCE_LAB_TARGET }}
+          CANDIDATE_SHA: ${{ github.sha }}
+          BASELINE_SHA: ${{ inputs.baseline_sha }}
+        run: |
+          mkdir -p probe
+          uv run --project executor/docs python -u executor/evidence/ssh_run.py --suite-root suite/evidence --transport tailscale --target "$LAB_TARGET" --candidate-wheel inputs/candidate/*.whl --baseline-wheel inputs/baseline/*.whl --candidate-sha "$CANDIDATE_SHA" --baseline-sha "$BASELINE_SHA" --requirements inputs/requirements.txt --output probe/gh-${{ github.run_id }}-${{ github.run_attempt }}-probe --probe
+      - name: Verify a complete matching Evidence report
+        id: reuse
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ github.sha }}
+          BASELINE_SHA: ${{ inputs.baseline_sha }}
+          SUITE_REF: ${{ inputs.suite_ref }}
+          FORCE_FRESH: ${{ inputs.force_fresh }}
+        run: |
+          arguments=()
+          if [[ "$FORCE_FRESH" == true ]]; then arguments+=(--force-fresh); fi
+          uv run --project executor/docs python executor/evidence/reuse.py --candidate "$CANDIDATE_SHA" --baseline "$BASELINE_SHA" --suite "$SUITE_REF" --executor "$(git -C executor rev-parse HEAD)" --inputs inputs --execution-identity probe/gh-${{ github.run_id }}-${{ github.run_attempt }}-probe --output "$RUNNER_TEMP/evidence-reuse" "${arguments[@]}"
       - name: Dispatch isolated experiments and retrieve reports
         id: dispatch
         env:
           LAB_TARGET: ${{ vars.EVIDENCE_LAB_TARGET }}
           CANDIDATE_SHA: ${{ github.sha }}
-          BASELINE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}
-        run: uv run --project executor/docs python -u executor/evidence/ssh_run.py --suite-root suite/evidence --transport tailscale --target "$LAB_TARGET" --candidate-wheel inputs/candidate/*.whl --baseline-wheel inputs/baseline/*.whl --candidate-sha "$CANDIDATE_SHA" --baseline-sha "$BASELINE_SHA" --requirements inputs/requirements.txt --output reports/gh-${{ github.run_id }}-${{ github.run_attempt }}
+          BASELINE_SHA: ${{ inputs.baseline_sha }}
+          FORCE_FRESH: ${{ inputs.force_fresh }}
+        if: steps.reuse.outputs.hit != 'true'
+        run: |
+          arguments=()
+          if [[ "$FORCE_FRESH" == true ]]; then arguments+=(--force-fresh); fi
+          uv run --project executor/docs python -u executor/evidence/ssh_run.py --suite-root suite/evidence --transport tailscale --target "$LAB_TARGET" --candidate-wheel inputs/candidate/*.whl --baseline-wheel inputs/baseline/*.whl --candidate-sha "$CANDIDATE_SHA" --baseline-sha "$BASELINE_SHA" --requirements inputs/requirements.txt --output reports/gh-${{ github.run_id }}-${{ github.run_attempt }} "${arguments[@]}"
       - name: Stop only this run's lab processes and containers
         if: always() && steps.dispatch.outcome != 'skipped'
         env:
@@ -92,6 +168,22 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: relflow-evidence
-          path: reports/gh-${{ github.run_id }}-${{ github.run_attempt }}/
+          path: ${{ steps.reuse.outputs.reports || format('reports/gh-{0}-{1}', github.run_id, github.run_attempt) }}
           retention-days: 90
           if-no-files-found: warn
+      - name: Attach the verified report reuse receipt
+        if: steps.reuse.outputs.hit == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-reuse
+          path: ${{ steps.reuse.outputs.receipt }}
+          retention-days: 90
+          if-no-files-found: error
+      - name: Attach original inputs for a reused report
+        if: steps.reuse.outputs.hit == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-reused-inputs
+          path: ${{ steps.reuse.outputs.inputs }}
+          retention-days: 14
+          if-no-files-found: error

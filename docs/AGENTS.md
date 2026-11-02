@@ -53,15 +53,16 @@ build from this checkout alone using the isolated static environment.
   Keep the Read the Docs File tree diff and Visual diff addons disabled: their
   floating review controls interfere with Quarto's fixed navigation. Pull request
   builds and the header version picker remain available without these addons.
-  Account connection, Gold membership, project ad-free settings, and domain
-  cutover are external setup steps in `docs/README.md`. The owner is
+  Hosted operations are documented in `docs/README.md`. The owner is
   `granthamtaylor`; Gold is assigned to `relflow` through the account's ad-free
   projects list. Verify the anonymous Addons response's `ad_free` flag after
-  changes. Keep the default version on
-  `latest`, deactivate unsupported `stable` targets, and activate only verified
-  tags containing the consolidated documentation and build configuration.
-  Existing tags through `v0.4.11` predate it. Do not automatically activate every
-  semantic tag or retag/delete old releases; backfilling is a separate change.
+  changes. Keep `main` as the default branch and `latest` as the default version.
+  Activate release tags only after verifying their documentation and build
+  configuration; keep unsupported versions inactive. Public pages and assets
+  use complete `https://www.relflow.ai/en/<version>/` URLs. The root redirects
+  to `latest`; do not add aliases for unversioned page or asset paths.
+  Squarespace forwards the apex to HTTPS on `www` and drops apex query strings;
+  direct `www` links and version switching preserve query strings and fragments.
 
 ## Teach in order
 
@@ -174,9 +175,9 @@ Repeated records always use variable Arrow lists, including bounded branches;
 input caps do not add public padding. Fixed-width vectors retain their feature
 axis. Extension output list children must be named `element`.
 Embeddings live in representation records with `path`, `parents`, `output_index`,
-and `embedding`. API claims must be verified against the targeted upstream source; recorded evidence
-retains its original provenance even when executable output readers are
-migrated. A reader migration does not establish fresh learning results. Show
+and `embedding`. Verify API claims against the targeted upstream source.
+Selected evidence must identify its actual tested revisions and environment;
+changing an output reader does not establish fresh learning results. Show
 observation and output examples as one YAML record, nesting repeated values
 under their field names.
 Keep examples realistic without constructing or executing miniature datasets.
@@ -209,5 +210,8 @@ results without executing them. Generated pages and fragments under
 `evidence/SPEC.md` when changing experiments. Execution writes independent JSON
 records. Select complete reports with `evidence/record.py` and review updates to
 the experiment frontmatter; never alter measurements to make a check pass. Preserve
-source fingerprints and provenance. Clean only generated publication output.
-There are no Proofs redirects, snapshot importers, or optional Modal backend.
+source fingerprints and provenance. Successful full main CI runs automatically
+retain verified reports in `relflow/relflow` and open a publication PR for the
+selected results and generated README measurements. Merging that PR updates
+the hosted docs. Keep publication-only updates from recursively publishing.
+Clean only generated publication output.

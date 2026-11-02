@@ -34,7 +34,7 @@ page. Configure:
 | Issuer | GitHub Actions, `https://token.actions.githubusercontent.com` |
 | Subject | `repo:relflow@312307812/relflow@1217201723:*` |
 | Custom claim `repository` | `relflow/relflow` |
-| Custom claim `job_workflow_ref` | `relflow/relflow/.github/workflows/evidence-lab.yml@7cba2bf2fe3082e643a95aa43c6bad8395569420` |
+| Custom claim `job_workflow_ref` | `relflow/relflow/.github/workflows/evidence-lab.yml@ed5f863c887f5cb672efeb73083265af0a18e69e` |
 | Scope | `auth_keys` write, restricted to `tag:relflow-evidence-ci` |
 | Device tag | `tag:relflow-evidence-ci` |
 
@@ -46,17 +46,14 @@ The helper commit is the complete SHA in the library workflow's `uses:` line.
 Keep the custom workflow claim exact; do not replace it with a wildcard. The
 immutable helper validates the calling repository and PR source, then checks
 out a separately pinned, tested evidence implementation. A fork cannot gain
-tailnet access by changing its own workflow. Moving the helper from relflow/docs
-to this repository requires updating this external Tailscale claim to the new
-exact reference before the consolidated workflow can run. Importing the source
-does not change the federated identity configuration.
+tailnet access by changing its own workflow.
 
-The trusted executor is pinned to import commit
-`349b2202e6390a5fe0cbdf09a0c5972e495351ed`; the helper is pinned to
-`7cba2bf2fe3082e643a95aa43c6bad8395569420`. Push both commits with the
-migration branch and merge while preserving this history so these immutable
-references remain reachable. Squashing or rebasing this migration requires
-recreating the pins and updating the exact Tailscale claim before validation.
+The trusted executor is pinned to
+`92b3c887eabc598ee2fc6c9dba4e05b9166cb8ba`; the helper is pinned to
+`ed5f863c887f5cb672efeb73083265af0a18e69e`. Keep these immutable commits
+reachable. Routine experiment and publication changes do not change the pins.
+A trusted-mechanics update requires a separately reviewed executor/helper
+revision and the corresponding exact Tailscale workflow claim before validation.
 
 Grant the CI tag access to lab's SSH service and allow noninteractive Tailscale
 SSH for the selected account using an `accept` rule. Retain existing human
@@ -75,7 +72,7 @@ References: [Tailscale workload identity federation](https://tailscale.com/docs/
 
 Set these Actions variables in `relflow/relflow`:
 
-- `TAILSCALE_OIDC_CLIENT_ID`: the federated identity's Client ID.
+- `TAILSCALE_EVIDENCE_OIDC_CLIENT_ID`: the federated identity's Client ID.
 - `EVIDENCE_LAB_TARGET`: the permitted SSH account and machine, such as
   `evidence@lab`.
 - `EVIDENCE_LAB_HOST`: optional connectivity probe target; defaults to `lab`.
@@ -88,9 +85,28 @@ pins its trusted executor. `ci.yml` supplies the candidate SHA as the suite, or
 the explicit manual override. The combined
 `CI / required` job always evaluates their results. Main pushes build package
 distributions alongside tests and documentation checks; release and coverage workflows consume the
-successful main CI run without repeating its test matrix. Configure branch protection only after a
-real successful run exists, requiring that check and an up-to-date base or
-merge queue. Preserve the repository's existing requirements and bypass policy.
+successful main CI run without repeating its test matrix. Require
+`CI / required` and an up-to-date base or merge queue in branch protection. Preserve the
+repository's existing requirements and bypass policy.
+
+Every event validates complete paired evidence. PRs and merge groups compare
+their actual candidate and base revisions; main pushes use the pre-push base,
+including multi-commit pushes. Manual validation uses the first parent or an
+explicit full ancestor SHA supplied as `evidence_base`. The
+helper checks the retained input request against the actual GitHub event.
+Reports preserve the original measured revisions even when reused.
+Successful main runs feed the evidence publisher, which retains verified
+reports and opens a PR for the selected results.
+
+The shared package build supplies the same candidate wheel to SDK tests,
+Evidence, and release. Before training, the trusted helper probes the actual
+pinned Docker image, host CPU/kernel, and resource/thread policy, then checks
+authenticated complete reports for equivalent source and package payloads.
+Full-report reuse uploads a separate receipt and original input artifacts;
+the report's records and provenance remain unchanged. The collector may also
+reference unchanged baseline executions from its bounded host cache. Workers
+cannot mount or modify that cache. Failed or incomplete executions never seed
+it, and a missing proof runs fresh tasks.
 
 Missing trust configuration fails the job with a clear setup message. It never
 turns a skipped or missing evidence run into a successful required check.

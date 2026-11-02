@@ -387,17 +387,25 @@ Read the Docs builds versioned hosting and pull request previews from the root
 GitHub documentation CI validates and uploads a review artifact. Preserve
 Quarto's visuals and the isolated static environment; the host supplies version
 URLs and its native version flyout, while source views use the actual checkout
-commit. See `docs/README.md`
-for account connection, Gold/project ad-free setup, eligible release tags, and
-the verified-preview requirement before any production domain cutover.
+commit. The default branch is `main`, the default documentation version is
+`latest`, and the canonical host is `www.relflow.ai`. See `docs/README.md` for
+hosted settings, Gold, release versions, and apex HTTPS forwarding. Use complete
+version URLs for public pages and assets; do not add unversioned compatibility
+aliases.
 
 ## CI Ownership
 
 `ci.yml` owns PR, merge-group, main-push, and manual triggers. `tests.yml`,
 `docs.yml`, and `evidence.yml` are reusable implementations. Require `CI / required`
-for PRs, including the full matrix, static documentation checks, and paired
-evidence. Release and coverage workflows
-consume successful main CI; do not add a second matrix invocation to release.
+for every event, including the shared package build, full matrix, static
+documentation checks, and complete paired evidence validation. Tests, Evidence,
+and release consume the same candidate wheel. Verified reuse must preserve
+original measurements and revisions and separately attest the current inputs;
+missing, changed, or invalid inputs require fresh execution. Release, coverage, and evidence publication workflows consume
+successful main CI; do not add a second matrix invocation to publication.
+The evidence publisher retains verified reports and opens a publication PR
+for the selected experiment results and generated README measurements.
+Publication-only changes must not recursively create another publication PR.
 The evidence helper and trusted executor are pinned separately from the suite.
 Keep selected suite code off the host execution path and preserve full evidence
 budgets, seeds, checks, and provenance. See [evidence/lab.md](evidence/lab.md).

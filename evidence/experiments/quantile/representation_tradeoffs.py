@@ -53,7 +53,7 @@
 #     'rank_quantile_clean: finite measurements': true
 #     'rank_quantile_clean: shuffled accuracy at most 0.60': true
 #     'rank_quantile_contaminated: finite measurements': true
-#   duration_seconds: 127.976
+#   duration_seconds: 126.445
 #   metrics:
 #     central_rows: 3901
 #     input_tasks:
@@ -196,55 +196,54 @@
 #   provenance:
 #     code_sha256: a0c88a124d8bf6e11c0e4d10311b88141a3fbe971299b6284dcd38babb5cea8f
 #     cuda: null
-#     evidence_revision: e00d336e3dc4a3c3352ab3fe5535ba69d6ac682f
+#     evidence_revision: 7dec5e860dc389c37c3642d8904867249e831773
 #     gpu: null
-#     host: d900a8c6d73d
+#     host: f5fc4cf226f2
 #     packages:
 #       lightning: 2.6.4
 #       numpy: 2.4.6
 #       polars: 2.0.0
 #       pyarrow: 24.0.0
 #       pydantic: 2.13.4
-#       relflow: 0.4.1
+#       relflow: 0.4.2
 #       tensordict: 0.12.4
 #       torch: 2.12.0+cpu
 #       torchmetrics: 1.9.0
 #     platform: Linux-6.8.0-138-generic-x86_64-with-glibc2.41
 #     python: 3.12.16
 #     relflow_path: /tmp/runtime/lib/python3.12/site-packages/relflow
-#     relflow_revision: 41d6f5fb74c0ba9f0be104c896913a55adb125f5
-#     relflow_source_sha256: 00fdf397aeefb3a4e705d431850e0a6294eef142989513fddcb903bb1aefa873
-#     script_sha256: aa134c4ef643be282f22621503699a3cdf194e8c698ca3559c2a8944b74acaa8
-#     source_sha256: 5091065d78a4884f3a9c81dbda8cc24e4e29aa7926d3d2833430265df92759fe
-#     wheel_sha256: d9796de8429bb57408422b49ea3f47765fc5a40548ecb4dacf165fc922bded09
+#     relflow_revision: 7dec5e860dc389c37c3642d8904867249e831773
+#     relflow_source_sha256: 77953506049ed76c92adc5f32a9bcc32432a788068a4e366b2f78bcf709f29a2
+#     script_sha256: 49856d0d7968f6465237bcebae1c995cfd7772a34a155ce47e11fdac20d98775
+#     source_sha256: a70fba5ea02076d5f1995c82420ff403443eea03d2a19c612b51f655fa4a7b06
+#     wheel_sha256: f38d698e13bd1bfa65f22f7eaf89bab8a17db0bb401d89e19c4112afcc467c37
 #   seed: 7701
-#   started_at: '2026-11-01T01:50:15.706109+00:00'
+#   started_at: '2026-11-02T04:22:46.910653+00:00'
 #   steps_override: null
 #   threads: 1
 # evidence-report:
-#   run_id: gh-41261482839-1
+#   run_id: gh-41386396488-1
 #   candidate:
-#     revision: 41d6f5fb74c0ba9f0be104c896913a55adb125f5
-#     wheel_sha256: d9796de8429bb57408422b49ea3f47765fc5a40548ecb4dacf165fc922bded09
+#     revision: 7dec5e860dc389c37c3642d8904867249e831773
+#     wheel_sha256: f38d698e13bd1bfa65f22f7eaf89bab8a17db0bb401d89e19c4112afcc467c37
 #   baseline:
-#     revision: 1add6d8919e686dc63b7fa6c4cdbdc437be2b570
-#     wheel_sha256: d9796de8429bb57408422b49ea3f47765fc5a40548ecb4dacf165fc922bded09
-#   evidence_revision: e00d336e3dc4a3c3352ab3fe5535ba69d6ac682f
-#   manifest_sha256: f4b3bfe706e43e38785ab5bed94c3f51eb44fe7314d0a1b2f0dd3c6f3f7bef92
+#     revision: 7dec5e860dc389c37c3642d8904867249e831773
+#     wheel_sha256: f38d698e13bd1bfa65f22f7eaf89bab8a17db0bb401d89e19c4112afcc467c37
+#   evidence_revision: 7dec5e860dc389c37c3642d8904867249e831773
+#   executor_revision: 349b2202e6390a5fe0cbdf09a0c5972e495351ed
+#   manifest_sha256: 1f096d9b4dcdf1b2235963715e8b41c325d2a989f2cf15da7c154ddfb9bfb08d
 #   passed: true
 #   github_run:
-#     event: pull_request
-#     head_branch: dev/evidence-in-docs
-#     head_sha: 8bb7764d8186c743eb554cb4a91dedb205ad4cb9
-#     html_url: https://github.com/relflow/relflow/actions/runs/41261482839
-#     pull_requests:
-#     - base_sha: 1add6d8919e686dc63b7fa6c4cdbdc437be2b570
-#       head_sha: 8bb7764d8186c743eb554cb4a91dedb205ad4cb9
-#       number: 64
+#     event: workflow_dispatch
+#     head_branch: main
+#     head_sha: 7dec5e860dc389c37c3642d8904867249e831773
+#     html_url: https://github.com/relflow/relflow/actions/runs/41386396488
+#     path: .github/workflows/ci.yml
 #     run_attempt: 1
-#     run_id: 41261482839
-#   release: https://github.com/relflow/docs/releases/tag/ci-41261482839-attempt-1
-#   reports_sha256: bc67a1cb3725cbf9c5a8deb65844297d70f6d2122cd3b7de5c1d15f56603864f
+#     run_id: 41386396488
+#     workflow_id: 403231172
+#   release: https://github.com/relflow/relflow/releases/tag/evidence-ci-41386396488-attempt-1
+#   reports_sha256: fca05e4cdb79410b5090075bab03e4fc6d4f2fbc70e798f208976f4f1d8a7ff9
 # ---
 #
 # ## Example

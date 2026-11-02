@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import re
 import shlex
 import signal
@@ -115,19 +116,39 @@ def run(options: argparse.Namespace) -> None:
         "--workers",
         str(options.workers),
     ]
+    if options.probe:
+        arguments += ["--probe"]
+    if options.force_fresh:
+        arguments += ["--force-fresh"]
     if options.steps is not None:
         arguments += ["--steps", str(options.steps)]
     if options.ids:
         arguments += ["--ids", *options.ids]
     try:
         result = subprocess.run([*command, shlex.join(arguments)], check=False)
-        reports = subprocess.run(
-            [*command, "tar -cz -C " + shlex.quote(remote_output) + " ."], stdout=subprocess.PIPE, check=True
-        )
-        extract_reports(reports.stdout, options.output)
+        if options.probe:
+            if result.returncode:
+                raise SystemExit(result.returncode)
+            result_data = subprocess.check_output([*command, "cat " + shlex.quote(remote_output)], text=True)
+            value = json.loads(result_data)
+            if not isinstance(value.get("identity"), dict) or not value["identity"].get("image_id"):
+                raise ValueError("Lab runtime probe did not return an execution identity")
+            options.output.parent.mkdir(parents=True, exist_ok=True)
+            with options.output.open("x") as handle:
+                json.dump(value, handle, indent=2, sort_keys=True, allow_nan=False)
+                handle.write("\n")
+        else:
+            reports = subprocess.run(
+                [*command, "tar -cz -C " + shlex.quote(remote_output) + " ."], stdout=subprocess.PIPE, check=True
+            )
+            extract_reports(reports.stdout, options.output)
     finally:
         cleanup(options.target, options.transport, options.output.name)
-    print("Retrieved evidence reports to", options.output, flush=True)
+    print(
+        "Retrieved execution identity to" if options.probe else "Retrieved evidence reports to",
+        options.output,
+        flush=True,
+    )
     if result.returncode:
         raise SystemExit(result.returncode)
 
@@ -151,6 +172,8 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--steps", type=int)
     parser.add_argument("--ids", nargs="+")
+    parser.add_argument("--force-fresh", action="store_true")
+    parser.add_argument("--probe", action="store_true")
     options = parser.parse_args()
     if options.output.exists():
         parser.error("Use a new output directory for each run")
