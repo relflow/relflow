@@ -233,11 +233,13 @@ Complete the domain setup as follows:
    CNAME to `readthedocs.io`. Rebuild the hosted versions and verify their
    canonical URLs, assets, search, version navigation, and ad-free behavior.
 2. In Squarespace, configure forwarding for the apex `relflow.ai` only, with
-   destination `www.relflow.ai` (omit the protocol in the form), a **301 permanent redirect**,
+   destination `https://www.relflow.ai` (include HTTPS explicitly), a **301 permanent redirect**,
    **Maintain paths**, and **Automatic HTTPS**. Keep the `www` CNAME and email
    records intact.
-3. Verify public HTTP and HTTPS forwarding from the apex, including nested
-   paths and the legacy routes below. Keep the previous GitHub Pages deployment
+3. Verify that the first redirect from both HTTP and HTTPS points directly to
+   HTTPS on `www`, including nested paths and the legacy routes below.
+   Automatic HTTPS provides the incoming certificate; it does not select the
+   destination scheme. Keep the previous GitHub Pages deployment
    active until public HTTPS forwarding and the first Read the Docs build from
    `main` are verified; retire it only afterward.
 
