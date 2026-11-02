@@ -210,6 +210,8 @@ results without executing them. Generated pages and fragments under
 `evidence/SPEC.md` when changing experiments. Execution writes independent JSON
 records. Select complete reports with `evidence/record.py` and review updates to
 the experiment frontmatter; never alter measurements to make a check pass. Preserve
-source fingerprints and provenance. Select newly completed full CI reports
-from `relflow/relflow` for publication, with their retained Release assets.
+source fingerprints and provenance. Successful full main CI runs automatically
+retain verified reports in `relflow/relflow` and open a publication PR for the
+selected results and generated README measurements. Merging that PR updates
+the hosted docs. Keep publication-only updates from recursively publishing.
 Clean only generated publication output.

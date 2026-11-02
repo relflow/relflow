@@ -62,11 +62,15 @@ The [evidence catalog](https://www.relflow.ai/en/latest/evidence.html) adds **79
 learning experiments** with code, comparisons, seeds, and recorded results.
 Examples from the published full runs:
 
+<!-- evidence-results:start -->
+
 | Experiment | relflow result | Control |
 | --- | --- | --- |
 | [Match IDs absent from training](https://www.relflow.ai/en/latest/evidence/identity/unseen-identity-equality.html) | **0.9991 AUC** with `Hash` | 0.5000 with unknown `Category` labels |
 | [Recall a value by an unfamiliar ID](https://www.relflow.ai/en/latest/evidence/relational/hash-recall.html) | **0.100 normalized RMSE**, median of three seeds | 1.401 after corrupting the lookup IDs |
 | [Distinguish nulls from zero](https://www.relflow.ai/en/latest/evidence/state/null-versus-zero.html) | **100% accuracy** with value states preserved | 50% after filling nulls with zero |
+
+<!-- evidence-results:end -->
 
 These are controlled synthetic tasks. Each page includes its protocol,
 comparisons, limitations, and complete run report.
@@ -299,15 +303,18 @@ For package development, see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Continuous Integration
 
 `ci.yml` is the entry point for PRs to main, merge groups, main pushes, and
-manual validation. PRs run the full Python/platform test matrix, static
-documentation checks, and the full paired evidence suite in parallel.
+manual validation. Every event runs the full Python/platform test matrix,
+static documentation checks, and the full paired evidence suite in parallel.
 `CI / required` rejects errors, cancellations,
 and missing required jobs. Evidence runs on lab through the pinned trusted
 executor, with the candidate commit supplying the suite from this repository. See the
 [lab guide](evidence/lab.md).
 
 Main pushes run the test matrix once and build the distributions consumed by
-release publication. Successful main CI also publishes coverage. Nightly
+release publication. Successful main CI also publishes coverage and retains
+verified evidence reports in this repository. The evidence publisher opens a
+PR updating the selected experiment results and README measurements; merging
+that PR updates the Read the Docs build. Nightly
 dependency compatibility and configured accelerator checks remain independent.
 Local pre-commit continues to run formatting, lint, types, and fast tests.
 The reusable documentation workflow validates and renders the static site using its

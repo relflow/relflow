@@ -46,28 +46,33 @@ Tailscale secret, or self-hosted GitHub runner is required.
 
 ## Reports and publication
 
-Routine CI reports are Actions artifacts in relflow/relflow, retained for 90
-days; input wheels and requirements are retained for seven days. Start a fresh
-full run on `main` when publishing current measurements:
+Every main push runs the complete paired suite. After the complete CI run
+succeeds, the evidence publisher automatically validates and retains its
+reports in an immutable Release in `relflow/relflow`. It opens a publication
+PR updating experiment results and the README measurements. Merge that PR
+through the normal checks and review to update the Read the Docs build.
+Publication-only changes do not recursively open another publication PR.
+
+Routine CI reports are Actions artifacts retained for 90 days; input wheels
+and requirements are retained for seven days. To refresh the current
+measurements explicitly, start another full run on `main`:
 
 ```sh
 gh workflow run ci.yml --repo relflow/relflow --ref main
 ```
 
-After the full CI run succeeds, promote that run before its artifacts expire to an immutable Release in `relflow/relflow`:
+Successful manual main runs also feed automatic publication. To retain a
+completed run explicitly and obtain a publication patch for review, use:
 
 ```sh
 gh workflow run publish-evidence.yml --repo relflow/relflow \
   -f tag=<unique-release-tag> -f library_run_id=<library-actions-run-id>
 ```
 
-The workflow verifies completeness, provenance, wheel digests, and the runtime
-lock; preserves reports and inputs with checksums; and generates a validated
-publication patch for experiment frontmatter. Download evidence-publication-update,
-review the patch on a branch at its recorded repository base, and open a normal PR.
-The site's normal build reads the committed records and canonical sources.
-Report Releases belong to `relflow/relflow` and do not replace the latest package
-release.
+The publisher verifies complete coverage, checks, provenance, source and wheel
+digests, and the runtime lock. Failed, stale, partial, or regressing runs cannot
+be selected. The site's normal build reads committed records and canonical
+sources. Report Releases do not replace the latest package release.
 
 Select the candidate records from that completed full run, preserving their
 actual metrics, checks, seeds, environment, tested revisions, and source digests.

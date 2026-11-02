@@ -98,13 +98,21 @@ this repository. `CI / required` requires the full library test matrix, static
 documentation checks, and evidence before merging into main.
 The [lab guide](../evidence/lab.md) describes its OIDC trust and isolation.
 
-Publish measurements from a fresh, complete paired CI run in `relflow/relflow`.
-`publish-evidence.yml` retains the selected run in an immutable Release in this
-repository, with JSON results, logs, an HTML report, tested wheels, runtime
-requirements, and checksums. It also validates a candidate update to
-the experiment frontmatter and uploads a review patch. Apply the patch on a branch
-at the recorded repository base and open a normal PR to publish those measurements.
-Ordinary builds read the committed results and need no runtime or cloud credentials.
+Every main push runs the complete paired evidence suite alongside the SDK and
+documentation checks. After a successful main CI run, `publish-evidence.yml`
+automatically validates its reports, retains them in an immutable Release in
+this repository, and opens a PR updating experiment frontmatter and the
+README's generated measurements. A successful manual full CI run on `main`
+uses the same publication flow. The retained assets contain JSON results,
+logs, an HTML report, tested wheels, runtime requirements, and checksums.
+
+Allow GitHub Actions to create pull requests in the repository settings.
+GitHub may require an owner to approve the generated PR workflows before
+normal required CI starts. Merge the publication PR through the normal checks
+and review. Read the Docs then builds the selected measurements from `main`;
+PR previews show them before merge. Publication-only commits do not create another publication
+PR. Ordinary builds read committed results and need no runtime or cloud
+credentials; they never fetch a live report or run experiments.
 
 Runtime tests are explicit and excluded from default checks. See
 [evidence/README.md](../evidence/README.md) for execution and publication commands.

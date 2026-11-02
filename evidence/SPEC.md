@@ -85,12 +85,14 @@ and logs, then checks completeness and provenance before producing the JSON
 summary, HTML report, and file checksums. Preserve separate attempts.
 
 Routine reports are GitHub Actions artifacts for 90 days; input wheels and
-requirements are retained for seven days. To publish current measurements,
-start a fresh full CI run on `main` in `relflow/relflow`. After it succeeds,
-promote that run before expiry with `publish-evidence.yml`. It verifies input hashes and report
-integrity, publishes immutable report assets in relflow/relflow, and prepares
-a validated update to the experiment frontmatter for review. No AWS storage or
-account is required.
+requirements are retained for seven days. Main pushes run the complete paired
+suite. A successful main CI run automatically feeds `publish-evidence.yml`,
+which verifies complete coverage, checks, provenance, tested source and input
+hashes, and report integrity. It publishes immutable report assets in
+`relflow/relflow` and opens a PR updating selected frontmatter and generated
+README measurements. A successful manual full main run uses the same flow.
+Publication-only changes must not recursively open another publication PR.
+No AWS storage or account is required.
 
 Publication replaces each experiment's current full-run record. Keep its
 metrics, checks, source fingerprints, package versions, and execution provenance

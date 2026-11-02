@@ -397,9 +397,12 @@ aliases.
 
 `ci.yml` owns PR, merge-group, main-push, and manual triggers. `tests.yml`,
 `docs.yml`, and `evidence.yml` are reusable implementations. Require `CI / required`
-for PRs, including the full matrix, static documentation checks, and paired
-evidence. Release and coverage workflows
-consume successful main CI; do not add a second matrix invocation to release.
+for every event, including the full matrix, static documentation checks, and
+paired evidence. Release, coverage, and evidence publication workflows consume
+successful main CI; do not add a second matrix invocation to publication.
+The evidence publisher retains verified reports and opens a publication PR
+for the selected experiment results and generated README measurements.
+Publication-only changes must not recursively create another publication PR.
 The evidence helper and trusted executor are pinned separately from the suite.
 Keep selected suite code off the host execution path and preserve full evidence
 budgets, seeds, checks, and provenance. See [evidence/lab.md](evidence/lab.md).

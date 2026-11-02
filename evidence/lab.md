@@ -89,6 +89,13 @@ successful main CI run without repeating its test matrix. Require
 `CI / required` and an up-to-date base or merge queue in branch protection. Preserve the
 repository's existing requirements and bypass policy.
 
+Main pushes also run the complete paired suite. PRs and merge groups compare
+their exact candidate and base revisions; main pushes and manual validation
+use the current revision for both roles. Reports preserve those actual
+revisions. Current-version publication is not a previous-release comparison.
+Successful main runs feed the evidence publisher, which retains verified
+reports and opens a PR for the selected results.
+
 Missing trust configuration fails the job with a clear setup message. It never
 turns a skipped or missing evidence run into a successful required check.
 

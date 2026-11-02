@@ -35,7 +35,7 @@ jobs:
 
   evidence:
     name: Evidence
-    if: github.event_name != 'push' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
       id-token: write
@@ -85,7 +85,7 @@ jobs:
           expected = {
               "tests": "success",
               "docs": "success",
-              "evidence": "skipped" if event == "push" else "success",
+              "evidence": "success",
               "package": "success" if event == "push" else "skipped",
           }
           actual = {name: job["result"] for name, job in json.loads(os.environ["RESULTS"]).items()}
