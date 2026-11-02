@@ -12,7 +12,7 @@ project:
     - "evidence/*/*.py"
 
 website:
-  site-url: https://relflow.ai/
+  site-url: https://www.relflow.ai/
   repo-url: https://github.com/relflow/relflow
   repo-subdir: docs
   repo-branch: main

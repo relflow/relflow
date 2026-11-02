@@ -314,5 +314,6 @@ The reusable documentation workflow validates and renders the static site using 
 isolated environment; see [the documentation guide](docs/README.md) for preview
 and build commands. Read the Docs builds the hosted versions and pull request
 previews from [.readthedocs.yaml](.readthedocs.yaml), with `latest` following the
-default branch and verified release versions activated separately. Hosting setup
-and the eventual `relflow.ai` domain cutover are described in that guide.
+default branch and verified release versions activated separately. That guide
+describes the canonical `www.relflow.ai` address, apex HTTPS forwarding, and
+the checks required before retiring the previous GitHub Pages deployment.

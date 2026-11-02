@@ -8,7 +8,7 @@ a custom neural architecture, trains the model, and serves predictions and
 learned representations.
 
 This directory owns the documentation for the relflow package in this repository, published at
-[relflow.ai](https://relflow.ai/). Examples start with one payment prediction,
+[www.relflow.ai](https://www.relflow.ai/). Examples start with one payment prediction,
 then add nested histories, multiple objectives, pretraining, and reuse.
 
 The site and its assets live under `docs/`; canonical experiments, runners, and
@@ -121,6 +121,9 @@ uv run --project docs python -m docs.publish
 The publisher validates sources, renders with pinned Quarto, checks the
 rendered site, and copies the validated HTML to `READTHEDOCS_OUTPUT/html`.
 `READTHEDOCS_CANONICAL_URL` supplies the full URL of that hosted version.
+After setting `www.relflow.ai` as the canonical domain, rebuild the hosted
+versions so this URL uses `https://www.relflow.ai/en/<version>/`. Pull request
+builds keep their separate preview domains and version URLs.
 Source links use the actual checkout's Git `HEAD`, checked against
 `READTHEDOCS_GIT_COMMIT_HASH` when that variable is supplied. The **View source**
 action therefore opens the exact commit for a branch, release, or pull request
@@ -223,17 +226,29 @@ request previews and the header version picker work without them.
 [Pull request previews](https://docs.readthedocs.com/platform/stable/pull-requests.html)
 use separate preview domains and carry a status check on GitHub.
 
-The production domain remains [relflow.ai](https://relflow.ai/) during setup;
-the production switch is pending. A later cutover requires verified hosted
-previews and ad-free behavior, custom-domain setup on Read the Docs, redirects
-for existing unversioned page URLs, and its provided DNS instructions. Retire
-the previous GitHub Pages deployment as part of that verified cutover. Source
-configuration alone does not move the domain.
+Use [www.relflow.ai](https://www.relflow.ai/) as the canonical public address.
+Complete the domain setup as follows:
+
+1. Set `www.relflow.ai` as the canonical domain in Read the Docs and point its
+   CNAME to `readthedocs.io`. Rebuild the hosted versions and verify their
+   canonical URLs, assets, search, version navigation, and ad-free behavior.
+2. In Squarespace, configure forwarding for the apex `relflow.ai` only, with
+   destination `www.relflow.ai` (omit the protocol in the form), a **301 permanent redirect**,
+   **Maintain paths**, and **Automatic HTTPS**. Keep the `www` CNAME and email
+   records intact.
+3. Verify public HTTP and HTTPS forwarding from the apex, including nested
+   paths and the legacy routes below. Keep the previous GitHub Pages deployment
+   active until public HTTPS forwarding and the first Read the Docs build from
+   `main` are verified; retire it only afterward.
+
+Squarespace's apex forwarding drops query strings. This limitation is accepted;
+use direct `www` URLs when a query string must survive. Direct `www` URLs and
+the header version picker retain query strings and fragments. Source
+configuration alone does not complete or verify the domain setup.
 
 The built-in `/` redirect handles the root URL; it does not preserve links such
-as `/guides/serving.html`. For the later cutover, the authorized project account
-must manually add these ten **Exact Redirects** in the dashboard, with **Force
-redirect disabled** for every entry:
+as `/guides/serving.html`. These ten **Exact Redirects** are already saved in the
+Read the Docs dashboard. Keep **Force redirect disabled** for every entry:
 
 | From URL | To URL |
 | --- | --- |
@@ -253,10 +268,9 @@ alias retains existing root asset URLs used by README branding and diagrams.
 These ten rules fit within Community's 100-redirect limit. Do not add a `/*`
 catchall: it could intercept native version URLs or create redirect loops.
 Verify representative old URLs from every directory, the evidence catalog,
-the index, and public assets on the regular hosted project domain before any
-DNS change; redirects do not apply on pull request preview domains. See the
+the index, and public assets on `www.relflow.ai` after completing forwarding.
+These redirects do not apply on pull request preview domains. See the
 [Read the Docs redirect reference](https://docs.readthedocs.com/platform/stable/user-defined-redirects.html).
-These dashboard changes remain a later manual task.
 
 relflow-authored material retains the [Apache 2.0 license](../LICENSE) and
 [NOTICE](../NOTICE). The vendored Typst extension retains its

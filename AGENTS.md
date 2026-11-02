@@ -364,7 +364,7 @@ values take precedence.
 
 This repository contains the package, user documentation, branding assets, and
 canonical learning experiments with recorded results. The website is published
-at [relflow.ai](https://relflow.ai/). Follow [docs/AGENTS.md](docs/AGENTS.md) and
+at [www.relflow.ai](https://www.relflow.ai/). Follow [docs/AGENTS.md](docs/AGENTS.md) and
 [docs/README.md](docs/README.md) for authoring, Typst diagrams, preview,
 validation, and publication; follow [evidence/AGENTS.md](evidence/AGENTS.md) and
 [evidence/SPEC.md](evidence/SPEC.md) for the learning protocol.
