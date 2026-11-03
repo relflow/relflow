@@ -607,12 +607,16 @@ def ship(encoded: Encoded) -> Encoded:
     source = encoded.source
     if source.num_rows:
         source = source.take(np.arange(source.num_rows))
+    # Allocate shared storage before the queue's daemon feeder can outlive
+    # Python shutdown inside Torch's GIL-releasing storage-sharing copy.
+    # share_memory_ also covers inputs that were already consolidated.
     return replace(
         encoded,
-        tensors=cast(TensorDict, encoded.tensors.consolidate()),
+        tensors=cast(TensorDict, encoded.tensors.consolidate(share_memory=True)).share_memory_(),
         source=source,
         observations={
-            address: cast(TensorDict, value.consolidate()) for address, value in encoded.observations.items()
+            address: cast(TensorDict, value.consolidate(share_memory=True)).share_memory_()
+            for address, value in encoded.observations.items()
         },
     )
 

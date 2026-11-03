@@ -3,12 +3,14 @@ from __future__ import annotations
 import multiprocessing as mp
 import pickle
 from collections.abc import Iterator
+from multiprocessing.reduction import ForkingPickler
 from types import SimpleNamespace
 
 import polars as pl
 import pyarrow as pa
 import pyarrow.dataset as ds
 import pytest
+import torch
 from tensordict import TensorDict
 from torch.utils.data import IterableDataset
 
@@ -17,6 +19,7 @@ from relflow.data.arrow import Encoded
 from relflow.data.datasets import arrow
 from relflow.data.datasets.custom import Adapter
 from relflow.structs.enums import Strata
+from relflow.structs.tree import Address
 
 
 def model(batch_size: int = 2) -> rf.Model:
@@ -32,6 +35,7 @@ class Records(IterableDataset):
 
 
 def collect(dataset: arrow.ArrowDataset, monkeypatch: pytest.MonkeyPatch) -> list[pa.Table]:
+    monkeypatch.setattr(arrow, "ship", lambda batch: batch)
     monkeypatch.setattr(
         arrow,
         "encode",
@@ -763,6 +767,7 @@ def test_mapping_modules_encode_in_spawned_workers(kind):
     assert all(batch.tensors.is_consolidated() for batch in batches)
 
 
+@pytest.mark.integration
 def test_shipping_packs_a_batch_without_its_stream():
     stream = pa.table({"id": [float(value) for value in range(4096)], "note": ["x" * 64] * 4096})
     batch = next(iter(rf.ArrowDataModule(model=model(batch_size=8), validate=stream, shuffle=False).val_dataloader()))
@@ -775,6 +780,84 @@ def test_shipping_packs_a_batch_without_its_stream():
     assert packed.source.equals(batch.source)
     assert len(pickle.dumps(batch.source)) > len(pickle.dumps(stream)) / 2, "a slice pickles its whole stream"
     assert len(pickle.dumps(packed.source)) < len(pickle.dumps(stream)) / 64
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("consolidated", [False, True])
+def test_shipping_shares_payload_and_observations_before_queue_serialization(consolidated):
+    configured = rf.Model.xs(
+        d_model=8,
+        batch_size=3,
+        id=rf.Number,
+        events=rf.Branch(length=4, amount=rf.Number),
+    )
+    source = pa.table(
+        {
+            "id": [1.0, 2.0, 3.0],
+            "events": pa.array(
+                [[{"amount": 1.0}, None], [], None],
+                type=pa.list_(pa.struct([("amount", pa.float64())])),
+            ),
+        }
+    )
+    batch = next(iter(rf.ArrowDataModule(model=configured, validate=source, shuffle=False).val_dataloader()))
+    # Packing accepts extension-owned tensor layouts without knowing their fields.
+    batch.tensors["/vendor"] = TensorDict(
+        {
+            "opaque": torch.arange(6, dtype=torch.int16).reshape(3, 2),
+            "flags": torch.tensor([True, False, True]),
+            "empty": torch.empty(3, 0),
+        },
+        batch_size=[3],
+    )
+    observations = {
+        **batch.observations,
+        Address("/vendor"): TensorDict({"count": torch.tensor([2, 0, 0], dtype=torch.int32)}, batch_size=[]),
+    }
+    payloads = {"tensors": batch.tensors, **{str(key): value for key, value in observations.items()}}
+    expected = {
+        name: {key: value.clone() for key, value in values.items(include_nested=True, leaves_only=True)}
+        for name, values in payloads.items()
+    }
+    if consolidated:
+        payloads = {name: values.consolidate() for name, values in payloads.items()}
+    encoded = Encoded(
+        tensors=payloads["tensors"],
+        observations={Address(key): value for key, value in payloads.items() if key != "tensors"},
+        source=batch.source,
+        retain=("id",),
+        bindings=batch.bindings,
+    )
+
+    packed = arrow.ship(encoded)
+
+    packed_payloads = {"tensors": packed.tensors, **{str(key): value for key, value in packed.observations.items()}}
+    for name, values in packed_payloads.items():
+        assert values.is_consolidated()
+        assert all(value.is_shared() for value in values.values(include_nested=True, leaves_only=True) if value.numel())
+        assert (
+            len(
+                {
+                    value.untyped_storage().data_ptr()
+                    for value in values.values(include_nested=True, leaves_only=True)
+                    if value.numel()
+                }
+            )
+            == 1
+        )
+        for key, value in values.items(include_nested=True, leaves_only=True):
+            torch.testing.assert_close(value, expected[name][key], rtol=0, atol=0)
+    restored = pickle.loads(ForkingPickler.dumps(packed))
+    assert restored.source.equals(source)
+    assert restored.retain == ("id",)
+    assert restored.bindings == batch.bindings
+    restored_payloads = {
+        "tensors": restored.tensors,
+        **{str(key): value for key, value in restored.observations.items()},
+    }
+    for name, values in restored_payloads.items():
+        for key, value in values.items(include_nested=True, leaves_only=True):
+            torch.testing.assert_close(value, expected[name][key], rtol=0, atol=0)
 
 
 def test_stream_randomization_is_independent_of_record_batch_boundaries(monkeypatch: pytest.MonkeyPatch):
