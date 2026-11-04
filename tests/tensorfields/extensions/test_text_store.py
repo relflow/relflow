@@ -1,7 +1,12 @@
 """The Text embedding store persists frozen-encoder vectors across runs, splits, and fields."""
 
+import gc
+import pickle
+import weakref
+
 import numpy as np
 import pyarrow as pa
+import pytest
 import torch
 
 import relflow as rf
@@ -122,6 +127,92 @@ def test_fields_with_the_same_encoder_share_one_store(tmp_path, monkeypatch):
     monkeypatch.setattr(Embedder, "pool", lambda self, ids, mask: (_ for _ in ()).throw(AssertionError("encoder ran")))
     second = model.nodes["/b"].embedder.encode(content=inputs["/b"].content, state=inputs["/b"].state)
     assert torch.equal(first, second)
+
+
+def test_live_models_share_store_until_the_last_owner_is_collected(tmp_path, monkeypatch):
+    patch_hf(monkeypatch)
+    first = configured(tmp_path)
+    second = configured(tmp_path)
+    store = first.nodes["/note"].embedder.store
+    assert store is second.nodes["/note"].embedder.store
+    assert first.nodes["/note"].embedder.warm(["a", "bbb"]) == 2
+    store = EmbeddingStore.open(tmp_path, store.fingerprint, store.hidden_size, resident=64)
+    view = store.view(torch.device("cpu"))
+    assert view is not None
+    tensors = [weakref.ref(tensor) for tensor in view]
+    reference = weakref.ref(store)
+    key = (str(tmp_path.resolve()), store.fingerprint, store.hidden_size)
+    del view, store, first
+    gc.collect()
+    assert reference() is second.nodes["/note"].embedder.store
+
+    del second
+    gc.collect()
+    assert reference() is None
+    assert key not in EmbeddingStore.instances
+    assert all(tensor() is None for tensor in tensors)
+
+    # Releasing process-local indices and views never removes persistent vectors.
+    later = configured(tmp_path)
+    monkeypatch.setattr(Embedder, "pool", lambda self, ids, mask: (_ for _ in ()).throw(AssertionError("encoder ran")))
+    assert later.nodes["/note"].embedder.warm(["a", "bbb"]) == 0
+    assert len(later.nodes["/note"].embedder.store) == 2
+
+
+def test_shared_store_resident_budget_changes_release_cached_views(tmp_path):
+    store = EmbeddingStore.open(tmp_path, "enc", 4, resident=64)
+    keys = hash_rows(np.arange(8, dtype=np.int64).reshape(2, 4))
+    vectors = np.arange(8, dtype=np.float32).reshape(2, 4)
+    store.put(keys, vectors)
+    store.flush()
+    view = store.view(torch.device("cpu"))
+    assert view is not None
+    references = [weakref.ref(tensor) for tensor in view]
+    del view
+
+    assert EmbeddingStore.open(tmp_path, "enc", 4, resident=0) is store
+    assert all(reference() is None for reference in references)
+    assert store.lookup_device(torch.from_numpy(keys)) is None
+    found, out = store.lookup(keys)
+    assert found.all() and np.array_equal(out, vectors)
+
+    assert EmbeddingStore.open(tmp_path, "enc", 4, resident=64) is store
+    found, resident = store.lookup_device(torch.from_numpy(keys))
+    assert found.all() and torch.equal(resident, torch.from_numpy(vectors))
+
+
+def test_negative_resident_budget_does_not_change_a_live_store(tmp_path):
+    with pytest.raises(ValueError, match="nonnegative budget"):
+        EmbeddingStore.open(tmp_path, "enc", 4, resident=-1)
+    store = EmbeddingStore.open(tmp_path, "enc", 4, resident=64)
+    keys = hash_rows(np.arange(4, dtype=np.int64).reshape(1, 4))
+    store.put(keys, np.ones((1, 4), dtype=np.float32))
+    store.flush()
+    view = store.view(torch.device("cpu"))
+    assert view is not None
+    with pytest.raises(ValueError, match="nonnegative resident budget"):
+        EmbeddingStore.open(tmp_path, "enc", 4, resident=-1)
+    assert store.resident == 64 and store.view(torch.device("cpu")) is view
+
+
+@pytest.mark.parametrize("resident", [None, 0, 64])
+def test_store_pickle_preserves_budget_and_pending_vectors(tmp_path, monkeypatch, resident):
+    store = EmbeddingStore.open(tmp_path, "enc", 4, flush_every=2, resident=resident)
+    keys = hash_rows(np.arange(4, dtype=np.int64).reshape(1, 4))
+    vectors = np.arange(4, dtype=np.float32).reshape(1, 4)
+    store.put(keys, vectors)
+    serialized = pickle.dumps(store)
+    assert not len(store.pending_keys)
+    # A new registry models reopening in another process, without inheriting views.
+    monkeypatch.setattr(EmbeddingStore, "instances", weakref.WeakValueDictionary())
+    restored = pickle.loads(serialized)
+    assert restored is not store
+    assert restored.resident == resident
+    assert restored.flush_every == 2
+    assert restored.views == {}
+    found, out = restored.lookup(keys)
+    assert found.all() and np.array_equal(out, vectors)
+    assert (restored.view(torch.device("cpu")) is not None) == (resident == 64)
 
 
 def test_resident_view_answers_on_device_within_its_budget(tmp_path):
