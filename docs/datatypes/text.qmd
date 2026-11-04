@@ -87,6 +87,10 @@ Checkpoints retain the `cache` setting but omit cached embeddings and token
 rows; a loaded or copied model starts cold. Under DDP, each process builds its
 own caches. Use a finite cap when inputs contain many distinct descriptions:
 `cache=True` has no embedding limit and can keep growing in host memory.
+Loader workers also have separate token caches. At `max_length=128`, 4,096
+cached token rows use about 8 MiB for the two integer arrays, plus retained
+strings and Python overhead, per field and worker. Size the cap for the
+repeated text in each field; a disk store alone does not reuse tokenization.
 
 ## Persistent store
 
@@ -97,7 +101,7 @@ runs when their encoder configuration and token rows match:
 model = rf.Model.xs(
     amount=rf.Number,
     merchant=rf.Category,
-    memo=rf.Text(store="embeddings/payment-memos"),
+    memo=rf.Text(store="embeddings/payment-memos", cache=4096),
     disputed=rf.Boolean(mask=True),
 )
 ```
@@ -118,6 +122,17 @@ index over memory-mapped shards, which the page cache keeps in memory after
 first use. The automatic budget applies to CUDA; other devices use the host
 index unless given an explicit resident budget. With a store the in-process
 embedding `cache` is bypassed; the token-row cache still follows `cache`.
+
+Live fields and models share one process-local store object for the same
+directory and encoder. When its last owner is collected, the host index and
+resident views can be released; persisted shards remain available to later
+models. Phase callbacks and `warm` flush pending rows. Releasing a store does
+not flush it, so unflushed rows from direct forward calls may be recomputed.
+
+The resident budget applies per store and process, rather than to all stores
+combined. Use a consistent `resident` setting for fields sharing a store.
+Reopening a live store with a different explicit budget updates that shared
+budget and releases its old device views; copies preserve the budget.
 
 To fill a store ahead of training, provide the application-supplied
 `memo_texts` as a string sequence or Arrow column:

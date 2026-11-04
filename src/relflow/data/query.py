@@ -545,7 +545,10 @@ def query(
 
     if isinstance(source, pa.Table):
         datatype = pa.struct(list(source.schema))
-        values: pa.Array | pa.ChunkedArray = source.to_struct_array()
+        # Arrow accepts nested zero-chunk types; its stubs omit that overload.
+        values: pa.Array | pa.ChunkedArray = (
+            source.to_struct_array() if source.num_rows else pa.chunked_array([], type=datatype)  # pyrefly: ignore[no-matching-overload]
+        )
     elif isinstance(source, (pa.Array, pa.ChunkedArray)):
         datatype = source.type
         values = source

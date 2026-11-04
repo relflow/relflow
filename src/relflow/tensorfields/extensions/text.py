@@ -9,9 +9,11 @@ import uuid
 from collections import OrderedDict
 from collections.abc import Sequence
 from dataclasses import InitVar, dataclass
+from functools import partial
 from pathlib import Path
 from threading import RLock
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, TypeAlias, Unpack, cast
+from weakref import WeakValueDictionary
 
 import numpy as np
 import pyarrow as pa
@@ -128,19 +130,23 @@ class EmbeddingStore:
         self.views: dict[str, tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None] = {}
         self.reload()
 
-    instances: ClassVar[dict[tuple[str, str, int], EmbeddingStore]] = {}
+    instances: ClassVar[WeakValueDictionary[tuple[str, str, int], EmbeddingStore]] = WeakValueDictionary()
     registry_lock: ClassVar[RLock] = RLock()
 
     @classmethod
     def open(cls, directory: str | os.PathLike[str], fingerprint: str, hidden_size: int, **options) -> EmbeddingStore:
-        """One store object per directory and encoder within a process, so fields share pending vectors."""
+        """Share a live store per directory and encoder without retaining it after its owners are released."""
         key = (str(Path(directory).resolve()), fingerprint, hidden_size)
         with cls.registry_lock:
             store = cls.instances.get(key)
             if store is None:
                 store = cls.instances[key] = cls(directory, fingerprint, hidden_size, **options)
-            elif options.get("resident") is not None:
-                store.resident = options["resident"]
+            elif options.get("resident") is not None and store.resident != options["resident"]:
+                if options["resident"] < 0:
+                    raise ValueError(f"embedding store '{directory}' needs a nonnegative resident budget")
+                with store.lock:
+                    store.resident = options["resident"]
+                    store.views.clear()
             return store
 
     def __len__(self) -> int:
@@ -149,7 +155,11 @@ class EmbeddingStore:
     def __reduce__(self):
         # Copies and spawned workers reopen the directory; pending vectors are persisted first.
         self.flush()
-        return EmbeddingStore.open, (self.directory, self.fingerprint, self.hidden_size)
+        return partial(EmbeddingStore.open, resident=self.resident, flush_every=self.flush_every), (
+            self.directory,
+            self.fingerprint,
+            self.hidden_size,
+        )
 
     def reload(self) -> int:
         """Index every shard in the directory that this instance has not loaded yet."""

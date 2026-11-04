@@ -71,7 +71,7 @@ def test_selection_preserves_candidate_and_github_provenance(reports, publicatio
     assert selection["release"] == "https://github.com/relflow/relflow/releases/tag/evidence-test"
     assert selection["evidence_revision"] == "tested-suite"
     assert selection["github_run"]["head_sha"] == "pr-head"
-    assert len(results) == 79
+    assert set(results) == set(registry(ROOT))
     assert all(entry["run"]["provenance"]["relflow_revision"] == "candidate" for entry in results.values())
     for path, source in before.items():
         selected = path.read_bytes()
