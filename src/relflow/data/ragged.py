@@ -344,11 +344,14 @@ def root(values: pa.Table, branch: Branch, *, size: int | None = None) -> Layout
     rows = values.num_rows if values.num_columns else (0 if size is None else size)
     names = referenced(branch)
     selected = values.select([index for index, name in enumerate(values.column_names) if name in names])
-    records = (
-        compact(selected.to_struct_array())
-        if selected.num_columns
-        else pa.StructArray.from_buffers(pa.struct([]), rows, [None])
-    )
+    records: pa.Array | pa.ChunkedArray
+    if not selected.num_columns:
+        records = pa.StructArray.from_buffers(pa.struct([]), rows, [None])
+    elif not rows:
+        # Arrow accepts nested zero-chunk types; its stubs omit that overload.
+        records = pa.chunked_array([], type=pa.struct(list(selected.schema)))  # pyrefly: ignore[no-matching-overload]
+    else:
+        records = compact(selected.to_struct_array())
     if branch.query is None:
         return Layout(
             records=records,
