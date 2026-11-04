@@ -294,6 +294,7 @@ with the workload, record shape, hardware, and requested outputs stated.
 - [Arrow data loading](https://www.relflow.ai/en/latest/guides/data-modules.html)
 - [Streaming batch inference](https://www.relflow.ai/en/latest/guides/batch-inference.html)
 - [Prediction output](https://www.relflow.ai/en/latest/reference/prediction-output.html)
+- [Agent-assisted schema inference](skills/README.md): a portable skill with local data profiling and schema validation.
 
 Tutorials and guides live in [docs/](docs/README.md); canonical learning
 experiments and recorded results live in [evidence/](evidence/README.md).

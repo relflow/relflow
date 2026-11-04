@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "relflow-schema",
+  "version": "0.1.0",
+  "description": "Infer and validate relflow schemas from data, semantics, and relational context.",
+  "author": {"name": "relflow"},
+  "repository": "https://github.com/relflow/relflow",
+  "homepage": "https://www.relflow.ai/en/latest/",
+  "license": "Apache-2.0",
+  "keywords": ["relflow", "schema", "inference", "relational-data"]
+}

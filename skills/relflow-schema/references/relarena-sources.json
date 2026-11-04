@@ -1,0 +1,78 @@
+{
+  "inspected_on": "2026-11-04",
+  "source_root": "Desktop/arena",
+  "scope": "Local documentation inspected; no training rerun or remote binary verification.",
+  "sources": [
+    {
+      "path": "AGENTS.md",
+      "sha256": "6fb9319ed9112ef7b66810b987edd6ebe7efdc9c03fb88dd86ce3e4966368c06"
+    },
+    {
+      "path": "results/research-archive-20261103/FINDINGS.md",
+      "sha256": "ed5e991721c0f89fb4e4408ff4bd3c36117363c5fd2dc8151e6f4069580e221a"
+    },
+    {
+      "path": "results/research-archive-20261103/PRESETS.md",
+      "sha256": "6acf359beda2d0854776cbac5e8980188b61fffa8486be4ff4ece554ab837275"
+    },
+    {
+      "path": "results/research-archive-20261103/ISSUES.md",
+      "sha256": "b6b22ad7df56a000267ae0b9d16e52ab703e8071525766e006c2e0c93dc390b0"
+    },
+    {
+      "path": "results/research-archive-20261103/UPSTREAM.md",
+      "sha256": "5b04e6d97ee5c035fb5fc78a1d962ba6bcb38c3bafb95ac98779eeda2acea427"
+    },
+    {
+      "path": "results/research-archive-20261103/LIMITATIONS.md",
+      "sha256": "954faedf9cb7fe442d1f69bd35481a69bb5cac937c45cd66df26bc049f0329e3"
+    },
+    {
+      "path": "results/research-closeout-20261104/CLOSEOUT.md",
+      "sha256": "efbc9311979e1c62829dce463bcf2d482aa884a235e54450ec2df7c5483cce06"
+    },
+    {
+      "path": "results/research-closeout-20261104/RESULTS.md",
+      "sha256": "de6754974490cd5ab44bc78fcac0ff57ea572b9aac86e480402416fb413dc124"
+    },
+    {
+      "path": "results/raw-schema-20261022/PROOFS.md",
+      "sha256": "c849423b2b439012c92518f86c5e58a9bc175a130e35dd75fbdf5add30a1892b"
+    }
+  ],
+  "lesson_sources": {
+    "geometry_and_join_multiplicity": [
+      "results/research-archive-20261103/ISSUES.md",
+      "results/research-archive-20261103/UPSTREAM.md",
+      "results/research-closeout-20261104/CLOSEOUT.md"
+    ],
+    "context_and_temporal_contract": [
+      "AGENTS.md",
+      "results/research-archive-20261103/FINDINGS.md",
+      "results/raw-schema-20261022/PROOFS.md"
+    ],
+    "recipe_selection_and_test_exposure": [
+      "results/research-archive-20261103/FINDINGS.md",
+      "results/research-archive-20261103/PRESETS.md",
+      "results/research-archive-20261103/LIMITATIONS.md",
+      "results/research-closeout-20261104/CLOSEOUT.md"
+    ],
+    "dedup_and_mixed_crop_counterexamples": [
+      "results/research-closeout-20261104/CLOSEOUT.md"
+    ],
+    "performance_and_recovery_limits": [
+      "results/research-archive-20261103/FINDINGS.md",
+      "results/research-archive-20261103/UPSTREAM.md",
+      "results/research-archive-20261103/LIMITATIONS.md",
+      "results/research-closeout-20261104/CLOSEOUT.md"
+    ],
+    "frozen_baseline_identity": [
+      "results/research-closeout-20261104/CLOSEOUT.md",
+      "results/research-closeout-20261104/RESULTS.md"
+    ]
+  },
+  "limits": [
+    "Historical sources do not override current SDK contracts.",
+    "Research results are not untouched holdout or official submission claims."
+  ]
+}

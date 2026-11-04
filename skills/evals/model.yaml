@@ -1,0 +1,20 @@
+preset: xs
+d_model: 8
+n_heads: 2
+fields:
+  customer_id:
+    type: hash
+  events:
+    type: branch
+    length: 8
+    overflow: tail
+    fields:
+      merchant:
+        type: category
+      amount:
+        type: number
+      age_days:
+        type: number
+  returned:
+    type: boolean
+    mask: true

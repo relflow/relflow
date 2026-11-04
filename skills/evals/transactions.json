@@ -1,0 +1,5 @@
+[
+  {"customer_id": "0012", "events": null, "returned": false},
+  {"customer_id": "0013", "events": [], "returned": true},
+  {"customer_id": "0012", "events": [null, {"merchant": "market", "amount": 42.75, "age_days": 2.0}], "returned": false}
+]

@@ -1,0 +1,4 @@
+interface:
+  display_name: "relflow schema inference"
+  short_description: "Infer and validate schemas from data and context"
+  default_prompt: "Use $relflow-schema to inspect this dataset and propose a validated relflow schema with its assumptions."
