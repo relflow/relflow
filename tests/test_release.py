@@ -172,15 +172,21 @@ def test_interrupted_new_draft_without_receipt_or_tag_can_resume(host):
 
 
 @pytest.mark.parametrize("partial", [False, True])
-def test_interrupted_draft_at_older_main_recovers_only_its_original_ci_artifact(host, tmp_path, monkeypatch, partial):
+@pytest.mark.parametrize("attempt", [1, 3])
+def test_interrupted_draft_at_older_main_recovers_only_its_original_ci_artifact(
+    host, tmp_path, monkeypatch, partial, attempt
+):
     host["release"] = {"draft": True, "target_commitish": SOURCE}
     if partial:
         host["files"][WHEEL] = (host["original"] / WHEEL).read_bytes()
     later = distributions(tmp_path, "later", LATER, b"later main", run_id=99)
-    monkeypatch.setattr(release, "github", lambda *args, **kwargs: {"workflow_runs": [{"id": 71, "run_attempt": 1}]})
+    monkeypatch.setattr(
+        release, "github", lambda *args, **kwargs: {"workflow_runs": [{"id": 71, "run_attempt": attempt}]}
+    )
     result = host["publish"](later, LATER)
     assert result["source_sha"] == SOURCE and host["tag"] == SOURCE
     assert all(receipt["ci_run_id"] == 71 for receipt in host["checked"])
+    assert all(receipt["ci_run_attempt"] == 1 for receipt in host["checked"])
     assert host["files"][WHEEL] == (host["original"] / WHEEL).read_bytes()
     assert not any(command[1:3] == ["release", "create"] for command in host["writes"])
 
@@ -281,21 +287,13 @@ def test_artifact_source_hash_and_extra_file_are_verified(tmp_path):
         release.verify(directory)
 
 
-@pytest.mark.parametrize(
-    "change",
-    [
-        {"conclusion": "failure"},
-        {"event": "pull_request"},
-        {"head_branch": "feature"},
-        {"head_sha": LATER},
-        {"head_repository": {"full_name": "fork/relflow"}},
-        {"path": ".github/workflows/other.yml"},
-        {"run_attempt": 2},
-    ],
-)
-def test_repair_rejects_an_untrusted_original_ci_attempt(tmp_path, monkeypatch, change):
-    receipt = release.verify(distributions(tmp_path))
+@pytest.fixture
+def ci(monkeypatch):
+    receipt = {"ci_run_id": 71, "ci_run_attempt": 1, "source_sha": SOURCE}
     run = {
+        "id": 71,
+        "workflow_id": 81,
+        "status": "completed",
         "conclusion": "success",
         "event": "push",
         "head_branch": "main",
@@ -304,10 +302,133 @@ def test_repair_rejects_an_untrusted_original_ci_attempt(tmp_path, monkeypatch, 
         "path": ".github/workflows/ci.yml",
         "run_attempt": 1,
     }
-    run.update(copy.deepcopy(change))
-    monkeypatch.setattr(release, "github", lambda *args, **kwargs: run)
-    with pytest.raises(ValueError, match="original successful main push"):
-        release.checked_run(REPOSITORY, receipt)
+    job = {"run_id": 71, "run_attempt": 1, "head_sha": SOURCE, "status": "completed", "conclusion": "success"}
+    state = {
+        "receipt": receipt,
+        "original": copy.deepcopy(run),
+        "latest": copy.deepcopy(run),
+        "producer": [{**job, "name": "Package / Build checked distributions"}],
+        "gate": [{**job, "name": "CI / required"}],
+        "reads": [],
+    }
+
+    def github(repository, path, **kwargs):
+        assert repository == REPOSITORY
+        state["reads"].append(path)
+        if path == f"actions/runs/71/attempts/{state['receipt']['ci_run_attempt']}":
+            return state["original"]
+        if path == "actions/runs/71":
+            return state["latest"]
+        assert kwargs == {"paginate": True}
+        if path == "actions/runs/71/attempts/1/jobs?per_page=100":
+            jobs = state["producer"] + (state["gate"] if state["latest"]["run_attempt"] == 1 else [])
+            return [{"jobs": jobs[:1]}, {"jobs": jobs[1:]}]
+        assert path == f"actions/runs/71/attempts/{state['latest']['run_attempt']}/jobs?per_page=100"
+        return [{"jobs": state["gate"]}]
+
+    monkeypatch.setattr(release, "github", github)
+    return state
+
+
+def retry(ci):
+    ci["original"]["conclusion"] = "failure"
+    ci["latest"]["run_attempt"] = 3
+    ci["gate"][0]["run_attempt"] = 3
+
+
+@pytest.mark.parametrize("targeted", [False, True])
+def test_release_authenticates_original_build_and_current_full_gate_without_rewriting_receipt(ci, targeted):
+    if targeted:
+        retry(ci)
+    original = copy.deepcopy(ci["receipt"])
+    release.checked_run(REPOSITORY, ci["receipt"])
+    assert ci["receipt"] == original
+    assert "actions/runs/71/attempts/1/jobs?per_page=100" in ci["reads"]
+    assert f"actions/runs/71/attempts/{3 if targeted else 1}/jobs?per_page=100" in ci["reads"]
+
+
+@pytest.mark.parametrize("attempt", ["original", "latest"])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"id": 72},
+        {"status": "in_progress"},
+        {"conclusion": None},
+        {"event": "pull_request"},
+        {"head_branch": "feature"},
+        {"head_sha": LATER},
+        {"head_repository": {"full_name": "fork/relflow"}},
+        {"path": ".github/workflows/other.yml"},
+        {"run_attempt": True},
+    ],
+)
+def test_repair_rejects_untrusted_original_or_validation_attempts(ci, attempt, change):
+    retry(ci)
+    ci[attempt].update(copy.deepcopy(change))
+    with pytest.raises(ValueError):
+        release.checked_run(REPOSITORY, ci["receipt"])
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"conclusion": "failure"},
+        {"conclusion": "cancelled"},
+        {"workflow_id": 82},
+        {"run_attempt": 0},
+    ],
+)
+def test_repair_rejects_failed_or_mismatched_latest_full_gate(ci, change):
+    retry(ci)
+    ci["latest"].update(change)
+    with pytest.raises(ValueError):
+        release.checked_run(REPOSITORY, ci["receipt"])
+
+
+def test_release_validation_cannot_precede_original_build(ci):
+    ci["receipt"]["ci_run_attempt"] = 2
+    ci["original"]["run_attempt"] = 2
+    with pytest.raises(ValueError, match="cannot precede"):
+        release.checked_run(REPOSITORY, ci["receipt"])
+
+
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled", "timed_out"])
+def test_successful_job_retry_accepts_failed_original_run_only_with_later_validation(ci, conclusion):
+    retry(ci)
+    ci["original"]["conclusion"] = conclusion
+    release.checked_run(REPOSITORY, ci["receipt"])
+    ci["latest"]["run_attempt"] = 1
+    with pytest.raises(ValueError, match="latest successful full CI"):
+        release.checked_run(REPOSITORY, ci["receipt"])
+
+
+@pytest.mark.parametrize("role", ["producer", "gate"])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"conclusion": "failure"},
+        {"conclusion": "skipped"},
+        {"status": "in_progress"},
+        {"run_id": 72},
+        {"run_attempt": 2},
+        {"head_sha": LATER},
+        {"name": "unrelated successful job"},
+    ],
+)
+def test_release_requires_the_exact_successful_original_build_and_current_gate_jobs(ci, role, change):
+    retry(ci)
+    ci[role][0].update(change)
+    with pytest.raises(ValueError, match="requires one successful"):
+        release.checked_run(REPOSITORY, ci["receipt"])
+
+
+@pytest.mark.parametrize("role", ["producer", "gate"])
+@pytest.mark.parametrize("count", [0, 2])
+def test_release_rejects_missing_or_duplicate_required_jobs(ci, role, count):
+    retry(ci)
+    ci[role] *= count
+    with pytest.raises(ValueError, match="requires one successful"):
+        release.checked_run(REPOSITORY, ci["receipt"])
 
 
 def test_annotated_tag_is_peeled_to_actual_commit(monkeypatch):
