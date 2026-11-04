@@ -104,7 +104,7 @@ jobs:
             python: "3.13"
           - os: ubuntu-24.04
             python: "3.14"
-          - os: macos-15
+          - os: macos-26
             python: "3.12"
           - os: windows-2025
             python: "3.12"

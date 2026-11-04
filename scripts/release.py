@@ -170,18 +170,61 @@ def compare_files(expected: dict[str, str], present: dict[str, str], host: str) 
     return sorted(set(expected) - set(present))
 
 
-def checked_run(repository: str, receipt: dict) -> None:
-    run = github(repository, f"actions/runs/{receipt['ci_run_id']}/attempts/{receipt['ci_run_attempt']}")
+def checked_attempt(repository: str, receipt: dict, run: dict, attempt: int) -> None:
+    expected = {
+        "id": receipt["ci_run_id"],
+        "run_attempt": attempt,
+        "status": "completed",
+        "event": "push",
+        "head_branch": "main",
+        "head_sha": receipt["source_sha"],
+        "path": ".github/workflows/ci.yml",
+    }
     if (
-        run["conclusion"] != "success"
-        or run["event"] != "push"
-        or run["head_branch"] != "main"
-        or run["head_sha"] != receipt["source_sha"]
-        or run["head_repository"]["full_name"] != repository
-        or run["path"] != ".github/workflows/ci.yml"
-        or run["run_attempt"] != receipt["ci_run_attempt"]
+        type(run.get("run_attempt")) is not int
+        or any(run.get(key) != value for key, value in expected.items())
+        or (run.get("head_repository") or {}).get("full_name") != repository
+        or not run.get("conclusion")
     ):
-        raise ValueError("Release repair requires the original successful main push CI attempt")
+        raise ValueError("Release requires completed main push CI attempts for the original distribution source")
+
+
+def checked_job(repository: str, receipt: dict, attempt: int, name: str) -> None:
+    pages = github(
+        repository,
+        f"actions/runs/{receipt['ci_run_id']}/attempts/{attempt}/jobs?per_page=100",
+        paginate=True,
+    )
+    jobs = [job for page in pages for job in page["jobs"] if job["name"] == name]
+    expected = {
+        "run_id": receipt["ci_run_id"],
+        "run_attempt": attempt,
+        "head_sha": receipt["source_sha"],
+        "status": "completed",
+        "conclusion": "success",
+    }
+    if len(jobs) != 1 or any(jobs[0].get(key) != value for key, value in expected.items()):
+        raise ValueError(f"Release requires one successful {name!r} job in CI attempt {attempt}")
+
+
+def checked_run(repository: str, receipt: dict) -> None:
+    """Preserve the build's producer while authenticating a later successful full CI gate."""
+    path = f"actions/runs/{receipt['ci_run_id']}"
+    original = github(repository, f"{path}/attempts/{receipt['ci_run_attempt']}")
+    checked_attempt(repository, receipt, original, receipt["ci_run_attempt"])
+    latest = github(repository, path)
+    attempt = latest.get("run_attempt")
+    if type(attempt) is not int or attempt < receipt["ci_run_attempt"]:
+        raise ValueError("Release validation cannot precede the original distribution build")
+    checked_attempt(repository, receipt, latest, attempt)
+    if (
+        latest["conclusion"] != "success"
+        or latest["workflow_id"] != original["workflow_id"]
+        or (attempt == receipt["ci_run_attempt"] and original["conclusion"] != "success")
+    ):
+        raise ValueError("Release requires the latest successful full CI attempt for the original distribution source")
+    checked_job(repository, receipt, receipt["ci_run_attempt"], "Package / Build checked distributions")
+    checked_job(repository, receipt, attempt, "CI / required")
 
 
 def recover_draft(
@@ -214,8 +257,8 @@ def recover_draft(
                 )
                 directory = Path(temporary)
                 receipt = verify(directory, source_sha=target, version=version)
-                if receipt["ci_run_id"] != run["id"] or receipt["ci_run_attempt"] != run["run_attempt"]:
-                    raise ValueError("Draft recovery artifact identifies a different CI attempt")
+                if receipt["ci_run_id"] != run["id"] or receipt["ci_run_attempt"] > run["run_attempt"]:
+                    raise ValueError("Draft recovery artifact identifies a different CI run or a later attempt")
                 checked_run(repository, receipt)
                 files = {path.name: path.read_bytes() for path in directory.iterdir()}
                 compare_files(
