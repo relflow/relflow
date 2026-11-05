@@ -21,7 +21,7 @@
 
 **Build and adapt foundation models for your own structured data.**
 
-relflow is a model factory for typed, nested data. Describe your records and
+Relflow is an open source model factory for typed, nested data. Describe your records and
 prediction targets, and it generates a custom neural architecture, trains
 the model, and serves predictions and learned representations.
 

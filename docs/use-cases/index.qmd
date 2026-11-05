@@ -9,7 +9,7 @@ with related events arriving over time. You want a prediction from the
 information available at a particular decision: tomorrow's demand, a candidate
 product's relevance, or a customer's next outcome.
 
-relflow is a model factory for typed, nested data. Declare the fields,
+Relflow is an open source model factory for typed, nested data. Declare the fields,
 record collections, and prediction objectives; that schema generates a custom
 neural architecture for your observations. The useful starting point is the
 decision and its dataset. Define what one observation contains, when its

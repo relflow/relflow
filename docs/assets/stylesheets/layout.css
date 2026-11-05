@@ -108,15 +108,56 @@ body.home .quarto-title .title {
   line-height: 1.1;
 }
 
-body.home .quarto-title .subtitle {
+body.home .home-tagline {
   font-family: "Libertinus Serif", serif;
   font-weight: 600;
   font-size: 1.55rem;
-  line-height: 1.3;
+  line-height: 1.55;
   max-width: 40rem;
-  margin-top: 0.75rem;
+  margin-block: -0.5rem 1.5rem;
   color: var(--bs-body-color);
-  opacity: 0.85;
+}
+
+body.home .home-tagline p {
+  margin: 0;
+}
+
+.home-word-phrase {
+  white-space: nowrap;
+}
+
+.home-words {
+  display: inline-grid;
+  box-sizing: content-box;
+  position: relative;
+  overflow: hidden;
+  inline-size: 7ch;
+  block-size: 1.3em;
+  padding-inline: 0.45em;
+  border-radius: 0.3em;
+  background-color: var(--rf-surface);
+  line-height: 1.3;
+  vertical-align: baseline;
+  color: var(--bs-link-color);
+  text-align: center;
+}
+
+.home-word,
+.home-word-reel,
+.home-word-reel > span {
+  display: block;
+  inline-size: 100%;
+}
+
+.home-word-reel {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  visibility: hidden;
+}
+
+.home-word-reel > span {
+  block-size: 1.3em;
 }
 
 body.home .lead {
@@ -154,6 +195,10 @@ body.home .home-actions .btn {
 }
 
 @media (max-width: 575.98px) {
+  body.home .home-tagline {
+    font-size: 1.4rem;
+  }
+
   body.home .home-actions {
     grid-template-columns: minmax(0, 1fr);
   }

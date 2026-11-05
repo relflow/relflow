@@ -1,0 +1,74 @@
+<script>
+  (() => {
+    function animateWords() {
+      const word = document.querySelector(".home-word");
+      const reel = document.querySelector(".home-word-reel");
+      const frame = document.querySelector(".home-words");
+      if (!word || !reel || !frame) return;
+
+      const words = ["messy", "nested", "deep", "large", "typed", "wide", "sparse", "ragged", "mixed", "noisy"];
+      const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+      let timer;
+      let animation;
+
+      function rotate() {
+        const choices = words.filter((value) => value !== word.textContent);
+        for (let index = choices.length - 1; index > 0; index--) {
+          const other = Math.floor(Math.random() * (index + 1));
+          [choices[index], choices[other]] = [choices[other], choices[index]];
+        }
+        const sequence = [word.textContent, ...choices.slice(0, 5)];
+        const rows = sequence.map((value) => {
+          const row = document.createElement("span");
+          row.textContent = value;
+          return row;
+        });
+        reel.replaceChildren(...rows);
+        const distance = frame.getBoundingClientRect().height * (rows.length - 1);
+        const timing = { duration: 1400, easing: "cubic-bezier(0.16, 1, 0.3, 1)", fill: "both" };
+        word.style.visibility = "hidden";
+        reel.style.visibility = "visible";
+        animation = reel.animate({ transform: ["translateY(0)", `translateY(-${distance}px)`] }, timing);
+        animation.onfinish = () => {
+          word.textContent = sequence[sequence.length - 1];
+          word.style.visibility = "visible";
+          reel.style.visibility = "hidden";
+          animation.cancel();
+          animation = null;
+          reel.replaceChildren();
+          schedule();
+        };
+      }
+
+      function schedule() {
+        if (motion.matches || document.hidden) return;
+        timer = window.setTimeout(rotate, 3000);
+      }
+
+      function refresh() {
+        window.clearTimeout(timer);
+        if (animation) {
+          animation.onfinish = null;
+          animation.cancel();
+        }
+        animation = null;
+        word.style.visibility = "visible";
+        reel.style.visibility = "hidden";
+        reel.replaceChildren();
+        schedule();
+      }
+
+      motion.addEventListener("change", refresh);
+      document.addEventListener("visibilitychange", refresh);
+      window.addEventListener("resize", refresh);
+      document.fonts.ready.then(refresh);
+      refresh();
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", animateWords, { once: true });
+    } else {
+      animateWords();
+    }
+  })();
+</script>

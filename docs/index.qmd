@@ -1,14 +1,24 @@
 ---
 title: relflow
-subtitle: Build and adapt foundation models for your own structured data.
 description-meta: "A model factory that generates, trains, and serves neural models from typed, nested schemas, with extensible field types and learned representations."
 body-classes: home
 toc: false
 engine: markdown
 ---
 
+```{=html}
+<div class="home-tagline">
+  <p>
+    <span class="visually-hidden">The open source predictive model factory framework for arbitrarily messy, nested, deep, large, typed, wide, sparse, ragged, mixed, or noisy data.</span>
+    <span aria-hidden="true">The open source predictive model factory framework for arbitrarily </span><span class="home-word-phrase">
+      <span class="home-words" aria-hidden="true"><span class="home-word">messy</span><span class="home-word-reel"></span></span> <span aria-hidden="true">data.</span>
+    </span>
+  </p>
+</div>
+```
+
 ::: {.lead}
-relflow is a model factory for typed, nested data. Describe your records and
+Relflow is an open source model factory for typed, nested data. Describe your records and
 prediction targets, and it generates a custom neural architecture, trains
 the model, and serves predictions and learned representations.
 :::

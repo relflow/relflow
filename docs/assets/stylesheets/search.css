@@ -1,0 +1,57 @@
+/* Quarto search and the hosted Read the Docs dialog share the active palette. */
+:root {
+  --readthedocs-search-backdrop-color: rgb(0 0 0 / 55%);
+  --readthedocs-search-color: var(--rf-text);
+  --readthedocs-search-content-background-color: var(--bs-body-bg);
+  --readthedocs-search-content-border-color: var(--rf-border);
+  --readthedocs-search-filters-border-color: var(--rf-border);
+  --readthedocs-search-footer-background-color: var(--rf-surface);
+  --readthedocs-search-footer-code-background-color: var(--rf-surface);
+  --readthedocs-search-footer-code-border-color: var(--rf-border);
+  --readthedocs-search-input-background-color: var(--rf-surface);
+  --readthedocs-search-result-section-border-color: var(--rf-border);
+  --readthedocs-search-result-section-color: var(--rf-text);
+  --readthedocs-search-result-section-highlight-color: var(--bs-link-color);
+  --readthedocs-search-result-section-subheading-color: var(--rf-text);
+}
+
+.aa-DetachedOverlay {
+  background-color: rgb(0 0 0 / 55%);
+}
+
+.aa-DetachedContainer {
+  background-color: var(--bs-body-bg);
+  box-shadow: 0 0.75rem 3rem rgb(0 0 0 / 25%);
+  outline: 1px solid var(--rf-border);
+}
+
+.aa-DetachedContainer--modal {
+  border-radius: 0.65rem;
+}
+
+.aa-DetachedContainer .aa-DetachedFormContainer,
+.aa-DetachedContainer .aa-Panel {
+  background-color: var(--bs-body-bg);
+  border-color: var(--rf-border);
+}
+
+.aa-DetachedContainer .aa-Form {
+  background-color: var(--rf-surface);
+  border-color: var(--rf-border);
+  color: var(--rf-text);
+}
+
+.aa-DetachedContainer .aa-Form:focus-within {
+  border-color: var(--bs-link-color);
+  box-shadow: 0 0 0 0.15rem color-mix(in srgb, var(--bs-link-color) 25%, transparent);
+}
+
+.aa-DetachedContainer .aa-DetachedFormContainer .aa-Form :is(.aa-Input, .aa-ClearButton),
+.aa-DetachedContainer .aa-Form .aa-InputWrapperPrefix :is(.aa-Label, .aa-LoadingIndicator) svg {
+  color: var(--rf-text);
+}
+
+.aa-DetachedContainer .aa-DetachedFormContainer .aa-Form .aa-Input::placeholder {
+  color: color-mix(in srgb, var(--rf-text) 65%, var(--rf-surface));
+  opacity: 1;
+}

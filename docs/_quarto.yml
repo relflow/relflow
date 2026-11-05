@@ -183,10 +183,13 @@ format:
       - assets/stylesheets/sidebar.css
       - assets/stylesheets/code.css
       - assets/stylesheets/versions.css
+      - assets/stylesheets/search.css
     include-in-header:
       - assets/color-scheme.html
       - assets/versions.html
-    include-after-body: assets/sidebar.html
+    include-after-body:
+      - assets/sidebar.html
+      - assets/home.html
     theme:
       light:
         - flatly

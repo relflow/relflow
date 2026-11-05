@@ -3,7 +3,7 @@ title: API map
 description: "Every public name grouped by workflow, with the page that documents it."
 ---
 
-relflow is a model factory for typed, nested data: your declared schema generates
+Relflow is an open source model factory for typed, nested data: your declared schema generates
 the neural architecture. Import it as `import relflow as rf`. This page maps the
 public API to its reference pages. For a first payment model, start with
 [Your first model](../learn/your-first-model.qmd).
