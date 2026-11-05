@@ -181,11 +181,32 @@ Gold's project-wide removal is described in the
 ### Versions and navigation
 
 Read the Docs provides native [versions](https://docs.readthedocs.com/platform/stable/versions.html).
-The default version, `latest`, follows `main`. Activate release versions only
-after verifying that the tag includes the current documentation and build
-configuration and builds successfully. Keep unsupported versions inactive;
-do not automatically activate every semantic tag. Use `stable` only when it
-resolves to the intended, successfully built release.
+The default version, `latest`, follows `main`. The enabled
+[release activation rule](https://app.readthedocs.org/dashboard/relflow/rules/3813/)
+activates and builds new final package tags from `v0.4.5` onward. It applies only
+to tags and excludes prereleases, internal evidence tags, and unsupported older
+versions. The rule uses this custom match:
+
+```text
+^v(?:0[.]4[.](?:[5-9]|[1-9][0-9]+)|0[.](?:[5-9]|[1-9][0-9]+)[.][0-9]+|[1-9][0-9]*[.][0-9]+[.][0-9]+)$
+```
+
+Release tags must contain the documentation build configuration and their frozen
+evidence publication. Keep `stable` and the current release active so Read the
+Docs also advances the stable alias when a newer release arrives. Existing
+versions require separate activation; new automation rules do not backfill them.
+Keep unsupported historical versions inactive until their documentation can be
+built from the appropriate source.
+
+Version activation is a project setting, separate from `.readthedocs.yaml`.
+If the header only shows **Latest**, check the project's
+[Versions settings](https://app.readthedocs.org/dashboard/relflow/versions/):
+an inactive or unbuilt release cannot appear in the picker. Activate a verified
+release tag, build it successfully, and check the public version URL before
+enabling `stable`. Adding a Git tag alone does not publish its documentation.
+Read the Docs caches Addons metadata, so a newly built version can be live before
+an existing page's picker lists it. Check the Addons response's `Cache-Control`
+and `Age` headers when diagnosing a delayed menu update.
 
 The header shows the current version beside the relflow logo. When multiple
 versions are available, it opens a keyboard-accessible menu of published

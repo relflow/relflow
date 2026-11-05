@@ -54,7 +54,7 @@
       if (links.length === 1) {
         const badge = document.createElement("span");
         badge.className = "docs-version-current";
-        badge.title = `Documentation version: ${versionName(current)}`;
+        badge.title = `${versionName(current)} is the only published documentation version`;
         badge.append(label);
         picker.append(badge);
       } else {

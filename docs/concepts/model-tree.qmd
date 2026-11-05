@@ -4,7 +4,7 @@ description: "How named field declarations become a schema and neural model, wit
 engine: markdown
 ---
 
-relflow is a model factory for typed, nested data. Your declared schema generates
+Relflow is an open source model factory for typed, nested data. Your declared schema generates
 the neural architecture: field types select encodings, branches build context,
 and targets define what the model learns to predict.
 

@@ -1,3 +1,27 @@
+/* Use the same track, thumb, and width for the page and its navigation. */
+html,
+#quarto-sidebar {
+  scrollbar-color: color-mix(in srgb, var(--rf-text) 30%, var(--bs-body-bg)) var(--bs-body-bg);
+  scrollbar-width: thin;
+}
+
+html::-webkit-scrollbar,
+#quarto-sidebar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+html::-webkit-scrollbar-track,
+#quarto-sidebar::-webkit-scrollbar-track {
+  background: var(--bs-body-bg);
+}
+
+html::-webkit-scrollbar-thumb,
+#quarto-sidebar::-webkit-scrollbar-thumb {
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--rf-text) 30%, var(--bs-body-bg));
+}
+
 /* Expanded labels and newly visible scrollbars must not resize navigation. */
 #quarto-sidebar {
   width: 100%;

@@ -81,6 +81,23 @@
   background-color: color-mix(in srgb, var(--rf-text) 9%, transparent);
 }
 
+/* Quarto's negative tooltip offset otherwise overlaps the success checkmark. */
+.code-copy-button-tooltip[data-popper-placement^="left"] {
+  translate: -1rem 0;
+}
+
+.code-copy-button-tooltip[data-popper-placement^="right"] {
+  translate: 1rem 0;
+}
+
+.code-copy-button-tooltip[data-popper-placement^="top"] {
+  translate: 0 -1rem;
+}
+
+.code-copy-button-tooltip[data-popper-placement^="bottom"] {
+  translate: 0 1rem;
+}
+
 #quarto-document-content .code-copy-button:focus-visible {
   outline: 2px solid var(--bs-link-color);
   outline-offset: -2px;

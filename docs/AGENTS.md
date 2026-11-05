@@ -58,8 +58,11 @@ build from this checkout alone using the isolated static environment.
   `granthamtaylor`; Gold is assigned to `relflow` through the account's ad-free
   projects list. Verify the anonymous Addons response's `ad_free` flag after
   changes. Keep `main` as the default branch and `latest` as the default version.
-  Activate release tags only after verifying their documentation and build
-  configuration; keep unsupported versions inactive. Public pages and assets
+  The enabled release rule documented in `docs/README.md` activates new final
+  package tags from `v0.4.5` onward; exclude prereleases and internal evidence
+  tags. Keep `stable` and the current release active for automatic promotion.
+  Verify historical tags' documentation and build configuration before manually
+  activating them; keep unsupported versions inactive. Public pages and assets
   use complete `https://www.relflow.ai/en/<version>/` URLs. The root redirects
   to `latest`; do not add aliases for unversioned page or asset paths.
   Squarespace forwards the apex to HTTPS on `www` and drops apex query strings;
