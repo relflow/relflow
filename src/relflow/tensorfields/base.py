@@ -41,6 +41,7 @@ from typing_extensions import TypeVar as DefaultTypeVar
 from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool
 from relflow.architecture.rotary import coordinates, flatten, signal
 from relflow.data.arrow import Geometry, variants
+from relflow.data.query import Projection as SourceProjection
 from relflow.structs.enums import Component, Strata, TensorKey
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, Leaf
@@ -70,6 +71,19 @@ class Observe(Protocol):
     def __call__(
         self, field: RaggedField, *, address: Address, schema: Schema, state: object | None, learn: bool
     ) -> TensorDict | None: ...
+
+
+class Derive(Protocol):
+    """Compute one Arrow value per retained owner record before observation or masking."""
+
+    def __call__(
+        self,
+        inputs: tuple[SourceProjection[pa.Array | pa.ChunkedArray], ...],
+        *,
+        request: RequestBase,
+        address: Address,
+        rows: int,
+    ) -> SourceProjection[pa.Array | pa.ChunkedArray]: ...
 
 
 class Learn(Protocol):
@@ -774,7 +788,8 @@ class Extension:
     Register request, tensorfield, embedder, decoder, loss, output, and write
     components with ``@extension.register(Component.Request)`` or another explicit
     role. ``types`` names the Python equivalents
-    of accepted canonical Arrow terminal families. Separate tuple entries are
+    of accepted canonical Arrow terminal families after optional derivation.
+    A derive component validates its own source operands. Separate tuple entries are
     incompatible; types joined in one PEP 604 union may share one Arrow column.
     ``arrow`` supplies a physical-type matcher for custom Python atoms or
     overrides a standard matcher. ``requires`` maps importable module names to
@@ -892,7 +907,7 @@ class Extension:
 
     @property
     def types(self) -> tuple[ValueTypeFamily, ...]:
-        """Registered raw atom compatibility families."""
+        """Registered canonical atom families consumed after optional derivation."""
         return self.value_types
 
     def require(self, *, address: Address) -> None:
@@ -1197,6 +1212,10 @@ class Extension:
     @property
     def observe(self) -> Observe:
         return cast(Observe, self.component(Component.observe))
+
+    @property
+    def derive(self) -> Derive:
+        return cast(Derive, self.component(Component.derive))
 
     @property
     def learn(self) -> Learn:

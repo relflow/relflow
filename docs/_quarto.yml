@@ -128,6 +128,8 @@ website:
             text: Enum
           - href: datatypes/dateparts.qmd
             text: Period
+          - href: datatypes/duration.qmd
+            text: Duration
           - href: datatypes/branch.qmd
             text: Branch
           - href: datatypes/hash.qmd

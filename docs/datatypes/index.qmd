@@ -29,6 +29,7 @@ matters to the task; the first model does not need every available type.
 | Payment channel from a declared fixed set | [Enum](enum.qmd) |
 | Unordered transaction tags | [Set](set.qmd) |
 | Recurring calendar position of a payment timestamp | [Period](dateparts.qmd) |
+| Elapsed account age or time between events | [Duration](duration.qmd) |
 | Account identifier equality without a learned vocabulary | [Hash](hash.qmd) |
 | Amount represented by its learned distribution | [Quantile](quantile.qmd) |
 | Merchant labels sharing learned latent groups | [Cluster](cluster.qmd) |
@@ -100,7 +101,7 @@ are rejected.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `query` | `None` | Read the parent's same-named child; an explicit [query](../guides/query-paths.qmd) selects another structural path. |
+| `query` | `None` | Read the parent's same-named child; [queries](../guides/query-paths.qmd) select local or ancestor paths, with ordered inputs for types that support derivation. |
 | `description` | `None` | Human-readable meaning or units. |
 | `active` | `True` | Inactive leaves remain in the schema but do not encode, train, or predict. |
 | `nullable` | `True` | Whether explicit nulls are allowed in the projected input. |
@@ -134,6 +135,7 @@ its remaining payload:
 | Type | Decoded content |
 | --- | --- |
 | Number | Scalar in source units |
+| Duration | Scalar in the configured elapsed-time unit |
 | Quantile | Scalar in source units; null before learning a distribution |
 | Boolean | Probability of true |
 | Category, Enum | Best label, probability, and optional candidates |
