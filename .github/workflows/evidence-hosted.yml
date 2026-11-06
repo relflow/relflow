@@ -1,0 +1,313 @@
+name: Run evidence on GitHub
+
+on:
+  workflow_call:
+    outputs:
+      run_attempt:
+        value: ${{ jobs.prepare.outputs.run_attempt }}
+    inputs:
+      suite_ref:
+        description: Full commit SHA of the experiment suite in relflow/relflow
+        type: string
+        required: true
+      baseline_sha:
+        description: Exact comparison base from the triggering GitHub event
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prepare:
+    name: Prepare immutable full-suite inputs
+    if: github.repository == 'relflow/relflow' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      run_attempt: ${{ steps.runtime.outputs.run_attempt }}
+      archive_sha256: ${{ steps.runtime.outputs.archive_sha256 }}
+      image_id: ${{ steps.runtime.outputs.image_id }}
+    steps:
+      - name: Validate the immutable suite reference
+        env:
+          SUITE_REF: ${{ inputs.suite_ref }}
+          BASELINE_SHA: ${{ inputs.baseline_sha }}
+        run: '[[ "$SUITE_REF" =~ ^[0-9a-f]{40}$ && "$BASELINE_SHA" =~ ^[0-9a-f]{40}$ ]]'
+      - name: Check out the trusted executor
+        uses: actions/checkout@v4
+        with:
+          repository: relflow/relflow
+          ref: 'a4280de8273c638a33da45ab324d4a916caca05e'
+          path: executor
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out experiment sources as data
+        uses: actions/checkout@v4
+        with:
+          repository: relflow/relflow
+          ref: ${{ inputs.suite_ref }}
+          path: suite
+          persist-credentials: false
+      - name: Verify the selected checkout
+        env:
+          SUITE_REF: ${{ inputs.suite_ref }}
+        run: 'test "$(git -C suite rev-parse HEAD)" = "$SUITE_REF"'
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: '3.12'
+          version: '0.13.7'
+          enable-cache: true
+          cache-dependency-glob: executor/docs/uv.lock
+      - name: Install the isolated executor tools
+        run: |
+          for attempt in 1 2 3; do
+            if uv sync --locked --project executor/docs; then break; fi
+            if [[ "$attempt" == 3 ]]; then exit 1; fi
+            sleep 5
+          done
+      - uses: actions/download-artifact@v4
+        with:
+          name: evidence-inputs-attempt-${{ github.run_attempt }}
+          path: inputs
+      - name: Bind the requested inputs to the GitHub event
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+          BASELINE_SHA: ${{ inputs.baseline_sha }}
+          SUITE_REF: ${{ inputs.suite_ref }}
+        run: |
+          git -C executor fetch --no-tags origin "$CANDIDATE_SHA" "$BASELINE_SHA" "$SUITE_REF"
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+          name = os.environ["GITHUB_EVENT_NAME"]
+          if name not in {"pull_request", "merge_group", "push", "workflow_dispatch"}:
+              raise ValueError("Evidence requires a supported CI event")
+          candidate = os.environ["CANDIDATE_SHA"]
+          if name == "pull_request":
+              baseline = event["pull_request"]["base"]["sha"]
+          elif name == "merge_group":
+              baseline = event["merge_group"]["base_sha"]
+          elif name == "push" and event.get("before", "").strip("0"):
+              baseline = event["before"]
+          elif name == "workflow_dispatch" and event.get("inputs", {}).get("evidence_base"):
+              baseline = event["inputs"]["evidence_base"]
+          else:
+              baseline = subprocess.check_output(["git", "-C", "executor", "rev-parse", candidate + "^1"], text=True).strip()
+          request = json.loads(Path("inputs/request.json").read_text())
+          if request.get("run_attempt") != int(os.environ["GITHUB_RUN_ATTEMPT"]):
+              raise ValueError("Evidence inputs belong to another workflow attempt; re-run all jobs")
+          expected = {
+              "candidate": candidate,
+              "baseline": baseline,
+              "suite": os.environ["SUITE_REF"],
+              "run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "event": name,
+          }
+          if baseline != os.environ["BASELINE_SHA"] or request != expected:
+              raise ValueError("Evidence inputs differ from the triggering GitHub event")
+          subprocess.run(["git", "-C", "executor", "merge-base", "--is-ancestor", baseline, candidate], check=True)
+          PY
+          python executor/scripts/release.py verify inputs/candidate --source-sha "$CANDIDATE_SHA"
+      - uses: docker/setup-buildx-action@v4
+      - name: Restore runtime dependency build layers
+        id: dependency-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/evidence-build-cache
+          key: evidence-runtime-${{ runner.os }}-${{ runner.arch }}-a4280de8273c638a33da45ab324d4a916caca05e-${{ hashFiles('inputs/requirements.txt') }}
+      - name: Build the shared CPU dependency image
+        id: runtime
+        run: |
+          uv run --project executor/docs python executor/evidence/hosted.py image --requirements inputs/requirements.txt --output runtime --build-cache "$RUNNER_TEMP/evidence-build-cache"
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+          runtime = json.loads(Path("runtime/runtime.json").read_text())
+          if not re.fullmatch(r"[0-9a-f]{64}", runtime["archive_sha256"]):
+              raise ValueError("Runtime archive needs a SHA256 digest")
+          if not re.fullmatch(r"sha256:[0-9a-f]{64}", runtime["image_id"]):
+              raise ValueError("Runtime image needs an exact Docker content ID")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
+              output.write(f"archive_sha256={runtime['archive_sha256']}\n")
+              output.write(f"image_id={runtime['image_id']}\n")
+              output.write(f"run_attempt={os.environ['GITHUB_RUN_ATTEMPT']}\n")
+          PY
+      - name: Plan all canonical baseline and candidate tasks
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+          BASELINE_SHA: ${{ inputs.baseline_sha }}
+          SUITE_REF: ${{ inputs.suite_ref }}
+          EVIDENCE_RUN_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}
+        run: >-
+          uv run --project executor/docs python executor/evidence/hosted.py plan
+          --suite-root suite/evidence --inputs inputs
+          --candidate-sha "$CANDIDATE_SHA" --baseline-sha "$BASELINE_SHA"
+          --evidence-sha "$SUITE_REF" --executor-sha "$(git -C executor rev-parse HEAD)"
+          --run-id "$EVIDENCE_RUN_ID" --runtime-manifest runtime/runtime.json --output plan
+      - name: Save only trusted runtime dependency layers
+        if: steps.dependency-cache.outputs.cache-hit != 'true' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/evidence-build-cache
+          key: ${{ steps.dependency-cache.outputs.cache-primary-key }}
+      - name: Retain the immutable full-suite plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-plan-${{ github.run_attempt }}
+          path: plan/
+          retention-days: 7
+          include-hidden-files: true
+          if-no-files-found: error
+      - name: Transfer the exact dependency image to all shards
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-runtime-${{ github.run_attempt }}
+          path: runtime/
+          retention-days: 1
+          compression-level: 1
+          if-no-files-found: error
+      - name: Retain setup diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-prepare-failure-${{ github.run_attempt }}
+          path: |
+            plan/
+            runtime/runtime.json
+          retention-days: 7
+          include-hidden-files: true
+          if-no-files-found: warn
+
+  shard:
+    name: Paired CPU shard ${{ matrix.shard }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - name: Require the current workflow attempt
+        env:
+          PREPARED_ATTEMPT: ${{ needs.prepare.outputs.run_attempt }}
+        run: |
+          if [[ "$PREPARED_ATTEMPT" != "$GITHUB_RUN_ATTEMPT" ]]; then
+            echo 'Evidence preparation belongs to another workflow attempt; re-run all jobs'
+            exit 1
+          fi
+      - name: Check out the trusted executor
+        uses: actions/checkout@v4
+        with:
+          repository: relflow/relflow
+          ref: 'a4280de8273c638a33da45ab324d4a916caca05e'
+          path: executor
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: '3.12'
+          version: '0.13.7'
+          enable-cache: true
+          cache-dependency-glob: executor/docs/uv.lock
+      - name: Install the isolated executor tools
+        run: |
+          for attempt in 1 2 3; do
+            if uv sync --locked --project executor/docs; then break; fi
+            if [[ "$attempt" == 3 ]]; then exit 1; fi
+            sleep 5
+          done
+      - uses: actions/download-artifact@v4
+        with:
+          name: evidence-plan-${{ github.run_attempt }}
+          path: plan
+      - uses: actions/download-artifact@v4
+        with:
+          name: evidence-runtime-${{ github.run_attempt }}
+          path: runtime
+      - name: Execute each planned measurement once in isolated containers
+        env:
+          SHARD: ${{ matrix.shard }}
+          ARCHIVE_SHA256: ${{ needs.prepare.outputs.archive_sha256 }}
+          IMAGE_ID: ${{ needs.prepare.outputs.image_id }}
+        run: >-
+          uv run --project executor/docs python -u executor/evidence/hosted.py run
+          --plan plan --shard "$SHARD" --output shard
+          --runtime-image runtime/runtime.tar --runtime-sha256 "$ARCHIVE_SHA256" --runtime-id "$IMAGE_ID"
+      - name: Retain measurements and logs on success or failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-shard-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: shard/
+          retention-days: 7
+          include-hidden-files: true
+          if-no-files-found: warn
+
+  collect:
+    name: Collect full paired suite
+    needs: [prepare, shard]
+    if: always() && needs.prepare.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Require the current workflow attempt
+        env:
+          PREPARED_ATTEMPT: ${{ needs.prepare.outputs.run_attempt }}
+        run: |
+          if [[ "$PREPARED_ATTEMPT" != "$GITHUB_RUN_ATTEMPT" ]]; then
+            echo 'Evidence preparation belongs to another workflow attempt; re-run all jobs'
+            exit 1
+          fi
+      - name: Check out the trusted executor
+        uses: actions/checkout@v4
+        with:
+          repository: relflow/relflow
+          ref: 'a4280de8273c638a33da45ab324d4a916caca05e'
+          path: executor
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: '3.12'
+          version: '0.13.7'
+          enable-cache: true
+          cache-dependency-glob: executor/docs/uv.lock
+      - name: Install the isolated executor tools
+        run: |
+          for attempt in 1 2 3; do
+            if uv sync --locked --project executor/docs; then break; fi
+            if [[ "$attempt" == 3 ]]; then exit 1; fi
+            sleep 5
+          done
+      - uses: actions/download-artifact@v4
+        with:
+          name: evidence-plan-${{ github.run_attempt }}
+          path: plan
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: evidence-shard-*-${{ github.run_attempt }}
+          path: downloaded-shards
+          merge-multiple: false
+      - name: Validate the complete paired catalog and regression gate
+        env:
+          EVIDENCE_RUN_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}
+        run: >-
+          uv run --project executor/docs python executor/evidence/hosted.py collect
+          --plan plan --shards downloaded-shards --output "reports/$EVIDENCE_RUN_ID"
+      - name: Attach the complete report on success or failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relflow-evidence-attempt-${{ github.run_attempt }}
+          path: reports/gh-${{ github.run_id }}-${{ github.run_attempt }}/
+          retention-days: 90
+          include-hidden-files: true
+          if-no-files-found: warn
