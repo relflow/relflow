@@ -310,7 +310,7 @@ checks and complete Evidence validation run alongside the matrix. Evidence
 runs the full suite freshly for baseline and candidate, preserving every
 experiment's original seeds, budgets, and checks.
 `CI / required` rejects errors, cancellations,
-and missing required jobs. Evidence runs across eight GitHub-hosted CPU shards
+and missing required jobs. Evidence runs across twelve GitHub-hosted CPU shards
 through the pinned trusted executor, with both roles for each proof on one
 runner and a separate full-catalog collector. Dependency caches accelerate setup;
 learning results execute freshly. The candidate commit supplies the suite from

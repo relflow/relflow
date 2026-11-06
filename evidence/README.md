@@ -28,7 +28,7 @@ The library's workflow shares one candidate wheel across tests, Evidence, and
 release, and builds an exact baseline wheel when needed. It
 calls `.github/workflows/evidence-hosted.yml` at a reviewed full commit SHA,
 passing a separate reviewed suite SHA. The helper pins the trusted executor.
-Eight GitHub-hosted CPU shards run one experiment per Docker container, with
+Twelve GitHub-hosted CPU shards run one experiment per Docker container, with
 both roles for each experiment assigned to the same runner. Each shard runs at
 most two containers concurrently. Containers have bounded CPU/memory, no network, a read-only
 root, and no host home or Docker socket. The full catalog runs for both wheels
@@ -116,7 +116,7 @@ reader changes do not establish fresh learning results.
 
 ## Runtime efficiency
 
-Eight shards distribute whole proof pairs using recorded durations as scheduling
+Twelve shards distribute whole proof pairs using recorded durations as scheduling
 hints, with two containers per runner. Wheels are installed in isolated image
 layers rather than in every task. P025 keeps all three seeds and its existing
 CPU behavior. Every report retains timing and CPU/memory telemetry.

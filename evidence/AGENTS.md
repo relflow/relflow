@@ -14,7 +14,7 @@ records. Experiment frontmatter owns definitions and prose; measured results liv
 in publication JSON assets. Never write results back into experiment sources.
 
 GitHub-hosted CPU jobs use exact supplied baseline and candidate wheels, with
-one bounded, network-disabled, read-only Docker container per task. Eight shards
+one bounded, network-disabled, read-only Docker container per task. Twelve shards
 keep each experiment's baseline and candidate on the same runner; a separate
 collector verifies the entire original catalog. Mount neither the host home nor
 Docker socket into workers. Keep credentials outside worker containers.

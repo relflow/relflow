@@ -1,7 +1,7 @@
 # GitHub-hosted CPU evidence
 
 The required Evidence workflow runs on standard GitHub-hosted Ubuntu CPU
-runners. A trusted helper prepares the exact inputs, eight shards run the full
+runners. A trusted helper prepares the exact inputs, twelve shards run the full
 paired catalog, and one collector validates the complete comparison. Lab,
 Tailscale, private networking, and a self-hosted runner are not required.
 
@@ -31,7 +31,7 @@ candidate receive that same dependency image.
 The helper has three phases:
 
 1. **Prepare:** bind the input request to the GitHub event, freeze the complete
-   manifest and eight-shard assignment, and prepare the dependency-only runtime
+   manifest and twelve-shard assignment, and prepare the dependency-only runtime
    image. Retain the exact wheels, requirements, source snapshot, image identity,
    and archive hashes.
 2. **Shard:** receive verified inputs, record the actual runner identity, and
@@ -51,7 +51,7 @@ executor and helper pins; do not rewrite their provenance during migration.
 
 ## Isolation and parallelism
 
-Eight shard jobs may run concurrently, subject to the repository's available
+Twelve shard jobs may run concurrently, subject to the repository's available
 GitHub Actions concurrency. Each runner permits at most two active task
 containers. Every container retains its two-CPU ceiling, 4 GiB memory limit,
 512-PID bound, original timeout, and declared thread policy. P025 retains its
@@ -77,6 +77,15 @@ Durations guide scheduling only. They never establish a learning result,
 change a seed, shorten a budget, or change a named check. The collector requires
 the entire catalog, including baseline-unmet checks and every declared internal
 seed panel.
+
+`timings.json` retains per-role duration hints from a verified hosted run and
+identifies its source commit, executor, and authenticated report artifact. Assign
+whole pairs longest first using the sum of their role costs, then schedule
+individual roles longest first within each runner. The plan freezes the timing
+file digest and resolved costs so preparation, execution, and collection agree.
+Missing timings use positive fallback costs, preventing unmeasured experiments
+from accumulating on a runner at zero estimated cost. Refresh hints from validated
+reports while retaining their source receipt; forecasts never replace measurements.
 
 ## Caches and attempts
 

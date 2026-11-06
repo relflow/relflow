@@ -79,7 +79,7 @@ verifiable; they do not authorize hosted shards to skip fresh measurements.
 Every logical slot still requires a validated full-budget execution, and
 publication must exactly match the archived candidate results and provenance.
 
-The hosted workflow assigns whole baseline/candidate experiment pairs to eight
+The hosted workflow assigns whole baseline/candidate experiment pairs to twelve
 GitHub-hosted CPU shards. Each shard runs at most two task containers at a time;
 each container retains its two-CPU ceiling, 4 GiB memory limit, 512 PIDs, and
 original experiment timeout. Baseline and candidate for a proof share the same
@@ -90,6 +90,12 @@ every shard's measured identity rather than describing the catalog as one host.
 The collector requires the exact planned union, unchanged task identities,
 matching within-pair execution policy, and a complete passing comparison.
 Duplicate, missing, unexpected, or altered shards fail closed.
+
+Scheduling uses the per-role costs in `timings.json`, with a reference to their
+verified source report. Freeze their file digest and resolved costs in the plan.
+Balance pairs by summed role cost; missing timings must have a positive fallback.
+These forecasts affect placement and ordering only. They cannot change the task
+catalog, seeds, training steps, checks, or measurement provenance.
 
 Workers have no network, a read-only root, and no host home or Docker socket
 mount. Install runtime packages in the image, never on the host. Keep credentials

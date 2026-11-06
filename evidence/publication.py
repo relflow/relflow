@@ -19,7 +19,7 @@ from reuse import SHA, archive, artifact_name, attempt, helper_sha, trusted, ver
 from reuse import artifact as verified_artifact
 
 REPOSITORY = "relflow/relflow"
-EXECUTOR = "f71d59490ed397a650c84524cad61ecabec1cfa8"
+EXECUTOR = "c224624ddbbcd247d6fbd6da9227a6e439e4f19e"
 RESULTS = {"evidence-result", "evidence-report"}
 MARKERS = ("<!-- evidence-results:start -->", "<!-- evidence-results:end -->")
 
