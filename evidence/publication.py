@@ -15,7 +15,7 @@ from pathlib import Path
 from evidence_ci import task_key
 from experiments.source import fingerprint, frontmatter, metadata
 from record import select, validate
-from reuse import SHA, archive, attempt, verify_receipt
+from reuse import SHA, archive, artifact_name, attempt, helper_sha, trusted, verify_receipt
 from reuse import artifact as verified_artifact
 
 REPOSITORY = "relflow/relflow"
@@ -248,10 +248,10 @@ def publish(root: Path, output: Path, run_id: int, *, version: str | None = None
     compatible(root, main, checkout)
     output.mkdir(parents=True, exist_ok=False)
     reports, inputs = output / "retained", output / "retained-inputs"
-    verified_artifact(run_id, "relflow-evidence", reports)
+    verified_artifact(run_id, artifact_name(run, "relflow-evidence"), reports)
     retained_manifest = json.loads((reports / "manifest.json").read_text())
     current_inputs = output / "current-inputs"
-    verified_artifact(run_id, "evidence-inputs", current_inputs)
+    verified_artifact(run_id, artifact_name(run, "evidence-inputs"), current_inputs)
     request = json.loads((current_inputs / "request.json").read_text())
     run = attempt(run, request.get("run_attempt"))
     reused = retained_manifest["run_id"] != f"gh-{run_id}-{run['run_attempt']}"
@@ -269,6 +269,8 @@ def publish(root: Path, output: Path, run_id: int, *, version: str | None = None
     }
     if not SHA.fullmatch(baseline) or request != expected_request:
         raise ValueError("Authenticated input request does not bind the exact current main CI attempt")
+    if retained_manifest.get("backend") == "github-hosted-docker":
+        trusted(run, retained_manifest, helper=helper_sha(run), executor=EXECUTOR, root=root, request=request)
     names = [("evidence-reused-inputs", inputs)] if reused else []
     if reused:
         names.append(("evidence-reuse", output / "reuse-context"))

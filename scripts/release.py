@@ -23,6 +23,12 @@ ARTIFACT = "python-package-distributions"
 FIELDS = {"schema", "source_sha", "version", "files", "ci_run_id", "ci_run_attempt"}
 
 
+def artifact_name(attempt: int) -> str:
+    if type(attempt) is not int or attempt < 1:
+        raise ValueError("Distribution artifacts require a positive CI attempt")
+    return f"{ARTIFACT}-attempt-{attempt}"
+
+
 def digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
@@ -240,21 +246,25 @@ def recover_draft(
     for run in runs:
         with tempfile.TemporaryDirectory() as temporary:
             try:
-                subprocess.run(
-                    [
-                        "gh",
-                        "run",
-                        "download",
-                        str(run["id"]),
-                        "--repo",
-                        repository,
-                        "--name",
-                        ARTIFACT,
-                        "--dir",
-                        temporary,
-                    ],
-                    check=True,
-                )
+                command = [
+                    "gh",
+                    "run",
+                    "download",
+                    str(run["id"]),
+                    "--repo",
+                    repository,
+                    "--name",
+                    artifact_name(run["run_attempt"]),
+                    "--dir",
+                    temporary,
+                ]
+                try:
+                    subprocess.run(command, check=True)
+                except subprocess.CalledProcessError:
+                    # Earlier CI runs used one unsuffixed artifact; its producer
+                    # attempt and full successful CI gate are still authenticated.
+                    command[command.index("--name") + 1] = ARTIFACT
+                    subprocess.run(command, check=True)
                 directory = Path(temporary)
                 receipt = verify(directory, source_sha=target, version=version)
                 if receipt["ci_run_id"] != run["id"] or receipt["ci_run_attempt"] > run["run_attempt"]:
@@ -440,7 +450,8 @@ def main() -> None:
         wheel = next(name for name in receipt["files"] if name.endswith(".whl"))
         outputs(
             {
-                "artifact_name": ARTIFACT,
+                "artifact_name": artifact_name(receipt["ci_run_attempt"]),
+                "run_attempt": str(receipt["ci_run_attempt"]),
                 "source_sha": receipt["source_sha"],
                 "version": receipt["version"],
                 "wheel_name": wheel,

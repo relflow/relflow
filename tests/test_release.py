@@ -21,6 +21,17 @@ SDIST = f"relflow-{VERSION}.tar.gz"
 REPOSITORY = "relflow/relflow"
 
 
+def test_distribution_artifacts_are_immutable_per_attempt():
+    assert release.artifact_name(1) == "python-package-distributions-attempt-1"
+    assert release.artifact_name(2) == "python-package-distributions-attempt-2"
+
+
+@pytest.mark.parametrize("attempt", [0, -1, True, "2", None])
+def test_distribution_artifact_name_requires_a_real_positive_attempt(attempt):
+    with pytest.raises(ValueError, match="positive CI attempt"):
+        release.artifact_name(attempt)
+
+
 def distributions(root, name="package", source=SOURCE, content=b"original", run_id=71):
     directory = root / name
     directory.mkdir()

@@ -368,6 +368,17 @@ def collect(output: Path, record: dict) -> None:
         handle.write(log)
 
 
+def verify_execution(manifest: dict, records: list[dict], reports: Path | None) -> list[str]:
+    """Check hosted cohorts while retaining historical single-host report semantics."""
+    if manifest.get("backend") != "github-hosted-docker":
+        return []
+    if reports is None:
+        return ["Hosted execution requires retained shard identities and launch journals"]
+    from hosted import verify_execution as verify_hosted
+
+    return verify_hosted(manifest, records, reports)
+
+
 def evaluate(
     manifest: dict, records: list[dict], *, root: Path = ROOT, reports: Path | None = None, reuse_depth: int = 0
 ) -> dict:
@@ -386,7 +397,7 @@ def evaluate(
             reused_keys.clear()
     expected = {task_key(task): task for task in manifest["tasks"]}
     seen = {}
-    errors = reuse_errors
+    errors = reuse_errors + verify_execution(manifest, records, reports)
     catalog = registry(root, measurements=False)
     if "runtime_sha256" in manifest:
         inputs = runtime_inputs(root)

@@ -42,12 +42,13 @@ def image_definition(torch_version: str) -> str:
 RUN python -m pip install --no-cache-dir torch=={torch_version}+cpu --index-url https://download.pytorch.org/whl/cpu
 COPY requirements.txt /tmp/requirements.txt
 RUN python -m pip install --no-cache-dir -r /tmp/requirements.txt pyyaml==6.0.3
+RUN python -m pip check
 ENV OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 POLARS_MAX_THREADS=2 HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false
 """
 
 
-def environment(requirements: Path, workers: int) -> dict:
-    """Build/inspect the trusted runtime once for both reuse probes and execution."""
+def runtime_recipe(requirements: Path) -> str:
+    """Resolve one CPU runtime recipe from the exact supplied requirements."""
     version = next(
         (
             line.split("==", 1)[1].split(";", 1)[0].split()[0].rstrip("\\")
@@ -58,14 +59,44 @@ def environment(requirements: Path, workers: int) -> dict:
     )
     if not version:
         raise ValueError("The runtime requirements must pin Torch")
-    recipe = image_definition(version)
+    return image_definition(version.removesuffix("+cpu"))
+
+
+def environment(
+    requirements: Path, workers: int, *, image_id: str | None = None, build_cache: Path | None = None
+) -> dict:
+    """Build/inspect the trusted runtime once for both reuse probes and execution."""
+    recipe = runtime_recipe(requirements)
     image = "relflow-evidence:" + identity({"lock": digest(requirements), "recipe": recipe})[:20]
-    with tempfile.TemporaryDirectory(prefix="evidence-image-") as temporary:
-        context = Path(temporary)
-        (context / "Dockerfile").write_text(recipe)
-        shutil.copy2(requirements, context / "requirements.txt")
-        subprocess.run(["docker", "build", "--tag", image, str(context)], check=True)
-    image_id = subprocess.check_output(["docker", "image", "inspect", image, "--format", "{{.Id}}"], text=True).strip()
+    if image_id is None:
+        with tempfile.TemporaryDirectory(prefix="evidence-image-") as temporary:
+            context = Path(temporary)
+            (context / "Dockerfile").write_text(recipe)
+            shutil.copy2(requirements, context / "requirements.txt")
+            command = ["docker", "build", "--tag", image]
+            if build_cache is not None:
+                pending = build_cache.with_name(build_cache.name + ".next")
+                if pending.exists():
+                    shutil.rmtree(pending)
+                command = ["docker", "buildx", "build", "--load", "--tag", image]
+                if (build_cache / "index.json").is_file():
+                    command += ["--cache-from", f"type=local,src={build_cache}"]
+                command += ["--cache-to", f"type=local,dest={pending},mode=max"]
+            subprocess.run([*command, str(context)], check=True)
+            if build_cache is not None:
+                if build_cache.exists():
+                    shutil.rmtree(build_cache)
+                pending.rename(build_cache)
+        image_id = subprocess.check_output(
+            ["docker", "image", "inspect", image, "--format", "{{.Id}}"], text=True
+        ).strip()
+    else:
+        image = image_id
+        actual = subprocess.check_output(
+            ["docker", "image", "inspect", image, "--format", "{{.Id}}"], text=True
+        ).strip()
+        if actual != image_id:
+            raise ValueError("Loaded dependency image differs from its trusted identity")
     processor = Path("/proc/cpuinfo")
     wanted = {
         "vendor_id",
@@ -184,6 +215,128 @@ def isolate(suite: Path, destination: Path, task: dict, inputs: dict, scripts: s
         if actual != expected:
             raise ValueError(f"Execution input changed after planning: {name}")
     return destination
+
+
+def container(
+    task: dict,
+    *,
+    execution: dict,
+    scratch: Path,
+    view: Path,
+    run_id: str,
+    evidence_sha: str,
+    package: dict,
+) -> dict:
+    """Execute one immutable launch with the shared Docker isolation policy.
+
+    A launch journal records Docker status separately from the experiment's
+    result. Callers may retry only a Docker 125 launch without a result; every
+    launch keeps its own directory and journal.
+    """
+    launched = time.monotonic()
+    started_ns = time.monotonic_ns()
+    label = hashlib.sha256(run_id.encode()).hexdigest()[:20]
+    name = "evidence-" + label + "-" + hashlib.sha256(str(scratch).encode()).hexdigest()[:12]
+    command = [
+        "docker",
+        "run",
+        "--rm",
+        "--name",
+        name,
+        "--label",
+        "relflow.evidence=" + label,
+        "--network",
+        "none",
+        "--read-only",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--pids-limit",
+        "512",
+        "--cpus",
+        "2",
+        "--memory",
+        "4g",
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
+        "--tmpfs",
+        "/tmp:rw,nosuid,nodev,size=2g,mode=1777",
+        "--mount",
+        f"type=bind,src={ROOT},dst=/executor,readonly",
+        "--mount",
+        f"type=bind,src={view},dst=/suite,readonly",
+        "--mount",
+        f"type=bind,src={scratch},dst=/results",
+        "--env",
+        "HOME=/tmp/home",
+        "--env",
+        "USER=evidence",
+        "--env",
+        "LOGNAME=evidence",
+        "--env",
+        "EVIDENCE_REVISION=" + evidence_sha,
+        "--env",
+        "EVIDENCE_RELFLOW_REVISION=" + package["revision"],
+        "--env",
+        "EVIDENCE_WHEEL_SHA256=" + package["wheel_sha256"],
+        execution["role_images"][task["role"]],
+        "python",
+        "/executor/lab_worker.py",
+        "/results/task.json",
+    ]
+    code = None
+    timed_out = False
+    record_path = scratch / "record.json"
+    try:
+        process = subprocess.run(
+            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=1850, check=False
+        )
+        code = process.returncode
+        log = process.stdout
+        if record_path.is_symlink():
+            raise ValueError("Container result must not be a symbolic link")
+        if record_path.is_file():
+            if record_path.stat().st_size > 64 * 1024 * 1024:
+                raise ValueError("Container result exceeds the 64 MiB record bound")
+            record = json.loads(record_path.read_text())
+            if record.get("task") != task:
+                raise ValueError("Container result identity differs from its planned task")
+            if code:
+                record["error"] = f"Container exited with status {code}"
+                record["log"] = log + "\n" + record.get("log", "")
+            return record
+        return {"task": task, "result": None, "error": f"Container exited {code} without a result", "log": log}
+    except subprocess.TimeoutExpired as error:
+        timed_out = True
+        log = error.stdout or ""
+        if isinstance(log, bytes):
+            log = log.decode(errors="replace")
+        return {"task": task, "result": None, "error": "Container launch timed out", "log": log}
+    except (ValueError, OSError) as error:
+        return {"task": task, "result": None, "error": str(error), "log": ""}
+    finally:
+        subprocess.run(
+            ["docker", "rm", "--force", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+        )
+        write_json(
+            scratch / "launch.json",
+            {
+                "schema": 1,
+                "task": task,
+                "container": name,
+                "docker_exit_code": code,
+                "image_id": execution["role_images"][task["role"]],
+                "started_ns": started_ns,
+                "finished_ns": time.monotonic_ns(),
+                "timed_out": timed_out,
+                "has_record": record_path.is_file(),
+                "record_sha256": digest(record_path)
+                if record_path.is_file() and not record_path.is_symlink()
+                else None,
+                "duration_seconds": round(time.monotonic() - launched, 3),
+            },
+        )
 
 
 def cached(
@@ -349,87 +502,19 @@ def run(options: argparse.Namespace) -> None:
             scratch.mkdir(parents=True)
             write_json(scratch / "task.json", task)
             view = isolate(suite, output / "task-inputs" / task_key(task), task, inputs, scripts)
-            role = task["role"]
-            name = "evidence-" + label + "-" + hashlib.sha256(task_key(task).encode()).hexdigest()[:12]
-            command = [
-                "docker",
-                "run",
-                "--rm",
-                "--name",
-                name,
-                "--label",
-                "relflow.evidence=" + label,
-                "--network",
-                "none",
-                "--read-only",
-                "--cap-drop",
-                "ALL",
-                "--security-opt",
-                "no-new-privileges",
-                "--pids-limit",
-                "512",
-                "--cpus",
-                "2",
-                "--memory",
-                "4g",
-                "--user",
-                f"{os.getuid()}:{os.getgid()}",
-                "--tmpfs",
-                "/tmp:rw,nosuid,nodev,size=2g,mode=1777",
-                "--mount",
-                f"type=bind,src={ROOT},dst=/executor,readonly",
-                "--mount",
-                f"type=bind,src={view},dst=/suite,readonly",
-                "--mount",
-                f"type=bind,src={scratch},dst=/results",
-                "--env",
-                "HOME=/tmp/home",
-                "--env",
-                "USER=evidence",
-                "--env",
-                "LOGNAME=evidence",
-                "--env",
-                "EVIDENCE_REVISION=" + options.evidence_sha,
-                "--env",
-                "EVIDENCE_RELFLOW_REVISION=" + manifest[role]["revision"],
-                "--env",
-                "EVIDENCE_WHEEL_SHA256=" + manifest[role]["wheel_sha256"],
-                images[role],
-                "python",
-                "/executor/lab_worker.py",
-                "/results/task.json",
-            ]
             try:
-                process = subprocess.run(
-                    command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=1850, check=False
+                return container(
+                    task,
+                    execution=execution,
+                    scratch=scratch,
+                    view=view,
+                    run_id=output.name,
+                    evidence_sha=options.evidence_sha,
+                    package=manifest[task["role"]],
                 )
-                record_path = scratch / "record.json"
-                if record_path.is_symlink():
-                    raise ValueError("Container result must not be a symbolic link")
-                if record_path.is_file():
-                    if record_path.stat().st_size > 64 * 1024 * 1024:
-                        raise ValueError("Container result exceeds the 64 MiB record bound")
-                    record = json.loads(record_path.read_text())
-                    if record.get("task") != task:
-                        raise ValueError("Container result identity differs from its planned task")
-                    if process.returncode:
-                        record["error"] = f"Container exited with status {process.returncode}"
-                        record["log"] = process.stdout + "\n" + record.get("log", "")
-                    return record
-                return {
-                    "task": task,
-                    "result": None,
-                    "error": f"Container exited {process.returncode} without a result",
-                    "log": process.stdout,
-                }
-            except (subprocess.TimeoutExpired, ValueError, OSError) as error:
-                return {"task": task, "result": None, "error": str(error), "log": ""}
             finally:
                 measurements.append(
                     {"task": task_key(task), "container_seconds": round(time.monotonic() - launched, 3)}
-                )
-                subprocess.run(
-                    ["docker", "rm", "--force", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
                 )
                 shutil.rmtree(view)
 
