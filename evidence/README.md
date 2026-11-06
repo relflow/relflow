@@ -33,11 +33,14 @@ explicitly:
 ```sh
 uv run --project docs python evidence/experiments/run.py --lane all --list
 uv run --project docs --with /path/to/provisioned-relflow.whl \
-  python evidence/experiments/run.py --lane research --list
+  python evidence/experiments/run.py --lane research P091
 ```
 
-Research sources declare their wheel, optional dependency, or offline model
-resources in `evidence-requires`. Check the selected page before execution.
+Read the selected page's Reproduce tab for its declared `evidence-requires`.
+P091 requires TorchJD, P092 requires a real offline Text encoder, and P099/P100
+require the Duration/Ordinal wheel from `stage/0.5.0`. The current core wheel
+does not supply those pending datatypes. A research selection does not download
+models, substitute a mocked encoder, or replace a missing measurement with a pass.
 
 Create an authoring file from the repository root:
 
