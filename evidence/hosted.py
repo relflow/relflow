@@ -6,10 +6,10 @@ import argparse
 import concurrent.futures
 import hashlib
 import json
-import math
 import os
 import re
 import shutil
+import statistics
 import subprocess
 import time
 from pathlib import Path
@@ -26,12 +26,12 @@ from evidence_ci import (
     write_json,
 )
 from experiments.source import registry
-from lab_run import container, environment, isolate, runtime_recipe, schedule, wheel_image
+from lab_run import container, environment, isolate, runtime_recipe, wheel_image
 
 BACKEND = "github-hosted-docker"
 PROFILE = {
-    "schema": 2,
-    "shards": 8,
+    "schema": 3,
+    "shards": 12,
     "workers": 2,
     "cpu_per_task": 2,
     "memory_per_task": "4g",
@@ -41,7 +41,7 @@ PROFILE = {
     "read_only": True,
     "cap_drop": "ALL",
     "no_new_privileges": True,
-    "scheduler": "longest-first-shards-v2",
+    "scheduler": "longest-first-shards-v3",
     "launch_attempts": 3,
     "task_timeout_seconds": 1850,
     "experiment_timeout_seconds": 1700,
@@ -57,21 +57,93 @@ THREADS = {
     "threads": 1,
 }
 LIMIT = 256 * 1024 * 1024
+MAX_HINT_SECONDS = 24 * 60 * 60
+
+
+def duration(value: object) -> float | None:
+    """Accept finite positive scheduling costs bounded to one day per task."""
+    if type(value) not in {int, float} or not 0 < value <= MAX_HINT_SECONDS:
+        return None
+    return float(value)
+
+
+def scheduling(suite: Path) -> dict:
+    """Freeze operative costs; timing provenance is data, never an execution proof."""
+    entries = registry(suite)
+    published = {
+        identifier: duration((entry["run"] or {}).get("duration_seconds")) for identifier, entry in entries.items()
+    }
+    path = suite / "timings.json"
+    hints = None
+    if path.is_symlink() or path.exists():
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > 1024 * 1024:
+            raise ValueError(f"Scheduling hints at '{path}' require a regular file no larger than one MiB")
+        try:
+            hints = json.loads(path.read_text())
+        except (ValueError, UnicodeError) as error:
+            raise ValueError(f"Scheduling hints at '{path}' must contain valid JSON") from error
+        if (
+            not isinstance(hints, dict)
+            or type(hints.get("schema")) is not int
+            or hints["schema"] != 1
+            or not isinstance(hints.get("tasks"), dict)
+        ):
+            raise ValueError(f"Scheduling hints at '{path}' require schema 1 and a task-cost mapping")
+        source = hints.get("source")
+        if not isinstance(source, dict) or not isinstance(source.get("artifact"), dict):
+            raise ValueError(f"Scheduling hints at '{path}' require retained source and artifact provenance labels")
+        artifact = source["artifact"]
+        if (
+            source.get("repository") != "relflow/relflow"
+            or any(type(source.get(name)) is not int or source[name] < 1 for name in ("run_id", "run_attempt"))
+            or any(
+                not isinstance(source.get(name), str) or not re.fullmatch(r"[0-9a-f]{40}", source[name])
+                for name in ("head_sha", "executor_sha")
+            )
+            or type(artifact.get("id")) is not int
+            or artifact["id"] < 1
+            or not isinstance(artifact.get("name"), str)
+            or not artifact["name"]
+            or not isinstance(artifact.get("digest"), str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", artifact["digest"])
+        ):
+            raise ValueError(f"Scheduling hints at '{path}' contain invalid source or artifact provenance labels")
+        for identifier, roles in hints["tasks"].items():
+            if not isinstance(identifier, str) or not isinstance(roles, dict) or set(roles) - {"baseline", "candidate"}:
+                raise ValueError(f"Scheduling hints at '{path}' require per-ID baseline/candidate costs")
+            if any(duration(value) is None for value in roles.values()):
+                raise ValueError(
+                    f"Scheduling hints for '{identifier}' must be finite positive seconds no greater than {MAX_HINT_SECONDS}"
+                )
+    measured = hints["tasks"] if hints is not None else {}
+    known = [value for identifier, roles in measured.items() if identifier in entries for value in roles.values()]
+    historical = [value for value in published.values() if value is not None]
+    fallback = max(historical) if historical else float(statistics.median(known)) if known else 1.0
+    costs = {}
+    for identifier in sorted(entries):
+        roles = measured.get(identifier, {})
+        costs[identifier] = {
+            role: float(roles.get(role, published[identifier] or fallback)) for role in ("baseline", "candidate")
+        }
+    return {"schema": 1, "timings_sha256": digest(path) if hints is not None else None, "costs": costs}
+
+
+def schedule(tasks: list[dict], costs: dict) -> list[dict]:
+    """Start expensive individual roles first without separating paired hosts."""
+    return sorted(tasks, key=lambda task: (-costs[task["id"]][task["role"]], task_key(task)))
 
 
 def assignments(manifest: dict, suite: Path) -> list[list[str]]:
     """Balance whole pairs using immutable historical durations as hints only."""
-    durations = {}
-    for identifier, entry in registry(suite).items():
-        value = (entry["run"] or {}).get("duration_seconds", 0)
-        durations[identifier] = value if type(value) in {int, float} and math.isfinite(value) and value > 0 else 0
+    costs = scheduling(suite)["costs"]
+    durations = {identifier: sum(roles.values()) for identifier, roles in costs.items()}
     identifiers = {task["id"] for task in manifest["tasks"]}
     buckets: list[list[str]] = [[] for _ in range(PROFILE["shards"])]
     weights = [0.0] * len(buckets)
-    for identifier in sorted(identifiers, key=lambda value: (-durations.get(value, 0), value)):
+    for identifier in sorted(identifiers, key=lambda value: (-durations[value], value)):
         index = min(range(len(buckets)), key=lambda value: (weights[value], len(buckets[value]), value))
         buckets[index].append(identifier)
-        weights[index] += 2 * durations.get(identifier, 0)
+        weights[index] += durations[identifier]
     return buckets
 
 
@@ -142,6 +214,8 @@ def load_plan(root: Path) -> dict:
     for name in ("tasks", "policy", "mode", "full_catalog", "runtime_sha256"):
         if manifest.get(name) != expected[name]:
             raise ValueError(f"Evidence plan changed canonical tasks or budgets: {name}")
+    if manifest.get("scheduling") != scheduling(suite):
+        raise ValueError("Evidence scheduling hints differ from the frozen source file or resolved costs")
     if manifest.get("shards") != assignments(manifest, suite):
         raise ValueError("Evidence shard assignment differs from the deterministic paired plan")
     for role in ("baseline", "candidate"):
@@ -214,6 +288,7 @@ def create_plan(options: argparse.Namespace) -> None:
         requirements_sha256=digest(output / "artifacts/requirements.txt"),
         suite_sha256=suite_identity(output / "source"),
     )
+    manifest["scheduling"] = scheduling(output / "source")
     manifest["shards"] = assignments(manifest, output / "source")
     manifest["dependency_image"] = json.loads((output / "artifacts/runtime.json").read_text())
     write_json(output / "manifest.json", manifest)
@@ -361,7 +436,7 @@ def run(options: argparse.Namespace) -> None:
     request = json.loads((source / "artifacts/request.json").read_text())
     runner = context(request)
     if type(options.shard) is not int or not 0 <= options.shard < PROFILE["shards"]:
-        raise ValueError("Evidence shard must be an integer from zero through seven")
+        raise ValueError(f"Evidence shard must be an integer from zero through {PROFILE['shards'] - 1}")
     output = options.output.resolve()
     if output == source or source in output.parents:
         raise ValueError("Store shard outputs outside the immutable plan")
@@ -408,7 +483,7 @@ def run(options: argparse.Namespace) -> None:
         },
     )
 
-    tasks = schedule([task for task in manifest["tasks"] if task["id"] in assigned], source / "source")
+    tasks = schedule([task for task in manifest["tasks"] if task["id"] in assigned], manifest["scheduling"]["costs"])
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=PROFILE["workers"]) as pool:
             futures = [
@@ -482,6 +557,8 @@ def verify_execution(manifest: dict, records: list[dict], reports: Path) -> list
         return []
     errors = []
     try:
+        if manifest.get("scheduling") != scheduling(reports / "source"):
+            raise ValueError("Hosted scheduling hints differ from the frozen source file or resolved costs")
         if manifest.get("profile") != PROFILE or manifest.get("shards") != assignments(manifest, reports / "source"):
             raise ValueError("Hosted execution profile or shard plan differs from the reviewed policy")
         execution = json.loads((reports / "execution.json").read_text())
@@ -634,7 +711,9 @@ def collect_shards(options: argparse.Namespace) -> None:
     (output / "checksums.json").unlink()
     receipts = sorted(options.shards.rglob("shard.json"))
     if len(receipts) != PROFILE["shards"]:
-        raise ValueError("The complete eight-shard matrix is required; re-run all jobs after infrastructure failures")
+        raise ValueError(
+            f"The complete {PROFILE['shards']}-shard matrix is required; re-run all jobs after infrastructure failures"
+        )
     entries = []
     seen = set()
     records = []

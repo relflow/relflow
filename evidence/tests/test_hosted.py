@@ -14,7 +14,7 @@ from threading import Barrier, Lock
 import hosted
 import lab_run
 import pytest
-from evidence_ci import digest, plan, registry, task_key, write_json
+from evidence_ci import digest, plan, registry, suite_identity, task_key, write_json
 
 
 def wheel(path, content):
@@ -24,7 +24,7 @@ def wheel(path, content):
     return path
 
 
-def source(root, count=16):
+def source(root, count=24):
     family = root / "experiments/family"
     family.mkdir(parents=True)
     for index in range(count):
@@ -37,9 +37,26 @@ def source(root, count=16):
     return root
 
 
+def hints(root, tasks):
+    value = {
+        "schema": 1,
+        "source": {
+            "repository": "relflow/relflow",
+            "run_id": 123,
+            "run_attempt": 1,
+            "head_sha": "a" * 40,
+            "executor_sha": "b" * 40,
+            "artifact": {"id": 456, "name": "relflow-evidence-attempt-1", "digest": "sha256:" + "c" * 64},
+        },
+        "tasks": tasks,
+    }
+    (root / "timings.json").write_text(json.dumps(value))
+    return value
+
+
 @pytest.fixture
 def planned(tmp_path, monkeypatch, request):
-    suite = source(tmp_path / "suite", count=getattr(request, "param", 16))
+    suite = source(tmp_path / "suite", count=getattr(request, "param", 24))
     inputs = tmp_path / "inputs"
     wheel(inputs / "baseline/relflow-0.4.5-py3-none-any.whl", "baseline runtime\n")
     wheel(inputs / "candidate/relflow-0.4.5-py3-none-any.whl", "candidate runtime\n")
@@ -89,15 +106,15 @@ def planned(tmp_path, monkeypatch, request):
     return output, json.loads((output / "manifest.json").read_text()), suite
 
 
-def test_eight_shards_cover_every_original_pair_without_changing_the_protocol(planned):
+def test_twelve_shards_cover_every_original_pair_without_changing_the_protocol(planned):
     output, manifest, suite = planned
     before = deepcopy(manifest)
     shards = hosted.assignments(manifest, suite)
-    assert len(shards) == 8
+    assert len(shards) == 12
     assert all(shards)
     identifiers = [identifier for shard in shards for identifier in shard]
     assert Counter(identifiers) == Counter(registry(suite).keys())
-    assert len(identifiers) == 16
+    assert len(identifiers) == 24
     assert shards == hosted.assignments(manifest, suite)
     assert manifest == before
     original = plan(
@@ -132,6 +149,114 @@ def test_hosted_planning_reads_selected_suite_as_data_without_importing_its_help
     )
     shards = hosted.assignments(manifest, suite)
     assert set(identifier for shard in shards for identifier in shard) == set(registry(suite))
+
+
+def test_unknown_proofs_have_positive_costs_and_spread_across_twelve_shards(tmp_path):
+    suite = source(tmp_path / "suite")
+    manifest = plan(
+        run_id="unmeasured", candidate={}, baseline={}, evidence_sha="suite", executor_sha="executor", root=suite
+    )
+    frozen = hosted.scheduling(suite)
+    assert frozen["timings_sha256"] is None
+    assert all(value == 1.0 for roles in frozen["costs"].values() for value in roles.values())
+    buckets = hosted.assignments(manifest, suite)
+    assert len(buckets) == 12 and all(len(bucket) == 2 for bucket in buckets)
+
+
+def test_unknown_proofs_use_the_largest_valid_published_hint(tmp_path, monkeypatch):
+    suite = source(tmp_path / "suite")
+    entries = registry(suite)
+    for identifier, value in zip(entries, [10, 2, 0, -1, float("nan"), float("inf"), True, 10**1000], strict=False):
+        entries[identifier]["run"] = {"duration_seconds": value}
+    monkeypatch.setattr(hosted, "registry", lambda root: entries)
+    costs = hosted.scheduling(suite)["costs"]
+    assert costs["P901"] == {"baseline": 10.0, "candidate": 10.0}
+    assert costs["P902"] == {"baseline": 2.0, "candidate": 2.0}
+    assert all(costs[identifier] == {"baseline": 10.0, "candidate": 10.0} for identifier in list(entries)[2:])
+
+
+def test_missing_role_hints_use_the_registered_median_without_creating_unknown_tasks(tmp_path):
+    suite = source(tmp_path / "suite")
+    hints(suite, {"P901": {"baseline": 2, "candidate": 6}, "P999": {"baseline": 86400, "candidate": 86400}})
+    frozen = hosted.scheduling(suite)
+    assert frozen["timings_sha256"] == digest(suite / "timings.json")
+    assert frozen["costs"]["P902"] == {"baseline": 4.0, "candidate": 4.0}
+    assert set(frozen["costs"]) == set(registry(suite))
+
+
+def test_measured_expensive_proof_is_balanced_and_scheduled_before_cheap_work(tmp_path):
+    suite = source(tmp_path / "suite")
+    script = suite / "experiments/family/proof_0.py"
+    script.write_text(script.read_text().replace("P901", "P082"))
+    manifest = plan(
+        run_id="scheduled", candidate={}, baseline={}, evidence_sha="suite", executor_sha="executor", root=suite
+    )
+    original = deepcopy(manifest)
+    costs = {identifier: {"baseline": 4.0, "candidate": 4.0} for identifier in registry(suite)}
+    costs["P082"] = {"baseline": 350.0, "candidate": 330.0}
+    hints(suite, costs)
+    frozen = hosted.scheduling(suite)
+    assert registry(suite)["P082"]["run"] is None
+    ordered = hosted.schedule(manifest["tasks"], frozen["costs"])
+    assert [(task["id"], task["role"]) for task in ordered[:2]] == [("P082", "baseline"), ("P082", "candidate")]
+    buckets = hosted.assignments(manifest, suite)
+    assert next(bucket for bucket in buckets if "P082" in bucket) == ["P082"]
+    after = plan(
+        run_id="scheduled", candidate={}, baseline={}, evidence_sha="suite", executor_sha="executor", root=suite
+    )
+    assert after["tasks"] == original["tasks"]
+    assert after["runtime_sha256"] == original["runtime_sha256"]
+
+
+def test_pair_assignment_uses_both_role_costs_while_task_order_uses_each_role(tmp_path):
+    suite = source(tmp_path / "suite")
+    costs = {identifier: {"baseline": 1, "candidate": 1} for identifier in registry(suite)}
+    costs.update(P901={"baseline": 100, "candidate": 1}, P902={"baseline": 60, "candidate": 60})
+    hints(suite, costs)
+    manifest = plan(
+        run_id="asymmetric", candidate={}, baseline={}, evidence_sha="suite", executor_sha="executor", root=suite
+    )
+    buckets = hosted.assignments(manifest, suite)
+    assert buckets[0] == ["P902"]
+    assert buckets[1] == ["P901"]
+    selected = [task for task in manifest["tasks"] if task["id"] in {"P901", "P902"}]
+    ordered = hosted.schedule(selected, hosted.scheduling(suite)["costs"])
+    assert [(task["id"], task["role"]) for task in ordered] == [
+        ("P901", "baseline"),
+        ("P902", "baseline"),
+        ("P902", "candidate"),
+        ("P901", "candidate"),
+    ]
+
+
+@pytest.mark.parametrize("value", [0, -1, True, float("nan"), float("inf"), 1e308, 10**1000])
+def test_malformed_timing_costs_fail_before_assignment(tmp_path, value):
+    suite = source(tmp_path / "suite")
+    hints(suite, {"P901": {"baseline": value}})
+    with pytest.raises(ValueError, match="Scheduling hints.*finite positive"):
+        hosted.scheduling(suite)
+
+
+@pytest.mark.parametrize("value", ["{", json.dumps({"schema": True, "source": {}, "tasks": {}})])
+def test_optional_timing_file_may_be_missing_but_not_malformed(tmp_path, value):
+    suite = source(tmp_path / "suite")
+    (suite / "timings.json").write_text(value)
+    with pytest.raises(ValueError, match="Scheduling hints"):
+        hosted.scheduling(suite)
+
+
+@pytest.mark.parametrize("changed", ["resolved-costs", "source-hints"])
+def test_resealed_plan_rejects_changed_frozen_scheduling_inputs(planned, changed):
+    prepared, manifest, suite = planned
+    if changed == "resolved-costs":
+        manifest["scheduling"]["costs"]["P901"]["baseline"] += 1
+    else:
+        hints(prepared / "source", {"P901": {"baseline": 300, "candidate": 250}})
+        manifest["suite_sha256"] = suite_identity(prepared / "source")
+    (prepared / "manifest.json").write_text(json.dumps(manifest))
+    reseal(prepared)
+    with pytest.raises(ValueError, match="scheduling hints.*frozen"):
+        hosted.load_plan(prepared)
 
 
 def test_container_keeps_the_original_caps_and_excludes_runner_credentials(tmp_path, monkeypatch):
@@ -277,7 +402,7 @@ def shards(planned, tmp_path, monkeypatch):
 
     def execute(*, candidate_passes=True):
         state["candidate_passes"] = candidate_passes
-        for index in range(8):
+        for index in range(12):
             state["index"] = index
             monkeypatch.setenv("RUNNER_NAME", f"runner-{index}")
             monkeypatch.setenv("GITHUB_JOB", "shard")
@@ -333,17 +458,17 @@ def change_execution(shard, change):
     reseal(shard)
 
 
-def test_full_collection_preserves_eight_actual_hosts_and_all_original_measurements(shards, tmp_path):
+def test_full_collection_preserves_twelve_actual_hosts_and_all_original_measurements(shards, tmp_path):
     prepared, manifest, suite, root, execute, state = shards
     execute()
     output = tmp_path / "collected"
     summary = collected(prepared, root, output)
     assert summary["passed"] and summary["complete"]
-    assert summary["fresh_tasks"] == 32 and summary["reused_baseline_tasks"] == 0
-    assert len(state["launches"]) == 32
+    assert summary["fresh_tasks"] == 48 and summary["reused_baseline_tasks"] == 0
+    assert len(state["launches"]) == 48
     execution = json.loads((output / "execution.json").read_text())
     assert "host" not in execution["identity"]
-    assert len({item["identity"]["identity"]["host"]["node"] for item in execution["shards"]}) == 8
+    assert len({item["identity"]["identity"]["host"]["node"] for item in execution["shards"]}) == 12
     for shard in root.iterdir():
         index = json.loads((shard / "shard.json").read_text())["index"]
         for path in (shard / "results").rglob("*.json"):
@@ -357,13 +482,13 @@ def test_completed_failed_learning_checks_are_never_retried_and_only_collector_f
     prepared, manifest, suite, root, execute, state = shards
     execute(candidate_passes=False)
     assert len(state["launches"]) == len(manifest["tasks"])
-    assert all((root / f"downloaded-{index}/checksums.json").is_file() for index in range(8))
+    assert all((root / f"downloaded-{index}/checksums.json").is_file() for index in range(12))
     summary = collected(prepared, root, tmp_path / "failed-learning")
     assert summary["complete"] and not summary["passed"]
-    assert len(summary["regressions"]) == 16
+    assert len(summary["regressions"]) == 24
 
 
-@pytest.mark.parametrize("planned", [8], indirect=True)
+@pytest.mark.parametrize("planned", [12], indirect=True)
 def test_same_host_baseline_and_candidate_can_overlap_with_two_active_containers(shards, tmp_path, monkeypatch):
     prepared, manifest, suite, root, execute, state = shards
     original = lab_run.subprocess.run
@@ -398,13 +523,13 @@ def test_same_host_baseline_and_candidate_can_overlap_with_two_active_containers
     monkeypatch.setattr(lab_run.subprocess, "run", docker)
     execute()
     assert not active and peak == 2
-    assert len(overlaps) == 8
+    assert len(overlaps) == 12
     for overlapping in overlaps:
         assert len({identifier for identifier, role in overlapping}) == 1
         assert {role for identifier, role in overlapping} == {"baseline", "candidate"}
     summary = collected(prepared, root, tmp_path / "overlapping-roles")
     assert summary["passed"] and summary["complete"]
-    assert summary["fresh_tasks"] == len(manifest["tasks"]) == 16
+    assert summary["fresh_tasks"] == len(manifest["tasks"]) == 24
 
 
 def test_resealed_launch_times_cannot_exceed_two_active_containers(shards, tmp_path):
@@ -437,7 +562,7 @@ def test_collection_rejects_missing_duplicate_or_tampered_artifacts(shards, tmp_
     elif fault == "unexpected-shard":
         receipt_path = shard / "shard.json"
         receipt = json.loads(receipt_path.read_text())
-        receipt["index"] = 8
+        receipt["index"] = 12
         rewrite(shard, receipt_path, receipt)
     else:
         next((shard / "logs").rglob("*.txt")).write_text("tampered log\n")
@@ -515,7 +640,7 @@ def test_rehashed_execution_changes_cannot_weaken_policy_or_mix_hosts(shards, tm
         else:
             execution["runner"]["run_attempt"] = 2
 
-    for index in range(8 if fault == "common-base-image" else 1):
+    for index in range(12 if fault == "common-base-image" else 1):
         change_execution(root / f"downloaded-{index}", change)
     summary = collected(prepared, root, tmp_path / "invalid-execution")
     assert not summary["passed"] and summary["errors"]
