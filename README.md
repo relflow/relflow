@@ -307,13 +307,14 @@ For package development, see [CONTRIBUTING.md](CONTRIBUTING.md).
 manual validation. Each run builds one package wheel and source distribution;
 the full Python/platform test matrix installs that same wheel. Documentation
 checks and complete Evidence validation run alongside the matrix. Evidence
-reuses an authenticated full report when the requested package payloads,
-source inputs, comparison, and actual lab runtime match. Other requests run
-the full suite, with unchanged baselines eligible for verified reuse.
+runs the full suite freshly for baseline and candidate, preserving every
+experiment's original seeds, budgets, and checks.
 `CI / required` rejects errors, cancellations,
-and missing required jobs. Evidence runs on lab through the pinned trusted
-executor, with the candidate commit supplying the suite from this repository. See the
-[lab guide](evidence/lab.md).
+and missing required jobs. Evidence runs across twelve GitHub-hosted CPU shards
+through the pinned trusted executor, with both roles for each proof on one
+runner and a separate full-catalog collector. Dependency caches accelerate setup;
+learning results execute freshly. The candidate commit supplies the suite from
+this repository. See the [hosted guide](evidence/hosted.md).
 
 Main pushes compare against the pre-push revision. Successful main CI also
 publishes coverage. Version releases retain verified evidence reports and
@@ -322,7 +323,6 @@ Hosted documentation reads those versioned assets; ordinary CI creates no
 publication commits or follow-up PRs. Nightly
 dependency compatibility and configured accelerator checks remain independent.
 Local pre-commit continues to run formatting, lint, types, and fast tests.
-Manual CI accepts `force_fresh_evidence=true` to execute every task again.
 Release publication consumes the shared distributions, verifies existing tag
 targets and published bytes, and repairs incomplete publication using its
 original checked build. It never overwrites a different published artifact.

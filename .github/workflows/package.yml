@@ -5,6 +5,8 @@ on:
     outputs:
       artifact_name:
         value: ${{ jobs.build.outputs.artifact_name }}
+      run_attempt:
+        value: ${{ jobs.build.outputs.run_attempt }}
       source_sha:
         value: ${{ jobs.build.outputs.source_sha }}
       version:
@@ -23,6 +25,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       artifact_name: ${{ steps.inventory.outputs.artifact_name }}
+      run_attempt: ${{ steps.inventory.outputs.run_attempt }}
       source_sha: ${{ steps.inventory.outputs.source_sha }}
       version: ${{ steps.inventory.outputs.version }}
       wheel_name: ${{ steps.inventory.outputs.wheel_name }}
@@ -46,7 +49,7 @@ jobs:
         run: python scripts/release.py inventory package --source-sha "$SOURCE_SHA"
       - uses: actions/upload-artifact@v4
         with:
-          name: python-package-distributions
+          name: ${{ steps.inventory.outputs.artifact_name }}
           path: package/
           retention-days: 14
           if-no-files-found: error

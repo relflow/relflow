@@ -13,13 +13,13 @@ import tomllib
 from pathlib import Path
 
 from evidence_ci import task_key
-from experiments.source import fingerprint, frontmatter, metadata
+from experiments.source import describe, fingerprint, frontmatter, metadata
 from record import select, validate
-from reuse import SHA, archive, attempt, verify_receipt
+from reuse import SHA, archive, artifact_name, attempt, helper_sha, trusted, verify_receipt
 from reuse import artifact as verified_artifact
 
 REPOSITORY = "relflow/relflow"
-EXECUTOR = "5d8adbb44fefb5d82ee5e2246db62dc26f94c5c2"
+EXECUTOR = "c224624ddbbcd247d6fbd6da9227a6e439e4f19e"
 RESULTS = {"evidence-result", "evidence-report"}
 MARKERS = ("<!-- evidence-results:start -->", "<!-- evidence-results:end -->")
 
@@ -85,7 +85,7 @@ def selection_changes(before: dict[str, str], after: dict[str, str]) -> bool:
                     return False
             elif re.fullmatch(r"evidence/experiments/[^/]+/[^/]+\.py", path):
                 left, right = metadata(old), metadata(new)
-                if not left.get("evidence-id") or left.get("evidence-id") != right.get("evidence-id"):
+                if describe(old)["evidence-id"] != describe(new)["evidence-id"]:
                     return False
                 left = {key: value for key, value in left.items() if key not in RESULTS}
                 right = {key: value for key, value in right.items() if key not in RESULTS}
@@ -248,10 +248,10 @@ def publish(root: Path, output: Path, run_id: int, *, version: str | None = None
     compatible(root, main, checkout)
     output.mkdir(parents=True, exist_ok=False)
     reports, inputs = output / "retained", output / "retained-inputs"
-    verified_artifact(run_id, "relflow-evidence", reports)
+    verified_artifact(run_id, artifact_name(run, "relflow-evidence"), reports)
     retained_manifest = json.loads((reports / "manifest.json").read_text())
     current_inputs = output / "current-inputs"
-    verified_artifact(run_id, "evidence-inputs", current_inputs)
+    verified_artifact(run_id, artifact_name(run, "evidence-inputs"), current_inputs)
     request = json.loads((current_inputs / "request.json").read_text())
     run = attempt(run, request.get("run_attempt"))
     reused = retained_manifest["run_id"] != f"gh-{run_id}-{run['run_attempt']}"
@@ -269,6 +269,8 @@ def publish(root: Path, output: Path, run_id: int, *, version: str | None = None
     }
     if not SHA.fullmatch(baseline) or request != expected_request:
         raise ValueError("Authenticated input request does not bind the exact current main CI attempt")
+    if retained_manifest.get("backend") == "github-hosted-docker":
+        trusted(run, retained_manifest, helper=helper_sha(run), executor=EXECUTOR, root=root, request=request)
     names = [("evidence-reused-inputs", inputs)] if reused else []
     if reused:
         names.append(("evidence-reuse", output / "reuse-context"))

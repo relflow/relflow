@@ -18,10 +18,6 @@ on:
         description: Optional full comparison-base SHA for manual Evidence validation
         type: string
         required: false
-      force_fresh_evidence:
-        description: Execute every Evidence task without reusing completed reports or baselines
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -54,13 +50,11 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
-      id-token: write
       actions: read
     uses: ./.github/workflows/evidence.yml
     with:
       suite_ref: ${{ inputs.evidence_ref || github.sha }}
       distribution_artifact: ${{ needs.package.outputs.artifact_name }}
-      force_fresh: ${{ inputs.force_fresh_evidence || false }}
       baseline_ref: ${{ inputs.evidence_base || '' }}
 
   required:
@@ -75,6 +69,9 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REPOSITORY: ${{ github.repository }}
           PR_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          PACKAGE_ATTEMPT: ${{ needs.package.outputs.run_attempt }}
+          EVIDENCE_ATTEMPT: ${{ needs.evidence.outputs.run_attempt }}
         shell: python
         run: |
           import json
@@ -91,3 +88,5 @@ jobs:
           }
           actual = {name: job["result"] for name, job in json.loads(os.environ["RESULTS"]).items()}
           assert actual == expected, {"expected": expected, "actual": actual}
+          for name in ("PACKAGE_ATTEMPT", "EVIDENCE_ATTEMPT"):
+              assert os.environ[name] == os.environ["RUN_ATTEMPT"], f"{name} belongs to another attempt; re-run all jobs"
