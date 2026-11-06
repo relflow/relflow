@@ -21,6 +21,11 @@
 # evidence-group: Calibration
 # ---
 #
+# This is a sanity check for interpreting learning experiments: can the same training setup learn an
+# obvious relationship and avoid reporting predictive skill when that relationship is removed? The
+# visible Boolean is called leak deliberately; it supplies a perfect signal in one arm, rather than
+# representing an accidental hidden data leak.
+#
 # ## Example
 #
 # ```yaml
@@ -34,6 +39,11 @@
 # ```
 #
 # leak is the visible yes/no signal; the other inputs are unrelated. target is hidden.
+#
+# In the signal arm, leak: true always accompanies target: true, and false accompanies false. The
+# numeric x, segment, and tags are unrelated distractions. In the noise arm, leak is generated
+# independently: the same visible true can accompany either target. A single illustrated row cannot
+# show the difference; it is a relationship across many independent examples.
 #
 # ```{typst}
 # //| label: fig-evidence-calibration-signal-vs-noise
@@ -50,13 +60,26 @@
 #
 # ## Comparison
 #
-# Train one model where input and answer match, and another where they are unrelated. Both receive the same training budget.
+# Train one model where input and answer match, and another where they are unrelated. Both receive
+# the same training budget.
+#
+# Two separately trained models use the same schema, initialization seed, and training budget. Only
+# the relationship between leak and target changes. Train, validation, and test use independent
+# streams, so remembering random training labels cannot solve the noise test. The target is
+# balanced, preventing a dominant class from masquerading as strong classification.
 #
 # ## Result
 #
 # {{< evidence P017 status >}}
 #
-# The real signal is learned; unrelated answers remain near chance. This basic check makes harder learning results easier to interpret.
+# The real signal is learned; unrelated answers remain near chance. This basic check makes harder
+# learning results easier to interpret.
+#
+#
+# AUC measures whether positive targets tend to receive higher scores than negative ones: 0.5 is
+# chance ranking and 1 is perfect ranking. The checks require high signal AUC, noise AUC near 0.5,
+# and a large gap between them. This basic control does not prove calibrated probabilities or
+# establish that more complex tasks are free from leakage.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

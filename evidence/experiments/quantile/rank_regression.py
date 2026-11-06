@@ -22,6 +22,11 @@
 # evidence-group: Representation
 # ---
 #
+# The model sees one amount and must predict a hidden cost. Amounts are heavily skewed, so this task
+# tests whether representing both quantities by their positions in the training distribution still
+# supports useful predictions after decoding back to cost units. The generating percentile itself is
+# never supplied as an input.
+#
 # ## Example
 #
 # ```yaml
@@ -41,15 +46,30 @@
 # )))
 # ```
 #
+# For the illustrative amount of 100, the generator's average cost is `200 + 3 × 100 = 500`. The
+# displayed 506 includes a possible +6 noise draw. Predicting exactly 506 is not implied by the
+# visible amount: the random residual is hidden. Good prediction should capture the systematic
+# relationship while leaving irreducible noise.
+#
 # ## Comparison
 #
 # Score new records in source units and shuffle amounts while retaining their original costs. Check that evaluation does not change the learned distributions.
+#
+# The shuffled control retains every amount and every target cost but pairs them with different rows.
+# This preserves their distributions while removing the row-level relationship. A separate probe
+# changes supplied hidden costs by a large amount; predictions should not move because cost is
+# excluded from embedding. Evaluation must also leave both fitted numerical distributions unchanged.
 #
 # ## Result
 #
 # {{< evidence P067 status >}}
 #
 # The learned relationship remains useful after conversion back. Shuffling removes accuracy; this does not establish behavior beyond the learned numerical range.
+#
+# The error readout is source-unit RMSE divided by the error of always predicting the training mean.
+# Smaller values mean a larger improvement over that constant guess, not a percentage of correct
+# classifications. A useful inverse conversion does not make percentile regression an uncertainty
+# interval, and this test stays within the generator's fitted numerical range.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

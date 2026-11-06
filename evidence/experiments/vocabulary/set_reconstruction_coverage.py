@@ -25,6 +25,11 @@
 # evidence-group: Vocabulary
 # ---
 #
+# A Set prediction gives a separate probability for each possible member. Red and blue can both
+# appear, so their probabilities need not sum to one. This experiment removes useful context and asks
+# whether the model learns the population frequency of each membership decision before testing how
+# unknown member names affect reported coverage.
+#
 # ## Example
 #
 # ```yaml
@@ -44,15 +49,33 @@
 # )))
 # ```
 #
+# The illustrated set containing both colors is one sampled outcome. Red occurs with probability 0.9
+# and blue independently with probability 0.2, making their joint occurrence 0.18 in the generator.
+# These are population calculations, not measured model scores. An empty set is also a valid complete
+# answer; it does not mean the membership labels were omitted.
+#
 # ## Comparison
 #
-# Compare internal output allocations and test sets that also contain unfamiliar members. Known positive and negative annotations remain usable.
+# Compare internal output allocations and test sets that also contain unfamiliar members. Known
+# positive and negative annotations remain usable.
+#
+# The allocation control changes unused storage while keeping the two observed names and training
+# distribution fixed. A separate evaluation includes `red` plus a novel member, a novel member alone,
+# empty, blue alone, and null. Known and unknown positive memberships are counted separately. Empty
+# and blue-only answers are fully representable, while answers containing the novel name are not.
 #
 # ## Result
 #
 # {{< evidence P063 status >}}
 #
-# The member probabilities recover their population rates. Unknown members still reduce coverage and cannot be emitted; annotations here are complete sets, not partially supplied labels.
+# The member probabilities recover their population rates. Unknown members still reduce coverage and
+# cannot be emitted; annotations here are complete sets, not partially supplied labels.
+#
+# Member coverage concerns individual positive memberships; complete-set coverage concerns whether an
+# entire valued answer can be named. Rebatching must preserve both counts and the resulting scores.
+# Expected Bernoulli log loss also uses known negative annotations: a complete list omitting blue
+# marks blue absent. This experiment does not treat omitted names as unspecified or partially
+# annotated targets.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

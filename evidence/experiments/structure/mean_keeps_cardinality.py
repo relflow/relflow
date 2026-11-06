@@ -29,6 +29,11 @@
 #
 # ## Example
 #
+# The model predicts two hidden quantities from the same collection: its average amount and its total. A
+# single `1.25` gives both answers as `1.25`, as illustrated. Six copies of that amount would keep the
+# average at `1.25` but change the total to `7.5`. Generated records contain one to six copies of one common
+# amount, so the number of copies is the essential extra information needed for the total.
+#
 # ```yaml
 # transactions:
 #   - amount: 1.25
@@ -53,9 +58,20 @@
 #
 # ## Comparison
 #
+# Item attention is disabled and the branch uses Mean reduction. The average content of identical values is
+# unchanged by duplication, while the branch's count lane can still distinguish how many items were present.
+# The explicit one-versus-six probe tests whether the downstream prediction uses that retained count. It
+# does not give the model a separate user-authored count feature or require the average itself to change.
+#
 # Compare one amount with six copies of the same amount. Their averages match, but their totals differ.
 #
 # ## Result
+#
+# The two normalized errors compare average and total predictions with their respective constant training-
+# target guesses. The additional readout shows the predicted total for the concrete six-copy probe, whose
+# mathematical target is `7.5`; the paired error is available in the details. A successful total prediction
+# therefore should not be read as evidence that averaging destroys all cardinality. The experiment is
+# restricted to equal values within each record and counts from one through six.
 #
 # {{< evidence P041 status >}}
 #

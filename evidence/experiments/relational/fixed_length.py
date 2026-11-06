@@ -23,6 +23,11 @@
 #
 # ## Example
 #
+# The same eight visible numbers can support four different questions. In the illustrative bag their total
+# is `1.3`, their average is `0.1625`, their minimum is `-1.0`, and their maximum is `1.2`. The visible
+# `operation: max` therefore selects the hidden answer `1.2`. Each generated bag produces all four requests,
+# so its values alone cannot determine which answer is wanted; the instruction must also be used.
+#
 # ```yaml
 # bag: 0
 # items:
@@ -55,9 +60,21 @@
 #
 # ## Comparison
 #
+# Reordering whole items leaves all four mathematical answers unchanged. Hiding `operation`, however, makes
+# the four requests for a bag indistinguishable to the model while their target answers remain different.
+# The control checks both that predictions collapse within each hidden-instruction bag and that this loss of
+# information hurts several operations. Evaluation uses fresh bags, with an operation-specific constant
+# baseline rather than one average across incompatible tasks.
+#
 # Hide the operation while keeping the different answers. Also reorder items without changing the requested calculation.
 #
 # ## Result
+#
+# The compact readout highlights the total, while the detailed metrics retain separate errors for sum, mean,
+# minimum, and maximum. An error ratio below one improves on that operation's training-mean guess;
+# permutation drift measures sensitivity to item order. Success requires both useful intact predictions and
+# the expected information loss when the instruction disappears. Every training and evaluation bag has eight
+# values, so this does not test extrapolation to longer lists.
 #
 # {{< evidence P031 status >}}
 #

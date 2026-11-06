@@ -28,6 +28,11 @@
 # evidence-group: Representation
 # ---
 #
+# A declared Enum class is available as an answer before the model has seen an example of what that
+# answer means. This experiment gives every model the same four output names but withholds the fourth
+# class's training examples initially. It then measures what changes when examples of that class are
+# included.
+#
 # ## Example
 #
 # ```yaml
@@ -47,15 +52,33 @@
 # )))
 # ```
 #
+# The illustrative `x = −0.94` lies near −1, the region labeled `blue`. The other regions are centered
+# at −3, +1, and +3, with the +3 region labeled `green` and initially withheld. Independent deviations
+# produce new numeric observations while keeping regions separate. The label is hidden, so the model
+# must associate each region with its declared name.
+#
 # ## Comparison
 #
-# Measure the withheld class before and after continued fitting that includes it. Continue supplying old classes to check retention.
+# Measure the withheld class before and after continued fitting that includes it. Continue supplying
+# old classes to check retention.
+#
+# After initial fitting on three classes, the model continues with all four classes represented. A
+# separate model sees all four during one fitting phase, checking that the withheld region is
+# learnable within that phase's budget. This control matches a phase, not the staged model's
+# cumulative number of updates. Existing-class examples remain present during continuation.
 #
 # ## Result
 #
 # {{< evidence P070 status >}}
 #
-# A declared output slot alone supplies no reliable understanding. Examples teach the withheld class; the old classes are retained with rehearsal.
+# A declared output slot alone supplies no reliable understanding. Examples teach the withheld class;
+# the old classes are retained with rehearsal.
+#
+# Both seen-class and withheld-class accuracy matter: always answering green would be perfect on the
+# isolated withheld test and wrong on every old class. Pre-example green accuracy is diagnostic and
+# has no success threshold. The class's count must initially be zero while its output slot remains
+# available; later success must accompany actual training exposure and retained performance on old
+# classes.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

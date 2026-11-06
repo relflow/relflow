@@ -1,10 +1,10 @@
 # %% [markdown]
 # ---
-# title: Do reconstruction embeddings separate unseen transaction styles?
+# title: Do reconstruction embeddings separate transaction styles in new records?
 # categories:
 # - Representation
-# description: Fit four clusters without labels, then measure their agreement with hidden transaction styles on independent
-#   records and compare trained, untrained, shuffled-view, and raw representations.
+# description: Fit four clusters without labels, then measure their agreement with hidden transaction styles
+#   on independent records and compare trained, untrained, shuffled-view, and raw representations.
 # execute:
 #   enabled: false
 #   eval: false
@@ -32,6 +32,12 @@
 # evidence-group: Representation
 # ---
 #
+# This experiment asks whether learning to reconstruct related fields makes a
+# useful representation of a whole record. There are four generated spending
+# styles, but the model never receives a style label. After training, a separate
+# clustering step groups the exported vectors and the evaluator checks whether
+# those groups agree with the hidden styles.
+#
 # ## Example
 #
 # ```yaml
@@ -42,6 +48,17 @@
 #
 # An account has three imperfect views of its spending style. The hidden style
 # is never part of the record or model; only the evaluator receives it.
+#
+# In the example, household and frequent are two noisy clues about an account.
+# The first two cashflow coordinates carry another style clue; the remaining
+# fourteen are unrelated noise. A similar account can have different aliases and
+# individual measurements. The Enum names are categorical codes: their English
+# wording is not interpreted by a language model.
+#
+# During reconstruction, some fields are hidden and predicted from the others.
+# The hope is that relationships shared across these imperfect views become
+# useful in the account vector. The hidden style itself is never a reconstruction
+# answer, and its label is excluded from clustering.
 #
 # ```{typst}
 # //| label: fig-evidence-semantic-clusters
@@ -56,6 +73,19 @@
 #
 # ## Comparison
 #
+# The untrained encoder checks how much structure already comes from the inputs
+# and architecture. Independently shuffling the views during training retains
+# each field's values but breaks their within-record relationship. The raw
+# baseline uses every visible coordinate with training-only scaling. All arms
+# then face the same clustering and neighbor-scoring procedure.
+#
+# Four clusters are supplied to the clustering algorithm. ARI compares their
+# memberships with the true styles without caring about cluster names. A second
+# score asks how many of a new record's five nearest training neighbors share
+# its hidden style; four matching neighbors would give agreement of 0.8. Those
+# labels are used only for evaluation, never to select the clusters.
+#
+#
 # Compare the same fixed clustering and neighborhood rules on reconstruction
 # embeddings, identically initialized untrained embeddings, embeddings trained
 # with independently shuffled views, and all raw input coordinates.
@@ -64,9 +94,10 @@
 #
 # {{< evidence P080 status >}}
 #
-# This experiment tests four synthetic styles, rather than real financial
-# categories. An exported vector alone does not establish useful semantic
-# structure; the trained representation need not outperform raw features.
+# Compare both the absolute agreement checks and the trained-versus-control
+# scores. Training may meet its criteria without beating raw features. The
+# experiment concerns new records of four shared synthetic styles and a supplied
+# cluster count; it does not demonstrate discovery of real financial segments.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

@@ -36,6 +36,17 @@
   white-space: nowrap;
 }
 
+#title-block-header .subtitle .evidence-status {
+  font-size: 0.85rem;
+  vertical-align: middle;
+}
+
+#title-block-header .evidence-lane {
+  margin-inline-start: 0.5rem;
+  color: var(--bs-secondary-color, var(--rf-text));
+  font-size: 0.85rem;
+}
+
 .evidence-status[data-evidence-status="Passing"] {
   color: #1b2621;
   background-color: #94aa83;
@@ -74,4 +85,360 @@ body.quarto-dark .evidence-status[data-evidence-status="Error"] {
 body.quarto-dark .evidence-status[data-evidence-status="Missing"] {
   color: #1b2621;
   background-color: #ccd6cf;
+}
+
+.evidence-summary {
+  margin-block: 1rem 1.5rem;
+}
+
+.evidence-readout {
+  margin-block: 1rem;
+}
+
+.evidence-criteria,
+.evidence-metrics {
+  min-width: 0;
+  margin-block: 1.25rem;
+}
+
+:is(.evidence-criteria, .evidence-metrics) table {
+  width: 100%;
+  font-size: 0.94rem;
+  font-variant-numeric: tabular-nums;
+}
+
+:is(.evidence-criteria, .evidence-metrics) caption {
+  padding-block: 0 0.5rem;
+  color: var(--bs-secondary-color, var(--rf-text));
+  font-size: 0.875rem;
+  line-height: 1.5;
+  text-align: left;
+  caption-side: top;
+  overflow-wrap: anywhere;
+}
+
+:is(.evidence-criteria, .evidence-metrics) :is(th, td) {
+  padding-block: 0.6rem;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+:is(.evidence-criteria, .evidence-metrics) th[scope="row"] {
+  font-weight: 400;
+}
+
+.evidence-criteria :is(th, td):last-child {
+  width: 6rem;
+  padding-inline-start: 1rem;
+  white-space: nowrap;
+}
+
+.evidence-check-met,
+.evidence-check-unmet {
+  font-weight: 600;
+}
+
+.evidence-check-unmet {
+  color: #9a351f;
+}
+
+body.quarto-dark .evidence-check-unmet {
+  color: #efb09e;
+}
+
+.evidence-metric-group {
+  margin-block: 0.5rem;
+}
+
+.evidence-metric-group .evidence-metric-group {
+  margin-inline-start: 1rem;
+}
+
+.evidence-metric-group > summary {
+  padding-block: 0.375rem;
+  color: var(--rf-text);
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.evidence-metric-group[open] > summary {
+  margin-block-end: 0.5rem;
+}
+
+.evidence-metrics td {
+  text-align: right;
+}
+
+.evidence-metrics thead th:not(:first-child) {
+  text-align: right;
+}
+
+.evidence-raw {
+  margin-block: 1rem;
+}
+
+.evidence-raw > summary {
+  padding-block: 0.375rem;
+  color: var(--bs-secondary-color, var(--rf-text));
+  font-size: 0.9rem;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.evidence-raw[open] > summary {
+  margin-block-end: 0.75rem;
+}
+
+:is(.evidence-metric-group, .evidence-raw) > summary:focus-visible {
+  outline: 2px solid var(--bs-link-color);
+  outline-offset: 3px;
+  border-radius: 0.125rem;
+}
+
+.evidence-raw pre {
+  max-height: 30rem;
+  overflow: auto;
+}
+
+@media (max-width: 575.98px) {
+  .evidence-metric-group .evidence-metric-group {
+    margin-inline-start: 0.75rem;
+  }
+
+  :is(.evidence-criteria, .evidence-metrics) table {
+    font-size: 0.9rem;
+  }
+
+  .evidence-criteria :is(th, td):last-child {
+    width: 4.5rem;
+    padding-inline-start: 0.75rem;
+  }
+}
+
+.evidence-details {
+  min-width: 0;
+  margin-block: 2rem;
+  padding-block-start: 0.75rem;
+  border-block-start: 1px solid var(--rf-border);
+}
+
+.evidence-details > summary {
+  padding-block: 0.5rem;
+  color: var(--rf-text);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.evidence-details[open] > summary {
+  margin-block-end: 0.75rem;
+}
+
+.evidence-details .panel-tabset.evidence-tabs {
+  min-width: 0;
+  margin-block: 0;
+}
+
+.evidence-details .evidence-tabs > .nav-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0;
+  max-width: 100%;
+  margin-block-end: 0;
+  border-block-end: 1px solid var(--rf-border);
+  overflow-x: auto;
+}
+
+.evidence-details .evidence-tabs > .nav-tabs > .nav-item {
+  flex: 0 0 auto;
+  margin-block-end: 0;
+}
+
+.evidence-details .evidence-tabs > .nav-tabs .nav-link {
+  margin-block-end: 0;
+  padding: 0.65rem 0.85rem;
+  border: 0;
+  border-block-end: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--rf-text);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.evidence-details .evidence-tabs > .nav-tabs .nav-link:hover {
+  border-block-end-color: var(--rf-border);
+  color: var(--bs-link-color);
+}
+
+.evidence-details .evidence-tabs > .nav-tabs .nav-link.active {
+  border-block-end-color: var(--bs-link-color);
+  background: transparent;
+  color: var(--bs-link-color);
+  font-weight: 600;
+}
+
+.evidence-details .evidence-tabs > .tab-content {
+  min-width: 0;
+  padding: 1rem 0 0;
+  border: 0;
+  overflow-x: auto;
+}
+
+.evidence-details .evidence-tabs > .tab-content > .tab-pane {
+  min-width: 0;
+}
+
+.evidence-details .evidence-tabs > .tab-content > .tab-pane > :first-child {
+  margin-block-start: 0;
+}
+
+.evidence-details .evidence-run-summary {
+  margin-block: 0 1rem;
+  color: var(--rf-text);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.evidence-details .evidence-metrics {
+  margin-block: 0.75rem;
+}
+
+.evidence-details table {
+  width: 100%;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
+.evidence-details caption {
+  padding-block: 0 0.35rem;
+  color: var(--bs-secondary-color, var(--rf-text));
+  font-size: 0.8rem;
+  text-align: left;
+  caption-side: top;
+  overflow-wrap: anywhere;
+}
+
+.evidence-details table :is(th, td) {
+  padding-block: 0.4rem;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.evidence-details table tbody tr + tr > :is(th, td) {
+  border-block-start: 1px solid var(--bs-border-color, var(--rf-border));
+}
+
+.evidence-details .evidence-metric-group {
+  margin-block: 0.35rem;
+  border-block-end: 1px solid var(--bs-border-color, var(--rf-border));
+}
+
+.evidence-details .evidence-metric-group > summary {
+  padding-block: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.evidence-details .evidence-metric-group .evidence-metric-group {
+  margin-inline-start: 0.6rem;
+  padding-inline-start: 0.6rem;
+  border-block-end: 0;
+  border-inline-start: 1px solid var(--bs-border-color, var(--rf-border));
+}
+
+.evidence-details .evidence-provenance {
+  margin-block: 1rem;
+}
+
+.evidence-details :is(.evidence-provenance, .evidence-raw) > summary {
+  padding-block: 0.5rem;
+  color: var(--rf-text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.evidence-details .evidence-provenance[open] > summary {
+  margin-block-end: 0.5rem;
+}
+
+.evidence-details .evidence-provenance table th[scope="row"] {
+  width: 9rem;
+  padding-inline-end: 1rem;
+  font-weight: 400;
+}
+
+.evidence-details .evidence-provenance table td {
+  text-align: left;
+}
+
+#quarto-document-content .evidence-details .evidence-provenance code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+#quarto-document-content .evidence-details :is(.evidence-raw, .evidence-error) pre {
+  max-height: 24rem;
+  padding: 0.85rem 1rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background-color: var(--rf-surface);
+  background-image: none;
+  box-shadow: none;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  overflow: auto;
+}
+
+.evidence-details .evidence-source {
+  min-width: 0;
+  max-height: min(34rem, 70vh);
+  overflow: auto;
+}
+
+.evidence-details > summary:focus-visible,
+.evidence-details .evidence-provenance > summary:focus-visible,
+.evidence-details .evidence-source:focus-visible {
+  outline: 2px solid var(--bs-link-color);
+  outline-offset: 3px;
+  border-radius: 0.125rem;
+}
+
+.evidence-details .evidence-tabs > .nav-tabs .nav-link:focus-visible {
+  outline: 2px solid var(--bs-link-color);
+  outline-offset: -3px;
+}
+
+.evidence-details :is(.evidence-metric-group, .evidence-provenance, .evidence-raw) > summary:focus-visible,
+.evidence-details .evidence-source:focus-visible {
+  outline-offset: -2px;
+}
+
+@media (max-width: 575.98px) {
+  .evidence-details .evidence-tabs > .nav-tabs .nav-link {
+    padding-inline: 0.5rem;
+    font-size: 0.85rem;
+  }
+
+  .evidence-details .evidence-metric-group .evidence-metric-group {
+    margin-inline-start: 0.3rem;
+    padding-inline-start: 0.5rem;
+  }
+
+  .evidence-details .evidence-provenance table th[scope="row"] {
+    width: 6rem;
+    padding-inline-end: 0.75rem;
+  }
+}
+
+@media print {
+  .evidence-details .evidence-source {
+    max-height: none;
+    overflow: visible;
+  }
 }

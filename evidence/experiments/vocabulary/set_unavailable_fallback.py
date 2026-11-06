@@ -21,6 +21,11 @@
 # evidence-group: Vocabulary
 # ---
 #
+# The prediction target is deliberately simple: does the input contain at least one member? Individual
+# tag names have no special meanings in this rule. That makes it possible to test whether a learned
+# unavailable-membership representation preserves the fact that something was present even when none
+# of its names are in the vocabulary.
+#
 # ## Example
 #
 # ```yaml
@@ -40,15 +45,31 @@
 # )))
 # ```
 #
+# The illustrated one-member set has target 1. An empty list has target 0, and changing `tag-12` to a
+# completely new name still leaves the reference answer at 1. Repeating that new member also leaves
+# the answer unchanged. These are illustrative examples of the generator rule, rather than a request
+# to recover an unseen tag's individual effect.
+#
 # ## Comparison
 #
 # Compare training with input members sometimes made unavailable against training that never exposes this condition. Repeat unknown members to check duplicates.
+#
+# Both models learn from familiar empty and nonempty sets. Only the augmented arm sometimes loses the
+# input members' familiar content during training, while the nonempty target stays positive. It
+# therefore gets examples of the fallback condition before evaluation. The control arm can solve the
+# known-name task without learning how to interpret that unfamiliar condition.
 #
 # ## Result
 #
 # {{< evidence P064 status >}}
 #
 # The trained fallback distinguishes unknown nonempty input from empty input. It preserves the presence of members, rather than learning their individual meanings.
+#
+# RMSE is measured directly on the zero/one target. The constant 0.5 forecast has error 0.5, giving a
+# useful reference for judging transfer to new names. The comparison tests empty versus nonempty
+# information, not counting members, identifying them, or reconstructing their meanings.
+# Frozen-vocabulary checks ensure that the unknown-name test is not converted into another training
+# phase.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

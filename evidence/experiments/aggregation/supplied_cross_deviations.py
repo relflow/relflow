@@ -18,6 +18,10 @@
 # evidence-group: Aggregation
 # ---
 #
+# This diagnostic removes two steps from covariance calculation before data reaches the model. Each
+# cross_deviation is already a centered x value multiplied by its centered y partner. The model only
+# has to turn the eight prepared contributions into their average.
+#
 # ## Example
 #
 # ```yaml
@@ -35,6 +39,10 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
+# The illustration contains four contributions of 1.4 and four of 0.2. Their total is 6.4; dividing
+# by eight gives the hidden covariance, 0.8. Positive and negative contributions are possible in the
+# generator, so the learned average must retain their signs rather than average absolute magnitudes.
+#
 # ```{typst}
 # //| label: fig-evidence-supplied-cross-deviations
 # //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
@@ -51,11 +59,24 @@
 #
 # Compare the prediction with the correct average on new records.
 #
+# Train and test contain independently generated records with the same construction. Unlike the
+# raw-pair experiment, the inputs no longer require discovering which x and y belong together or
+# calculating their centers. The simpler representation helps localize a failure: trouble here would
+# concern interpreting and reducing prepared contributions, while success alone says nothing about
+# learning the omitted preparation steps.
+#
 # ## Result
 #
 # {{< evidence P008 status >}}
 #
-# The final averaging step works here. Centering and multiplication were already done by the data generator, so they were not learned in this test.
+# The final averaging step works here. Centering and multiplication were already done by the data
+# generator, so they were not learned in this test.
+#
+#
+# The error percentage compares the predicted covariance with a constant guess based on training
+# targets. Lower is better; 100% means no improvement over that guess. These are learned numerical
+# readouts from a Mean branch, not an explicit arithmetic average wired into the prediction output.
+# Eight-item performance does not establish arbitrary-length covariance calculation.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

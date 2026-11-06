@@ -23,6 +23,10 @@
 # evidence-group: Aggregation
 # ---
 #
+# Averages should ignore wholesale repetition: repeating every observation changes how much data is
+# present, but not its average. Here the model sees individual amounts and predicts their mean. The
+# item branch averages its learned encodings, with item attention disabled.
+#
 # ## Example
 #
 # ```yaml
@@ -33,6 +37,10 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# The illustrated amounts 0.2 and 0.8 average to 0.5. Repeating the entire list gives 0.2, 0.8, 0.2,
+# 0.8: its total doubles from 1.0 to 2.0, but dividing by four items still gives 0.5. Repeating just
+# one item would be a different intervention and need not preserve the mean.
 #
 # ```{typst}
 # //| label: fig-evidence-mean-duplicate-invariance
@@ -50,11 +58,24 @@
 #
 # Reorder the list and repeat every item. Both changes should leave its average unchanged.
 #
+# Fresh test lists contain one through three items. Reordering preserves the same observations,
+# while duplication adds a second copy of every item and stays within the trained length range. The
+# average-content part of the summary is unchanged by duplication; its separate count signal can
+# change. The learned prediction must therefore retain the mean despite that change in
+# representation.
+#
 # ## Result
 #
 # {{< evidence P003 status >}}
 #
-# This setup learns the average and keeps it under repetition to within a thousandth of the target spread. The summary itself is no longer identical: Mean carries a count lane, so the same summary can also tell a total apart.
+# The selected run learns accurate averages and meets the declared repetition-drift tolerance. Mean
+# also carries a count lane, so a stable mean prediction does not imply an identical summary.
+#
+#
+# The main error percentage compares predicted averages with a constant guess. The two drift scores
+# compare predictions with each other before and after an answer-preserving change; zero drift alone
+# would also be possible for a useless constant predictor, so accuracy and stability are checked
+# together. This does not establish invariance for every reduction or attention configuration.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

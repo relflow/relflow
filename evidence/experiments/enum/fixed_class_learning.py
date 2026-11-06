@@ -24,6 +24,11 @@
 # evidence-group: Representation
 # ---
 #
+# Enum declares a fixed set of possible names, while training must still learn which answer goes with
+# each input combination. This task provides an opaque route and channel and asks for one of four
+# hidden labels. Their strings carry no useful language meaning; the predictive information is the
+# combination observed in training.
+#
 # ## Example
 #
 # ```yaml
@@ -45,15 +50,31 @@
 # )))
 # ```
 #
+# The illustrated `bay` route has index 1 and `store` has index 1 in the fixed declarations. The
+# generator computes `(1 + 2 × 1) mod 4 = 3`, selecting `green`. For the same route with channel
+# `web`, it selects `blue`. These worked values explain the synthetic rule; the model receives the
+# names rather than the generating indices.
+#
 # ## Comparison
 #
 # Compare informative training with shuffled evidence, and check that fitting and save/load preserve class order and size.
+#
+# The informative arm trains on the real route/channel-to-label pairing. The control permutes whole
+# visible contexts while leaving targets in place, preserving all category frequencies and the variety
+# of contexts but removing their link to the answer. Independently shuffled test contexts check the
+# same information boundary after fitting.
 #
 # ## Result
 #
 # {{< evidence P069 status >}}
 #
 # The declared classes support reliable learning in this small task. This covers new records of familiar combinations, rather than new identities or meanings inferred from label names.
+#
+# Accuracy counts exact label matches, with a balanced four-class constant baseline of 25%. Every
+# route/channel combination already occurs during training, so held-out rows test fresh observations
+# of familiar combinations. Fixed declaration order, unchanged storage, frozen exposure counts, and
+# checkpoint consistency are separate mechanical requirements; passing them alone would not establish
+# that the predictive relationship was learned.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

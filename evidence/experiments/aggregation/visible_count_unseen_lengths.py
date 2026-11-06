@@ -18,6 +18,10 @@
 # evidence-group: Aggregation
 # ---
 #
+# This is a test of extending an amount-times-count relationship beyond the counts used in training.
+# Each bag repeats a single amount, and item_count is visible. The model need not discover the count
+# from scratch to solve these records.
+#
 # ## Example
 #
 # ```yaml
@@ -36,6 +40,10 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
+# Eight copies of 0.5 give the illustrated total 4.0. Counts seven through ten are absent from
+# training. To picture the scaling check within the allowed capacity, start with four copies, whose
+# answer is 2.0, and duplicate that whole bag while changing item_count from four to eight.
+#
 # ```{typst}
 # //| label: fig-evidence-visible-count-unseen-lengths
 # //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
@@ -53,11 +61,24 @@
 #
 # Repeat the list and double the visible count. The expected total doubles too.
 #
+# Training counts run from one through six, while the main test uses seven through ten. The separate
+# duplication intervention changes both the item collection and its visible count consistently;
+# leaving the old count in place would create contradictory inputs. Amounts remain within the same
+# numerical range, so the change being probed is list length rather than a new value distribution.
+#
 # ## Result
 #
 # {{< evidence P005 status >}}
 #
-# The model extends the amount-times-count relationship to these larger counts. The count is supplied, so this does not show that it learned to count items.
+# The model extends the amount-times-count relationship to these larger counts. The count is
+# supplied, so this does not show that it learned to count items.
+#
+#
+# The reported error compares the longer-list predictions with a constant training-mean guess. The
+# scaling error compares the duplicated prediction with twice the original prediction. These are
+# complementary checks: low test error alone would not show that individual matched examples scale
+# properly. The result is limited to repeated equal values and the tested finite capacity, with
+# count explicitly available.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -71,8 +92,10 @@
 # ### How it works
 #
 # The schema matches the [in-range count control](visible-count-sum.html).
-# A Mean item branch has no item attention; its equal-valued bags supply content
-# but lose multiplicity. The root receives `item_count` as an ordinary Number.
+# A Mean item branch has no item attention. Its averaged content is unchanged
+# by repeating equal values; its current structural count lane retains multiplicity.
+# The root additionally receives `item_count` as an ordinary Number. This is not
+# an ablation of the two available count routes.
 #
 # Training counts are one through six. The test uses seven through ten, so
 # accuracy measures count extrapolation. A separate complete-bag duplication

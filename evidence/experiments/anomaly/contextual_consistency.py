@@ -29,6 +29,10 @@
 # evidence-group: Anomaly
 # ---
 #
+# A value can be common overall but inconsistent with the rest of its record. It scores disagreement
+# between an observed value and its reconstruction from context. It asks whether the score responds to
+# a broken relationship rather than simply treating large or rare values as anomalies.
+#
 # ## Example
 #
 # ```yaml
@@ -50,15 +54,32 @@
 # )))
 # ```
 #
+# For the illustrative amber row, the normal mean is `0.7 × 1 − 0.5 = 0.2`; the shown 0.24 includes a
+# possible small noise draw. A value near −1 is normal for another group at the same x, but would
+# disagree with amber's context. The model predicts from group and x before the observed y is used to
+# calculate the warning score.
+#
 # ## Comparison
 #
-# Shuffle answers among test records so their individual distribution stays unchanged. Compare with an independently shuffled-training model.
+# Shuffle answers among test records so their individual distribution stays unchanged. Compare with an
+# independently shuffled-training model.
+#
+# Test anomalies shuffle y between records, preserving its distribution and every visible context. A
+# detector looking only at y therefore has chance ranking performance. Shuffled training provides a
+# second control that cannot learn the correct relationship. Separate valid-tail records use uncommon
+# x values still inside training support to check that rarity alone does not cause excessive warnings.
 #
 # ## Result
 #
 # {{< evidence P076 status >}}
 #
-# All three seeds detect this constructed inconsistency. The warning score is not a calibrated anomaly probability, and rare valid values need their own false-alarm check.
+# The selected run meets the declared checks for this constructed inconsistency. Its warning score is
+# not a calibrated anomaly probability, and rare valid values need their own false-alarm check.
+#
+# AUROC measures how often an anomalous record ranks above a normal one; it is not the probability
+# that a flagged record is anomalous. Recall and false-alarm rates use a threshold chosen only from
+# clean validation residuals. The selected checks concern this constructed inconsistency and noise
+# model, rather than every possible anomaly or a calibrated deployment threshold.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

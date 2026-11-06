@@ -23,6 +23,11 @@
 #
 # ## Example
 #
+# The hidden answer is the largest session total, not the total of all transactions. In the illustration,
+# the three sessions contain one, four, and one copies of `0.5`, so their totals are `0.5`, `2.0`, and
+# `0.5`; the answer is `2.0`. Regrouping those same six values into three two-item sessions would make every
+# session total `1.0`. The flat values and overall total would still be identical.
+#
 # ```yaml
 # sessions:
 #   - transactions:
@@ -56,9 +61,21 @@
 #
 # ## Comparison
 #
+# Each generated pair repeats a common amount with both arrangements, so the only useful difference is the
+# grouping. A predictor that has discarded session membership must make the same prediction for both
+# records. The best squared-error compromise for the illustrated pair would be `1.5`, halfway between the
+# two correct answers `1.0` and `2.0`. This flattened-input oracle is a stronger reference than a single
+# guess for the whole dataset.
+#
 # Pair records with identical flat values but different grouping. Compare with the best prediction available after discarding that grouping.
 #
 # ## Result
+#
+# The errors here are ordinary RMSE in target units, rather than normalized ratios. Lower model error than
+# the flattened oracle indicates that useful hierarchy information survived. A separate check asks whether
+# predictions recover the difference between each pair's answers, which helps distinguish the two
+# arrangements from a compromise prediction. All six amounts are equal within a record, and only the `(2, 2,
+# 2)` and `(1, 4, 1)` layouts are tested.
 #
 # {{< evidence P040 status >}}
 #

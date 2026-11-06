@@ -23,6 +23,11 @@
 #
 # ## Example
 #
+# Each item supplies only its value. The model must use the whole six-item collection to recover a reference
+# and predict `value - collection mean` at every item. The illustrative values sum to `15`, giving mean
+# `2.5`; the first and last deviations are therefore `-1.0` and `1.0`. The hidden deviations sum to zero. A
+# value by itself is insufficient, because the generator moves the common mean between records.
+#
 # ```yaml
 # items:
 #   - {value: 1.5, deviation: -1.0}
@@ -49,9 +54,21 @@
 #
 # ## Comparison
 #
+# Adding `2` to every illustrated value would move the list mean from `2.5` to `4.5` while leaving all
+# deviations unchanged. The translation control applies independently drawn common offsets and tests that
+# property. Reordering whole records should instead reorder the predictions with them. These interventions
+# distinguish relative, collection-dependent answers from a rule based only on absolute value or a memorized
+# output position.
+#
 # Shift the whole list equally: differences should stay fixed. Reorder items: predictions should move with their items.
 #
 # ## Result
+#
+# The original-list and shifted-list readouts use the same training-target constant baseline. Lower
+# normalized error supports useful relative predictions; low permutation drift checks that the result
+# remains attached to its item. The model combines a shared collection summary with local target context.
+# The generator's six-item width and centered synthetic distribution constrain the conclusion: this is not a
+# demonstration of arbitrary-length mean calculation or exact subtraction.
 #
 # {{< evidence P035 status >}}
 #

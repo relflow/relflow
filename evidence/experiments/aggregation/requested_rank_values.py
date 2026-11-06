@@ -23,6 +23,10 @@
 # evidence-group: Aggregation
 # ---
 #
+# The list is deliberately unsorted, and a visible rank request tells the model which value to
+# return. The same nine-item bag can ask for its minimum, lower quarter, median, upper quarter, or
+# maximum. Returning one typical value for the bag cannot satisfy all five requests.
+#
 # ## Example
 #
 # ```yaml
@@ -42,6 +46,11 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
+# Sorting the illustrated values gives 0.1 through 0.9. The median is the fifth value, 0.5; the
+# lower-quarter request selects the third, 0.3, and the upper-quarter request the seventh, 0.7.
+# These are actual observed values. With nine items, this experiment does not need a convention for
+# interpolating between neighboring values.
+#
 # ```{typst}
 # //| label: fig-evidence-requested-rank-values
 # //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
@@ -57,13 +66,27 @@
 #
 # ## Comparison
 #
-# Give the same list different requests. Hide or change the requests while keeping the original answers to check that the request matters.
+# Give the same list different requests. Hide or change the requests while keeping the original
+# answers to check that the request matters.
+#
+# Whole bags stay within one split, so a test bag cannot leak in through another request. Reordering
+# items retains the answer. Cycling request labels while keeping the original targets breaks
+# request-to-answer alignment. Hiding the request makes all five versions of a bag identical, so
+# their predictions should collapse together rather than somehow retain access to the original
+# requested rank.
 #
 # ## Result
 #
 # {{< evidence P012 status >}}
 #
-# The model learns all five tested requests. These lists have an odd length; other lengths and rules for interpolating between values need separate tests.
+# The model learns all five tested requests. These lists have an odd length; other lengths and rules
+# for interpolating between values need separate tests.
+#
+#
+# Error is compared with a training-mean guess for the requested rank, so simply learning that
+# maxima tend to be larger than minima is not enough. Separate checks cover interior ranks,
+# endpoints, and different list shapes, including duplicates. The result is limited to these five
+# familiar requests and nine-item lists; it is not evidence of a general sorting algorithm.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

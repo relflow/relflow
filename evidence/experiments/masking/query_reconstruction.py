@@ -23,6 +23,11 @@
 #
 # ## Example
 #
+# Each real item has its own visible `x` and a Boolean `selected` flag. The target formula is `value = 2x +
+# 0.3`, so the first illustrated item needs `1.1`; the second already contains `-0.1` and is not selected
+# for reconstruction. The flag applies at the item's coordinate, not to every value in the list. Generated
+# lists contain one to four items and always select at least one real item.
+#
 # ```yaml
 # items:
 #   - {x: 0.4, value: 1.1, selected: true}
@@ -45,13 +50,25 @@
 #
 # ## Comparison
 #
-# Score only selected real items. Change their hidden values to check they cannot leak into predictions, and shuffle visible x to remove its signal.
+# Only selected coordinates contribute to the reconstruction score. The intervention replaces their hidden
+# stored values with a large constant; predictions should stay unchanged if those values were truly excluded
+# from the encoder. Independently redrawing visible `x` breaks its relationship with the retained target
+# values and should increase error. Additional audits compare prediction and training-selection flags with
+# the item selectors, including absent positions in the bounded representation.
+#
+# Score only selected real items. Change their hidden values to check they cannot leak into predictions, and replace visible x with independent draws to remove its signal.
 #
 # ## Result
 #
+# Normalized RMSE is calculated over selected real items against their training-mean reference, rather than
+# averaging visible values and padding into the score. The public prediction output contains real collection
+# items without cap padding; internal selection checks ensure nonexistent items are not treated as targets.
+# A good result supports aligned reconstruction from local context. It does not show that the model can find
+# the relevant value in an unrelated collection or infer the selection policy itself.
+#
 # {{< evidence P052 status >}}
 #
-# Per-item selection works, including padded positions. This tests aligned local reconstruction, rather than retrieval across unrelated lists.
+# The selected run reconstructs the chosen real items and excludes absent positions from selection. This tests aligned local reconstruction, rather than retrieval across unrelated lists.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

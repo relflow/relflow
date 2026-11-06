@@ -19,15 +19,26 @@
 # evidence-group: Representation
 # ---
 #
+# One hundred recurring identities generate numeric observations under five different hidden rules.
+# The model sees id and x and learns to predict y, while identity reconstruction activates adaptive
+# clustering. This experiment watches whether the number and usage of clusters approach five; it
+# does not directly score which identities should share a group.
+#
 # ## Example
 #
 # ```yaml
 # id: id-0007
 # x: 0.0
-# y: 10.0
+# y: -8.0
 # ```
 #
-# The numeric answer is hidden. Identity reconstruction activates grouping; the generating rule is not a model input.
+# The numeric answer is hidden. Identity reconstruction activates grouping; the generating rule is
+# not a model input.
+#
+# For the default generator seed, id-0007 follows the rule 0.5 × x − 8. At x = 0 its underlying
+# answer is −8, as illustrated before the generator adds small noise. Another identity may follow a
+# sine curve or a different offset. Repeated observations let the model encounter each identity
+# under changing x values.
 #
 # ```{typst}
 # //| label: fig-evidence-cluster-hidden-regression-regimes
@@ -44,11 +55,25 @@
 #
 # Compare the number and usage of learned groups with the five generating rules.
 #
+# A callback records committed cluster count and usage at each training epoch. The final five epochs
+# are compared with a window around five, while checking that the count has not simply stopped at an
+# allowed bound. Crucially, training and validation reuse the same observations. There is no
+# independent prediction test, wrong-group control, or measured agreement with the generating
+# partition here.
+#
 # ## Result
 #
 # {{< evidence P018 status >}}
 #
-# The number settles near five, but that does not show the correct identities share a group. Training and validation reuse the same records; independent prediction and grouping quality remain untested.
+# The selected run does not meet the count-and-usage gates. Those diagnostics do not measure correct
+# membership; training and validation also reuse the same records, leaving independent prediction
+# and grouping quality untested.
+#
+#
+# Cluster count is simply how many groups the adaptive mechanism commits. Usage perplexity
+# summarizes how broadly the available groups are used; it is not classification accuracy. The
+# selected run misses the intended count-and-usage window. Even a count of exactly five would not
+# show that identities following the same rule were assigned together.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

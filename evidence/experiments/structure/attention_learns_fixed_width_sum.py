@@ -19,6 +19,11 @@
 #
 # ## Example
 #
+# The input contains exactly six visible amounts and one hidden total. For the illustrative record, `0.8 -
+# 0.4 + 0.2 + 0.5 - 0.5 + 0.9 = 1.5`. The mixed signs matter: returning the largest amount, counting
+# positive values, or ignoring negative entries would give a different answer. Each amount is independently
+# drawn between `-1` and `1`; no extra subtotal or count field is supplied to simplify the target.
+#
 # ```yaml
 # transactions:
 #   - amount: 0.8
@@ -46,9 +51,21 @@
 #
 # ## Comparison
 #
+# Training, validation, and test sets contain independently generated six-item records. The reference
+# predictor ignores every visible amount and always returns the mean total from the training set. Beating it
+# shows that the model uses information beyond the typical answer. This experiment establishes that basic
+# comparison without separately scrambling inputs, changing the number of items, or testing whether the
+# prediction is invariant to their order.
+#
 # Compare test error with a simple predictor that always returns the training-set average total.
 #
 # ## Result
+#
+# The readout is test RMSE divided by the constant predictor's RMSE. For example, a ratio of `0.1` would
+# mean one tenth of that baseline error, not a guarantee that nine out of ten sums are exact. Detailed
+# metrics retain validation and test errors alongside the reference scale. Because every example has six
+# items, the model could learn a fixed-width strategy that would not carry over to an arbitrary-length
+# collection.
 #
 # {{< evidence P039 status >}}
 #

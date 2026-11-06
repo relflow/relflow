@@ -27,6 +27,11 @@
 #
 # ## Example
 #
+# The original predictor receives a number and one of four category codes, then predicts their hidden offset
+# sum. The offsets for `code-0` through `code-3` are `-0.75`, `-0.25`, `0.25`, and `0.75`. Thus the
+# illustrative `x: 0.5` with `code-0` gives `y = 0.5 - 0.75 = -0.25`. A model must first learn this
+# relationship before unchanged predictions across an edit can demonstrate preservation of useful behavior.
+#
 # ```yaml
 # x: 0.5
 # code: code-0
@@ -49,9 +54,21 @@
 #
 # ## Comparison
 #
+# The experiment records predictions and learned state before editing, then changes metadata, adds and
+# removes an inactive field, and rebinds the numeric input to an equivalent renamed source key. No fitting
+# follows these edits. It also checks rejection of a duplicate field name and a save/load round trip.
+# Repeating the edits tests more than one successful mutation. A complete reset supplies the opposite
+# control: intentionally discarding learned state should lose the trained relationship.
+#
 # Repeat metadata changes, inactive-field additions and deletions, equivalent input-key changes, and save/load. Compare with a complete reset.
 #
 # ## Result
+#
+# The compact errors compare the trained predictor with the reset control, while detailed edit records
+# contain prediction drift, preserved vocabulary, and changed or missing state entries. Those are separate
+# questions: unchanged parameters alone would not prove that an input was still read correctly. These edits
+# are chosen to preserve the available information. The result does not promise unchanged predictions after
+# adding active evidence, changing model capacity, or adapting the model with further training.
 #
 # {{< evidence P046 status >}}
 #

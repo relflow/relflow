@@ -25,6 +25,10 @@
 # evidence-group: Identity
 # ---
 #
+# The task is equality, not remembering what a particular ID means. The model receives two strings
+# and predicts whether they are the same. Test identities use a separate namespace from training, so
+# a memorized table of training names cannot provide the answers.
+#
 # ## Example
 #
 # ```yaml
@@ -34,6 +38,11 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# The illustrated pair test-17 and test-17 has answer true. Replacing only the right-hand ID with
+# test-18 makes the answer false; replacing both with a different shared test ID should still mean
+# equality. The experiment scores new equal and unequal pairs, rather than assigning a permanent
+# yes/no meaning to any one string.
 #
 # ```{typst}
 # //| label: fig-evidence-identity-unseen-identity-equality
@@ -48,13 +57,27 @@
 #
 # ## Comparison
 #
-# Compare Hash inputs with Category inputs that treat new IDs as unknown. Shuffle answers as a second check.
+# Compare Hash inputs with Category inputs that treat new IDs as unknown. Shuffle answers as a
+# second check.
+#
+# A matched Category model uses a learned vocabulary, so both unfamiliar test strings become unknown
+# content; their original equality is no longer represented that way. Hash retains a within-batch
+# matching signal for new strings. A second control leaves the Hash model and its test pairs
+# unchanged but shuffles the answers, breaking the relationship that accurate equality predictions
+# would otherwise exploit.
 #
 # ## Result
 #
 # {{< evidence P021 status >}}
 #
-# Hash preserves a useful matching signal for new IDs. This test compares two IDs within one record; larger lookups and joins require their own evidence.
+# Hash preserves a useful matching signal for new IDs. This test compares two IDs within one record;
+# larger lookups and joins require their own evidence.
+#
+#
+# AUC describes ranking of equal versus unequal pairs: 0.5 is chance and 1 is perfect ranking.
+# Strong Hash AUC together with chance-like Category and shuffled-label controls supports the tested
+# unseen-identity comparison. It is not a guarantee of collision-free hashing, probability
+# calibration, or reliable lookup across arbitrarily large memories.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

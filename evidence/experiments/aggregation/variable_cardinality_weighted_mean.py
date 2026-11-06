@@ -23,6 +23,11 @@
 # evidence-group: Aggregation
 # ---
 #
+# A weighted average gives more influence to values with larger weights, then divides by the total
+# weight. The model sees two through six value–weight pairs and predicts the hidden weighted_mean.
+# Unlike a weighted sum, this answer should not grow when every weight is multiplied by the same
+# factor.
+#
 # ## Example
 #
 # ```yaml
@@ -34,6 +39,10 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# The illustrated weighted contributions are 0.4, −0.5, and 0.4, totaling 0.3. The weights total
+# 3.75, so the answer is 0.3 ÷ 3.75 = 0.08. The ordinary unweighted average would be 0.2. A model
+# that ignores which weights accompany which values would miss that distinction.
 #
 # ```{typst}
 # //| label: fig-evidence-variable-cardinality-weighted-mean
@@ -50,13 +59,28 @@
 #
 # ## Comparison
 #
-# Reorder or repeat whole items, or scale all weights equally: the answer should stay fixed. Swapping weights between values should change it.
+# Reorder or repeat whole items, or scale all weights equally: the answer should stay fixed.
+# Swapping weights between values should change it.
+#
+# The generator varies positive weights over a broad range. Reordering complete pairs changes no
+# information. Duplicating all pairs doubles both the weighted total and total weight, leaving their
+# ratio unchanged; only short bags are duplicated so they still fit. Scaling all weights by 0.75
+# also cancels between numerator and denominator. Swapping weights alone breaks their associations
+# and should worsen error against the original labels.
 #
 # ## Result
 #
 # {{< evidence P016 status >}}
 #
-# The model uses relative weights and approximately preserves these equal-answer changes. Zero or negative weights and much longer lists are not covered.
+# The model uses relative weights and approximately preserves these equal-answer changes. Zero or
+# negative weights and much longer lists are not covered.
+#
+#
+# Intact error is measured relative to a constant training-mean guess. The drift checks instead
+# measure whether predictions stay stable under the three answer-preserving interventions. These
+# behaviors must accompany accurate predictions; a constant output could otherwise pass every
+# stability check. Zero weights, negative weights, and lengths beyond the trained range are not
+# covered.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

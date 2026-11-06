@@ -24,6 +24,11 @@
 # evidence-group: Vocabulary
 # ---
 #
+# The question is what remains predictable when a categorical identity is unfamiliar. Each row
+# supplies a number `x` and a `code`; the hidden numeric target combines a slope shared by every row
+# with an effect belonging to that code. This separates learning a general relationship from
+# remembering individual labels.
+#
 # ## Example
 #
 # ```yaml
@@ -45,15 +50,30 @@
 # )))
 # ```
 #
+# The illustrated values are a worked calculation, not a measured prediction: `2 × 0.4 + 1.5 = 2.3`
+# for `right`. At the same `x`, `left` would give −0.7 and null would give −2.2. A new code has no
+# learned individual effect. For two indistinguishable new codes assigned opposite effects, the best
+# shared answer is their midpoint, 0.8.
+#
 # ## Comparison
 #
 # Rename new labels without changing other inputs. Train with some input labels made unavailable so the model can learn a fallback.
+#
+# The unknown-code renaming control keeps `x` fixed, so any prediction change would come from an
+# identity distinction the vocabulary has never learned. Replacing the code with null is a different
+# intervention: null appeared during training and has its own target relationship. Training-time
+# unavailable content gives the model practice using the shared numeric fallback.
 #
 # ## Result
 #
 # {{< evidence P055 status >}}
 #
 # Different new labels share unavailable identity content, while null remains distinct. Other context can support a fallback, but the model cannot infer the new label’s individual effect.
+#
+# RMSE measures error in target units. The 1.5 unknown-identity limit is the error left even by the
+# correct midpoint prediction on this paired probe; getting below the familiar-label error is not the
+# appropriate goal. Evaluation also checks that looking at new labels does not silently teach them to
+# the vocabulary.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

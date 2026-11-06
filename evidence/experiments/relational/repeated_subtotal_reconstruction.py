@@ -23,6 +23,11 @@
 #
 # ## Example
 #
+# Each item has its own visible quantity and unit price, and needs its own hidden subtotal. The illustrative
+# first answer is `1.5 × 1.2 = 1.8`; the second is `0.5 × -1.0 = -0.5`. Negative prices are permitted by
+# this synthetic arithmetic generator. These are two separate predictions at the original item positions,
+# rather than one total for the order. Generated orders range from empty to five items.
+#
 # ```yaml
 # items:
 #   - {quantity: 1.5, unit_price: 1.2, subtotal: 1.8}
@@ -46,9 +51,21 @@
 #
 # ## Comparison
 #
+# The scoring control shuffles subtotal targets among items inside an order without changing the visible
+# quantities or prices. For the illustrated pair, swapping `1.8` and `-0.5` would attach valid numbers to
+# the wrong records. Predictions should fit the original pairing better. Independent structural checks also
+# require the output list to retain exactly the real items, including zero predictions for an empty order,
+# and to mark each predicted coordinate as inferred.
+#
 # Shuffle the expected subtotals between items while keeping visible inputs fixed. Also check empty orders and retained item positions.
 #
 # ## Result
+#
+# Normalized RMSE divides subtotal error by the error of a constant guess based on the training targets.
+# Lower error for aligned targets, with a clear increase for shuffled targets, supports learning an item-
+# specific relationship. Correct output lengths address a different question: where those predictions were
+# written. Neither low average error nor correct alignment makes multiplication exact; the example explains
+# the target formula rather than showing a measured prediction.
 #
 # {{< evidence P030 status >}}
 #

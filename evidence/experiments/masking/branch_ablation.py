@@ -33,6 +33,12 @@
 #
 # ## Example
 #
+# Two views repeat the same underlying reading. Each backup is `2 × reading + 0.1`, and the hidden target is
+# `1.5 × reading - 0.2`. For the illustrated reading `0.4`, those values are `0.9` and `0.4`. The first view
+# is entirely hidden, so even its otherwise-allowed backup is unavailable. In the second view, the reading
+# remains visible while its backup is separately skipped. Either visible reading would provide enough
+# information for this target.
+#
 # ```yaml
 # views:
 #   - {reading: 0.4, backup: 0.9, hidden: true, hide_backup: false}
@@ -57,9 +63,22 @@
 #
 # ## Comparison
 #
+# Evaluation fixes four visibility patterns: both views available, only the first, only the second, and
+# neither. Changing numbers inside a hidden branch must not alter the prediction, even when its descendant's
+# own flag would allow that number. The target value is also replaced to check that it remains hidden.
+# Shuffling available views between records removes their relationship to the original targets and provides
+# another information-removal control.
+#
 # Test each branch alone, both visible, and both hidden. Change hidden descendant values to check they cannot affect the answer.
 #
 # ## Result
+#
+# The readouts compare each single-view error with the both-hidden case using a constant training-target
+# baseline. Useful predictions from either view demonstrate redundancy, while baseline-level error without
+# either view is an expected information limit. The branch and leaf audits test which values were actually
+# made available. Because the views are deliberately duplicate, deterministic measurements, these
+# interventions do not establish causal importance, robustness to noisy sensors, or recovery from arbitrary
+# missing branches.
 #
 # {{< evidence P053 status >}}
 #

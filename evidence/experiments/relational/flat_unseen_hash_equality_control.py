@@ -23,6 +23,11 @@
 #
 # ## Example
 #
+# Here there is one identifier on each side, with no collection to search. Both visible fields contain
+# `owl`, making the illustrative hidden answer `equal: true`. Changing only `right_id` to `yak` would make
+# the answer false. The labels are synthetic names rather than known objects: their spelling carries no
+# intended meaning. Every generated row receives fresh IDs, and the test namespace differs from training.
+#
 # ```yaml
 # left_id: owl
 # right_id: owl
@@ -44,9 +49,21 @@
 #
 # ## Comparison
 #
+# Positive and negative labels are balanced. The control replaces the right-hand ID in every originally
+# matching pair with a different ID, while retaining the original labels for scoring. The visible pairs then
+# contain no equality signal for separating those labels. A model using the relationship should lose its
+# ranking advantage and reduce its positive-class probabilities. This isolates direct equality from the
+# additional routing problem introduced by two repeated lists.
+#
 # Turn matching pairs into nonmatching pairs while retaining the original answers.
 #
 # ## Result
+#
+# The two AUC readouts compare ranking on intact pairs and on the deliberately broken pairs. They are not
+# percentages of correct classifications. The additional probability-drop check asks whether the same
+# positive examples change after their equality is removed. Together these measurements test sensitivity to
+# unfamiliar-ID equality; they do not establish list overlap, joins over arbitrary structures, or reliable
+# behavior for every possible hash collision.
 #
 # {{< evidence P029 status >}}
 #

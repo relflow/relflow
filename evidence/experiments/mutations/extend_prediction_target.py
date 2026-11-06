@@ -29,6 +29,14 @@
 # evidence-group: Mutations
 # ---
 #
+# Start with a model that already answers two questions about the same pair of
+# numbers. Then add a third prediction target to its schema. This experiment
+# asks two separate questions: does the edit preserve the old answers before
+# further training, and can the extended model learn the new answer afterward?
+#
+# Adding a target changes what we ask the model to predict. The visible inputs
+# stay the same; the new target is not an extra clue supplied at prediction time.
+#
 # ## Example
 #
 # ```yaml
@@ -40,6 +48,20 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# Here `a` and `b` are the two visible numbers. The original targets are
+# `u = a + 2b` and `v = 2a - b`. The added target is `w = 3a + b`:
+#
+# | Question | Worked answer for a = 0.5 and b = 0.25 |
+# | --- | --- |
+# | Original target u | 0.5 + 2 × 0.25 = 1.0 |
+# | Original target v | 2 × 0.5 - 0.25 = 0.75 |
+# | Added target w | 3 × 0.5 + 0.25 = 1.75 |
+#
+# The formulas define the generated training answers. The neural model learns
+# to approximate them from examples. Although `w` also equals `u + v`, those
+# two answers remain hidden from the input encoder, so the new task still has
+# to be learned from `a` and `b`.
 #
 # ```{typst}
 # //| label: fig-evidence-mutations-add-target
@@ -56,13 +78,41 @@
 #
 # ## Comparison
 #
-# Measure old predictions immediately after the edit and after more training. Keep old targets supervised, and compare unchanged and fresh-model controls.
+# First train the original model on `u` and `v` for 512 updates and save it.
+# Compare four subsequent paths using fresh examples from the same generator:
+#
+# | Path | Starting point | What happens next |
+# | --- | --- | --- |
+# | Extended model | The trained two-target checkpoint | Add w, then train all three targets for 256 updates. |
+# | Continued original | The same checkpoint | Keep the original schema and train u and v for another 256 updates. |
+# | Fresh, matched adaptation | A new three-target model | Train from scratch for 256 updates. |
+# | Fresh, matched total updates | A new three-target model | Train from scratch for 768 updates, matching the source-plus-adaptation update count. |
+#
+# Check old predictions immediately after adding `w`, before any additional
+# fitting. This isolates the effect of the schema edit. Then check all three
+# targets after fitting to assess learning. Retaining the old parameter tensors
+# and retaining the old predictions are separate checks: architecture-dependent
+# computation can change even when the stored tensors do not.
+#
+# In the plot, step zero is the start of adaptation. The extended model already
+# had its 512-update source training; the fresh comparison starts untrained.
+# Each plotted point measures the new target on fixed validation examples.
+# Normalized RMSE divides prediction error by a constant-guess baseline: 1
+# matches that guess, 0.25 is one quarter of its error, and lower is better.
 #
 # ## Result
 #
 # {{< evidence P047 status >}}
 #
-# Adding w shifts old predictions before training, so the preservation check fails. After training, all three tasks learn. This does not establish retention without old labels.
+# Read the preservation checks and the learning curve as separate results.
+# The checks tell you whether the edit preserved existing state and predictions;
+# the curve shows how the added task is learned during further training. Low
+# final error alone does not establish that the edit was initially neutral.
+#
+# Old targets remain supervised throughout adaptation. This tests extending a
+# model while continuing to rehearse its original tasks. It does not establish
+# retention when old labels are unavailable, an advantage over every fresh
+# model, or transfer to a different data distribution.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -75,12 +125,14 @@
 #
 # ### Remaining work
 #
-# Three GPU seeds reproduce the retention failure and successful adaptation.
-# Calibrate the provisional 0.25 nRMSE gate on ten separate seeds.
+# The selected record describes its own seed, model revision, and device;
+# the measured checks above determine its outcome. Test repeatability across
+# independently declared seeds before generalizing that outcome, and calibrate
+# the provisional 0.25 nRMSE gate on a separate seed panel.
 # Adding visible context, targets in repeated branches, and
 # adaptation without old labels remain separate claims. These linear targets
 # measure a simple useful extension, not transfer to a new data distribution.
-# The failed preservation gate identifies a further design question: should
+# The pooling-scale diagnostic helps investigate preservation failures: should
 # permanently hidden outputs change the capacity used to scale visible evidence?
 #
 # ### Complete experiment code

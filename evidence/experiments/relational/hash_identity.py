@@ -27,6 +27,11 @@
 #
 # ## Example
 #
+# The target list asks for values associated with IDs in a separately ordered source list. Here `row-42-K2`
+# points to `-0.2`, and `row-42-K1` points to `0.7`; both target values are hidden from the model. Unlike
+# the familiar-category version, generated names are fresh for each record and split. There is no persistent
+# ID-to-value dictionary to memorize: the relevant association exists within the current observation.
+#
 # ```yaml
 # source:
 #   - {entity_id: row-42-K1, value: 0.7}
@@ -56,9 +61,21 @@
 #
 # ## Comparison
 #
+# Both routes see independently shuffled source and target orders and the same random numeric payloads. One
+# route compresses context; the other retains encoded items for interaction. Rotating only the target IDs
+# breaks the association while preserving source values and the original scoring targets. A successful
+# identity-based transfer should have low intact error and substantially higher error after that
+# intervention, rather than merely benefiting from a particular list position.
+#
 # Compare keeping encoded items with compressing them. Change target IDs while retaining original answers.
 #
 # ## Result
+#
+# Normalized RMSE uses the zero-prediction error as its reference. The selected readouts let you compare
+# retained items, compressed context, and corrupted queries without turning a ranking between routes into an
+# exactness claim. This experiment uses just two key/value pairs per record and a particular Hash
+# configuration. It provides evidence about learned lookup under those conditions; it does not define
+# missing-match behavior or guarantee exact equality resolution at arbitrary scale.
 #
 # {{< evidence P037 status >}}
 #

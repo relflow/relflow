@@ -23,6 +23,11 @@
 # evidence-group: Vocabulary
 # ---
 #
+# A Set carries membership rather than order or repetition count. This experiment first teaches a
+# small membership rule using only `red`, `blue`, empty sets, and null. It then asks what the model
+# retains when an input contains a member absent from the learned vocabulary, while a separate hidden
+# Set head tries to reconstruct the members.
+#
 # ## Example
 #
 # ```yaml
@@ -44,15 +49,31 @@
 # )))
 # ```
 #
+# The illustrated row is a deliberate prediction probe. The known member `red` contributes +1, and
+# `never-seen` supplies no learned membership bit, giving the reference numeric answer 1. For familiar
+# training patterns, `blue` contributes −1.5, both colors give −0.5, and the empty set gives 0. Null
+# is a separate case whose target is 3.
+#
 # ## Comparison
 #
 # Compare empty, all-unknown, and partly known sets. Check which member names the output can actually emit.
+#
+# Adding unknown members and repeating known members preserves the available known-membership
+# information. The experiment compares those augmented rows with their originals and also tests empty,
+# all-unknown, and null inputs directly. Shuffling whole tag sets between records preserves how often
+# each pattern occurs but breaks its connection to the original numeric targets.
 #
 # ## Result
 #
 # {{< evidence P058 status >}}
 #
 # The untrained fallback treats all-unknown input like empty input here. Unknown output members also cannot be named. The next fallback test shows how training can distinguish nonempty input.
+#
+# Exact-set accuracy requires the entire predicted membership set to match, rather than rewarding a
+# few correct members. An output vocabulary containing only known colors cannot emit `never-seen`.
+# Because unavailable members were never simulated during training, equality of the empty and
+# all-unknown predictions describes this untrained boundary; it does not establish a useful fallback
+# for every deployment.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

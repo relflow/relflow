@@ -28,6 +28,11 @@
 #
 # ## Example
 #
+# The source list supplies an ID and a changing value; each target item supplies an ID and asks for its
+# hidden value. In the illustration, target `entity-B` must receive `-0.2` even though it comes first in the
+# target list and second in the source list. Target `entity-A` must receive `0.7`. The two IDs are familiar
+# vocabulary entries across splits, but their numeric values are drawn anew for each record.
+#
 # ```yaml
 # source:
 #   - {entity_id: entity-A, value: 0.7}
@@ -57,9 +62,21 @@
 #
 # ## Comparison
 #
+# Source and target order vary independently, so copying the first source value to the first target cannot
+# solve the task. The identity intervention swaps the target IDs while keeping the original target values
+# for scoring: the visible lookup now points to the wrong value. Both a compressed route and a route
+# retaining item representations train on the same generated records and seed, isolating the representation
+# choice under this small setup.
+#
 # Change target IDs while retaining original answers. Compare compressed summaries with a route that keeps encoded items.
 #
 # ## Result
+#
+# Each error is divided by the error of always predicting zero, the natural constant reference for these
+# symmetric targets. Read the intact routes alongside the changed-ID control: good intact error alone would
+# not establish that IDs drive the transfer. There are exactly two persistent category IDs and two items per
+# side. The result does not test unfamiliar vocabulary, absent matches, duplicate keys, or the correctness
+# guarantees of a database join.
 #
 # {{< evidence P036 status >}}
 #

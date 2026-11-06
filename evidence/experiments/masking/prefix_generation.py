@@ -27,6 +27,12 @@
 #
 # ## Example
 #
+# Each five-event sequence follows one constant increment. The visible prefix `0.2, 0.5` suggests an
+# increment of `0.3`, giving the next hidden value `0.8`, then `1.1` and `1.4`. These are illustrative
+# arithmetic targets, not measured predictions. `future` excludes the suffix from model input, while `next`
+# requests exactly one coordinate for reconstruction. Training varies the starting value, increment, and cut
+# after two, three, or four visible events.
+#
 # ```yaml
 # events:
 #   - {value: 0.2, future: false, next: false}
@@ -51,9 +57,22 @@
 #
 # ## Comparison
 #
+# Replacing all stored future values with large unrelated numbers tests whether hidden suffixes can leak
+# into the answer. Swapping the visible prefix with another record's prefix should instead change the
+# prediction and worsen agreement with the original target. The separate rollout starts with two true
+# events, then feeds each generated value back as visible context for the next step. It never supplies the
+# true held-out suffix to correct earlier prediction errors.
+#
 # Change hidden future values to check they cannot influence prediction. Then feed predicted values back for a short rollout.
 #
 # ## Result
+#
+# Single-step errors use a constant training-target guess for the corresponding sequence position. Rollout
+# error summarizes the three generated suffix values and is also compared with persistence, which repeats
+# the last observed value. These measurements distinguish predicting one next step from remaining accurate
+# after earlier generated errors enter the context. The sequences are short, noiseless arithmetic
+# progressions; the result does not establish open-ended sequence modeling, language generation, or
+# forecasting with changing dynamics.
 #
 # {{< evidence P054 status >}}
 #

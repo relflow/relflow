@@ -39,6 +39,12 @@
 #
 # ## Example
 #
+# The visible inputs are `a` and `b`; both `u` and `v` remain hidden targets. Their rules are `u = a + 2b`
+# and `v = 2a - b`, giving `1.0` and `0.75` for the illustrative inputs. After learning both rules, the
+# experiment resets only the target at `/u`. This should erase that target's trained predictor while leaving
+# the sibling's learned state available, before any additional optimization can obscure the immediate
+# effect.
+#
 # ```yaml
 # a: 0.5
 # b: 0.25
@@ -62,9 +68,21 @@
 #
 # ## Comparison
 #
+# Three checkpoint copies undergo selective reset, unchanged continuation, or complete reset. The experiment
+# first measures predictions immediately after each operation, then gives each copy the same additional
+# training budget and data. Both labels are rehearsed during adaptation; the sibling is not frozen
+# throughout that phase. State comparisons check that the selective operation changed only the selected
+# target, and checkpoint checks test whether the relearned model can be saved and restored.
+#
 # Measure both immediately after reset and after further training on both targets. Compare unchanged and completely reset models.
 #
 # ## Result
+#
+# The three headline errors answer different questions: did the reset target lose its skill, did the sibling
+# survive immediately, and could the reset target learn again? Normalization uses the source-training
+# constant guesses for final test comparisons. Recorded curves show separate validation checkpoints during
+# adaptation. A preserved sibling immediately after reset is not a claim that its predictions remain fixed
+# during later joint training, nor that resetting a shared ancestor would have the same local effect.
 #
 # {{< evidence P048 status >}}
 #

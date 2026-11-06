@@ -24,6 +24,11 @@
 # evidence-group: Vocabulary
 # ---
 #
+# Adding an input identity to a vocabulary and learning that identity's behavior are separate
+# operations. This experiment follows three cohorts whose identity-specific effects are unrelated. The
+# same model encounters each cohort in stages, allowing a direct test of whether admission alone
+# changes its predictions before the next fitting phase begins.
+#
 # ## Example
 #
 # ```yaml
@@ -46,15 +51,36 @@
 # )))
 # ```
 #
+# The illustrated row supplies an identity and the shared context `high`; the yes/no answer is sampled
+# from their combined effect. The hide flag selects which training labels are reconstructed and is not
+# a predictive schema field. A new cohort preserves the familiar low/high context and yes/no answer
+# names, but its individual identity effects must be learned afresh.
+#
 # ## Comparison
 #
-# Predict the same held-out rows just before and just after admitting independent training records, without an optimizer update.
+# Predict the same held-out rows just before and just after admitting independent training records,
+# without an optimizer update.
+#
+# For later cohorts, the same held-out rows are predicted immediately before and after independent
+# training records admit their identities. No optimizer step occurs between those predictions. This
+# isolates admission drift from learning. After fitting, shuffling identities across the held-out rows
+# keeps context and outcome frequencies while breaking the personal effect the model should now use.
 #
 # ## Result
 #
 # {{< evidence P066 status >}}
 #
-# The selected run records zero prediction drift and unchanged reconstruction NLL when new input identities are admitted, before an optimizer update. Its overall result remains unmet: the second cohort's cold marginal RMSE is 0.1653 against the declared 0.15 limit. Preserving predictions at admission does not by itself establish cold-input prediction quality. The measurements and library revision remain those recorded above.
+# The selected run records zero prediction drift and unchanged reconstruction NLL when new input
+# identities are admitted, before an optimizer update. Its overall result remains unmet: the second
+# cohort's cold marginal RMSE is 0.1653 against the declared 0.15 limit. Preserving predictions at
+# admission does not by itself establish cold-input prediction quality. The measurements and library
+# revision remain those recorded above.
+#
+# Zero admission drift is a storage and execution invariant, not a quality score. The cold probability
+# error instead compares predictions with the best mixture over still-unknown identity effects. The
+# learned error uses each identity's generating effect. Read both: stable admission can coexist with
+# an unmet cold-quality criterion, and these staged fits do not test uninterrupted optimizer-state
+# continuation.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

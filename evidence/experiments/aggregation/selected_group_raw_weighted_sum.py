@@ -28,6 +28,10 @@
 # evidence-group: Aggregation
 # ---
 #
+# The request names one group, while a mixed list contains two items from each of A, B, and C. The
+# hidden answer is the sum of value times weight for only the requested group. Both selecting the
+# right items and keeping each value with its own weight are necessary.
+#
 # ## Example
 #
 # ```yaml
@@ -43,6 +47,11 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# For selected_group A, the illustrated contributions are 0.8 × 0.5 = 0.4 and −0.4 × 1.25 = −0.5,
+# giving −0.1. All B and C items are excluded. If the two A weights were exchanged, their
+# contributions would instead total 0.8; preserving the same values and weights separately would not
+# preserve the answer.
 #
 # ```{typst}
 # //| label: fig-evidence-selected-group-raw-weighted-sum
@@ -61,13 +70,27 @@
 #
 # ## Comparison
 #
-# Change the requested group. Then separately shuffle group labels and swap weights, retaining the original answers.
+# Change the requested group. Then separately shuffle group labels and swap weights, retaining the
+# original answers.
+#
+# Each generated bag appears with all three group requests, so the list alone cannot determine the
+# target. One intervention rotates item group labels while preserving their counts; another
+# exchanges weights only within their existing groups. Both keep the original answers for scoring.
+# Reordering complete items preserves every relationship and should barely change predictions. These
+# comparisons probe selection, pairing, and order sensitivity separately.
 #
 # ## Result
 #
 # {{< evidence P010 status >}}
 #
-# The model uses both membership and value–weight pairing. The groups are familiar and equally sized; unfamiliar or missing groups are not tested.
+# The model uses both membership and value–weight pairing. The groups are familiar and equally
+# sized; unfamiliar or missing groups are not tested.
+#
+#
+# All three error percentages share the original constant-guess baseline. Increased error after
+# either corruption indicates dependence on the damaged relationship, while low intact error is
+# still required. The result concerns familiar group labels and exactly two items per group; it does
+# not establish behavior for absent groups or independently varying group sizes.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

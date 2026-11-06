@@ -25,6 +25,11 @@
 # evidence-group: Vocabulary
 # ---
 #
+# A classifier can be good at choosing among its available answers while lacking the correct answer
+# altogether. This experiment deliberately separates those two properties. The sign of `x` identifies
+# a binary class during training, while an independent `hint` field contains strings that may look
+# like answer names but carry no useful signal.
+#
 # ## Example
 #
 # ```yaml
@@ -46,15 +51,30 @@
 # )))
 # ```
 #
+# In the illustrative row, positive `x = 0.7` supports `positive`. The hint `novel-negative` does not
+# override that rule: hints are drawn independently of the sign. In the shifted test set, half the
+# target names are replaced by their novel counterparts while the numeric inputs stay the same. The
+# input pattern remains familiar, but those answer names were never output classes.
+#
 # ## Comparison
 #
 # Compare accuracy on known labels with accuracy over every row, and count how many answers the vocabulary can represent.
+#
+# Coverage counts the fraction of test answers present in the output vocabulary. Known-label accuracy
+# scores only that covered fraction; all-row accuracy keeps every test row in the denominator.
+# Shuffling `x` preserves its distribution and the label counts while removing the relationship the
+# model should have learned. The independent hint should not rescue that broken relationship.
 #
 # ## Result
 #
 # {{< evidence P056 status >}}
 #
 # Known-only accuracy can look perfect while half the answers are impossible to emit. Report coverage and all-row accuracy alongside it; confidence need not warn about the missing labels.
+#
+# Confidence is normalized across the two populated output labels. It can therefore be high even when
+# neither name is the required novel answer. Recognizing a string in the separate hint vocabulary does
+# not add it to the output vocabulary. These measurements concern answer coverage, rather than
+# recognizing that a prediction should be rejected.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

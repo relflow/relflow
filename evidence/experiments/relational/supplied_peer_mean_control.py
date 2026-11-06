@@ -19,6 +19,11 @@
 #
 # ## Example
 #
+# Every item receives the reference average explicitly as `peer_mean`; the hidden answer is simply `value -
+# peer_mean`. In the illustration, `1.5 - 2.5 = -1.0` and `3.5 - 2.5 = 1.0`. All six listed values average
+# to `2.5`, but the model does not have to derive that fact to solve this version. The example separates
+# understanding the desired subtraction from discovering which other values provide the reference.
+#
 # ```yaml
 # items:
 #   - {value: 1.5, peer_mean: 2.5, deviation: -1.0}
@@ -46,9 +51,20 @@
 #
 # ## Comparison
 #
+# The generator varies the common mean and the spread of six centered deviations, then supplies that mean
+# beside every item. Fresh train, validation, and test records use independent random draws. This is a
+# diagnostic control beside the versions that withhold the mean: it removes peer selection and aggregation
+# while retaining local numeric prediction and repeated output alignment. It does not include an
+# intervention that corrupts the supplied reference.
+#
 # Compare predictions with the correct differences on fresh records.
 #
 # ## Result
+#
+# Normalized RMSE compares prediction error with a constant training-target guess. A ratio of `0.25`, for
+# example, would mean one quarter of that guess's root-mean-square error, not 75% exact answers. The visible
+# mean makes this a test of the final subtraction step. A good result helps rule out an inability to produce
+# local differences, but cannot show that the harder mean-inference or grouping steps have been learned.
 #
 # {{< evidence P034 status >}}
 #

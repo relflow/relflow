@@ -18,6 +18,10 @@
 # evidence-group: Aggregation
 # ---
 #
+# Variance can be calculated by averaging squared distances from a list's mean. Here those distances
+# are provided as inputs, so the model is tested on the final averaging step. It never sees the raw
+# values whose distances were calculated.
+#
 # ## Example
 #
 # ```yaml
@@ -35,6 +39,11 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
+# Every squared_deviation in the illustration is 1.0, so their sum is 8.0 and their average is 1.0.
+# One possible raw list would alternate −1 and 1 around a mean of zero. The original signs are
+# deliberately absent: squared distances describe spread, not which side of the mean each value
+# occupied.
+#
 # ```{typst}
 # //| label: fig-evidence-supplied-squared-deviations
 # //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
@@ -51,11 +60,24 @@
 #
 # Compare the prediction with the correct variance on new records.
 #
+# Fresh records come from independently sampled locations and scales, with eight prepared distances
+# per record. Supplying these distances removes the need to find the mean, subtract it, and square
+# the differences. The raw-value variance experiment asks the larger question. This control instead
+# checks whether the model can recover the correct numerical average after that information has
+# already been prepared.
+#
 # ## Result
 #
 # {{< evidence P009 status >}}
 #
-# This tests the final averaging step. The inputs already contain the difficult parts of calculating variance.
+# This tests the final averaging step. The inputs already contain the difficult parts of calculating
+# variance.
+#
+#
+# The error percentage uses the constant training-mean variance as its baseline. A small error
+# supports the reduction and numeric readout in this setting; it does not show that the model
+# learned to center or square raw measurements. The answer uses population variance, and all scored
+# lists have the same length.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

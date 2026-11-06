@@ -26,6 +26,11 @@
 #
 # ## Example
 #
+# The target is the sum of two independently drawn inputs. In the illustration, `0.5 + 0.75 = 1.25`. After
+# `b` is disabled, the model can still read `a: 0.5` but cannot distinguish this record from another with
+# `b: -0.75`, whose answer would be `-0.25`. Because hidden `b` has mean zero, predicting `a` is the best
+# squared-error rule available from the remaining information; it cannot identify each original sum.
+#
 # ```yaml
 # a: 0.5
 # b: 0.75
@@ -47,9 +52,21 @@
 #
 # ## Comparison
 #
+# The same trained model repeatedly disables and re-enables `b` without additional fitting. While disabled,
+# changing, omitting, or flipping `b` should not affect predictions. Re-enabling it should restore the
+# original schema and trained outputs because the learned state was retained. Temporary overrides are tested
+# on both normal and exceptional exits, and a saved inactive checkpoint is loaded before restoration.
+# Shuffling the active input provides a separate check that `b` mattered before it was disabled.
+#
 # Check repeated edits, temporary overrides, and a saved inactive model. No training occurs while b is disabled.
 #
 # ## Result
+#
+# The readout's remaining-input oracle is an information reference, not a claim that the unchanged disabled
+# model has already optimized itself for missing `b`. The detailed edit scores show that distinction
+# alongside state preservation and prediction restoration. This experiment concerns reversible input
+# activation with no intervening training. Deleting the field, resetting its parameters, or continuing
+# optimization while it is absent raises different questions about what can later be restored.
 #
 # {{< evidence P049 status >}}
 #

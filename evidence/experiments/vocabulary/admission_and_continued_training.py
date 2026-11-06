@@ -25,6 +25,11 @@
 # evidence-group: Vocabulary
 # ---
 #
+# The model initially knows two answer names and a simple numeric distinction. Later, two additional
+# classes arrive in more distant numeric regions. This experiment separates three events that are easy
+# to conflate: seeing a new label, allocating a place for it, and adjusting learned parameters so that
+# the model predicts it correctly.
+#
 # ## Example
 #
 # ```yaml
@@ -44,15 +49,30 @@
 # )))
 # ```
 #
+# The illustrated `x = −0.9` lies near the original negative class center of −1. The original positive
+# class is near +1; the added classes are near −3 and +3. Small independent deviations keep each
+# region distinct. The target label is hidden, so identifying a region from `x` is the useful
+# predictive information.
+#
 # ## Comparison
 #
 # Measure before admission, immediately after admission without training, and after continued fitting. Rehearse the old classes too.
+#
+# The admission-only step encodes new examples as training data but takes no optimizer steps. It can
+# append label IDs and update permitted statistics without teaching the new decision boundaries. The
+# experiment measures predictions immediately afterward, then fits again on a mixture of old and new
+# examples. Save/load checks ensure that any comparison uses the same stored mappings and predictions.
 #
 # ## Result
 #
 # {{< evidence P059 status >}}
 #
 # Admission creates storage; further training teaches the new distinctions. Old-label retention here depends on continued examples of the old classes.
+#
+# The key learning requirements apply after continued fitting: both old and new held-out classes must
+# reach the declared accuracy. Immediate post-admission accuracy is recorded as a diagnostic, not
+# treated as proof that allocation taught a class. Retention includes rehearsal of the original
+# classes, so it does not establish resistance to forgetting when old examples are absent.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

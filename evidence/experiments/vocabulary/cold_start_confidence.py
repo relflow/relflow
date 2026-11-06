@@ -26,6 +26,11 @@
 # evidence-group: Vocabulary
 # ---
 #
+# A new identity removes one source of information, but the numeric input can still be informative.
+# Here the yes probability depends on both `x` and a persistent identity effect. The experiment asks
+# whether predictions appropriately lose certainty about that individual effect while retaining
+# certainty justified by a sufficiently strong numeric signal.
+#
 # ## Example
 #
 # ```yaml
@@ -47,15 +52,30 @@
 # )))
 # ```
 #
+# At the illustrative `x = 0`, the two possible identity effects favor opposite answers; without
+# knowing which effect belongs to a new identity, their average yes probability is 0.5. At a
+# sufficiently large positive `x`, both effects favor yes. A confident prediction can then be
+# reasonable even for an unfamiliar name. The shown yes label is sampled, not guaranteed.
+#
 # ## Comparison
 #
 # Compare training with 1% or 20% of input identities made unavailable. Score new identities separately where the numeric signal is weak or strong.
+#
+# Both training arms sometimes make identity content unavailable, at rates of 1% and 20%. This gives
+# practice forecasting from the remaining context without changing the known yes/no output labels.
+# Evaluation separately measures familiar and disjoint identity names. Renaming one unknown identity
+# to another checks that its spelling does not supply an unlearned personal effect.
 #
 # ## Result
 #
 # {{< evidence P061 status >}}
 #
 # A new identity does not always imply a 50% prediction: strong remaining context can still justify confidence. Neither unavailability rate is claimed to be best for every dataset.
+#
+# The confidence readouts use the probability of the more likely answer, so confident no and confident
+# yes count alike. They distinguish weak-signal rows from strong-signal rows. Probability error is
+# also compared with an evaluator-only oracle. These checks concern this mixture of identity effects
+# and signals; they do not imply that stronger unavailability augmentation is universally better.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

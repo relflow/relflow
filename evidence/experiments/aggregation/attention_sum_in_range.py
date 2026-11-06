@@ -18,6 +18,10 @@
 # evidence-group: Aggregation
 # ---
 #
+# Each record is a small bag of signed numbers. The model receives the items and must predict their
+# total; it receives neither the answer nor a separate count field. Because both values and list
+# lengths vary, recognizing a typical length cannot solve the task.
+#
 # ## Example
 #
 # ```yaml
@@ -29,6 +33,10 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# In the illustration, adding 0.5 and −0.2 gives 0.3; adding the remaining 0.9 gives the hidden
+# answer 1.2. Negative amounts matter: predicting the number of items, or simply adding their
+# magnitudes, would produce a different answer.
 #
 # ```{typst}
 # //| label: fig-evidence-attention-sum-in-range
@@ -46,11 +54,22 @@
 #
 # Test on fresh lists, then reorder the same items. Reordering should preserve the total.
 #
+# Training and scoring use independently generated lists of one through six items, with amounts
+# between −1 and 1. The second comparison moves complete items to different positions without
+# changing any amount or the target. A model that relies on the first or last position could look
+# accurate on ordinary examples yet change its answer under this intervention.
+#
 # ## Result
 #
 # {{< evidence P001 status >}}
 #
 # The model learns an approximate total in this range. Longer lists need a separate test.
+#
+#
+# Prediction error is compared with always guessing the training-set mean total: 100% means that
+# constant guess, and lower is better. Permutation drift instead measures how much predictions move
+# when the answer should stay fixed. These checks cover approximate addition within the tested
+# length range, not a general-purpose exact calculator.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

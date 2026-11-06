@@ -29,6 +29,11 @@
 # evidence-group: Vocabulary
 # ---
 #
+# Reconstruction quality has two denominators: the answers the model can represent and all answers it
+# was asked to reconstruct. This experiment holds the numeric evidence and masking positions fixed
+# while changing how many selected answer names belong to the learned vocabulary. It makes the
+# difference visible without making the original classification rule harder.
+#
 # ## Example
 #
 # ```yaml
@@ -37,7 +42,8 @@
 # hide: true
 # ```
 #
-# code is hidden wherever hide is true. Unknown code names cannot be emitted by the learned output vocabulary.
+# code is hidden wherever hide is true. Unknown code names cannot be emitted by the learned output
+# vocabulary.
 #
 # ```{typst}
 # //| label: fig-evidence-pretraining-coverage
@@ -49,15 +55,32 @@
 # )))
 # ```
 #
+# The illustrative `x = 2` identifies `class-2`, and `hide: true` selects that code for
+# reconstruction. The auxiliary hide value controls masking; it is not a predictive schema field.
+# Replacing the hidden target name with `novel-class-2` leaves the visible numeric evidence unchanged,
+# but the learned output vocabulary still contains only the original eight class names.
+#
 # ## Comparison
 #
 # Compare known-answer accuracy, vocabulary coverage, and accuracy over all selected answers.
+#
+# Exactly 1,024 evaluation answers are selected. Keeping only 102 of their original names gives about
+# 10% coverage: even perfect recovery of every representable answer would recover only 102 of the
+# 1,024 requested names. Reordering those same records changes which batches contain known targets,
+# allowing the experiment to check that batch composition does not distort epoch-level counts or
+# scores.
 #
 # ## Result
 #
 # {{< evidence P062 status >}}
 #
-# Known-only accuracy stays high even as coverage falls. Excluding unfamiliar answers from the content score does not mean they were recovered.
+# Known-only accuracy stays high even as coverage falls. Excluding unfamiliar answers from the content
+# score does not mean they were recovered.
+#
+# Known-answer accuracy measures conditional quality; coverage states how often that condition holds;
+# all-answer accuracy counts unfamiliar targets as wrong. When no selected answers are known,
+# conditional loss and accuracy are undefined and are recorded as missing values. A blank conditional
+# score must not be read as zero error or as successful recovery of unknown names.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

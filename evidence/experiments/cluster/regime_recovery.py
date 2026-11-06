@@ -3,36 +3,71 @@
 # title: Can it discover hidden groups with different behaviors?
 # categories:
 # - Cluster
-# description: Repeated identities follow four hidden numerical rules. Ask the Cluster field to recover the groups
-#   while predicting new observations.
+# description: Predict new measurements for repeated identities whose behavior follows four hidden curves, and test
+#   whether Cluster recovers the groups behind those curves.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
 # toc: false
 # evidence-readout:
-# - label: Stable hidden groups
+# - label: Stable groups — ARI
 #   metric:
 #   - stable
-#   - normalized_rmse
-#   format: error
-# - label: No persistent groups
+#   - adjusted_rand
+#   format: number
+# - label: No persistent groups — ARI
 #   metric:
 #   - no_regime
+#   - adjusted_rand
+#   format: number
+# - label: Stable groups — prediction error
+#   metric:
+#   - stable
 #   - normalized_rmse
 #   format: error
 # evidence-group: Representation
 # ---
 #
+# The model sees an opaque identity and a numeric input `x`, then predicts `y`.
+# Across repeated observations, each of 64 identities follows one of four hidden
+# curves. The group labels and curve parameters are never supplied to the model;
+# training targets provide the behavioral evidence. Can `Cluster` recover which
+# identities behave alike, as well as predict their next measurement?
+#
+# Think of the identities as 64 named devices, each measured at different
+# settings. Some devices respond similarly and should end up in the same
+# learned group. The device names carry no clues about that behavior. These
+# measurements are generated from known rules, so we can compare the learned
+# groups with the groups that actually produced the data.
+#
 # ## Example
 #
 # ```yaml
-# entity: entity-0017
+# entity: entity-0001
 # x: 0.5
 # y: -6.27
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# In this illustrative record, the model receives the device name and the
+# setting `x = 0.5`; it must predict the response `y`. Repeated training records
+# let it learn how that identity behaves. A different device following the same
+# rule should receive a similar grouping assignment even though its name differs.
+#
+# The four generator rules give these responses before the small random noise:
+#
+# | Hidden rule | Response at x = -0.5 | Response at x = 0.5 |
+# | --- | ---: | ---: |
+# | -6 - 0.6x | -5.7 | -6.3 |
+# | -2 + 0.6x | -2.3 | -1.7 |
+# | 2 - 0.6x | 2.3 | 1.7 |
+# | 6 + 0.6x | 5.7 | 6.3 |
+#
+# These are worked examples of the data-generating rules. The model is never
+# given this table or a device's true group. It learns from individual labeled
+# measurements, and the evaluator keeps the true grouping for scoring.
 #
 # ```{typst}
 # //| label: fig-evidence-cluster-regime-recovery
@@ -47,13 +82,48 @@
 #
 # ## Comparison
 #
-# Measure actual grouping agreement and held-out prediction, then shuffle identities and train a control with no persistent groups.
+# | Condition | What an identity tells the model | Expected behavior |
+# | --- | --- | --- |
+# | Stable groups | Each identity always follows the same hidden curve. | Recover the generating groups and predict new measurements accurately. |
+# | No persistent groups | Identities are shuffled across observations; the numeric records and identity counts stay the same. | No agreement with the original grouping, and prediction error near a constant guess. |
+#
+# For the stable condition, imagine that the same device repeatedly follows
+# the first row of the table. Its name becomes a useful clue about its next
+# response. In the shuffled condition, that name might accompany the first
+# rule on one record and the fourth rule on the next. The device still appears
+# just as often, but remembering its name no longer identifies a response rule.
+# In the detailed measurements, `stable` and `no_regime` name these two conditions.
+#
+# Both arms use the same model, initialization, and 600-update training budget.
+# Train, validation, and test contain the same 64 identities with independent
+# numeric inputs and noise. This tests new observations of known identities;
+# it does not test previously unseen identities.
+#
+# **Grouping:** the adjusted Rand index (ARI) compares which identities share
+# a group, regardless of the names or numbers assigned to clusters. An ARI of
+# 1 means the partitions match, 0 means chance-level agreement, and negative
+# values mean less agreement than expected by chance. The stable arm must reach
+# at least 0.80; the no-group control must remain at or below 0.15.
+# If two devices truly share a rule, putting them in groups called 2 and 5 is
+# a disagreement; renaming a correctly recovered group from 2 to 5 is harmless.
+# ARI scores that distinction, so merely producing four or eight clusters is
+# insufficient.
+#
+# **Prediction:** normalized RMSE divides test prediction error by the error of
+# always guessing the training mean. A value of 1 matches that constant guess;
+# lower is better. The stable arm must reach at most 0.35, while the no-group
+# control must remain at or above 0.85. Separately, shuffling IDs only at test
+# time checks whether the trained stable model depends on the correct identity.
 #
 # ## Result
 #
 # {{< evidence P078 status >}}
 #
-# All three seeds fail the recovery checks at this budget. Some identity information helps prediction, but producing several clusters does not show the right groups were discovered.
+# The selected run does not meet the stable arm's grouping or prediction gates.
+# Identity information helps prediction, but producing several clusters does
+# not show that the right groups were discovered. These are final measurements
+# after 600 updates per arm. No ARI history was recorded, so they do not show
+# how grouping agreement changes during training.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -105,17 +175,17 @@
 #
 # ### Remaining work
 #
-# The three-seed panel retained the original gates and 600-update budget. All
-# three runs failed both partition-recovery and prediction-quality gates; the
-# threshold is not redefined to make these outcomes pass. Diagnose optimization
+# The selected run retains the original gates and 600-update budget. It fails
+# both partition-recovery and prediction-quality gates; the thresholds are not
+# redefined to make this outcome pass. Diagnose optimization
 # and assignment behavior with training and validation data before proposing a
 # distinct follow-up experiment or a ten-seed promotion panel.
 #
 # This task has strongly separated intercepts; crossing curves, unbalanced
 # groups, unseen identities, and a benefit over a parameter-matched Category
-# model remain separate questions. No-regime assignments occupied seven or
-# eight clusters. Their low ARI measures a lack of recovered meaning; Cluster
-# did not automatically reject the spurious groups.
+# model remain separate questions. Occupying several clusters is not a success
+# criterion: low ARI can reveal that these assignments have not recovered the
+# generating groups. The no-regime arm checks that distinction directly.
 #
 # ### Complete experiment code
 #

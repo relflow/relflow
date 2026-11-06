@@ -23,6 +23,10 @@
 # evidence-group: Aggregation
 # ---
 #
+# A weight changes how much its own value contributes to a total. The model receives both fields on
+# every item, with no precomputed product. It must preserve that pairing while combining all six
+# items, rather than summarize values and weights independently.
+#
 # ## Example
 #
 # ```yaml
@@ -37,6 +41,11 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# The illustrated products are 0.4, −0.4, 0.28, 0.1, −0.2, and 0.27; adding them gives 0.45. Merely
+# adding the values, or multiplying their sum by the average weight, would generally give a
+# different result. A negative value still contributes negatively because all generated weights are
+# positive.
 #
 # ```{typst}
 # //| label: fig-evidence-raw-value-weight-sum
@@ -53,13 +62,27 @@
 #
 # ## Comparison
 #
-# Swap weights between items while retaining the original total. Also reorder whole items and scale all weights together.
+# Swap weights between items while retaining the original total. Also reorder whole items and scale
+# all weights together.
+#
+# Swapping weights between items preserves every individual value and weight but changes which ones
+# multiply together. Scoring against the original total tests whether the model used that
+# association. Two other interventions preserve known arithmetic relationships: reordering complete
+# pairs leaves the answer unchanged, while multiplying every weight by 0.75 must multiply the total
+# by 0.75.
 #
 # ## Result
 #
 # {{< evidence P014 status >}}
 #
-# The model uses the pairing: swapping weights worsens accuracy. This is approximate learned arithmetic on fixed-length lists.
+# The model uses the pairing: swapping weights worsens accuracy. This is approximate learned
+# arithmetic on fixed-length lists.
+#
+#
+# The intact and swapped-weight percentages use the same original-target baseline. A rise after
+# swapping supports sensitivity to pairing, and separate drift checks assess order and scaling
+# behavior. The learned result is approximate and covers six-item lists with positive weights in the
+# sampled range; zero or negative weights and arbitrary lengths are separate questions.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

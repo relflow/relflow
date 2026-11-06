@@ -25,6 +25,11 @@
 # evidence-group: Vocabulary
 # ---
 #
+# This experiment asks whether the first labels encountered can crowd out useful labels that arrive
+# later. There are four code strings, but their frequencies are very unequal: the two rare labels
+# occur once each per generated pass, while `cold` and `hot` fill the remaining rows. The hidden
+# target depends only on the code plus small noise.
+#
 # ## Example
 #
 # ```yaml
@@ -44,15 +49,30 @@
 # )))
 # ```
 #
+# The displayed `rare-left` target of −1 is the illustrative mean before noise. The two common codes
+# have means −1 for `cold` and +1 for `hot`. Giving rare labels the first two encounters should
+# determine their vocabulary positions, but should not prevent the model from later storing both
+# common identities or learning their opposite effects.
+#
 # ## Comparison
 #
 # Compare rare-first and common-first training. Check that all observed labels are admitted and that common-label distinctions learn.
+#
+# The order intervention moves the first common examples to the front of the same observations. It
+# preserves every code, target, noise draw, and frequency, so a coverage difference cannot be
+# explained by one arm receiving more information. A second probe swaps common code names on held-out
+# rows; a model that uses identity should change its predictions substantially.
 #
 # ## Result
 #
 # {{< evidence P057 status >}}
 #
 # Storage grows and retains earlier labels in both orders. This single-consumer experiment does not test distributed encounter order.
+#
+# Vocabulary coverage and prediction quality answer different questions here. Complete coverage shows
+# that growing storage admitted the common labels; low normalized error shows that their effects were
+# learned. The rare labels diagnose admission and stable ordering, not dependable rare-label accuracy.
+# The controlled one-consumer setup also leaves distributed encounter ordering outside this claim.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>

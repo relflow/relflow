@@ -3,7 +3,7 @@
 # title: Can an average reveal how many items there were?
 # categories:
 # - Weighted aggregation
-# description: Use an average-only branch, with item attention disabled, to predict both an average and a total; the
+# description: Use a Mean branch, with item attention disabled, to predict both an average and a total; the
 #   branch's count lane carries the multiplicity a plain average erases.
 # execute:
 #   enabled: false
@@ -29,6 +29,11 @@
 # evidence-group: Aggregation
 # ---
 #
+# An ordinary average cannot reveal how many identical numbers were averaged. This experiment asks
+# the current Mean branch for two hidden outputs at once: the average contribution and its total.
+# There is no separate visible item_count field; repetition must remain available through the branch
+# representation.
+#
 # ## Example
 #
 # ```yaml
@@ -45,6 +50,10 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
+# Six copies of 0.75 have an average of 0.75 and a total of 4.5, as illustrated. A single copy has
+# the same average but a total of 0.75. These matched cases separate knowing the shared contribution
+# from knowing how many times it should be counted.
+#
 # ```{typst}
 # //| label: fig-evidence-mean-keeps-contribution-count
 # //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
@@ -60,13 +69,27 @@
 #
 # ## Comparison
 #
-# Repeat the same contribution different numbers of times. The average stays fixed while the correct total changes.
+# Repeat the same contribution different numbers of times. The average stays fixed while the correct
+# total changes.
+#
+# Training and test draw counts from one through six and a fresh shared contribution for each
+# record. Item attention is disabled, so repetitions do not create new interactions before
+# averaging. Mean's count lane distinguishes bags whose averaged content is identical. The
+# experiment measures both outputs and includes the one-copy versus six-copy probe; accurate
+# averages alone would not show that multiplicity survived.
 #
 # ## Result
 #
 # {{< evidence P013 status >}}
 #
-# The model learns both the average and a total that scales with the count. Mean's count lane preserves the multiplicity its plain average would erase.
+# The model learns both the average and a total that scales with the count. Mean's count lane
+# preserves the multiplicity its plain average would erase.
+#
+#
+# The two error percentages use separate constant-guess baselines for the average and total. The
+# paired-total checks also require correctly separated predictions near 0.75 and 4.5. Success
+# demonstrates usable count information for repeated equal contributions within the trained range;
+# it does not establish unseen-length extrapolation or summation of arbitrary mixed contributions.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
