@@ -3,7 +3,6 @@
 # title: Can day-of-year alone identify the weekday?
 # categories:
 # - Calendar reasoning
-# evidence-id: P045
 # description: Predict weekday from the day number while deliberately balancing different years across all seven weekday
 #   answers.
 # execute:
@@ -100,9 +99,7 @@ from functools import partial
 import lightning.pytorch as lit
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P045"
+from reporting import experiment, report
 
 
 def records(*, years: Sequence[int], ordinal_step: int = 5) -> Iterator[dict]:
@@ -184,6 +181,7 @@ def accuracy(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator
     return float(metrics[".target/test.accuracy.content"])
 
 
+@experiment("P045", seed=47)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     train = partial(records, years=tuple(range(1901, 1936)))
     validate = partial(records, years=tuple(range(1951, 1986)))
@@ -221,7 +219,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=47)
+    report(run)
 
 # %% [markdown]
 # </details>

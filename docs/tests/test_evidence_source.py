@@ -46,13 +46,14 @@ def test_fingerprint_detects_python_changes(source: ModuleType, changed: str) ->
 
 def test_metadata_preserves_nested_yaml(source: ModuleType) -> None:
     script = (
-        "# %% [markdown]\n# ---\n# evidence-id: P014\n# title: Weighted sums\n"
+        "# %% [markdown]\n# ---\n# title: Weighted sums\n"
         "# categories: [Aggregation]\n# execute:\n#   enabled: false\n#   echo: true\n"
         "# description: |\n#   First line.\n#   Second line.\n# ---\n# Explanation.\n"
-        "# %%\nraise RuntimeError('must not execute')\n"
+        "# %%\nfrom reporting import experiment, report\n"
+        "@experiment('P014', seed=14)\n"
+        "def run(seed, steps, accelerator):\n    raise RuntimeError('must not execute')\n"
     )
     assert source.metadata(script) == {
-        "evidence-id": "P014",
         "title": "Weighted sums",
         "categories": ["Aggregation"],
         "execute": {"enabled": False, "echo": True},
@@ -80,12 +81,15 @@ def test_metadata_rejects_malformed_header(source: ModuleType, script: str, mess
 def test_reading_source_never_executes_it(source: ModuleType, tmp_path: Path) -> None:
     marker = tmp_path / "executed"
     script = (
-        "# %% [markdown]\n# ---\n# evidence-id: P001\n# ---\n# %%\n"
+        "# %% [markdown]\n# ---\n# title: Signal\n# ---\n# %%\n"
         "from pathlib import Path\n"
         f"Path({str(marker)!r}).write_text('executed')\n"
         "raise RuntimeError('must not execute')\n"
+        "from reporting import experiment, report\n"
+        "@experiment('P001', seed=1)\n"
+        "def run(seed, steps, accelerator):\n    return {}, {'signal': True}\n"
     )
-    assert source.metadata(script) == {"evidence-id": "P001"}
+    assert source.metadata(script) == {"title": "Signal"}
     assert len(source.fingerprint(script)) == 64
     assert not marker.exists()
     unsafe_yaml = "# %% [markdown]\n# ---\n# value: !!python/object/apply:builtins.eval ['1 + 1']\n# ---\n"
@@ -94,7 +98,12 @@ def test_reading_source_never_executes_it(source: ModuleType, tmp_path: Path) ->
 
 
 def test_frontmatter_updates_preserve_code_and_nested_results(source):
-    script = "# %% [markdown]\n# ---\n# evidence-id: P001\n# ---\n# %%\nraise RuntimeError('not executed')\n"
+    body = (
+        "# %%\nfrom reporting import experiment, report\n"
+        "@experiment('P001', seed=1)\n"
+        "def run(seed, steps, accelerator):\n    raise RuntimeError('not executed')\n"
+    )
+    script = "# %% [markdown]\n# ---\n# title: Signal\n# ---\n" + body
     header = source.metadata(script)
     header["description"] = "First line\n---\nLast line"
     header["evidence-result"] = {"seed": 42, "checks": {"signal": True}, "metrics": {"error": 0.125}}
@@ -102,7 +111,7 @@ def test_frontmatter_updates_preserve_code_and_nested_results(source):
     assert source.metadata(updated) == header
     assert source.frontmatter(updated, header) == updated
     assert source.fingerprint(updated) == source.fingerprint(script)
-    assert updated.endswith("# %%\nraise RuntimeError('not executed')\n")
+    assert updated.endswith(body)
 
 
 def test_discovery_rejects_duplicate_ids_instead_of_losing_an_experiment(source, tmp_path):
@@ -110,7 +119,12 @@ def test_discovery_rejects_duplicate_ids_instead_of_losing_an_experiment(source,
 
     family = tmp_path / "experiments/family"
     family.mkdir(parents=True)
-    text = "# %% [markdown]\n# ---\n# evidence-id: P001\n# ---\n# %%\nraise RuntimeError('not executed')\n"
+    text = (
+        "# %% [markdown]\n# ---\n# title: Signal\n# ---\n# %%\n"
+        "from reporting import experiment, report\n"
+        "@experiment('P001', seed=1)\n"
+        "def run(seed, steps, accelerator):\n    raise RuntimeError('not executed')\n"
+    )
     (family / "first.py").write_text(text)
     (family / "second.py").write_text(text)
     with pytest.raises(ValueError, match="duplicate evidence ID"):

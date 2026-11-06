@@ -3,7 +3,6 @@
 # title: Can it average prepared squared differences?
 # categories:
 # - Distribution statistics
-# evidence-id: P009
 # description: Supply each value’s squared distance from the average, then predict the average of those distances.
 # execute:
 #   enabled: false
@@ -105,9 +104,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P009"
 ITEMS = 8
 
 
@@ -143,6 +141,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
+@experiment("P009", seed=3500)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -190,7 +189,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3500)
+    report(run)
 
 # %% [markdown]
 # </details>

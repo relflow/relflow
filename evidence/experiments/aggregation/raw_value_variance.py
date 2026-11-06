@@ -3,7 +3,6 @@
 # title: Can it tell how spread out a list is?
 # categories:
 # - Distribution statistics
-# evidence-id: P007
 # description: Predict variance, a measure of how far the values lie from their average.
 # execute:
 #   enabled: false
@@ -107,9 +106,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P007"
 ITEMS = 8
 
 
@@ -145,6 +143,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
+@experiment("P007", seed=3504)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -200,7 +199,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3504)
+    report(run)
 
 # %% [markdown]
 # </details>

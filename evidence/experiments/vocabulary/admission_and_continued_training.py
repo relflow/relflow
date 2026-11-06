@@ -3,7 +3,6 @@
 # title: Does admitting a label teach it to predict that label?
 # categories:
 # - Vocabulary
-# evidence-id: P059
 # description: Introduce new output labels to a model trained on an earlier pair of classes.
 # execute:
 #   enabled: false
@@ -102,9 +101,8 @@ import numpy as np
 import pyarrow as pa
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P059"
 BUDGET = 300
 CONTINUATION = 400
 LABELS = ("negative", "positive", "far-negative", "far-positive")
@@ -184,6 +182,7 @@ def roundtrip(model: rf.Model, rows: list[dict], path: Path) -> tuple[rf.Model, 
     return loaded, matches
 
 
+@experiment("P059", seed=5901)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -251,7 +250,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=5901)
+    report(run)
 
 # %% [markdown]
 # </details>

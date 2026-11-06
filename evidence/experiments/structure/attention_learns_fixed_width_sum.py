@@ -3,7 +3,6 @@
 # title: Can it add six numbers?
 # categories:
 # - Hierarchical statistics
-# evidence-id: P039
 # description: Predict the total of six independently chosen amounts.
 # execute:
 #   enabled: false
@@ -103,9 +102,7 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P039"
+from reporting import experiment, report
 
 
 def records(*, rows: int, seed: int) -> Iterator[dict]:
@@ -130,6 +127,7 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
+@experiment("P039", seed=2600)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     data_seed = (seed - 2600) % (2**32)
@@ -188,7 +186,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=2600)
+    report(run)
 
 # %% [markdown]
 # </details>

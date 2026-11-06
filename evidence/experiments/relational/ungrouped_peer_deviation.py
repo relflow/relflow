@@ -3,7 +3,6 @@
 # title: Can it infer an average and compare each item?
 # categories:
 # - Peer-relative inference
-# evidence-id: P035
 # description: Predict each item’s difference from the list average without supplying that average.
 # execute:
 #   enabled: false
@@ -104,9 +103,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P035"
 ITEMS = 6
 
 
@@ -167,6 +165,7 @@ def permute_items(rows: list[dict], seed: int) -> tuple[list[dict], np.ndarray]:
     return result, np.asarray(flattened)
 
 
+@experiment("P035", seed=3710)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -241,7 +240,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3710)
+    report(run)
 
 # %% [markdown]
 # </details>

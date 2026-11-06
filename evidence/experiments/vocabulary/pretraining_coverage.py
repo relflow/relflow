@@ -3,7 +3,6 @@
 # title: Does reconstruction accuracy include unfamiliar answers?
 # categories:
 # - Vocabulary
-# evidence-id: P062
 # description: Hide a categorical answer and reconstruct it from numeric context, while varying how many test answers
 #   belong to the learned vocabulary.
 # execute:
@@ -93,9 +92,8 @@ from functools import partial
 import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P062"
 BUDGET = 400
 LABELS = tuple(f"class-{index}" for index in range(8))
 
@@ -125,6 +123,7 @@ def evaluate(trainer: lit.Trainer, model: rf.Model, rows: list[dict]) -> dict[st
     return {name.removeprefix(prefix): float(value) for name, value in result.items() if name.startswith(prefix)}
 
 
+@experiment("P062", seed=7621)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -212,7 +211,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7621)
+    report(run)
 
 # %% [markdown]
 # </details>

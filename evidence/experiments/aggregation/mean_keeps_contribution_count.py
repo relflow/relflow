@@ -3,7 +3,6 @@
 # title: Can an average reveal how many items there were?
 # categories:
 # - Weighted aggregation
-# evidence-id: P013
 # description: Use an average-only branch, with item attention disabled, to predict both an average and a total; the
 #   branch's count lane carries the multiplicity a plain average erases.
 # execute:
@@ -121,9 +120,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P013"
 ITEMS = 6
 
 
@@ -158,6 +156,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray, target:
     return {"rmse": measured, "baseline_rmse": baseline_rmse, "nrmse": measured / baseline_rmse}
 
 
+@experiment("P013", seed=3309)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -222,7 +221,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3309)
+    report(run)
 
 # %% [markdown]
 # </details>

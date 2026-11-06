@@ -3,7 +3,6 @@
 # title: How confident should it be about a new identity?
 # categories:
 # - Vocabulary
-# evidence-id: P061
 # description: Predict a yes/no outcome using a numeric signal and an identity-specific effect. New identities remove
 #   only the latter information.
 # execute:
@@ -93,9 +92,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P061"
 BUDGET = 600
 ENTITIES = 4096
 
@@ -152,6 +150,7 @@ def score(p: np.ndarray, rows: list[dict], novel: bool) -> dict[str, float]:
     }
 
 
+@experiment("P061", seed=7611)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     metrics, checks = {}, {}
     for unavailable in (0.01, 0.2):
@@ -214,7 +213,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7611)
+    report(run)
 
 # %% [markdown]
 # </details>

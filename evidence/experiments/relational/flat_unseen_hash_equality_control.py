@@ -3,7 +3,6 @@
 # title: Can it compare two unfamiliar IDs directly?
 # categories:
 # - Collection overlap
-# evidence-id: P029
 # description: Ask whether two individual IDs match, as a simpler comparison beside the two-list overlap test.
 # execute:
 #   enabled: false
@@ -100,9 +99,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P029"
 MIN_LENGTH = 2
 MAX_LENGTH = 5
 
@@ -136,6 +134,7 @@ def probabilities(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["predictions"]["equal"]["content"]["probability"] for row in output])
 
 
+@experiment("P029", seed=3701)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -191,7 +190,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3701)
+    report(run)
 
 # %% [markdown]
 # </details>

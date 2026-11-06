@@ -3,7 +3,6 @@
 # title: Can admitting a new input change predictions before learning?
 # categories:
 # - Vocabulary
-# evidence-id: P066
 # description: Introduce a new cohort of input identities while keeping output labels and hidden-answer selection
 #   fixed.
 # execute:
@@ -94,9 +93,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P066"
 BUDGET = 400
 IDENTITIES = 256
 
@@ -161,6 +159,7 @@ def evaluate(trainer: lit.Trainer, model: rf.Model, rows: list[dict]) -> dict[st
     return {name.removeprefix(prefix): float(value) for name, value in result.items() if name.startswith(prefix)}
 
 
+@experiment("P066", seed=7801)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -248,7 +247,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7801)
+    report(run)
 
 # %% [markdown]
 # </details>

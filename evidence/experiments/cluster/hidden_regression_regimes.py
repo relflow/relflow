@@ -3,7 +3,6 @@
 # title: Do five clusters mean five behaviors were found?
 # categories:
 # - Cluster
-# evidence-id: P018
 # description: Repeated identities follow five hidden numerical rules. Watch how the Cluster field groups them during
 #   training.
 # execute:
@@ -104,9 +103,7 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P018"
+from reporting import experiment, report
 
 
 def records(seed: int) -> Iterator[dict]:
@@ -156,6 +153,7 @@ class Trajectory(lit.Callback):
         )
 
 
+@experiment("P018", seed=0)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -204,7 +202,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=0)
+    report(run)
 
 # %% [markdown]
 # </details>

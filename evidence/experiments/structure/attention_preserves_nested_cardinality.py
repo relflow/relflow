@@ -3,7 +3,6 @@
 # title: Does the grouping of values matter?
 # categories:
 # - Hierarchical statistics
-# evidence-id: P040
 # description: Predict the largest session total when the same six amounts are divided into different sessions.
 # execute:
 #   enabled: false
@@ -115,9 +114,7 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P040"
+from reporting import experiment, report
 
 
 def records(*, pairs: int, seed: int) -> Iterator[dict]:
@@ -144,6 +141,7 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
+@experiment("P040", seed=2601)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     data_seed = (seed - 2601) % (2**32)
@@ -210,7 +208,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=2601)
+    report(run)
 
 # %% [markdown]
 # </details>

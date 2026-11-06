@@ -3,7 +3,6 @@
 # title: Can it return the winning item’s value?
 # categories:
 # - Argmax retrieval
-# evidence-id: P023
 # description: Predict the value attached to the highest score while retaining the encoded candidates.
 # execute:
 #   enabled: false
@@ -103,9 +102,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P023"
 LENGTH = 3
 
 
@@ -135,6 +133,7 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
+@experiment("P023", seed=23)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -195,7 +194,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=23)
+    report(run)
 
 # %% [markdown]
 # </details>

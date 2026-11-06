@@ -3,7 +3,6 @@
 # title: Can percentile-based predictions return useful original values?
 # categories:
 # - Quantile
-# evidence-id: P067
 # description: Represent amounts and costs by their positions in the training distribution, then convert predicted
 #   costs back to their original units.
 # execute:
@@ -109,9 +108,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P067"
 BUDGET = 400
 BATCH_SIZE = 128
 TRAIN_ROWS = 4096
@@ -139,6 +137,7 @@ def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["cost"]["content"] for row in predictions], dtype=np.float64)
 
 
+@experiment("P067", seed=6701)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -227,7 +226,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=6701)
+    report(run)
 
 # %% [markdown]
 # </details>

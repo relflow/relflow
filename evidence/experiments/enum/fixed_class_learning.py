@@ -3,7 +3,6 @@
 # title: Can it learn classes declared in advance?
 # categories:
 # - Enum
-# evidence-id: P069
 # description: Declare the allowed input and output classes with Enum, then learn which output belongs to each visible
 #   combination.
 # execute:
@@ -112,9 +111,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P069"
 BUDGET = 300
 ROUTES = ("arch", "bay", "cove", "dune", "elm", "ford", "glen", "hill")
 CHANNELS = ("web", "store")
@@ -165,6 +163,7 @@ def accuracy(output: list[dict], rows: list[dict]) -> float:
     return float(np.mean([value["value"] == row["label"] for value, row in zip(output, rows, strict=True)]))
 
 
+@experiment("P069", seed=6901)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     test = list(records(rows=2048, seed=seed + 3))
     shuffled_test = list(records(rows=2048, seed=seed + 3, shuffled=True))
@@ -240,7 +239,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=6901)
+    report(run)
 
 # %% [markdown]
 # </details>

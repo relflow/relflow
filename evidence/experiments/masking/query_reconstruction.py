@@ -3,7 +3,6 @@
 # title: Can each item choose which value to hide?
 # categories:
 # - Masking
-# evidence-id: P052
 # description: Use an item’s selected flag to hide its value and predict it from x.
 # execute:
 #   enabled: false
@@ -96,9 +95,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P052"
 LENGTH = 4
 BUDGET = 400
 
@@ -142,6 +140,7 @@ def prediction(model: rf.Model, rows: list[dict]) -> tuple[np.ndarray, np.ndarra
     return content, inferred
 
 
+@experiment("P052", seed=5201)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -215,7 +214,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=5201)
+    report(run)
 
 # %% [markdown]
 # </details>

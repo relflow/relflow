@@ -3,7 +3,6 @@
 # title: Can it combine noisy measurements with missing readings?
 # categories:
 # - Representation
-# evidence-id: P074
 # description: Predict a signal from three noisy sensors, sometimes hiding one or more readings. An extra sensor carries
 #   no useful information.
 # execute:
@@ -118,9 +117,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P074"
 BUDGET = 600
 TRAIN_ROWS = 4096
 TEST_ROWS = 2048
@@ -177,6 +175,7 @@ def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["target"]["content"] for row in output], dtype=np.float64)
 
 
+@experiment("P074", seed=7401)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -281,7 +280,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7401)
+    report(run)
 
 # %% [markdown]
 # </details>

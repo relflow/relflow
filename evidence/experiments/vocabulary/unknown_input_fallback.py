@@ -3,7 +3,6 @@
 # title: Is an unfamiliar category the same as a null?
 # categories:
 # - Vocabulary
-# evidence-id: P055
 # description: Compare familiar labels, new labels, and missing values in a task where identity and numeric context
 #   both matter.
 # execute:
@@ -97,9 +96,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P055"
 BUDGET = 600
 EFFECTS = {"left": -1.5, "right": 1.5, None: -3.0}
 
@@ -129,6 +127,7 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean((actual - predicted) ** 2)))
 
 
+@experiment("P055", seed=5501)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -209,7 +208,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=5501)
+    report(run)
 
 # %% [markdown]
 # </details>

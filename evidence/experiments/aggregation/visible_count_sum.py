@@ -3,7 +3,6 @@
 # title: Can a visible count help recover a total?
 # categories:
 # - Cardinality generalization
-# evidence-id: P004
 # description: Every item has the same amount. Give the model the item count as an extra input and ask for the total.
 # execute:
 #   enabled: false
@@ -107,9 +106,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P004"
 TRAIN_MAX = 6
 CAPACITY = 12
 
@@ -161,6 +159,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
+@experiment("P004", seed=3605)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -224,7 +223,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3605)
+    report(run)
 
 # %% [markdown]
 # </details>

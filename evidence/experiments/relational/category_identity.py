@@ -3,7 +3,6 @@
 # title: Can familiar IDs connect two lists?
 # categories:
 # - Sibling entity transfer
-# evidence-id: P036
 # description: Use matching category IDs to transfer changing values from a source list to a separately ordered target
 #   list.
 # execute:
@@ -112,9 +111,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P036"
 PAIR_COUNT = 2
 
 
@@ -141,6 +139,7 @@ def normalized_rmse(model: rf.Model, records: list[dict]) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted)) / np.mean(np.square(actual))))
 
 
+@experiment("P036", seed=17)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     test = list(records(rows=1024, seed=seed + 3, namespace="test"))
     broken = list(records(rows=1024, seed=seed + 3, namespace="test", broken_identity=True))
@@ -208,7 +207,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=17)
+    report(run)
 
 # %% [markdown]
 # </details>

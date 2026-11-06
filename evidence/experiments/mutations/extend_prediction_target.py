@@ -3,7 +3,6 @@
 # title: What happens when a new prediction target is added?
 # categories:
 # - Schema mutation
-# evidence-id: P047
 # description: Add hidden target w to a model already trained to predict u and v from a and b.
 # execute:
 #   enabled: false
@@ -100,9 +99,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P047"
 TARGETS = ("u", "v", "w")
 
 
@@ -234,6 +232,7 @@ def fit(model: rf.Model, *, seed: int, split: int, budget: int, accelerator: str
     }
 
 
+@experiment("P047", seed=4701)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     source_budget = 512 if steps is None else min(steps, 512)
     adapt_budget = 256 if steps is None else min(steps, 256)
@@ -366,7 +365,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=4701)
+    report(run)
 
 # %% [markdown]
 # </details>

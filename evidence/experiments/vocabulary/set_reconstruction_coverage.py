@@ -3,7 +3,6 @@
 # title: Can it learn separate probabilities for Set members?
 # categories:
 # - Vocabulary
-# evidence-id: P063
 # description: With no useful context, red appears in 90% of answer sets and blue in 20%. Predict each member’s probability.
 # execute:
 #   enabled: false
@@ -88,9 +87,8 @@ import numpy as np
 import pyarrow as pa
 import relflow as rf
 from relflow.tensorfields.shared.resize import Resize
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P063"
 BUDGET = 400
 
 
@@ -120,6 +118,7 @@ def build(size: int) -> rf.Model:
     return model
 
 
+@experiment("P063", seed=7631)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     metrics, checks = {}, {}
     prior = np.asarray([0.9, 0.2])
@@ -205,7 +204,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7631)
+    report(run)
 
 # %% [markdown]
 # </details>

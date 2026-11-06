@@ -3,7 +3,6 @@
 # title: Does label encounter order limit vocabulary coverage?
 # categories:
 # - Vocabulary
-# evidence-id: P057
 # description: Train on common and rare labels, changing which labels appear first.
 # execute:
 #   enabled: false
@@ -104,9 +103,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P057"
 BUDGET = 300
 EFFECTS = {"rare-left": -1.0, "rare-right": 1.0, "cold": -1.0, "hot": 1.0}
 
@@ -147,6 +145,7 @@ def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["target"]["content"] for row in output], dtype=np.float64)
 
 
+@experiment("P057", seed=5701)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     test = [row for row in records(rows=2050, seed=seed + 3) if row["code"] in {"cold", "hot"}]
     train = [row for row in records(rows=4096, seed=seed + 1) if row["code"] in {"cold", "hot"}]
@@ -216,7 +215,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=5701)
+    report(run)
 
 # %% [markdown]
 # </details>

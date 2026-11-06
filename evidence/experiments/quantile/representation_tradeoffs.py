@@ -3,7 +3,6 @@
 # title: Should a number be represented by size or percentile?
 # categories:
 # - Quantile
-# evidence-id: P077
 # description: Compare Number and Quantile on rank and amount tasks, with clean training and rare corrupt measurements.
 # execute:
 #   enabled: false
@@ -119,9 +118,8 @@ import numpy as np
 import pyarrow as pa
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P077"
 BUDGET = 400
 TRAIN_ROWS = 8192
 TEST_ROWS = 4096
@@ -236,6 +234,7 @@ def optima() -> dict[str, np.ndarray]:
     }
 
 
+@experiment("P077", seed=7701)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     stream = seed * 100
     test = list(records(rows=TEST_ROWS, seed=stream + 3))
@@ -350,7 +349,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7701)
+    report(run)
 
 # %% [markdown]
 # </details>

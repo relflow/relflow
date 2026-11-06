@@ -3,7 +3,6 @@
 # title: Can it learn the month from the day number?
 # categories:
 # - Calendar reasoning
-# evidence-id: P044
 # description: Learn month boundaries from day-of-year in non-leap years.
 # execute:
 #   enabled: false
@@ -98,9 +97,7 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P044"
+from reporting import experiment, report
 
 
 def records(years: Sequence[int], *, parity: int) -> Iterator[dict]:
@@ -175,6 +172,7 @@ def accuracy(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator
     return float(metrics[".target/test.accuracy.content"])
 
 
+@experiment("P044", seed=41)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     train = partial(records, (2017, 2018, 2019), parity=1)
     validate = partial(records, (2021,), parity=1)
@@ -205,7 +203,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=41)
+    report(run)
 
 # %% [markdown]
 # </details>

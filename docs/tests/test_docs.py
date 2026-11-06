@@ -39,7 +39,7 @@ def documents() -> dict[Path, str]:
         for source in [ROOT / "README.md", DOCS / "README.md", *DOCS.rglob("*.qmd")]
         if source.is_file() and not source.is_relative_to(DOCS / "site")
     }
-    entries = registry(ROOT / "evidence")
+    entries = registry(ROOT / "evidence", lane="all")
     pages.update({ROOT / entry["page"]: markdown(ROOT / "evidence" / entry["script"]) for entry in entries.values()})
     return pages
 
@@ -126,7 +126,7 @@ def test_data_examples_are_single_yaml_records() -> None:
 def test_quarto_navigation_and_relative_links_resolve() -> None:
     pages = documents()
     published = {source.with_suffix(".html"): text for source, text in pages.items() if source.is_relative_to(DOCS)}
-    entries = registry(ROOT / "evidence")
+    entries = registry(ROOT / "evidence", lane="all")
     downloads = {
         DOCS / f"evidence/_generated/{identifier}.py": ROOT / "evidence" / entry["script"]
         for identifier, entry in entries.items()
@@ -167,15 +167,16 @@ def test_quarto_navigation_and_relative_links_resolve() -> None:
 
 
 def test_every_registered_evidence_has_a_small_readable_overview() -> None:
-    entries = registry(ROOT / "evidence")
+    entries = registry(ROOT / "evidence", lane="all")
     documented: Counter[str] = Counter()
-    for entry in entries.values():
+    for identifier, entry in entries.items():
         page = ROOT / "evidence" / entry["script"]
         text = markdown(page)
         header = re.match(r"\A---\s*\n(.*?)\n---(?:\n|\Z)", text, flags=re.DOTALL)
         assert header, f"{page}: missing evidence metadata"
         metadata = yaml.safe_load(header[1])
-        identifier = metadata["evidence-id"]
+        assert "evidence-id" not in metadata, f"{page}: the decorator owns the ID"
+        assert entry["header"]["evidence-id"] == identifier
         assert identifier in entries, f"{page}: unregistered evidence ID {identifier}"
         documented[identifier] += 1
         assert ROOT / "evidence" / entries[identifier]["script"] == page, (

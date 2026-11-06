@@ -3,7 +3,6 @@
 # title: What happens beyond the learned percentile range?
 # categories:
 # - Quantile
-# evidence-id: P068
 # description: Train a Quantile relationship within a bounded amount range, then supply much smaller and larger amounts.
 # execute:
 #   enabled: false
@@ -112,9 +111,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P068"
 BUDGET = 400
 BATCH_SIZE = 128
 TRAIN_ROWS = 4096
@@ -143,6 +141,7 @@ def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["cost"]["content"] for row in predictions], dtype=np.float64)
 
 
+@experiment("P068", seed=6801)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -250,7 +249,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=6801)
+    report(run)
 
 # %% [markdown]
 # </details>

@@ -3,9 +3,8 @@
 # title: Do reconstruction embeddings separate unseen transaction styles?
 # categories:
 # - Representation
-# evidence-id: P080
-# description: Fit four clusters without labels, then measure their agreement with hidden transaction styles
-#   on independent records and compare trained, untrained, shuffled-view, and raw representations.
+# description: Fit four clusters without labels, then measure their agreement with hidden transaction styles on independent
+#   records and compare trained, untrained, shuffled-view, and raw representations.
 # execute:
 #   enabled: false
 #   eval: false
@@ -144,9 +143,8 @@ import numpy as np
 import pyarrow as pa
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P080"
 BUDGET = 600
 BATCH_SIZE = 64
 TRAIN_ROWS = 4096
@@ -425,6 +423,7 @@ def trial(seed: int, steps: int | None, accelerator: str) -> dict:
     return {"seed": seed, "arms": arms}
 
 
+@experiment("P080", seed=8001)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     trials = [trial(seed + offset, steps, accelerator) for offset in range(3)]
     names = ("ari", "neighbor_agreement", "shuffled_ari_mean", "shuffled_neighbor_agreement")
@@ -485,7 +484,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=8001)
+    report(run)
 
 # %% [markdown]
 # </details>

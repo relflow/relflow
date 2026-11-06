@@ -3,7 +3,6 @@
 # title: Can it find a shared ID across two lists?
 # categories:
 # - Collection overlap
-# evidence-id: P028
 # description: Predict whether two lists have any ID in common, using IDs absent from training.
 # execute:
 #   enabled: false
@@ -113,9 +112,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P028"
 MIN_LENGTH = 2
 MAX_LENGTH = 5
 
@@ -207,6 +205,7 @@ def probabilities(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["predictions"]["has_overlap"]["content"]["probability"] for row in output])
 
 
+@experiment("P028", seed=3711)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -295,7 +294,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3711)
+    report(run)
 
 # %% [markdown]
 # </details>

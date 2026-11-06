@@ -3,7 +3,6 @@
 # title: Does each subtotal stay with its own item?
 # categories:
 # - Item alignment
-# evidence-id: P030
 # description: Predict quantity times price separately for every real item in an order.
 # execute:
 #   enabled: false
@@ -102,9 +101,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P030"
 LENGTH = 5
 
 
@@ -146,6 +144,7 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
+@experiment("P030", seed=31)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model.xs(
@@ -204,7 +203,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=31)
+    report(run)
 
 # %% [markdown]
 # </details>

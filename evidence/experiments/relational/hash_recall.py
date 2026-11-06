@@ -3,7 +3,6 @@
 # title: Can it look up a value using a new ID?
 # categories:
 # - Associative recall
-# evidence-id: P025
 # description: Mix source values and questions in different positions. Use unfamiliar IDs to connect each question
 #   to its source, and judge the result over a panel of three seeds.
 # execute:
@@ -126,9 +125,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P025"
 PAIR_COUNT = 2
 PANEL = (0, 100, 200)
 
@@ -219,6 +217,7 @@ def trial(seed: int, steps: int | None, accelerator: str) -> dict:
     }
 
 
+@experiment("P025", seed=17)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     if accelerator == "cpu":
         with ProcessPoolExecutor(
@@ -249,7 +248,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=17)
+    report(run)
 
 # %% [markdown]
 # </details>

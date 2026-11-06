@@ -3,7 +3,6 @@
 # title: Can it predict the next value without seeing the future?
 # categories:
 # - Masking
-# evidence-id: P054
 # description: Expose the beginning of a simple numeric sequence, hide its remaining events, and predict the next
 #   value.
 # execute:
@@ -105,9 +104,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P054"
 LENGTH = 5
 BUDGET = 800
 
@@ -171,6 +169,7 @@ def rollout(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return values
 
 
+@experiment("P054", seed=5401)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -276,7 +275,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=5401)
+    report(run)
 
 # %% [markdown]
 # </details>

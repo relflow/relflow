@@ -3,7 +3,6 @@
 # title: Does each value keep its own weight?
 # categories:
 # - Weighted aggregation
-# evidence-id: P014
 # description: Predict a weighted total from values and weights stored together on each item.
 # execute:
 #   enabled: false
@@ -113,9 +112,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P014"
 ITEMS = 6
 
 
@@ -196,6 +194,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline_rmse, "nrmse": measured / baseline_rmse}
 
 
+@experiment("P014", seed=3304)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -269,7 +268,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3304)
+    report(run)
 
 # %% [markdown]
 # </details>

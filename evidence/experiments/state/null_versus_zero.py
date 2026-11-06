@@ -3,7 +3,6 @@
 # title: Can it distinguish missing values from zero?
 # categories:
 # - Value state
-# evidence-id: P038
 # description: Predict a label from whether a number is missing, even though every present number is zero.
 # execute:
 #   enabled: false
@@ -99,9 +98,7 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P038"
+from reporting import experiment, report
 
 
 def records(*, rows: int, seed: int, signal: bool, fill_nulls: bool = False) -> Iterator[dict]:
@@ -167,6 +164,7 @@ def fit(*, signal: bool, seed: int, steps: int | None, accelerator: str) -> rf.M
     return model
 
 
+@experiment("P038", seed=11)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     signal_model = fit(signal=True, seed=seed, steps=steps, accelerator=accelerator)
     control_model = fit(signal=False, seed=seed, steps=steps, accelerator=accelerator)
@@ -199,7 +197,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=11)
+    report(run)
 
 # %% [markdown]
 # </details>

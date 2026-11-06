@@ -3,7 +3,6 @@
 # title: Can it adapt after losing an input?
 # categories:
 # - Schema mutation
-# evidence-id: P050
 # description: Delete b from a model trained on y = a + b, then continue training with only a.
 # execute:
 #   enabled: false
@@ -97,9 +96,7 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P050"
+from reporting import experiment, report
 
 
 def records(*, rows: int, seed: int) -> Iterator[dict]:
@@ -220,6 +217,7 @@ def fit(model: rf.Model, *, seed: int, split: int, rows: int, budget: int, accel
     }
 
 
+@experiment("P050", seed=5001)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     source_budget = 512 if steps is None else min(steps, 512)
     adapt_budget = 256 if steps is None else min(steps, 256)
@@ -377,7 +375,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=5001)
+    report(run)
 
 # %% [markdown]
 # </details>

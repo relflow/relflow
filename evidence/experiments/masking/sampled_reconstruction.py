@@ -3,7 +3,6 @@
 # title: Can hiding values teach a relationship in both directions?
 # categories:
 # - Masking
-# evidence-id: P051
 # description: Sometimes hide x or y during training, then ask the model to recover the missing value from the other.
 # execute:
 #   enabled: false
@@ -99,9 +98,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P051"
 BUDGET = 400
 
 
@@ -135,6 +133,7 @@ def error(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean((actual - predicted) ** 2)))
 
 
+@experiment("P051", seed=5101)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -207,7 +206,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=5101)
+    report(run)
 
 # %% [markdown]
 # </details>

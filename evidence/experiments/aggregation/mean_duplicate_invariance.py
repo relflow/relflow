@@ -3,7 +3,6 @@
 # title: Does repeating a list preserve its average?
 # categories:
 # - Cardinality generalization
-# evidence-id: P003
 # description: Predict the average amount, using a branch that averages its encoded items without item attention;
 #   the branch's count lane sees the repetition, the average must not.
 # execute:
@@ -112,9 +111,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P003"
 TRAIN_MAX = 6
 CAPACITY = 12
 
@@ -174,6 +172,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
+@experiment("P003", seed=3600)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -236,7 +235,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3600)
+    report(run)
 
 # %% [markdown]
 # </details>

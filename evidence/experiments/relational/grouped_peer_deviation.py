@@ -3,7 +3,6 @@
 # title: Can it compare an item with its own group?
 # categories:
 # - Peer-relative inference
-# evidence-id: P032
 # description: Predict how far each value lies above or below the average of its group.
 # execute:
 #   enabled: false
@@ -107,9 +106,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P032"
 ITEMS = 6
 GROUPS = ("A", "B", "C")
 
@@ -189,6 +187,7 @@ def permute_items(rows: list[dict], seed: int) -> tuple[list[dict], np.ndarray]:
     return result, np.asarray(flattened)
 
 
+@experiment("P032", seed=3720)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -271,7 +270,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3720)
+    report(run)
 
 # %% [markdown]
 # </details>

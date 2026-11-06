@@ -15,15 +15,14 @@ PROOFS = ROOT / "experiments"
 
 
 def test_registered_proofs_have_unique_standalone_scripts() -> None:
-    entries = registry(ROOT)
-    assert entries, "declare each experiment in its frontmatter"
+    entries = registry(ROOT, lane="all")
+    assert entries, "declare each experiment with @experiment"
 
     paths = Counter(entry["script"] for entry in entries.values())
     assert all(count == 1 for count in paths.values()), "each proof ID must own one experiment script"
     expected = {ROOT / path for path in paths}
-    actual = set(PROOFS.rglob("*.py")) - {
-        PROOFS / name for name in ("reporting.py", "run.py", "source.py", "render.py")
-    }
+    actual = set(PROOFS.rglob("*.py")) | set((ROOT / "research").rglob("*.py"))
+    actual -= {PROOFS / name for name in ("reporting.py", "run.py", "source.py", "render.py")}
     assert actual == expected, f"proof scripts and results registry disagree: {actual ^ expected}"
     assert not list(PROOFS.rglob("test_*.py")), "learning experiments belong in standalone scripts"
     pages = Counter(entry["page"] for entry in entries.values())
@@ -31,23 +30,31 @@ def test_registered_proofs_have_unique_standalone_scripts() -> None:
 
     for identifier, entry in entries.items():
         path = ROOT / entry["script"]
-        assert path.parent.parent == PROOFS and path.is_file(), path
+        assert path.parent.parent in {PROOFS, ROOT / "research"} and path.is_file(), path
         page = Path(entry["page"])
         assert page.suffix == ".py" and page.parent.parent == Path("docs/evidence"), page
         assert path.parent.name == page.parent.name, f"{path}: keep the script in its documented category"
         module = ast.parse(path.read_text(), filename=str(path))
         declared = [
-            ast.literal_eval(node.value)
+            ast.literal_eval(decorator.args[0])
             for node in module.body
-            if isinstance(node, ast.Assign)
-            and any(isinstance(target, ast.Name) and target.id == "PROOF_ID" for target in node.targets)
+            if isinstance(node, ast.FunctionDef)
+            for decorator in node.decorator_list
+            if isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Name)
+            and decorator.func.id == "experiment"
         ]
-        assert declared == [identifier], f"{path}: PROOF_ID must match {identifier}"
+        assert declared == [identifier], f"{path}: one @experiment declaration must own {identifier}"
+        assert not any(
+            isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "PROOF_ID" for target in node.targets)
+            for node in module.body
+        ), f"{path}: the decorator owns the ID without a duplicate constant"
         assert ast.get_docstring(module), f"{path}: explain the experiment's claim"
 
 
 def test_experiments_keep_generation_and_modeling_in_their_own_script() -> None:
-    entries = registry(ROOT)
+    entries = registry(ROOT, lane="all")
     sibling_modules = {Path(entry["script"]).stem for entry in entries.values()}
     for entry in entries.values():
         path = ROOT / entry["script"]
@@ -87,7 +94,9 @@ def test_experiments_keep_generation_and_modeling_in_their_own_script() -> None:
                     assert not node.args and all(keyword.arg != "model" for keyword in node.keywords), (
                         f"{path}:{node.lineno}: let the model or Trainer loop bind the data module automatically"
                     )
-        assert {"Model", "SyntheticDataModule"} <= constructors, f"{path}: include the model and synthetic splits"
+        assert "Model" in constructors and constructors & {"SyntheticDataModule", "ArrowDataModule"}, (
+            f"{path}: include the model and independently generated splits"
+        )
         assert any(isinstance(node, (ast.Yield, ast.YieldFrom)) for node in ast.walk(module)), (
             f"{path}: include the synthetic record generator"
         )
@@ -98,7 +107,7 @@ def test_experiments_keep_generation_and_modeling_in_their_own_script() -> None:
 
 
 def test_experiments_keep_explicit_training_protocols_on_model_fit() -> None:
-    entries = registry(ROOT)
+    entries = registry(ROOT, lane="all")
     for entry in entries.values():
         path = ROOT / entry["script"]
         module = ast.parse(path.read_text(), filename=str(path))
@@ -141,7 +150,7 @@ def test_experiments_keep_explicit_training_protocols_on_model_fit() -> None:
 
 
 def test_experiments_expose_the_shared_reporting_entrypoint() -> None:
-    entries = registry(ROOT)
+    entries = registry(ROOT, lane="all")
     for entry in entries.values():
         path = ROOT / entry["script"]
         module = ast.parse(path.read_text(), filename=str(path))
@@ -160,8 +169,18 @@ def test_experiments_expose_the_shared_reporting_entrypoint() -> None:
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "report"
         ]
         assert len(reports) == 1, f"{path}: record the experiment through shared reporting"
-        assert [ast.unparse(argument) for argument in reports[0].args] == ["PROOF_ID", "run"], path
-        assert any(keyword.arg == "seed" for keyword in reports[0].keywords), f"{path}: declare a reproducible seed"
+        assert [ast.unparse(argument) for argument in reports[0].args] == ["run"], path
+        assert not reports[0].keywords, f"{path}: the decorator owns reporting metadata"
+        declarations = [
+            decorator
+            for decorator in functions["run"].decorator_list
+            if isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Name)
+            and decorator.func.id == "experiment"
+        ]
+        assert len(declarations) == 1, f"{path}: register the existing run function once"
+        seeds = [ast.literal_eval(keyword.value) for keyword in declarations[0].keywords if keyword.arg == "seed"]
+        assert len(seeds) == 1 and type(seeds[0]) is int, f"{path}: declare one reproducible integer seed"
 
 
 def markdown(source: Path) -> str:
@@ -180,15 +199,16 @@ def markdown(source: Path) -> str:
 
 
 def test_every_registered_proof_has_a_small_readable_overview() -> None:
-    entries = registry(ROOT)
+    entries = registry(ROOT, lane="all")
     documented: Counter[str] = Counter()
-    for entry in entries.values():
+    for identifier, entry in entries.items():
         page = ROOT / entry["script"]
         text = markdown(page)
         header = re.match(r"\A---\s*\n(.*?)\n---(?:\n|\Z)", text, flags=re.DOTALL)
         assert header, f"{page}: missing proof metadata"
         metadata = yaml.safe_load(header[1])
-        identifier = metadata["evidence-id"]
+        assert "evidence-id" not in metadata, f"{page}: the decorator owns the ID"
+        assert entry["header"]["evidence-id"] == identifier
         assert identifier in entries, f"{page}: unregistered proof ID {identifier}"
         documented[identifier] += 1
         assert ROOT / entries[identifier]["script"] == page, f"{page}: registered script does not match {identifier}"

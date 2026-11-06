@@ -3,7 +3,6 @@
 # title: Do frozen financial embeddings retain their groups with missing evidence?
 # categories:
 # - Representation
-# evidence-id: P081
 # description: Reconstruct noisy financial views, fit four clusters on complete training embeddings, and keep those
 #   clusters fixed while removing a view or replacing unrelated noise in independent records.
 # execute:
@@ -145,9 +144,8 @@ import numpy as np
 import pyarrow as pa
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P081"
 BUDGET = 600
 BATCH_SIZE = 64
 TRAIN_ROWS = 4096
@@ -426,6 +424,7 @@ def trial(seed: int, steps: int | None, accelerator: str) -> dict:
     return {"seed": seed, "arms": arms}
 
 
+@experiment("P081", seed=8101)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     trials = [trial(seed + offset, steps, accelerator) for offset in range(3)]
     summary = {}
@@ -488,7 +487,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=8101)
+    report(run)
 
 # %% [markdown]
 # </details>

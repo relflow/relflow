@@ -3,7 +3,6 @@
 # title: Can an average lose the total?
 # categories:
 # - Hierarchical statistics
-# evidence-id: P041
 # description: Predict both average and total after an average-only branch with item attention disabled; the branch's
 #   count lane keeps the total recoverable.
 # execute:
@@ -115,9 +114,7 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P041"
+from reporting import experiment, report
 
 
 def records(*, rows: int, seed: int) -> Iterator[dict]:
@@ -144,6 +141,7 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
+@experiment("P041", seed=2599)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     data_seed = (seed - 2599) % (2**32)
@@ -212,7 +210,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=2599)
+    report(run)
 
 # %% [markdown]
 # </details>

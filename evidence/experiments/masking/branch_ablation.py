@@ -3,7 +3,6 @@
 # title: Can it recover when a whole branch is hidden?
 # categories:
 # - Masking
-# evidence-id: P053
 # description: Provide two redundant measurements of the same signal and sometimes hide an entire branch.
 # execute:
 #   enabled: false
@@ -110,9 +109,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P053"
 BUDGET = 500
 
 
@@ -151,6 +149,7 @@ def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["target"]["content"] for row in output], dtype=np.float64)
 
 
+@experiment("P053", seed=5301)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -241,7 +240,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=5301)
+    report(run)
 
 # %% [markdown]
 # </details>

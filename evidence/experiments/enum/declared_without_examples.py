@@ -3,7 +3,6 @@
 # title: Does declaring a class teach its meaning?
 # categories:
 # - Enum
-# evidence-id: P070
 # description: Declare all four classes, but leave one out of initial training.
 # execute:
 #   enabled: false
@@ -117,9 +116,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P070"
 BUDGET = 300
 LABELS = ("amber", "blue", "coral", "green")
 CENTERS = (-3.0, -1.0, 1.0, 3.0)
@@ -198,6 +196,7 @@ def measure(output: list[dict], rows: list[dict]) -> dict:
     }
 
 
+@experiment("P070", seed=7001)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     budget = BUDGET if steps is None else min(steps, BUDGET)
@@ -292,7 +291,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7001)
+    report(run)
 
 # %% [markdown]
 # </details>

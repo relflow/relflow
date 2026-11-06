@@ -3,7 +3,6 @@
 # title: Can it recognize matching IDs it has never seen?
 # categories:
 # - Identity
-# evidence-id: P021
 # description: Ask whether two IDs are equal, using IDs absent from training.
 # execute:
 #   enabled: false
@@ -105,9 +104,7 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P021"
+from reporting import experiment, report
 
 
 def records(*, rows: int, seed: int, namespace: str, shuffle_targets: bool = False) -> Iterator[dict]:
@@ -185,6 +182,7 @@ def score(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator: s
     return float(metrics[".equal/test.auc.content"])
 
 
+@experiment("P021", seed=29)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     test = partial(records, rows=4096, seed=seed + 3, namespace="test")
     control = partial(records, rows=4096, seed=seed + 3, namespace="test", shuffle_targets=True)
@@ -208,7 +206,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=29)
+    report(run)
 
 # %% [markdown]
 # </details>

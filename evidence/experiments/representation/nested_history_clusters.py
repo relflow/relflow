@@ -3,8 +3,8 @@
 # title: Do transaction histories form meaningful customer neighborhoods?
 # categories:
 # - Representation
-# evidence-id: P082
-# description: Cluster frozen customer embeddings using only unlabeled training histories, then score independent customers with shorter or longer histories.
+# description: Cluster frozen customer embeddings using only unlabeled training histories, then score independent
+#   customers with shorter or longer histories.
 # execute:
 #   enabled: false
 #   eval: false
@@ -12,13 +12,25 @@
 # toc: false
 # evidence-readout:
 # - label: Eight transactions
-#   metric: [summary, reconstruction, length_8, ari_mean]
+#   metric:
+#   - summary
+#   - reconstruction
+#   - length_8
+#   - ari_mean
 #   format: number
 # - label: Twelve transactions
-#   metric: [summary, reconstruction, length_12, ari_mean]
+#   metric:
+#   - summary
+#   - reconstruction
+#   - length_12
+#   - ari_mean
 #   format: number
 # - label: Untrained encoder
-#   metric: [summary, untrained, length_8, ari_mean]
+#   metric:
+#   - summary
+#   - untrained
+#   - length_8
+#   - ari_mean
 #   format: number
 # evidence-group: Representation
 # ---
@@ -136,9 +148,8 @@ import numpy as np
 import pyarrow as pa
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P082"
 BUDGET = 600
 BATCH_SIZE = 64
 TRAIN_ROWS = 4096
@@ -417,6 +428,7 @@ def trial(seed: int, steps: int | None, accelerator: str) -> dict:
     return {"seed": seed, "arms": arms}
 
 
+@experiment("P082", seed=8201)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     trials = [trial(seed + offset, steps, accelerator) for offset in range(3)]
     names = ("reconstruction", "untrained", "mixed_histories", "raw")
@@ -488,7 +500,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=8201)
+    report(run)
 
 # %% [markdown]
 # </details>

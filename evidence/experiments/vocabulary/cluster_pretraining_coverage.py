@@ -3,7 +3,6 @@
 # title: Can Cluster reconstruction hide missing coverage too?
 # categories:
 # - Vocabulary
-# evidence-id: P065
 # description: Reconstruct a Cluster answer from a categorical cue while reducing the share of test identities seen
 #   in training.
 # execute:
@@ -93,9 +92,8 @@ from functools import partial
 import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P065"
 BUDGET = 800
 LABELS = tuple(f"class-{index}" for index in range(8))
 
@@ -125,6 +123,7 @@ def evaluate(trainer: lit.Trainer, model: rf.Model, rows: list[dict]) -> dict[st
     return {name.removeprefix(prefix): float(value) for name, value in result.items() if name.startswith(prefix)}
 
 
+@experiment("P065", seed=7651)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -213,7 +212,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7651)
+    report(run)
 
 # %% [markdown]
 # </details>

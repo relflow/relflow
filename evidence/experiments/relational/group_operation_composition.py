@@ -3,7 +3,6 @@
 # title: Can it choose both a group and an operation?
 # categories:
 # - Category-conditioned reduction
-# evidence-id: P027
 # description: Ask for a group’s minimum, maximum, average, or total from the same list.
 # execute:
 #   enabled: false
@@ -121,9 +120,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P027"
 OPERATIONS = ("sum", "mean", "min", "max")
 GROUPS = ("A", "B", "C")
 
@@ -196,6 +194,7 @@ def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["predictions"]["answer"]["content"] for row in output])
 
 
+@experiment("P027", seed=16)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -250,7 +249,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=16)
+    report(run)
 
 # %% [markdown]
 # </details>

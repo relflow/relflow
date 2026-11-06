@@ -3,7 +3,6 @@
 # title: What happens to Set members never seen in training?
 # categories:
 # - Vocabulary
-# evidence-id: P058
 # description: Train a Set field on known members without ever teaching it how unavailable members should affect prediction.
 # execute:
 #   enabled: false
@@ -95,9 +94,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P058"
 BUDGET = 400
 PATTERNS = ((), ("red",), ("blue",), ("red", "blue"), None)
 
@@ -130,6 +128,7 @@ def prediction(model: rf.Model, rows: list[dict]) -> tuple[np.ndarray, list[set[
     return values, labels
 
 
+@experiment("P058", seed=5801)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -226,7 +225,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=5801)
+    report(run)
 
 # %% [markdown]
 # </details>

@@ -3,7 +3,6 @@
 # title: Can it total contributions already calculated?
 # categories:
 # - Weighted aggregation
-# evidence-id: P015
 # description: Supply each item’s contribution to a total, instead of its separate value and weight.
 # execute:
 #   enabled: false
@@ -103,9 +102,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P015"
 ITEMS = 6
 
 
@@ -142,6 +140,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline_rmse, "nrmse": measured / baseline_rmse}
 
 
+@experiment("P015", seed=3300)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -189,7 +188,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3300)
+    report(run)
 
 # %% [markdown]
 # </details>

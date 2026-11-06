@@ -3,7 +3,6 @@
 # title: Can perfect accuracy hide answers it cannot name?
 # categories:
 # - Vocabulary
-# evidence-id: P056
 # description: Ask a Category output to predict a mix of familiar and unfamiliar target labels.
 # execute:
 #   enabled: false
@@ -100,9 +99,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P056"
 BUDGET = 350
 LABELS = ("negative", "positive", "novel-negative", "novel-positive")
 
@@ -126,6 +124,7 @@ def build() -> rf.Model:
     )
 
 
+@experiment("P056", seed=5601)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -219,7 +218,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=5601)
+    report(run)
 
 # %% [markdown]
 # </details>

@@ -3,7 +3,6 @@
 # title: Can it discover hidden groups with different behaviors?
 # categories:
 # - Cluster
-# evidence-id: P078
 # description: Repeated identities follow four hidden numerical rules. Ask the Cluster field to recover the groups
 #   while predicting new observations.
 # execute:
@@ -131,9 +130,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P078"
 BUDGET = 600
 BATCH_SIZE = 128
 TRAIN_ROWS = 4096
@@ -221,6 +219,7 @@ def measure(model: rf.Model, rows: list[dict], training_mean: float, partition_s
     }
 
 
+@experiment("P078", seed=7801)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     metrics, checks = {}, {}
     partition_seed = seed * 100
@@ -288,7 +287,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7801)
+    report(run)
 
 # %% [markdown]
 # </details>

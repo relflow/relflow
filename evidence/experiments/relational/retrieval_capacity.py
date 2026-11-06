@@ -3,7 +3,6 @@
 # title: Can it follow IDs through larger lists and a second lookup?
 # categories:
 # - Sibling entity transfer
-# evidence-id: P075
 # description: Retrieve a source value by ID with increasing numbers of distractors, then add an intermediate ID link
 #   for a two-step lookup.
 # execute:
@@ -142,9 +141,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P075"
 BUDGET = 600
 BATCH_SIZE = 64
 TRAIN_ROWS = 4096
@@ -236,6 +234,7 @@ def score(predicted: np.ndarray, rows: list[dict], training_mean: float) -> dict
     }
 
 
+@experiment("P075", seed=7501)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     metrics, checks = {}, {}
     for hops in (1, 2):
@@ -311,7 +310,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7501)
+    report(run)
 
 # %% [markdown]
 # </details>

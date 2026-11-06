@@ -3,7 +3,6 @@
 # title: Can it spot an ordinary value in the wrong context?
 # categories:
 # - Anomaly detection
-# evidence-id: P076
 # description: Learn to reconstruct a numeric answer from its context. Use a large reconstruction error as a warning
 #   that the value does not fit.
 # execute:
@@ -107,9 +106,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P076"
 BUDGET = 500
 GROUPS = ("amber", "birch", "cove", "dune")
 SLOPES = np.array([0.7, -0.8, 1.2, -1.3])
@@ -155,6 +153,7 @@ def auc(normal: np.ndarray, anomalous: np.ndarray) -> float:
     return float(np.mean((left + right) / (2 * len(normal))))
 
 
+@experiment("P076", seed=7601)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     stream = seed * 100
     validation = list(records(rows=2048, seed=stream + 2))
@@ -235,7 +234,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7601)
+    report(run)
 
 # %% [markdown]
 # </details>

@@ -3,7 +3,6 @@
 # title: Can an instruction change the calculation?
 # categories:
 # - Operation-conditioned reduction
-# evidence-id: P031
 # description: Ask for a list’s minimum, maximum, average, or total by changing a visible operation field.
 # execute:
 #   enabled: false
@@ -110,9 +109,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P031"
 OPERATIONS = ("sum", "mean", "min", "max")
 
 
@@ -188,6 +186,7 @@ def permute_items(rows: list[dict], seed: int) -> list[dict]:
     return result
 
 
+@experiment("P031", seed=15)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -254,7 +253,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=15)
+    report(run)
 
 # %% [markdown]
 # </details>

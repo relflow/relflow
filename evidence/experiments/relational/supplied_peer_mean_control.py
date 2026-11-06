@@ -3,7 +3,6 @@
 # title: Can it subtract an average supplied as input?
 # categories:
 # - Peer-relative inference
-# evidence-id: P034
 # description: Give each item both its value and its peer average, then predict their difference.
 # execute:
 #   enabled: false
@@ -100,9 +99,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P034"
 ITEMS = 6
 
 
@@ -142,6 +140,7 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
+@experiment("P034", seed=3700)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -197,7 +196,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3700)
+    report(run)
 
 # %% [markdown]
 # </details>

@@ -3,7 +3,6 @@
 # title: Can it find a requested value in an unsorted list?
 # categories:
 # - Order statistics
-# evidence-id: P012
 # description: Ask for the smallest, largest, middle, or quarter-position value without sorting the input first.
 # execute:
 #   enabled: false
@@ -119,9 +118,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P012"
 LENGTH = 9
 RANKS = ("minimum", "q25", "median", "q75", "maximum")
 RANK_INDEX = dict(zip(RANKS, (0, 2, 4, 6, 8), strict=True))
@@ -241,6 +239,7 @@ def overall_score(*, train: list[dict], test: list[dict], predicted: np.ndarray)
     return {"rmse": measured_rmse, "baseline_rmse": baseline_rmse, "nrmse": measured_rmse / baseline_rmse}
 
 
+@experiment("P012", seed=3700)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     train = list(records(bags=1024, seed=seed + 1))
@@ -350,7 +349,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3700)
+    report(run)
 
 # %% [markdown]
 # </details>

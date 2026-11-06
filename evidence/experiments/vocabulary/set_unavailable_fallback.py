@@ -3,7 +3,6 @@
 # title: Can it distinguish an unknown set from an empty set?
 # categories:
 # - Vocabulary
-# evidence-id: P064
 # description: Predict whether a set is nonempty, including sets whose member names were absent from training.
 # execute:
 #   enabled: false
@@ -82,9 +81,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P064"
 BUDGET = 400
 
 
@@ -112,6 +110,7 @@ def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     )
 
 
+@experiment("P064", seed=7641)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     metrics, checks = {"constant_rmse": 0.5}, {}
     for probability in (0.0, 0.5):
@@ -164,7 +163,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7641)
+    report(run)
 
 # %% [markdown]
 # </details>

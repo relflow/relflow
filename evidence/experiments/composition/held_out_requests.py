@@ -3,7 +3,6 @@
 # title: Can familiar instructions work in new combinations?
 # categories:
 # - Compositional generalization
-# evidence-id: P071
 # description: Train on group and operation requests, deliberately leaving out three combinations, such as coral’s
 #   maximum.
 # execute:
@@ -124,9 +123,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P071"
 BUDGET = 600
 GROUPS = ("amber", "blue", "coral")
 OPERATIONS = ("mean", "min", "max")
@@ -206,6 +204,7 @@ def scores(train: list[dict], test: list[dict], predicted: np.ndarray) -> dict:
     return result
 
 
+@experiment("P071", seed=7101)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     test = list(records(rows=TEST_ROWS, seed=seed * 100 + 3, complete=True))
     metrics = {"train_rows": TRAIN_ROWS, "test_rows": TEST_ROWS, "noise_rmse": 0.02}
@@ -271,7 +270,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7101)
+    report(run)
 
 # %% [markdown]
 # </details>

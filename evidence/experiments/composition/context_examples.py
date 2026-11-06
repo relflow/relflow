@@ -3,7 +3,6 @@
 # title: Can it infer a new rule from examples in the record?
 # categories:
 # - Learning from context
-# evidence-id: P072
 # description: Each record supplies four examples of a fresh straight-line rule and asks for the answer at a new input.
 # execute:
 #   enabled: false
@@ -135,9 +134,8 @@ import numpy as np
 import pyarrow as pa
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P072"
 BUDGET = 600
 TRAIN_ROWS = 4096
 TEST_ROWS = 2048
@@ -203,6 +201,7 @@ def score(predicted: np.ndarray, rows: list[dict], training_mean: float) -> dict
     return {"rmse": rmse, "baseline_rmse": baseline, "normalized_rmse": rmse / baseline}
 
 
+@experiment("P072", seed=7201)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     tests = {
         "familiar": list(records(rows=TEST_ROWS, seed=seed * 100 + 3)),
@@ -274,7 +273,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7201)
+    report(run)
 
 # %% [markdown]
 # </details>

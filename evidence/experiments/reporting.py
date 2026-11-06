@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.metadata
+import inspect
 import json
 import os
 import platform
@@ -14,12 +15,39 @@ import traceback
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
-from source import fingerprint
+from source import Experiment, check_experiment, fingerprint
 
 ROOT = Path(__file__).resolve().parents[1]
-Experiment = Callable[[int, int | None, str], tuple[dict[str, Any], dict[str, bool]]]
+Runner = Callable[[int, int | None, str], tuple[dict[str, Any], dict[str, bool]]]
+Function = TypeVar("Function", bound=Runner)
+
+
+def experiment(identifier: str, *, seed: int) -> Callable[[Function], Function]:
+    """Register a standalone experiment without wrapping its callable.
+
+    Discovery builds the catalog from source; no process-wide import registry is
+    needed. Repeated imports therefore cannot accumulate or replace experiments.
+    """
+    declared = check_experiment(identifier, seed)
+
+    def register(function: Function) -> Function:
+        if not inspect.isfunction(function) or inspect.iscoroutinefunction(function):
+            raise TypeError(f"Experiment {identifier}: decorate a synchronous function")
+        parameters = list(inspect.signature(function).parameters.values())
+        if [parameter.name for parameter in parameters] != ["seed", "steps", "accelerator"] or any(
+            parameter.kind is not inspect.Parameter.POSITIONAL_OR_KEYWORD
+            or parameter.default is not inspect.Parameter.empty
+            for parameter in parameters
+        ):
+            raise ValueError(f"Experiment {identifier}: expected signature (seed, steps, accelerator)")
+        if hasattr(function, "experiment"):
+            raise ValueError(f"Experiment {identifier}: function is already registered")
+        setattr(function, "experiment", declared)
+        return function
+
+    return register
 
 
 def plain(value: Any) -> Any:
@@ -100,10 +128,14 @@ def save(result: dict[str, Any], output: Path) -> None:
         handle.write("\n")
 
 
-def report(identifier: str, experiment: Experiment, *, seed: int) -> None:
+def report(function: Runner) -> None:
     """Run an experiment and record every outcome, including unmet gates and errors."""
-    parser = argparse.ArgumentParser(description=experiment.__module__ + " · " + identifier)
-    parser.add_argument("--seed", type=int, default=seed)
+    declared = getattr(function, "experiment", None)
+    if not isinstance(declared, Experiment):
+        raise ValueError("Decorate the reporting function with @experiment('P001', seed=123)")
+    identifier = declared.id
+    parser = argparse.ArgumentParser(description=function.__module__ + " · " + identifier)
+    parser.add_argument("--seed", type=int, default=declared.seed)
     parser.add_argument("--steps", type=int, help="Cap each training stage for a smoke run; not capability evidence.")
     parser.add_argument("--accelerator", choices=("cpu", "gpu", "mps", "auto"), default="cpu")
     parser.add_argument("--threads", type=int, default=1)
@@ -118,7 +150,7 @@ def report(identifier: str, experiment: Experiment, *, seed: int) -> None:
 
     torch.set_num_threads(options.threads)
     os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
-    script = Path(experiment.__code__.co_filename).resolve()
+    script = Path(function.__code__.co_filename).resolve()
     started = time.perf_counter()
     result: dict[str, Any] = {
         "started_at": datetime.now(UTC).isoformat(),
@@ -132,7 +164,7 @@ def report(identifier: str, experiment: Experiment, *, seed: int) -> None:
     error = None
     try:
         result["provenance"] = provenance(script)
-        metrics, checks = experiment(options.seed, options.steps, options.accelerator)
+        metrics, checks = function(options.seed, options.steps, options.accelerator)
         result["metrics"] = plain(metrics)
         result["checks"] = {name: bool(value) for name, value in checks.items()}
         if not checks:
@@ -152,4 +184,4 @@ def report(identifier: str, experiment: Experiment, *, seed: int) -> None:
         raise SystemExit(1)
 
 
-__all__ = ["report"]
+__all__ = ["experiment", "report"]

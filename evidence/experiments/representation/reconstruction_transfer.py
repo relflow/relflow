@@ -3,7 +3,6 @@
 # title: Do reconstruction embeddings help a new small-label task?
 # categories:
 # - Representation
-# evidence-id: P073
 # description: Learn to reconstruct three noisy views of a hidden class, then freeze the encoder and classify using
 #   eight labeled examples per class.
 # execute:
@@ -117,9 +116,8 @@ import numpy as np
 import pyarrow as pa
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P073"
 BUDGET = 600
 TRAIN_ROWS = 4096
 TEST_ROWS = 2048
@@ -195,6 +193,7 @@ def classify(reference: np.ndarray, labels: np.ndarray, queries: np.ndarray) -> 
     return np.square(queries[:, None, :] - centroids[None, :, :]).sum(axis=-1).argmin(axis=1)
 
 
+@experiment("P073", seed=7301)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     train, _ = sample(rows=TRAIN_ROWS, seed=seed * 100 + 1)
     reference, reference_labels = sample(rows=4 * LABELS_PER_CLASS, seed=seed * 100 + 3)
@@ -285,7 +284,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7301)
+    report(run)
 
 # %% [markdown]
 # </details>

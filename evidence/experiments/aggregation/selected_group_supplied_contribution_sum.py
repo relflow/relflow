@@ -3,7 +3,6 @@
 # title: Can it total prepared contributions for one group?
 # categories:
 # - Grouped weighted aggregation
-# evidence-id: P011
 # description: Supply already calculated contributions and ask for the total belonging to one group.
 # execute:
 #   enabled: false
@@ -115,9 +114,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P011"
 GROUPS = ("A", "B", "C")
 ITEMS_PER_GROUP = 2
 ITEMS = len(GROUPS) * ITEMS_PER_GROUP
@@ -189,6 +187,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline_rmse, "nrmse": measured / baseline_rmse}
 
 
+@experiment("P011", seed=3600)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -262,7 +261,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3600)
+    report(run)
 
 # %% [markdown]
 # </details>

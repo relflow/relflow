@@ -3,7 +3,6 @@
 # title: Do harmless schema edits preserve predictions?
 # categories:
 # - Schema mutation
-# evidence-id: P046
 # description: Train a useful predictor, then make edits that should not alter its visible information or learned
 #   state.
 # execute:
@@ -90,9 +89,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P046"
 OFFSETS = (-0.75, -0.25, 0.25, 0.75)
 
 
@@ -133,6 +131,7 @@ def errors(actual: np.ndarray, predicted: np.ndarray, baseline: float) -> dict:
     return {"rmse": rmse, "baseline_rmse": baseline, "nrmse": rmse / baseline}
 
 
+@experiment("P046", seed=4601)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     budget = 512 if steps is None else min(steps, 512)
@@ -249,7 +248,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=4601)
+    report(run)
 
 # %% [markdown]
 # </details>

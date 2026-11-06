@@ -3,7 +3,6 @@
 # title: Can it add a list of numbers?
 # categories:
 # - Cardinality generalization
-# evidence-id: P001
 # description: Predict the total of a list whose length varies within the range used in training.
 # execute:
 #   enabled: false
@@ -103,9 +102,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P001"
 TRAIN_MAX = 6
 CAPACITY = 12
 
@@ -154,6 +152,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
+@experiment("P001", seed=3609)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -210,7 +209,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3609)
+    report(run)
 
 # %% [markdown]
 # </details>

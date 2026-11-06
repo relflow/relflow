@@ -3,7 +3,6 @@
 # title: Can one number representation serve additive and multiplicative structure?
 # categories:
 # - Representation
-# evidence-id: P079
 # description: Compare Number, which embeds raw and log lanes and reads out standardized log-scale deviations, with
 #   Quantile ranks on additive, moderate-tail, heavy-tail, and far-from-zero targets.
 # execute:
@@ -158,9 +157,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P079"
 BUDGET = 500
 LONG_BUDGET = 1500
 BATCH_SIZE = 128
@@ -295,6 +293,7 @@ def evaluate(output: np.ndarray, control: np.ndarray, reference: dict, bulk: np.
     return result
 
 
+@experiment("P079", seed=7901)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     stream = seed * 100
     metrics: dict = {"train_rows": TRAIN_ROWS, "test_rows": TEST_ROWS, "budget": BUDGET, "long_budget": LONG_BUDGET}
@@ -371,7 +370,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7901)
+    report(run)
 
 # %% [markdown]
 # </details>

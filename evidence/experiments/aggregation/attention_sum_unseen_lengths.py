@@ -3,7 +3,6 @@
 # title: Can it add longer lists than it saw in training?
 # categories:
 # - Cardinality generalization
-# evidence-id: P002
 # description: Train on short lists, then ask for totals of longer lists.
 # execute:
 #   enabled: false
@@ -113,9 +112,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P002"
 TRAIN_MAX = 6
 CAPACITY = 12
 
@@ -176,6 +174,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
+@experiment("P002", seed=3615)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -257,7 +256,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3615)
+    report(run)
 
 # %% [markdown]
 # </details>

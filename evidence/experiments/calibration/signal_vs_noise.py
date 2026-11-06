@@ -3,7 +3,6 @@
 # title: Can it learn a signal without inventing one?
 # categories:
 # - Calibration
-# evidence-id: P017
 # description: Predict a yes/no answer from a visible yes/no input.
 # execute:
 #   enabled: false
@@ -103,9 +102,7 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P017"
+from reporting import experiment, report
 
 
 def records(*, rows: int, seed: int, signal: bool) -> Iterator[dict]:
@@ -166,6 +163,7 @@ def fit(*, signal: bool, seed: int, steps: int | None, accelerator: str) -> floa
     return float(metrics[".target/test.auc.content"])
 
 
+@experiment("P017", seed=7)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     signal_auc = fit(signal=True, seed=seed, steps=steps, accelerator=accelerator)
     noise_auc = fit(signal=False, seed=seed, steps=steps, accelerator=accelerator)
@@ -178,7 +176,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7)
+    report(run)
 
 # %% [markdown]
 # </details>

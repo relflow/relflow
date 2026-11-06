@@ -3,7 +3,6 @@
 # title: Do stable labels produce the right groups?
 # categories:
 # - Cluster
-# evidence-id: P020
 # description: Repeated identities carry stable labels. Ask the Cluster field to reconstruct identities while predicting
 #   their labels.
 # execute:
@@ -101,9 +100,7 @@ from functools import partial
 import lightning.pytorch as lit
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P020"
+from reporting import experiment, report
 
 
 def records(seed: int) -> Iterator[dict]:
@@ -144,6 +141,7 @@ class Trajectory(lit.Callback):
         )
 
 
+@experiment("P020", seed=0)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -191,7 +189,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=0)
+    report(run)
 
 # %% [markdown]
 # </details>

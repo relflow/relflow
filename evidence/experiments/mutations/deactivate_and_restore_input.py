@@ -3,7 +3,6 @@
 # title: Can an input be disabled and restored?
 # categories:
 # - Schema mutation
-# evidence-id: P049
 # description: Train on y = a + b, temporarily disable b, then enable it again.
 # execute:
 #   enabled: false
@@ -88,9 +87,7 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P049"
+from reporting import experiment, report
 
 
 def records(*, rows: int, seed: int) -> Iterator[dict]:
@@ -133,6 +130,7 @@ def equal(first, second) -> bool:
     return type(first) is type(second) and first == second
 
 
+@experiment("P049", seed=4901)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     budget = 512 if steps is None else min(steps, 512)
@@ -287,7 +285,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=4901)
+    report(run)
 
 # %% [markdown]
 # </details>

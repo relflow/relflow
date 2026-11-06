@@ -3,7 +3,6 @@
 # title: Does a Cluster input group itself automatically?
 # categories:
 # - Cluster
-# evidence-id: P019
 # description: Use a Cluster field only as an input beside a hidden prediction target.
 # execute:
 #   enabled: false
@@ -101,9 +100,7 @@ from functools import partial
 import lightning.pytorch as lit
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P019"
+from reporting import experiment, report
 
 
 def records(seed: int) -> Iterator[dict]:
@@ -144,6 +141,7 @@ class Trajectory(lit.Callback):
         )
 
 
+@experiment("P019", seed=0)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -184,7 +182,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=0)
+    report(run)
 
 # %% [markdown]
 # </details>

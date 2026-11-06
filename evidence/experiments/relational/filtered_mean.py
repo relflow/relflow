@@ -3,7 +3,6 @@
 # title: Can it average only the requested group?
 # categories:
 # - Category-conditioned reduction
-# evidence-id: P026
 # description: Ask for the average of one named group within a mixed list.
 # execute:
 #   enabled: false
@@ -111,9 +110,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P026"
 OPERATIONS = ("sum", "mean", "min", "max")
 GROUPS = ("A", "B", "C")
 
@@ -173,6 +171,7 @@ def corrupt_labels(rows: list[dict], seed: int) -> list[dict]:
     return result
 
 
+@experiment("P026", seed=16)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -233,7 +232,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=16)
+    report(run)
 
 # %% [markdown]
 # </details>

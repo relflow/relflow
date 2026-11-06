@@ -3,7 +3,6 @@
 # title: Can one prediction target be reset and relearned?
 # categories:
 # - Schema mutation
-# evidence-id: P048
 # description: Reset the learned predictor for u while preserving its sibling target v.
 # execute:
 #   enabled: false
@@ -103,9 +102,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P048"
 TARGETS = ("u", "v")
 
 
@@ -222,6 +220,7 @@ def fit(model: rf.Model, *, seed: int, split: int, budget: int, accelerator: str
     }
 
 
+@experiment("P048", seed=4801)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     source_budget = 512 if steps is None else min(steps, 512)
     adapt_budget = 256 if steps is None else min(steps, 256)
@@ -330,7 +329,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=4801)
+    report(run)
 
 # %% [markdown]
 # </details>

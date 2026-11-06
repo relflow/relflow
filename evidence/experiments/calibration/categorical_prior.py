@@ -3,7 +3,6 @@
 # title: Can it learn a 90% probability without a useful input?
 # categories:
 # - Calibration
-# evidence-id: P060
 # description: Generate yes answers 90% of the time, independently of the input. The right probability is therefore
 #   90%.
 # execute:
@@ -100,9 +99,8 @@ import numpy as np
 import pyarrow as pa
 import relflow as rf
 from relflow.tensorfields.shared.resize import Resize
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P060"
 BUDGET = 400
 
 
@@ -129,6 +127,7 @@ def build(size: int) -> rf.Model:
     return model
 
 
+@experiment("P060", seed=7601)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     oracle_nll = float(-0.9 * np.log(0.9) - 0.1 * np.log(0.1))
     metrics = {"prior": 0.9, "weighted_optimum": 0.75, "oracle_nll": oracle_nll}
@@ -184,7 +183,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7601)
+    report(run)
 
 # %% [markdown]
 # </details>

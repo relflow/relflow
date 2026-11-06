@@ -3,7 +3,6 @@
 # title: Can a summary retain the winning item’s value?
 # categories:
 # - Argmax retrieval
-# evidence-id: P022
 # description: Predict the value attached to the highest-scoring candidate after compressing the candidates into learned
 #   summaries.
 # execute:
@@ -105,9 +104,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P022"
 LENGTH = 3
 
 
@@ -137,6 +135,7 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
+@experiment("P022", seed=23)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -197,7 +196,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=23)
+    report(run)
 
 # %% [markdown]
 # </details>

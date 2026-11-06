@@ -3,7 +3,6 @@
 # title: Can it total weighted values for one group?
 # categories:
 # - Grouped weighted aggregation
-# evidence-id: P010
 # description: Ask for a group’s total after multiplying each of its values by its own weight.
 # execute:
 #   enabled: false
@@ -122,9 +121,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P010"
 GROUPS = ("A", "B", "C")
 ITEMS_PER_GROUP = 2
 ITEMS = len(GROUPS) * ITEMS_PER_GROUP
@@ -216,6 +214,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline_rmse, "nrmse": measured / baseline_rmse}
 
 
+@experiment("P010", seed=3605)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -291,7 +290,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3605)
+    report(run)
 
 # %% [markdown]
 # </details>

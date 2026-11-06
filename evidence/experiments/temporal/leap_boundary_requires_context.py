@@ -3,7 +3,6 @@
 # title: Can day 60 reveal the month in a leap year?
 # categories:
 # - Calendar reasoning
-# evidence-id: P043
 # description: Distinguish February 29 from March 1 when both can be day 60 of a year.
 # execute:
 #   enabled: false
@@ -98,9 +97,7 @@ from functools import partial
 import lightning.pytorch as lit
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P043"
+from reporting import experiment, report
 
 
 def records(*, years: Sequence[int], rows: int) -> Iterator[dict]:
@@ -176,6 +173,7 @@ def accuracy(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator
     return float(metrics[".target/test.accuracy.content"])
 
 
+@experiment("P043", seed=53)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     train = partial(records, years=tuple(range(1901, 1951)), rows=512)
     validate = partial(records, years=tuple(range(1951, 2001)), rows=128)
@@ -213,7 +211,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=53)
+    report(run)
 
 # %% [markdown]
 # </details>

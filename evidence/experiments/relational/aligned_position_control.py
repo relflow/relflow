@@ -3,7 +3,6 @@
 # title: Is it copying by position instead of by ID?
 # categories:
 # - Associative recall
-# evidence-id: P024
 # description: Place source values and questions in matching positions, then ask the model to copy the values.
 # execute:
 #   enabled: false
@@ -102,9 +101,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P024"
 PAIR_COUNT = 2
 
 
@@ -139,6 +137,7 @@ def normalized_rmse(model: rf.Model, records: list[dict]) -> float:
     return float(np.sqrt(np.mean(np.square(np.asarray(predicted) - actual)) / np.mean(np.square(actual))))
 
 
+@experiment("P024", seed=17)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -197,7 +196,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=17)
+    report(run)
 
 # %% [markdown]
 # </details>

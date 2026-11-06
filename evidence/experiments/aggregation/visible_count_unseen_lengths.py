@@ -3,7 +3,6 @@
 # title: Does the count help with longer lists?
 # categories:
 # - Cardinality generalization
-# evidence-id: P005
 # description: Give the model both a repeated amount and its count, then test larger counts absent from training.
 # execute:
 #   enabled: false
@@ -110,9 +109,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P005"
 TRAIN_MAX = 6
 CAPACITY = 12
 
@@ -164,6 +162,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
+@experiment("P005", seed=3621)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -223,7 +222,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3621)
+    report(run)
 
 # %% [markdown]
 # </details>
