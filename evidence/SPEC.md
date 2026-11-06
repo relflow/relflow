@@ -83,7 +83,9 @@ The hosted workflow assigns whole baseline/candidate experiment pairs to eight
 GitHub-hosted CPU shards. Each shard runs at most two task containers at a time;
 each container retains its two-CPU ceiling, 4 GiB memory limit, 512 PIDs, and
 original experiment timeout. Baseline and candidate for a proof share the same
-actual runner. Different shards may have different CPUs or kernels, so retain
+actual runner and may execute concurrently. Schedule individual tasks longest
+first while retaining the two-container limit. Different shards may have
+different CPUs or kernels, so retain
 every shard's measured identity rather than describing the catalog as one host.
 The collector requires the exact planned union, unchanged task identities,
 matching within-pair execution policy, and a complete passing comparison.

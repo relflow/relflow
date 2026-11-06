@@ -57,6 +57,10 @@ containers. Every container retains its two-CPU ceiling, 4 GiB memory limit,
 512-PID bound, original timeout, and declared thread policy. P025 retains its
 internal seed panel and CPU behavior.
 
+Schedule individual tasks longest first within each shard. The two roles for a
+proof may run concurrently on their shared VM, keeping both worker slots useful
+when a long pair remains. The two-container limit applies across all roles.
+
 Each container has no network, a read-only root, dropped capabilities, and no
 new privileges. Its selected experiment and declared shared runtime files are
 read-only; only its own result directory and bounded temporary storage are
