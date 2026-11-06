@@ -350,7 +350,8 @@ uv run pytest -m integration -n 2
 Plain `pytest` and pre-commit run the fast core serially (about 12 seconds on
 the development machine). An explicit `-m` expression overrides the default
 `not integration` selection. Use `--full` for the complete suite; every PR CI
-job selects it explicitly and retains its platform and Python version matrix.
+job selects it explicitly. The hosted matrix covers Linux and Windows; macOS
+workers are omitted. Keep the configured Python versions and full checks.
 
 Mark tests with `pytest.mark.integration` when they run real Trainer/Tuner loops,
 compiler graph capture, worker or distributed processes, socket servers, optional
