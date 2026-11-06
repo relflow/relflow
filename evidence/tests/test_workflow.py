@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from hosted import PROFILE
 
 WORKFLOW = Path(__file__).resolve().parents[2] / ".github/workflows/evidence-hosted.yml"
 CONFIG = yaml.safe_load(WORKFLOW.read_text())
@@ -87,14 +88,14 @@ def test_comparison_base_is_bound_to_the_actual_event(tmp_path, monkeypatch, nam
         exec(compile(source, "evidence-hosted.yml:request", "exec"), {})
 
 
-def test_eight_standard_cpu_shards_collect_even_when_a_shard_fails():
+def test_standard_cpu_matrix_matches_the_execution_profile_and_collects_failures():
     jobs = CONFIG["jobs"]
     assert set(jobs) == {"prepare", "shard", "collect"}
     assert all(job["runs-on"] == "ubuntu-24.04" for job in jobs.values())
     assert jobs["shard"]["strategy"] == {
         "fail-fast": False,
-        "max-parallel": 8,
-        "matrix": {"shard": list(range(8))},
+        "max-parallel": PROFILE["shards"],
+        "matrix": {"shard": list(range(PROFILE["shards"]))},
     }
     assert jobs["collect"]["needs"] == ["prepare", "shard"]
     assert jobs["collect"]["if"].startswith("always()")

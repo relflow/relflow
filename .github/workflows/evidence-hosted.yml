@@ -39,7 +39,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
-          ref: 'f71d59490ed397a650c84524cad61ecabec1cfa8'
+          ref: 'c224624ddbbcd247d6fbd6da9227a6e439e4f19e'
           path: executor
           fetch-depth: 0
           persist-credentials: false
@@ -120,7 +120,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/evidence-build-cache
-          key: evidence-runtime-${{ runner.os }}-${{ runner.arch }}-f71d59490ed397a650c84524cad61ecabec1cfa8-${{ hashFiles('inputs/requirements.txt') }}
+          key: evidence-runtime-${{ runner.os }}-${{ runner.arch }}-c224624ddbbcd247d6fbd6da9227a6e439e4f19e-${{ hashFiles('inputs/requirements.txt') }}
       - name: Build the shared CPU dependency image
         id: runtime
         run: |
@@ -193,9 +193,9 @@ jobs:
     timeout-minutes: 90
     strategy:
       fail-fast: false
-      max-parallel: 8
+      max-parallel: 12
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
       - name: Require the current workflow attempt
         env:
@@ -209,7 +209,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
-          ref: 'f71d59490ed397a650c84524cad61ecabec1cfa8'
+          ref: 'c224624ddbbcd247d6fbd6da9227a6e439e4f19e'
           path: executor
           persist-credentials: false
       - uses: astral-sh/setup-uv@v10.3.0
@@ -271,7 +271,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
-          ref: 'f71d59490ed397a650c84524cad61ecabec1cfa8'
+          ref: 'c224624ddbbcd247d6fbd6da9227a6e439e4f19e'
           path: executor
           persist-credentials: false
       - uses: astral-sh/setup-uv@v10.3.0
