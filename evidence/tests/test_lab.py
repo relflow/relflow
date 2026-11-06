@@ -76,3 +76,60 @@ def test_wheel_installation_is_in_an_offline_cached_layer(tmp_path, monkeypatch)
     assert lab_run.wheel_image({"image": "verified-base", "image_id": "sha256:base"}, wheel) == "sha256:installed-wheel"
     assert "FROM verified-base\n" in recipes[0]
     assert "pip install --no-deps --no-index" in recipes[0]
+
+
+def test_loaded_dependency_image_is_verified_and_tagged_for_offline_wheel_builds(tmp_path, monkeypatch):
+    import lab_run
+
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text("torch==2.12.0+cpu\n")
+    wheel = tmp_path / "relflow-0.4.5-py3-none-any.whl"
+    wheel.write_bytes(b"verified-wheel")
+    loaded = "sha256:" + "a" * 64
+    installed = "sha256:" + "b" * 64
+    commands, recipes = [], []
+
+    def inspect(command, **kwargs):
+        commands.append(command)
+        if command[:3] == ["docker", "image", "inspect"]:
+            return (loaded if command[3] == loaded else installed) + "\n"
+        assert command[:2] == ["docker", "version"]
+        return "27.5.1\n"
+
+    def run(command, **kwargs):
+        commands.append(command)
+        assert kwargs["check"] is True
+        if command[:3] == ["docker", "image", "tag"]:
+            return
+        assert command[:2] == ["docker", "build"]
+        assert command[command.index("--network") + 1] == "none"
+        recipes.append((lab_run.Path(command[-1]) / "Dockerfile").read_text())
+
+    monkeypatch.setattr(lab_run.subprocess, "check_output", inspect)
+    monkeypatch.setattr(lab_run.subprocess, "run", run)
+    monkeypatch.setattr(lab_run.platform, "processor", lambda: "fixture CPU")
+    execution = lab_run.environment(requirements, workers=2, image_id=loaded)
+    expected = (
+        "relflow-evidence:"
+        + lab_run.identity({"lock": lab_run.digest(requirements), "recipe": lab_run.runtime_recipe(requirements)})[:20]
+    )
+
+    assert commands[0] == ["docker", "image", "inspect", loaded, "--format", "{{.Id}}"]
+    assert commands[1] == ["docker", "image", "tag", loaded, expected]
+    assert execution["image"] == expected
+    assert execution["image_id"] == execution["identity"]["image_id"] == loaded
+    assert lab_run.wheel_image(execution, wheel) == installed
+    assert recipes[0].splitlines()[0] == f"FROM {expected}"
+    assert f"FROM {loaded}\n" not in recipes[0]
+
+
+def test_loaded_dependency_image_mismatch_is_rejected_before_tagging(tmp_path, monkeypatch):
+    import lab_run
+
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text("torch==2.12.0+cpu\n")
+    monkeypatch.setattr(lab_run.subprocess, "check_output", lambda *args, **kwargs: "sha256:" + "b" * 64 + "\n")
+    monkeypatch.setattr(lab_run.subprocess, "run", lambda *args, **kwargs: pytest.fail("Unverified image was tagged"))
+
+    with pytest.raises(ValueError, match="Loaded dependency image differs"):
+        lab_run.environment(requirements, workers=2, image_id="sha256:" + "a" * 64)

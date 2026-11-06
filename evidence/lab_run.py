@@ -91,12 +91,12 @@ def environment(
             ["docker", "image", "inspect", image, "--format", "{{.Id}}"], text=True
         ).strip()
     else:
-        image = image_id
         actual = subprocess.check_output(
-            ["docker", "image", "inspect", image, "--format", "{{.Id}}"], text=True
+            ["docker", "image", "inspect", image_id, "--format", "{{.Id}}"], text=True
         ).strip()
         if actual != image_id:
             raise ValueError("Loaded dependency image differs from its trusted identity")
+        subprocess.run(["docker", "image", "tag", image_id, image], check=True)
     processor = Path("/proc/cpuinfo")
     wanted = {
         "vendor_id",
