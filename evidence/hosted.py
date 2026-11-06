@@ -26,13 +26,13 @@ from evidence_ci import (
     write_json,
 )
 from experiments.source import registry
-from lab_run import container, environment, isolate, runtime_recipe, wheel_image
+from lab_run import container, environment, isolate, runtime_recipe, schedule, wheel_image
 
 BACKEND = "github-hosted-docker"
 PROFILE = {
-    "schema": 1,
+    "schema": 2,
     "shards": 8,
-    "pair_workers": 2,
+    "workers": 2,
     "cpu_per_task": 2,
     "memory_per_task": "4g",
     "pids": 512,
@@ -41,7 +41,7 @@ PROFILE = {
     "read_only": True,
     "cap_drop": "ALL",
     "no_new_privileges": True,
-    "scheduler": "paired-longest-first-shards-v1",
+    "scheduler": "longest-first-shards-v2",
     "launch_attempts": 3,
     "task_timeout_seconds": 1850,
     "experiment_timeout_seconds": 1700,
@@ -256,7 +256,7 @@ def image(options: argparse.Namespace) -> None:
     output = options.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     execution = setup(
-        lambda: environment(options.requirements, PROFILE["pair_workers"], build_cache=options.build_cache),
+        lambda: environment(options.requirements, PROFILE["workers"], build_cache=options.build_cache),
         output / "setup",
     )
     probe = setup(
@@ -382,11 +382,11 @@ def run(options: argparse.Namespace) -> None:
             raise ValueError("Dependency image differs from its immutable plan attestation")
         setup(lambda: subprocess.run(["docker", "load", "--input", str(archive)], check=True), output / "setup/load")
         execution = setup(
-            lambda: environment(requirements, PROFILE["pair_workers"], image_id=options.runtime_id),
+            lambda: environment(requirements, PROFILE["workers"], image_id=options.runtime_id),
             output / "setup/probe",
         )
     else:
-        execution = setup(lambda: environment(requirements, PROFILE["pair_workers"]), output / "setup/environment")
+        execution = setup(lambda: environment(requirements, PROFILE["workers"]), output / "setup/environment")
     execution["identity"]["resources"]["scheduler"] = PROFILE["scheduler"]
     execution["runner"] = runner
     execution["role_images"] = {}
@@ -408,24 +408,25 @@ def run(options: argparse.Namespace) -> None:
         },
     )
 
-    def pair(identifier: str) -> None:
-        for role in ("baseline", "candidate"):
-            task = next(task for task in manifest["tasks"] if task["id"] == identifier and task["role"] == role)
-            launch(
-                task,
-                output=output,
-                suite=source / "source",
-                manifest=manifest,
-                execution=execution,
-                execution_sha256=fingerprint,
-                shard=options.shard,
-            )
-
+    tasks = schedule([task for task in manifest["tasks"] if task["id"] in assigned], source / "source")
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=PROFILE["pair_workers"]) as pool:
-            futures = [pool.submit(pair, identifier) for identifier in assigned]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=PROFILE["workers"]) as pool:
+            futures = [
+                pool.submit(
+                    launch,
+                    task,
+                    output=output,
+                    suite=source / "source",
+                    manifest=manifest,
+                    execution=execution,
+                    execution_sha256=fingerprint,
+                    shard=options.shard,
+                )
+                for task in tasks
+            ]
             for future in concurrent.futures.as_completed(futures):
                 future.result()
+
     finally:
         write_json(output / "timing.json", {"wall_seconds": round(time.monotonic() - started, 3)})
         seal(output)
@@ -468,8 +469,8 @@ def check_runtime(actual: dict, dependency: dict, index: int) -> str:
     ):
         if resources.get(name) != PROFILE[name]:
             raise ValueError(f"Shard {index} changed container policy: {name}")
-    if resources.get("workers") != PROFILE["pair_workers"] or runtime["host"]["system"] != "Linux":
-        raise ValueError("Hosted shards require two pair workers on Linux")
+    if resources.get("workers") != PROFILE["workers"] or runtime["host"]["system"] != "Linux":
+        raise ValueError("Hosted shards require two task workers on Linux")
     if runtime["host"]["cpu_count"] < 4 or runtime["host"]["memory_bytes"] < 8 * 1024**3:
         raise ValueError("Hosted shard cannot sustain the reviewed CPU and memory limits")
     return runtime["image_id"]
@@ -527,7 +528,6 @@ def verify_execution(manifest: dict, records: list[dict], reports: Path) -> list
             if len(local) != len(wanted) or {task_key(record["task"]) for record in local} != wanted:
                 raise ValueError("Shard records are missing, duplicated, or outside their assignment")
             intervals = []
-            bounds = {}
             for record in local:
                 task = record["task"]
                 key = task_key(task)
@@ -550,7 +550,7 @@ def verify_execution(manifest: dict, records: list[dict], reports: Path) -> list
                     or not 1 <= len(launches) <= PROFILE["launch_attempts"]
                 ):
                     raise ValueError("Launch selection is not a bounded immutable attempt chain")
-                first, last = None, None
+                previous_end = None
                 for offset, reference in enumerate(launches, 1):
                     journal_path = taskroot / f"launch-{offset}/launch.json"
                     if reference != {
@@ -565,8 +565,9 @@ def verify_execution(manifest: dict, records: list[dict], reports: Path) -> list
                     if type(start) is not int or type(end) is not int or end < start:
                         raise ValueError("Launch timing interval is invalid")
                     intervals.extend(((start, 1), (end, -1)))
-                    first = start if first is None else first
-                    last = end
+                    if previous_end is not None and start < previous_end:
+                        raise ValueError("Launch retries for one task overlap")
+                    previous_end = end
                     raw = journal_path.parent / "record.json"
                     if journal.get("has_record") != raw.is_file() or journal.get("record_sha256") != (
                         digest(raw) if raw.is_file() else None
@@ -605,15 +606,11 @@ def verify_execution(manifest: dict, records: list[dict], reports: Path) -> list
                     taskroot / f"launch-{len(launches)}/captured/logs/{key}.txt"
                 ).read_bytes():
                     raise ValueError("Collected task rewrote the selected original log")
-                bounds[task["id"], task["role"]] = first, last
             active = 0
             for _, change in sorted(intervals):
                 active += change
-                if not 0 <= active <= PROFILE["pair_workers"]:
+                if not 0 <= active <= PROFILE["workers"]:
                     raise ValueError("Shard exceeded its active-container bound")
-            for identifier in manifest["shards"][index]:
-                if bounds[identifier, "baseline"][1] > bounds[identifier, "candidate"][0]:
-                    raise ValueError("Candidate started before its paired baseline finished")
         if len(base_images) != 1 or seen != set(expected_tasks) or len(records) != len(expected_tasks):
             raise ValueError("Shards differ in dependency image or do not form the exact full task union")
     except (ValueError, KeyError, TypeError, OSError, IndexError) as error:

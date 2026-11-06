@@ -9,6 +9,7 @@ import zipfile
 from collections import Counter
 from copy import deepcopy
 from pathlib import Path
+from threading import Barrier, Lock
 
 import hosted
 import lab_run
@@ -37,8 +38,8 @@ def source(root, count=16):
 
 
 @pytest.fixture
-def planned(tmp_path, monkeypatch):
-    suite = source(tmp_path / "suite")
+def planned(tmp_path, monkeypatch, request):
+    suite = source(tmp_path / "suite", count=getattr(request, "param", 16))
     inputs = tmp_path / "inputs"
     wheel(inputs / "baseline/relflow-0.4.5-py3-none-any.whl", "baseline runtime\n")
     wheel(inputs / "candidate/relflow-0.4.5-py3-none-any.whl", "candidate runtime\n")
@@ -360,6 +361,68 @@ def test_completed_failed_learning_checks_are_never_retried_and_only_collector_f
     summary = collected(prepared, root, tmp_path / "failed-learning")
     assert summary["complete"] and not summary["passed"]
     assert len(summary["regressions"]) == 16
+
+
+@pytest.mark.parametrize("planned", [8], indirect=True)
+def test_same_host_baseline_and_candidate_can_overlap_with_two_active_containers(shards, tmp_path, monkeypatch):
+    prepared, manifest, suite, root, execute, state = shards
+    original = lab_run.subprocess.run
+    lock = Lock()
+    active, overlaps = set(), []
+    peak = 0
+
+    def capture():
+        with lock:
+            overlaps.append(set(active))
+
+    barrier = Barrier(2, action=capture, timeout=5)
+
+    def docker(command, **options):
+        nonlocal peak
+        if command[:2] != ["docker", "run"]:
+            return original(command, **options)
+        mount = next(value for value in command if value.endswith(",dst=/results"))
+        scratch = Path(mount.removeprefix("type=bind,src=").removesuffix(",dst=/results"))
+        task = json.loads((scratch / "task.json").read_text())
+        coordinate = task["id"], task["role"]
+        with lock:
+            active.add(coordinate)
+            peak = max(peak, len(active))
+        try:
+            barrier.wait()
+            return original(command, **options)
+        finally:
+            with lock:
+                active.remove(coordinate)
+
+    monkeypatch.setattr(lab_run.subprocess, "run", docker)
+    execute()
+    assert not active and peak == 2
+    assert len(overlaps) == 8
+    for overlapping in overlaps:
+        assert len({identifier for identifier, role in overlapping}) == 1
+        assert {role for identifier, role in overlapping} == {"baseline", "candidate"}
+    summary = collected(prepared, root, tmp_path / "overlapping-roles")
+    assert summary["passed"] and summary["complete"]
+    assert summary["fresh_tasks"] == len(manifest["tasks"]) == 16
+
+
+def test_resealed_launch_times_cannot_exceed_two_active_containers(shards, tmp_path):
+    prepared, manifest, suite, root, execute, state = shards
+    execute()
+    shard = root / "downloaded-0"
+    for journal_path in (shard / "tasks").rglob("launch.json"):
+        journal = json.loads(journal_path.read_text())
+        journal.update(started_ns=10, finished_ns=20)
+        journal_path.write_text(json.dumps(journal))
+        selection_path = journal_path.parent.parent / "selection.json"
+        selection = json.loads(selection_path.read_text())
+        selection["launches"][0]["sha256"] = digest(journal_path)
+        selection_path.write_text(json.dumps(selection))
+    reseal(shard)
+    summary = collected(prepared, root, tmp_path / "oversubscribed-shard")
+    assert not summary["passed"]
+    assert any("active-container bound" in error for error in summary["errors"])
 
 
 @pytest.mark.parametrize("fault", ["missing-shard", "duplicate-shard", "unexpected-shard", "changed-bytes"])
