@@ -48,6 +48,7 @@ names for decoded results and a separate column for requested representations.
 | `rf.Branch(...)` | Group repeated records, such as transactions, into a local context. |
 | `rf.Boolean`, `rf.Number`, `rf.Category` | Represent a dispute outcome, payment amount, or merchant label. |
 | `rf.Enum`, `rf.Set`, `rf.Period` | Represent declared currency codes, merchant tags, or booking calendar parts. |
+| `rf.Ordinal` | Represent ordered labels or integer ranks through their numeric positions. |
 | `rf.Hash`, `rf.Quantile`, `rf.Text`, `rf.Vector`, `rf.Cluster` | Represent identifier equality, numeric percentiles, text, supplied vectors, or learned label groups. |
 | `rf.Attention`, `rf.Mean` | Choose branch reduction; `reduction=None` preserves routed tokens. |
 | `rf.Mask`, `rf.Jitter` | Configure visibility/objectives and continuous input perturbation. |

@@ -31,6 +31,8 @@ disputed: false
 Every declared label is available immediately. Use [Category](category.qmd)
 when training data should introduce labels over time. Add `mask=True` to an
 Enum to predict one of its declared labels.
+Use [Ordinal](ordinal.qmd) when the labels have a meaningful rank and adjacent
+positions should be modeled as one numeric step apart.
 
 ## Input and options
 

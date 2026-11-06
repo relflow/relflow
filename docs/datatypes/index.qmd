@@ -27,6 +27,7 @@ matters to the task; the first model does not need every available type.
 | Merchant name or another label learned from training observations | [Category](category.qmd) |
 | Recent transactions, each with its own fields | [Branch](branch.qmd) |
 | Payment channel from a declared fixed set | [Enum](enum.qmd) |
+| Ordered assessment labels or integer stages | [Ordinal](ordinal.qmd) |
 | Unordered transaction tags | [Set](set.qmd) |
 | Recurring calendar position of a payment timestamp | [Period](dateparts.qmd) |
 | Elapsed account age or time between events | [Duration](duration.qmd) |
@@ -44,6 +45,8 @@ Category, Set, and Cluster learn labels through an
 [online vocabulary](../concepts/online-vocabulary.qmd). Its capacity, admission timing, and unknown
 values affect both training and prediction.
 Enum uses the labels declared in its schema and rejects values outside that set.
+Ordinal models the positions of declared ordered labels, or accepts integer
+ranks directly when no labels are declared.
 
 ## Value state {#value-state}
 
@@ -139,6 +142,7 @@ its remaining payload:
 | Quantile | Scalar in source units; null before learning a distribution |
 | Boolean | Probability of true |
 | Category, Enum | Best label, probability, and optional candidates |
+| Ordinal | Declared ordered label or integer rank |
 | Cluster | Best cluster and best vocabulary label, each with probability |
 | Set | Label/probability pairs |
 | Vector | Fixed-width reconstructed vector |

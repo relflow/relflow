@@ -1,0 +1,104 @@
+---
+title: Ordinal
+description: "Ordered labels or integer ranks, modeled through their numeric positions."
+---
+
+`Ordinal` represents values whose order matters. An account's risk assessment
+might be `"low"`, `"medium"`, or `"high"`; their declared positions become ranks
+0, 1, and 2. Use that assessment as context for predicting a later payment
+dispute:
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    amount=rf.Number,
+    risk_level=rf.Ordinal(values=("low", "medium", "high")),
+    disputed=rf.Boolean(mask=True),
+)
+```
+
+One labeled payment:
+
+```yaml
+amount: 84.50
+risk_level: medium
+disputed: false
+```
+
+Use [Enum](enum.qmd) when labels identify separate classes without a numeric
+ordering, such as currencies. Use [Number](number.qmd) when the source value's
+measured magnitude matters. Declaring an order does not force the model's
+prediction of another field to increase with that order.
+
+## Declared labels or integer ranks
+
+With `values=("low", "medium", "high")`, tuple order defines the ranks.
+Neighboring labels are one rank apart: the representation does not infer
+distances from their names. Supply a deliberate order rather than sorting
+labels alphabetically. An undeclared label is rejected; training does not
+grow this declaration.
+
+`values` is normalized to a nonempty tuple of unique labels of one built-in
+Python type: `bool`, `int`, `float`, `str`, or `bytes`. Null, NaN, and infinite
+labels are rejected. Inputs match the declared type and label exactly; spelling
+and case are not folded automatically.
+
+Without `values`, source integers are already ranks:
+
+```python
+model = rf.Model.xs(
+    review_stage=rf.Ordinal,
+    amount=rf.Number,
+    disputed=rf.Boolean(mask=True),
+)
+```
+
+Negative integers and integers absent from training remain valid ranks.
+Integer gaps are retained: 10 and 20 are ten rank steps apart. With an explicit
+declaration `values=(10, 20, 30)`, those same labels instead occupy consecutive
+positions 0, 1, and 2.
+
+Implicit ranks must be Arrow integers. Booleans, floating-point values, and
+numeric strings do not become integer ranks automatically. Implicit ranks
+outside ±2^53 are rejected, following
+[Number's numeric range and precision](number.qmd#input-and-representation).
+Nulls retain their separate [value state](index.qmd#value-state); they are not
+ranks or labels.
+
+## Learning and prediction
+
+Ordinal reuses Number's numeric encodings, normalization, jitter, and
+reconstruction objectives, with ranks as the numeric values. See
+[Number options](number.qmd#options) and
+[shared leaf options](index.qmd#shared-leaf-options).
+It does not allocate a content vocabulary embedding or a classifier row for
+each rank.
+
+Add `mask=True` to predict an ordered value:
+
+```python
+model = rf.Model.xs(
+    amount=rf.Number,
+    merchant=rf.Category,
+    review_priority=rf.Ordinal(
+        values=("low", "medium", "high"),
+        objective="mse",
+        mask=True,
+    ),
+)
+```
+
+The numeric decoder predicts a rank. Prediction writing rounds it to the nearest
+integer, with halfway values rounded to the nearest even rank. With declared
+labels, it also clamps the position to the declaration's bounds and returns the
+corresponding label in its declared Arrow value family. Without declared labels,
+`content` is an integer rank, clamped to ±2^53. A rank that was absent from
+training may be predicted, but input acceptance does not establish extrapolation
+quality.
+
+Losses and MAE/RMSE metrics operate on numeric ranks before output rounding.
+They measure rank error rather than class probabilities. Read the decoded
+`content` alongside `state` and `inferred` in the
+[prediction envelope](../reference/prediction-output.qmd); Ordinal does not
+provide content probabilities or top-k candidates.
