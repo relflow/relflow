@@ -1,7 +1,7 @@
 # relflow evidence
 
-This directory owns the 79 controlled synthetic experiments, their protocol,
-lab runner, runtime tests, and current publication results.
+This directory owns the controlled synthetic experiments, their protocol,
+hosted CPU runner, runtime tests, and current publication results.
 Stable P identifiers identify experiments throughout the runner, reports, and
 website. Scripts declare their ID, group, and presentation options. Measured
 runs, checks, seeds, environment, source provenance, and report links live in
@@ -22,44 +22,41 @@ A two-step run checks execution only. Each execution
 writes a new JSON file under evidence/runs/local; --output-dir selects another
 directory. Execution never edits the reviewed publication selection.
 
-## Required lab execution
+## Required hosted execution
 
 The library's workflow shares one candidate wheel across tests, Evidence, and
 release, and builds an exact baseline wheel when needed. It
-calls .github/workflows/evidence-lab.yml at a reviewed full commit SHA, passing
-a separate reviewed suite SHA. The helper pins the trusted executor. GitHub
-joins Tailscale using short-lived OIDC and dispatches one experiment per Docker
-container on lab. Containers have bounded CPU/memory, no network, a read-only
+calls `.github/workflows/evidence-hosted.yml` at a reviewed full commit SHA,
+passing a separate reviewed suite SHA. The helper pins the trusted executor.
+Eight GitHub-hosted CPU shards run one experiment per Docker container, with
+both roles for each experiment assigned to the same runner. Each shard runs at
+most two containers concurrently. Containers have bounded CPU/memory, no network, a read-only
 root, and no host home or Docker socket. The full catalog runs for both wheels
-with the original seeds and budgets, using verified references for unchanged
-baselines. Every baseline-passing check must pass on
-the candidate; baseline misses remain reported. CI queues lab work across PRs
-and cancels superseded attempts within each PR. Errors, missing records, invalid
+with the original seeds and budgets. Every baseline-passing check must pass on
+the candidate; baseline misses remain reported. A separate collector verifies
+all shards and their actual execution identities. CI cancels superseded attempts
+within each PR. Errors, missing records, invalid
 provenance, smoke execution, and partial coverage fail CI / required.
 
 The combined CI gate also requires the library test matrix and static
 documentation validation. The suite normally comes from the candidate commit
 in this repository. A new suite can be validated explicitly with
 `gh workflow run ci.yml --repo relflow/relflow --ref main -f evidence_ref=<full-suite-commit>`.
-This tests the selected suite without changing the trusted executor or
-Tailscale trust.
+This tests the selected suite without changing the trusted executor.
 
-Before training, the pinned helper probes the actual cached container image,
-host CPU/kernel, and resource/thread settings. It authenticates complete
-successful CI reports and proves their source and wheel-payload equivalence
-to the current request. Report-only updates must exactly match archived
-candidate measurements and their provenance. A reuse receipt records the
-current request, original run/artifacts, explicit role mapping, and all hashes;
-it does not change or clone an original execution record. A miss runs the
-suite. The required Evidence job always performs validation.
+The dependency-only runtime image is prepared once and delivered with its
+verified identity. Each shard records its actual CPU/kernel, image, and
+resource/thread settings; baseline and candidate retain those measurements.
+Both roles run freshly. A dependency-cache hit never supplies a learning result
+or bypasses the required collector. Historical authenticated reports retain
+their original measurements, revisions, and runtime identities.
 
-Baseline execution reuse is local to the trusted lab controller. Its cache is
-outside worker mounts, limited to eight source reports and 1 GiB. Retained
-reports carry self-contained source proofs, bounded to two levels and 256 MiB.
-Missing, invalid, changed, or overly deep proofs cause fresh execution.
+Only infrastructure operations that have not produced a worker measurement
+receive bounded retries. Failed checks, worker exceptions, OOMs, cancellations,
+and learning timeouts remain failures, with their logs and attempts retained.
 
-See [lab.md](lab.md) for trust and repository variables. No cloud account, stored
-Tailscale secret, or self-hosted GitHub runner is required.
+See [hosted.md](hosted.md) for workflow trust, parallelism, and storage. No cloud
+account, tailnet configuration, or self-hosted GitHub runner is required.
 
 ## Reports and publication
 
@@ -104,13 +101,6 @@ To execute another complete CI run without publishing a new selection:
 gh workflow run ci.yml --repo relflow/relflow --ref main
 ```
 
-To execute every task without report or baseline reuse:
-
-```sh
-gh workflow run ci.yml --repo relflow/relflow --ref main \
-  -f force_fresh_evidence=true
-```
-
 The release workflow normally publishes evidence automatically. To prepare
 assets explicitly for an unreleased version using its verified main CI run:
 
@@ -126,12 +116,12 @@ reader changes do not establish fresh learning results.
 
 ## Runtime efficiency
 
-Lab defaults to 16 workers, with the longest recorded experiments scheduled
-first. Wheels are installed in cached, isolated image layers rather than in
-every task. P025 keeps all three seeds and runs two trials concurrently within
-its existing CPU limit. Every report retains timing and CPU/memory telemetry.
+Eight shards distribute whole proof pairs using recorded durations as scheduling
+hints, with two containers per runner. Wheels are installed in isolated image
+layers rather than in every task. P025 keeps all three seeds and its existing
+CPU behavior. Every report retains timing and CPU/memory telemetry.
 
-Verified reuse compares execution inputs. Publication, documentation, and test
-changes do not retrain unchanged models. Runtime, dependency, seed, budget, and
-policy changes invalidate the affected measurements. Complete coverage and the
-paired regression gate remain required. See [lab.md](lab.md#execution-cost-and-timing).
+Dependency caches reduce setup; they do not remove seeds, reduce budgets, or
+substitute historical measurements. Shards execute both roles freshly. Complete
+coverage and the paired regression gate remain required. See
+[hosted.md](hosted.md#execution-cost-and-timing).

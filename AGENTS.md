@@ -409,5 +409,10 @@ asset before publishing the package tag. Documentation consumes these assets;
 ordinary CI must not create publication commits or pull requests. Experiments
 keep definitions and prose, with measured results outside their source files.
 The evidence helper and trusted executor are pinned separately from the suite.
+Eight GitHub-hosted CPU shards keep baseline/candidate proof pairs on one runner,
+with two bounded task containers per shard and a separate full-catalog collector.
+Dependency caches never substitute learning results; hosted roles execute freshly.
 Keep selected suite code off the host execution path and preserve full evidence
-budgets, seeds, checks, and provenance. See [evidence/lab.md](evidence/lab.md).
+budgets, seeds, checks, per-shard provenance, and immutable attempts. Retry only
+eligible infrastructure failures before a measurement exists. See
+[evidence/hosted.md](evidence/hosted.md).

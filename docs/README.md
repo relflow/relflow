@@ -85,7 +85,7 @@ task described in [its README](assets/branding/README.md).
 
 ## Evidence
 
-Canonical experiments, protocol, lab runner, and tests live under
+Canonical experiments, protocol, hosted runner, and tests live under
 [`evidence/`](../evidence/README.md). Scripts own definitions, explanatory prose,
 and presentation metadata. Measured results are separate JSON publication
 assets; rendering never rewrites or executes experiments.
@@ -95,7 +95,7 @@ CI. It requires valid full-budget results for both exact wheels and blocks
 execution errors, incomplete coverage, invalid provenance, and regressions of
 baseline-passing checks. Verified reuse keeps the original execution records
 and adds a separate receipt binding the current request. See the
-[lab guide](../evidence/lab.md).
+[hosted guide](../evidence/hosted.md).
 
 Publication happens **only with package version releases**. Before publishing
 `v<version>`, the release workflow freezes a validated `evidence-v<version>`

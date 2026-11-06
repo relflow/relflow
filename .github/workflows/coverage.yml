@@ -28,7 +28,7 @@ jobs:
       - name: Download coverage from the completed main run
         uses: actions/download-artifact@v4
         with:
-          name: coverage
+          name: coverage-attempt-${{ github.event.workflow_run.run_attempt }}
           path: report
           github-token: ${{ github.token }}
           run-id: ${{ github.event.workflow_run.id }}

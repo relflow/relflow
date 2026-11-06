@@ -13,9 +13,11 @@ import RelFlow, Torch, or Lightning. Execution writes independent immutable JSON
 records. Experiment frontmatter owns definitions and prose; measured results live
 in publication JSON assets. Never write results back into experiment sources.
 
-Lab uses exact supplied baseline and candidate wheels, with one bounded,
-network-disabled, read-only Docker container per task. Mount neither the host
-home nor Docker socket into workers. Keep credentials outside worker containers.
+GitHub-hosted CPU jobs use exact supplied baseline and candidate wheels, with
+one bounded, network-disabled, read-only Docker container per task. Eight shards
+keep each experiment's baseline and candidate on the same runner; a separate
+collector verifies the entire original catalog. Mount neither the host home nor
+Docker socket into workers. Keep credentials outside worker containers.
 Smoke, partial coverage, invalid provenance, execution failures, and regressions
 of baseline-passing checks cannot satisfy the required gate. Reports use Actions
 artifacts and immutable Releases in relflow/relflow, with no AWS dependency.
@@ -29,7 +31,14 @@ updated selection. Hosted builds verify the public release asset's digest and
 source revision, without model dependencies or credentials.
 Equivalent requests may reuse that execution only through the trusted verifier
 and a separate receipt binding the current source, wheel payloads, comparison,
-and actual lab runtime. Baseline references retain original immutable records;
-candidate tasks execute freshly when no full-report reuse applies. The required
-gate verifies the complete catalog even when no new training is needed.
+and actual execution runtime. Hosted shards execute both roles freshly;
+dependency caches do not authorize measurement reuse. Historical baseline
+references retain their original immutable records and execution provenance.
+The required gate verifies every logical slot and its actual shard host, image,
+and resource policy. A missing or failed shard cannot become a successful gate.
 A publication update must not relabel an older result as a fresh run.
+
+Retry only bounded infrastructure failures before a worker has produced a
+measurement. Preserve launch attempts and logs. Never retry a failed learning
+check, worker exception, OOM, cancellation, or learning timeout until one happens
+to pass. See [hosted.md](hosted.md) for execution and workflow trust.

@@ -72,6 +72,12 @@ def run(main):
         "path": ".github/workflows/ci.yml",
         "workflow_id": 42,
         "html_url": "https://github.com/relflow/relflow/actions/runs/123",
+        "referenced_workflows": [
+            {
+                "path": "relflow/relflow/.github/workflows/evidence-lab.yml@" + "b" * 40,
+                "sha": "b" * 40,
+            }
+        ],
     }
 
 
@@ -383,6 +389,35 @@ def test_workflow_never_promotes_pr_runs_or_installs_model_runtime():
     release = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/release.yml").read_text())
     assert release["jobs"]["evidence"]["uses"] == "./.github/workflows/publish-evidence.yml"
     assert "evidence" in release["jobs"]["publish"]["needs"]
+
+
+def test_ci_attempts_keep_all_artifacts_and_checkpoint_consumers_separate():
+    workflows = Path(__file__).resolve().parents[2] / ".github/workflows"
+    for name in ("tests.yml", "docs.yml", "publish-evidence.yml", "evidence-hosted.yml", "evidence.yml"):
+        value = yaml.safe_load((workflows / name).read_text())
+        for job in value["jobs"].values():
+            for step in job.get("steps", []):
+                if step.get("uses") == "actions/upload-artifact@v4":
+                    assert "github.run_attempt" in step["with"]["name"], (name, step)
+    tests = yaml.safe_load((workflows / "tests.yml").read_text())["jobs"]
+    checkpoint = next(
+        step["with"]["name"]
+        for step in tests["checkpoint"]["steps"]
+        if step.get("uses") == "actions/upload-artifact@v4"
+    )
+    for name in ("suite", "preview"):
+        downloads = [
+            step["with"]["name"] for step in tests[name]["steps"] if step.get("uses") == "actions/download-artifact@v4"
+        ]
+        assert checkpoint in downloads
+    coverage = yaml.safe_load((workflows / "coverage.yml").read_text())["jobs"]
+    downloads = [
+        step["with"]["name"]
+        for job in coverage.values()
+        for step in job["steps"]
+        if step.get("uses") == "actions/download-artifact@v4"
+    ]
+    assert downloads == ["coverage-attempt-${{ github.event.workflow_run.run_attempt }}"]
 
 
 @pytest.mark.parametrize("fault", ["attempt", "candidate", "baseline", "suite", "executor", "regression"])

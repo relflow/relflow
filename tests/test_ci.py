@@ -20,10 +20,13 @@ EVENTS = ["pull_request", "merge_group", "push", "workflow_dispatch"]
 
 @pytest.fixture
 def gate(monkeypatch):
-    def run(event, results, head="relflow/relflow"):
+    def run(event, results, head="relflow/relflow", package_attempt="2", evidence_attempt="2"):
         monkeypatch.setenv("EVENT_NAME", event)
         monkeypatch.setenv("REPOSITORY", "relflow/relflow")
         monkeypatch.setenv("PR_REPOSITORY", head)
+        monkeypatch.setenv("RUN_ATTEMPT", "2")
+        monkeypatch.setenv("PACKAGE_ATTEMPT", package_attempt)
+        monkeypatch.setenv("EVIDENCE_ATTEMPT", evidence_attempt)
         monkeypatch.setenv("RESULTS", json.dumps({name: {"result": result} for name, result in results.items()}))
         exec(compile(GATE, "ci.yml:required", "exec"), {})
 
@@ -101,6 +104,18 @@ def test_forks_and_missing_jobs_cannot_report_a_passing_gate(gate):
         gate("pull_request", {"tests": "success", "evidence": "success"})
 
 
+@pytest.mark.parametrize("event", EVENTS)
+@pytest.mark.parametrize("package,evidence", [("1", "2"), ("2", "1"), ("", "2"), ("2", "")])
+def test_partial_ci_retries_require_a_complete_current_attempt(gate, event, package, evidence):
+    with pytest.raises(AssertionError, match="re-run all jobs"):
+        gate(
+            event,
+            {name: "success" for name in ("tests", "docs", "evidence", "package")},
+            package_attempt=package,
+            evidence_attempt=evidence,
+        )
+
+
 @pytest.fixture
 def release():
     node = shutil.which("node")
@@ -110,6 +125,7 @@ def release():
     def run(change=None, manual=False, available=True):
         candidate = {
             "id": 123,
+            "run_attempt": 2,
             "conclusion": "success",
             "event": "push",
             "head_branch": "main",
@@ -146,7 +162,12 @@ def release():
 def test_release_selects_the_successful_run_of_the_exact_main_commit(release, manual):
     result = release(manual=manual)
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"run_id": "123", "source_sha": "main-sha", "current": "true"}
+    assert json.loads(result.stdout) == {
+        "run_id": "123",
+        "source_sha": "main-sha",
+        "distribution_artifact": "python-package-distributions-attempt-2",
+        "current": "true",
+    }
 
 
 @pytest.mark.parametrize(
@@ -157,6 +178,9 @@ def test_release_selects_the_successful_run_of_the_exact_main_commit(release, ma
         {"head_branch": "feature"},
         {"head_repository": {"full_name": "fork/relflow"}},
         {"path": ".github/workflows/other.yml"},
+        {"run_attempt": None},
+        {"run_attempt": 0},
+        {"run_attempt": True},
     ],
 )
 def test_release_rejects_runs_outside_the_trusted_main_ci_boundary(release, change):

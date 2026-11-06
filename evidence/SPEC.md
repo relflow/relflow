@@ -55,7 +55,7 @@ are explicit and excluded from the default static checks.
 ## Required merge gate
 
 The library workflow builds wheels from the exact PR merge candidate and base,
-exports the candidate's locked requirements, and calls the reusable lab
+exports the candidate's locked requirements, and calls the reusable hosted
 workflow at a reviewed full commit SHA. The trusted host executor is pinned independently of the experiment suite.
 The suite defaults to the candidate commit in this repository, with an explicit
 full SHA override available for manual validation. Host code reads it as data and
@@ -70,25 +70,47 @@ either side, changed check sets, missing or duplicate records, altered tasks,
 invalid provenance, cancellation, timeout, partial coverage, or a smoke budget
 must prevent a successful gate. Preserve the named numerical checks unchanged.
 
-The required job may authenticate a complete successful original report and
-reuse it after proving the current source, actual wheel payloads, comparison,
-and lab runtime equivalent. It retains all original records and measured
-revisions, with a separate receipt for the current request. An unchanged
-candidate may satisfy both requested roles through an explicit mapping to
-that original execution; this creates no new measurement or record. Selection
-updates must exactly match archived candidate measurements and provenance.
-Unchanged baseline tasks may reference original immutable executions retained
-inside the report. Every logical slot still requires a validated full-budget
-execution. Missing or invalid proofs require fresh tasks, and an explicit
-force-fresh request bypasses both forms of reuse.
+Historical single-host reports may contain authenticated reuse after proving
+source, actual wheel payloads, comparison, and execution runtime equivalent.
+Their original records and measured revisions remain unchanged, with a separate
+receipt for the request and explicit role mapping. Retained baseline references
+carry the original immutable execution. These historical proofs remain
+verifiable; they do not authorize hosted shards to skip fresh measurements.
+Every logical slot still requires a validated full-budget execution, and
+publication must exactly match the archived candidate results and provenance.
 
-Lab uses one disposable Docker container per task, bounded to two CPU cores,
-4 GiB of memory, and 512 PIDs, with eight workers by default. A shared lab queue serializes CI runs, while
-superseded attempts are cancelled per PR. Workers have no
-network, a read-only root, and no host home or Docker socket mount. Install
-runtime packages in the image, never on the host. Keep credentials outside
-workers. Tailscale uses short-lived OIDC bound to the exact workflow and calling
-repository. Fork execution fails closed. See [lab.md](lab.md).
+The hosted workflow assigns whole baseline/candidate experiment pairs to eight
+GitHub-hosted CPU shards. Each shard runs at most two task containers at a time;
+each container retains its two-CPU ceiling, 4 GiB memory limit, 512 PIDs, and
+original experiment timeout. Baseline and candidate for a proof share the same
+actual runner. Different shards may have different CPUs or kernels, so retain
+every shard's measured identity rather than describing the catalog as one host.
+The collector requires the exact planned union, unchanged task identities,
+matching within-pair execution policy, and a complete passing comparison.
+Duplicate, missing, unexpected, or altered shards fail closed.
+
+Workers have no network, a read-only root, and no host home or Docker socket
+mount. Install runtime packages in the image, never on the host. Keep credentials
+outside workers. Executor and helper code remain separately pinned; selected
+suite code executes only inside task containers. Fork execution fails closed.
+Superseded attempts are cancelled per PR. No tailnet or lab service participates
+in the required workflow. See [hosted.md](hosted.md).
+
+Hosted measurements execute freshly for both roles. Dependency-image caches
+accelerate setup without substituting for any experiment. Preserve historical
+authenticated reports and their original runtime identities; an earlier lab
+execution must not be relabeled as a hosted measurement. Any future hosted
+result reuse still requires the complete equivalence and authentication proof
+above.
+
+Infrastructure setup and a container launch that produced no worker record may
+be retried within a fixed bound, retaining every launch receipt and log. A
+learning result, failed check, worker exception, OOM, cancellation, or learning
+timeout is terminal for that execution. Preserve workflow attempts separately;
+rerunning failed jobs cannot silently combine different plans or rewrite an
+earlier measurement's attempt identity. This hosted profile rejects a shard or
+collector whose current GitHub attempt differs from the prepared input request.
+Rerun all jobs so preparation, inputs, shards, and collection share one attempt.
 
 ## Records and publication
 
