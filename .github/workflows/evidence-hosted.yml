@@ -39,7 +39,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
-          ref: 'ad6c28ff52ce461f87b884369c89df9b7bde47de'
+          ref: 'f71d59490ed397a650c84524cad61ecabec1cfa8'
           path: executor
           fetch-depth: 0
           persist-credentials: false
@@ -120,7 +120,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/evidence-build-cache
-          key: evidence-runtime-${{ runner.os }}-${{ runner.arch }}-ad6c28ff52ce461f87b884369c89df9b7bde47de-${{ hashFiles('inputs/requirements.txt') }}
+          key: evidence-runtime-${{ runner.os }}-${{ runner.arch }}-f71d59490ed397a650c84524cad61ecabec1cfa8-${{ hashFiles('inputs/requirements.txt') }}
       - name: Build the shared CPU dependency image
         id: runtime
         run: |
@@ -209,7 +209,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
-          ref: 'ad6c28ff52ce461f87b884369c89df9b7bde47de'
+          ref: 'f71d59490ed397a650c84524cad61ecabec1cfa8'
           path: executor
           persist-credentials: false
       - uses: astral-sh/setup-uv@v10.3.0
@@ -271,7 +271,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
-          ref: 'ad6c28ff52ce461f87b884369c89df9b7bde47de'
+          ref: 'f71d59490ed397a650c84524cad61ecabec1cfa8'
           path: executor
           persist-credentials: false
       - uses: astral-sh/setup-uv@v10.3.0
