@@ -3,7 +3,6 @@
 # title: Can a series forecast use the order of its steps?
 # categories:
 # - Forecasting
-# evidence-id: P083
 # description: Forecast the next steps of noisy two-channel seasonal series and compare with repeating the last step and
 #   with a model whose history steps are shuffled.
 # execute:
@@ -59,7 +58,7 @@
 #
 # ## Result
 #
-# {{< evidence P083 status >}}
+# {{< evidence P101 status >}}
 #
 # Ordered history beats repeating the last step. Shuffling keeps every value but
 # erases the phase, so the shuffled model loses most of that advantage.
@@ -67,11 +66,11 @@
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
 #
-# {{< evidence P083 evidence >}}
+# {{< evidence P101 evidence >}}
 #
 # ### Run this experiment
 #
-# {{< evidence P083 script >}}
+# {{< evidence P101 script >}}
 #
 # ### How it works
 #
@@ -99,7 +98,7 @@
 #
 
 # %%
-"""P083: a Series forecast depends on step order, not only on the values seen.
+"""P101: a Series forecast depends on step order, not only on the values seen.
 
 Seasonal phase is visible only through the order of history steps. Shuffling
 each history keeps its values and level but removes that phase.
@@ -112,9 +111,8 @@ import numpy as np
 import pyarrow as pa
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P083"
 HISTORY, HORIZON, CHANNELS = 48, 8, 2
 
 
@@ -204,6 +202,7 @@ def mae(model: rf.Model, history: np.ndarray, future: np.ndarray) -> float:
     return float(np.abs(np.asarray(content) - future).mean())
 
 
+@experiment("P101", seed=83)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     train_history, train_future = waves(count=1200, seed=seed)
     validate_history, validate_future = waves(count=200, seed=seed + 1)
@@ -239,7 +238,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=83)
+    report(run)
 
 # %% [markdown]
 # </details>
