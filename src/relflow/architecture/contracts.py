@@ -400,14 +400,14 @@ def require_core_tensors(
     if TensorKey.content in targets.keys():
         target_content_name = f"{TensorKey.targets}[{TensorKey.content}]"
         target_content = require_tensor_tree(address, target_content_name, targets[TensorKey.content])
-        # Targets share content's keys and leading coordinate axes; trailing axes
+        # Targets share the keys of content and leading coordinate axes; trailing axes
         # belong to the extension, so a target may differ in width from its input.
         if set(target_content) != set(content):
             raise ForwardContractError(
                 f"forward input '{address}' {target_content_name} keys must match {TensorKey.content} keys: "
                 f"expected {format_paths(content)}, got {format_paths(target_content)}"
             )
-        require_content_prefix_shapes(address, target_content, state, name=target_content_name)
+        require_content_prefix_shapes(address=address, content=target_content, state=state, name=target_content_name)
 
 
 def require_tensor_devices(module: "Model", address: Address, tensorfield: TensorFieldBase) -> None:
@@ -554,6 +554,7 @@ def require_content_prefix_shapes(
     address: Address,
     content: dict[tuple[str, ...], torch.Tensor],
     state: torch.Tensor,
+    *,
     name: str = TensorKey.content,
 ) -> None:
     state_shape = tuple(state.shape)

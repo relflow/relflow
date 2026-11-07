@@ -9,6 +9,7 @@ import pyarrow.parquet as pq
 import pydantic
 import pytest
 import torch
+from lightning.pytorch import seed_everything
 from tensordict import TensorDict
 
 import relflow as rf
@@ -24,6 +25,13 @@ from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.normalizer import GlobalOnlineNormalizer, moments
 from tests.arrow import table as arrow_table
 from tests.tensorfields.helpers import tensorize
+
+SEED = 0
+
+
+def randn(*shape: int) -> torch.Tensor:
+    return torch.randn(*shape, generator=torch.Generator().manual_seed(SEED))
+
 
 NAN = float("nan")
 INF = float("inf")
@@ -231,8 +239,9 @@ def embed(rows: list, *, channels: int = 1, datatype: pa.DataType | None = None,
 
 
 def test_block_keeps_shape_and_zeroes_unobserved_steps():
+    seed_everything(SEED, workers=True)
     observed = torch.tensor([[True, True, False, False, True]] * 2)
-    out = Block(width=8, dilation=2)(torch.randn(2, 5, 8), observed)
+    out = Block(width=8, dilation=2)(randn(2, 5, 8), observed=observed)
     assert out.shape == (2, 5, 8)
     assert not out[:, 2:4].any()
 
@@ -368,7 +377,7 @@ def test_target_tensorfield_rejects_longer_than_horizon_and_pads_shorter():
 
 def test_decoder_shapes_for_target():
     decoder = Decoder(schema=forecast_schema(channels=2, horizon=3), address=ADDRESS)
-    payload = decoder.decode(torch.randn(5, 16))
+    payload = decoder.decode(randn(5, 16))
     assert payload["scaled"].shape == (5, 3, 2)
     assert payload[TensorKey.content].shape == (5, 3, 2)
     assert payload[TensorKey.state].shape == (5, len(Tokens))
@@ -381,7 +390,7 @@ def test_decoder_content_is_source_units():
     with torch.no_grad():
         decoder.regression.weight.zero_()
         decoder.regression.bias.copy_(torch.tensor([1.0, 3.0]))
-    content = decoder.decode(torch.randn(2, 16))[TensorKey.content]
+    content = decoder.decode(randn(2, 16))[TensorKey.content]
     torch.testing.assert_close(content[0, 0], torch.tensor([102.0, -2.0], dtype=torch.float64))
 
 
@@ -447,7 +456,7 @@ def test_embed_only_decoder_has_no_regression():
     model = rf.Model.xs(d_model=8, signal=rf.Series(channels=1, embed=True), label=rf.Boolean(mask=True))
     decoder = model.nodes["/signal"].decoder
     assert not hasattr(decoder, "regression")
-    assert decoder.decode(torch.randn(2, 8)).keys() == {TensorKey.state}
+    assert decoder.decode(randn(2, 8)).keys() == {TensorKey.state}
 
 
 def test_learn_updates_decoder_normalizer_for_targets():
@@ -582,6 +591,7 @@ def test_shared_modules_do_not_reference_series():
 @pytest.mark.integration
 @pytest.mark.parametrize("nested", [False, True])
 def test_forecast_smoke(tmp_path, nested):
+    seed_everything(SEED, workers=True)
     history, future = [1.0, 2.0, 3.0], [4.0, 5.0]
     if nested:
         model = rf.Model.xs(
