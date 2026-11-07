@@ -137,6 +137,8 @@ website:
             text: Text
           - href: datatypes/vector.qmd
             text: Vector
+          - href: datatypes/series.qmd
+            text: Series
           - href: datatypes/quantile.qmd
             text: Quantile
           - href: datatypes/cluster.qmd
