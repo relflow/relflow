@@ -35,6 +35,7 @@ matters to the task; the first model does not need every available type.
 | Amount represented by its learned distribution | [Quantile](quantile.qmd) |
 | Merchant labels sharing learned latent groups | [Group](group.qmd) |
 | Merchant representation supplied by another system | [Vector](vector.qmd) |
+| Daily spend history or a spend forecast, with several values per day | [Series](series.qmd) |
 | Meaning of a payment description from a frozen text encoder | [Text](text.qmd) |
 
 Choose by meaning rather than storage format: a numeric merchant code is
@@ -146,6 +147,7 @@ its remaining payload:
 | Group | Group decoder output; see its training limitation on the [Group page](group.qmd#prediction) |
 | Set | Label/probability pairs |
 | Vector | Fixed-width reconstructed vector |
+| Series | `horizon` forecast steps of `channels` values in source units |
 | Period, Hash, Text | No decoded public payload |
 
 All types can export an embedding when configured. These vectors live in the
