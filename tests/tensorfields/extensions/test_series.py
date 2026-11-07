@@ -128,6 +128,37 @@ def test_univariate_input_types(datatype, row):
     assert state.tolist() == [Tokens.valued]
 
 
+@pytest.mark.parametrize(
+    "datatype, row",
+    [
+        (pa.large_list(pa.float64()), [1.0, 2.0, 3.0]),
+        (pa.large_list(pa.large_list(pa.float64())), [[1.0], [2.0], [3.0]]),
+        (pa.large_list(pa.list_(pa.float64())), [[1.0], [2.0], [3.0]]),
+    ],
+)
+def test_large_list_variants_univariate(datatype, row):
+    values, observed, state = steps(tensorfield([row], build_schema(channels=1), datatype=datatype))
+    assert values[0, :, 0].tolist() == [1.0, 2.0, 3.0]
+    assert observed[0].tolist() == [True, True, True]
+    assert state.tolist() == [Tokens.valued]
+
+
+@pytest.mark.parametrize(
+    "datatype",
+    [
+        pa.large_list(pa.large_list(pa.float64())),
+        pa.large_list(pa.list_(pa.float64())),
+        pa.list_(pa.list_(pa.float64(), 2)),
+    ],
+)
+def test_multivariate_list_variants_with_null_step(datatype):
+    row = [[1.0, 2.0], None, [5.0, 6.0]]
+    values, observed, state = steps(tensorfield([row], build_schema(channels=2), datatype=datatype))
+    assert observed[0].tolist() == [True, False, True]
+    assert values[0, [0, 2]].tolist() == [[1.0, 2.0], [5.0, 6.0]]
+    assert state.tolist() == [Tokens.valued]
+
+
 def test_multivariate_wrong_inner_width_names_address():
     with pytest.raises(ValueError, match=r"/items/signal.*channels=2.*3"):
         tensorfield([[[1.0, 2.0, 3.0]]], build_schema(channels=2))

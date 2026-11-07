@@ -51,7 +51,7 @@ A null series is `null`.
 | `channels` | required | Positive number of values per step. |
 | `length` | `None` | Hard cap on retained steps. `None` keeps the whole series and pads each batch to its longest. |
 | `overflow` | `None` | With a finite `length`: `head` (default), `tail`, `random`, or `error`. Rejected when `length` is `None`. |
-| `horizon` | `None` | Steps to predict. Required with `mask=True` and rejected otherwise. |
+| `horizon` | `None` | Steps to predict. Required on reconstruction targets (`mask=True` or a reconstructing ancestor), rejected otherwise. |
 | `n_blocks` | `6` | Number of dilated convolution blocks. |
 | `jitter` | `rf.Jitter()` | Training noise on input steps. |
 | `objective` | `"l2"` | Forecast loss: mean `"l1"` or `"l2"` error over predicted steps and channels. |
@@ -71,9 +71,11 @@ the field adds one token to its record however long the series is. Padding and
 unobserved steps never contribute, and an embedding does not depend on the
 padded width of the batch.
 
-With `n_blocks=k`, one token sees `1 + 4 * (2^k - 1)` steps: 253 at the default
-of six. Choose `n_blocks` so that this covers the history that matters; steps
-beyond it cannot influence the token. Apply `length` to bound memory.
+With `n_blocks=k`, each step feature sees up to `1 + 4 * (2^k - 1)` neighboring
+steps: 253 at the default of six. The masked max-pool then covers every
+retained observed step, so any of them can influence the token. Choose
+`n_blocks` so that the local context per step matches the patterns that matter.
+Apply `length` to bound memory.
 
 ## Learning and output
 

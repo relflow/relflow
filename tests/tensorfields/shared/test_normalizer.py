@@ -17,6 +17,24 @@ def test_moments_are_per_column():
     torch.testing.assert_close(stats["var"], torch.tensor([8 / 3, 100.0], dtype=torch.float64))
 
 
+def test_moments_match_var_mean_for_one_column():
+    values = torch.randn(64, generator=torch.Generator().manual_seed(0), dtype=torch.float64)
+    values[::7] = NAN
+    finite = values[torch.isfinite(values)]
+    expected_var, expected_mean = torch.var_mean(finite, correction=0)
+    stats = moments(values)
+    assert stats["count"].item() == finite.numel()
+    torch.testing.assert_close(stats["mean"], expected_mean.reshape(1))
+    torch.testing.assert_close(stats["var"], expected_var.reshape(1))
+
+
+def test_moments_without_finite_values_are_zero():
+    stats = moments(torch.tensor([NAN, float("inf")], dtype=torch.float64))
+    assert stats["count"].tolist() == [0]
+    assert stats["mean"].tolist() == [0.0]
+    assert stats["var"].tolist() == [0.0]
+
+
 def test_vector_normalizer_merges_each_channel_independently():
     normalizer = GlobalOnlineNormalizer(width=2)
     normalizer.learn(moments(torch.tensor([[1.0, 100.0], [3.0, 300.0]]), width=2))

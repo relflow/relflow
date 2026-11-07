@@ -78,9 +78,10 @@ class Request(RequestBase):
     caps the retained steps with an ``overflow`` policy as ``Branch`` does;
     ``None`` keeps the whole series and pads each batch to its longest.
     ``n_blocks`` sets the number of dilated convolution blocks. As an input, the
-    series embeds as one pooled token. With ``mask=True`` the series is a
-    forecast target and ``horizon`` gives the number of steps to predict;
-    ``horizon`` is required there and rejected elsewhere. ``jitter`` adds
+    series embeds as one pooled token. As a reconstruction target (``mask=True``
+    or a reconstructing ancestor) the series is a forecast target and
+    ``horizon`` gives the number of steps to predict; ``horizon`` is required
+    there and rejected elsewhere. ``jitter`` adds
     training-only noise to input steps, and ``objective`` selects mean ``"l1"``
     or ``"l2"`` error over predicted steps. Predictions contain ``horizon``
     steps of ``channels`` values in source units.

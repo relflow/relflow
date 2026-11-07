@@ -147,10 +147,11 @@ model = rf.Model(
   in `Category`, take the `other` state; a NaN `Set` member is dropped like a null.
 - `Series(channels=C)` holds one ordered multichannel run per record, not a
   timestamped one. A null, NaN, or infinite step is unobserved; the rest of the
-  record stays valid. As input it embeds as one pooled token (receptive field
-  `1 + 4*(2^n_blocks - 1)` steps, 253 at the default `n_blocks=6`). `mask=True`
-  makes it a forecast target and requires `horizon`; `horizon` is rejected on a
-  non-target. Forecasts are written as exactly `horizon` steps in source units.
+  record stays valid. As input it embeds as one token: each step feature sees
+  `1 + 4*(2^n_blocks - 1)` steps (253 at the default `n_blocks=6`), and a masked
+  max-pool covers every retained observed step. `horizon` is required on
+  reconstruction targets (`mask=True` or a reconstructing ancestor) and
+  rejected otherwise. Forecasts are written as exactly `horizon` steps in source units.
   `Series` does not read elapsed time, so use `Period` or a derived `Number` for
   irregular sampling.
 - `Text(store="dir")` keeps frozen-encoder vectors on disk, keyed by encoder
