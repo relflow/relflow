@@ -3,7 +3,6 @@
 # title: Can it add longer lists than it saw in training?
 # categories:
 # - Cardinality generalization
-# evidence-id: P002
 # description: Train on short lists, then ask for totals of longer lists.
 # execute:
 #   enabled: false
@@ -24,6 +23,10 @@
 # evidence-group: Aggregation
 # ---
 #
+# The question is whether a learned summation rule continues to work when there are more terms to
+# add. The inputs remain ordinary item amounts; no count is supplied as a separate field. Only the
+# number of items changes beyond the training range.
+#
 # ## Example
 #
 # ```yaml
@@ -41,6 +44,11 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
+# The illustrated list has eight copies of 0.5, so its total is 4.0. The model trained on at most
+# six items, making this an example of an unfamiliar length. Four copies would total 2.0;
+# duplicating that complete four-item list must double the answer without changing the individual
+# values.
+#
 # ```{typst}
 # //| label: fig-evidence-attention-sum-unseen-lengths
 # //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
@@ -57,11 +65,24 @@
 #
 # Compare familiar and unfamiliar lengths. Also repeat a whole list: its total should double.
 #
+# The familiar test uses lengths one through six; the longer-list test uses seven through ten.
+# Separately, the experiment duplicates bags of at most five items and compares their predictions
+# before and after duplication. Equal-value probes also hold the amount fixed while changing
+# repetition count. Together these checks distinguish responding to extra items from merely
+# producing a plausible total.
+#
 # ## Result
 #
 # {{< evidence P002 status >}}
 #
-# The learned total extends to the tested longer lists. This does not establish exact addition or unlimited length.
+# The learned total extends to the tested longer lists. This does not establish exact addition or
+# unlimited length.
+#
+#
+# The error percentages compare each test set with a constant training-mean guess. The duplication
+# check asks a different question: does doubling the input approximately double the prediction?
+# Passing both supports the tested extension in length; all lists still fit a capacity of twelve,
+# and no claim is made about unlimited lengths or exact arithmetic.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -113,9 +134,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P002"
 TRAIN_MAX = 6
 CAPACITY = 12
 
@@ -176,6 +196,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
+@experiment("P002", seed=3615)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -257,7 +278,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3615)
+    report(run)
 
 # %% [markdown]
 # </details>

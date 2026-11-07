@@ -3,7 +3,6 @@
 # title: Can it learn a weighted average?
 # categories:
 # - Weighted aggregation
-# evidence-id: P016
 # description: Predict an average in which each value contributes according to its own positive weight.
 # execute:
 #   enabled: false
@@ -24,6 +23,11 @@
 # evidence-group: Aggregation
 # ---
 #
+# A weighted average gives more influence to values with larger weights, then divides by the total
+# weight. The model sees two through six value–weight pairs and predicts the hidden weighted_mean.
+# Unlike a weighted sum, this answer should not grow when every weight is multiplied by the same
+# factor.
+#
 # ## Example
 #
 # ```yaml
@@ -35,6 +39,10 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# The illustrated weighted contributions are 0.4, −0.5, and 0.4, totaling 0.3. The weights total
+# 3.75, so the answer is 0.3 ÷ 3.75 = 0.08. The ordinary unweighted average would be 0.2. A model
+# that ignores which weights accompany which values would miss that distinction.
 #
 # ```{typst}
 # //| label: fig-evidence-variable-cardinality-weighted-mean
@@ -51,13 +59,28 @@
 #
 # ## Comparison
 #
-# Reorder or repeat whole items, or scale all weights equally: the answer should stay fixed. Swapping weights between values should change it.
+# Reorder or repeat whole items, or scale all weights equally: the answer should stay fixed.
+# Swapping weights between values should change it.
+#
+# The generator varies positive weights over a broad range. Reordering complete pairs changes no
+# information. Duplicating all pairs doubles both the weighted total and total weight, leaving their
+# ratio unchanged; only short bags are duplicated so they still fit. Scaling all weights by 0.75
+# also cancels between numerator and denominator. Swapping weights alone breaks their associations
+# and should worsen error against the original labels.
 #
 # ## Result
 #
 # {{< evidence P016 status >}}
 #
-# The model uses relative weights and approximately preserves these equal-answer changes. Zero or negative weights and much longer lists are not covered.
+# The model uses relative weights and approximately preserves these equal-answer changes. Zero or
+# negative weights and much longer lists are not covered.
+#
+#
+# Intact error is measured relative to a constant training-mean guess. The drift checks instead
+# measure whether predictions stay stable under the three answer-preserving interventions. These
+# behaviors must accompany accurate predictions; a constant output could otherwise pass every
+# stability check. Zero weights, negative weights, and lengths beyond the trained range are not
+# covered.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -109,9 +132,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P016"
 ITEMS = 6
 
 
@@ -202,6 +224,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline_rmse, "nrmse": measured / baseline_rmse}
 
 
+@experiment("P016", seed=3313)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -276,7 +299,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3313)
+    report(run)
 
 # %% [markdown]
 # </details>

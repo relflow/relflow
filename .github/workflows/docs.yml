@@ -35,7 +35,7 @@ jobs:
       - name: Upload review artifact
         uses: actions/upload-artifact@v4
         with:
-          name: documentation-site
+          name: documentation-site-attempt-${{ github.run_attempt }}
           path: docs/site
           if-no-files-found: error
           retention-days: 7

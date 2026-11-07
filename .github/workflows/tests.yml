@@ -81,7 +81,7 @@ jobs:
         run: uv run --no-sync python scripts/checkpoint.py create --output checkpoint-baseline
       - uses: actions/upload-artifact@v4
         with:
-          name: checkpoint-baseline
+          name: checkpoint-baseline-attempt-${{ github.run_attempt }}
           path: checkpoint-baseline/
           if-no-files-found: error
           retention-days: 7
@@ -104,8 +104,6 @@ jobs:
             python: "3.13"
           - os: ubuntu-24.04
             python: "3.14"
-          - os: macos-26
-            python: "3.12"
           - os: windows-2025
             python: "3.12"
     steps:
@@ -152,7 +150,7 @@ jobs:
           uv run --no-sync pyrefly check
       - uses: actions/download-artifact@v4
         with:
-          name: checkpoint-baseline
+          name: checkpoint-baseline-attempt-${{ github.run_attempt }}
           path: checkpoint-baseline
       - name: Load, predict, resave, and resume cross-platform checkpoint
         run: uv run --no-sync python scripts/checkpoint.py check --input checkpoint-baseline --output checkpoint-check
@@ -172,7 +170,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tests-${{ matrix.os }}-py${{ matrix.python }}
+          name: tests-${{ matrix.os }}-py${{ matrix.python }}-attempt-${{ github.run_attempt }}
           path: |
             environment.txt
             junit.xml
@@ -183,7 +181,7 @@ jobs:
         if: always() && matrix.coverage
         uses: actions/upload-artifact@v4
         with:
-          name: coverage
+          name: coverage-attempt-${{ github.run_attempt }}
           path: |
             coverage.xml
             coverage.json
@@ -229,7 +227,7 @@ jobs:
         run: uv pip freeze >> environment.txt
       - uses: actions/download-artifact@v4
         with:
-          name: checkpoint-baseline
+          name: checkpoint-baseline-attempt-${{ github.run_attempt }}
           path: checkpoint-baseline
       - name: Exercise cross-platform checkpoint and complete suite
         run: |
@@ -239,7 +237,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tests-python-3.15-preview
+          name: tests-python-3.15-preview-attempt-${{ github.run_attempt }}
           path: |
             environment.txt
             torch-resolution.log

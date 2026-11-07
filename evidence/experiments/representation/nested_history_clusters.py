@@ -3,7 +3,6 @@
 # title: Do transaction histories form meaningful customer neighborhoods?
 # categories:
 # - Representation
-# evidence-id: P082
 # description: Cluster frozen customer embeddings using only unlabeled training histories, then score independent customers with shorter or longer histories.
 # execute:
 #   enabled: false
@@ -23,6 +22,12 @@
 # evidence-group: Representation
 # ---
 #
+# One observation here is an entire customer's history, rather than a single
+# transaction. The model reconstructs hidden transaction fields, then exports
+# one vector for the customer. We ask whether histories generated from similar
+# spending patterns become neighbors in that vector space, even for new customers
+# or a history length absent from training.
+#
 # ## Example
 #
 # ```yaml
@@ -35,11 +40,30 @@
 #     amount: 45.0
 #     interval_days: 6.0
 #     terminal: terminal-8
+#   - merchant: grocer
+#     amount: 37.0
+#     interval_days: 3.5
+#     terminal: terminal-1
+#   - merchant: market
+#     amount: 42.0
+#     interval_days: 4.5
+#     terminal: terminal-5
 # ```
 #
 # One observation is a new customer's transaction history. Four hidden spending
 # styles influence the noisy merchant, amount, and timing observations. Those
 # styles are kept outside the records and the model throughout training.
+#
+# The illustrated history contains relatively small amounts and short gaps.
+# Those noisy measurements can provide repeated clues about a hidden style;
+# a terminal name is independent nuisance. Two customers can therefore belong
+# together without sharing a terminal or a persistent customer identifier.
+# The four-row example is illustrative, not a recorded model prediction.
+#
+# A history is summarized by a position-free mean reduction. Reversing complete
+# transactions should preserve its customer vector. A different test gives the
+# same new customer's first four, eight, or twelve transactions to the frozen
+# model, probing how much evidence it can use without changing the cluster fit.
 #
 # ```{typst}
 # //| label: fig-evidence-nested-history-clusters
@@ -57,6 +81,19 @@
 #
 # ## Comparison
 #
+# Training histories contain four through eight transactions. Twelve-transaction
+# test histories exceed that trained range while remaining below the schema's
+# cap of sixteen. The clustering step receives four groups and fits only on
+# unlabeled training histories; test labels are kept for scoring.
+#
+# The mixed-history control moves complete transactions between customers while
+# preserving every transaction and each history length. It breaks the coherent
+# customer-level pattern without scrambling fields within a transaction. The
+# untrained encoder and raw field averages provide additional comparisons.
+# ARI measures agreement with the hidden customer styles, so a visually pleasing
+# cloud of vectors alone cannot establish meaningful neighborhoods.
+#
+#
 # Compare masked reconstruction with the same untrained encoder, reconstruction
 # after mixing transactions across customers, and raw field averages. Fit four
 # clusters on unlabeled training exports once, then reuse them for every test
@@ -66,11 +103,11 @@
 #
 # {{< evidence P082 status >}}
 #
-# This new experiment measures whether exported geometry recovers the generating
-# styles. A successful result would concern new observations of these four
-# synthetic styles, with the number of clusters supplied. It would not establish
-# discovery of new concepts or natural-language meaning. Gains over the raw and
-# untrained controls remain diagnostic, including when reconstruction loses.
+# The checks specify grouping quality for eight- and twelve-transaction histories,
+# plus unchanged export state and reversal stability. Gains over raw or untrained
+# features remain separate diagnostics. The test concerns fresh customers drawn
+# from four known synthetic styles, rather than discovery of new financial
+# concepts or a general claim that longer histories always help.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -136,9 +173,8 @@ import numpy as np
 import pyarrow as pa
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P082"
 BUDGET = 600
 BATCH_SIZE = 64
 TRAIN_ROWS = 4096
@@ -417,6 +453,7 @@ def trial(seed: int, steps: int | None, accelerator: str) -> dict:
     return {"seed": seed, "arms": arms}
 
 
+@experiment("P082", seed=8201)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     trials = [trial(seed + offset, steps, accelerator) for offset in range(3)]
     names = ("reconstruction", "untrained", "mixed_histories", "raw")
@@ -488,7 +525,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=8201)
+    report(run)
 
 # %% [markdown]
 # </details>

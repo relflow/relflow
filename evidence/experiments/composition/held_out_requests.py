@@ -3,7 +3,6 @@
 # title: Can familiar instructions work in new combinations?
 # categories:
 # - Compositional generalization
-# evidence-id: P071
 # description: Train on group and operation requests, deliberately leaving out three combinations, such as coral’s
 #   maximum.
 # execute:
@@ -28,6 +27,11 @@
 #   format: error
 # evidence-group: Composition
 # ---
+#
+# The request contains two instructions: which group to inspect and which operation to apply. Every
+# group and every operation occurs during fitting, but three particular pairings are deliberately
+# absent. The task is to combine familiar instructions on a fresh bag of values rather than memorize
+# an answer for an old record.
 #
 # ## Example
 #
@@ -60,15 +64,30 @@
 # )))
 # ```
 #
+# In the illustrative bag, amber has values 0.2 and 0.8, so its mean is 0.5; the shown answer 0.51
+# includes a possible small noise draw. Asking for amber's maximum would instead give 0.8 before
+# noise. Amber/mean is one of the withheld training combinations, making this example a test of
+# composition in the restricted arm.
+#
 # ## Comparison
 #
 # Test the missing combinations and compare with a model trained on all combinations. Change either request to check that it matters.
+#
+# The complete-training model receives examples of all nine group/operation cells and checks that the
+# task is learnable with the same total row and update budgets. The restricted model sees only six
+# cells. Changing a request while keeping the original answer fixed should worsen error if the model
+# actually follows that instruction; it is not scored against a recomputed answer.
 #
 # ## Result
 #
 # {{< evidence P071 status >}}
 #
-# Only two of three seeds meet every check. Familiar requests learn, but one withheld combination can fail even when both instructions are used.
+# Read the selected cell scores separately: familiar requests, withheld combinations, and corrupted instructions answer different questions. The criteria above show which requirements this recorded run meets.
+#
+# Each cell has its own error score, so strong familiar-cell performance cannot conceal one failed
+# withheld combination. Normalized RMSE compares with a training-only operation baseline, pooling
+# exchangeable groups without using withheld answers. Even success on these bounded two-item groups
+# would not establish exact arithmetic, unseen operations, or generalization to larger collections.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -124,9 +143,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P071"
 BUDGET = 600
 GROUPS = ("amber", "blue", "coral")
 OPERATIONS = ("mean", "min", "max")
@@ -206,6 +224,7 @@ def scores(train: list[dict], test: list[dict], predicted: np.ndarray) -> dict:
     return result
 
 
+@experiment("P071", seed=7101)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     test = list(records(rows=TEST_ROWS, seed=seed * 100 + 3, complete=True))
     metrics = {"train_rows": TRAIN_ROWS, "test_rows": TEST_ROWS, "noise_rmse": 0.02}
@@ -271,7 +290,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7101)
+    report(run)
 
 # %% [markdown]
 # </details>

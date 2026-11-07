@@ -182,6 +182,7 @@ format:
       - assets/stylesheets/layout.css
       - assets/stylesheets/sidebar.css
       - assets/stylesheets/code.css
+      - assets/stylesheets/evidence.css
       - assets/stylesheets/versions.css
       - assets/stylesheets/search.css
     include-in-header:

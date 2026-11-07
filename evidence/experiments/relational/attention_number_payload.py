@@ -3,7 +3,6 @@
 # title: Can a summary retain the winning item’s value?
 # categories:
 # - Argmax retrieval
-# evidence-id: P022
 # description: Predict the value attached to the highest-scoring candidate after compressing the candidates into learned
 #   summaries.
 # execute:
@@ -23,6 +22,10 @@
 # evidence-group: Relational
 # ---
 #
+# Each candidate has a score and a separate numeric payload. The hidden answer is the payload
+# belonging to the highest score, not the highest payload or the score itself. This version
+# compresses candidate information into learned summaries before producing the answer.
+#
 # ## Example
 #
 # ```yaml
@@ -34,6 +37,10 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# The highest illustrated score is 1.7, whose payload is −3.0, so the answer is −3.0 even though
+# another candidate carries payload 5.0. A predictor that returns the largest payload, an average
+# payload, or the winning score would be answering a different question.
 #
 # ```{typst}
 # //| label: fig-evidence-attention-number-payload
@@ -50,13 +57,28 @@
 #
 # ## Comparison
 #
-# Shuffle values between candidates while keeping the original answer. Scores and values individually stay the same.
+# Shuffle values between candidates while keeping the original answer. Scores and values
+# individually stay the same.
+#
+# Scores and payloads are sampled independently, making a score alone uninformative about the
+# answer's numeric value. The control rotates payloads among the same three candidates while
+# retaining the original target. Both collections of numbers survive unchanged, but the payload
+# attached to the winner changes. Independent train and test records prevent copying a previously
+# memorized triple from solving this comparison.
 #
 # ## Result
 #
 # {{< evidence P022 status >}}
 #
-# The tested summaries retain useful score–value relationships. Exact retrieval, larger lists, and speed or memory savings are not established.
+# The tested summaries retain useful score–value relationships. Exact retrieval, larger lists, and
+# speed or memory savings are not established.
+#
+#
+# The error percentages compare predictions with always guessing the mean training payload answer.
+# Low intact error and a substantial rise after breaking pairs support retention of the
+# score–payload association through the summaries. They do not show an exact argmax operator,
+# isolate the minimum necessary summary width, or measure memory or speed savings against the
+# pass-through route.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -105,9 +127,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P022"
 LENGTH = 3
 
 
@@ -137,6 +158,7 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
+@experiment("P022", seed=23)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -197,7 +219,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=23)
+    report(run)
 
 # %% [markdown]
 # </details>

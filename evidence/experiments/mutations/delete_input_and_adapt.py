@@ -3,7 +3,6 @@
 # title: Can it adapt after losing an input?
 # categories:
 # - Schema mutation
-# evidence-id: P050
 # description: Delete b from a model trained on y = a + b, then continue training with only a.
 # execute:
 #   enabled: false
@@ -35,6 +34,11 @@
 #
 # ## Example
 #
+# The source task again predicts `y = a + b`. The illustrative answer is `1.25`, but after deleting `b` the
+# visible `a: 0.5` cannot reveal the missing contribution `0.75`. The target rule does not change when the
+# schema changes. Since `b` is independently drawn with mean zero, the best remaining-input prediction is
+# `a`; residual error against the true sum is unavoidable even for a perfectly adapted restricted model.
+#
 # ```yaml
 # a: 0.5
 # b: 0.75
@@ -56,9 +60,22 @@
 #
 # ## Comparison
 #
+# Four arms receive matched adaptation data and update budgets: a checkpoint with `b` deleted, one with it
+# inactive, a fresh model containing only `a`, and unchanged continuation with both inputs. Comparing them
+# separates field removal from learning under reduced information. Before and after adaptation, supplying or
+# changing an ignored `b` must not influence restricted predictions. The experiment separately deletes and
+# re-adds the name to verify that fresh field state and normalization do not recover the discarded state.
+#
 # Compare deletion, deactivation, a fresh model with only a, and an unchanged model. Each receives the same additional training budget.
 #
 # ## Result
+#
+# Read the adapted deletion error beside the only-`a` oracle, rather than expecting it to regain full-
+# information accuracy. Closeness to that reference means the model uses its remaining evidence; the
+# unchanged continuation arm shows the advantage of retaining both inputs. Validation curves report recorded
+# adaptation checkpoints. The re-addition check concerns fresh state, not an observed recovery after
+# retraining the re-added field, and this task does not establish a general transfer-learning advantage over
+# starting fresh.
 #
 # {{< evidence P050 status >}}
 #
@@ -97,9 +114,7 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P050"
+from reporting import experiment, report
 
 
 def records(*, rows: int, seed: int) -> Iterator[dict]:
@@ -220,6 +235,7 @@ def fit(model: rf.Model, *, seed: int, split: int, rows: int, budget: int, accel
     }
 
 
+@experiment("P050", seed=5001)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     source_budget = 512 if steps is None else min(steps, 512)
     adapt_budget = 256 if steps is None else min(steps, 256)
@@ -377,7 +393,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=5001)
+    report(run)
 
 # %% [markdown]
 # </details>

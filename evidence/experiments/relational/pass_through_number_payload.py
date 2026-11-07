@@ -3,7 +3,6 @@
 # title: Can it return the winning item’s value?
 # categories:
 # - Argmax retrieval
-# evidence-id: P023
 # description: Predict the value attached to the highest score while retaining the encoded candidates.
 # execute:
 #   enabled: false
@@ -22,6 +21,11 @@
 # evidence-group: Relational
 # ---
 #
+# The model must return the numeric payload attached to the largest score among three candidates.
+# Here the architecture keeps the encoded candidate information instead of reducing it into learned
+# summaries. Keeping that information available does not itself specify the correct selection rule;
+# the rule still has to be learned.
+#
 # ## Example
 #
 # ```yaml
@@ -33,6 +37,10 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# The second illustrated candidate wins because 1.7 is the largest score. Its payload is −3.0, which
+# is therefore the hidden answer. The payload 5.0 belongs to a lower-scoring candidate and must not
+# win simply because it is numerically larger.
 #
 # ```{typst}
 # //| label: fig-evidence-pass-through-number-payload
@@ -51,11 +59,24 @@
 #
 # Shuffle values between candidates while keeping the original answer.
 #
+# Training and test use new independent triples. Rotating only the payloads breaks their pairing
+# with scores, while leaving the original answer in place for scoring. A model using the winning
+# association should now disagree with that old answer. The comparison complements intact accuracy:
+# a constant predictor might ignore the changed inputs, while a useful but pairing-insensitive
+# shortcut would fail to respond appropriately.
+#
 # ## Result
 #
 # {{< evidence P023 status >}}
 #
-# Keeping the pairs together supports the learned selection. This test uses three candidates and does not guarantee exact selection.
+# Keeping the pairs together supports the learned selection. This test uses three candidates and
+# does not guarantee exact selection.
+#
+#
+# The intact and broken percentages share a constant training-mean baseline; training error is also
+# recorded separately. Low intact error plus worse broken-pair error supports learned selection in
+# this small setting. This is not a controlled speed or memory comparison with the summary model,
+# and it does not establish exact retrieval or larger-candidate generalization.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -103,9 +124,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P023"
 LENGTH = 3
 
 
@@ -135,6 +155,7 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
+@experiment("P023", seed=23)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -195,7 +216,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=23)
+    report(run)
 
 # %% [markdown]
 # </details>

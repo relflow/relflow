@@ -3,9 +3,9 @@ return {
   ["evidence"] = function(args)
     local identifier = pandoc.utils.stringify(args[1])
     local section = pandoc.utils.stringify(args[2])
-    local sections = {status = true, evidence = true, script = true}
+    local sections = {status = true, checks = true, evidence = true, script = true}
     if not identifier:match("^P%d%d%d$") or not sections[section] then
-      error("Use {{< evidence P001 status|evidence|script >}} with a registered evidence ID.")
+      error("Use {{< evidence P001 status|checks|evidence|script >}} with a registered evidence ID.")
     end
     local path = quarto.project.directory .. "/evidence/_generated/" .. identifier .. "-" .. section .. ".md"
     local file, reason = io.open(path, "r")

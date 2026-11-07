@@ -3,7 +3,6 @@
 # title: Do harmless schema edits preserve predictions?
 # categories:
 # - Schema mutation
-# evidence-id: P046
 # description: Train a useful predictor, then make edits that should not alter its visible information or learned
 #   state.
 # execute:
@@ -28,6 +27,11 @@
 #
 # ## Example
 #
+# The original predictor receives a number and one of four category codes, then predicts their hidden offset
+# sum. The offsets for `code-0` through `code-3` are `-0.75`, `-0.25`, `0.25`, and `0.75`. Thus the
+# illustrative `x: 0.5` with `code-0` gives `y = 0.5 - 0.75 = -0.25`. A model must first learn this
+# relationship before unchanged predictions across an edit can demonstrate preservation of useful behavior.
+#
 # ```yaml
 # x: 0.5
 # code: code-0
@@ -50,9 +54,21 @@
 #
 # ## Comparison
 #
+# The experiment records predictions and learned state before editing, then changes metadata, adds and
+# removes an inactive field, and rebinds the numeric input to an equivalent renamed source key. No fitting
+# follows these edits. It also checks rejection of a duplicate field name and a save/load round trip.
+# Repeating the edits tests more than one successful mutation. A complete reset supplies the opposite
+# control: intentionally discarding learned state should lose the trained relationship.
+#
 # Repeat metadata changes, inactive-field additions and deletions, equivalent input-key changes, and save/load. Compare with a complete reset.
 #
 # ## Result
+#
+# The compact errors compare the trained predictor with the reset control, while detailed edit records
+# contain prediction drift, preserved vocabulary, and changed or missing state entries. Those are separate
+# questions: unchanged parameters alone would not prove that an input was still read correctly. These edits
+# are chosen to preserve the available information. The result does not promise unchanged predictions after
+# adding active evidence, changing model capacity, or adapting the model with further training.
 #
 # {{< evidence P046 status >}}
 #
@@ -90,9 +106,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P046"
 OFFSETS = (-0.75, -0.25, 0.25, 0.75)
 
 
@@ -133,6 +148,7 @@ def errors(actual: np.ndarray, predicted: np.ndarray, baseline: float) -> dict:
     return {"rmse": rmse, "baseline_rmse": baseline, "nrmse": rmse / baseline}
 
 
+@experiment("P046", seed=4601)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     budget = 512 if steps is None else min(steps, 512)
@@ -249,7 +265,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=4601)
+    report(run)
 
 # %% [markdown]
 # </details>

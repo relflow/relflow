@@ -3,7 +3,6 @@
 # title: Does it need both weekday and hour?
 # categories:
 # - Calendar reasoning
-# evidence-id: P042
 # description: Predict whether a time lies in a weekday business-hours window.
 # execute:
 #   enabled: false
@@ -28,6 +27,11 @@
 #
 # ## Example
 #
+# The hidden label follows a simple synthetic rule: open means Monday through Friday at an hour from 09:00
+# through 16:00 inclusive. The illustrated Monday at 09:00 is open. The same Monday at 20:00 would be
+# closed, as would Sunday at 09:00. Although each record contains a timestamp, each model sees only its
+# selected calendar coordinates, rather than every fact that a person could extract from the displayed date.
+#
 # ```yaml
 # observed_at: 2025-01-06T09:00:00
 # target: open
@@ -47,9 +51,21 @@
 #
 # ## Comparison
 #
+# Three models receive weekday alone, hour alone, or both. Half the generated records are open, one quarter
+# are weekday/off-hour near misses, and one quarter are weekend/work-hour near misses. Either single
+# coordinate leaves genuinely ambiguous examples; the combined inputs distinguish both kinds of closed case.
+# Training, validation, and test use separate year ranges, so the comparison is evaluated on different dates
+# rather than the training records themselves.
+#
 # Train with only weekday, only hour, and both together. Each single coordinate leaves ambiguous cases.
 #
 # ## Result
+#
+# The percentages are held-out classification accuracies. The important comparison is whether the combined
+# model improves over both restricted-input models, not merely whether it beats a 50% guess. The task's
+# definition of open is intentionally narrow and supplied by the generator. There are no holiday exceptions,
+# time zones, varying local opening schedules, or daylight-saving transitions, so a high score is not a
+# deployed business-calendar service.
 #
 # {{< evidence P042 status >}}
 #
@@ -100,9 +116,7 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P042"
+from reporting import experiment, report
 
 
 def records(*, start: date, weeks: int, rows: int, seed: int) -> Iterator[dict]:
@@ -192,6 +206,7 @@ def accuracy(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator
     return float(metrics[".target/test.accuracy.content"])
 
 
+@experiment("P042", seed=59)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     train = partial(records, start=date(2017, 1, 2), weeks=52, rows=1024, seed=seed + 1)
     validate = partial(records, start=date(2021, 1, 4), weeks=26, rows=512, seed=seed + 2)
@@ -241,7 +256,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=59)
+    report(run)
 
 # %% [markdown]
 # </details>

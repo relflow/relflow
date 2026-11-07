@@ -3,7 +3,6 @@
 # title: Can it choose both a group and an operation?
 # categories:
 # - Category-conditioned reduction
-# evidence-id: P027
 # description: Ask for a group’s minimum, maximum, average, or total from the same list.
 # execute:
 #   enabled: false
@@ -25,6 +24,12 @@
 #   format: error
 # evidence-group: Relational
 # ---
+#
+# Two instructions jointly define the answer: which group to select and which operation to apply.
+# Every twelve-item bag contains four values from each of A, B, and C. The visible operation
+# requests a sum, average, minimum, or maximum of only the selected group's values.
+#
+# The bag number is generator bookkeeping, not a model input.
 #
 # ## Example
 #
@@ -50,6 +55,10 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
+# The illustrated B values are −0.1, 0.3, −0.9, and 1.3. Their maximum is 1.3, so that is the answer
+# to the shown request. On the same B values, sum would request 0.6, mean 0.15, and min −0.9.
+# Changing the instruction changes the answer without changing the list.
+#
 # ```{typst}
 # //| label: fig-evidence-group-operation-composition
 # //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
@@ -67,13 +76,27 @@
 #
 # ## Comparison
 #
-# Measure every group-and-operation combination so a good score on one cannot hide a poor score on another.
+# Measure every group-and-operation combination so a good score on one cannot hide a poor score on
+# another.
+#
+# Each bag produces all twelve group–operation requests within the same split, and different splits
+# use independently generated bags. Every combination receives its own score, preventing a good
+# average from hiding a failed group or operation. The input values are chosen so different
+# reductions usually disagree. This version does not corrupt request fields or group membership;
+# those would provide stronger direct tests of information use.
 #
 # ## Result
 #
 # {{< evidence P027 status >}}
 #
-# All tested combinations learn. This exact experiment does not corrupt either request, so stronger evidence that both instructions are used remains needed.
+# All tested combinations learn. This exact experiment does not corrupt either request, so stronger
+# evidence that both instructions are used remains needed.
+#
+#
+# Each error percentage uses that particular group's and operation's training-mean baseline. The
+# overview shows a few examples, while the checks cover all twelve combinations. Low errors support
+# the composed task on these familiar labels and fixed group sizes; they do not show that an unseen
+# operation or unseen combination can be composed without training examples.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -121,9 +144,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P027"
 OPERATIONS = ("sum", "mean", "min", "max")
 GROUPS = ("A", "B", "C")
 
@@ -196,6 +218,7 @@ def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["predictions"]["answer"]["content"] for row in output])
 
 
+@experiment("P027", seed=16)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -250,7 +273,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=16)
+    report(run)
 
 # %% [markdown]
 # </details>

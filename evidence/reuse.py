@@ -20,7 +20,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 from evidence_ci import digest, identity, resolved, task_key
-from experiments.source import metadata, registry
+from experiments.source import describe, metadata, registry
 from record import readme_content, validate
 
 REPOSITORY = "relflow/relflow"
@@ -28,6 +28,11 @@ RESULTS = {"evidence-result", "evidence-report"}
 MARKERS = ("<!-- evidence-results:start -->", "<!-- evidence-results:end -->")
 SHA = re.compile(r"[0-9a-f]{40}")
 LIMIT = 512 * 1024 * 1024
+HELPERS = {
+    # Authenticate archived reports; the retired workflow has no execution path.
+    "evidence-lab.yml": "Run full paired suite on lab / Run full paired suite on lab",
+    "evidence-hosted.yml": "/ Collect full paired suite",
+}
 
 
 def wheel_equivalence(source: Path, current: Path, source_readme: bytes, current_readme: bytes) -> dict:
@@ -156,6 +161,43 @@ def api(path: str) -> dict:
     return json.loads(subprocess.check_output(["gh", "api", path]))
 
 
+def workflow(run: dict) -> tuple[str, str]:
+    """Identify one immutable Evidence helper, including historical lab executions."""
+    references = set()
+    for row in run.get("referenced_workflows", []):
+        for name in HELPERS:
+            prefix = REPOSITORY + "/.github/workflows/" + name + "@"
+            if not row.get("path", "").startswith(prefix):
+                continue
+            revision = row.get("sha", "")
+            if not SHA.fullmatch(revision) or row["path"] != prefix + revision:
+                raise ValueError("CI must identify one immutable trusted evidence helper")
+            references.add((name, revision))
+    if len(references) != 1:
+        raise ValueError("CI must identify one immutable trusted evidence helper")
+    return references.pop()
+
+
+def successful_job(run: dict, number: int) -> dict:
+    """Authenticate the collector, rather than treating a successful shard as the gate."""
+    name, _ = workflow(run)
+    path = f"repos/{REPOSITORY}/actions/runs/{run['id']}/attempts/{number}/jobs?per_page=100"
+    listing = api(path)
+    jobs = list(listing["jobs"])
+    for page in range(2, (listing.get("total_count", len(jobs)) + 99) // 100 + 1):
+        jobs.extend(api(path + f"&page={page}")["jobs"])
+    evidence = [job for job in jobs if job["name"].endswith(HELPERS[name])]
+    if len(evidence) != 1 or evidence[0].get("conclusion") != "success" or evidence[0].get("status") != "completed":
+        raise ValueError("The original attempt has no complete successful Evidence job")
+    return evidence[0]
+
+
+def artifact_name(run: dict, name: str) -> str:
+    """Keep hosted attempts immutable; old lab artifacts retain their original names."""
+    helper, _ = workflow(run)
+    return f"{name}-attempt-{run['run_attempt']}" if helper == "evidence-hosted.yml" else name
+
+
 def attempt(run: dict, number: int) -> dict:
     """Keep original Evidence provenance when a later retry completes the remaining CI jobs."""
     if type(number) is not int or number < 1 or number > run["run_attempt"]:
@@ -186,33 +228,20 @@ def attempt(run: dict, number: int) -> dict:
         or any(original.get(name) != run.get(name) for name in fields)
     ):
         raise ValueError("Retried CI does not bind the original Evidence source and workflow")
-    jobs = api(f"repos/{REPOSITORY}/actions/runs/{run['id']}/attempts/{number}/jobs?per_page=100")["jobs"]
-    evidence = [
-        job for job in jobs if job["name"].endswith("Run full paired suite on lab / Run full paired suite on lab")
-    ]
-    if len(evidence) != 1 or evidence[0].get("conclusion") != "success" or evidence[0].get("status") != "completed":
-        raise ValueError("The original attempt has no complete successful Evidence job")
+    evidence = successful_job(original, number)
     return dict(
         original,
         validation={
             "run_attempt": run["run_attempt"],
             "head_sha": run["head_sha"],
             "conclusion": "success",
-            "evidence_job_id": evidence[0]["id"],
+            "evidence_job_id": evidence["id"],
         },
     )
 
 
 def helper_sha(run: dict) -> str:
-    references = {
-        row["sha"]
-        for row in run.get("referenced_workflows", [])
-        if row.get("path", "").startswith(REPOSITORY + "/.github/workflows/evidence-lab.yml@")
-        and SHA.fullmatch(row.get("sha", ""))
-    }
-    if len(references) != 1:
-        raise ValueError("CI must identify one immutable trusted evidence helper")
-    return references.pop()
+    return workflow(run)[1]
 
 
 def ensure(root: Path, revision: str) -> None:
@@ -410,7 +439,7 @@ def equivalent(
             raise ValueError(f"Evidence input mode differs: {name}")
         if re.fullmatch(r"evidence/experiments/[^/]+/[^/]+\.py", name):
             left, right = old.decode(), content.decode()
-            header = metadata(right)
+            header = describe(right)
             headers[header["evidence-id"]] = {
                 "header": header,
                 "run": header.get("evidence-result"),
@@ -491,13 +520,13 @@ def trusted(run: dict, manifest: dict, *, helper: str, executor: str, root: Path
         or run["run_attempt"] < 1
         or manifest["run_id"] != f"gh-{run['id']}-{run['run_attempt']}"
         or manifest["executor_sha"] != executor
-        or not any(
-            row.get("sha") == helper
-            and row.get("path", "").startswith(REPOSITORY + "/.github/workflows/evidence-lab.yml@")
-            for row in run.get("referenced_workflows", [])
-        )
+        or helper_sha(run) != helper
     ):
         raise ValueError("Reuse source is not a successful internal immutable evidence workflow attempt")
+    if manifest.get("backend") == "github-hosted-docker":
+        if workflow(run)[0] != "evidence-hosted.yml":
+            raise ValueError("Hosted execution must use its immutable hosted Evidence helper")
+        successful_job(run, run["run_attempt"])
     expected = {
         "candidate": manifest["candidate"]["revision"],
         "baseline": manifest["baseline"]["revision"],
@@ -742,8 +771,12 @@ def unpack(payload: bytes, destination: Path, *, zipped: bool) -> None:
 
 
 def artifact(run_id: int, name: str, destination: Path) -> dict:
-    listing = api(f"repos/{REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100")
-    matches = [row for row in listing["artifacts"] if row["name"] == name and not row["expired"]]
+    path = f"repos/{REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100"
+    listing = api(path)
+    artifacts = list(listing["artifacts"])
+    for page in range(2, (listing.get("total_count", len(artifacts)) + 99) // 100 + 1):
+        artifacts.extend(api(path + f"&page={page}")["artifacts"])
+    matches = [row for row in artifacts if row["name"] == name and not row["expired"]]
     if len(matches) != 1:
         raise ValueError("Reuse source needs one unexpired immutable artifact per name")
     row = matches[0]
@@ -844,8 +877,8 @@ def find(root: Path, output: Path, requested: dict, *, current_inputs: Path, hel
                     source = {
                         "repository": REPOSITORY,
                         "artifacts": [
-                            artifact(run["id"], "relflow-evidence", staging / "reports"),
-                            artifact(run["id"], "evidence-inputs", staging / "inputs"),
+                            artifact(run["id"], artifact_name(run, "relflow-evidence"), staging / "reports"),
+                            artifact(run["id"], artifact_name(run, "evidence-inputs"), staging / "inputs"),
                         ],
                     }
                 else:
@@ -936,8 +969,8 @@ def verify_receipt(
             origin = {
                 "repository": REPOSITORY,
                 "artifacts": [
-                    artifact(run["id"], "relflow-evidence", staging / "reports"),
-                    artifact(run["id"], "evidence-inputs", staging / "inputs"),
+                    artifact(run["id"], artifact_name(run, "relflow-evidence"), staging / "reports"),
+                    artifact(run["id"], artifact_name(run, "evidence-inputs"), staging / "inputs"),
                 ],
             }
         expected = verify(

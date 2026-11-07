@@ -60,7 +60,7 @@ jobs:
       - name: Attach the validated publication assets
         uses: actions/upload-artifact@v4
         with:
-          name: evidence-release-assets
+          name: evidence-release-assets-attempt-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/evidence-publication/publication.json
             ${{ runner.temp }}/evidence-publication/measurements.md
@@ -72,7 +72,7 @@ jobs:
       - name: Attach the rendered release review site
         uses: actions/upload-artifact@v4
         with:
-          name: documentation-site
+          name: documentation-site-attempt-${{ github.run_attempt }}
           path: docs/site
           if-no-files-found: ignore
           retention-days: 7

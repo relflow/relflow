@@ -3,7 +3,6 @@
 # title: Do stable labels produce the right groups?
 # categories:
 # - Cluster
-# evidence-id: P020
 # description: Repeated identities carry stable labels. Ask the Cluster field to reconstruct identities while predicting
 #   their labels.
 # execute:
@@ -20,6 +19,11 @@
 # evidence-group: Representation
 # ---
 #
+# Repeated identities carry one of five stable labels. The model learns the hidden label and also
+# reconstructs masked identities, which activates Cluster's adaptive state. The experiment asks
+# whether its internal count and usage settle near five, rather than assuming that recurrence alone
+# turns grouping on.
+#
 # ## Example
 #
 # ```yaml
@@ -28,6 +32,11 @@
 # ```
 #
 # The label is hidden; identities are sometimes hidden for reconstruction during training.
+#
+# The illustrated c0-id3 identity always has label L0. Other identities such as c0-id8 share that
+# label, while c1-id3 belongs to L1. These are complete synthetic identity tokens. The model is not
+# given a separate group field, and the hidden label is a training target rather than a visible
+# prediction input.
 #
 # ```{typst}
 # //| label: fig-evidence-cluster-reconstructing-category-labels
@@ -43,11 +52,24 @@
 #
 # Compare learned group count and usage with the five hidden label groups.
 #
+# Compared with the plain-input control, the important change is a reconstructing mask on
+# merchant_id. A callback then follows commitment and usage through thirty epochs and checks the
+# final five entries. Both training and validation reuse the same generated records. There is no
+# independent test of predicted labels and no direct comparison between learned memberships and the
+# five generating classes.
+#
 # ## Result
 #
 # {{< evidence P020 status >}}
 #
-# The model reaches roughly five groups, but count and usage do not measure whether grouping is correct. Reused validation records also leave independent predictive quality untested.
+# The model reaches roughly five groups, but count and usage do not measure whether grouping is
+# correct. Reused validation records also leave independent predictive quality untested.
+#
+#
+# The selected run meets the count-and-usage checks. Usage perplexity describes how evenly groups
+# are used; it is not the fraction of identities grouped correctly. Five equally used clusters could
+# still mix the generating labels badly. The result therefore supports activation of the mechanism
+# under this objective, while partition recovery and generalization remain separate questions.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -101,9 +123,7 @@ from functools import partial
 import lightning.pytorch as lit
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P020"
+from reporting import experiment, report
 
 
 def records(seed: int) -> Iterator[dict]:
@@ -144,6 +164,7 @@ class Trajectory(lit.Callback):
         )
 
 
+@experiment("P020", seed=0)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -191,7 +212,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=0)
+    report(run)
 
 # %% [markdown]
 # </details>

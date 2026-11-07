@@ -3,7 +3,6 @@
 # title: Can a visible count help recover a total?
 # categories:
 # - Cardinality generalization
-# evidence-id: P004
 # description: Every item has the same amount. Give the model the item count as an extra input and ask for the total.
 # execute:
 #   enabled: false
@@ -18,6 +17,10 @@
 #   format: error
 # evidence-group: Aggregation
 # ---
+#
+# Every item in a record repeats one randomly chosen amount. The model must combine that amount with
+# the visible item_count to predict a total. This isolates a simpler multiplication problem from the
+# harder task of adding a list of unrelated values.
 #
 # ## Example
 #
@@ -35,6 +38,10 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
+# The illustration supplies six copies of 0.7 and explicitly says item_count is six, so the hidden
+# total is 6 × 0.7 = 4.2. One copy of the same amount would total 0.7. Looking only at the average
+# amount would not distinguish those answers.
+#
 # ```{typst}
 # //| label: fig-evidence-visible-count-sum
 # //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
@@ -50,13 +57,26 @@
 #
 # ## Comparison
 #
-# Keep the amount fixed while changing the count. The answers must differ even though an average-only branch sees the same value.
+# Keep the amount fixed while changing the count. The answers must differ even though the average
+# amount stays the same.
+#
+# Both train and test counts range from one through six. The matched probes keep the amount at 0.7
+# and change only the count, requiring clearly separated predictions rather than two copies of an
+# average-like answer. The current Mean representation also carries a structural count signal, so
+# this is not an ablation proving that the extra item_count field is indispensable.
 #
 # ## Result
 #
 # {{< evidence P004 status >}}
 #
-# The extra count supplies information the average loses. This test uses repeated equal amounts, rather than arbitrary mixed lists.
+# The configured model meets the held-out and matched-count checks. This test supplies an explicit
+# count and uses repeated equal amounts, rather than arbitrary mixed lists.
+#
+#
+# The error percentage compares held-out totals with a constant training-mean prediction. The probe
+# checks additionally require predictions near 0.7 and 4.2, with a substantial gap between them. A
+# successful result shows that this configured model can use the available information on
+# equal-valued bags; it does not establish mixed-value summation or unseen-count generalization.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -70,9 +90,10 @@
 # ### How it works
 #
 # Every item in a record repeats one random amount. The branch uses
-# `attention=None` and `rf.Mean()`, so its summary does not change with repetition
-# count. A visible root `item_count` supplies the missing factor, and learned root
-# attention combines both inputs to predict their product.
+# `attention=None` and `rf.Mean()`. Its averaged content stays the same under
+# repetition, while the current Mean also carries a structural count signal.
+# The root additionally receives visible `item_count`; this test does not ablate
+# either count route to establish which is necessary for the learned product.
 #
 # Train and test lengths are one through six. Matched probes repeat 0.7 once or
 # six times, requiring totals 0.7 and 4.2. Their predictions must separate by more
@@ -107,9 +128,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P004"
 TRAIN_MAX = 6
 CAPACITY = 12
 
@@ -161,6 +181,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
+@experiment("P004", seed=3605)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -224,7 +245,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3605)
+    report(run)
 
 # %% [markdown]
 # </details>

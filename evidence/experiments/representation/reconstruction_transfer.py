@@ -3,7 +3,6 @@
 # title: Do reconstruction embeddings help a new small-label task?
 # categories:
 # - Representation
-# evidence-id: P073
 # description: Learn to reconstruct three noisy views of a hidden class, then freeze the encoder and classify using
 #   eight labeled examples per class.
 # execute:
@@ -31,6 +30,11 @@
 # evidence-group: Representation
 # ---
 #
+# The hidden class influences three imperfect views of a record, but the class label is absent during
+# reconstruction training. Later, only a small separate labeled reference set is available. The
+# experiment asks whether reconstructing shared structure makes a frozen embedding more useful for
+# that later classification task than simpler representations.
+#
 # ## Example
 #
 # ```yaml
@@ -52,15 +56,33 @@
 # )))
 # ```
 #
+# The illustrated `arch` and `bay` are two possible synonyms associated with the same generating
+# class. The first two geometry coordinates carry a noisy class-specific square corner, while fourteen
+# additional coordinates carry independent noise. Any one view can be misleading, so a useful
+# representation should retain their shared signal rather than merely reproduce the strongest-looking
+# individual value.
+#
 # ## Comparison
 #
 # Use the same simple classifier on raw features, an untrained encoder, and an encoder trained with the views shuffled independently.
+#
+# All representations are judged by the same nearest-centroid classifier with eight labeled reference
+# examples per class. Controls use the untrained encoder, reconstruction training with independently
+# shuffled views, and standardized raw features. View shuffling preserves each field's distribution
+# but removes cross-view agreement. Shuffling the reference labels separately checks whether the small
+# probe itself supplies a spurious association.
 #
 # ## Result
 #
 # {{< evidence P073 status >}}
 #
-# Only two of three seeds pass every check. Reconstruction can help, but raw features are stronger in two seeds; exporting an embedding alone does not make it useful.
+# The selected run improves on the untrained encoder but misses the required 0.05 accuracy margin. Raw features score higher here; exporting an embedding alone does not establish useful transfer.
+#
+# Accuracy is measured on independent records after freezing the encoder; no downstream gradient
+# update improves it. The selected run misses the required margin over the untrained encoder, and
+# raw-feature performance remains an important comparison. Finite, unit-length embeddings and
+# successful export are mechanical properties, not evidence that reconstruction necessarily gives the
+# best representation for a later task.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -117,9 +139,8 @@ import numpy as np
 import pyarrow as pa
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P073"
 BUDGET = 600
 TRAIN_ROWS = 4096
 TEST_ROWS = 2048
@@ -195,6 +216,7 @@ def classify(reference: np.ndarray, labels: np.ndarray, queries: np.ndarray) -> 
     return np.square(queries[:, None, :] - centroids[None, :, :]).sum(axis=-1).argmin(axis=1)
 
 
+@experiment("P073", seed=7301)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     train, _ = sample(rows=TRAIN_ROWS, seed=seed * 100 + 1)
     reference, reference_labels = sample(rows=4 * LABELS_PER_CLASS, seed=seed * 100 + 3)
@@ -285,7 +307,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7301)
+    report(run)
 
 # %% [markdown]
 # </details>

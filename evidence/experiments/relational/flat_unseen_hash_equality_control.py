@@ -3,7 +3,6 @@
 # title: Can it compare two unfamiliar IDs directly?
 # categories:
 # - Collection overlap
-# evidence-id: P029
 # description: Ask whether two individual IDs match, as a simpler comparison beside the two-list overlap test.
 # execute:
 #   enabled: false
@@ -23,6 +22,11 @@
 # ---
 #
 # ## Example
+#
+# Here there is one identifier on each side, with no collection to search. Both visible fields contain
+# `owl`, making the illustrative hidden answer `equal: true`. Changing only `right_id` to `yak` would make
+# the answer false. The labels are synthetic names rather than known objects: their spelling carries no
+# intended meaning. Every generated row receives fresh IDs, and the test namespace differs from training.
 #
 # ```yaml
 # left_id: owl
@@ -45,9 +49,21 @@
 #
 # ## Comparison
 #
+# Positive and negative labels are balanced. The control replaces the right-hand ID in every originally
+# matching pair with a different ID, while retaining the original labels for scoring. The visible pairs then
+# contain no equality signal for separating those labels. A model using the relationship should lose its
+# ranking advantage and reduce its positive-class probabilities. This isolates direct equality from the
+# additional routing problem introduced by two repeated lists.
+#
 # Turn matching pairs into nonmatching pairs while retaining the original answers.
 #
 # ## Result
+#
+# The two AUC readouts compare ranking on intact pairs and on the deliberately broken pairs. They are not
+# percentages of correct classifications. The additional probability-drop check asks whether the same
+# positive examples change after their equality is removed. Together these measurements test sensitivity to
+# unfamiliar-ID equality; they do not establish list overlap, joins over arbitrary structures, or reliable
+# behavior for every possible hash collision.
 #
 # {{< evidence P029 status >}}
 #
@@ -100,9 +116,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P029"
 MIN_LENGTH = 2
 MAX_LENGTH = 5
 
@@ -136,6 +151,7 @@ def probabilities(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["predictions"]["equal"]["content"]["probability"] for row in output])
 
 
+@experiment("P029", seed=3701)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -191,7 +207,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3701)
+    report(run)
 
 # %% [markdown]
 # </details>

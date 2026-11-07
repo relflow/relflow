@@ -67,10 +67,10 @@ anchors, and Typst diagrams. HTML output goes to `docs/site/`.
 
 Quarto is pinned to **1.10.18** through an isolated uv tool invocation and uses
 its bundled Typst. To use that exact Quarto version already installed locally,
-pass `QUARTO=quarto` to make. Python tooling installs only PyYAML, pytest, and
-Ruff into `docs/.venv`, separately from the package environment. Building never
-imports relflow, executes model examples, trains models, or downloads model
-weights.
+pass `QUARTO=quarto` to make. Python tooling installs PyYAML 6.0.3, plus pytest
+and Ruff for development, into `docs/.venv`, separately from the package
+environment. Building never imports relflow, Torch, or Lightning, executes
+model examples, trains models, or downloads model weights.
 
 ## Write documentation
 
@@ -85,17 +85,23 @@ task described in [its README](assets/branding/README.md).
 
 ## Evidence
 
-Canonical experiments, protocol, lab runner, and tests live under
+Canonical experiments, protocol, hosted runner, and tests live under
 [`evidence/`](../evidence/README.md). Scripts own definitions, explanatory prose,
 and presentation metadata. Measured results are separate JSON publication
 assets; rendering never rewrites or executes experiments.
+
+Generated Evidence pages put the behavioral criteria before the Example and
+show recorded metrics as plain readouts, labeled groups, and tables. Expanded
+details separate Measurements, Method, Reproduce, and Code. Provenance and the
+complete raw record remain available in their own disclosures. See the
+[presentation contract](../evidence/SPEC.md#documentation) for authoring guidance.
 
 The complete paired evidence gate still runs for PRs, merge groups, and main
 CI. It requires valid full-budget results for both exact wheels and blocks
 execution errors, incomplete coverage, invalid provenance, and regressions of
 baseline-passing checks. Verified reuse keeps the original execution records
 and adds a separate receipt binding the current request. See the
-[lab guide](../evidence/lab.md).
+[hosted guide](../evidence/hosted.md).
 
 Publication happens **only with package version releases**. Before publishing
 `v<version>`, the release workflow freezes a validated `evidence-v<version>`

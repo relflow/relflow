@@ -3,7 +3,6 @@
 # title: Can it combine noisy measurements with missing readings?
 # categories:
 # - Representation
-# evidence-id: P074
 # description: Predict a signal from three noisy sensors, sometimes hiding one or more readings. An extra sensor carries
 #   no useful information.
 # execute:
@@ -24,6 +23,11 @@
 #   format: number
 # evidence-group: Representation
 # ---
+#
+# Every useful sensor is a noisy reading of the same hidden signal. The task requires combining
+# visible readings and ignoring independent nuisance. Because the generator is Gaussian with specified
+# noise levels, an evaluator can calculate the best possible conditional mean for each visibility
+# pattern and compare the learned prediction with it.
 #
 # ## Example
 #
@@ -53,15 +57,34 @@
 # )))
 # ```
 #
+# The illustrated readings can arise from hidden target 0.4 plus different sensor errors. None is an
+# exact copy of the target. The first sensor has lower noise than the third, so equal averaging is not
+# the optimal rule; the known prior also pulls a noisy estimate toward zero. The nuisance value 1.4
+# supplies no information about that target.
+#
 # ## Comparison
 #
-# Compare combined and single-sensor evidence, no evidence, an unseen visibility pattern, and a deliberately corrupted reading.
+# Compare combined and single-sensor evidence, no evidence, an unseen visibility pattern, and a
+# deliberately corrupted reading.
+#
+# All eight visibility patterns are applied to the same held-out numeric observations. One
+# combination, first and third visible with second hidden, is excluded from fitting. Poisoning hidden
+# values checks that masking truly removes them. Adding six to a visible first reading instead tests
+# corruption, a different condition the model was not trained to recognize.
 #
 # ## Result
 #
 # {{< evidence P074 status >}}
 #
-# Combining readings helps in all three seeds, but only one passes every check. Missing-evidence fallback remains inconsistent, and a corrupted visible sensor can sharply increase error.
+# The selected run meets the combined-sensor and masking checks but misses the no-evidence prior
+# requirement. A corrupted visible sensor can still sharply increase error; the stress result is
+# diagnostic.
+#
+# MSE against the target includes unavoidable measurement noise; distance to the conditional mean
+# isolates error beyond the available information. The selected run misses its no-evidence prior
+# requirement even though other fusion and masking checks pass. Hiding the corrupted reading should
+# recover the corresponding two-sensor prediction, but this does not imply that a visible corrupted
+# reading is automatically rejected.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -118,9 +141,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P074"
 BUDGET = 600
 TRAIN_ROWS = 4096
 TEST_ROWS = 2048
@@ -177,6 +199,7 @@ def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["target"]["content"] for row in output], dtype=np.float64)
 
 
+@experiment("P074", seed=7401)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -281,7 +304,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7401)
+    report(run)
 
 # %% [markdown]
 # </details>

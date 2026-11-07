@@ -3,7 +3,6 @@
 # title: Do frozen financial embeddings retain their groups with missing evidence?
 # categories:
 # - Representation
-# evidence-id: P081
 # description: Reconstruct noisy financial views, fit four clusters on complete training embeddings, and keep those
 #   clusters fixed while removing a view or replacing unrelated noise in independent records.
 # execute:
@@ -36,6 +35,12 @@
 # evidence-group: Representation
 # ---
 #
+# A record may contain several clues about the same hidden pattern. Can a frozen
+# representation still put similar records together when one clue disappears?
+# Here four synthetic styles combine low or high amounts with low or high
+# frequencies. A payment-channel code is another noisy clue, while the nuisance
+# vector is unrelated to the style.
+#
 # ## Example
 #
 # ```yaml
@@ -48,6 +53,16 @@
 # Each record has one of four hidden spending styles. Channel, amount, and
 # frequency provide noisy clues; the extra vector is independent noise. The
 # style label is available only to the evaluator, never to the model.
+#
+# The example amount 32.4 and frequency 3.1 are consistent with the low-amount,
+# low-frequency style, whose centers are 30 and 3. The card channel is another
+# imperfect observation; its name does not guarantee a style. All sixteen nuisance
+# values are independent random noise.
+#
+# For the missing-channel comparison, replace only channel with null. Amount and
+# frequency still provide evidence. For complete signal removal, also replace
+# those two measurements with null, leaving only unrelated noise. Neither change
+# supplies the hidden style as a field or label to the model.
 #
 # ```{typst}
 # //| label: fig-evidence-semantic-robustness
@@ -63,6 +78,19 @@
 #
 # ## Comparison
 #
+# Fit four clusters on complete training records, then freeze the encoder,
+# preprocessing, and cluster centers. Reusing those exact centers makes this a
+# check of the original grouping under changed evidence, rather than fitting a
+# new grouping separately for every condition.
+#
+# Resampling nuisance changes irrelevant details while preserving the useful
+# clues. Removing channel asks whether the remaining views suffice. Removing all
+# three semantic views checks whether apparent agreement survives after the
+# signal is gone. Trained, untrained, and raw representations undergo the same
+# conditions. ARI near one means matching hidden groups; chance-level agreement
+# is near zero, independently of the cluster numbers.
+#
+#
 # Compare reconstruction training, the same untrained encoder, and standardized
 # raw fields. Fit each set of four clusters on complete training records only.
 # Keep the encoder, preprocessing, and centroids fixed for complete test records,
@@ -72,10 +100,11 @@
 #
 # {{< evidence P081 status >}}
 #
-# This controlled experiment asks whether new records retain their hidden
-# grouping under missing evidence. It has no published measurements yet.
-# Four groups are supplied, and the concepts and vocabulary are shared across
-# splits; this does not establish discovery of new real-world customer segments.
+# The checks distinguish complete evidence, partial evidence, and the no-signal
+# control. The same known concepts and vocabulary appear across independent
+# records, and the number of clusters is supplied. A later successful result
+# would establish robustness in this setup, rather than discovery of new customer
+# concepts or superiority to every raw representation.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -145,9 +174,8 @@ import numpy as np
 import pyarrow as pa
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P081"
 BUDGET = 600
 BATCH_SIZE = 64
 TRAIN_ROWS = 4096
@@ -426,6 +454,7 @@ def trial(seed: int, steps: int | None, accelerator: str) -> dict:
     return {"seed": seed, "arms": arms}
 
 
+@experiment("P081", seed=8101)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     trials = [trial(seed + offset, steps, accelerator) for offset in range(3)]
     summary = {}
@@ -488,7 +517,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=8101)
+    report(run)
 
 # %% [markdown]
 # </details>

@@ -3,7 +3,6 @@
 # title: Can Cluster reconstruction hide missing coverage too?
 # categories:
 # - Vocabulary
-# evidence-id: P065
 # description: Reconstruct a Cluster answer from a categorical cue while reducing the share of test identities seen
 #   in training.
 # execute:
@@ -30,6 +29,11 @@
 # evidence-group: Vocabulary
 # ---
 #
+# This is the Cluster counterpart of the categorical reconstruction coverage test. A familiar
+# categorical cue identifies which answer identity should be reconstructed. The experiment varies
+# whether the requested answer name is available to the output field, separating success at a learned
+# cue-to-answer association from the ability to name every requested identity.
+#
 # ## Example
 #
 # ```yaml
@@ -38,7 +42,8 @@
 # hide: true
 # ```
 #
-# code is hidden wherever hide is true. Unfamiliar answer identities are counted in coverage separately.
+# code is hidden wherever hide is true. Unfamiliar answer identities are counted in coverage
+# separately.
 #
 # ```{typst}
 # //| label: fig-evidence-cluster-pretraining-coverage
@@ -50,15 +55,33 @@
 # )))
 # ```
 #
+# In the illustrative row, `cue-2` is the visible clue associated with `class-2`. Setting `hide` to
+# true removes the code answer at that row; the hide flag selects the objective rather than becoming a
+# model input. Changing the hidden answer to `novel-class-2` leaves the clue unchanged but requests a
+# name absent from the trained output vocabulary.
+#
 # ## Comparison
 #
 # Measure known-answer accuracy and all-answer accuracy separately from vocabulary coverage.
+#
+# The evaluation copies share their observations and selected positions. Only the number of hidden
+# answer names retained from training changes, down to zero. The 102-known case covers roughly one
+# tenth of 1,024 selected answers. Reordering that same case checks that batches containing only
+# unavailable answers do not change the overall denominator or numerical aggregation.
 #
 # ## Result
 #
 # {{< evidence P065 status >}}
 #
-# Coverage and recovery are different questions. The latest run also misses the required known-answer accuracy, so its reconstruction result remains incomplete.
+# Coverage and recovery are different questions. A high known-answer score applies only to answer
+# identities the output can represent; the selected criteria above show whether this run also meets
+# the separate accuracy requirement.
+#
+# Known-answer accuracy asks whether representable identities were reconstructed correctly. Coverage
+# asks how many requested identities were representable, and all-answer accuracy keeps unsupported
+# requests in the denominator. At zero coverage, conditional quality is undefined. Internal grouping
+# of known identities does not, by itself, supply the missing spelling of an unfamiliar answer. Read
+# the selected criteria alongside each of these distinct measurements.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -93,9 +116,8 @@ from functools import partial
 import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P065"
 BUDGET = 800
 LABELS = tuple(f"class-{index}" for index in range(8))
 
@@ -125,6 +147,7 @@ def evaluate(trainer: lit.Trainer, model: rf.Model, rows: list[dict]) -> dict[st
     return {name.removeprefix(prefix): float(value) for name, value in result.items() if name.startswith(prefix)}
 
 
+@experiment("P065", seed=7651)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -213,7 +236,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7651)
+    report(run)
 
 # %% [markdown]
 # </details>

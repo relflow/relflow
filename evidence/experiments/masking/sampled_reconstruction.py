@@ -3,7 +3,6 @@
 # title: Can hiding values teach a relationship in both directions?
 # categories:
 # - Masking
-# evidence-id: P051
 # description: Sometimes hide x or y during training, then ask the model to recover the missing value from the other.
 # execute:
 #   enabled: false
@@ -28,6 +27,11 @@
 #
 # ## Example
 #
+# The two numbers obey `y = 2x + 0.3`. In the illustration, visible `x: 0.4` identifies hidden `y` as `1.1`;
+# reversing the selection would ask for `x = (1.1 - 0.3) / 2 = 0.4`. The `hide_x` and `hide_y` flags choose
+# which stored values are unavailable at prediction time. During training, each field is also randomly
+# selected for reconstruction at a 35% rate, exposing the model to different information patterns.
+#
 # ```yaml
 # x: 0.4
 # y: 1.1
@@ -49,9 +53,21 @@
 #
 # ## Comparison
 #
+# Evaluation requests each direction separately on fresh records. Shuffling the other, visible field breaks
+# the relationship while keeping the original target fixed. Hiding both fields removes the evidence
+# entirely. Replacing a hidden target with a large, unrelated number checks that its stored value cannot
+# leak into its prediction. Separate mask audits verify partial sampling, repeatability within an epoch, and
+# changes across epochs without changing the fitted model with held-out data.
+#
 # Score both directions on new records. Shuffle the visible value, or hide both, to remove the needed information.
 #
 # ## Result
+#
+# Each normalized error compares one direction with a constant guess from that target's training values. Low
+# intact error and high shuffled or both-hidden error support reconstruction from the other field, rather
+# than successful guessing without context. The two directions share this simple invertible relation and
+# bounded synthetic inputs. They do not demonstrate recovery from arbitrary missingness patterns, causal
+# inference, or reliable imputation when real variables contain noise or do not determine one another.
 #
 # {{< evidence P051 status >}}
 #
@@ -99,9 +115,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P051"
 BUDGET = 400
 
 
@@ -135,6 +150,7 @@ def error(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean((actual - predicted) ** 2)))
 
 
+@experiment("P051", seed=5101)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -207,7 +223,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=5101)
+    report(run)
 
 # %% [markdown]
 # </details>

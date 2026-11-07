@@ -1,8 +1,10 @@
 # relflow evidence protocol
 
 This repository owns the relflow package, website, and canonical controlled experiments.
-Each script's frontmatter declares its stable P identifier, title, group, and
-presentation options. CI discovers experiments directly from those headers.
+Each script declares its stable P identifier and default seed with
+`@experiment("P001", seed=123)` on its `run(seed, steps, accelerator)` function.
+Frontmatter owns the title, group, and presentation options. CI discovers
+declarations as syntax, without importing or executing experiment code.
 Measured runs and report provenance are separate JSON publication assets; they
 never rewrite the scripts. Website builds read static sources and result data
 without executing models.
@@ -31,10 +33,47 @@ A single-seed experiment is provisional; promote a mature core claim using
 three paired seeds and its declared held-out metrics and controls. Preserve any
 internal seed panels already implemented by an experiment.
 
+## Authoring scaffold
+
+`experiments/run.py --new <category>/<name>` creates a new annotated Python file
+from `templates/experiment.py.txt`. It allocates an ID above the current maximum
+without reusing retired gaps and writes a literal default seed of `0`. Optional
+title, group, ID, and seed arguments configure the declaration and presentation.
+Discovery remains static, and creation imports no experiments or model packages.
+Existing files, unsafe paths, and duplicate explicit IDs are rejected.
+
+The scaffold supplies the header, example/comparison/result sections, model-tree
+illustration, decorator, and reporting entrypoint. Its scientific body raises
+`NotImplementedError`; it must never return fabricated passing measurements or
+checks. Authors own the generator, independent splits, model, budgets, controls,
+evaluation, and numerical criteria. A scaffold is not a recorded experiment.
+Once created under `experiments/`, it joins the catalog and must be completed
+before authoring and full paired checks can pass.
+
 ## Execution
 
-Each script exposes `run(seed, steps, accelerator)` and calls the shared
-reporter under a main guard. Execution produces a new immutable JSON record,
+The required hosted catalog is the **core** lane under `experiments/<category>/`.
+It always includes every core declaration. Studies requiring additional model
+artifacts, optional solvers, or an unreleased datatype wheel live separately in
+`research/<category>/` and declare an `evidence-requires` list in frontmatter.
+Their stable IDs share the same namespace. Directory placement owns the lane;
+frontmatter cannot reclassify a required core experiment. Both lanes use the same
+standalone protocol, immutable records, and static documentation renderer.
+
+The local runner defaults to core. Select research explicitly with
+`--lane research`; `--lane all --list` lists both. Documentation lists both lanes
+and marks research pages, including their provisioning requirements under
+Reproduce. A missing research result remains Missing; excluding optional
+resources from hosted core execution never creates a passing result.
+
+Each script exposes a decorated `run(seed, steps, accelerator)` and calls
+`report(run)` under a main guard. Registration attaches immutable metadata and
+returns the original function; it never runs the experiment. There is no mutable
+process-wide catalog. Static discovery rejects duplicate IDs, multiple decorated
+entrypoints, nonliteral IDs or seeds, and unsupported function signatures.
+Historical undecorated suites retain their frontmatter and reporter-call reader
+for archived execution and publication validation.
+Execution produces a new immutable JSON record,
 including failures. It never edits sources or a selected publication. A `--steps`
 cap always identifies a smoke run and cannot establish learning capability.
 
@@ -42,6 +81,7 @@ Run these commands from the repository root with the intended wheel:
 
 ```sh
 uv run --project docs python evidence/experiments/run.py --list
+uv run --project docs python evidence/experiments/run.py --lane all --list
 uv run --project docs --with /path/to/matching-relflow.whl python evidence/experiments/run.py P001 --steps 2
 uv run --project docs --with /path/to/matching-relflow.whl python evidence/experiments/run.py P001
 uv run --project docs --with /path/to/matching-relflow.whl pytest -c docs/pyproject.toml evidence/tests/runtime
@@ -55,7 +95,7 @@ are explicit and excluded from the default static checks.
 ## Required merge gate
 
 The library workflow builds wheels from the exact PR merge candidate and base,
-exports the candidate's locked requirements, and calls the reusable lab
+exports the candidate's locked requirements, and calls the reusable hosted
 workflow at a reviewed full commit SHA. The trusted host executor is pinned independently of the experiment suite.
 The suite defaults to the candidate commit in this repository, with an explicit
 full SHA override available for manual validation. Host code reads it as data and
@@ -70,25 +110,55 @@ either side, changed check sets, missing or duplicate records, altered tasks,
 invalid provenance, cancellation, timeout, partial coverage, or a smoke budget
 must prevent a successful gate. Preserve the named numerical checks unchanged.
 
-The required job may authenticate a complete successful original report and
-reuse it after proving the current source, actual wheel payloads, comparison,
-and lab runtime equivalent. It retains all original records and measured
-revisions, with a separate receipt for the current request. An unchanged
-candidate may satisfy both requested roles through an explicit mapping to
-that original execution; this creates no new measurement or record. Selection
-updates must exactly match archived candidate measurements and provenance.
-Unchanged baseline tasks may reference original immutable executions retained
-inside the report. Every logical slot still requires a validated full-budget
-execution. Missing or invalid proofs require fresh tasks, and an explicit
-force-fresh request bypasses both forms of reuse.
+Historical single-host reports may contain authenticated reuse after proving
+source, actual wheel payloads, comparison, and execution runtime equivalent.
+Their original records and measured revisions remain unchanged, with a separate
+receipt for the request and explicit role mapping. Retained baseline references
+carry the original immutable execution. These historical proofs remain
+verifiable; they do not authorize hosted shards to skip fresh measurements.
+Every logical slot still requires a validated full-budget execution, and
+publication must exactly match the archived candidate results and provenance.
 
-Lab uses one disposable Docker container per task, bounded to two CPU cores,
-4 GiB of memory, and 512 PIDs, with eight workers by default. A shared lab queue serializes CI runs, while
-superseded attempts are cancelled per PR. Workers have no
-network, a read-only root, and no host home or Docker socket mount. Install
-runtime packages in the image, never on the host. Keep credentials outside
-workers. Tailscale uses short-lived OIDC bound to the exact workflow and calling
-repository. Fork execution fails closed. See [lab.md](lab.md).
+The hosted workflow assigns whole baseline/candidate experiment pairs to twelve
+GitHub-hosted CPU shards. Each shard runs at most two task containers at a time;
+each container retains its two-CPU ceiling, 4 GiB memory limit, 512 PIDs, and
+original experiment timeout. Baseline and candidate for a proof share the same
+actual runner and may execute concurrently. Schedule individual tasks longest
+first while retaining the two-container limit. Different shards may have
+different CPUs or kernels, so retain
+every shard's measured identity rather than describing the catalog as one host.
+The collector requires the exact planned union, unchanged task identities,
+matching within-pair execution policy, and a complete passing comparison.
+Duplicate, missing, unexpected, or altered shards fail closed.
+
+Scheduling uses the per-role costs in `timings.json`, with a reference to their
+verified source report. Freeze their file digest and resolved costs in the plan.
+Balance pairs by summed role cost; missing timings must have a positive fallback.
+These forecasts affect placement and ordering only. They cannot change the task
+catalog, seeds, training steps, checks, or measurement provenance.
+
+Workers have no network, a read-only root, and no host home or Docker socket
+mount. Install runtime packages in the image, never on the host. Keep credentials
+outside workers. Executor and helper code remain separately pinned; selected
+suite code executes only inside task containers. Fork execution fails closed.
+Superseded attempts are cancelled per PR. See [hosted.md](hosted.md) for the
+GitHub-hosted execution workflow.
+
+Hosted measurements execute freshly for both roles. Dependency-image caches
+accelerate setup without substituting for any experiment. Preserve historical
+authenticated reports and their original runtime identities; a historical
+execution must not be relabeled as a hosted measurement. Any future hosted
+result reuse still requires the complete equivalence and authentication proof
+above.
+
+Infrastructure setup and a container launch that produced no worker record may
+be retried within a fixed bound, retaining every launch receipt and log. A
+learning result, failed check, worker exception, OOM, cancellation, or learning
+timeout is terminal for that execution. Preserve workflow attempts separately;
+rerunning failed jobs cannot silently combine different plans or rewrite an
+earlier measurement's attempt identity. This hosted profile rejects a shard or
+collector whose current GitHub attempt differs from the prepared input request.
+Rerun all jobs so preparation, inputs, shards, and collection share one attempt.
 
 ## Records and publication
 
@@ -125,16 +195,42 @@ output-reader update does not establish a fresh learning measurement.
 ## Documentation
 
 Author prose in `# %% [markdown]` comment cells and Python in `# %%` cells.
-The header declares `evidence-id`, `code-fold: true`, and
+The header declares `code-fold: true` and
 `execute: {enabled: false, eval: false}`. Use the Markdown engine, with no Jupyter
-or model dependency in the documentation build.
+or model dependency in the documentation build. Static discovery supplies
+`evidence-id` from the decorator when generating documentation. An explicitly
+supplied frontmatter ID must agree with the decorator.
 
 Each page asks one question and shows an Example, Comparison, and Result, with
-one YAML observation and a schema-faithful shared Typst tree. Keep training
-settings, raw checks, measured provenance, and reproduction commands inside the
-closed details foldout. Select one to three numerical readouts using explicit
-metric paths and formats. Explain the measured limit; AUC is not accuracy and
-learned arithmetic is not exact accounting.
+one YAML observation and a schema-faithful shared Typst tree. Generated pages
+show predeclared behavioral criteria before the Example, with recorded met/unmet
+statuses. The renderer injects the checks shortcode only into the generated
+page; canonical scripts keep their authored prose and unchanged scientific code.
+Select one to three numerical readouts using explicit metric paths and formats.
+Explain the measured limit; AUC is not accuracy and learned arithmetic is not
+exact accounting.
+
+Write the overview for a reader who has not seen the generator. Explain what
+each visible input and hidden target means, then walk through the example's
+answer using the actual rule or label definition. Use concrete values within
+the declared ranges and preserve the schema's real field names. Name what each
+control changes and why that change should affect the answer or measurement.
+Explain metric direction and reference values before interpreting the selected
+result. Keep illustrative examples distinct from recorded predictions, and
+tie claims to the displayed record rather than an unlinked historical campaign.
+State the evaluation boundary, such as new observations of familiar identities
+versus identities absent from training. Keep detailed settings folded while
+leaving the question, worked example, comparison, and interpretation readable.
+
+Present nested metric dictionaries and arrays as labeled disclosure groups and
+scalar tables, with metric paths preserved in captions. Keep the complete raw
+record available in its own disclosure, and keep training settings, measured
+provenance, reproduction commands, and source code folded. Readable presentation
+must retain all recorded values and named checks.
+
+Use plain readouts and structured tables for selected measurements, keeping
+missing values explicit. Presentation changes never supply new measurements,
+alter scientific budgets or checks, or establish fresh learning evidence.
 
 `evidence/render.py` generates ignored `docs/evidence/` pages from canonical
 scripts and the selected publication JSON. The checked-in `results.json` is an

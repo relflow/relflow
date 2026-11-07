@@ -3,7 +3,6 @@
 # title: Does the grouping of values matter?
 # categories:
 # - Hierarchical statistics
-# evidence-id: P040
 # description: Predict the largest session total when the same six amounts are divided into different sessions.
 # execute:
 #   enabled: false
@@ -23,6 +22,11 @@
 # ---
 #
 # ## Example
+#
+# The hidden answer is the largest session total, not the total of all transactions. In the illustration,
+# the three sessions contain one, four, and one copies of `0.5`, so their totals are `0.5`, `2.0`, and
+# `0.5`; the answer is `2.0`. Regrouping those same six values into three two-item sessions would make every
+# session total `1.0`. The flat values and overall total would still be identical.
 #
 # ```yaml
 # sessions:
@@ -57,9 +61,21 @@
 #
 # ## Comparison
 #
+# Each generated pair repeats a common amount with both arrangements, so the only useful difference is the
+# grouping. A predictor that has discarded session membership must make the same prediction for both
+# records. The best squared-error compromise for the illustrated pair would be `1.5`, halfway between the
+# two correct answers `1.0` and `2.0`. This flattened-input oracle is a stronger reference than a single
+# guess for the whole dataset.
+#
 # Pair records with identical flat values but different grouping. Compare with the best prediction available after discarding that grouping.
 #
 # ## Result
+#
+# The errors here are ordinary RMSE in target units, rather than normalized ratios. Lower model error than
+# the flattened oracle indicates that useful hierarchy information survived. A separate check asks whether
+# predictions recover the difference between each pair's answers, which helps distinguish the two
+# arrangements from a compromise prediction. All six amounts are equal within a record, and only the `(2, 2,
+# 2)` and `(1, 4, 1)` layouts are tested.
 #
 # {{< evidence P040 status >}}
 #
@@ -115,9 +131,7 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P040"
+from reporting import experiment, report
 
 
 def records(*, pairs: int, seed: int) -> Iterator[dict]:
@@ -144,6 +158,7 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
+@experiment("P040", seed=2601)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     data_seed = (seed - 2601) % (2**32)
@@ -210,7 +225,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=2601)
+    report(run)
 
 # %% [markdown]
 # </details>

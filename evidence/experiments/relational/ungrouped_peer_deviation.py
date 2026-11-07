@@ -3,7 +3,6 @@
 # title: Can it infer an average and compare each item?
 # categories:
 # - Peer-relative inference
-# evidence-id: P035
 # description: Predict each item’s difference from the list average without supplying that average.
 # execute:
 #   enabled: false
@@ -23,6 +22,11 @@
 # ---
 #
 # ## Example
+#
+# Each item supplies only its value. The model must use the whole six-item collection to recover a reference
+# and predict `value - collection mean` at every item. The illustrative values sum to `15`, giving mean
+# `2.5`; the first and last deviations are therefore `-1.0` and `1.0`. The hidden deviations sum to zero. A
+# value by itself is insufficient, because the generator moves the common mean between records.
 #
 # ```yaml
 # items:
@@ -50,9 +54,21 @@
 #
 # ## Comparison
 #
+# Adding `2` to every illustrated value would move the list mean from `2.5` to `4.5` while leaving all
+# deviations unchanged. The translation control applies independently drawn common offsets and tests that
+# property. Reordering whole records should instead reorder the predictions with them. These interventions
+# distinguish relative, collection-dependent answers from a rule based only on absolute value or a memorized
+# output position.
+#
 # Shift the whole list equally: differences should stay fixed. Reorder items: predictions should move with their items.
 #
 # ## Result
+#
+# The original-list and shifted-list readouts use the same training-target constant baseline. Lower
+# normalized error supports useful relative predictions; low permutation drift checks that the result
+# remains attached to its item. The model combines a shared collection summary with local target context.
+# The generator's six-item width and centered synthetic distribution constrain the conclusion: this is not a
+# demonstration of arbitrary-length mean calculation or exact subtraction.
 #
 # {{< evidence P035 status >}}
 #
@@ -104,9 +120,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P035"
 ITEMS = 6
 
 
@@ -167,6 +182,7 @@ def permute_items(rows: list[dict], seed: int) -> tuple[list[dict], np.ndarray]:
     return result, np.asarray(flattened)
 
 
+@experiment("P035", seed=3710)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -241,7 +257,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3710)
+    report(run)
 
 # %% [markdown]
 # </details>

@@ -3,7 +3,6 @@
 # title: What happens beyond the learned percentile range?
 # categories:
 # - Quantile
-# evidence-id: P068
 # description: Train a Quantile relationship within a bounded amount range, then supply much smaller and larger amounts.
 # execute:
 #   enabled: false
@@ -28,6 +27,11 @@
 # evidence-group: Representation
 # ---
 #
+# This experiment asks what a percentile representation cannot distinguish. Training amounts lie
+# between 10 and 30, with cost increasing linearly. Evaluation then moves populations below or above
+# that range. The question is whether valid numeric input can still lose the information needed for
+# extrapolation after percentile conversion.
+#
 # ## Example
 #
 # ```yaml
@@ -47,15 +51,33 @@
 # )))
 # ```
 #
+# The illustrated amount of 20 has average cost `100 + 4 × 20 = 180`; 180.5 is a possible noisy
+# observation. An illustrative amount of 50 instead has average cost 300. Training costs occupy
+# approximately 140 to 220. A decoder restricted to its learned target support cannot reach 300 merely
+# because the original relationship is linear.
+#
 # ## Comparison
 #
-# Compare in-range error with each outer range. Check whether distinct amounts in a tail receive the same prediction.
+# Compare in-range error with each outer range. Check whether distinct amounts in a tail receive the
+# same prediction.
+#
+# The shifted tests reuse the same latent draws as the in-range evaluation and add a fixed amount
+# shift, so the underlying rule remains unchanged. Within each outer range, inputs collapse to the
+# same endpoint percentile. The experiment measures prediction spread to check this saturation.
+# Shuffling the in-range inputs separately confirms that ordinary prediction depended on the amount.
 #
 # ## Result
 #
 # {{< evidence P068 status >}}
 #
-# Outside the learned support, percentile inputs and outputs hit their boundaries. Tail predictions become constant; accepting a number does not guarantee extrapolation.
+# Outside the learned support, percentile inputs and outputs hit their boundaries. Tail predictions
+# become constant; accepting a number does not guarantee extrapolation.
+#
+# The clipping lower bound is calculated by an evaluator allowed to see each true target, then
+# restricted to the learned output interval. It describes an unavoidable error floor, not a trained
+# prediction. Here a met limitation check can accompany large tail error: it confirms saturation and
+# finite bounded outputs, rather than successful extrapolation or an automatic warning about
+# unfamiliar input.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -112,9 +134,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P068"
 BUDGET = 400
 BATCH_SIZE = 128
 TRAIN_ROWS = 4096
@@ -143,6 +164,7 @@ def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["cost"]["content"] for row in predictions], dtype=np.float64)
 
 
+@experiment("P068", seed=6801)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
@@ -250,7 +272,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=6801)
+    report(run)
 
 # %% [markdown]
 # </details>

@@ -4,6 +4,7 @@ import copy
 import io
 import json
 import shutil
+import subprocess
 import tarfile
 import zipfile
 from pathlib import Path
@@ -19,6 +20,17 @@ VERSION = "0.4.2"
 WHEEL = f"relflow-{VERSION}-py3-none-any.whl"
 SDIST = f"relflow-{VERSION}.tar.gz"
 REPOSITORY = "relflow/relflow"
+
+
+def test_distribution_artifacts_are_immutable_per_attempt():
+    assert release.artifact_name(1) == "python-package-distributions-attempt-1"
+    assert release.artifact_name(2) == "python-package-distributions-attempt-2"
+
+
+@pytest.mark.parametrize("attempt", [0, -1, True, "2", None])
+def test_distribution_artifact_name_requires_a_real_positive_attempt(attempt):
+    with pytest.raises(ValueError, match="positive CI attempt"):
+        release.artifact_name(attempt)
 
 
 def distributions(root, name="package", source=SOURCE, content=b"original", run_id=71):
@@ -51,6 +63,7 @@ def host(tmp_path, monkeypatch):
         "writes": [],
         "checked": [],
         "original": directory,
+        "artifact_mode": "attempt",
     }
 
     def release_state(repository, tag):
@@ -73,6 +86,14 @@ def host(tmp_path, monkeypatch):
             state["release"]["draft"] = False
             state["tag"] = state["release"]["target_commitish"]
         elif operation == ["run", "download"]:
+            receipt = release.verify(state["original"])
+            expected = (
+                release.ARTIFACT
+                if state["artifact_mode"] == "legacy"
+                else release.artifact_name(receipt["ci_run_attempt"])
+            )
+            if command[command.index("--name") + 1] != expected:
+                raise subprocess.CalledProcessError(1, command)
             destination = Path(command[command.index("--dir") + 1])
             for path in state["original"].iterdir():
                 shutil.copyfile(path, destination / path.name)
@@ -177,6 +198,8 @@ def test_interrupted_draft_at_older_main_recovers_only_its_original_ci_artifact(
     host, tmp_path, monkeypatch, partial, attempt
 ):
     host["release"] = {"draft": True, "target_commitish": SOURCE}
+    if attempt > 1:
+        host["artifact_mode"] = "legacy"
     if partial:
         host["files"][WHEEL] = (host["original"] / WHEEL).read_bytes()
     later = distributions(tmp_path, "later", LATER, b"later main", run_id=99)
@@ -226,7 +249,14 @@ def test_same_version_on_later_main_preserves_original_source_and_files(host, tm
     assert list((tmp_path / "dist").iterdir()) == []
 
 
-def test_later_main_repairs_only_from_original_ci_artifact(host, tmp_path):
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("attempt", [1, 3])
+def test_later_main_repairs_only_from_original_ci_artifact(host, tmp_path, legacy, attempt):
+    receipt_path = host["original"] / "build.json"
+    receipt = json.loads(receipt_path.read_text())
+    receipt["ci_run_attempt"] = attempt
+    receipt_path.write_text(json.dumps(receipt))
+    host["artifact_mode"] = "legacy" if legacy else "attempt"
     published(host)
     del host["files"][WHEEL]
     del host["pypi"][WHEEL]
@@ -234,7 +264,14 @@ def test_later_main_repairs_only_from_original_ci_artifact(host, tmp_path):
     result = host["publish"](later, LATER)
     assert result["source_sha"] == SOURCE
     assert host["checked"][0]["ci_run_id"] == 71
-    assert any(command[1:3] == ["run", "download"] for command in host["writes"])
+    assert all(checked["ci_run_attempt"] == attempt for checked in host["checked"])
+    downloads = [command for command in host["writes"] if command[1:3] == ["run", "download"]]
+    assert [command[command.index("--name") + 1] for command in downloads] == [
+        release.artifact_name(attempt),
+        *([release.ARTIFACT] if legacy else []),
+    ]
+    assert all(command[3] == "71" for command in downloads)
+    assert release.verify(tmp_path / "retained") == receipt
     assert (tmp_path / "dist" / WHEEL).read_bytes() == (host["original"] / WHEEL).read_bytes()
 
 

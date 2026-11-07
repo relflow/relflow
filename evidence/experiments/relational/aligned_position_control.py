@@ -3,7 +3,6 @@
 # title: Is it copying by position instead of by ID?
 # categories:
 # - Associative recall
-# evidence-id: P024
 # description: Place source values and questions in matching positions, then ask the model to copy the values.
 # execute:
 #   enabled: false
@@ -22,6 +21,10 @@
 # evidence-group: Relational
 # ---
 #
+# This is a deliberately misleading lookup setup: the right value can be copied without using an ID
+# at all. Two visible source entries are followed by two query entries in the same relative order.
+# Only query values are masked and scored, so the source values remain available as evidence.
+#
 # ## Example
 #
 # ```yaml
@@ -33,6 +36,11 @@
 # ```
 #
 # Source values are visible. Query values are the hidden answers, selected by is_query.
+#
+# In the illustration, the first query asks for K1 and should return 0.4; the second asks for K2 and
+# should return −0.8. But the same answers can be obtained by copying the first source into the
+# first query and the second source into the second query. Correct predictions alone cannot tell
+# those strategies apart.
 #
 # ```{typst}
 # //| label: fig-evidence-aligned-position-control
@@ -50,13 +58,27 @@
 #
 # ## Comparison
 #
-# Change question IDs while leaving their positions and answers fixed. If accuracy survives, matching IDs were unnecessary.
+# Change question IDs while leaving their positions and answers fixed. If accuracy survives,
+# matching IDs were unnecessary.
+#
+# The damaged version exchanges the query IDs while retaining source order, query positions, and the
+# original answers. Genuine lookup using the changed IDs would follow different source values and
+# therefore worsen the old-target score. Positional copying can keep its low error. This control
+# intentionally regards accurate predictions after changing IDs as evidence that identity was
+# unnecessary for the task.
 #
 # ## Result
 #
 # {{< evidence P024 status >}}
 #
-# Accuracy survives the changed IDs. Success on aligned records can therefore hide a positional shortcut.
+# Accuracy survives the changed IDs. Success on aligned records can therefore hide a positional
+# shortcut.
+#
+#
+# These errors are normalized against always predicting zero for query values. Small errors on both
+# versions, with little gap, demonstrate that the apparent lookup task admits a shortcut. A passing
+# result here is not a positive claim about associative recall; the independently shuffled lookup
+# experiment removes this fixed source-to-query position relationship.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -102,9 +124,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P024"
 PAIR_COUNT = 2
 
 
@@ -139,6 +160,7 @@ def normalized_rmse(model: rf.Model, records: list[dict]) -> float:
     return float(np.sqrt(np.mean(np.square(np.asarray(predicted) - actual)) / np.mean(np.square(actual))))
 
 
+@experiment("P024", seed=17)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -197,7 +219,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=17)
+    report(run)
 
 # %% [markdown]
 # </details>

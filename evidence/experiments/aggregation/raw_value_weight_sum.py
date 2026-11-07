@@ -3,7 +3,6 @@
 # title: Does each value keep its own weight?
 # categories:
 # - Weighted aggregation
-# evidence-id: P014
 # description: Predict a weighted total from values and weights stored together on each item.
 # execute:
 #   enabled: false
@@ -24,6 +23,10 @@
 # evidence-group: Aggregation
 # ---
 #
+# A weight changes how much its own value contributes to a total. The model receives both fields on
+# every item, with no precomputed product. It must preserve that pairing while combining all six
+# items, rather than summarize values and weights independently.
+#
 # ## Example
 #
 # ```yaml
@@ -38,6 +41,11 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# The illustrated products are 0.4, −0.4, 0.28, 0.1, −0.2, and 0.27; adding them gives 0.45. Merely
+# adding the values, or multiplying their sum by the average weight, would generally give a
+# different result. A negative value still contributes negatively because all generated weights are
+# positive.
 #
 # ```{typst}
 # //| label: fig-evidence-raw-value-weight-sum
@@ -54,13 +62,27 @@
 #
 # ## Comparison
 #
-# Swap weights between items while retaining the original total. Also reorder whole items and scale all weights together.
+# Swap weights between items while retaining the original total. Also reorder whole items and scale
+# all weights together.
+#
+# Swapping weights between items preserves every individual value and weight but changes which ones
+# multiply together. Scoring against the original total tests whether the model used that
+# association. Two other interventions preserve known arithmetic relationships: reordering complete
+# pairs leaves the answer unchanged, while multiplying every weight by 0.75 must multiply the total
+# by 0.75.
 #
 # ## Result
 #
 # {{< evidence P014 status >}}
 #
-# The model uses the pairing: swapping weights worsens accuracy. This is approximate learned arithmetic on fixed-length lists.
+# The model uses the pairing: swapping weights worsens accuracy. This is approximate learned
+# arithmetic on fixed-length lists.
+#
+#
+# The intact and swapped-weight percentages use the same original-target baseline. A rise after
+# swapping supports sensitivity to pairing, and separate drift checks assess order and scaling
+# behavior. The learned result is approximate and covers six-item lists with positive weights in the
+# sampled range; zero or negative weights and arbitrary lengths are separate questions.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -113,9 +135,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P014"
 ITEMS = 6
 
 
@@ -196,6 +217,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline_rmse, "nrmse": measured / baseline_rmse}
 
 
+@experiment("P014", seed=3304)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -269,7 +291,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3304)
+    report(run)
 
 # %% [markdown]
 # </details>

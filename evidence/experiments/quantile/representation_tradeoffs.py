@@ -3,7 +3,6 @@
 # title: Should a number be represented by size or percentile?
 # categories:
 # - Quantile
-# evidence-id: P077
 # description: Compare Number and Quantile on rank and amount tasks, with clean training and rare corrupt measurements.
 # execute:
 #   enabled: false
@@ -26,6 +25,12 @@
 # evidence-group: Representation
 # ---
 #
+# A number tells us both an amount and a position in a distribution. For example,
+# 100 is ten times 10 in original units, but their percentile positions depend on
+# what values were seen in training. This experiment separates questions about
+# ordering from questions about amount, then asks how rare bad measurements affect
+# each representation.
+#
 # ## Example
 #
 # ```yaml
@@ -35,6 +40,15 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# The illustrated x = 1 is in the lower half of this generator's population, so
+# its rank answer is lower. Its amount answer is roughly 0.2 times x, plus small
+# noise; 0.24 is an illustrative noisy observation. Separate models predict the
+# rank label and the numeric amount. Neither answer is visible as an input.
+#
+# For a concrete corruption, imagine recording that same x as 100 while keeping
+# its original answer. This creates a misleading input measurement. The test does
+# this to 2% of training inputs; its validation and test observations stay clean.
 #
 # ```{typst}
 # //| label: fig-evidence-numeric-tradeoffs
@@ -48,13 +62,30 @@
 #
 # ## Comparison
 #
+# The input comparison gives Number and Quantile the same underlying observations.
+# It measures both ordinary rows and the largest 5% separately, since a good
+# average score can conceal large mistakes at the extremes. Shuffling the test
+# inputs while retaining their answers removes the useful input-answer relationship.
+#
+# A second comparison changes the output representation for a noisy positive
+# quantity. Squared error in original units puts a large penalty on large amount
+# misses; squared error in percentile units measures mistakes in distribution
+# position. Those objectives can prefer different answers even with unlimited
+# training. Each model is therefore compared with the optimum for its own
+# objective, as well as scored in common original units.
+#
+#
 # Measure overall and tail errors separately. Also compare noisy output targets learned in original units versus percentile units.
 #
 # ## Result
 #
 # {{< evidence P077 status >}}
 #
-# Neither representation wins every comparison. Percentiles can reduce some contamination effects while worsening tail error; changing output units can also change which answer the loss prefers.
+# Read rank accuracy and amount error as different questions. Contamination and
+# tail comparisons are diagnostics; the checks do not require Quantile to win.
+# The noisy-output measurements also separate learning quality from the quantity
+# the objective asks the model to estimate. These generated distributions support
+# a controlled comparison, rather than a universal datatype recommendation.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -119,9 +150,8 @@ import numpy as np
 import pyarrow as pa
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P077"
 BUDGET = 400
 TRAIN_ROWS = 8192
 TEST_ROWS = 4096
@@ -236,6 +266,7 @@ def optima() -> dict[str, np.ndarray]:
     }
 
 
+@experiment("P077", seed=7701)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     stream = seed * 100
     test = list(records(rows=TEST_ROWS, seed=stream + 3))
@@ -350,7 +381,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7701)
+    report(run)
 
 # %% [markdown]
 # </details>

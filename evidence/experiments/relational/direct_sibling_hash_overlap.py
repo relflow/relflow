@@ -3,7 +3,6 @@
 # title: Can it find a shared ID across two lists?
 # categories:
 # - Collection overlap
-# evidence-id: P028
 # description: Predict whether two lists have any ID in common, using IDs absent from training.
 # execute:
 #   enabled: false
@@ -23,6 +22,12 @@
 # ---
 #
 # ## Example
+#
+# The input is two separate collections of unfamiliar identifiers. The hidden Boolean asks whether any
+# identifier appears on both sides, regardless of its position. In this illustrative record, `owl` occurs in
+# each list, so `has_overlap` is true; `fox`, `lynx`, and `yak` do not affect that answer. Replacing the
+# right-hand `owl` with a fresh identifier would make the correct answer false. Generated lists contain two
+# to five distinct members per side.
 #
 # ```yaml
 # left:
@@ -54,9 +59,20 @@
 #
 # ## Comparison
 #
+# Half the generated records have exactly one shared identifier and half have none. Train and test use
+# separate names, preventing a familiar ID from standing in for a positive label. Renaming all IDs
+# consistently and reordering both lists preserves the question's answer. Removing shared members destroys
+# the relevant evidence while the scoring labels remain fixed; this intervention checks whether predictions
+# actually respond to equality across the two collections.
+#
 # Rename and reorder IDs without changing overlap, then remove the shared member. A useful predictor should notice the removal.
 #
 # ## Result
+#
+# Read AUC as a ranking score: 0.5 is chance and 1 would rank every positive example above every negative
+# one. The named checks deliberately describe a calibrated limitation, including near-chance AUC and a small
+# response to removing matches. A passing status here means those expected behaviors were reproduced, not
+# that the model successfully learned overlap. The simpler scalar-ID experiment helps locate the difficulty.
 #
 # {{< evidence P028 status >}}
 #
@@ -113,9 +129,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P028"
 MIN_LENGTH = 2
 MAX_LENGTH = 5
 
@@ -207,6 +222,7 @@ def probabilities(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["predictions"]["has_overlap"]["content"]["probability"] for row in output])
 
 
+@experiment("P028", seed=3711)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -295,7 +311,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3711)
+    report(run)
 
 # %% [markdown]
 # </details>

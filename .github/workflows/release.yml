@@ -30,6 +30,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       ci_run_id: ${{ steps.ci.outputs.run_id }}
       source_sha: ${{ steps.ci.outputs.source_sha }}
+      distribution_artifact: ${{ steps.ci.outputs.distribution_artifact }}
     steps:
       - name: Identify successful CI for the exact current main commit
         id: ci
@@ -58,6 +59,10 @@ jobs:
             }
             core.setOutput('run_id', String(run.id));
             core.setOutput('source_sha', run.head_sha);
+            if (!Number.isInteger(run.run_attempt) || run.run_attempt < 1) {
+              throw new Error('Release requires the exact successful CI attempt.');
+            }
+            core.setOutput('distribution_artifact', `python-package-distributions-attempt-${run.run_attempt}`);
             core.setOutput('current', 'true');
       - uses: actions/checkout@v4
         if: steps.ci.outputs.current == 'true'
@@ -113,7 +118,7 @@ jobs:
           python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
-          name: python-package-distributions
+          name: ${{ needs.detect_version.outputs.distribution_artifact }}
           path: package/
           github-token: ${{ github.token }}
           run-id: ${{ needs.detect_version.outputs.ci_run_id }}

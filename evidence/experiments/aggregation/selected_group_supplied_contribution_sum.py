@@ -3,7 +3,6 @@
 # title: Can it total prepared contributions for one group?
 # categories:
 # - Grouped weighted aggregation
-# evidence-id: P011
 # description: Supply already calculated contributions and ask for the total belonging to one group.
 # execute:
 #   enabled: false
@@ -24,6 +23,10 @@
 # evidence-group: Aggregation
 # ---
 #
+# The model is asked to add contributions for one named group from a mixed list. A contribution is
+# already the product of a value and its weight. Providing that product removes multiplication from
+# the task while retaining group selection and summation.
+#
 # ## Example
 #
 # ```yaml
@@ -39,6 +42,10 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# The illustrated request selects A, so only 0.6 and −0.1 contribute: the answer is 0.5. With the
+# same list and a B request, the answer would instead be 0.4 + 0.3 = 0.7. The request therefore
+# changes what must be selected without changing the underlying list.
 #
 # ```{typst}
 # //| label: fig-evidence-selected-group-supplied-contribution-sum
@@ -56,13 +63,28 @@
 #
 # ## Comparison
 #
-# Reuse a list with different group requests, then shuffle item group labels while keeping the original answers.
+# Reuse a list with different group requests, then shuffle item group labels while keeping the
+# original answers.
+#
+# Every bag is paired with all three requests within its split; different splits use independent
+# bags. The damaged-input comparison rotates group labels A to B, B to C, and C to A, keeping both
+# the numeric contributions and label counts. It retains the old target to test whether the model
+# follows membership. A separate whole-item permutation preserves membership and should leave
+# predictions stable.
 #
 # ## Result
 #
 # {{< evidence P011 status >}}
 #
-# The model uses group membership to select contributions. Because the products are supplied, this does not test learned multiplication.
+# The model uses group membership to select contributions. Because the products are supplied, this
+# does not test learned multiplication.
+#
+#
+# The error percentages compare both versions with the same constant training-mean guess. Low intact
+# error plus worse error after rotating labels supports request-based selection; worse corrupted
+# error alone would not establish useful prediction. This experiment cannot establish learned
+# value-times-weight multiplication, because that operation has already been performed by the
+# generator.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -115,9 +137,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P011"
 GROUPS = ("A", "B", "C")
 ITEMS_PER_GROUP = 2
 ITEMS = len(GROUPS) * ITEMS_PER_GROUP
@@ -189,6 +210,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline_rmse, "nrmse": measured / baseline_rmse}
 
 
+@experiment("P011", seed=3600)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -262,7 +284,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3600)
+    report(run)
 
 # %% [markdown]
 # </details>

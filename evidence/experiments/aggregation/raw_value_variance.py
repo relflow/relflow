@@ -3,7 +3,6 @@
 # title: Can it tell how spread out a list is?
 # categories:
 # - Distribution statistics
-# evidence-id: P007
 # description: Predict variance, a measure of how far the values lie from their average.
 # execute:
 #   enabled: false
@@ -18,6 +17,10 @@
 #   format: error
 # evidence-group: Aggregation
 # ---
+#
+# The model receives eight raw values and predicts their variance: the average squared distance from
+# the list's own mean. No mean or squared-distance feature is supplied. The task is to distinguish a
+# tightly packed list from a widely spread one, even when their centers coincide.
 #
 # ## Example
 #
@@ -36,6 +39,10 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
+# The illustrated values average to 0.3. Each is 0.2 away from that center, and squaring 0.2 gives
+# 0.04, so averaging the eight squared distances still gives 0.04. The sign of each deviation
+# disappears when it is squared; positive and negative departures cannot cancel.
+#
 # ```{typst}
 # //| label: fig-evidence-raw-value-variance
 # //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
@@ -52,11 +59,23 @@
 #
 # Include lists with the same average but different spreads. Their answers should differ.
 #
+# Ordinary test records vary their centers and spreads independently. A separate pair of probes has
+# the same center and shape but different scale, so a prediction based only on the average would
+# give nearly identical answers. The correct probe variances are 0.04 and 1.21, and the high-spread
+# prediction must be substantially larger.
+#
 # ## Result
 #
 # {{< evidence P007 status >}}
 #
-# The model learns more than the average alone. These results cover the tested list length and do not establish exact variance calculation.
+# The model learns more than the average alone. These results cover the tested list length and do
+# not establish exact variance calculation.
+#
+#
+# Prediction error is normalized against guessing the training-set mean variance, not against the
+# mean of the input values. The matched-mean check adds evidence that spread matters. This is the
+# population definition, dividing by eight; it does not test a sample estimator that divides by
+# seven, nor variable-length lists or extreme outliers.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -107,9 +126,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P007"
 ITEMS = 8
 
 
@@ -145,6 +163,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
+@experiment("P007", seed=3504)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -200,7 +219,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3504)
+    report(run)
 
 # %% [markdown]
 # </details>

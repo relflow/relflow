@@ -3,7 +3,6 @@
 # title: Can it average prepared contributions to covariance?
 # categories:
 # - Distribution statistics
-# evidence-id: P008
 # description: Supply the centered products used to calculate covariance, then ask for their average.
 # execute:
 #   enabled: false
@@ -18,6 +17,10 @@
 #   format: error
 # evidence-group: Aggregation
 # ---
+#
+# This diagnostic removes two steps from covariance calculation before data reaches the model. Each
+# cross_deviation is already a centered x value multiplied by its centered y partner. The model only
+# has to turn the eight prepared contributions into their average.
 #
 # ## Example
 #
@@ -36,6 +39,10 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
+# The illustration contains four contributions of 1.4 and four of 0.2. Their total is 6.4; dividing
+# by eight gives the hidden covariance, 0.8. Positive and negative contributions are possible in the
+# generator, so the learned average must retain their signs rather than average absolute magnitudes.
+#
 # ```{typst}
 # //| label: fig-evidence-supplied-cross-deviations
 # //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
@@ -52,11 +59,24 @@
 #
 # Compare the prediction with the correct average on new records.
 #
+# Train and test contain independently generated records with the same construction. Unlike the
+# raw-pair experiment, the inputs no longer require discovering which x and y belong together or
+# calculating their centers. The simpler representation helps localize a failure: trouble here would
+# concern interpreting and reducing prepared contributions, while success alone says nothing about
+# learning the omitted preparation steps.
+#
 # ## Result
 #
 # {{< evidence P008 status >}}
 #
-# The final averaging step works here. Centering and multiplication were already done by the data generator, so they were not learned in this test.
+# The final averaging step works here. Centering and multiplication were already done by the data
+# generator, so they were not learned in this test.
+#
+#
+# The error percentage compares the predicted covariance with a constant guess based on training
+# targets. Lower is better; 100% means no improvement over that guess. These are learned numerical
+# readouts from a Mean branch, not an explicit arithmetic average wired into the prediction output.
+# Eight-item performance does not establish arbitrary-length covariance calculation.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -106,9 +126,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P008"
 ITEMS = 8
 
 
@@ -169,6 +188,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
+@experiment("P008", seed=3513)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -216,7 +236,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3513)
+    report(run)
 
 # %% [markdown]
 # </details>

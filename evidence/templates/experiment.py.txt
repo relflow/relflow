@@ -1,0 +1,93 @@
+# %% [markdown]
+# ---
+# title: ${title}
+# categories: [${category}]
+# description: "TODO: State the information boundary and held-out comparison."
+# execute:
+#   enabled: false
+#   eval: false
+# code-fold: true
+# toc: false
+# evidence-readout:
+# - label: "TODO: Name the measurement"
+#   metric: [score]
+#   format: number
+# evidence-group: ${group}
+# ---
+#
+# TODO: Explain the question in plain language: what does the model receive,
+# what answer must it infer, and why is that distinction useful to test?
+# Give opaque field names a clear meaning within this generated task.
+#
+# ## Example
+#
+# Replace this illustrative record and diagram with the observation and schema
+# used by the experiment. The target must be hidden from model inputs.
+#
+# ```yaml
+# feature: 0.5
+# target: 1.0
+# ```
+#
+# TODO: Walk through this observation in words. Show how its answer follows
+# from the generator's rule or explain what its label means. Identify which
+# fields are hidden during prediction. Illustrative answers are not measured
+# model predictions.
+#
+# ```{typst}
+# //| label: fig-evidence-${number}
+# //| fig-cap: "Replace these fields with the experiment's schema."
+# //| fig-alt: "A record contains a visible numeric feature and a hidden numeric target."
+# #tree(node("record", kind: "root", children: (
+#   node("feature", type: "Number"),
+#   node("target", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# TODO: Describe the informative arm, matched negative control, and independent
+# held-out evaluation. Declare budgets and numerical checks before measuring.
+# Explain a concrete example of what the comparison changes, why the answer
+# should change or stay the same, and which inputs and budgets remain matched.
+#
+# ## Result
+#
+# {{< evidence ${number} status >}}
+#
+# No learning result is claimed until this experiment is implemented and recorded.
+# TODO: Explain what larger or smaller scores mean, how the checks answer the
+# original question, and which generalizations the experiment does not test.
+#
+# <details class="evidence-details">
+# <summary>Experiment details and code</summary>
+#
+# {{< evidence ${number} evidence >}}
+#
+# ### Run this experiment
+#
+# {{< evidence ${number} script >}}
+#
+# ### Complete experiment code
+#
+
+# %%
+"""TODO: State this experiment's claim and information boundary."""
+
+from reporting import experiment, report
+
+
+@experiment(${identifier}, seed=${seed})
+def run(seed, steps, accelerator):
+    """Return measured metrics and predeclared Boolean checks."""
+    raise NotImplementedError(
+        "Implement independent data splits, training, held-out evaluation, "
+        "and a matched control before recording this experiment."
+    )
+
+
+if __name__ == "__main__":
+    report(run)
+
+# %% [markdown]
+# </details>

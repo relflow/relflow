@@ -23,6 +23,12 @@ ARTIFACT = "python-package-distributions"
 FIELDS = {"schema", "source_sha", "version", "files", "ci_run_id", "ci_run_attempt"}
 
 
+def artifact_name(attempt: int) -> str:
+    if type(attempt) is not int or attempt < 1:
+        raise ValueError("Distribution artifacts require a positive CI attempt")
+    return f"{ARTIFACT}-attempt-{attempt}"
+
+
 def digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
@@ -227,6 +233,46 @@ def checked_run(repository: str, receipt: dict) -> None:
     checked_job(repository, receipt, attempt, "CI / required")
 
 
+def download(repository: str, run_id: int, attempt: int, destination: Path) -> None:
+    """Retrieve an original attempt without relabeling legacy artifact receipts."""
+    names = (artifact_name(attempt), ARTIFACT)
+    destination.mkdir(parents=True, exist_ok=True)
+    if any(destination.iterdir()):
+        raise ValueError("Distribution artifact retrieval requires an empty destination")
+    for name in names:
+        with tempfile.TemporaryDirectory() as temporary:
+            staged = Path(temporary)
+            command = [
+                "gh",
+                "run",
+                "download",
+                str(run_id),
+                "--repo",
+                repository,
+                "--name",
+                name,
+                "--dir",
+                str(staged),
+            ]
+            try:
+                subprocess.run(command, check=True)
+            except subprocess.CalledProcessError:
+                if name == names[0]:
+                    continue
+                raise
+            receipt = verify(staged)
+            if (
+                receipt["ci_run_id"] != run_id
+                or receipt["ci_run_attempt"] > attempt
+                or name == names[0]
+                and receipt["ci_run_attempt"] != attempt
+            ):
+                raise ValueError("Downloaded distribution artifact differs from its CI run or named attempt")
+            for path in staged.iterdir():
+                shutil.copyfile(path, destination / path.name)
+            return
+
+
 def recover_draft(
     repository: str, target: str, version: str, present: dict[str, bytes]
 ) -> tuple[dict, dict[str, bytes]]:
@@ -240,22 +286,8 @@ def recover_draft(
     for run in runs:
         with tempfile.TemporaryDirectory() as temporary:
             try:
-                subprocess.run(
-                    [
-                        "gh",
-                        "run",
-                        "download",
-                        str(run["id"]),
-                        "--repo",
-                        repository,
-                        "--name",
-                        ARTIFACT,
-                        "--dir",
-                        temporary,
-                    ],
-                    check=True,
-                )
                 directory = Path(temporary)
+                download(repository, run["id"], run["run_attempt"], directory)
                 receipt = verify(directory, source_sha=target, version=version)
                 if receipt["ci_run_id"] != run["id"] or receipt["ci_run_attempt"] > run["run_attempt"]:
                     raise ValueError("Draft recovery artifact identifies a different CI run or a later attempt")
@@ -327,23 +359,9 @@ def prepare(directory: Path, output: Path, retained: Path, *, repository: str, s
         if missing_github or missing_pypi or (release is not None and release["draft"]):
             checked_run(repository, receipt)
         if any(not (original / name).exists() for name in receipt["files"]):
-            with tempfile.TemporaryDirectory() as download:
-                subprocess.run(
-                    [
-                        "gh",
-                        "run",
-                        "download",
-                        str(receipt["ci_run_id"]),
-                        "--repo",
-                        repository,
-                        "--name",
-                        ARTIFACT,
-                        "--dir",
-                        download,
-                    ],
-                    check=True,
-                )
-                restored = Path(download)
+            with tempfile.TemporaryDirectory() as downloaded:
+                restored = Path(downloaded)
+                download(repository, receipt["ci_run_id"], receipt["ci_run_attempt"], restored)
                 if verify(restored) != receipt:
                     raise ValueError("Retained original CI artifact does not match the release receipt")
                 for name in receipt["files"]:
@@ -440,7 +458,8 @@ def main() -> None:
         wheel = next(name for name in receipt["files"] if name.endswith(".whl"))
         outputs(
             {
-                "artifact_name": ARTIFACT,
+                "artifact_name": artifact_name(receipt["ci_run_attempt"]),
+                "run_attempt": str(receipt["ci_run_attempt"]),
                 "source_sha": receipt["source_sha"],
                 "version": receipt["version"],
                 "wheel_name": wheel,

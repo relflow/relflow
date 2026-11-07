@@ -3,7 +3,6 @@
 # title: Can it look up a value using a new ID?
 # categories:
 # - Associative recall
-# evidence-id: P025
 # description: Mix source values and questions in different positions. Use unfamiliar IDs to connect each question
 #   to its source, and judge the result over a panel of three seeds.
 # execute:
@@ -30,6 +29,11 @@
 # evidence-group: Relational
 # ---
 #
+# Each record supplies two temporary ID-to-value associations and two questions about them. The
+# source values are visible; query values are hidden wherever is_query is true. Source order, query
+# order, and the combined memory order are shuffled, so a fixed-position copying rule cannot
+# reliably solve the task.
+#
 # ## Example
 #
 # ```yaml
@@ -41,6 +45,11 @@
 # ```
 #
 # Source values are visible. Query values are hidden wherever is_query is true.
+#
+# The illustrated K2 query must return −0.8 from the K2 source, while K1 must return 0.4 from its
+# source despite their separated positions. These short IDs stand in for generated record-local
+# names. Actual train, validation, and test namespaces differ, so test associations must be read
+# from the current record rather than recalled from a training vocabulary.
 #
 # ```{typst}
 # //| label: fig-evidence-hash-recall
@@ -60,11 +69,26 @@
 #
 # Change question IDs while retaining their original answers. This should break an ID-based lookup.
 #
+# The corruption rotates only query IDs and keeps their original target values. An
+# identity-sensitive model should then follow the changed request and lose accuracy against those
+# old answers. The panel trains three different seeds, reporting both median performance and the
+# weakest intact performance. Every seed must beat the zero predictor and be hurt by changed IDs;
+# the stronger median gates cannot conceal a completely failed seed.
+#
 # ## Result
 #
 # {{< evidence P025 status >}}
 #
-# Three paired seeds train and score the same task, and the gates read their medians, so one lucky or unlucky draw cannot decide the outcome. Only two source values are tested; missing IDs and larger memories need separate checks.
+# Three paired seeds train and score the same task. Median gates summarize their performance, while
+# separate checks require every seed to beat the constant baseline and respond to changed IDs.
+# Missing IDs and larger memories need separate checks.
+#
+#
+# Error is measured relative to always predicting zero at query positions. Low intact error plus a
+# large corruption gap supports using the temporary associations, while the aligned-position control
+# shows why accuracy without the intervention would be insufficient. Only two source keys are
+# present, and the protocol does not define missing keys, duplicate keys, exact lookup, or larger
+# memory capacity.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -126,9 +150,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P025"
 PAIR_COUNT = 2
 PANEL = (0, 100, 200)
 
@@ -219,6 +242,7 @@ def trial(seed: int, steps: int | None, accelerator: str) -> dict:
     }
 
 
+@experiment("P025", seed=17)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     if accelerator == "cpu":
         with ProcessPoolExecutor(
@@ -249,7 +273,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=17)
+    report(run)
 
 # %% [markdown]
 # </details>

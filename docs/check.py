@@ -45,7 +45,7 @@ def documents(root: Path = ROOT) -> dict[Path, str]:
         if source.is_file() and not source.is_relative_to(docs / "site")
     }
     if (root / "evidence/experiments").is_dir():
-        entries = registry(root / "evidence")
+        entries = registry(root / "evidence", lane="all")
         pages.update(
             {
                 (root / entry["page"]).resolve(): markdown(root / "evidence" / entry["script"])

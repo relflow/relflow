@@ -3,7 +3,6 @@
 # title: Can it learn how two measurements vary together?
 # categories:
 # - Distribution statistics
-# evidence-id: P006
 # description: 'Predict covariance: whether paired measurements tend to rise together or move in opposite directions.'
 # execute:
 #   enabled: false
@@ -24,6 +23,10 @@
 # evidence-group: Aggregation
 # ---
 #
+# Each item contains two measurements, x and y, that belong together. The hidden answer describes
+# whether above-average x values tend to accompany above-average y values. Knowing the two separate
+# distributions is insufficient; which x is paired with which y matters.
+#
 # ## Example
 #
 # ```yaml
@@ -41,6 +44,11 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
+# In the illustration, both field means are zero. Multiply each x by its paired y, then average the
+# eight products: the answer is 0.8. A positive answer means the measurements tend to move together.
+# Swapping only the y values can change that answer even though neither field gains or loses any
+# values.
+#
 # ```{typst}
 # //| label: fig-evidence-aligned-pair-covariance
 # //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
@@ -56,13 +64,27 @@
 #
 # ## Comparison
 #
-# Compare correct pairs with pairs whose second measurements are shuffled, keeping the original answers. The separate values stay the same.
+# Compare correct pairs with pairs whose second measurements are shuffled, keeping the original
+# answers. The separate values stay the same.
+#
+# The generator independently varies locations, spreads, and the relationship between the fields
+# across records. The corruption control circularly shifts y within each list while leaving x and
+# the original target untouched. It therefore removes the original pairing without changing either
+# set of values. Higher error against the old answer is expected if the model was using the
+# relationship between siblings.
 #
 # ## Result
 #
 # {{< evidence P006 status >}}
 #
-# Accuracy depends on keeping each pair together. This tests covariance, not correlation, which also accounts for each measurement’s spread.
+# Accuracy depends on keeping each pair together. This tests covariance, not correlation, which also
+# accounts for each measurement’s spread.
+#
+#
+# Both error percentages use the same constant-guess baseline because the labels remain unchanged.
+# Low intact error plus a rise after breaking pairs supports sensitivity to alignment; the corrupted
+# score is not a measure of accuracy on newly labeled shuffled data. This is population covariance,
+# which keeps scale information, rather than scale-normalized correlation.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -115,9 +137,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P006"
 ITEMS = 8
 
 
@@ -181,6 +202,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
+@experiment("P006", seed=3508)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -248,7 +270,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3508)
+    report(run)
 
 # %% [markdown]
 # </details>

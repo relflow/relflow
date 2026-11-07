@@ -3,7 +3,6 @@
 # title: Can it compare an item with its own group?
 # categories:
 # - Peer-relative inference
-# evidence-id: P032
 # description: Predict how far each value lies above or below the average of its group.
 # execute:
 #   enabled: false
@@ -23,6 +22,11 @@
 # ---
 #
 # ## Example
+#
+# The model sees six interleaved items, each with a group label and a value. It must predict the value minus
+# the mean of that item's own group; the means are not supplied. In the illustration, A contains `2` and
+# `4`, so its mean is `3` and its deviations are `-1` and `+1`. B's mean is `0`, and C's mean is `-2`. Other
+# groups should not change an A item's answer.
 #
 # ```yaml
 # items:
@@ -51,9 +55,21 @@
 #
 # ## Comparison
 #
+# Rotating the visible group labels changes which items are peers while preserving every value, original
+# target, and group count. This makes a useful diagnostic: a predictor using memberships should now disagree
+# with the retained targets. Two complementary controls preserve the answer: adding the same offset to both
+# members of a group, and reordering complete items. The latter must move each prediction with its
+# corresponding item rather than leave it at a fixed position.
+#
 # Change group labels while retaining original answers. Separately shift all values in a group equally; differences from its average should stay fixed.
 #
 # ## Result
+#
+# The main error is normalized against a constant guess from the training deviations. Compare it with the
+# corrupted-label error, then inspect translation error and permutation drift separately: they test
+# different properties. The generator always has three groups with two members each and equal-and-opposite
+# deviations. Evidence for these controlled pairs is narrower than evidence for arbitrary group sizes,
+# unseen grouping rules, or exact group-by arithmetic.
 #
 # {{< evidence P032 status >}}
 #
@@ -107,9 +123,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P032"
 ITEMS = 6
 GROUPS = ("A", "B", "C")
 
@@ -189,6 +204,7 @@ def permute_items(rows: list[dict], seed: int) -> tuple[list[dict], np.ndarray]:
     return result, np.asarray(flattened)
 
 
+@experiment("P032", seed=3720)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -271,7 +287,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3720)
+    report(run)
 
 # %% [markdown]
 # </details>

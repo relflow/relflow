@@ -3,7 +3,6 @@
 # title: Can it average only the requested group?
 # categories:
 # - Category-conditioned reduction
-# evidence-id: P026
 # description: Ask for the average of one named group within a mixed list.
 # execute:
 #   enabled: false
@@ -21,6 +20,13 @@
 #   format: error
 # evidence-group: Relational
 # ---
+#
+# The request names one group in a list containing A, B, and C values. The hidden answer averages
+# only that group's two values. Although operation is visible in the schema, it always says mean
+# here; this experiment isolates group selection rather than learning to choose among different
+# operations.
+#
+# The bag number is generator bookkeeping, not a model input.
 #
 # ## Example
 #
@@ -40,6 +46,10 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
+# The illustrated B values are −0.4 and −0.2, giving an answer of −0.3. Requesting A from the same
+# list would instead give 1.1, and requesting C would give 0.6. Averaging all six values would
+# ignore the instruction and produce a different answer.
+#
 # ```{typst}
 # //| label: fig-evidence-filtered-mean
 # //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
@@ -57,13 +67,27 @@
 #
 # ## Comparison
 #
-# Reuse the list with different group requests. Shuffle group labels while retaining the original answers.
+# Reuse the list with different group requests. Shuffle group labels while retaining the original
+# answers.
+#
+# Each independently generated bag appears with all three requests, so identical item content must
+# support different answers. The control shuffles only the item group labels, retaining label
+# counts, numerical values, and original targets. A model that follows membership should now
+# disagree with the old answers; one that averages the whole bag or ignores selected_group has not
+# used the necessary relationship.
 #
 # ## Result
 #
 # {{< evidence P026 status >}}
 #
-# The model uses membership to choose the relevant values. Empty groups and unfamiliar group names are not tested.
+# The model uses membership to choose the relevant values. Empty groups and unfamiliar group names
+# are not tested.
+#
+#
+# Errors are compared with a separate constant training-mean guess for each requested group. The
+# overview shows A as a compact readout, but checks require accuracy and corruption sensitivity for
+# A, B, and C. All groups are familiar and always have two members, so empty selections, new group
+# names, and variable group sizes remain outside this experiment.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -111,9 +135,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P026"
 OPERATIONS = ("sum", "mean", "min", "max")
 GROUPS = ("A", "B", "C")
 
@@ -173,6 +196,7 @@ def corrupt_labels(rows: list[dict], seed: int) -> list[dict]:
     return result
 
 
+@experiment("P026", seed=16)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -233,7 +257,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=16)
+    report(run)
 
 # %% [markdown]
 # </details>

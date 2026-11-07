@@ -3,7 +3,6 @@
 # title: Can it distinguish missing values from zero?
 # categories:
 # - Value state
-# evidence-id: P038
 # description: Predict a label from whether a number is missing, even though every present number is zero.
 # execute:
 #   enabled: false
@@ -24,6 +23,11 @@
 #
 # ## Example
 #
+# The only useful distinction is whether `measurement` is present. In the illustrated signal case, a null
+# measurement means the hidden label is true; a present numeric `0.0` means false. Every present number is
+# zero, so comparing numeric magnitudes cannot help. This is a controlled way to ask whether the model can
+# use missingness itself, rather than silently treating an explicit null as an ordinary zero.
+#
 # ```yaml
 # measurement: null
 # target: true
@@ -43,9 +47,21 @@
 #
 # ## Comparison
 #
+# The signal model learns from data where nullness follows the label. A separately trained control receives
+# the same balanced label task but independently chosen nullness, removing that relationship. A second
+# intervention takes the signal model and fills all nulls with zero at evaluation time. Its positive and
+# negative examples then look identical. These two controls distinguish learning a genuine validity pattern
+# from guessing labels or exploiting a useful numeric value.
+#
 # Compare informative missingness with unrelated missingness. Then replace all nulls with zeros while retaining the original answers.
 #
 # ## Result
+#
+# Accuracy counts correct labels at the fixed 0.5 probability threshold; AUC in the details measures ranking
+# independently of that threshold. High signal scores alongside chance-level independent and filled-input
+# scores show why preserving the distinction matters here. Missingness is deliberately informative in this
+# generator. The result does not imply that absent values are informative in every application, or that a
+# model should prefer them to correctly measured data.
 #
 # {{< evidence P038 status >}}
 #
@@ -99,9 +115,7 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P038"
+from reporting import experiment, report
 
 
 def records(*, rows: int, seed: int, signal: bool, fill_nulls: bool = False) -> Iterator[dict]:
@@ -167,6 +181,7 @@ def fit(*, signal: bool, seed: int, steps: int | None, accelerator: str) -> rf.M
     return model
 
 
+@experiment("P038", seed=11)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     signal_model = fit(signal=True, seed=seed, steps=steps, accelerator=accelerator)
     control_model = fit(signal=False, seed=seed, steps=steps, accelerator=accelerator)
@@ -199,7 +214,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=11)
+    report(run)
 
 # %% [markdown]
 # </details>

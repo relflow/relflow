@@ -3,7 +3,6 @@
 # title: Can it follow IDs through larger lists and a second lookup?
 # categories:
 # - Sibling entity transfer
-# evidence-id: P075
 # description: Retrieve a source value by ID with increasing numbers of distractors, then add an intermediate ID link
 #   for a two-step lookup.
 # execute:
@@ -31,6 +30,11 @@
 # evidence-group: Relational
 # ---
 #
+# Each observation supplies a small lookup table of fresh identities and numeric payloads, then
+# requests two payloads by identity. Larger lists add distractors without changing the rule. The
+# two-step arm inserts another relation, requiring a query identity to lead to a source identity
+# before retrieving its value.
+#
 # ## Example
 #
 # ```yaml
@@ -44,7 +48,8 @@
 #   - {entity_id: S0, value: 0.7}
 # ```
 #
-# Target values are hidden. This example shows a direct lookup; the two-step arm adds a separate links collection.
+# Target values are hidden. This example shows a direct lookup; the two-step arm adds a separate links
+# collection.
 #
 # ```{typst}
 # //| label: fig-evidence-retrieval-capacity
@@ -66,15 +71,34 @@
 # )))
 # ```
 #
+# The illustrative direct request for `S1` should return −0.2 and the request for `S0` should return
+# 0.7. These names stand for fresh keys in the generator. In a two-step illustration, a target key
+# `Q1` would first follow a link `Q1 → S1` and then retrieve −0.2. The model sees relations, not a
+# generating array index.
+#
 # ## Comparison
 #
-# Change lookup keys while keeping answers fixed. Compare with averaging source values, and reorder the records without changing matches.
+# Change lookup keys while keeping answers fixed. Compare with averaging source values, and reorder
+# the records without changing matches.
+#
+# Broken-key tests keep source payloads and hidden target values fixed while changing the relation
+# that points to them. A model following that altered relation should now disagree with the original
+# answer. Reordering complete source, link, and target records preserves valid matches and tests
+# robustness to position. A per-record source-mean baseline also checks whether apparent success is
+# merely averaging the available values.
 #
 # ## Result
 #
 # {{< evidence P075 status >}}
 #
-# Direct lookup works in one of three seeds; the two-step lookup fails in all three. The capability checks remain failed, rather than being redefined as an expected limitation.
+# The selected run misses the declared intact-retrieval gates for both direct and two-step requests.
+# Capability failures remain reported, rather than being redefined as successful evidence of an
+# expected limitation.
+#
+# The selected run does not establish reliable retrieval across the tested source counts. Errors and
+# failed conditions remain separate for direct and two-step requests. These lengths already occur
+# during fitting, so the ladder tests learned capacity rather than extrapolation to longer lists. Even
+# a successful condition would not establish an exact join or behavior for missing and duplicate keys.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -142,9 +166,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P075"
 BUDGET = 600
 BATCH_SIZE = 64
 TRAIN_ROWS = 4096
@@ -236,6 +259,7 @@ def score(predicted: np.ndarray, rows: list[dict], training_mean: float) -> dict
     }
 
 
+@experiment("P075", seed=7501)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     metrics, checks = {}, {}
     for hops in (1, 2):
@@ -311,7 +335,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7501)
+    report(run)
 
 # %% [markdown]
 # </details>

@@ -3,7 +3,6 @@
 # title: Can it learn a 90% probability without a useful input?
 # categories:
 # - Calibration
-# evidence-id: P060
 # description: Generate yes answers 90% of the time, independently of the input. The right probability is therefore
 #   90%.
 # execute:
@@ -29,6 +28,11 @@
 # evidence-group: Calibration
 # ---
 #
+# This task has a useful probability but no useful feature for separating individual outcomes. Every
+# row has the same numeric input, and identity is independent of the sampled yes/no answer. The
+# appropriate prediction is therefore the same 90% yes probability across observations, including
+# observations carrying identities that were never encountered in training.
+#
 # ## Example
 #
 # ```yaml
@@ -50,15 +54,31 @@
 # )))
 # ```
 #
+# The illustrated `yes` is one possible draw, not a deterministic answer implied by `x = 0` or
+# `id-12`. In an illustrative group of many such records, about nine in ten outcomes would be yes.
+# Always choosing yes can consequently achieve high classification accuracy while a predicted
+# probability of 100% would be unjustified and heavily penalized whenever no occurs.
+#
 # ## Comparison
 #
 # Compare known and new input identities, using two different internal output allocations.
+#
+# The two storage-allocation arms keep the data distribution and training setup fixed. They test
+# whether extra unused output space changes the probabilities assigned to the populated labels.
+# Known-identity and novel-identity evaluations retain the same uninformative numeric context; the
+# unknown names should not create a different population prior.
 #
 # ## Result
 #
 # {{< evidence P060 status >}}
 #
 # The latest model learns probabilities near the population rate. Accuracy alone would not reveal whether its confidence was appropriate; this does not establish general probability calibration.
+#
+# Probability RMSE compares each written yes probability with 0.9. Excess expected negative log
+# likelihood compares the same probabilities with the ideal 90/10 forecast, accounting for both
+# possible outcomes rather than rewarding a lucky sampled label. Agreement on this constant-prior task
+# is a narrow calibration check; it does not establish calibration when probabilities depend on
+# features or rare outcomes.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -100,9 +120,8 @@ import numpy as np
 import pyarrow as pa
 import relflow as rf
 from relflow.tensorfields.shared.resize import Resize
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P060"
 BUDGET = 400
 
 
@@ -129,6 +148,7 @@ def build(size: int) -> rf.Model:
     return model
 
 
+@experiment("P060", seed=7601)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     oracle_nll = float(-0.9 * np.log(0.9) - 0.1 * np.log(0.1))
     metrics = {"prior": 0.9, "weighted_optimum": 0.75, "oracle_nll": oracle_nll}
@@ -184,7 +204,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7601)
+    report(run)
 
 # %% [markdown]
 # </details>

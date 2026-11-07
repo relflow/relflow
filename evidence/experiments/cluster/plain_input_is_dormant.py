@@ -3,7 +3,6 @@
 # title: Does a Cluster input group itself automatically?
 # categories:
 # - Cluster
-# evidence-id: P019
 # description: Use a Cluster field only as an input beside a hidden prediction target.
 # execute:
 #   enabled: false
@@ -24,6 +23,10 @@
 # evidence-group: Representation
 # ---
 #
+# The name Cluster can suggest that adaptive grouping happens whenever identities recur. This
+# negative control checks that expectation. The model uses merchant_id only as an input and predicts
+# a hidden label; the identity field itself is never selected as a reconstruction objective.
+#
 # ## Example
 #
 # ```yaml
@@ -32,6 +35,11 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# The illustrated identity c2-id7 always accompanies label L2 in the synthetic records. There are
+# ten identities for each of five labels, and every identity repeats twenty times. The names are
+# synthetic identifiers, not evidence about real merchants. Predicting L2 for this familiar identity
+# and updating the adaptive grouping mechanism are separate behaviors.
 #
 # ```{typst}
 # //| label: fig-evidence-cluster-plain-input-is-dormant
@@ -45,13 +53,26 @@
 #
 # ## Comparison
 #
-# Observe its adaptive grouping state before and after training, without asking the Cluster field to reconstruct itself.
+# Observe its adaptive grouping state before and after training, without asking the Cluster field to
+# reconstruct itself.
+#
+# The callback watches committed count and adherence through five epochs of label training. With no
+# identity reconstruction loss, the expected result is unchanged count and zero adherence. This is a
+# mechanism check rather than a failed demand for useful groups. The reconstructing-label experiment
+# adds the missing objective; it must then face its own quality checks.
 #
 # ## Result
 #
 # {{< evidence P019 status >}}
 #
-# Its grouping state stays dormant in this setup. Add a reconstructing mask when adaptive grouping is intended; then test whether the groups are useful.
+# Its grouping state stays dormant in this setup. Add a reconstructing mask when adaptive grouping
+# is intended; then test whether the groups are useful.
+#
+#
+# A passing status here means the intended inactivity was observed. It does not mean the model
+# discovered groups or achieved any particular held-out label accuracy: those quantities are not the
+# reported checks. Validation reuses the training observations, so this example also provides no
+# evidence for prediction on new identities or independently sampled records.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -101,9 +122,7 @@ from functools import partial
 import lightning.pytorch as lit
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P019"
+from reporting import experiment, report
 
 
 def records(seed: int) -> Iterator[dict]:
@@ -144,6 +163,7 @@ class Trajectory(lit.Callback):
         )
 
 
+@experiment("P019", seed=0)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -184,7 +204,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=0)
+    report(run)
 
 # %% [markdown]
 # </details>

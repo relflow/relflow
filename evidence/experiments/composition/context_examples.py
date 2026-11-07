@@ -3,7 +3,6 @@
 # title: Can it infer a new rule from examples in the record?
 # categories:
 # - Learning from context
-# evidence-id: P072
 # description: Each record supplies four examples of a fresh straight-line rule and asks for the answer at a new input.
 # execute:
 #   enabled: false
@@ -33,6 +32,11 @@
 # evidence-group: Composition
 # ---
 #
+# Each record describes a fresh small prediction problem. Four visible examples come from one
+# straight-line rule, and the hidden answer asks what that same rule produces at the query. The model
+# is never given the slope or intercept directly, so useful prediction must recover their effect from
+# the examples carried in that record.
+#
 # ## Example
 #
 # ```yaml
@@ -60,15 +64,31 @@
 # )))
 # ```
 #
+# The illustrated examples follow the noiseless rule `y = x + 0.5`. Applying it to query 0.6 gives
+# 1.1. These values illustrate the task; generated examples and answers include small independent
+# noise. This positive-slope, positive-intercept combination is excluded from fitting, although each
+# sign separately occurs in other training combinations. The query remains inside the examples'
+# numeric span.
+#
 # ## Comparison
 #
 # Swap the examples between records, remove them, and compare with fitting a line directly. Test a region of rules excluded from training.
+#
+# Swapping complete example sets between records leaves each query and its original answer in place
+# but supplies evidence for another rule. Removing the examples tests what the query alone permits. A
+# direct least-squares fit uses only the four visible pairs and establishes that the answer is
+# observable, independently of whether the neural model learns a good procedure.
 #
 # ## Result
 #
 # {{< evidence P072 status >}}
 #
-# Examples help in familiar regions, but only one of three seeds passes every check. Reliable transfer to the excluded rule region remains unestablished.
+# Use the familiar and withheld-region scores to distinguish learning from examples from transfer to a rule combination excluded during fitting. The selected criteria above report whether each requirement is met.
+#
+# The familiar and withheld-region errors answer different generalization questions, and the selected
+# criteria report both. Prediction also checks that every trained weight stays unchanged while
+# examples are read. That is adaptation through context after meta-training on many rules, not
+# learning without prior training or extrapolating beyond the observed query range.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -135,9 +155,8 @@ import numpy as np
 import pyarrow as pa
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P072"
 BUDGET = 600
 TRAIN_ROWS = 4096
 TEST_ROWS = 2048
@@ -203,6 +222,7 @@ def score(predicted: np.ndarray, rows: list[dict], training_mean: float) -> dict
     return {"rmse": rmse, "baseline_rmse": baseline, "normalized_rmse": rmse / baseline}
 
 
+@experiment("P072", seed=7201)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     tests = {
         "familiar": list(records(rows=TEST_ROWS, seed=seed * 100 + 3)),
@@ -274,7 +294,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7201)
+    report(run)
 
 # %% [markdown]
 # </details>

@@ -19,7 +19,11 @@ from record import select
 EXECUTOR = "a" * 40
 HELPER = "b" * 40
 IDENTITY = {"image": "sha256:" + "c" * 64, "cpu": "verified CPU", "kernel": "test", "env": {"OMP_NUM_THREADS": "1"}}
-SCRIPT = "# %% [markdown]\n# ---\n# evidence-id: {identifier}\n# title: A bounded experiment\n# ---\nreport(seed=7)\n"
+# These retained single-host reports predate decorators and exercise historical
+# inline selections; current hosted suites use decorated declarations elsewhere.
+ARCHIVED_SCRIPT = (
+    "# %% [markdown]\n# ---\n# evidence-id: {identifier}\n# title: A bounded experiment\n# ---\nreport(seed=7)\n"
+)
 README = "Intro\n<!-- evidence-results:start -->\nOld measurements\n<!-- evidence-results:end -->\nEnd\n"
 
 
@@ -95,7 +99,7 @@ def bundle(tmp_path):
     for identifier in ("P021", "P025", "P038"):
         path = root / "evidence/experiments/example" / (identifier.lower() + ".py")
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(SCRIPT.format(identifier=identifier))
+        path.write_text(ARCHIVED_SCRIPT.format(identifier=identifier))
     (root / "README.md").write_text(README)
     (root / "uv.lock").write_text("locked-runtime\n")
     (root / "pyproject.toml").write_text('[project]\nversion="0.4.2"\n')
@@ -446,6 +450,30 @@ def test_artifact_bytes_must_match_github_digest_before_extraction(tmp_path, mon
     assert not (tmp_path / "untrusted").exists()
 
 
+def test_attempt_artifact_selection_checks_every_page_and_rejects_duplicates(tmp_path, monkeypatch):
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("manifest.json", "{}")
+    row = {
+        "id": 101,
+        "name": "relflow-evidence-attempt-9",
+        "expired": False,
+        "digest": "sha256:" + hashlib.sha256(payload.getvalue()).hexdigest(),
+    }
+    monkeypatch.setattr(
+        reuse,
+        "api",
+        lambda path: {"artifacts": [row]} if path.endswith("&page=2") else {"artifacts": [], "total_count": 101},
+    )
+    monkeypatch.setattr(reuse.subprocess, "check_output", lambda *args, **kwargs: payload.getvalue())
+    assert reuse.artifact(123, row["name"], tmp_path / "retained")["id"] == 101
+    assert (tmp_path / "retained/manifest.json").read_text() == "{}"
+    monkeypatch.setattr(reuse, "api", lambda path: {"artifacts": [row, row]})
+    with pytest.raises(ValueError, match="one unexpired immutable artifact"):
+        reuse.artifact(123, row["name"], tmp_path / "duplicate")
+    assert not (tmp_path / "duplicate").exists()
+
+
 def test_force_fresh_never_performs_network_lookup_or_creates_hit(tmp_path, monkeypatch):
     monkeypatch.setattr(reuse, "api", lambda *args: pytest.fail("Force fresh must skip reuse discovery"))
     assert (
@@ -777,6 +805,61 @@ def test_partial_ci_retry_preserves_original_successful_evidence_attempt(bundle,
             "evidence_job_id": 42,
         }
         assert "validation" not in original
+
+
+@pytest.mark.parametrize("fault", [None, "failed", "skipped", "shard-only", "duplicate", "mixed-helper", "mutable"])
+def test_hosted_publication_authenticates_the_complete_collector(bundle, monkeypatch, fault):
+    root, reports, inputs, original, _ = bundle
+    run = copy.deepcopy(original)
+    run["referenced_workflows"] = [
+        {"path": f"{reuse.REPOSITORY}/.github/workflows/evidence-hosted.yml@{HELPER}", "sha": HELPER}
+    ]
+    manifest = json.loads((reports / "manifest.json").read_text()) | {"backend": "github-hosted-docker"}
+    request = json.loads((inputs / "request.json").read_text())
+    job = {
+        "id": 42,
+        "name": "Evidence / Run full paired suite on GitHub / Collect full paired suite",
+        "status": "completed",
+        "conclusion": "success",
+    }
+    if fault in {"failed", "skipped"}:
+        job["conclusion"] = "failure" if fault == "failed" else "skipped"
+    elif fault == "shard-only":
+        job["name"] = "Evidence / Run paired shard (0)"
+    elif fault == "mixed-helper":
+        run["referenced_workflows"].extend(original["referenced_workflows"])
+    elif fault == "mutable":
+        run["referenced_workflows"][0]["path"] = f"{reuse.REPOSITORY}/.github/workflows/evidence-hosted.yml@main"
+    monkeypatch.setattr(reuse, "api", lambda path: {"jobs": [job, job] if fault == "duplicate" else [job]})
+    if fault:
+        with pytest.raises(ValueError):
+            reuse.trusted(run, manifest, helper=HELPER, executor=EXECUTOR, root=root, request=request)
+    else:
+        reuse.trusted(run, manifest, helper=HELPER, executor=EXECUTOR, root=root, request=request)
+        assert reuse.artifact_name(run, "relflow-evidence") == "relflow-evidence-attempt-2"
+        assert reuse.artifact_name(run, "evidence-inputs") == "evidence-inputs-attempt-2"
+        assert reuse.artifact_name(original, "relflow-evidence") == "relflow-evidence"
+
+
+def test_collector_authentication_reads_all_job_pages(bundle, monkeypatch):
+    _, _, _, original, _ = bundle
+    run = copy.deepcopy(original)
+    run["referenced_workflows"][0]["path"] = f"{reuse.REPOSITORY}/.github/workflows/evidence-hosted.yml@{HELPER}"
+    collector = {
+        "id": 42,
+        "name": "Evidence / Collect full paired suite",
+        "status": "completed",
+        "conclusion": "success",
+    }
+    paths = []
+
+    def api(path):
+        paths.append(path)
+        return {"jobs": [collector]} if path.endswith("&page=2") else {"jobs": [], "total_count": 101}
+
+    monkeypatch.setattr(reuse, "api", api)
+    assert reuse.successful_job(run, 2) == collector
+    assert len(paths) == 2
 
 
 def test_versioned_release_assets_are_considered_for_report_reuse(tmp_path, monkeypatch):

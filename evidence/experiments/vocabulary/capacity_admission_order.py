@@ -3,7 +3,6 @@
 # title: Does label encounter order limit vocabulary coverage?
 # categories:
 # - Vocabulary
-# evidence-id: P057
 # description: Train on common and rare labels, changing which labels appear first.
 # execute:
 #   enabled: false
@@ -26,6 +25,11 @@
 # evidence-group: Vocabulary
 # ---
 #
+# This experiment asks whether the first labels encountered can crowd out useful labels that arrive
+# later. There are four code strings, but their frequencies are very unequal: the two rare labels
+# occur once each per generated pass, while `cold` and `hot` fill the remaining rows. The hidden
+# target depends only on the code plus small noise.
+#
 # ## Example
 #
 # ```yaml
@@ -45,15 +49,30 @@
 # )))
 # ```
 #
+# The displayed `rare-left` target of −1 is the illustrative mean before noise. The two common codes
+# have means −1 for `cold` and +1 for `hot`. Giving rare labels the first two encounters should
+# determine their vocabulary positions, but should not prevent the model from later storing both
+# common identities or learning their opposite effects.
+#
 # ## Comparison
 #
 # Compare rare-first and common-first training. Check that all observed labels are admitted and that common-label distinctions learn.
+#
+# The order intervention moves the first common examples to the front of the same observations. It
+# preserves every code, target, noise draw, and frequency, so a coverage difference cannot be
+# explained by one arm receiving more information. A second probe swaps common code names on held-out
+# rows; a model that uses identity should change its predictions substantially.
 #
 # ## Result
 #
 # {{< evidence P057 status >}}
 #
 # Storage grows and retains earlier labels in both orders. This single-consumer experiment does not test distributed encounter order.
+#
+# Vocabulary coverage and prediction quality answer different questions here. Complete coverage shows
+# that growing storage admitted the common labels; low normalized error shows that their effects were
+# learned. The rare labels diagnose admission and stable ordering, not dependable rare-label accuracy.
+# The controlled one-consumer setup also leaves distributed encounter ordering outside this claim.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -104,9 +123,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P057"
 BUDGET = 300
 EFFECTS = {"rare-left": -1.0, "rare-right": 1.0, "cold": -1.0, "hot": 1.0}
 
@@ -147,6 +165,7 @@ def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["target"]["content"] for row in output], dtype=np.float64)
 
 
+@experiment("P057", seed=5701)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     test = [row for row in records(rows=2050, seed=seed + 3) if row["code"] in {"cold", "hot"}]
     train = [row for row in records(rows=4096, seed=seed + 1) if row["code"] in {"cold", "hot"}]
@@ -216,7 +235,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=5701)
+    report(run)
 
 # %% [markdown]
 # </details>

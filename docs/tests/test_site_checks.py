@@ -217,10 +217,14 @@ def test_build_configuration_has_no_machine_learning_dependencies() -> None:
     root = Path(__file__).resolve().parents[2]
     config = tomllib.loads((root / "docs/pyproject.toml").read_text())
     assert config["project"]["dependencies"] == ["pyyaml==6.0.3"]
+    assert all(
+        dependency.split("==")[0].lower() not in {"relflow", "torch", "lightning"}
+        for dependency in config["project"]["dependencies"]
+    )
     assert config["tool"]["uv"]["package"] is False
     for name in ("docs/check.py", "evidence/render.py"):
         text = (root / name).read_text()
-        assert "import relflow" not in text and "import torch" not in text
+        assert all(f"import {module}" not in text for module in ("relflow", "torch", "lightning"))
 
 
 def test_theme_resources_can_share_ids_while_content_anchors_stay_unique(project: Path) -> None:

@@ -118,10 +118,11 @@ def test_selection_rejects_catalog_and_source_drift_before_writing(reports, publ
     elif fault == "removed":
         source.unlink()
     else:
-        entry = registry(publication)["P001"]
-        source.with_name("new_experiment.py").write_text(
-            frontmatter(source.read_text(), dict(entry["header"], **{"evidence-id": "P999"}))
-        )
+        original = source.read_text()
+        added = original.replace('@experiment("P001",', '@experiment("P999",', 1)
+        assert added != original, "the added experiment fixture must declare its own ID"
+        source.with_name("new_experiment.py").write_text(added)
+        assert "P999" in registry(publication), "the fixture must add a valid catalog entry"
     before = {path: path.read_bytes() for path in publication.rglob("*.py")}
     with pytest.raises(ValueError, match="source|catalog"):
         select(reports, root=publication)

@@ -3,7 +3,6 @@
 # title: Can it learn the month from the day number?
 # categories:
 # - Calendar reasoning
-# evidence-id: P044
 # description: Learn month boundaries from day-of-year in non-leap years.
 # execute:
 #   enabled: false
@@ -24,6 +23,11 @@
 #
 # ## Example
 #
+# The model sees the day-of-year coordinate and must predict the hidden month name. In the illustrative non-
+# leap year, February 4 is day `31 + 4 = 35`, placing it in February's day-number interval. The visible
+# timestamp is a convenient source for that coordinate; the month is not also supplied as a feature.
+# Restricting the data to non-leap years keeps the month boundaries consistent across the year ranges.
+#
 # ```yaml
 # observed_at: 2025-02-04
 # target: February
@@ -43,9 +47,21 @@
 #
 # ## Comparison
 #
+# Training uses odd-numbered days of each month, while testing uses even-numbered days in different years.
+# For example, February 4 is held out while nearby odd days can appear in training. The control shuffles
+# timestamps across test records but retains the original month labels. That preserves the collection of
+# dates and label frequencies while breaking their relationship, checking that useful predictions depend on
+# the date coordinate rather than a popular-month guess.
+#
 # Train on odd days of each month, test even days in unseen years, and shuffle timestamps while keeping month answers fixed.
 #
 # ## Result
+#
+# The reported percentages are exact month-label accuracies, not errors in days. Compare the original dates
+# with their shuffled counterparts to see how much the date-to-month relationship contributes. The task is
+# learning a restricted mapping whose boundaries are already known exactly to calendar libraries. It does
+# not establish leap-year handling, elapsed-time calculation, or behavior in a different calendar; exact
+# extraction remains an appropriate preprocessing option when that is the goal.
 #
 # {{< evidence P044 status >}}
 #
@@ -98,9 +114,7 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P044"
+from reporting import experiment, report
 
 
 def records(years: Sequence[int], *, parity: int) -> Iterator[dict]:
@@ -175,6 +189,7 @@ def accuracy(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator
     return float(metrics[".target/test.accuracy.content"])
 
 
+@experiment("P044", seed=41)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     train = partial(records, (2017, 2018, 2019), parity=1)
     validate = partial(records, (2021,), parity=1)
@@ -205,7 +220,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=41)
+    report(run)
 
 # %% [markdown]
 # </details>

@@ -3,7 +3,6 @@
 # title: Can day 60 reveal the month in a leap year?
 # categories:
 # - Calendar reasoning
-# evidence-id: P043
 # description: Distinguish February 29 from March 1 when both can be day 60 of a year.
 # execute:
 #   enabled: false
@@ -24,6 +23,11 @@
 #
 # ## Example
 #
+# February 29 in leap year 2024 is the sixtieth day of that year. March 1 in ordinary year 2025 is also day
+# sixty, yet its hidden month label is March. The illustration shows the first case. If the model receives
+# only day-of-year, these two dates become the same input with different correct answers. Week-of-month
+# distinguishes a date at the end of February from one at the start of March.
+#
 # ```yaml
 # observed_at: 2024-02-29
 # target: February
@@ -43,9 +47,21 @@
 #
 # ## Comparison
 #
+# The generator balances leap-day February labels and ordinary-year March labels, then separates training,
+# validation, and test years. The restricted model sees only the shared ordinal day. The richer model also
+# sees week-of-month, which directly removes this ambiguity without requiring it to infer whether a hidden
+# year is leap. The original budgets differ: ten epochs for the restricted model and twenty for the richer
+# one, so this is not an equal-budget speed comparison.
+#
 # Compare day-of-year alone with a model that also receives week-of-month.
 #
 # ## Result
+#
+# Accuracy near 50% for day-only inputs is the expected consequence of balanced, indistinguishable cases.
+# Higher accuracy with the additional coordinate shows that the selected representation provides
+# distinguishing information. It does not show that the network derived the Gregorian leap-year rule from
+# year numbers: those numbers are not exposed as inputs here. The result concerns this specific
+# February/March collision, rather than general date arithmetic or every calendar boundary.
 #
 # {{< evidence P043 status >}}
 #
@@ -98,9 +114,7 @@ from functools import partial
 import lightning.pytorch as lit
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P043"
+from reporting import experiment, report
 
 
 def records(*, years: Sequence[int], rows: int) -> Iterator[dict]:
@@ -176,6 +190,7 @@ def accuracy(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator
     return float(metrics[".target/test.accuracy.content"])
 
 
+@experiment("P043", seed=53)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     train = partial(records, years=tuple(range(1901, 1951)), rows=512)
     validate = partial(records, years=tuple(range(1951, 2001)), rows=128)
@@ -213,7 +228,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=53)
+    report(run)
 
 # %% [markdown]
 # </details>

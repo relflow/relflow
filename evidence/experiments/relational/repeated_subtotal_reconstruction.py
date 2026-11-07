@@ -3,7 +3,6 @@
 # title: Does each subtotal stay with its own item?
 # categories:
 # - Item alignment
-# evidence-id: P030
 # description: Predict quantity times price separately for every real item in an order.
 # execute:
 #   enabled: false
@@ -23,6 +22,11 @@
 # ---
 #
 # ## Example
+#
+# Each item has its own visible quantity and unit price, and needs its own hidden subtotal. The illustrative
+# first answer is `1.5 × 1.2 = 1.8`; the second is `0.5 × -1.0 = -0.5`. Negative prices are permitted by
+# this synthetic arithmetic generator. These are two separate predictions at the original item positions,
+# rather than one total for the order. Generated orders range from empty to five items.
 #
 # ```yaml
 # items:
@@ -47,9 +51,21 @@
 #
 # ## Comparison
 #
+# The scoring control shuffles subtotal targets among items inside an order without changing the visible
+# quantities or prices. For the illustrated pair, swapping `1.8` and `-0.5` would attach valid numbers to
+# the wrong records. Predictions should fit the original pairing better. Independent structural checks also
+# require the output list to retain exactly the real items, including zero predictions for an empty order,
+# and to mark each predicted coordinate as inferred.
+#
 # Shuffle the expected subtotals between items while keeping visible inputs fixed. Also check empty orders and retained item positions.
 #
 # ## Result
+#
+# Normalized RMSE divides subtotal error by the error of a constant guess based on the training targets.
+# Lower error for aligned targets, with a clear increase for shuffled targets, supports learning an item-
+# specific relationship. Correct output lengths address a different question: where those predictions were
+# written. Neither low average error nor correct alignment makes multiplication exact; the example explains
+# the target formula rather than showing a measured prediction.
 #
 # {{< evidence P030 status >}}
 #
@@ -102,9 +118,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P030"
 LENGTH = 5
 
 
@@ -146,6 +161,7 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
+@experiment("P030", seed=31)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model.xs(
@@ -204,7 +220,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=31)
+    report(run)
 
 # %% [markdown]
 # </details>

@@ -1,9 +1,10 @@
 # relflow evidence
 
-This directory owns the 79 controlled synthetic experiments, their protocol,
-lab runner, runtime tests, and current publication results.
+This directory owns the controlled synthetic experiments, their protocol,
+hosted CPU runner, runtime tests, and current publication results.
 Stable P identifiers identify experiments throughout the runner, reports, and
-website. Scripts declare their ID, group, and presentation options. Measured
+website. An `@experiment` declaration owns each script's ID and default seed;
+frontmatter owns its group and presentation options. Measured
 runs, checks, seeds, environment, source provenance, and report links live in
 separate publication JSON assets.
 
@@ -22,44 +23,139 @@ A two-step run checks execution only. Each execution
 writes a new JSON file under evidence/runs/local; --output-dir selects another
 directory. Execution never edits the reviewed publication selection.
 
-## Required lab execution
+## Define an experiment
+
+The default **core** lane runs in required hosted CI. Additional studies with
+optional resources live in `research/<category>/`; they use the same experiment
+format and appear in the docs with a Research label. List or run that lane
+explicitly:
+
+```sh
+uv run --project docs python evidence/experiments/run.py --lane all --list
+uv run --project docs --with /path/to/provisioned-relflow.whl \
+  python evidence/experiments/run.py --lane research P091
+```
+
+Read the selected page's Reproduce tab for its declared `evidence-requires`.
+P091 requires TorchJD, P092 requires a real offline Text encoder, and P099/P100
+require the Duration/Ordinal wheel from `stage/0.5.0`. The current core wheel
+does not supply those pending datatypes. A research selection does not download
+models, substitute a mocked encoder, or replace a missing measurement with a pass.
+
+Create an authoring file from the repository root:
+
+```sh
+uv run --project docs python evidence/experiments/run.py \
+  --new aggregation/median --title "Can a model learn a median?"
+```
+
+This writes `evidence/experiments/aggregation/median.py` with the next stable
+ID, a literal default seed of `0`, presentation metadata, example sections, and
+the decorator and reporting entrypoint. The title defaults to words from the
+filename; the category comes from the first path segment. The display group
+reuses that category's existing group when unambiguous, otherwise its name.
+Use `--title`, `--group`, `--id`, or `--seed` to choose those values.
+Add `--lane research` to scaffold a separately provisioned study. IDs are
+allocated across both lanes, and research sources must describe their resources
+in `evidence-requires`.
+Creation reads declarations without importing experiments or model packages,
+and refuses to overwrite an existing file. IDs increase beyond the current
+maximum instead of filling gaps.
+
+The generated scientific implementation raises `NotImplementedError`. Fill in
+the generator, model, independent training/validation/test splits, explicit
+budgets, matched control, held-out metrics, and Boolean checks. Update the
+example, model tree, and metric readout to match. The file joins discovery
+immediately, so it cannot satisfy the full gate until it is complete; it may
+also fail authoring checks while those sections are unfinished.
+
+List the catalog, then smoke-test the new ID with the intended wheel:
+
+```sh
+uv run --project docs python evidence/experiments/run.py --list
+uv run --project docs --with /path/to/matching-relflow.whl \
+  python evidence/experiments/run.py P083 --steps 2
+```
+
+Replace `P083` with the ID printed by creation. `--steps 2` caps each training
+stage when the implementation honors the cap; it records a smoke run and
+cannot establish a learning result. Complete experiments keep the same explicit
+training and evaluation protocol when run without that cap.
+
+Decorate the standalone `run(seed, steps, accelerator)` function and pass it to
+the shared reporter under a main guard:
+
+```python
+from reporting import experiment, report
+
+
+@experiment("P083", seed=8301)
+def run(seed, steps, accelerator):
+    # Generate independent splits, fit the model, and evaluate held-out data.
+    # Keep the experiment's budgets, controls, metrics, and checks in this file.
+    ...
+    return metrics, checks
+
+
+if __name__ == "__main__":
+    report(run)
+```
+
+Choose a new stable P identifier for a new experiment. The decorator keeps the
+original function callable and attaches an immutable declaration; importing a
+script never runs training. Discovery scans declarations as syntax, without
+importing scripts, Torch, Lightning, or relflow. IDs and seeds must be literals,
+and duplicate IDs or malformed declarations fail discovery. Existing publication
+records and archived frontmatter-based suites retain their original identities.
+The [authoring template](templates/experiment.py.txt) supplies structure rather
+than a training framework: budgets, controls, and checks remain visible in the
+experiment itself.
+
+## Present recorded results
+
+Generated pages put the behavioral criteria before the Example, with the
+selected record's met/unmet statuses. Recorded measurements use plain readouts,
+labeled groups, and scalar tables. Expanded details separate Measurements,
+Method, Reproduce, and Code, with provenance and the complete raw record in
+their own disclosures. These views are generated from the existing scripts and
+selected publication, preserving scientific code, budgets, checks, and original
+measurement provenance. Missing measurements stay unrecorded. See the
+[presentation contract](SPEC.md#documentation) for authoring guidance.
+
+## Required hosted execution
 
 The library's workflow shares one candidate wheel across tests, Evidence, and
 release, and builds an exact baseline wheel when needed. It
-calls .github/workflows/evidence-lab.yml at a reviewed full commit SHA, passing
-a separate reviewed suite SHA. The helper pins the trusted executor. GitHub
-joins Tailscale using short-lived OIDC and dispatches one experiment per Docker
-container on lab. Containers have bounded CPU/memory, no network, a read-only
+calls `.github/workflows/evidence-hosted.yml` at a reviewed full commit SHA,
+passing a separate reviewed suite SHA. The helper pins the trusted executor.
+Twelve GitHub-hosted CPU shards run one experiment per Docker container, with
+both roles for each experiment assigned to the same runner. Each shard runs at
+most two containers concurrently. Containers have bounded CPU/memory, no network, a read-only
 root, and no host home or Docker socket. The full catalog runs for both wheels
-with the original seeds and budgets, using verified references for unchanged
-baselines. Every baseline-passing check must pass on
-the candidate; baseline misses remain reported. CI queues lab work across PRs
-and cancels superseded attempts within each PR. Errors, missing records, invalid
+with the original seeds and budgets. Every baseline-passing check must pass on
+the candidate; baseline misses remain reported. A separate collector verifies
+all shards and their actual execution identities. CI cancels superseded attempts
+within each PR. Errors, missing records, invalid
 provenance, smoke execution, and partial coverage fail CI / required.
 
 The combined CI gate also requires the library test matrix and static
 documentation validation. The suite normally comes from the candidate commit
 in this repository. A new suite can be validated explicitly with
 `gh workflow run ci.yml --repo relflow/relflow --ref main -f evidence_ref=<full-suite-commit>`.
-This tests the selected suite without changing the trusted executor or
-Tailscale trust.
+This tests the selected suite without changing the trusted executor.
 
-Before training, the pinned helper probes the actual cached container image,
-host CPU/kernel, and resource/thread settings. It authenticates complete
-successful CI reports and proves their source and wheel-payload equivalence
-to the current request. Report-only updates must exactly match archived
-candidate measurements and their provenance. A reuse receipt records the
-current request, original run/artifacts, explicit role mapping, and all hashes;
-it does not change or clone an original execution record. A miss runs the
-suite. The required Evidence job always performs validation.
+The dependency-only runtime image is prepared once and delivered with its
+verified identity. Each shard records its actual CPU/kernel, image, and
+resource/thread settings; baseline and candidate retain those measurements.
+Both roles run freshly. A dependency-cache hit never supplies a learning result
+or bypasses the required collector. Historical authenticated reports retain
+their original measurements, revisions, and runtime identities.
 
-Baseline execution reuse is local to the trusted lab controller. Its cache is
-outside worker mounts, limited to eight source reports and 1 GiB. Retained
-reports carry self-contained source proofs, bounded to two levels and 256 MiB.
-Missing, invalid, changed, or overly deep proofs cause fresh execution.
+Only infrastructure operations that have not produced a worker measurement
+receive bounded retries. Failed checks, worker exceptions, OOMs, cancellations,
+and learning timeouts remain failures, with their logs and attempts retained.
 
-See [lab.md](lab.md) for trust and repository variables. No cloud account, stored
-Tailscale secret, or self-hosted GitHub runner is required.
+See [hosted.md](hosted.md) for workflow trust, parallelism, and storage.
 
 ## Reports and publication
 
@@ -104,13 +200,6 @@ To execute another complete CI run without publishing a new selection:
 gh workflow run ci.yml --repo relflow/relflow --ref main
 ```
 
-To execute every task without report or baseline reuse:
-
-```sh
-gh workflow run ci.yml --repo relflow/relflow --ref main \
-  -f force_fresh_evidence=true
-```
-
 The release workflow normally publishes evidence automatically. To prepare
 assets explicitly for an unreleased version using its verified main CI run:
 
@@ -126,12 +215,12 @@ reader changes do not establish fresh learning results.
 
 ## Runtime efficiency
 
-Lab defaults to 16 workers, with the longest recorded experiments scheduled
-first. Wheels are installed in cached, isolated image layers rather than in
-every task. P025 keeps all three seeds and runs two trials concurrently within
-its existing CPU limit. Every report retains timing and CPU/memory telemetry.
+Twelve shards distribute whole proof pairs using recorded durations as scheduling
+hints, with two containers per runner. Wheels are installed in isolated image
+layers rather than in every task. P025 keeps all three seeds and its existing
+CPU behavior. Every report retains timing and CPU/memory telemetry.
 
-Verified reuse compares execution inputs. Publication, documentation, and test
-changes do not retrain unchanged models. Runtime, dependency, seed, budget, and
-policy changes invalidate the affected measurements. Complete coverage and the
-paired regression gate remain required. See [lab.md](lab.md#execution-cost-and-timing).
+Dependency caches reduce setup; they do not remove seeds, reduce budgets, or
+substitute historical measurements. Shards execute both roles freshly. Complete
+coverage and the paired regression gate remain required. See
+[hosted.md](hosted.md#execution-cost-and-timing).

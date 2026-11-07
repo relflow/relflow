@@ -21,9 +21,9 @@ build from this checkout alone using the isolated static environment.
   tools use `uv run --project docs` and `docs/.venv`; package tools use the root
   environment. Documentation tests live in `docs/tests/`.
 - The build uses pinned Quarto 1.10.18, bundled Typst, and the committed
-  extension. PyYAML is the only Python runtime dependency; pytest and Ruff are
-  development tools. Never install or import relflow, Torch, Lightning, or a
-  sibling checkout to render or validate the site.
+  extension. PyYAML 6.0.3 is the only Python runtime dependency; pytest and Ruff
+  are development tools. Never install or import relflow, Torch, Lightning, or
+  a sibling checkout to render or validate the site.
 - Python examples are static illustrations. Use ordinary `python` fences and
   the Markdown engine. Never execute examples, train models, read application
   data, or download model weights during a build.
@@ -222,3 +222,23 @@ bootstrap snapshot. Hosted builds fetch matching versioned assets, validate
 their digests and source revisions, and cache them outside canonical sources;
 unreleased previews use the last released data. Keep the static environment
 free of model imports and credentials. Clean only generated publication output.
+
+Evidence pages expose the predeclared behavioral criteria before the Example,
+with each selected run's met/unmet status. The renderer injects this checks
+shortcode only into generated pages; canonical scripts retain their authored
+prose. Present nested metrics as labeled groups and scalar tables, with the full
+raw record in a separate disclosure. Generated experiment details use
+Measurements, Method, Reproduce, and Code tabs. Keep metric groups and provenance
+folded by default, format provenance as a table, and bound the source-code viewer.
+
+Evidence overviews explain the generated task in ordinary language and walk
+through a concrete example. Explain what the fields mean, which answers are
+hidden, how the answer is determined, and why the comparison is informative.
+Use the real schema and generator ranges. Explain unfamiliar metric names and
+their reference values. Illustrative answers are separate from model predictions;
+interpret measured outcomes against the displayed record and its scope.
+
+Show only measurements present in the selected record, using plain readouts
+and structured tables. Missing measurements remain visibly unrecorded.
+Presentation edits never establish a fresh learning result or change
+scientific budgets and checks.

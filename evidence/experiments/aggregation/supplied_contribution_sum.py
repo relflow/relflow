@@ -3,7 +3,6 @@
 # title: Can it total contributions already calculated?
 # categories:
 # - Weighted aggregation
-# evidence-id: P015
 # description: Supply each item’s contribution to a total, instead of its separate value and weight.
 # execute:
 #   enabled: false
@@ -19,6 +18,11 @@
 # evidence-group: Aggregation
 # ---
 #
+# Every input number is already an item's contribution to a weighted total. The separate value and
+# weight have been multiplied before the record reaches the model. The hidden task is therefore to
+# add six signed contributions, rather than discover their original pairings or learn
+# multiplication.
+#
 # ## Example
 #
 # ```yaml
@@ -33,6 +37,10 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# In the illustration, 0.4 and −0.4 cancel. The remaining 0.3, 0.1, −0.2, and 0.3 sum to 0.5. A
+# contribution could have come from many different value–weight pairs; those original pairs are not
+# needed once their product is known.
 #
 # ```{typst}
 # //| label: fig-evidence-supplied-contribution-sum
@@ -50,11 +58,25 @@
 #
 # Compare predictions with the correct totals on new lists of the same length.
 #
+# Training and test use independently generated lists, always with six items. Compare this
+# diagnostic with the raw value-and-weight experiment: both predict a weighted total, but this
+# version supplies the difficult item-level interaction directly. There is no pairing corruption
+# here because the original value and weight fields are absent. It tests whether the remaining
+# numerical information can be combined successfully.
+#
 # ## Result
 #
 # {{< evidence P015 status >}}
 #
-# The simpler summation task works. Fixed length means averaging and a fixed multiplier could also solve it; varying lengths are not tested.
+# The simpler summation task works. Fixed length means averaging and a fixed multiplier could also
+# solve it; varying lengths are not tested.
+#
+#
+# The error percentage compares held-out totals with a constant training-mean prediction. A low
+# score establishes useful fixed-length prediction, not a particular internal algorithm: multiplying
+# an accurately decoded average by six would also solve this task. Variable-length bags and
+# complete-list duplication would be needed to distinguish that shortcut from a rule that scales
+# across counts.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -103,9 +125,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P015"
 ITEMS = 6
 
 
@@ -142,6 +163,7 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline_rmse, "nrmse": measured / baseline_rmse}
 
 
+@experiment("P015", seed=3300)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
@@ -189,7 +211,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3300)
+    report(run)
 
 # %% [markdown]
 # </details>

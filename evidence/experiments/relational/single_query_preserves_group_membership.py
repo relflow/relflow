@@ -3,7 +3,6 @@
 # title: Can one summary support comparisons within groups?
 # categories:
 # - Peer-relative inference
-# evidence-id: P033
 # description: Compress a list into one summary, then predict each item’s difference from its group average.
 # execute:
 #   enabled: false
@@ -23,6 +22,12 @@
 # ---
 #
 # ## Example
+#
+# The arithmetic matches the grouped-deviation task: A's values `2` and `4` have mean `3`, so their hidden
+# answers are `-1` and `+1`. The visible inputs remain each item's group and value. This version compresses
+# collection context into one learned summary, while each repeated target still receives its own aligned
+# group and value. It therefore asks whether that shared context is useful alongside local information, not
+# whether a single vector can replace every item.
 #
 # ```yaml
 # items:
@@ -51,9 +56,21 @@
 #
 # ## Comparison
 #
+# The control rotates group labels across the six items without altering values, target deviations, or the
+# number of occurrences of each label. It changes the peer relationship needed to compute the original
+# answers. For example, assigning the value `2` to a different pair changes which mean should be subtracted.
+# Worse error against the retained original targets is evidence of membership-sensitive behavior, rather
+# than successful subtraction from the item's value alone.
+#
 # Change group labels while retaining original answers. Each decoder still receives its own item’s group and value.
 #
 # ## Result
+#
+# Read the intact and changed-group errors together. A low intact error is useful only if the label
+# intervention also changes the result as intended; the recorded oracle check confirms that the intervention
+# changes the underlying mathematical task. Normalization uses the training-target constant baseline. These
+# measurements concern six items and three two-member groups. They neither establish lossless compression
+# nor measure a speed or memory advantage of the summary.
 #
 # {{< evidence P033 status >}}
 #
@@ -107,9 +124,8 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P033"
 ITEMS = 6
 GROUPS = ("A", "B", "C")
 
@@ -168,6 +184,7 @@ def implied_deviation(rows: list[dict]) -> np.ndarray:
     return np.asarray(values)
 
 
+@experiment("P033", seed=3720)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
@@ -235,7 +252,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=3720)
+    report(run)
 
 # %% [markdown]
 # </details>

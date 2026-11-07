@@ -1,4 +1,4 @@
-"""Cached baseline slots preserve originals and fail closed on any changed input."""
+"""Historical baseline references preserve originals and reject changed execution inputs."""
 
 import json
 import shutil
@@ -13,12 +13,12 @@ from evidence_ci import (
     finish,
     integrity,
     plan,
+    resolved,
     suite_identity,
     task_key,
     wheel_payload,
     write_json,
 )
-from lab_run import cached, retain
 from record import validate
 
 
@@ -33,7 +33,13 @@ def wheel(path, *, payload=b"sdk", year=2020):
 def source(root):
     script = root / "experiments/family/signal.py"
     script.parent.mkdir(parents=True, exist_ok=True)
-    script.write_text("# %% [markdown]\n# ---\n# evidence-id: P901\n# title: Signal\n# ---\n# %%\nreport(seed=123)\n")
+    script.write_text(
+        "# %% [markdown]\n# ---\n# title: Signal\n# ---\n# %%\n"
+        "from reporting import experiment, report\n"
+        "@experiment('P901', seed=123)\n"
+        "def run(seed, steps, accelerator):\n    return {}, {'signal': True}\n"
+        "if __name__ == '__main__':\n    report(run)\n"
+    )
     (root / "experiments/reporting.py").write_text("# trusted reporting fixture\n")
     return script
 
@@ -102,29 +108,43 @@ def fresh(manifest, task):
     }
 
 
+def seal(reports):
+    inventory = {
+        path.relative_to(reports).as_posix(): digest(path)
+        for path in sorted(reports.rglob("*"))
+        if path.is_file() and path != reports / "checksums.json"
+    }
+    (reports / "checksums.json").write_text(json.dumps(inventory, sort_keys=True))
+    return digest(reports / "checksums.json")
+
+
+def archive(original, current, task):
+    """Construct an old archive layout without reviving a live cache writer."""
+    name = "reused/" + digest(original / "checksums.json")
+    shutil.copytree(original, current / name)
+    return {"task": task, "reuse": {"report": name, "task": task_key(dict(task, role="candidate"))}}
+
+
 @pytest.fixture
 def reuse_pair(tmp_path):
     suite = tmp_path / "suite"
     source(suite)
     original = tmp_path / "original"
-    manifest, execution = setup_report(original, suite)
+    _, execution = setup_report(original, suite)
     assert finish(original, root=suite)["passed"]
-    cache = tmp_path / "cache"
-    retain(cache, original, manifest, execution)
     current = tmp_path / "current"
     now, _ = setup_report(
         current, suite, revision="new", seed_records=False, baseline_payload=b"sdk", candidate_payload=b"new-sdk"
     )
     task = now["tasks"][0]
-    wrapper = cached(cache, current, now, task, execution, suite)
-    assert wrapper is not None
+    wrapper = archive(original, current, task)
     collect(current, wrapper)
     collect(current, fresh(now, now["tasks"][1]))
-    return suite, original, current, cache, now, execution, wrapper
+    return suite, original, current, now, execution, wrapper
 
 
 def test_reuse_preserves_original_bytes_and_provenance_and_all_slots(reuse_pair):
-    suite, original, current, cache, manifest, execution, wrapper = reuse_pair
+    suite, original, current, manifest, _, wrapper = reuse_pair
     original_key = wrapper["reuse"]["task"]
     assert original_key.startswith("candidate/")
     retained = current / wrapper["reuse"]["report"]
@@ -150,9 +170,9 @@ def test_reuse_preserves_original_bytes_and_provenance_and_all_slots(reuse_pair)
 @pytest.mark.parametrize(
     "field", ["payload", "requirements", "suite", "executor", "cpu", "image", "threads", "seed", "budget", "policy"]
 )
-def test_any_changed_execution_input_is_a_miss(reuse_pair, field):
-    suite, _, current, cache, manifest, execution, _ = reuse_pair
-    manifest, execution = deepcopy(manifest), deepcopy(execution)
+def test_archived_reference_rejects_any_changed_execution_input(reuse_pair, field):
+    suite, _, current, manifest, execution, wrapper = reuse_pair
+    manifest, execution, wrapper = deepcopy((manifest, execution, wrapper))
     task = manifest["tasks"][0]
     if field == "payload":
         manifest["baseline"]["payload_sha256"] = "changed"
@@ -174,7 +194,10 @@ def test_any_changed_execution_input_is_a_miss(reuse_pair, field):
         task["steps"] = 1
     else:
         manifest["policy"] = "changed"
-    assert cached(cache, current, manifest, task, execution, suite) is None
+    wrapper["task"] = task
+    (current / "execution.json").write_text(json.dumps(execution))
+    with pytest.raises(ValueError, match="execution identity differs"):
+        resolved(manifest, [wrapper], current, root=suite)
 
 
 def test_payload_identity_ignores_transport_timestamps_only(tmp_path):
@@ -207,7 +230,7 @@ def test_suite_identity_ignores_only_selected_metadata(tmp_path):
 
 @pytest.mark.parametrize("fault", ["log", "record", "wheel", "source", "candidate-ref", "chain", "failed", "missing"])
 def test_invalid_source_or_reference_never_satisfies_gate(reuse_pair, fault):
-    suite, _, current, _, manifest, _, wrapper = reuse_pair
+    suite, _, current, manifest, _, wrapper = reuse_pair
     retained = current / wrapper["reuse"]["report"]
     records = [json.loads(path.read_text()) for path in (current / "results").rglob("*.json")]
     if fault == "candidate-ref":
@@ -215,9 +238,10 @@ def test_invalid_source_or_reference_never_satisfies_gate(reuse_pair, fault):
         candidate.clear()
         candidate.update(task=manifest["tasks"][1], reuse=wrapper["reuse"])
     elif fault == "chain":
-        wrapper["reuse"]["task"] = "baseline/P901/cpu/seed-123/attempt-1"
-        source_record = retained / "results" / (wrapper["reuse"]["task"] + ".json")
-        source_record.write_text(json.dumps({"task": manifest["tasks"][0], "reuse": wrapper["reuse"]}))
+        reference = next(value for value in records if "reuse" in value)
+        reference["reuse"]["task"] = "baseline/P901/cpu/seed-123/attempt-1"
+        source_record = retained / "results" / (reference["reuse"]["task"] + ".json")
+        source_record.write_text(json.dumps({"task": manifest["tasks"][0], "reuse": reference["reuse"]}))
     elif fault in {"failed", "missing"}:
         paths = sorted((retained / "results").rglob("*.json"))
         if fault == "missing":
@@ -226,12 +250,11 @@ def test_invalid_source_or_reference_never_satisfies_gate(reuse_pair, fault):
             value = json.loads(paths[0].read_text())
             value["error"] = "original execution failed"
             paths[0].write_text(json.dumps(value))
-        checks = {
-            path.relative_to(retained).as_posix(): digest(path)
-            for path in retained.rglob("*")
-            if path.is_file() and path.name != "checksums.json"
-        }
-        (retained / "checksums.json").write_text(json.dumps(checks))
+        # Authenticate the altered inventory so deeper original-run validation
+        # must reject the missing or failed measurement, even with a green summary.
+        name = "reused/" + seal(retained)
+        retained.rename(current / name)
+        next(value for value in records if "reuse" in value)["reuse"]["report"] = name
     else:
         path = {
             "log": next((retained / "logs").rglob("*.txt")),
@@ -240,11 +263,14 @@ def test_invalid_source_or_reference_never_satisfies_gate(reuse_pair, fault):
             "source": retained / "source/experiments/family/signal.py",
         }[fault]
         path.write_bytes(b"tampered")
-    assert not evaluate(manifest, records, root=suite, reports=current)["passed"]
+    summary = evaluate(manifest, records, root=suite, reports=current)
+    assert not summary["passed"]
+    if fault in {"failed", "missing"}:
+        assert any("complete passing original run" in error for error in summary["errors"])
 
 
-def test_cached_passing_checks_still_block_candidate_regression(reuse_pair):
-    suite, _, current, _, manifest, _, _ = reuse_pair
+def test_archived_passing_checks_still_block_candidate_regression(reuse_pair):
+    suite, _, current, manifest, _, _ = reuse_pair
     records = [json.loads(path.read_text()) for path in (current / "results").rglob("*.json")]
     next(value for value in records if value["task"]["role"] == "candidate")["result"]["checks"]["signal"] = False
     summary = evaluate(manifest, records, root=suite, reports=current)
@@ -252,29 +278,37 @@ def test_cached_passing_checks_still_block_candidate_regression(reuse_pair):
     assert summary["regressions"] == [{"id": "P901", "seed": 123, "check": "signal"}]
 
 
-def test_failed_or_incomplete_run_cannot_seed_cache(tmp_path):
+@pytest.mark.parametrize("fault", ["failed", "missing"])
+def test_failed_or_incomplete_archive_cannot_supply_baseline(tmp_path, fault):
     suite = tmp_path / "suite"
     source(suite)
-    for fault in ("failed", "missing"):
-        reports = tmp_path / fault
-        manifest, execution = setup_report(reports, suite)
-        path = next((reports / "results").rglob("*.json"))
-        if fault == "missing":
-            path.unlink()
-        else:
-            record = json.loads(path.read_text())
-            record["error"] = "training failed"
-            path.write_text(json.dumps(record))
-        assert not finish(reports, root=suite)["passed"]
-        cache = tmp_path / (fault + "-cache")
-        retain(cache, reports, manifest, execution)
-        assert not cache.exists()
+    original = tmp_path / "original"
+    setup_report(original, suite)
+    path = next((original / "results").rglob("*.json"))
+    if fault == "missing":
+        path.unlink()
+    else:
+        record = json.loads(path.read_text())
+        record["error"] = "training failed"
+        path.write_text(json.dumps(record))
+    assert not finish(original, root=suite)["passed"]
+    current = tmp_path / "current"
+    manifest, _ = setup_report(
+        current, suite, revision="new", seed_records=False, baseline_payload=b"sdk", candidate_payload=b"new-sdk"
+    )
+    wrapper = archive(original, current, manifest["tasks"][0])
+    with pytest.raises(ValueError, match="incomplete or failed original run"):
+        resolved(manifest, [wrapper], current, root=suite)
+    collect(current, wrapper)
+    collect(current, fresh(manifest, manifest["tasks"][1]))
+    assert not finish(current, root=suite)["passed"]
+    with pytest.raises(ValueError, match="Publication requires a complete full-catalog run"):
+        validate(current, current / "artifacts", root=suite)
 
 
-def test_fresh_candidate_from_reused_run_seeds_next_baseline_with_bounded_proof(reuse_pair, tmp_path):
-    suite, _, current, cache, manifest, execution, _ = reuse_pair
+def test_archived_reference_chains_are_bounded(reuse_pair, tmp_path):
+    suite, _, current, _, _, _ = reuse_pair
     assert finish(current, root=suite)["passed"]
-    retain(cache, current, manifest, execution)
     next_run = tmp_path / "next"
     next_manifest, _ = setup_report(
         next_run,
@@ -284,12 +318,11 @@ def test_fresh_candidate_from_reused_run_seeds_next_baseline_with_bounded_proof(
         baseline_payload=b"new-sdk",
         candidate_payload=b"third-sdk",
     )
-    wrapper = cached(cache, next_run, next_manifest, next_manifest["tasks"][0], execution, suite)
-    assert wrapper is not None and wrapper["reuse"]["task"].startswith("candidate/")
+    wrapper = archive(current, next_run, next_manifest["tasks"][0])
+    assert wrapper["reuse"]["task"].startswith("candidate/")
     collect(next_run, wrapper)
     collect(next_run, fresh(next_manifest, next_manifest["tasks"][1]))
     assert finish(next_run, root=suite)["passed"]
-    retain(cache, next_run, next_manifest, execution)
     deeper = tmp_path / "deeper"
     deeper_manifest, _ = setup_report(
         deeper,
@@ -299,164 +332,22 @@ def test_fresh_candidate_from_reused_run_seeds_next_baseline_with_bounded_proof(
         baseline_payload=b"third-sdk",
         candidate_payload=b"fourth-sdk",
     )
-    assert cached(cache, deeper, deeper_manifest, deeper_manifest["tasks"][0], execution, suite) is None
+    wrapper = archive(next_run, deeper, deeper_manifest["tasks"][0])
+    with pytest.raises(ValueError, match="complete passing original run"):
+        resolved(deeper_manifest, [wrapper], deeper, root=suite)
+    collect(deeper, wrapper)
+    collect(deeper, fresh(deeper_manifest, deeper_manifest["tasks"][1]))
+    assert not finish(deeper, root=suite)["passed"]
 
 
 def test_missing_slot_and_untrusted_provenance_bypass_cannot_pass(reuse_pair):
-    suite, _, current, _, manifest, _, _ = reuse_pair
+    suite, _, current, manifest, _, _ = reuse_pair
     records = [json.loads(path.read_text()) for path in (current / "results").rglob("*.json")]
     assert not evaluate(manifest, records[:1], root=suite, reports=current)["passed"]
     candidate = next(value for value in records if value["task"]["role"] == "candidate")
     candidate["result"]["provenance"]["wheel_sha256"] = "forged"
     candidate["reused_from"] = {"report": "pretend validated"}
     assert not evaluate(manifest, records, root=suite, reports=current)["passed"]
-
-
-def test_runner_only_schedules_missing_baselines_and_keeps_task_isolation(tmp_path, monkeypatch):
-    import argparse
-    from types import SimpleNamespace
-
-    import lab_run
-
-    suite = tmp_path / "suite"
-    source(suite)
-    candidate = wheel(tmp_path / "candidate/relflow.whl", payload=b"sdk")
-    baseline = wheel(tmp_path / "baseline/relflow.whl", payload=b"prior-sdk")
-    lock = tmp_path / "requirements.txt"
-    lock.write_text("torch==2.5.0\n")
-    runtime = {
-        "identity": {"image_id": "sha256:actual-image"},
-        "image_id": "sha256:actual-image",
-        "image": "cached-runtime",
-    }
-    monkeypatch.setattr(lab_run, "environment", lambda *args: runtime)
-    monkeypatch.setattr(lab_run, "wheel_image", lambda environment, path: "installed-" + digest(path))
-    monkeypatch.setattr(lab_run.Path, "home", lambda: tmp_path / "lab-home")
-    monkeypatch.setattr(lab_run.subprocess, "check_output", lambda *args, **kwargs: "")
-    calls = []
-    exit_code = [0]
-
-    def docker(command, **kwargs):
-        if command[:2] == ["docker", "run"]:
-            calls.append(command)
-            mount = next(value for value in command if value.endswith(",dst=/results"))
-            scratch = lab_run.Path(mount.removeprefix("type=bind,src=").removesuffix(",dst=/results"))
-            task = json.loads((scratch / "task.json").read_text())
-            mount = next(value for value in command if value.endswith(",dst=/suite,readonly"))
-            view = lab_run.Path(mount.removeprefix("type=bind,src=").removesuffix(",dst=/suite,readonly"))
-            assert view != suite and scratch not in view.parents and view not in scratch.parents
-            assert (view / task["script"]).read_bytes() == (suite / task["script"]).read_bytes()
-            assert not (view / "results.json").exists()
-            reports = next(parent for parent in scratch.parents if (parent / "manifest.json").exists())
-            manifest = json.loads((reports / "manifest.json").read_text())
-            write_json(scratch / "record.json", fresh(manifest, task))
-        return SimpleNamespace(
-            returncode=exit_code[0] if command[:2] == ["docker", "run"] else 0, stdout="container log"
-        )
-
-    monkeypatch.setattr(lab_run.subprocess, "run", docker)
-
-    def run(name, *, force=False):
-        lab_run.run(
-            argparse.Namespace(
-                suite_root=suite,
-                output=tmp_path / name,
-                candidate_wheel=candidate,
-                baseline_wheel=baseline,
-                candidate_sha=name,
-                baseline_sha="previous",
-                evidence_sha=name,
-                executor_sha="trusted",
-                requirements=lock,
-                ids=None,
-                steps=None,
-                workers=8,
-                force_fresh=force,
-            )
-        )
-        return json.loads((tmp_path / name / "summary.json").read_text())
-
-    assert run("first")["fresh_tasks"] == 2
-    wheel(baseline, payload=b"sdk", year=2025)
-    assert run("second")["reused_baseline_tasks"] == 1
-    assert len(calls) == 3
-    assert run("forced", force=True)["fresh_tasks"] == 2
-    assert len(calls) == 5
-    for command in calls:
-        assert command[command.index("--network") + 1] == "none"
-        assert "--read-only" in command and "--cap-drop" in command
-        assert any(value.startswith("installed-") for value in command)
-        assert not any("pip install" in value or "venv" in value for value in command)
-        assert command[command.index("--cpus") + 1] == "2"
-        assert command[command.index("--memory") + 1] == "4g"
-        assert not any("cache/v1" in value or "docker.sock" in value for value in command)
-        assert command[command.index("--mount") + 1].endswith(",dst=/executor,readonly")
-    source_count = len(list((tmp_path / "lab-home/relflow-evidence/cache/v1/reports").iterdir()))
-    exit_code[0] = 7
-    with pytest.raises(SystemExit):
-        run("nonzero", force=True)
-    failed = json.loads((tmp_path / "nonzero/summary.json").read_text())
-    assert not failed["passed"] and any("Container exited with status 7" in error for error in failed["errors"])
-    assert len(list((tmp_path / "lab-home/relflow-evidence/cache/v1/reports").iterdir())) == source_count
-    exit_code[0] = 0
-
-    def unwritable(*args):
-        raise OSError("cache storage unavailable")
-
-    monkeypatch.setattr(lab_run, "retain", unwritable)
-    assert run("uncached", force=True)["passed"]
-
-
-def test_probe_and_runner_share_actual_image_and_environment_policy(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-
-    import lab_run
-
-    lock = tmp_path / "requirements.txt"
-    lock.write_text("torch==2.5.0\n")
-    builds = []
-
-    def docker(command, **kwargs):
-        assert command[:2] == ["docker", "build"]
-        context = lab_run.Path(command[-1])
-        builds.append((context / "Dockerfile").read_text())
-        assert (context / "requirements.txt").read_bytes() == lock.read_bytes()
-        return SimpleNamespace(returncode=0)
-
-    monkeypatch.setattr(lab_run.subprocess, "run", docker)
-    monkeypatch.setattr(
-        lab_run.subprocess,
-        "check_output",
-        lambda command, **kwargs: "sha256:actual-image\n" if command[1] == "image" else "actual-docker-version\n",
-    )
-    measured = lab_run.environment(lock, 8)
-    assert measured["identity"]["image_id"] == "sha256:actual-image"
-    assert measured["identity"]["docker"] == "actual-docker-version"
-    assert measured["identity"]["host"]["cpu_count"]
-    assert measured["identity"]["resources"]["workers"] == 8
-    assert measured["identity"]["resources"]["network"] == "none"
-    assert builds and "python:3.12-slim@sha256:b18b" in builds[0]
-    assert "pip install --no-cache-dir torch==2.5.0+cpu" in builds[0]
-
-
-def test_retention_bounds_storage_and_removes_only_orphan_indices(tmp_path):
-    import os
-
-    from lab_run import prune
-
-    cache = tmp_path / "cache"
-    for index in range(3):
-        name = str(index) * 64
-        report = cache / "reports" / name
-        report.mkdir(parents=True)
-        (report / "immutable.json").write_text("execution")
-        os.utime(report, (index + 1, index + 1))
-        write_json(cache / "keys" / (name + ".json"), {"report": name, "task": "candidate/P901"})
-    prune(cache, max_reports=2, max_bytes=100)
-    assert {path.name for path in (cache / "reports").iterdir()} == {"1" * 64, "2" * 64}
-    assert {path.stem for path in (cache / "keys").iterdir()} == {"1" * 64, "2" * 64}
-    prune(cache, max_reports=2, max_bytes=9)
-    assert {path.name for path in (cache / "reports").iterdir()} == {"2" * 64}
 
 
 def test_suite_identity_includes_binary_fixtures_and_modes(tmp_path):
@@ -502,60 +393,6 @@ def test_one_experiment_change_preserves_other_baseline_execution_keys(tmp_path)
         old = next(task for task in before["tasks"] if task["id"] == identifier and task["role"] == "baseline")
         new = next(task for task in after["tasks"] if task["id"] == identifier and task["role"] == "baseline")
         assert (execution_key(before, old, execution) == execution_key(after, new, execution)) is (identifier == "P902")
-
-
-def test_worker_inputs_exclude_unbound_files_and_preserve_shared_data(tmp_path):
-    from evidence_ci import identity, runtime_inputs
-    from lab_run import isolate
-
-    suite = tmp_path / "suite"
-    script = source(suite)
-    other = script.with_name("other.py")
-    other.write_text(script.read_text().replace("P901", "P902"))
-    data = suite / "experiments/data.bin"
-    data.write_bytes(b"\x00training input")
-    data.chmod(0o640)
-    (suite / "results.json").write_text("unbound publication input")
-    manifest = plan(
-        run_id="isolated", candidate={}, baseline={}, evidence_sha="source", executor_sha="trusted", root=suite
-    )
-    task = manifest["tasks"][0]
-    inputs = runtime_inputs(suite)
-    scripts = {script.relative_to(suite).as_posix(), other.relative_to(suite).as_posix()}
-    view = isolate(suite, tmp_path / "inputs", task, inputs, scripts)
-    assert identity(runtime_inputs(view)) == task["inputs_sha256"]
-    assert (view / task["script"]).read_bytes() == script.read_bytes()
-    assert (view / "experiments/reporting.py").is_file()
-    assert (view / "experiments/data.bin").read_bytes() == data.read_bytes()
-    assert (view / "experiments/data.bin").stat().st_mode & 0o777 == 0o640
-    assert not (view / other.relative_to(suite)).exists()
-    assert not (view / "results.json").exists()
-    # A separate copy prevents writes through any accidental alias to the source.
-    (view / "experiments/data.bin").write_bytes(b"changed copy")
-    assert data.read_bytes() == b"\x00training input"
-
-
-@pytest.mark.parametrize("change", ["bytes", "mode", "symlink"])
-def test_worker_rejects_input_changes_after_planning(tmp_path, change):
-    from evidence_ci import runtime_inputs
-    from lab_run import isolate
-
-    suite = tmp_path / "suite"
-    script = source(suite)
-    manifest = plan(
-        run_id="isolated", candidate={}, baseline={}, evidence_sha="source", executor_sha="trusted", root=suite
-    )
-    task = manifest["tasks"][0]
-    inputs = runtime_inputs(suite)
-    if change == "bytes":
-        script.write_text(script.read_text() + "changed = True\n")
-    elif change == "mode":
-        script.chmod(0o755)
-    else:
-        script.unlink()
-        script.symlink_to(suite / "experiments/reporting.py")
-    with pytest.raises(ValueError, match="Execution input"):
-        isolate(suite, tmp_path / "inputs", task, inputs, {task["script"]})
 
 
 def test_runtime_keys_bind_every_byte_exposed_to_the_worker(tmp_path):

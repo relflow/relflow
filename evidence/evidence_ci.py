@@ -15,10 +15,10 @@ import tempfile
 import time
 import traceback
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-from experiments.source import frontmatter, metadata, registry
+from experiments.source import declaration, frontmatter, metadata, registry
 
 ROOT = Path(__file__).resolve().parent
 
@@ -225,7 +225,12 @@ def write_json(path: Path, value: object) -> None:
 
 
 def default_seed(path: Path) -> int:
-    for node in ast.walk(ast.parse(path.read_text())):
+    source = path.read_text()
+    declared = declaration(source)
+    if declared is not None:
+        return declared.seed
+    # Archived suites retain their original report(...) declaration and hashes.
+    for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "report":
             for keyword in node.keywords:
                 if keyword.arg == "seed":
@@ -277,7 +282,7 @@ def plan(
     return {
         "schema": 3,
         "run_id": run_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),  # noqa: UP017 - lab host runs Python 3.10
+        "created_at": datetime.now(UTC).isoformat(),
         "evidence_sha": evidence_sha,
         "executor_sha": executor_sha,
         "policy": "paired-passing-checks-v1",
@@ -368,6 +373,17 @@ def collect(output: Path, record: dict) -> None:
         handle.write(log)
 
 
+def verify_execution(manifest: dict, records: list[dict], reports: Path | None) -> list[str]:
+    """Check hosted cohorts while retaining historical single-host report semantics."""
+    if manifest.get("backend") != "github-hosted-docker":
+        return []
+    if reports is None:
+        return ["Hosted execution requires retained shard identities and launch journals"]
+    from hosted import verify_execution as verify_hosted
+
+    return verify_hosted(manifest, records, reports)
+
+
 def evaluate(
     manifest: dict, records: list[dict], *, root: Path = ROOT, reports: Path | None = None, reuse_depth: int = 0
 ) -> dict:
@@ -386,7 +402,7 @@ def evaluate(
             reused_keys.clear()
     expected = {task_key(task): task for task in manifest["tasks"]}
     seen = {}
-    errors = reuse_errors
+    errors = reuse_errors + verify_execution(manifest, records, reports)
     catalog = registry(root, measurements=False)
     if "runtime_sha256" in manifest:
         inputs = runtime_inputs(root)

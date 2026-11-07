@@ -3,7 +3,6 @@
 # title: Can one number representation serve additive and multiplicative structure?
 # categories:
 # - Representation
-# evidence-id: P079
 # description: Compare Number, which embeds raw and log lanes and reads out standardized log-scale deviations, with
 #   Quantile ranks on additive, moderate-tail, heavy-tail, and far-from-zero targets.
 # execute:
@@ -33,6 +32,12 @@
 # evidence-group: Representation
 # ---
 #
+# Can the same numerical datatype handle adding ordinary values, multiplying
+# widely varying positive values, and predicting a small variation around a large
+# constant? These tasks stress different aspects of numerical representation.
+# The comparison keeps the learning setup matched while changing how the inputs
+# or target are represented.
+#
 # ## Example
 #
 # ```yaml
@@ -42,6 +47,16 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# For the illustrated price 18.4 and rate 0.62, the generator's noise-free median
+# answer is 18.4 times the square root of 0.62, about 14.49. Multiplicative noise
+# can produce a nearby observation such as ltv = 15.1. The name ltv labels this
+# synthetic target; no real customer-value process is being estimated.
+#
+# The other tasks use left and right inputs. An illustrative left = 10 and
+# right = -4 gives a median total of 6 in the additive task and 1006 when the
+# fixed 1000 offset is added. The target formula stays simple even though its
+# scale changes considerably.
 #
 # ```{typst}
 # //| label: fig-evidence-number-lanes
@@ -56,6 +71,19 @@
 #
 # ## Comparison
 #
+# Number exposes original-scale and signed-log information; Quantile exposes
+# training-percentile information. A log scale makes multiplicative changes easier
+# to express, while a percentile says where a value sits rather than how many
+# units separate it from another value. The experiment checks which representation
+# can learn each generated relationship under its declared budget.
+#
+# The evaluator knows the conditional median: the best population answer for the
+# absolute-error task. It compares model error with that median's error and with
+# always guessing the training median. A shuffled-input control retains each
+# answer but pairs it with another observation's inputs. Separate bulk, tail, and
+# outside-training-range measurements reveal where mistakes occur.
+#
+#
 # Hold the data, model width, optimizer, and update budget fixed. Change only the
 # numeric datatype: Number, which embeds a raw lane and a signed-log lane and
 # reads targets out as standardized deviations on the signed-log scale, or
@@ -68,19 +96,13 @@
 #
 # {{< evidence P079 status >}}
 #
-# Number has no scale option. Its two lanes make additive and multiplicative
-# structure both readable: with moderate tails they are interchangeable, and
-# only when the largest input is ten thousand times the median does a raw lane
-# alone degrade, because standardization is then set by a handful of extreme
-# rows. Its readout starts at the training mean on the signed-log scale and
-# predicts standardized deviations, which is what lets a target near 1,000 or
-# a heavy-tailed target train at the same budget as a centered one; a plain
-# raw-unit head cannot grow a readout that spans either. A monotone target
-# transform leaves the median-optimal MAE answer unchanged, so these are
-# claims about optimization at a budget, not about the estimand. Quantile
-# ranks are a fair input but a poor heavy-tailed target, because the inverse
-# continues linearly past the learned support and a slightly high rank
-# becomes an enormous source value.
+# Read the task-specific errors together. The checks ask whether Number approaches
+# the known median answer and remains close to the Quantile-input comparison;
+# they do not establish that one representation wins on every distribution.
+# Most arms receive 500 updates, and a separate 1500-update arm probes budget
+# sensitivity. Extreme-tail errors and the Quantile-target comparison are
+# additional diagnostics, so a single overall percentage does not summarize all
+# of the tradeoffs. These are controlled synthetic tasks with known formulas.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
@@ -100,9 +122,9 @@
 # `rate = exp(s z2)` from independent standard normals, then
 # `ltv = price * sqrt(rate) * exp(0.3 z3)`. Prices have a median near 20 and a
 # long tail; rates have a median of 1. The heavy task uses `s = 2.5`, where the
-# largest of 8,192 training rates is about ten thousand times the median, the
-# regime of RelBench's study-adverse count. The moderate task uses `s = 1.5`,
-# where that ratio is a few hundred. The noise is symmetric in log units, so
+# largest training rates can be much greater than the median. The moderate
+# task uses `s = 1.5`, reducing that spread. The actual extremes depend on the
+# generated sample. The noise is symmetric in log units, so
 # the conditional median is exactly `price * sqrt(rate)`, and the evaluator
 # computes it from the visible inputs without any latent variable.
 #
@@ -142,8 +164,7 @@
 # The tasks are two-input and noise-free apart from symmetric log or additive
 # noise. They do not cover bounded or bimodal bulks, where a rank lane may add
 # information beyond the log lane, or mixed-sign heavy tails. Mixed precision
-# is covered only by the recorded side experiments: an fp32 embedder and
-# readout under bf16 autocast matched fp32 scores, which is now the default.
+# needs its own explicit comparison; these fits declare full float32 precision.
 #
 # ### Complete experiment code
 #
@@ -158,9 +179,8 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
-from reporting import report
+from reporting import experiment, report
 
-PROOF_ID = "P079"
 BUDGET = 500
 LONG_BUDGET = 1500
 BATCH_SIZE = 128
@@ -295,6 +315,7 @@ def evaluate(output: np.ndarray, control: np.ndarray, reference: dict, bulk: np.
     return result
 
 
+@experiment("P079", seed=7901)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     stream = seed * 100
     metrics: dict = {"train_rows": TRAIN_ROWS, "test_rows": TEST_ROWS, "budget": BUDGET, "long_budget": LONG_BUDGET}
@@ -371,7 +392,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=7901)
+    report(run)
 
 # %% [markdown]
 # </details>

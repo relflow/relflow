@@ -3,7 +3,6 @@
 # title: Can day-of-year alone identify the weekday?
 # categories:
 # - Calendar reasoning
-# evidence-id: P045
 # description: Predict weekday from the day number while deliberately balancing different years across all seven weekday
 #   answers.
 # execute:
@@ -25,6 +24,12 @@
 #
 # ## Example
 #
+# January 1, 2001 was Monday, as the illustration shows; January 1, 2002 was Tuesday. Both dates have
+# ordinal day one. A model receiving only day-of-year cannot tell those cases apart even though their hidden
+# weekday labels differ. The generator deliberately assembles all seven weekdays for each sampled ordinal
+# day, so the ambiguity is repeated systematically rather than depending on an accidental imbalance in a few
+# dates.
+#
 # ```yaml
 # observed_at: 2001-01-01
 # target: Monday
@@ -44,9 +49,21 @@
 #
 # ## Comparison
 #
+# The two models receive day-of-year alone or day-of-year together with day-of-week. They train for the same
+# number of epochs and are evaluated on a separate range of years. Adding day-of-week supplies the
+# information needed to identify the answer directly; it does not ask the model to recover the missing year
+# or learn a calendar algorithm. This positive control shows that the prediction machinery can read a
+# sufficient representation.
+#
 # Compare day number alone with a model that also receives the weekday coordinate.
 #
 # ## Result
+#
+# With seven equally represented labels for each indistinguishable day number, about one correct answer in
+# seven is the meaningful day-only reference. The richer-input accuracy should be read as evidence that the
+# exposed weekday coordinate can be used, rather than evidence of year reasoning. A timestamp in the
+# original record does not make all of its information available after encoding. The choice of coordinates
+# determines which distinctions the downstream model can learn.
 #
 # {{< evidence P045 status >}}
 #
@@ -100,9 +117,7 @@ from functools import partial
 import lightning.pytorch as lit
 import relflow as rf
 import torch
-from reporting import report
-
-PROOF_ID = "P045"
+from reporting import experiment, report
 
 
 def records(*, years: Sequence[int], ordinal_step: int = 5) -> Iterator[dict]:
@@ -184,6 +199,7 @@ def accuracy(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator
     return float(metrics[".target/test.accuracy.content"])
 
 
+@experiment("P045", seed=47)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     train = partial(records, years=tuple(range(1901, 1936)))
     validate = partial(records, years=tuple(range(1951, 1986)))
@@ -221,7 +237,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 
 if __name__ == "__main__":
-    report(PROOF_ID, run, seed=47)
+    report(run)
 
 # %% [markdown]
 # </details>
