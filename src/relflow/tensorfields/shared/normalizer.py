@@ -29,8 +29,8 @@ def wide(device: torch.device) -> torch.dtype:
     return torch.float32 if device.type == "mps" else torch.float64
 
 
-def moments(values: torch.Tensor, width: int = 1) -> TensorDict:
-    """Summarize finite values per column with an exact count and centered moments in the device's widest float.
+def moments(values: torch.Tensor, *, width: int = 1) -> TensorDict:
+    """Summarize finite values per column with an exact count and centered moments in the widest float of the device.
 
     ``values`` reshapes to ``(-1, width)``; each column ignores its own
     non-finite entries. ``count``, ``mean`` and ``var`` have shape ``(width,)``.
@@ -57,7 +57,7 @@ class GlobalOnlineNormalizer(torch.nn.Module):
     finite value keeps its statistics.
     """
 
-    def __init__(self, alpha: float | None = None, epsilon: float = 1e-12, width: int = 1):
+    def __init__(self, alpha: float | None = None, epsilon: float = 1e-12, *, width: int = 1):
         super().__init__()
 
         self.epsilon: float = epsilon
@@ -70,7 +70,7 @@ class GlobalOnlineNormalizer(torch.nn.Module):
 
     @property
     def scale(self) -> torch.Tensor:
-        """Standard deviation floored at ``epsilon`` of the mean's magnitude."""
+        """Standard deviation floored at ``epsilon`` of the magnitude of the mean."""
         return torch.sqrt(self.var).clamp_min(self.epsilon * (self.mean.abs() + 1.0))
 
     def _apply(self, fn, recurse=True):
@@ -84,7 +84,7 @@ class GlobalOnlineNormalizer(torch.nn.Module):
 
     @torch.no_grad()
     def update(self, values: torch.Tensor):
-        self.merge(moments(values, self.width))
+        self.merge(moments(values, width=self.width))
 
     @torch.no_grad()
     def learn(self, observation: TensorDict) -> None:
@@ -149,10 +149,11 @@ class GlobalOnlineNormalizer(torch.nn.Module):
 
     def forward(self, inputs: torch.Tensor, mask: torch.Tensor, update=True) -> torch.Tensor:
         if self.training and update and self.width != 1:
-            raise ValueError(
+            message = (
                 f"normalizer with width={self.width} cannot update from flattened inputs; "
-                "call learn(moments(values, width)) or pass update=False"
+                "call learn(moments(values, width=width)) or pass update=False"
             )
+            raise ValueError(message)
         finite_mask = mask & torch.isfinite(inputs)
         if self.training and update:
             self.update(inputs[finite_mask])

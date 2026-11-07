@@ -3,7 +3,7 @@ title: Series
 description: "One multichannel run of ordered numeric steps per record, as context or a forecast target."
 ---
 
-An account's daily spend is a run of numbers whose order matters: a payment
+The daily spend of an account is a run of numbers whose order matters: a payment
 model can use the last 90 days as context, or forecast the next seven. `Series`
 holds one such run per record. Each step carries `channels` numeric values, such
 as daily amount spent and daily transaction count. Steps are ordered, not
@@ -69,7 +69,7 @@ then `n_blocks` residual blocks of two dilated convolutions with dilation
 doubling at each block. A masked max-pool collapses the result to one token, so
 the field adds one token to its record however long the series is. Padding and
 unobserved steps never contribute, and an embedding does not depend on the
-batch's padded width.
+padded width of the batch.
 
 With `n_blocks=k`, one token sees `1 + 4 * (2^k - 1)` steps: 253 at the default
 of six. Choose `n_blocks` so that this covers the history that matters; steps
@@ -78,7 +78,7 @@ beyond it cannot influence the token. Apply `length` to bound memory.
 ## Learning and output
 
 As a forecast target, `Series` predicts `horizon` steps of `channels` values
-from the record's context. The loss is the `objective` error over target steps
+from the context of the record. The loss is the `objective` error over target steps
 observed in the source, after both sides are standardized per channel.
 Predictions are decoded back to source units. MAE and RMSE metrics report in
 source units.

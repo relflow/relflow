@@ -81,7 +81,7 @@
 # both channels. Two history steps per training record are missing.
 #
 # The future depends on where the wave is in its cycle, which only step order
-# reveals. The shuffled control permutes each history's steps independently, in
+# reveals. The shuffled control permutes the steps of each history independently, in
 # training and testing, keeping the values and level while removing the phase.
 # Repeating the last step is the naive baseline; it ignores the cycle.
 #
@@ -133,7 +133,7 @@ def waves(*, count: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
 
 
 def shuffle(history: np.ndarray, *, seed: int) -> np.ndarray:
-    """Permute each record's steps independently, keeping channels of a step together."""
+    """Permute the steps of each record independently, keeping channels of a step together."""
     rng = np.random.default_rng(seed)
     order = np.argsort(rng.random(history.shape[:2]), axis=1)
     return np.take_along_axis(history, order[..., None], axis=1)
@@ -173,7 +173,13 @@ def fit(
     model.fit(
         data,
         batch_size=64,
-        optimizer=lambda module: torch.optim.AdamW(module.parameters(), lr=0.003),
+        learning_rate=0.003,
+        weight_decay=0.01,
+        betas=(0.9, 0.999),
+        fused=False,
+        decay_bias=True,
+        decay_1d=True,
+        no_decay_name_fragments=(),
         early_stopping=False,
         rollback=False,
         precision="32-true",
