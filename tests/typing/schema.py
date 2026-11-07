@@ -36,6 +36,7 @@ def schema_api() -> None:
     parts: tuple[str | DatePart, ...] = ("day_of_week", DatePart.hour_of_day)
     rf.Period(*parts, pattern="%Y-%m-%d", jitter=rf.Jitter(add=0.1), mask=True)
     assert_type(rf.Vector(n_dim=8, objective="l1").n_dim, int)
+    assert_type(rf.Series(channels=3, length=8, overflow="tail").length, int | None)
     rf.Text(encoder_pooling="mean", objective="l2", max_length=64)
     rf.Set(threshold=0.5)
     rf.Hash(n_hashes=2, n_buckets=8)

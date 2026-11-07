@@ -6,6 +6,7 @@ from relflow.tensorfields.extensions import enum as enum
 from relflow.tensorfields.extensions import hashable as hashable
 from relflow.tensorfields.extensions import number as number
 from relflow.tensorfields.extensions import quantile as quantile
+from relflow.tensorfields.extensions import series as series
 from relflow.tensorfields.extensions import set as set
 from relflow.tensorfields.extensions import text as text
 from relflow.tensorfields.extensions import vector as vector
@@ -19,6 +20,7 @@ __all__ = [
     "hashable",
     "number",
     "quantile",
+    "series",
     "set",
     "text",
     "vector",

@@ -31,10 +31,10 @@ from relflow.tensorfields.base import (
     TensorFieldBase,
     TensorInput,
 )
-from relflow.tensorfields.extensions.number import precise
 from relflow.tensorfields.output import array, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
 from relflow.tensorfields.shared.digest import Digest
+from relflow.tensorfields.shared.normalizer import precise
 from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
 if TYPE_CHECKING:

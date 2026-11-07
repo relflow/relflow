@@ -22,16 +22,15 @@ from relflow.tensorfields.base import TENSORFIELDS, TensorInput
 from relflow.tensorfields.extensions.number import (
     Decoder,
     Embedder,
-    GlobalOnlineNormalizer,
     TensorField,
     loss,
-    moments,
     write,
 )
 from relflow.tensorfields.extensions.number import (
     output as output_type,
 )
 from relflow.tensorfields.shared.jitter import Jitter
+from relflow.tensorfields.shared.normalizer import GlobalOnlineNormalizer, moments
 from tests.arrow import table as arrow_table
 from tests.tensorfields.helpers import tensorize
 

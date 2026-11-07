@@ -145,6 +145,15 @@ model = rf.Model(
   Zone-aware timestamps describe their own wall clock; strings carrying an offset
   are read as UTC. A `Vector` with a NaN or infinite element, and a float NaN label
   in `Category`, take the `other` state; a NaN `Set` member is dropped like a null.
+- `Series(channels=C)` holds one ordered multichannel run per record, not a
+  timestamped one. A null, NaN, or infinite step is unobserved; the rest of the
+  record stays valid. As input it embeds as one token: each step feature sees
+  `1 + 4*(2^n_blocks - 1)` steps (253 at the default `n_blocks=6`), and a masked
+  max-pool covers every retained observed step. `horizon` is required on
+  reconstruction targets (`mask=True` or a reconstructing ancestor) and
+  rejected otherwise. Forecasts are written as exactly `horizon` steps in source units.
+  `Series` does not read elapsed time, so use `Period` or a derived `Number` for
+  irregular sampling.
 - `Text(store="dir")` keeps frozen-encoder vectors on disk, keyed by encoder
   configuration and token row and shared by every split, run, and field with
   that encoder; misses are encoded once and appended as shards, the
@@ -157,8 +166,8 @@ model = rf.Model(
 - `rf.Jitter(add=..., multiply=..., normalize=...)` is a shared frozen
   configuration whose `apply(inputs, mask)` method owns the vectorized affine
   tensor operation. Consumers own training activation, eligible coordinates,
-  and normalization placement. `Number`, `Vector`, `Period`, and `Text`
-  consume it. `Number` uses `normalize` to choose between raw and standardized
+  and normalization placement. `Number`, `Vector`, `Series`, `Period`, and
+  `Text` consume it. `Number` uses `normalize` to choose between raw and standardized
   values. The other built-ins have one continuous representation and apply
   jitter there without creating another normalizer.
 - Tensorfield extensions declare canonical Arrow atom compatibility families with

@@ -400,13 +400,14 @@ def require_core_tensors(
     if TensorKey.content in targets.keys():
         target_content_name = f"{TensorKey.targets}[{TensorKey.content}]"
         target_content = require_tensor_tree(address, target_content_name, targets[TensorKey.content])
-        require_matching_tree_shapes(
-            address,
-            actual_name=target_content_name,
-            actual=target_content,
-            expected_name=TensorKey.content,
-            expected=content,
-        )
+        # Targets share the keys of content and leading coordinate axes; trailing axes
+        # belong to the extension, so a target may differ in width from its input.
+        if set(target_content) != set(content):
+            raise ForwardContractError(
+                f"forward input '{address}' {target_content_name} keys must match {TensorKey.content} keys: "
+                f"expected {format_paths(content)}, got {format_paths(target_content)}"
+            )
+        require_content_prefix_shapes(address=address, content=target_content, state=state, name=target_content_name)
 
 
 def require_tensor_devices(module: "Model", address: Address, tensorfield: TensorFieldBase) -> None:
@@ -553,6 +554,8 @@ def require_content_prefix_shapes(
     address: Address,
     content: dict[tuple[str, ...], torch.Tensor],
     state: torch.Tensor,
+    *,
+    name: str = TensorKey.content,
 ) -> None:
     state_shape = tuple(state.shape)
     state_rank = len(state_shape)
@@ -560,7 +563,7 @@ def require_content_prefix_shapes(
         if len(tensor.shape) < state_rank or tuple(tensor.shape[:state_rank]) != state_shape:
             suffix = format_path(path)
             raise ForwardContractError(
-                f"forward input '{address}' {TensorKey.content}{suffix} must start with {TensorKey.state} "
+                f"forward input '{address}' {name}{suffix} must start with {TensorKey.state} "
                 f"shape {state_shape}, "
                 f"got {tuple(tensor.shape)}"
             )
