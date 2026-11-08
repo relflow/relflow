@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from evidence.diagnostics.review import fragment, load
 from evidence.experiments.source import fingerprint, frontmatter, registry
 
 
@@ -314,8 +315,19 @@ GROUP_ORDER = [
 def render(root: Path, *, publication: Path | None = None) -> None:
     docs = root / "docs/evidence"
     entries = registry(root / "evidence", publication=publication, lane="all")
+    review = load(root)
     output = docs / "_generated"
     output.mkdir(parents=True, exist_ok=True)
+    diagnostic = publication is not None and json.loads(publication.read_text()).get("version") == "diagnostic-review"
+    write(
+        output / "review-status.md",
+        '<div class="diagnostic-preview-banner" role="note"><strong>Diagnostic visualization preview.</strong> '
+        "The selected core measurements and plots come from full-budget CI captures. Unmet checks remain visible. "
+        "These unpaired runs do not replace the required paired Evidence gate or released results. "
+        "Optional research illustrations contain no model predictions.</div>\n"
+        if diagnostic
+        else "",
+    )
     pages = set()
     for identifier, entry in entries.items():
         script = root / "evidence" / entry["script"]
@@ -375,7 +387,10 @@ def render(root: Path, *, publication: Path | None = None) -> None:
         write(
             output / f"{identifier}-status.md",
             f'::: {{.evidence-result .evidence-result-{kind} role="note"}}\n'
-            f"**{identifier} · {title}**\n\n{summary}\n:::\n\n" + readout(header, run),
+            f"**{identifier} · {title}**\n\n{summary}\n:::\n\n"
+            + readout(header, run)
+            + "\n\n"
+            + fragment(root, identifier, run, review),
         )
         write(output / f"{identifier}-checks.md", criteria(run))
         write(output / f"{identifier}-evidence.md", evidence(entry))

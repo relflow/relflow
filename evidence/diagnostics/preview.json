@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "url": "https://github.com/relflow/relflow/releases/download/docs-preview-pr-86-5f66bbaf07cf/proof-visualizations.zip",
+  "sha256": "5f66bbaf07cfc06ab46cf8b18f54eb4a5f48ebe5fe73c7eb8bdceb4e77ba8c94",
+  "size": 17200282,
+  "proofs": 100,
+  "figures": 111,
+  "capture_runs": [
+    42432931869,
+    42437236022
+  ]
+}

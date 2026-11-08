@@ -27,9 +27,14 @@ Use structured groups and tables for nested metrics, with the full raw record
 in its own disclosure. Generated details use Measurements, Method, Reproduce,
 and Code tabs, with metric groups and provenance folded by default and a bounded
 source-code viewer. Preserve the canonical scripts and exact downloads.
-Use plain readouts and structured tables for recorded measurements; keep
-missing values explicit. Presentation changes never add measurements or alter
-scientific budgets and checks.
+Use diagnostic plots alongside readouts and structured tables. Retain actual
+paired predictions, scores, masks, coordinates, and other needed observations
+during the proof; do not limit figures to the latest released scalar metrics.
+Bind every measured figure to its exact source, full-budget record, and artifact
+checksums. Keep missing values explicit and generator illustrations distinct
+from model outcomes. Static builds consume prepared SVG/JSON only; explicit
+diagnostic CI runs own model compute. See [diagnostics/README.md](diagnostics/README.md).
+Presentation changes never add measurements or alter scientific budgets and checks.
 
 Use `experiments/run.py --new <category>/<name>` for a new authoring file. The
 template lives in `templates/experiment.py.txt`, outside canonical discovery.

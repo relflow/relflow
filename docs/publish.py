@@ -16,6 +16,7 @@ import yaml
 
 from docs.check import ROOT, rendered_checks
 from evidence.assets import fetch
+from evidence.diagnostics.review import prepare, selection
 from evidence.experiments.source import snapshot
 
 
@@ -65,7 +66,13 @@ def publish(root: Path = ROOT, *, environ: Mapping[str, str] | None = None, quar
             if environment.get("READTHEDOCS_VERSION_TYPE") == "tag"
             else None
         )
-        publication = fetch(root, version.removeprefix("v") if version else None, required=bool(version))
+        if environment.get("READTHEDOCS_VERSION_TYPE") == "external":
+            prepare(root)
+            publication = selection(root)
+        else:
+            publication = None
+        if publication is None:
+            publication = fetch(root, version.removeprefix("v") if version else None, required=bool(version))
         if publication is not None:
             if version and snapshot(publication)["revision"] != revision:
                 raise ValueError("Released evidence does not match the documentation tag's source revision")

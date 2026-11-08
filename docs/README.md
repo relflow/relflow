@@ -91,10 +91,13 @@ and presentation metadata. Measured results are separate JSON publication
 assets; rendering never rewrites or executes experiments.
 
 Generated Evidence pages put the behavioral criteria before the Example and
-show recorded metrics as plain readouts, labeled groups, and tables. Expanded
+show recorded metrics as diagnostic figures, plain readouts, labeled groups, and tables. Expanded
 details separate Measurements, Method, Reproduce, and Code. Provenance and the
 complete raw record remain available in their own disclosures. See the
 [presentation contract](../evidence/SPEC.md#documentation) for authoring guidance.
+The [diagnostic workflow](../evidence/diagnostics/README.md) captures full-budget
+observations on CI and prepares static SVG/JSON. PR previews fetch a checksum-pinned static bundle and select its matching
+records; package release pages retain their frozen publications.
 
 The complete paired evidence gate still runs for PRs, merge groups, and main
 CI. It requires valid full-budget results for both exact wheels and blocks

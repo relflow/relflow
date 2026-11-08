@@ -5,6 +5,7 @@ project:
     - uv run --directory .. --project docs python -m evidence.render
   resources:
     - assets/fonts/OFL.txt
+    - assets/evidence-plots/**
     - evidence/_generated/*.py
   render:
     - index.qmd
@@ -183,6 +184,7 @@ format:
       - assets/stylesheets/sidebar.css
       - assets/stylesheets/code.css
       - assets/stylesheets/evidence.css
+      - assets/evidence-plots/style.css
       - assets/stylesheets/versions.css
       - assets/stylesheets/search.css
     include-in-header:

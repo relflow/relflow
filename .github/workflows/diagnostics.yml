@@ -114,6 +114,22 @@ jobs:
               path.rename(path.with_name('shard-' + index))
       - name: Verify catalog coverage and every observation checksum
         run: uv run --project docs python -m evidence.diagnostics.host collect --inputs diagnostic-inputs --shards diagnostic-shards --output proof-diagnostics
+      - name: Render a complete static preview bundle
+        if: inputs.ids == ''
+        env:
+          OMP_NUM_THREADS: '1'
+          OPENBLAS_NUM_THREADS: '1'
+        run: >-
+          uv run --project docs --with matplotlib==3.10.7 --with pyarrow==24.0.0
+          python -m evidence.diagnostics.build --bundles proof-diagnostics/bundles
+          --output proof-plots --archive proof-visualizations.zip
+      - uses: actions/upload-artifact@v4
+        if: inputs.ids == '' && success()
+        with:
+          name: proof-visualization-site-bundle-attempt-${{ github.run_attempt }}
+          path: proof-visualizations.zip
+          retention-days: 30
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:
