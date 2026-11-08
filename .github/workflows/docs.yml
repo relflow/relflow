@@ -3,6 +3,11 @@ name: Validate documentation
 on:
   workflow_call:
   workflow_dispatch:
+    inputs:
+      diagnostic_plots:
+        description: Capture full-budget proof observations on CPU runners for visualization work
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -12,6 +17,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  diagnostics:
+    name: Proof visualization data
+    if: github.event_name == 'workflow_dispatch' && inputs.diagnostic_plots
+    uses: ./.github/workflows/diagnostics.yml
+
   build:
     name: Validate and render static documentation
     runs-on: ubuntu-latest

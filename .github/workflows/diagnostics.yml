@@ -1,0 +1,104 @@
+name: Capture proof visualization data
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Prepare exact CPU diagnostic inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: '3.12'
+          version: '0.13.7'
+          enable-cache: true
+      - run: uv sync --locked --project docs
+      - name: Build wheel, resolve locked CPU dependencies, and freeze the full catalog
+        run: uv run --project docs python -m evidence.diagnostics.host prepare --output diagnostic-inputs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proof-diagnostic-inputs-attempt-${{ github.run_attempt }}
+          path: diagnostic-inputs
+          retention-days: 7
+          if-no-files-found: error
+
+  capture:
+    name: Capture full-budget proofs, shard ${{ matrix.shard }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: '3.12'
+          version: '0.13.7'
+          enable-cache: true
+      - run: uv sync --locked --project docs
+      - uses: actions/download-artifact@v4
+        with:
+          name: proof-diagnostic-inputs-attempt-${{ github.run_attempt }}
+          path: diagnostic-inputs
+      - name: Execute every assigned proof once in an offline bounded container
+        run: uv run --project docs python -m evidence.diagnostics.host shard --inputs diagnostic-inputs --index ${{ matrix.shard }} --output diagnostic-shard
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: proof-diagnostics-shard-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
+          path: diagnostic-shard
+          retention-days: 14
+          if-no-files-found: error
+
+  collect:
+    name: Verify complete diagnostic bundles
+    needs: [prepare, capture]
+    if: always() && needs.prepare.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: '3.12'
+          version: '0.13.7'
+      - run: uv sync --locked --project docs
+      - uses: actions/download-artifact@v4
+        with:
+          name: proof-diagnostic-inputs-attempt-${{ github.run_attempt }}
+          path: diagnostic-inputs
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: proof-diagnostics-shard-*-attempt-${{ github.run_attempt }}
+          path: diagnostic-shards
+      - name: Normalize shard artifact directories
+        shell: python
+        run: |
+          from pathlib import Path
+          for path in Path('diagnostic-shards').glob('proof-diagnostics-shard-*-attempt-*'):
+              index = path.name.split('proof-diagnostics-shard-', 1)[1].split('-attempt-', 1)[0]
+              path.rename(path.with_name('shard-' + index))
+      - name: Verify catalog coverage and every observation checksum
+        run: uv run --project docs python -m evidence.diagnostics.host collect --inputs diagnostic-inputs --shards diagnostic-shards --output proof-diagnostics
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: proof-visualization-bundles-attempt-${{ github.run_attempt }}
+          path: proof-diagnostics
+          retention-days: 30
+          if-no-files-found: error
