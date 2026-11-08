@@ -163,6 +163,101 @@ def steps(field: TensorField) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]
     return field.content["values"][:, 0, 0], field.content["observed"][:, 0, 0], field.state[:, 0, 0]
 
 
+LISTS = [[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]]
+A_ROW = [{"temp": 1.0, "hum": 10.0}, {"temp": 2.0, "hum": 20.0}, {"temp": 3.0, "hum": 30.0}]
+B_ROW = {"temp": [1.0, 2.0, 3.0], "hum": [10.0, 20.0, 30.0]}
+A_TYPE = pa.list_(pa.struct([("temp", pa.float64()), ("hum", pa.float64())]))
+B_TYPE = pa.struct([("temp", pa.list_(pa.float64())), ("hum", pa.list_(pa.float64()))])
+
+
+@pytest.mark.parametrize("row, datatype", [(A_ROW, A_TYPE), (B_ROW, B_TYPE)])
+def test_struct_shapes_match_list_of_lists(row, datatype):
+    expected, _, _ = steps(tensorfield([LISTS], build_schema(channels=2)))
+    values, observed, state = steps(tensorfield([row], build_schema(channels=2), datatype=datatype))
+    torch.testing.assert_close(values, expected)
+    assert observed.all() and state.tolist() == [Tokens.valued.value]
+
+
+@pytest.mark.parametrize("row, datatype", [(A_ROW, A_TYPE), (B_ROW, B_TYPE)])
+def test_named_channels_set_order(row, datatype):
+    values, _, _ = steps(tensorfield([row], build_schema(channels=("hum", "temp")), datatype=datatype))
+    assert values[0, :, 0].tolist() == [10.0, 20.0, 30.0]
+
+
+def test_named_channels_select_a_subset():
+    row = [{"temp": 1.0, "hum": 10.0, "wind": 5.0}]
+    datatype = pa.list_(pa.struct([("temp", pa.float64()), ("hum", pa.float64()), ("wind", pa.float64())]))
+    values, _, _ = steps(tensorfield([row], build_schema(channels=("wind",)), datatype=datatype))
+    assert values.shape[-1] == 1 and values[0, 0, 0].item() == 5.0
+
+
+def test_missing_named_member_names_address_and_members():
+    with pytest.raises(ValueError, match=r"/items/signal.*rain"):
+        tensorfield([A_ROW], build_schema(channels=("temp", "rain")), datatype=A_TYPE)
+
+
+def test_integer_channels_must_match_member_count():
+    with pytest.raises(ValueError, match=r"/items/signal.*channels=3"):
+        tensorfield([A_ROW], build_schema(channels=3), datatype=A_TYPE)
+
+
+def test_named_channels_reject_list_input():
+    with pytest.raises(ValueError, match=r"/items/signal.*struct"):
+        tensorfield([LISTS], build_schema(channels=("temp", "hum")))
+
+
+def test_columns_with_different_step_counts_raise():
+    row = {"temp": [1.0, 2.0], "hum": [10.0]}
+    with pytest.raises(ValueError, match=r"/items/signal.*step count"):
+        tensorfield([row], build_schema(channels=2), datatype=B_TYPE)
+
+
+def test_null_column_warns_and_marks_its_steps_unobserved():
+    row = {"temp": [1.0, 2.0], "hum": None}
+    with pytest.warns(UserWarning, match=r"/items/signal.*hum.*1 record"):
+        _, observed, state = steps(tensorfield([row], build_schema(channels=2), datatype=B_TYPE))
+    assert state.tolist() == [Tokens.other.value]
+    assert not observed.any()
+
+
+def test_all_null_columns_warn_and_give_zero_steps():
+    row = {"temp": None, "hum": None}
+    with pytest.warns(UserWarning, match=r"/items/signal"):
+        _, observed, state = steps(tensorfield([row], build_schema(channels=2), datatype=B_TYPE))
+    assert state.tolist() == [Tokens.valued.value] and not observed.any()
+
+
+def test_null_value_inside_column_is_an_unobserved_step_without_warning(recwarn):
+    row = {"temp": [1.0, None], "hum": [10.0, 20.0]}
+    _, observed, _ = steps(tensorfield([row], build_schema(channels=2), datatype=B_TYPE))
+    assert observed[0, :2].tolist() == [True, False]
+    assert not [w for w in recwarn if issubclass(w.category, UserWarning) and "/items/signal" in str(w.message)]
+
+
+def test_null_struct_step_and_null_member_are_unobserved():
+    row = [{"temp": 1.0, "hum": 10.0}, None, {"temp": 3.0, "hum": None}]
+    _, observed, _ = steps(tensorfield([row], build_schema(channels=2), datatype=A_TYPE))
+    assert observed[0, :3].tolist() == [True, False, False]
+
+
+def test_integer_struct_members_cast_to_float64():
+    datatype = pa.list_(pa.struct([("temp", pa.int64()), ("hum", pa.int64())]))
+    values, _, _ = steps(tensorfield([[{"temp": 1, "hum": 2}]], build_schema(channels=2), datatype=datatype))
+    assert values[0, 0].tolist() == [1.0, 2.0]
+
+
+@pytest.mark.parametrize(
+    "row, datatype",
+    [
+        (A_ROW, pa.large_list(pa.struct([("temp", pa.float64()), ("hum", pa.float64())]))),
+        (B_ROW, pa.struct([("temp", pa.large_list(pa.float64())), ("hum", pa.list_(pa.float64(), 3))])),
+    ],
+)
+def test_struct_shapes_large_and_fixed_size_variants(row, datatype):
+    values, _, _ = steps(tensorfield([row], build_schema(channels=2), datatype=datatype))
+    assert values[0, :3, 0].tolist() == [1.0, 2.0, 3.0]
+
+
 @pytest.mark.parametrize(
     "datatype, row",
     [

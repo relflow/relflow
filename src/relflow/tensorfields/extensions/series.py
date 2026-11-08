@@ -3,6 +3,7 @@ from __future__ import annotations
 import enum
 import hashlib
 import math
+import warnings
 from collections.abc import Callable, Mapping
 from dataclasses import InitVar
 from types import MappingProxyType
@@ -224,28 +225,141 @@ def listlike(datatype: pa.DataType) -> bool:
     return pa.types.is_list(datatype) or pa.types.is_large_list(datatype) or pa.types.is_fixed_size_list(datatype)
 
 
-def steps(values: pa.Array, *, channels: int, address: Address) -> tuple[np.ndarray, np.ndarray]:
-    """Every step of every series back to back as ``(steps, channels)`` float64, with the step count per series.
-
-    A null step or element is NaN; a step reads as observed only when all
-    its channels are finite.
+def members(datatype: pa.StructType, *, channels: int | tuple[str, ...], address: Address) -> tuple[str, ...]:
+    """Struct member names to read, in channel order.
 
     Args:
-        values: One Arrow list of steps per record.
-        channels: Values expected in each step.
+        datatype: The Arrow struct type of a step or of a record.
+        channels: A member count, or the member names to select.
+        address: Field address, for error messages.
+
+    Returns:
+        The member names, in the struct order for a count and in tuple order for names.
+
+    Raises:
+        ValueError: If a count differs from the member count or a name is not a member.
+    """
+    names = tuple(field.name for field in datatype)
+    if isinstance(channels, int) and len(names) != channels:
+        message = (
+            f"series field at '{address}' has channels={channels} but its struct has {len(names)} members {names}; "
+            "name the members in channels or select them in a preprocessor"
+        )
+        raise ValueError(message)
+    missing = [] if isinstance(channels, int) else [name for name in channels if name not in names]
+    if missing:
+        message = f"series field at '{address}' names channels {missing} absent from its struct members {names}"
+        raise ValueError(message)
+    return names if isinstance(channels, int) else channels
+
+
+def rows(values: pa.Array, *, channels: int | tuple[str, ...], address: Address) -> tuple[np.ndarray, np.ndarray]:
+    """Steps of lists of structs, one struct per step.
+
+    A null step struct or a null member makes the whole step NaN.
+
+    Args:
+        values: One Arrow list of step structs per record.
+        channels: A member count, or the member names to select.
         address: Field address, for error messages.
 
     Returns:
         The step matrix and the number of steps of each record.
 
     Raises:
-        ValueError: If a record is not a list or a step does not hold ``channels`` values.
+        ValueError: If the members do not match ``channels``.
+    """
+    flat = cast(pa.StructArray, pc.list_flatten(values))
+    names = members(flat.type, channels=channels, address=address)
+    children = dict(zip((field.name for field in flat.type), flat.flatten(), strict=True))
+    matrix = np.column_stack([floats(children[name], address=address) for name in names])
+    return matrix, pc.list_value_length(values).to_numpy(zero_copy_only=False).astype(np.int64)
+
+
+def columns(
+    values: pa.StructArray, *, channels: int | tuple[str, ...], address: Address
+) -> tuple[np.ndarray, np.ndarray]:
+    """Steps of structs with one list per channel.
+
+    A null channel list is a missing channel: it warns, and the steps of its
+    record are NaN. A record whose channel lists are all null has no steps.
+
+    Args:
+        values: One Arrow struct of channel lists per record.
+        channels: A member count, or the member names to select.
+        address: Field address, for error messages.
+
+    Returns:
+        The step matrix and the number of steps of each record.
+
+    Raises:
+        ValueError: If the channel lists of a record differ in length or the members do not match ``channels``.
+    """
+    names = members(values.type, channels=channels, address=address)
+    children = dict(zip((field.name for field in values.type), values.flatten(), strict=True))
+    lists = [children[name] for name in names]
+    counts = np.stack(
+        [floats(pc.list_value_length(member), address=address) for member in lists]
+    )  # NaN marks a null list
+    missing = np.isnan(counts)
+    for name, absent in zip(names, missing, strict=True):
+        if absent.any():
+            message = (
+                f"series field at '{address}' has a null channel list '{name}' in {int(absent.sum())} record(s); "
+                "its steps are unobserved. Supply a list of nulls with the record step count, "
+                "or drop or fill the record in a preprocessor"
+            )
+            warnings.warn(message, UserWarning, stacklevel=2)
+    longest = np.where(missing, -1, counts).max(axis=0)
+    shortest = np.where(missing, np.inf, counts).min(axis=0)
+    differing = np.flatnonzero(~missing.all(axis=0) & (longest != shortest))
+    if len(differing):
+        message = (
+            f"series field at '{address}' has channel lists {names} with different step count "
+            f"in record {int(differing[0])}: {counts[:, differing[0]].tolist()}"
+        )
+        raise ValueError(message)
+    lengths = np.where(missing.all(axis=0), 0, longest).astype(np.int64)
+    matrix = np.full((int(lengths.sum()), len(names)), math.nan)
+    for index, (member, absent) in enumerate(zip(lists, missing, strict=True)):
+        matrix[np.repeat(~absent, lengths), index] = floats(pc.list_flatten(member), address=address)
+    return matrix, lengths
+
+
+def steps(values: pa.Array, *, channels: int | tuple[str, ...], address: Address) -> tuple[np.ndarray, np.ndarray]:
+    """Every step of every series back to back as ``(steps, channels)`` float64, with the step count per series.
+
+    A null step or element is NaN; a step reads as observed only when all
+    its channels are finite.
+
+    Args:
+        values: One Arrow list of steps per record, a list of step structs, or a struct of channel lists.
+        channels: Values expected in each step, or the struct member names that are the channels.
+        address: Field address, for error messages.
+
+    Returns:
+        The step matrix and the number of steps of each record.
+
+    Raises:
+        ValueError: If a record is not a list or struct, named channels meet a list input,
+            or a step does not hold ``channels`` values.
     """
 
     if not len(values):
-        return np.empty((0, channels)), np.empty(0, dtype=np.int64)
+        width = channels if isinstance(channels, int) else len(channels)
+        return np.empty((0, width)), np.empty(0, dtype=np.int64)
+    if pa.types.is_struct(values.type):
+        return columns(cast(pa.StructArray, values), channels=channels, address=address)
     if not listlike(values.type):
-        message = f"series field at '{address}' expects an Arrow list per record, got {values.type}"
+        message = f"series field at '{address}' expects an Arrow list or struct per record, got {values.type}"
+        raise ValueError(message)
+    if pa.types.is_struct(cast(pa.ListType, values.type).value_type):
+        return rows(values, channels=channels, address=address)
+    if not isinstance(channels, int):
+        message = (
+            f"series field at '{address}' names channels {channels} but its input has no struct members; "
+            "provide a list of structs or a struct of lists, or set channels to a count"
+        )
         raise ValueError(message)
 
     lengths = pc.list_value_length(values).to_numpy(zero_copy_only=False).astype(np.int64)
@@ -375,7 +489,7 @@ def encode(
     one observed step takes the ``other`` state; an empty one stays valued.
     """
 
-    matrix, lengths = steps(combine(field), channels=request.width, address=address)
+    matrix, lengths = steps(combine(field), channels=request.channels, address=address)
     cap = request.horizon if target else request.length
     kept = lengths if cap is None else np.minimum(lengths, cap)
     start = crop(
@@ -478,7 +592,7 @@ def observe(
     if not learn:
         return None
     request = cast(Request, schema.requests[address])
-    matrix, _ = steps(combine(field), channels=request.width, address=address)
+    matrix, _ = steps(combine(field), channels=request.channels, address=address)
     observed = torch.from_numpy(matrix[np.isfinite(matrix).all(axis=1)])
     return TensorDict({TensorKey.content: moments(observed, width=request.width)}, batch_size=[])
 
