@@ -14,7 +14,7 @@ import pyarrow.compute as pc
 import pydantic
 import torch
 from beartype import beartype
-from pydantic import StrictInt
+from pydantic import StrictInt, StrictStr
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
@@ -73,8 +73,10 @@ LOSSES: Mapping[Objective, Callable[..., torch.Tensor]] = MappingProxyType(
 class Request(RequestBase):
     """One multichannel time series per record.
 
-    Each record holds ``channels`` numeric values per step, observed at
-    consecutive positions; steps are ordered but not timestamped. ``length``
+    Each record holds one numeric value per channel and step, observed at
+    consecutive positions; steps are ordered but not timestamped. ``channels``
+    is either a positive count or a tuple of distinct struct member names; a
+    tuple sets the count and the channel order and labels forecast steps. ``length``
     caps the retained steps with an ``overflow`` policy as ``Branch`` does;
     ``None`` keeps the whole series and pads each batch to its longest.
     ``n_blocks`` sets the number of dilated convolution blocks. As an input, the
@@ -84,11 +86,11 @@ class Request(RequestBase):
     there and rejected elsewhere. ``jitter`` adds
     training-only noise to input steps, and ``objective`` selects mean ``"l1"``
     or ``"l2"`` error over predicted steps. Predictions contain ``horizon``
-    steps of ``channels`` values in source units.
+    steps of one value per channel in source units.
     """
 
     type: Literal["series"] = "series"
-    channels: Annotated[StrictInt, pydantic.Field(gt=0)]
+    channels: Annotated[StrictInt, pydantic.Field(gt=0)] | tuple[StrictStr, ...]
     length: Annotated[StrictInt | None, pydantic.Field(gt=0)] = None
     overflow: Overflow | None = None
     horizon: Annotated[StrictInt | None, pydantic.Field(gt=0)] = None
@@ -101,7 +103,7 @@ class Request(RequestBase):
         def __init__(
             self,
             *,
-            channels: int,
+            channels: int | tuple[str, ...],
             length: int | None = None,
             overflow: Overflow | Literal["head", "tail", "random", "error"] | None = None,
             horizon: int | None = None,
@@ -111,6 +113,35 @@ class Request(RequestBase):
             type: Literal["series"] = "series",
             **options: Unpack[FieldOptions],
         ) -> None: ...
+
+    @pydantic.field_validator("channels")
+    @classmethod
+    def check_channels(cls, channels: int | tuple[str, ...]) -> int | tuple[str, ...]:
+        """Reject an empty, blank or duplicated channel name list.
+
+        Args:
+            channels: A channel count or the channel names.
+
+        Returns:
+            The unchanged channels.
+
+        Raises:
+            ValueError: If names are empty, blank or repeated.
+        """
+        if isinstance(channels, int):
+            return channels
+        repeated = sorted({name for name in channels if channels.count(name) > 1})
+        if not channels or not all(name.strip() for name in channels) or repeated:
+            message = f"series channels must be a non-empty tuple of distinct, non-blank names, got {channels!r}" + (
+                f" with repeated {repeated}" if repeated else ""
+            )
+            raise ValueError(message)
+        return channels
+
+    @property
+    def width(self) -> int:
+        """Number of channels per step, whether ``channels`` is a count or names."""
+        return self.channels if isinstance(self.channels, int) else len(self.channels)
 
     @pydantic.model_validator(mode="after")
     def check_bounds(self) -> Self:
@@ -311,7 +342,7 @@ def encode(
     one observed step takes the ``other`` state; an empty one stays valued.
     """
 
-    matrix, lengths = steps(combine(field), channels=request.channels, address=address)
+    matrix, lengths = steps(combine(field), channels=request.width, address=address)
     cap = request.horizon if target else request.length
     kept = lengths if cap is None else np.minimum(lengths, cap)
     start = crop(
@@ -331,7 +362,7 @@ def encode(
     picked = matrix[(np.cumsum(lengths) - lengths)[record] + start[record] + offset]
     finite = np.isfinite(picked).all(axis=1)
 
-    content = np.zeros((len(lengths), width, request.channels))
+    content = np.zeros((len(lengths), width, request.width))
     observed = np.zeros((len(lengths), width), dtype=np.bool_)
     content[record[finite], offset[finite]] = picked[finite]
     observed[record[finite], offset[finite]] = True
@@ -340,7 +371,7 @@ def encode(
     state[field.place((kept > 0) & ~observed.any(axis=1), fill=False)] = Tokens.other.value
     encoded = TensorDict(
         {
-            VALUES: torch.from_numpy(field.place(content, fill=0.0, value_shape=(width, request.channels))),
+            VALUES: torch.from_numpy(field.place(content, fill=0.0, value_shape=(width, request.width))),
             OBSERVED: torch.from_numpy(field.place(observed, fill=False, value_shape=(width,))),
         },
         batch_size=field.shape,
@@ -414,9 +445,9 @@ def observe(
     if not learn:
         return None
     request = cast(Request, schema.requests[address])
-    matrix, _ = steps(combine(field), channels=request.channels, address=address)
+    matrix, _ = steps(combine(field), channels=request.width, address=address)
     observed = torch.from_numpy(matrix[np.isfinite(matrix).all(axis=1)])
-    return TensorDict({TensorKey.content: moments(observed, width=request.channels)}, batch_size=[])
+    return TensorDict({TensorKey.content: moments(observed, width=request.width)}, batch_size=[])
 
 
 class Block(torch.nn.Module):
@@ -465,8 +496,8 @@ class Embedder(EmbedderBase):
         self.destination: Address = cast("Branch", request.parent).address
         self.jitter: Jitter = request.jitter
 
-        self.normalizer = GlobalOnlineNormalizer(width=request.channels)
-        self.projection = torch.nn.Linear(in_features=request.channels, out_features=schema.d_model)
+        self.normalizer = GlobalOnlineNormalizer(width=request.width)
+        self.projection = torch.nn.Linear(in_features=request.width, out_features=schema.d_model)
         self.blocks = torch.nn.ModuleList(
             [Block(width=schema.d_model, dilation=2**depth) for depth in range(request.n_blocks)]
         )
@@ -547,10 +578,10 @@ class Decoder(DecoderBase):
 
         horizon = cast(int, request.horizon)
         self.horizon: int = horizon
-        self.channels: int = request.channels
-        self.regression = torch.nn.Linear(in_features=schema.d_model, out_features=horizon * request.channels)
+        self.channels: int = request.width
+        self.regression = torch.nn.Linear(in_features=schema.d_model, out_features=horizon * request.width)
         # Target statistics per channel: the forecast starts at their mean and predicts standardized deviations.
-        self.normalizer: GlobalOnlineNormalizer = GlobalOnlineNormalizer(width=request.channels)
+        self.normalizer: GlobalOnlineNormalizer = GlobalOnlineNormalizer(width=request.width)
         self.metrics = Scores(address=address, factory=Errors)
 
     @beartype
@@ -577,7 +608,7 @@ def loss(
     address: Address = prediction.address
     request: Request = cast(Request, module.schema.requests[address])
     decoder: Decoder = cast(Decoder, module.nodes[address].decoder)
-    horizon, channels = decoder.horizon, request.channels
+    horizon, channels = decoder.horizon, request.width
 
     size: int = cast(torch.Tensor, batch.targets[TensorKey.state]).numel()
     trainable = batch.trainable.reshape(size)
