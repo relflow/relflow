@@ -153,7 +153,9 @@ model = rf.Model(
   reconstruction targets (`mask=True` or a reconstructing ancestor) and
   rejected otherwise. Forecasts are written as exactly `horizon` steps in source units.
   `Series` does not read elapsed time, so use `Period` or a derived `Number` for
-  irregular sampling.
+  irregular sampling. Steps may also arrive as `list<struct<...>>` or
+  `struct<list<...>>`; `channels` may name struct members, whose order sets the
+  channel order and whose names label forecast steps.
 - `Text(store="dir")` keeps frozen-encoder vectors on disk, keyed by encoder
   configuration and token row and shared by every split, run, and field with
   that encoder; misses are encoded once and appended as shards, the
