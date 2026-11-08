@@ -841,3 +841,21 @@ def test_predict_writes_named_steps_and_round_trips_parquet(tmp_path):
     path = tmp_path / "out.parquet"
     pq.write_table(table, path)
     assert pq.read_table(path).equals(table)
+
+
+@pytest.mark.parametrize(
+    "column",
+    [
+        pa.array([[{"temp": 1.0, "hum": 2.0}, {"temp": 3.0, "hum": 4.0}]]),
+        pa.array([{"temp": [1.0, 3.0], "hum": [2.0, 4.0]}]),
+    ],
+)
+def test_predict_reads_struct_shapes(column):
+    model = rf.Model.xs(
+        d_model=8,
+        history=rf.Series(channels=("temp", "hum")),
+        future=rf.Series(channels=2, horizon=3, mask=True),
+    )
+    table = model.predict(pa.table({"history": column}))
+    content = table.to_pylist()[0]["predictions"]["future"]["content"]
+    assert len(content) == 3 and all(len(step) == 2 for step in content)
