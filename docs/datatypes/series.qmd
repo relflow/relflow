@@ -38,23 +38,57 @@ decision time. Use [Number](number.qmd) for a single value per record and
 
 ## Input and options
 
-Each valued input is one of these Arrow shapes:
+Each valued input takes one of four Arrow shapes. Each row below shows the same
+three steps of temperature and humidity:
 
-- a list of numbers when `channels=1`;
-- a list of lists or fixed-size lists with exactly `channels` numbers per step;
-- a list of structs, one struct of numbers per step;
-- a struct of lists, one list of numbers per channel, with equal step counts in
-  each record.
+| Shape | Arrow type per record | Example record | Field |
+| --- | --- | --- | --- |
+| list | `list<number>` | `[21.5, 22.0, 22.4]` | `rf.Series(channels=1)` |
+| list of lists | `list<list<number>>` or `list<fixed_size_list<number, C>>` | `[[21.5, 0.61], [22.0, 0.58], [22.4, 0.55]]` | `rf.Series(channels=2)` |
+| list of structs | `list<struct<temp: number, hum: number>>` | `[{temp: 21.5, hum: 0.61}, {temp: 22.0, hum: 0.58}, {temp: 22.4, hum: 0.55}]` | `rf.Series(channels=("temp", "hum"))` |
+| struct of lists | `struct<temp: list<number>, hum: list<number>>` | `{temp: [21.5, 22.0, 22.4], hum: [0.61, 0.58, 0.55]}` | `rf.Series(channels=("temp", "hum"))` |
 
-Large lists are accepted wherever lists are. Values convert to `float64`;
-integers beyond ±2^53 are rejected. A null, NaN, or infinite step is
-unobserved: the rest of the series stays valid, and the encoder sees which steps
-were observed. In a list of structs, a null step or null member is unobserved.
-A null channel list in a struct of lists warns and leaves the steps of that
-record unobserved; when every channel list is null, the series is empty and the
-warning still appears. An empty series is `valued`. A non-empty series with no
-observed step takes the `other` [value state](index.qmd#value-state). A null
-series is `null`.
+Large lists are accepted wherever lists are, for the outer list and for the
+channel lists. Values convert to `float64`; integers beyond ±2^53 are rejected.
+
+The two struct shapes accept either form of `channels`:
+
+- A tuple of names selects those struct members, in tuple order. Other members
+  are ignored, so `channels=("hum",)` reads only humidity and
+  `channels=("hum", "temp")` swaps the channel order. A named member that is
+  absent raises an error.
+- An integer reads every member, in struct order, and must equal the member
+  count. `channels=2` reads both examples above; `channels=3` raises an error.
+
+Every struct member must be numeric (list of structs) or a list of numbers
+(struct of lists). A struct with a string member or with mixed members is
+rejected when relflow checks the input Arrow types, even when `channels` does not name that
+member; narrow it in a [preprocessor](#reshaping-in-a-preprocessor). A tuple of
+names on a list or list of lists raises an error, because those shapes have no
+member names.
+
+### Missing values
+
+A step is observed only when every one of its channels is finite. A null, NaN,
+or infinite value makes its step unobserved, silently: the rest of the series
+stays valid, and the encoder sees which steps were observed. This covers a null
+value inside a list, a null step in a list of lists, and a null step struct or
+null member value in a list of structs.
+
+A null channel list in a struct of lists is a missing channel, not a missing
+step, so it is never silent. relflow emits a `UserWarning` that names the field,
+the channel, and the number of records affected, then reads the record:
+
+- When some channel lists are null, those channels are NaN at every step of the
+  record, so its steps are unobserved.
+- When every named channel list is null, the series is empty.
+
+In one record, every non-null channel list must hold the same number of steps.
+Lists of different lengths raise an error naming the field, the channels, and
+the first record that differs.
+
+An empty series is `valued`. A non-empty series with no observed step takes the
+`other` [value state](index.qmd#value-state). A null series is `null`.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
@@ -87,12 +121,20 @@ retained observed step, so any of them can influence the token. Choose
 `n_blocks` so that the local context per step matches the patterns that matter.
 Apply `length` to bound memory.
 
-## Channels from several columns
+## Reshaping in a preprocessor
 
-Name the channels of a struct, and gather separate columns or nested paths into
-that struct with a [preprocessor](../guides/preprocessing.qmd).
+`Series` reads one field. When the channels live elsewhere, gather them into
+one of the shapes above with a [preprocessor](../guides/preprocessing.qmd). A
+struct of lists is usually the shortest route, because `pl.struct` combines
+list columns directly.
+
+Channels from separate columns or nested paths become a struct of lists:
 
 ```python
+import polars as pl
+import relflow as rf
+
+
 @rf.preprocess
 def gather(frame: pl.DataFrame) -> pl.DataFrame:
     return frame.with_columns(
@@ -104,6 +146,60 @@ def gather(frame: pl.DataFrame) -> pl.DataFrame:
 ```
 
 Read it with `signals=rf.Series(channels=("temp", "hum"))`.
+
+A list of lists becomes a named struct of lists, one channel per position:
+
+```python
+@rf.preprocess
+def name(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(
+        signals=pl.struct(
+            temp=pl.col("readings").list.eval(pl.element().list.get(0)),
+            hum=pl.col("readings").list.eval(pl.element().list.get(1)),
+        ),
+    )
+```
+
+A list of step records with a non-numeric member, such as
+`[{temp: 21.5, hum: 0.61, station: "a"}, ...]`, fails the type check. Keep only
+the numeric members to make a list of structs:
+
+```python
+@rf.preprocess
+def narrow(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(
+        hourly=pl.col("hourly").list.eval(
+            pl.struct(
+                pl.element().struct.field("temp"),
+                pl.element().struct.field("hum"),
+            ),
+        ),
+    )
+```
+
+Read it with `hourly=rf.Series(channels=("temp", "hum"))`.
+
+To avoid the null channel warning, either drop the records whose channel is
+missing:
+
+```python
+@rf.preprocess
+def complete(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.filter(pl.col("hum").is_not_null())
+```
+
+or fill the missing channel with nulls, one per step of another channel, so its
+steps read as unobserved:
+
+```python
+@rf.preprocess
+def fill(frame: pl.DataFrame) -> pl.DataFrame:
+    # Multiplying by None keeps the step count of temp and makes every value null.
+    unobserved = pl.col("temp").list.eval(pl.element() * None)
+    return frame.with_columns(hum=pl.col("hum").fill_null(unobserved))
+```
+
+Apply either before gathering the columns into a struct.
 
 ## Learning and output
 
