@@ -81,6 +81,33 @@ def test_series_is_exported():
     assert rf.Series is TENSORFIELDS["series"].Request
 
 
+def test_named_channels_set_width():
+    request = build_schema(channels=("temp", "hum")).requests[ADDRESS]
+    assert request.channels == ("temp", "hum")
+    assert request.width == 2
+
+
+def test_integer_channels_width():
+    assert build_schema(channels=3).requests[ADDRESS].width == 3
+
+
+@pytest.mark.parametrize("channels", [(), ("temp", "temp"), ("",)])
+def test_named_channels_reject_empty_duplicate_or_blank(channels):
+    with pytest.raises(pydantic.ValidationError):
+        rf.Series(channels=channels)
+
+
+def test_named_channels_round_trip_yaml(tmp_path):
+    path = tmp_path / "model.yaml"
+    path.write_text(
+        "d_model: 8\nn_layers: 1\nn_heads: 4\nfields:\n  signal:\n    type: series\n    channels: [temp, hum]\n",
+        encoding="utf-8",
+    )
+    loaded = rf.Model.from_yaml(path)
+    assert loaded.schema.requests["/signal"].channels == ("temp", "hum")
+    assert loaded.schema.model_dump(mode="json")["fields"]["fields"][0]["channels"] == ["temp", "hum"]
+
+
 def projection(rows: list, schema: Schema, strata: Strata, datatype: pa.DataType | None = None):
     arrow = None
     if datatype is not None:
