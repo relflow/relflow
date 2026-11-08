@@ -52,7 +52,7 @@ def numeric(datatype: pa.DataType) -> bool:
         True for an integer or floating type, or one list level of them.
     """
     # Every list layout exposes value_type; pyarrow types it only on ListType.
-    datatype = cast(pa.ListType, datatype).value_type if listlike(datatype) else datatype
+    datatype = cast(pa.ListType, datatype).value_type if listlike(datatype=datatype) else datatype
     return pa.types.is_integer(datatype) or pa.types.is_floating(datatype)
 
 
@@ -69,8 +69,8 @@ def channelled(datatype: pa.DataType) -> bool:
     if not pa.types.is_struct(datatype) or not datatype.num_fields:
         return False
     kinds = [field.type for field in datatype]
-    return all(numeric(kind) and not listlike(kind) for kind in kinds) or all(
-        listlike(kind) and numeric(kind) for kind in kinds
+    return all(numeric(datatype=kind) and not listlike(datatype=kind) for kind in kinds) or all(
+        listlike(datatype=kind) and numeric(datatype=kind) for kind in kinds
     )
 
 
@@ -278,7 +278,15 @@ def members(datatype: pa.StructType, *, channels: Channels, address: Address) ->
 
 
 def children(datatype: pa.StructType, *, flat: list[pa.Array]) -> dict[str, pa.Array]:
-    """Member arrays of a struct by member name."""
+    """Map member names of a struct to their arrays.
+
+    Args:
+        datatype: The struct type whose member names label the arrays.
+        flat: The member arrays in struct order, from ``StructArray.flatten()``.
+
+    Returns:
+        A dict from member name to member array.
+    """
     return dict(zip((field.name for field in datatype), flat, strict=True))
 
 
@@ -301,7 +309,7 @@ def rows(values: pa.Array, *, channels: Channels, address: Address) -> tuple[np.
     flat = cast(pa.StructArray, pc.list_flatten(values))
     names = members(flat.type, channels=channels, address=address)
     by_name = children(flat.type, flat=flat.flatten())
-    matrix = np.column_stack([floats(by_name[name], address=address) for name in names])
+    matrix = np.column_stack([floats(values=by_name[name], address=address) for name in names])
     return matrix, pc.list_value_length(values).to_numpy(zero_copy_only=False).astype(np.int64)
 
 
@@ -328,7 +336,7 @@ def columns(values: pa.StructArray, *, channels: Channels, address: Address) -> 
     by_name = children(values.type, flat=values.flatten())
     lists = [by_name[name] for name in names]
     counts = np.stack(
-        [floats(pc.list_value_length(member), address=address) for member in lists]
+        [floats(values=pc.list_value_length(member), address=address) for member in lists]
     )  # NaN marks a null list
     missing = np.isnan(counts)
     for name, absent in zip(names, missing, strict=True):
@@ -352,7 +360,7 @@ def columns(values: pa.StructArray, *, channels: Channels, address: Address) -> 
     lengths = np.where(missing.all(axis=0), 0, longest).astype(np.int64)
     matrix = np.full((int(lengths.sum()), len(names)), math.nan)
     for index, (member, absent) in enumerate(zip(lists, missing, strict=True)):
-        matrix[np.repeat(~absent, lengths), index] = floats(pc.list_flatten(member), address=address)
+        matrix[np.repeat(~absent, lengths), index] = floats(values=pc.list_flatten(member), address=address)
     return matrix, lengths
 
 
@@ -518,7 +526,7 @@ def encode(
     one observed step takes the ``other`` state; an empty one stays valued.
     """
 
-    matrix, lengths = steps(combine(field), channels=request.layout, address=address)
+    matrix, lengths = steps(values=combine(field=field), channels=request.layout, address=address)
     cap = request.horizon if target else request.length
     kept = lengths if cap is None else np.minimum(lengths, cap)
     start = crop(
@@ -621,7 +629,7 @@ def observe(
     if not learn:
         return None
     request = cast(Request, schema.requests[address])
-    matrix, _ = steps(combine(field), channels=request.layout, address=address)
+    matrix, _ = steps(values=combine(field=field), channels=request.layout, address=address)
     observed = torch.from_numpy(matrix[np.isfinite(matrix).all(axis=1)])
     return TensorDict({TensorKey.content: moments(observed, width=request.layout.width)}, batch_size=[])
 
@@ -846,16 +854,32 @@ def output(module: Model, address: Address) -> pa.StructType:
     return pa.struct([pa.field(TensorKey.content.name, pa.list_(pa.field("element", step)), nullable=False)])
 
 
-def struct_steps(content: torch.Tensor, *, step: pa.StructType) -> pa.Array:
-    """Steps written as structs with one member per named channel."""
+def struct_steps(*, content: torch.Tensor, step: pa.StructType) -> pa.Array:
+    """Write steps as structs with one member per named channel.
+
+    Args:
+        content: The forecast tensor ``[..., width]``.
+        step: The struct step type with one float64 member per named channel.
+
+    Returns:
+        One struct per step.
+    """
     return struct(
         values={field.name: array(values=content[..., index], dtype=pa.float64()) for index, field in enumerate(step)},
         dtype=step,
     )
 
 
-def list_steps(content: torch.Tensor, *, step: pa.ListType) -> pa.Array:
-    """Steps written as lists with one value per channel."""
+def list_steps(*, content: torch.Tensor, step: pa.ListType) -> pa.Array:
+    """Write steps as lists with one value per channel.
+
+    Args:
+        content: The forecast tensor ``[..., width]``.
+        step: The list step type.
+
+    Returns:
+        One list of ``width`` float64 values per step.
+    """
     *_, width = content.shape
     return variable(
         values=array(values=content, dtype=pa.float64()),
@@ -864,7 +888,10 @@ def list_steps(content: torch.Tensor, *, step: pa.ListType) -> pa.Array:
     )
 
 
-STEP_WRITERS: Mapping[bool, Callable[..., pa.Array]] = MappingProxyType({True: struct_steps, False: list_steps})
+# The keys are the step types that ``output`` writes.
+STEP_WRITERS: Mapping[type[pa.DataType], Callable[..., pa.Array]] = MappingProxyType(
+    {pa.StructType: struct_steps, pa.ListType: list_steps}
+)
 
 
 @series.register(Component.write)
@@ -884,7 +911,7 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
     nested = datatype.field(TensorKey.content.name).type
     step = cast(pa.StructType | pa.ListType, nested.value_type)  # the type written by ``output``
     forecast = variable(
-        values=STEP_WRITERS[pa.types.is_struct(step)](content, step=step),
+        values=STEP_WRITERS[type(step)](content=content, step=step),
         counts=torch.full((math.prod(coordinates),), horizon),
         datatype=nested,
     )
