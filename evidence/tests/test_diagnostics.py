@@ -5,6 +5,7 @@ from pathlib import Path
 import yaml
 
 from evidence.diagnostics.capture import FUNCTIONS
+from evidence.diagnostics.host import policy
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -30,3 +31,12 @@ def test_documentation_dispatch_explicitly_opts_into_proof_compute():
     job = workflow["jobs"]["diagnostics"]
     assert "workflow_dispatch" in job["if"] and "inputs.diagnostic_plots" in job["if"]
     assert "needs" not in workflow["jobs"]["build"]
+
+
+def test_preflight_and_worker_policy_supplies_identity_and_writable_cache_without_host_network():
+    profile = policy()
+    assert profile[profile.index("--network") + 1] == "none"
+    assert "--read-only" in profile
+    assert "USER=evidence" in profile and "LOGNAME=evidence" in profile
+    assert "TORCHINDUCTOR_CACHE_DIR=/tmp/inductor" in profile
+    assert "mode=1777" in profile[profile.index("--tmpfs") + 1]

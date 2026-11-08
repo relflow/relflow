@@ -18,6 +18,37 @@ from evidence.experiments.source import registry
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def policy() -> list[str]:
+    """Keep preflight and proof workers on the same bounded offline profile."""
+    return [
+        "--network",
+        "none",
+        "--read-only",
+        "--cpus",
+        "2",
+        "--memory",
+        "4g",
+        "--pids-limit",
+        "512",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
+        "--tmpfs",
+        "/tmp:rw,nosuid,nodev,size=2g,mode=1777",
+        "--env",
+        "USER=evidence",
+        "--env",
+        "LOGNAME=evidence",
+        "--env",
+        "XDG_CACHE_HOME=/tmp/cache",
+        "--env",
+        "TORCHINDUCTOR_CACHE_DIR=/tmp/inductor",
+    ]
+
+
 def prepare(output: Path) -> None:
     sys.path.insert(0, str(ROOT / "evidence"))
     from evidence.resolve import resolve
@@ -38,6 +69,19 @@ def prepare(output: Path) -> None:
     (context / "Dockerfile").write_text(recipe)
     image = "relflow-diagnostics:" + digest(wheel)[:16]
     subprocess.run(["docker", "build", "--tag", image, str(context)], check=True)
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            *policy(),
+            image,
+            "python",
+            "-c",
+            "import getpass, lightning.pytorch, relflow; print('CPU worker preflight:', getpass.getuser())",
+        ],
+        check=True,
+    )
     image_id = subprocess.check_output(["docker", "image", "inspect", image, "--format", "{{.Id}}"], text=True).strip()
     with (output / "runtime-image.tar.zst").open("xb") as stream:
         save = subprocess.Popen(["docker", "save", image], stdout=subprocess.PIPE)
@@ -98,25 +142,7 @@ def task(identifier: str, plan: dict, inputs: Path, output: Path) -> dict:
         "--rm",
         "--name",
         container,
-        "--network",
-        "none",
-        "--read-only",
-        "--cpus",
-        "2",
-        "--memory",
-        "4g",
-        "--pids-limit",
-        "512",
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges",
-        "--user",
-        f"{os.getuid()}:{os.getgid()}",
-        "--tmpfs",
-        "/tmp:rw,nosuid,size=2g",
-        "--env",
-        "XDG_CACHE_HOME=/tmp/cache",
+        *policy(),
         "--env",
         f"EVIDENCE_REVISION={plan['revision']}",
         "--env",
