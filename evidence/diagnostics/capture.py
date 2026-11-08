@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.util
+import importlib
 import inspect
 import json
 import math
@@ -178,7 +178,7 @@ class Capture:
                     array = np.asarray(value)
                     if array.dtype.kind in "bifU":
                         return self.value(array, depth=depth)
-                except (TypeError, ValueError):
+                except (TypeError, ValueError, RuntimeError):
                     pass
             return [self.value(item, depth=depth + 1) for item in value]
         if isinstance(value, dict):
@@ -248,6 +248,16 @@ class Capture:
         monitoring.free_tool_id(self.tool)
 
 
+def load(source: Path):
+    """Use a real import name so declared spawn-based seed panels can import it."""
+    source = source.resolve()
+    sys.path.insert(0, str(source.parent))
+    module = importlib.import_module(source.stem)
+    if Path(module.__file__).resolve() != source:
+        raise ValueError(f"Proof {source}: import name collides with {module.__file__}")
+    return module
+
+
 def run(source: Path, output: Path, wheel: Path) -> dict:
     source, output, wheel = source.resolve(), output.resolve(), wheel.resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -264,9 +274,7 @@ def run(source: Path, output: Path, wheel: Path) -> dict:
     torch.set_num_threads(1)
     torch.set_num_interop_threads(1)
     header = describe(source.read_text())
-    spec = importlib.util.spec_from_file_location("diagnostic_proof", source)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load(source)
     declared = module.run.experiment
     record = {
         "id": declared.id,

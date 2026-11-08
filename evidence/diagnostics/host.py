@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -49,7 +50,20 @@ def policy() -> list[str]:
     ]
 
 
-def prepare(output: Path) -> None:
+def schedule(identifiers: list[str], timings: dict) -> list[dict]:
+    """Assign every selected whole proof once, with at most twelve CPU shards."""
+    count = min(12, len(identifiers))
+    if count == 0:
+        raise ValueError("Diagnostic scheduling requires at least one proof")
+    jobs, totals = [[] for _ in range(count)], [0.0] * count
+    for identifier in sorted(identifiers, key=lambda key: -timings.get(key, {}).get("candidate", 180)):
+        index = min(range(count), key=lambda index: totals[index])
+        jobs[index].append(identifier)
+        totals[index] += timings.get(identifier, {}).get("candidate", 180)
+    return [{"index": i, "ids": ids, "estimated_seconds": totals[i]} for i, ids in enumerate(jobs)]
+
+
+def prepare(output: Path, identifiers: list[str] | None = None) -> None:
     sys.path.insert(0, str(ROOT / "evidence"))
     from evidence.resolve import resolve
     from evidence.runtime import runtime_recipe
@@ -91,12 +105,11 @@ def prepare(output: Path) -> None:
             raise RuntimeError("Could not archive the diagnostic CPU image")
     entries = registry(ROOT / "evidence", measurements=False)
     timings = json.loads((ROOT / "evidence/timings.json").read_text())["tasks"]
-    jobs, totals = [[] for _ in range(12)], [0.0] * 12
-    for identifier, entry in sorted(entries.items(), key=lambda item: -timings.get(item[0], {}).get("candidate", 180)):
-        shard = min(range(12), key=lambda index: totals[index])
-        cost = timings.get(identifier, {}).get("candidate", 180)
-        jobs[shard].append(identifier)
-        totals[shard] += cost
+    if identifiers:
+        if len(set(identifiers)) != len(identifiers) or any(key not in entries for key in identifiers):
+            raise ValueError("Diagnostic selection must contain unique existing core proof identifiers")
+        entries = {key: entries[key] for key in identifiers}
+    jobs = schedule(list(entries), timings)
     plan = {
         "schema": 1,
         "purpose": "Unpaired visualization capture; not the required learning gate",
@@ -107,7 +120,7 @@ def prepare(output: Path) -> None:
         "image_id": image_id,
         "image_sha256": digest(output / "runtime-image.tar.zst"),
         "capture_sha256": digest(Path(__file__).with_name("capture.py")),
-        "shards": [{"index": i, "ids": ids, "estimated_seconds": totals[i]} for i, ids in enumerate(jobs)],
+        "shards": jobs,
         "experiments": {
             key: {"script": value["script"], "source_sha256": digest(ROOT / "evidence" / value["script"])}
             for key, value in entries.items()
@@ -236,6 +249,8 @@ def collect(inputs: Path, shards: Path, output: Path) -> None:
         declared = json.loads(receipt.read_text())
         if declared["ids"] != expected["ids"] or declared["plan_sha256"] != digest(inputs / "plan.json"):
             raise ValueError("Diagnostic shard differs from the prepared request")
+        (output / "shards").mkdir(exist_ok=True)
+        shutil.copy2(receipt, output / "shards" / f"shard-{expected['index']}.json")
         for identifier in expected["ids"]:
             bundle = folder / identifier / "bundle"
             if not (bundle / "manifest.json").is_file():
@@ -284,10 +299,11 @@ def main() -> None:
     parser.add_argument("--inputs", type=Path)
     parser.add_argument("--shards", type=Path)
     parser.add_argument("--index", type=int)
+    parser.add_argument("--ids", default="", help="Explicit diagnostic subset; blank retains the full core catalog")
     parser.add_argument("--output", type=Path, required=True)
     options = parser.parse_args()
     if options.operation == "prepare":
-        prepare(options.output)
+        prepare(options.output, [key for key in re.split(r"[,\s]+", options.ids) if key] or None)
     elif options.operation == "shard":
         shard(options.inputs, options.output, options.index)
     else:

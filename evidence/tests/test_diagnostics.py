@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 
 from evidence.diagnostics.capture import FUNCTIONS
-from evidence.diagnostics.host import policy
+from evidence.diagnostics.host import policy, schedule
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -16,7 +16,7 @@ def test_visualization_compute_has_no_automatic_trigger_or_publication_permissio
     assert workflow["permissions"] == {"contents": "read"}
     assert set(workflow["jobs"]) == {"prepare", "capture", "collect"}
     assert workflow["jobs"]["capture"]["strategy"]["fail-fast"] is False
-    assert workflow["jobs"]["capture"]["strategy"]["matrix"]["shard"] == list(range(12))
+    assert "needs.prepare.outputs.shards" in workflow["jobs"]["capture"]["strategy"]["matrix"]["shard"]
 
 
 def test_diagnostic_capture_observes_readouts_without_monitoring_generators_or_model_runtime():
@@ -40,3 +40,17 @@ def test_preflight_and_worker_policy_supplies_identity_and_writable_cache_withou
     assert "USER=evidence" in profile and "LOGNAME=evidence" in profile
     assert "TORCHINDUCTOR_CACHE_DIR=/tmp/inductor" in profile
     assert "mode=1777" in profile[profile.index("--tmpfs") + 1]
+
+
+def test_full_diagnostic_schedule_keeps_every_whole_proof_and_uses_twelve_shards():
+    identifiers = [f"P{index:03d}" for index in range(1, 97)]
+    plan = schedule(identifiers, {})
+    assert len(plan) == 12
+    assert sorted(key for shard in plan for key in shard["ids"]) == identifiers
+    assert all(len(shard["ids"]) == 8 for shard in plan)
+
+
+def test_explicit_subset_has_no_empty_compute_shards():
+    plan = schedule(["P025", "P085"], {})
+    assert len(plan) == 2
+    assert sorted(key for shard in plan for key in shard["ids"]) == ["P025", "P085"]

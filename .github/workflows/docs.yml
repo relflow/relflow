@@ -8,6 +8,10 @@ on:
         description: Capture full-budget proof observations on CPU runners for visualization work
         type: boolean
         default: false
+      diagnostic_ids:
+        description: Optional explicit diagnostic subset, such as P025,P085; blank captures every core proof
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -21,6 +25,8 @@ jobs:
     name: Proof visualization data
     if: github.event_name == 'workflow_dispatch' && inputs.diagnostic_plots
     uses: ./.github/workflows/diagnostics.yml
+    with:
+      ids: ${{ inputs.diagnostic_ids || '' }}
 
   build:
     name: Validate and render static documentation

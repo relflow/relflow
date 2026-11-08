@@ -5,8 +5,9 @@ from types import ModuleType
 
 import numpy as np
 import pyarrow.ipc as ipc
+import pytest
 
-from evidence.diagnostics.capture import Capture
+from evidence.diagnostics.capture import Capture, load
 
 
 def test_return_capture_preserves_values_and_snapshots_mutable_inputs(tmp_path):
@@ -55,3 +56,29 @@ def test_snapshot_keeps_nonfinite_values_explicit(tmp_path):
     assert capture.value(float("nan")) == {"nonfinite": "nan"}
     assert capture.value(None) is None
     assert capture.value(np.array([float("nan"), float("inf")]))["shape"] == [2]
+
+
+def test_parameter_sequence_snapshot_retains_gradients(tmp_path):
+    import torch
+
+    parameters = [torch.tensor([float(index)], requires_grad=True) for index in range(40)]
+    capture = Capture(Path(__file__), tmp_path)
+    snapshot = capture.value(parameters)
+    assert len(snapshot) == 40
+    assert all(parameter.requires_grad for parameter in parameters)
+    sum(parameter.sum() for parameter in parameters).backward()
+    assert all(parameter.grad.item() == 1 for parameter in parameters)
+    with ipc.open_file(tmp_path / snapshot[7]["artifact"]) as reader:
+        assert reader.read_all()["value"].to_pylist() == [7.0]
+
+
+@pytest.mark.integration
+def test_proof_module_remains_importable_by_spawned_seed_workers(tmp_path):
+    from concurrent.futures import ProcessPoolExecutor
+    from multiprocessing import get_context
+
+    source = tmp_path / "diagnostic_spawn_fixture.py"
+    source.write_text("def trial(seed):\n    return seed * seed\n")
+    proof = load(source)
+    with ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn")) as pool:
+        assert list(pool.map(proof.trial, [17, 117, 217])) == [289, 13689, 47089]
