@@ -49,7 +49,8 @@ three steps of temperature and humidity:
 | struct of lists | `struct<temp: list<number>, hum: list<number>>` | `{temp: [21.5, 22.0, 22.4], hum: [0.61, 0.58, 0.55]}` | `rf.Series(channels=("temp", "hum"))` |
 
 Large lists and fixed-size lists are accepted wherever lists are: for the outer
-list of a list of structs and for the channel lists of a struct of lists. Values convert to `float64`; integers beyond ±2^53 are rejected.
+list of a list of structs and for the channel lists of a struct of lists.
+Values convert to `float64`; integers beyond ±2^53 are rejected.
 
 The two struct shapes accept either form of `channels`:
 
@@ -63,9 +64,9 @@ The two struct shapes accept either form of `channels`:
 Every struct member must be numeric (list of structs) or a list of numbers
 (struct of lists). A struct with a string member or with mixed members is
 rejected when relflow checks the input Arrow types, even when `channels` does
-not name that member; narrow it in a [preprocessor](#reshaping-in-a-preprocessor). A tuple of
-names on a list or list of lists raises an error, because those shapes have no
-member names.
+not name that member; narrow it in a
+[preprocessor](#reshaping-in-a-preprocessor). A tuple of names on a list or list
+of lists raises an error, because those shapes have no member names.
 
 ### Missing values
 
@@ -76,9 +77,10 @@ value inside a list, a null step in a list of lists, and a null step struct or
 null member value in a list of structs.
 
 A null channel list in a struct of lists is a missing channel, not a missing
-step, so it is never silent. relflow emits a `UserWarning` that names the field and the
-channel, then reads the record. The warning shows once per field and channel
-under the default Python warning filter, so it does not count records:
+step, so it is never silent. relflow emits a `UserWarning` that names the
+field and the channel, then reads the record. The message carries no record
+count, so under the default Python warning filter it shows once per field and
+channel:
 
 - When some channel lists are null, those channels are NaN at every step of the
   record, so its steps are unobserved.
