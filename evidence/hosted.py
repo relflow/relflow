@@ -198,6 +198,13 @@ def context(request: dict) -> dict:
 def load_plan(root: Path) -> dict:
     validate_inventory(root)
     manifest = json.loads((root / "manifest.json").read_text())
+    capture = manifest.get("observations")
+    if capture is not None and capture != {
+        "schema": 1,
+        "method": "py-return-v1",
+        "capture_sha256": digest(Path(__file__).parent / "diagnostics/capture.py"),
+    }:
+        raise ValueError("Evidence observations differ from the trusted recorder")
     if manifest.get("backend") != BACKEND or manifest.get("profile") != PROFILE:
         raise ValueError("Evidence plan differs from the reviewed hosted execution profile")
     suite = root / "source"
@@ -287,6 +294,11 @@ def create_plan(options: argparse.Namespace) -> None:
         profile=PROFILE,
         requirements_sha256=digest(output / "artifacts/requirements.txt"),
         suite_sha256=suite_identity(output / "source"),
+        observations={
+            "schema": 1,
+            "method": "py-return-v1",
+            "capture_sha256": digest(Path(__file__).parent / "diagnostics/capture.py"),
+        },
     )
     manifest["scheduling"] = scheduling(output / "source")
     manifest["shards"] = assignments(manifest, output / "source")
@@ -411,6 +423,7 @@ def launch(
                 run_id=manifest["run_id"],
                 evidence_sha=manifest["evidence_sha"],
                 package=manifest[task["role"]],
+                observations=output.with_name(output.name + "-observations") / task_key(task) / f"launch-{attempt}",
             )
         finally:
             shutil.rmtree(view)
@@ -433,6 +446,8 @@ def run(options: argparse.Namespace) -> None:
     started = time.monotonic()
     source = options.plan.resolve()
     manifest = load_plan(source)
+    if not manifest.get("observations"):
+        raise ValueError("Fresh hosted execution requires its planned proof observations")
     request = json.loads((source / "artifacts/request.json").read_text())
     runner = context(request)
     if type(options.shard) is not int or not 0 <= options.shard < PROFILE["shards"]:
@@ -586,6 +601,10 @@ def verify_execution(manifest: dict, records: list[dict], reports: Path) -> list
             validate_inventory(directory)
             receipt = json.loads((directory / "shard.json").read_text())
             actual = json.loads((directory / "execution.json").read_text())
+            capture = manifest.get("observations")
+            method = actual.get("identity", {}).get("resources", {}).get("observation_capture")
+            if (capture or method) and (not capture or method != capture.get("method")):
+                raise ValueError("Shard observation policy differs from its immutable plan")
             if entry != {"index": index, "execution_sha256": digest(directory / "execution.json"), "identity": actual}:
                 raise ValueError("Shard execution identity differs from its retained original")
             if receipt != {
@@ -608,6 +627,17 @@ def verify_execution(manifest: dict, records: list[dict], reports: Path) -> list
             for record in local:
                 task = record["task"]
                 key = task_key(task)
+                if capture:
+                    observation = record.get("observations", {})
+                    if (
+                        observation.get("schema") != 1
+                        or observation.get("capture_sha256") != capture["capture_sha256"]
+                        or not re.fullmatch(r"[a-f0-9]{64}", observation.get("sha256", ""))
+                        or not re.fullmatch(r"[a-f0-9]{64}", observation.get("manifest_sha256", ""))
+                        or type(observation.get("bytes")) is not int
+                        or not 0 < observation["bytes"] <= 1024**3
+                    ):
+                        raise ValueError("Measured task is missing its bound proof observations")
                 if (
                     key in seen
                     or task != expected_tasks[key]
@@ -751,6 +781,36 @@ def collect_shards(options: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def plots(options: argparse.Namespace) -> None:
+    """Render only after the full paired report and every retained host verify."""
+    from evidence_ci import evaluate
+    from runtime import render_plots
+    from visuals import verify
+
+    reports = options.reports.resolve()
+    validate_inventory(reports)
+    manifest = json.loads((reports / "manifest.json").read_text())
+    records = [json.loads(path.read_text()) for path in sorted((reports / "results").rglob("*.json"))]
+    summary = evaluate(manifest, records, root=reports / "source", reports=reports)
+    if not summary["complete"] or summary["errors"] or summary != json.loads((reports / "summary.json").read_text()):
+        raise ValueError("Proof plots require complete measurements with valid provenance; regressions remain visible")
+    output = options.output.resolve()
+    runtime = render_plots(reports, options.observations, output)
+    bundle = output / "proof-visualizations.zip"
+    verify(bundle, manifest, records)
+    write_json(
+        output / "plot-receipt.json",
+        dict(
+            runtime,
+            run_id=manifest["run_id"],
+            report_manifest_sha256=digest(reports / "manifest.json"),
+            sha256=stream_digest(bundle),
+            bytes=bundle.stat().st_size,
+            source_sha256=manifest["suite_sha256"],
+        ),
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -774,8 +834,13 @@ def main() -> None:
     gather = commands.add_parser("collect")
     for name in ("plan", "shards", "output"):
         gather.add_argument("--" + name, required=True, type=Path)
+    figures = commands.add_parser("plots")
+    for name in ("reports", "observations", "output"):
+        figures.add_argument("--" + name, required=True, type=Path)
     options = parser.parse_args()
-    {"plan": create_plan, "image": image, "run": run, "collect": collect_shards}[options.command](options)
+    {"plan": create_plan, "image": image, "run": run, "collect": collect_shards, "plots": plots}[options.command](
+        options
+    )
 
 
 if __name__ == "__main__":

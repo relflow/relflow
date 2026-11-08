@@ -15,6 +15,7 @@ package = false
 testpaths = ["tests", "../evidence/tests"]
 pythonpath = ["..", "../evidence", "../evidence/experiments"]
 norecursedirs = ["runtime"]
+markers = ["integration: explicit runtime, worker, distributed, or accelerator checks"]
 
 [tool.ruff]
 line-length = 120

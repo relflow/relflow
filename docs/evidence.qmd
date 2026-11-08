@@ -25,8 +25,10 @@ listing:
 
 These are small learning experiments, each asking one question. Open a page
 for its task, visible behavioral criteria, comparison, and recorded result.
-Plain readouts and structured tables show the selected measurements;
+Diagnostic figures, plain readouts, and structured tables show the selected measurements;
 provenance and runnable code are available in the details tabs.
+
+{{< include evidence/_generated/review-status.md >}}
 
 The catalog includes the required core suite and separately provisioned research
 studies. Research pages are labeled beside their result badge and list their

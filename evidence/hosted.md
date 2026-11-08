@@ -173,3 +173,23 @@ Reports distinguish preparation, container execution, and total wall time.
 Moving work onto several runners changes scheduling and hardware; timing alone
 does not prove a learning improvement or a compute reduction. The required
 behavioral comparison remains CPU-only with its full original budgets.
+
+## Automatic proof plots
+
+Each full paired worker retains readout observations in a separate bounded host
+mount. The exact canonical result stays in the report; its observation receipt
+binds the archive, recorder and manifest hashes. Both roles use the same recorder.
+Raw archives are uploaded per shard for 14 days, outside report limits. The plots
+job validates the complete paired union and renders the selected suite's figures
+inside a read-only, network-disabled 2-CPU/4-GiB container, with host-disk temporary
+storage and no credentials. It uploads the static bundle and frozen-host receipt
+for 90 days. It performs no training or inference.
+
+The post-CI publisher executes only the frozen verifier, authenticates the
+original attempt, immutable helper/executor, reports, wheels and plot hashes,
+and retains `evidence-ci-<id>-attempt-<n>` assets. Valid learning regressions may
+be visualized; execution/provenance errors and incomplete coverage cannot publish.
+No PR code executes with publication credentials. Version release publication
+retains the same matched bundle in its frozen version assets. See
+[diagnostics/README.md](diagnostics/README.md) for Read the Docs setup and local
+review. Keep executor, helper and consumer pin updates in that order.

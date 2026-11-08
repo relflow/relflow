@@ -15,7 +15,7 @@ from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
 from relflow.tensorfields.base import TENSORFIELDS, Context
-from relflow.tensorfields.extensions.group import Decoder, Embedder, TensorField, bind, loss, output, write
+from relflow.tensorfields.extensions.group import Decoder, Embedder, Metrics, TensorField, bind, loss, output, write
 from relflow.tensorfields.shared.resize import Resize
 from relflow.tensorfields.shared.vocabulary import OnlineVocabularyModel, VocabularyBatch, VocabularyState
 from tests.arrow import table as arrow_table
@@ -552,6 +552,115 @@ class TrackingModule:
         return value
 
 
+@pytest.mark.parametrize(
+    ("n_groups", "assignments", "proportions"),
+    [
+        (3, [0, 1, 2], [1 / 3, 1 / 3, 1 / 3]),
+        (3, [0, 0, 0], [1.0, 0.0, 0.0]),
+        (3, [0, 1, 2, 2], [0.25, 0.25, 0.5]),
+        (3, [0, 0, 1, 1, 2, 2, 2, 2], [0.25, 0.25, 0.5]),
+        (4, [0, 1, 2, 2], [0.25, 0.25, 0.5, 0.0]),
+    ],
+)
+@pytest.mark.parametrize(
+    "device",
+    [
+        "cpu",
+        pytest.param(
+            "cuda",
+            marks=[
+                pytest.mark.integration,
+                pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable"),
+            ],
+        ),
+        pytest.param(
+            "mps",
+            marks=[
+                pytest.mark.integration,
+                pytest.mark.skipif(not torch.backends.mps.is_available(), reason="MPS unavailable"),
+            ],
+        ),
+    ],
+)
+def test_group_metrics_describe_populated_vocabulary(monkeypatch, n_groups, assignments, proportions, device):
+    model = rf.Model.xs(d_model=8, label=rf.Group(n_groups=n_groups))
+    for index, assignment in enumerate(assignments):
+        rf.Group.assign(model, "/label", str(index), assignment)
+    embedder = model.nodes["/label"].embedder
+    resize = Resize()
+    embedder.resize(len(assignments) + 4, resize)
+    resize.commit()
+    weight = embedder.embeddings["group"].weight
+    with torch.no_grad():
+        weight[len(assignments) :].zero_()
+        weight[len(assignments) :, -1] = 100.0
+    model.to(device)
+    entries = []
+    monkeypatch.setattr(model, "log", lambda **options: entries.append(options))
+    callback = Metrics()
+
+    callback.on_train_batch_start(None, model, None, 0)
+    for stage in ("validation", "test", "predict"):
+        getattr(callback, f"on_{stage}_batch_end")(None, model, None, None, 0)
+    assert entries == []
+    callback.on_train_batch_end(None, model, None, None, 0)
+    callback.on_train_epoch_end(None, model)
+
+    expected = {
+        "imbalance": 1.0 - min(proportions) / max(proportions),
+        "majority_class": max(proportions),
+        "standard_deviation": math.sqrt(sum((value - 1 / n_groups) ** 2 for value in proportions) / n_groups),
+    }
+    assert len(entries) == 3
+    for entry in entries:
+        assert entry["name"].startswith(".label/train.vocabulary.")
+        assert entry["on_step"] is True
+        assert entry["on_epoch"] is False
+        value = entry["value"]
+        assert value.shape == torch.Size([])
+        assert value.dtype == torch.float32
+        assert value.device.type == device
+        assert not value.requires_grad
+        assert value.item() == pytest.approx(expected[entry["name"].split(".")[-1]], abs=1e-7)
+    assert weight.grad is None
+
+
+def test_group_metrics_skip_empty_fields_and_refresh_each_batch(monkeypatch):
+    model = rf.Model.xs(
+        d_model=8,
+        empty=rf.Group(n_groups=2),
+        label=rf.Group(n_groups=3),
+        items=rf.Branch(length=2, group=rf.Group(n_groups=2)),
+        category=rf.Category,
+    )
+    callbacks = [callback for callback in model.configure_callbacks() if isinstance(callback, Metrics)]
+    assert len(callbacks) == 1
+    callback = callbacks[0]
+    entries = []
+    monkeypatch.setattr(model, "log", lambda **options: entries.append(options))
+
+    callback.on_train_batch_end(None, model, None, None, 0)
+    assert entries == []
+    for index in range(3):
+        rf.Group.assign(model, "/label", str(index), index)
+    rf.Group.assign(model, "/items/group", "nested", 0)
+    callback.on_train_batch_end(None, model, None, None, 1)
+    assert len(entries) == 6
+    assert {entry["name"].split("/")[0] for entry in entries} == {".label", ".items.group"}
+    assert entries[0]["value"].item() == pytest.approx(0.0)
+    assert entries[1]["value"].item() == pytest.approx(1 / 3)
+    assert entries[2]["value"].item() == pytest.approx(0.0)
+
+    entries.clear()
+    for index in range(3):
+        rf.Group.assign(model, "/label", str(index), 0)
+    callback.on_train_batch_end(None, model, None, None, 2)
+    assert len(entries) == 6
+    assert entries[0]["value"].item() == pytest.approx(1.0)
+    assert entries[1]["value"].item() == pytest.approx(1.0)
+    assert entries[2]["value"].item() == pytest.approx(math.sqrt(2 / 9))
+
+
 @pytest.mark.parametrize("strata", [Strata.train, Strata.validate, Strata.test])
 @pytest.mark.parametrize(
     "trainable",
@@ -595,6 +704,7 @@ def test_group_state_loss_respects_trainable_coordinates(trainable, strata, nonf
 
     objective = loss(module, prediction, field, strata)
 
+    assert not any(key[-1] in {"imbalance", "majority_class", "standard_deviation"} for key in module.tracked)
     assert torch.isfinite(objective)
     assert objective.requires_grad
     state_loss = module.tracked[(ADDRESS, strata, Metric.loss, TensorKey.state)]

@@ -1,0 +1,111 @@
+Seed set to 10401
+23:27:28 INFO initialized Model module {'component': 'model', 'batch_size': 1, 'requests': 3, 'branches': 1, 'embeds': 0}
+GPU available: False, used: False
+TPU available: False, using: 0 TPU cores
+💡 Tip: For seamless cloud logging and experiment tracking, try installing [litlogger](https://pypi.org/project/litlogger/) to enable LitLogger, which logs metrics and artifacts automatically to the Lightning Experiments platform.
+/usr/local/lib/python3.12/site-packages/lightning/pytorch/utilities/_pytree.py:21: `isinstance(treespec, LeafSpec)` is deprecated, use `isinstance(treespec, TreeSpec) and treespec.is_leaf()` instead.
+/usr/local/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:434: The 'train_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=31` in the `DataLoader` to improve performance.
+/usr/local/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:434: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=31` in the `DataLoader` to improve performance.
+/usr/local/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:378: You have overridden `on_before_batch_transfer` in `LightningModule` but have passed in a `LightningDataModule`. It will use the implementation from `LightningModule` instance.
+/usr/local/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:378: You have overridden `transfer_batch_to_device` in `LightningModule` but have passed in a `LightningDataModule`. It will use the implementation from `LightningModule` instance.
+`Trainer.fit` stopped: `max_steps=32` reached.
+Seed set to 10401
+23:27:29 INFO initialized Model module {'component': 'model', 'batch_size': 1, 'requests': 3, 'branches': 1, 'embeds': 0}
+GPU available: False, used: False
+TPU available: False, using: 0 TPU cores
+💡 Tip: For seamless cloud logging and experiment tracking, try installing [litlogger](https://pypi.org/project/litlogger/) to enable LitLogger, which logs metrics and artifacts automatically to the Lightning Experiments platform.
+`Trainer.fit` stopped: `max_steps=32` reached.
+{
+  "evidence": "P104",
+  "started_at": "2026-11-09T23:27:28.195678+00:00",
+  "mode": "smoke",
+  "seed": 10401,
+  "steps_override": 32,
+  "accelerator": "cpu",
+  "threads": 1,
+  "provenance": {
+    "evidence_revision": "uncommitted-working-tree",
+    "relflow_revision": "e5d6f42010b1802edc6687ea55c1032c3badd3af",
+    "wheel_sha256": "cabe120b55c0e552e64469ecf337171650c3fd087375e7d56dd629ddccde5e8b",
+    "relflow_source_sha256": "161c4bc68f004f4d96c9507e181853e85f1419562005672f9e5d5dab5bf81c22",
+    "source_sha256": "a33f54161e790a836ab26cb10e5af8c264674ca7d12eebedd95897320c52dd7a",
+    "script_sha256": "1e96c449506d3672644534e489068c5f42318b58af438de2f51ce6940f83a5e3",
+    "code_sha256": "d104c6ba0cd39ec19c3f78aa062a2f26ab21f31e9724fc1fac5a77c03d4a9d92",
+    "python": "3.12.16",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.41",
+    "host": "8ac8e1889a57",
+    "relflow_path": "/work/input/package/relflow",
+    "packages": {
+      "relflow": "0.4.5",
+      "torch": "2.12.0+cpu",
+      "lightning": "2.6.4",
+      "numpy": "2.4.6",
+      "pyarrow": "24.0.0",
+      "polars": "2.0.0",
+      "torchmetrics": "1.9.0",
+      "tensordict": "0.12.4",
+      "pydantic": "2.13.4"
+    },
+    "cuda": null,
+    "gpu": null
+  },
+  "metrics": {
+    "no_dropout": {
+      "known": {
+        "rmse": 4.681546064429076,
+        "normalized_rmse": 0.9938970574613145,
+        "baseline_rmse": 4.710292710179692,
+        "rows": 2048
+      },
+      "unseen": {
+        "rmse": 3.7561860958707722,
+        "normalized_rmse": 0.9945088601440728,
+        "baseline_rmse": 3.776925723242546,
+        "rows": 2048
+      },
+      "null": {
+        "rmse": 3.750414609100548,
+        "normalized_rmse": 0.9929807689945149,
+        "baseline_rmse": 3.776925723242546,
+        "rows": 2048
+      },
+      "vocabulary_before": 48,
+      "vocabulary_after": 48,
+      "unknown_pair_difference": 1.4017705274316228e-07,
+      "assignments_preserved": true
+    },
+    "dropout": {
+      "known": {
+        "rmse": 4.7020359163696925,
+        "normalized_rmse": 0.998247074159074,
+        "baseline_rmse": 4.710292710179692,
+        "rows": 2048
+      },
+      "unseen": {
+        "rmse": 3.7687634218086403,
+        "normalized_rmse": 0.9978389033748595,
+        "baseline_rmse": 3.776925723242546,
+        "rows": 2048
+      },
+      "null": {
+        "rmse": 3.7775952250327505,
+        "normalized_rmse": 1.0001772610422504,
+        "baseline_rmse": 3.776925723242546,
+        "rows": 2048
+      },
+      "vocabulary_before": 48,
+      "vocabulary_after": 48,
+      "unknown_pair_difference": 0.0,
+      "assignments_preserved": true
+    },
+    "unseen_error": 0.9978389033748595
+  },
+  "checks": {
+    "Unknown identities do not grow or mutate vocabulary": true,
+    "Unknown names share the unavailable prediction": true,
+    "Unavailable dropout keeps unseen error at most 1.25 baseline": true
+  },
+  "outcome": "met",
+  "duration_seconds": 2.509
+}
+Recorded P104 in /work/output/P104-10401-smoke/record.json

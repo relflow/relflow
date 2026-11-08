@@ -1,0 +1,114 @@
+{
+  "schema": 1,
+  "id": "P104",
+  "title": "How does Group handle unseen identities?",
+  "source_sha256": "924b2c4ba50af5b48354fb4d8bf2e3483154ef6adb8c39becd4fc0543a4e853d",
+  "code_sha256": "b8e3f32fc6c8a98d9cec8a4f7b4c94b4aff090c82ef46869aaa1aa5f0ea8a2f4",
+  "wheel_sha256": "cabe120b55c0e552e64469ecf337171650c3fd087375e7d56dd629ddccde5e8b",
+  "capture_sha256": "cbdd7d998915defe677d9667f423c9d65cc2ed674fb983daa25bfe2ca5edad4f",
+  "capture_method": "CPython 3.12 PY_RETURN snapshots of unchanged proof functions",
+  "frames": 7,
+  "artifacts": {
+    "observations/9b6611276b6429352c7f1684fca12a5a58e70ebcadb8d7d300566f66c541905f.arrow": {
+      "sha256": "9b6611276b6429352c7f1684fca12a5a58e70ebcadb8d7d300566f66c541905f",
+      "bytes": 64242,
+      "rows": 2048
+    },
+    "observations/455aa5bc1ca42163d92c9cd80ec95fe47027cf610e53068152ca7a4b7c95f178.arrow": {
+      "sha256": "455aa5bc1ca42163d92c9cd80ec95fe47027cf610e53068152ca7a4b7c95f178",
+      "bytes": 16842,
+      "rows": 2048
+    },
+    "observations/02572886bb2cca401da4c939bea29524cb528793d5e98e4653b5116eed081461.arrow": {
+      "sha256": "02572886bb2cca401da4c939bea29524cb528793d5e98e4653b5116eed081461",
+      "bytes": 16842,
+      "rows": 2048
+    },
+    "observations/03487908174b8fed6fbd29f6caec77def2fa0ebd9ffd4331fa2e0e67ddfde54d.arrow": {
+      "sha256": "03487908174b8fed6fbd29f6caec77def2fa0ebd9ffd4331fa2e0e67ddfde54d",
+      "bytes": 64242,
+      "rows": 2048
+    },
+    "observations/14b7f169858ea9403690e251e16faccb33695b5236ef4b2e1ebcf005b9c4e086.arrow": {
+      "sha256": "14b7f169858ea9403690e251e16faccb33695b5236ef4b2e1ebcf005b9c4e086",
+      "bytes": 16842,
+      "rows": 2048
+    },
+    "observations/d886be17d1b2cdbb0819a9dbe871851bea5c09428d0343aeed56214eb5b16aeb.arrow": {
+      "sha256": "d886be17d1b2cdbb0819a9dbe871851bea5c09428d0343aeed56214eb5b16aeb",
+      "bytes": 16842,
+      "rows": 2048
+    },
+    "observations/a5f86e29daa8fec9324dc7e4421df3aaa0cf52534ff91f0ca08c886a82e0961b.arrow": {
+      "sha256": "a5f86e29daa8fec9324dc7e4421df3aaa0cf52534ff91f0ca08c886a82e0961b",
+      "bytes": 33466,
+      "rows": 2048
+    },
+    "observations/a6c35b5dffd7c325acd60f659a51d5d04fb02cce14c40525297dcf9646cc2219.arrow": {
+      "sha256": "a6c35b5dffd7c325acd60f659a51d5d04fb02cce14c40525297dcf9646cc2219",
+      "bytes": 16842,
+      "rows": 2048
+    },
+    "observations/ff556e38e3eeb970a44fb9dade673f8c91ff17558c1779d7ba6eac63f0737b38.arrow": {
+      "sha256": "ff556e38e3eeb970a44fb9dade673f8c91ff17558c1779d7ba6eac63f0737b38",
+      "bytes": 16842,
+      "rows": 2048
+    },
+    "observations/94396ff3e1b4eacb7942a885bbef48b785654a82933c8d0da2ce4ea3a26eba37.arrow": {
+      "sha256": "94396ff3e1b4eacb7942a885bbef48b785654a82933c8d0da2ce4ea3a26eba37",
+      "bytes": 16842,
+      "rows": 2048
+    },
+    "observations/6f998785a28c8b36872a7391a00d98f73d00b8be5fefc7473c9a1a8ab2394f9e.arrow": {
+      "sha256": "6f998785a28c8b36872a7391a00d98f73d00b8be5fefc7473c9a1a8ab2394f9e",
+      "bytes": 16842,
+      "rows": 2048
+    },
+    "observations/c15e72d9c6069f37eb2e9b7dc75a61977c0ba2755bf84b2d9729a6d8928b46ec.arrow": {
+      "sha256": "c15e72d9c6069f37eb2e9b7dc75a61977c0ba2755bf84b2d9729a6d8928b46ec",
+      "bytes": 127730,
+      "rows": 4096
+    },
+    "observations/ab37a2b2757b84fbdbaa7f6e4acfeea6c5222e40ac9b753b39ae75973c079132.arrow": {
+      "sha256": "ab37a2b2757b84fbdbaa7f6e4acfeea6c5222e40ac9b753b39ae75973c079132",
+      "bytes": 32498,
+      "rows": 1024
+    },
+    "observations/887ae6e7f1ca92d0005381f20a74eb98c58fb94e28b4b15c71a93365d4c1972a.arrow": {
+      "sha256": "887ae6e7f1ca92d0005381f20a74eb98c58fb94e28b4b15c71a93365d4c1972a",
+      "bytes": 810,
+      "rows": 2
+    },
+    "observations/0840fcc14a852aea968ea226e892891134e9b0a5e88599eba43c60731e21d845.arrow": {
+      "sha256": "0840fcc14a852aea968ea226e892891134e9b0a5e88599eba43c60731e21d845",
+      "bytes": 474,
+      "rows": 2
+    },
+    "observations/8e5f246cde380d6357b3c9e6b9ca253ead593d625298cac09f922d0356e266de.arrow": {
+      "sha256": "8e5f246cde380d6357b3c9e6b9ca253ead593d625298cac09f922d0356e266de",
+      "bytes": 7090,
+      "rows": 2
+    },
+    "record.json": {
+      "sha256": "be74475bd0771c6e52dfd363e2c8b40760a571730aaf8ff65551e2468eeb7a77",
+      "bytes": 2950
+    },
+    "frames.json": {
+      "sha256": "c8b461671678ea9a85752856f13ff2db0c9319b25afa69b1c1a0ac9b09d617cd",
+      "bytes": 33340
+    },
+    "proof.py": {
+      "sha256": "924b2c4ba50af5b48354fb4d8bf2e3483154ef6adb8c39becd4fc0543a4e853d",
+      "bytes": 9202
+    }
+  },
+  "task": {},
+  "runtime": {
+    "python": "3.12.16",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.41",
+    "run_id": "",
+    "role": null,
+    "github_run_id": null,
+    "github_run_attempt": null
+  }
+}

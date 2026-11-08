@@ -1,0 +1,130 @@
+"""Group and historical Cluster records retain their measured plot shapes."""
+
+import ast
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+pytest.importorskip("matplotlib")
+
+from evidence.diagnostics.illustrations import illustrate
+from evidence.diagnostics.plots import (
+    group_composition,
+    group_learning,
+    group_predictions,
+    group_study,
+    grouping,
+    trajectory,
+)
+
+
+@pytest.mark.parametrize(
+    ("point", "expected"),
+    [
+        ({"epoch": 1, "n_committed": 2, "adherence": 0.2}, ("Committed groups", "Input adherence")),
+        ({"epoch": 1, "n_assigned_groups": 3, "perplexity": 2.1}, ("Assigned groups", "Usage perplexity")),
+        ({"epoch": 1, "assigned_groups": 3, "adjusted_rand": 0.4}, ("Assigned groups", "Adjusted Rand index")),
+    ],
+)
+def test_trajectory_uses_recorded_metric_names(point, expected):
+    fig, _, _ = trajectory(SimpleNamespace(record={"metrics": {"trajectory": [point]}}), {})
+    assert tuple(axis.get_ylabel() for axis in fig.axes) == expected
+    assert all(len(axis.lines) == 1 for axis in fig.axes)
+
+
+def test_group_partition_plot_uses_fixed_width():
+    arm = {"expected_partition": [0, 0, 1, 1], "assignments": [0, 0, 1, 1], "adjusted_rand": 1.0}
+    bundle = SimpleNamespace(
+        manifest={"id": "P078"}, record={"metrics": {"group_counts": {"4": {"stable": arm, "no_regime": arm}}}}
+    )
+    fig, _, _ = grouping(bundle, {})
+    assert fig.axes[0].images[0].get_array().shape == (2, 4)
+
+
+@pytest.mark.parametrize("identity", ["cluster", "group"])
+def test_tradeoff_plot_supports_historical_and_current_arms(identity):
+    arm = {"nrmse": 0.5, "rare_identity_nrmse": 0.7}
+    arms = {name: arm for name in (identity, "category", "oracle", "shuffled")}
+    bundle = SimpleNamespace(manifest={"id": "P095"}, record={"metrics": {"conditions": {"dense": {"arms": arms}}}})
+    fig, _, _ = grouping(bundle, {})
+    assert len(fig.axes[0].collections) == 4
+
+
+def test_regime_prediction_labels_distinguish_the_shuffled_control():
+    source = "measured = measure(model, test)\nmeasured['shuffled'] = measure(model, shuffled)\n"
+    frames = [
+        {"ordinal": 0, "context": [{"function": "run", "line": 1}]},
+        {"ordinal": 1, "context": [{"function": "run", "line": 2}]},
+        {"ordinal": 2, "context": [{"function": "run", "line": 1}]},
+    ]
+    pairs = [
+        {
+            "frame": index,
+            "population": "test",
+            "context": {"arm": arm},
+            "field": "y",
+            "actual": np.array([0.0, 1.0]),
+            "predicted": np.array([0.1, 0.9]),
+            "coordinates": [],
+            "rows": None,
+        }
+        for index, arm in enumerate(["stable", "stable", "no_regime"])
+    ]
+    bundle = SimpleNamespace(
+        manifest={"id": "P078"},
+        record={"metrics": {"group_counts": {}}},
+        syntax=ast.parse(source),
+        frames=frames,
+        pairs=lambda target: pairs,
+    )
+    fig, _, _ = group_predictions(bundle, {"target": "y"})
+    labels = [line.get_label().replace("\n", " ") for line in fig.axes[1].lines]
+    assert labels == ["Stable identities", "Stable model, shuffled test identities", "No stable identity regimes"]
+
+
+def test_group_learning_uses_recorded_epoch_trajectories():
+    stable = {"ari_by_step": [{"step": 32, "adjusted_rand": 0.2, "validation_rmse": 3.0}]}
+    control = {"ari_by_step": [{"step": 32, "adjusted_rand": 0.0, "validation_rmse": 4.0}]}
+    bundle = SimpleNamespace(
+        manifest={"id": "P101"}, record={"metrics": {"group_counts": {"4": {"stable": stable, "no_regime": control}}}}
+    )
+    fig, note, _ = group_learning(bundle, {})
+    assert len(fig.axes[0].lines) == 3
+    assert fig.axes[1].lines[0].get_ydata().tolist() == [3.0]
+    assert "validation observations" in note
+
+
+def test_group_composition_retains_unassigned_identities():
+    stable = {"expected_partition": [0, 0, 1, 1], "assignments": [0, -1, 1, 1]}
+    bundle = SimpleNamespace(manifest={"id": "P101"}, record={"metrics": {"group_counts": {"4": {"stable": stable}}}})
+    fig, _, _ = group_composition(bundle, {})
+    assert "Unassigned" in [label.get_text() for label in fig.axes[0].get_yticklabels()]
+    assert sum(patch.get_width() for patch in fig.axes[0].patches) == 4
+
+
+def test_group_study_plots_rare_and_frequent_controls_from_the_record():
+    def arm(rare, frequent):
+        return {"rare": {"normalized_rmse": rare}, "frequent": {"normalized_rmse": frequent}}
+
+    bundle = SimpleNamespace(
+        manifest={"id": "P102"},
+        record={
+            "metrics": {
+                "group": arm(0.3, 0.1),
+                "category": arm(0.2, 0.05),
+                "no_identity": arm(1.0, 1.0),
+                "shuffled": arm(1.1, 1.1),
+            }
+        },
+    )
+    fig, _, data = group_study(bundle, {"focus": "Rare identities"})
+    assert fig.axes[0].collections[0].get_offsets()[:, 0].tolist() == [0.3, 0.2, 1.0, 1.1, 0.1, 0.05]
+    assert data["metric_paths"][0] == ["group", "rare", "normalized_rmse"]
+
+
+@pytest.mark.parametrize("identifier", ["P102", "P103", "P104", "P105", "P106", "P107"])
+def test_unmeasured_group_studies_show_only_the_generator(identifier):
+    fig, note = illustrate(identifier)
+    assert len(fig.axes[0].lines) == 4
+    assert "no model predictions" in note

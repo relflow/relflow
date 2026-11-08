@@ -174,5 +174,80 @@ def test_vocabulary_fields_log_available_scores(fit_options, field, labels, has_
         assert ".label/validate.targets.known" not in validations[0]
         assert ".label/validate.coverage.content" not in validations[0]
         assert ".label/validate.loss.content" not in validations[0]
-    assert model.trainer.checkpoint_callback.best_model_score.item() == pytest.approx(validations[0]["loss/validate"])
     assert torch.isfinite(model.trainer.callback_metrics["loss/train_epoch"])
+
+
+@pytest.mark.parametrize("masked", [False, True], ids=["input", "target"])
+@pytest.mark.parametrize("native", [False, True], ids=["model-fit", "native-trainer"])
+@pytest.mark.parametrize("accumulate", [1, 2])
+def test_group_distribution_logs_only_at_training_batch_end(fit_options, monkeypatch, masked, native, accumulate):
+    model = rf.Model.xs(
+        d_model=8,
+        batch_size=2,
+        label=rf.Group(n_groups=3, mask=masked, p_unavailable=0.0),
+        target=rf.Number(mask=True),
+    )
+    for token, assignment in zip(["a", "b", "c", "d"], [0, 1, 2, 2], strict=True):
+        rf.Group.assign(model, "/label", token, assignment)
+    rows = pa.table({"label": ["a", "b", "c", "d"], "target": [1.0, 2.0, 3.0, 4.0]})
+    data = rf.ArrowDataModule(
+        train=rows,
+        validate=rows,
+        test=rows,
+        predict=rows,
+        shuffle=False,
+        num_workers=0,
+        persistent_workers=False,
+        pin_memory=False,
+    )
+    logger = RecordingLogger()
+    calls = []
+    log = model.log
+
+    def record(**options):
+        if options["name"].startswith(".label/train.vocabulary.") and not options["name"].endswith(".size"):
+            calls.append((model._current_fx_name, model.trainer.global_step, dict(options)))
+        log(**options)
+
+    monkeypatch.setattr(model, "log", record)
+    options = dict(
+        accumulate_grad_batches=accumulate,
+        log_every_n_steps=1,
+        logger=logger,
+        num_sanity_val_steps=0,
+        enable_checkpointing=False,
+        **fit_options,
+    )
+    if native:
+        model.optimizer = rf.adamw(learning_rate=1e-3, fused=False)
+        trainer = lit.Trainer(**{name: value for name, value in options.items() if name != "batch_size"})
+        trainer.fit(model, datamodule=data)
+    else:
+        model.fit(data, early_stopping=False, rollback=False, **options)
+        trainer = model.trainer
+    trainer.validate(model, datamodule=data, verbose=False)
+    trainer.test(model, datamodule=data, verbose=False)
+    trainer.predict(model, datamodule=data)
+
+    expected = {
+        ".label/train.vocabulary.imbalance": 0.5,
+        ".label/train.vocabulary.majority_class": 0.5,
+        ".label/train.vocabulary.standard_deviation": math.sqrt(1 / 72),
+    }
+    assert len(calls) == 6
+    assert [step for _, step, _ in calls] == ([1, 1, 1, 2, 2, 2] if accumulate == 1 else [0, 0, 0, 1, 1, 1])
+    for hook, _, options in calls:
+        assert hook == "on_train_batch_end"
+        assert options["on_step"] is True
+        assert options["on_epoch"] is False
+        assert options["value"].item() == pytest.approx(expected[options["name"]], abs=1e-7)
+    reports = [(metrics, step) for metrics, step in logger.records if expected.keys() & metrics.keys()]
+    assert [step for _, step in reports] == ([0, 1] if accumulate == 1 else [0])
+    for metrics, _ in reports:
+        assert {name: metrics[name] for name in expected} == pytest.approx(expected)
+    assert not any(
+        name.endswith(("vocabulary.imbalance", "vocabulary.majority_class", "vocabulary.standard_deviation"))
+        and name not in expected
+        for metrics, _ in logger.records
+        for name in metrics
+    )

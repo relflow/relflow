@@ -178,7 +178,7 @@ def workflow(run: dict) -> tuple[str, str]:
     return references.pop()
 
 
-def successful_job(run: dict, number: int) -> dict:
+def successful_job(run: dict, number: int, *, review: bool = False) -> dict:
     """Authenticate the collector, rather than treating a successful shard as the gate."""
     name, _ = workflow(run)
     path = f"repos/{REPOSITORY}/actions/runs/{run['id']}/attempts/{number}/jobs?per_page=100"
@@ -187,7 +187,12 @@ def successful_job(run: dict, number: int) -> dict:
     for page in range(2, (listing.get("total_count", len(jobs)) + 99) // 100 + 1):
         jobs.extend(api(path + f"&page={page}")["jobs"])
     evidence = [job for job in jobs if job["name"].endswith(HELPERS[name])]
-    if len(evidence) != 1 or evidence[0].get("conclusion") != "success" or evidence[0].get("status") != "completed":
+    conclusions = {"success", "failure"} if review else {"success"}
+    if (
+        len(evidence) != 1
+        or evidence[0].get("conclusion") not in conclusions
+        or evidence[0].get("status") != "completed"
+    ):
         raise ValueError("The original attempt has no complete successful Evidence job")
     return evidence[0]
 
@@ -499,12 +504,15 @@ def integrity(reports: Path) -> None:
         raise ValueError("Evidence report is missing execution identity, summary, report or task logs")
 
 
-def trusted(run: dict, manifest: dict, *, helper: str, executor: str, root: Path, request: dict) -> None:
+def trusted(
+    run: dict, manifest: dict, *, helper: str, executor: str, root: Path, request: dict, review: bool = False
+) -> None:
     """Bind actual tested commits to an immutable successful internal workflow attempt."""
     if (
         run.get("status") != "completed"
         or (
             run.get("conclusion") != "success"
+            and not (review and run.get("conclusion") == "failure")
             and not (
                 run.get("validation", {}).get("conclusion") == "success"
                 and run["validation"].get("head_sha") == run.get("head_sha")
@@ -526,7 +534,7 @@ def trusted(run: dict, manifest: dict, *, helper: str, executor: str, root: Path
     if manifest.get("backend") == "github-hosted-docker":
         if workflow(run)[0] != "evidence-hosted.yml":
             raise ValueError("Hosted execution must use its immutable hosted Evidence helper")
-        successful_job(run, run["run_attempt"])
+        successful_job(run, run["run_attempt"], review=review)
     expected = {
         "candidate": manifest["candidate"]["revision"],
         "baseline": manifest["baseline"]["revision"],

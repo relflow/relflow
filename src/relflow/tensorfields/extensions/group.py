@@ -24,6 +24,7 @@ import pyarrow as pa
 import pydantic
 import torch
 from beartype import beartype
+from lightning.pytorch import Callback, LightningModule, Trainer
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
@@ -60,10 +61,45 @@ if TYPE_CHECKING:
     from relflow.structs.structure import Branch
 
 
+class Metrics(Callback):
+    """Report the populated vocabulary's current routing after each training batch."""
+
+    @torch.no_grad()
+    def on_train_batch_end(
+        self,
+        trainer: Trainer,
+        pl_module: LightningModule,
+        outputs: object,
+        batch: object,
+        batch_idx: int,
+    ) -> None:
+        module = cast("Model", pl_module)
+        for embedder in module.modules():
+            if not isinstance(embedder, Embedder):
+                continue
+            size = len(embedder.vocab.master)
+            if not size:
+                continue
+            weight = cast(Embedding, embedder.embeddings[TensorKey.group.name]).weight
+            proportions = tally(weight[:size].argmax(dim=-1), embedder.size).float() / size
+            majority = proportions.max()
+            for name, value in (
+                ("imbalance", 1.0 - proportions.min() / majority),
+                ("majority_class", majority),
+                ("standard_deviation", proportions.std(correction=0)),
+            ):
+                module.track(
+                    (embedder.origin, Strata.train, "vocabulary", name),
+                    value=value,
+                    on_step=True,
+                    on_epoch=False,
+                )
+
+
 group: Extension = Extension(
     name="group",
     types=(bool, int, float, str, bytes),
-    callbacks=(VocabularySyncCallback, CounterUpdateCallback),
+    callbacks=(VocabularySyncCallback, CounterUpdateCallback, Metrics),
 )
 
 
@@ -95,7 +131,7 @@ class Request(RequestBase):
     n_groups: Annotated[
         int,
         pydantic.Field(
-            description="A single int to specify an exact number of groups.",
+            description="An integer specification of the number of groups to model.",
         ),
     ]
 
@@ -655,37 +691,6 @@ def loss(
         (prediction.address, strata, "vocabulary", "size"),
         value=state_inputs.new_tensor(len(embedder.vocab.master), dtype=torch.float32),
     )
-
-    # content_targets = cast(torch.Tensor, batch.targets[TensorKey.group]).reshape(N)
-
-    # group_prediction = cast(torch.Tensor, prediction.payload[TensorKey.group]).reshape(N, -1)
-
-    # TODO: Consider whether MSE enforces semantic clustering. If so:
-    # TODO: set up the only content loss to be a MSE. Document that MSE is chosen to encourage semantic clustering
-
-    # TODO: Log the frequency of the majority class' frequency across batches
-    # TODO: Log distribution statistics which encapsulate how spread out // concentrated the clusters are, overall
-
-    # valued: torch.Tensor = trainable & state_targets.eq(Tokens.valued.value)
-
-    # assign_weight: torch.Tensor = cast(torch.Tensor, embedder.embeddings[TensorKey.group.name].weight)
-    # vocab_size = len(embedder.vocab.master)
-    # known = valued & content_targets.ge(0) & content_targets.lt(vocab_size)
-
-    # safe_content = content_inputs.masked_fill(content_inputs.eq(-1), self.capacity).masked_fill(~valued, 0)
-
-    # embedding_values = embedder.embeddings[TensorKey.group.name](safe_content)
-    # radial_distance: torch.Tensor = (
-    #     embedding_values.fmod(2*torch.pi)
-    #     -
-    #     torch.arange(0, 2*torch.pi, step=2*torch.pi / embedder.size).reshape(1, -1)
-    # ).abs()
-
-    # group_probs = group_logits[known].float().softmax(dim=-1)
-    # vocab_logits = group_probs @ assign_weight[:vocab_size].float().T
-
-    # objective = torch.nn.functional.cross_entropy(vocab_logits, content_targets[known], reduction="sum")
-    # loss = loss + objective / known.sum().clamp_min(1)
 
     return loss
 

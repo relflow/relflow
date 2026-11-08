@@ -1,0 +1,527 @@
+[
+  {
+    "ordinal": 0,
+    "function": "scores",
+    "line": 171,
+    "context": [
+      {
+        "function": "run",
+        "line": 231,
+        "values": {
+          "seed": 10202,
+          "arm": "group",
+          "kind": "group"
+        }
+      }
+    ],
+    "values": {
+      "rows": {
+        "artifact": "observations/8c2918e59b258988396d398ca71e768fdc52e83b87fba4df333e4bdae90bfa3d.arrow",
+        "kind": "table",
+        "shape": null
+      },
+      "training_mean": -0.3197508274824694,
+      "target": {
+        "artifact": "observations/80fe75e80ea3cb3bedb14436762f3a57d8efa84698e73d4e99b5069258a9ecbc.arrow",
+        "kind": "array",
+        "shape": [
+          1024
+        ]
+      },
+      "predicted": {
+        "artifact": "observations/a4becbc2f60a6e91af5d9ea2eae55295c5c7d8c9a059d11aaf0ce1be6a0a0668.arrow",
+        "kind": "array",
+        "shape": [
+          1024
+        ]
+      },
+      "rmse": 0.9954833092260065,
+      "baseline": 4.748952504424097
+    },
+    "result": {
+      "rmse": 0.9954833092260065,
+      "normalized_rmse": 0.209621660418507,
+      "baseline_rmse": 4.748952504424097,
+      "rows": 1024
+    }
+  },
+  {
+    "ordinal": 1,
+    "function": "scores",
+    "line": 171,
+    "context": [
+      {
+        "function": "run",
+        "line": 232,
+        "values": {
+          "seed": 10202,
+          "arm": "group",
+          "kind": "group"
+        }
+      }
+    ],
+    "values": {
+      "rows": {
+        "artifact": "observations/2411f68fb27c3e9b6b6da217b650cf968191b53049502d40031770b1ba521fe7.arrow",
+        "kind": "table",
+        "shape": null
+      },
+      "training_mean": -0.3197508274824694,
+      "target": {
+        "artifact": "observations/93478eba9dc314ac8f209dd25216f8dccd54871ec81223ee16a285806d557ff5.arrow",
+        "kind": "array",
+        "shape": [
+          1024
+        ]
+      },
+      "predicted": {
+        "artifact": "observations/dc2288a39d33166303bccf8a3556a8bce2649b44244dc840cb3c85b7968b56bc.arrow",
+        "kind": "array",
+        "shape": [
+          1024
+        ]
+      },
+      "rmse": 0.10934523866732494,
+      "baseline": 4.243061430035638
+    },
+    "result": {
+      "rmse": 0.10934523866732494,
+      "normalized_rmse": 0.025770364268896888,
+      "baseline_rmse": 4.243061430035638,
+      "rows": 1024
+    }
+  },
+  {
+    "ordinal": 2,
+    "function": "scores",
+    "line": 171,
+    "context": [
+      {
+        "function": "run",
+        "line": 231,
+        "values": {
+          "seed": 10202,
+          "arm": "category",
+          "kind": "category"
+        }
+      }
+    ],
+    "values": {
+      "rows": {
+        "artifact": "observations/8c2918e59b258988396d398ca71e768fdc52e83b87fba4df333e4bdae90bfa3d.arrow",
+        "kind": "table",
+        "shape": null
+      },
+      "training_mean": -0.3197508274824694,
+      "target": {
+        "artifact": "observations/80fe75e80ea3cb3bedb14436762f3a57d8efa84698e73d4e99b5069258a9ecbc.arrow",
+        "kind": "array",
+        "shape": [
+          1024
+        ]
+      },
+      "predicted": {
+        "artifact": "observations/5120e8165a23c599509b50be61c001038f9e5340680f226104d9d393c51df87c.arrow",
+        "kind": "array",
+        "shape": [
+          1024
+        ]
+      },
+      "rmse": 0.126201567785424,
+      "baseline": 4.748952504424097
+    },
+    "result": {
+      "rmse": 0.126201567785424,
+      "normalized_rmse": 0.02657461148913478,
+      "baseline_rmse": 4.748952504424097,
+      "rows": 1024
+    }
+  },
+  {
+    "ordinal": 3,
+    "function": "scores",
+    "line": 171,
+    "context": [
+      {
+        "function": "run",
+        "line": 232,
+        "values": {
+          "seed": 10202,
+          "arm": "category",
+          "kind": "category"
+        }
+      }
+    ],
+    "values": {
+      "rows": {
+        "artifact": "observations/2411f68fb27c3e9b6b6da217b650cf968191b53049502d40031770b1ba521fe7.arrow",
+        "kind": "table",
+        "shape": null
+      },
+      "training_mean": -0.3197508274824694,
+      "target": {
+        "artifact": "observations/93478eba9dc314ac8f209dd25216f8dccd54871ec81223ee16a285806d557ff5.arrow",
+        "kind": "array",
+        "shape": [
+          1024
+        ]
+      },
+      "predicted": {
+        "artifact": "observations/b4bc24340336c78f5741ae7ae9841643166cd1bbe277411d8ba469329356fb9f.arrow",
+        "kind": "array",
+        "shape": [
+          1024
+        ]
+      },
+      "rmse": 0.10645084988552686,
+      "baseline": 4.243061430035638
+    },
+    "result": {
+      "rmse": 0.10645084988552686,
+      "normalized_rmse": 0.02508821793905368,
+      "baseline_rmse": 4.243061430035638,
+      "rows": 1024
+    }
+  },
+  {
+    "ordinal": 4,
+    "function": "scores",
+    "line": 171,
+    "context": [
+      {
+        "function": "run",
+        "line": 231,
+        "values": {
+          "seed": 10202,
+          "arm": "no_identity",
+          "kind": "none"
+        }
+      }
+    ],
+    "values": {
+      "rows": {
+        "artifact": "observations/8c2918e59b258988396d398ca71e768fdc52e83b87fba4df333e4bdae90bfa3d.arrow",
+        "kind": "table",
+        "shape": null
+      },
+      "training_mean": -0.3197508274824694,
+      "target": {
+        "artifact": "observations/80fe75e80ea3cb3bedb14436762f3a57d8efa84698e73d4e99b5069258a9ecbc.arrow",
+        "kind": "array",
+        "shape": [
+          1024
+        ]
+      },
+      "predicted": {
+        "artifact": "observations/a74c81bb2e8a6722bcf171109c1565feaf872c512c03870fa828b179719c728f.arrow",
+        "kind": "array",
+        "shape": [
+          1024
+        ]
+      },
+      "rmse": 4.80015921655141,
+      "baseline": 4.748952504424097
+    },
+    "result": {
+      "rmse": 4.80015921655141,
+      "normalized_rmse": 1.0107827383153674,
+      "baseline_rmse": 4.748952504424097,
+      "rows": 1024
+    }
+  },
+  {
+    "ordinal": 5,
+    "function": "scores",
+    "line": 171,
+    "context": [
+      {
+        "function": "run",
+        "line": 232,
+        "values": {
+          "seed": 10202,
+          "arm": "no_identity",
+          "kind": "none"
+        }
+      }
+    ],
+    "values": {
+      "rows": {
+        "artifact": "observations/2411f68fb27c3e9b6b6da217b650cf968191b53049502d40031770b1ba521fe7.arrow",
+        "kind": "table",
+        "shape": null
+      },
+      "training_mean": -0.3197508274824694,
+      "target": {
+        "artifact": "observations/93478eba9dc314ac8f209dd25216f8dccd54871ec81223ee16a285806d557ff5.arrow",
+        "kind": "array",
+        "shape": [
+          1024
+        ]
+      },
+      "predicted": {
+        "artifact": "observations/25c78abf2afd025c59fb8f6c472d504706177070a29549f92c99d0413c569652.arrow",
+        "kind": "array",
+        "shape": [
+          1024
+        ]
+      },
+      "rmse": 4.296640141505962,
+      "baseline": 4.243061430035638
+    },
+    "result": {
+      "rmse": 4.296640141505962,
+      "normalized_rmse": 1.0126273711455254,
+      "baseline_rmse": 4.243061430035638,
+      "rows": 1024
+    }
+  },
+  {
+    "ordinal": 6,
+    "function": "scores",
+    "line": 171,
+    "context": [
+      {
+        "function": "run",
+        "line": 231,
+        "values": {
+          "seed": 10202,
+          "arm": "shuffled",
+          "kind": "group"
+        }
+      }
+    ],
+    "values": {
+      "rows": {
+        "artifact": "observations/8c2918e59b258988396d398ca71e768fdc52e83b87fba4df333e4bdae90bfa3d.arrow",
+        "kind": "table",
+        "shape": null
+      },
+      "training_mean": -0.3197508274824694,
+      "target": {
+        "artifact": "observations/80fe75e80ea3cb3bedb14436762f3a57d8efa84698e73d4e99b5069258a9ecbc.arrow",
+        "kind": "array",
+        "shape": [
+          1024
+        ]
+      },
+      "predicted": {
+        "artifact": "observations/03a94a0b67e0be97b0257a554a3e5090827d7e6028ed9ddd82399c733509e2f1.arrow",
+        "kind": "array",
+        "shape": [
+          1024
+        ]
+      },
+      "rmse": 4.960242951867273,
+      "baseline": 4.748952504424097
+    },
+    "result": {
+      "rmse": 4.960242951867273,
+      "normalized_rmse": 1.0444920110795672,
+      "baseline_rmse": 4.748952504424097,
+      "rows": 1024
+    }
+  },
+  {
+    "ordinal": 7,
+    "function": "scores",
+    "line": 171,
+    "context": [
+      {
+        "function": "run",
+        "line": 232,
+        "values": {
+          "seed": 10202,
+          "arm": "shuffled",
+          "kind": "group"
+        }
+      }
+    ],
+    "values": {
+      "rows": {
+        "artifact": "observations/2411f68fb27c3e9b6b6da217b650cf968191b53049502d40031770b1ba521fe7.arrow",
+        "kind": "table",
+        "shape": null
+      },
+      "training_mean": -0.3197508274824694,
+      "target": {
+        "artifact": "observations/93478eba9dc314ac8f209dd25216f8dccd54871ec81223ee16a285806d557ff5.arrow",
+        "kind": "array",
+        "shape": [
+          1024
+        ]
+      },
+      "predicted": {
+        "artifact": "observations/5b5fcc11fc9084f1b5afa104be5b373ce55d27ffc38f16ee3d83e2784557abd2.arrow",
+        "kind": "array",
+        "shape": [
+          1024
+        ]
+      },
+      "rmse": 4.488237635274711,
+      "baseline": 4.243061430035638
+    },
+    "result": {
+      "rmse": 4.488237635274711,
+      "normalized_rmse": 1.0577828554410096,
+      "baseline_rmse": 4.243061430035638,
+      "rows": 1024
+    }
+  },
+  {
+    "ordinal": 8,
+    "function": "run",
+    "line": 210,
+    "context": [],
+    "values": {
+      "seed": 10202,
+      "steps": null,
+      "accelerator": "cpu",
+      "ps": 1020200,
+      "train_rows": {
+        "artifact": "observations/82f6604c1391ea207d959798effb8df0c1e59702528a39932ac277a3b40b086f.arrow",
+        "kind": "table",
+        "shape": null
+      },
+      "valid_rows": {
+        "artifact": "observations/7bb5910663cde148642348b3dbff905030906d9502fa7babca93507726494ab9.arrow",
+        "kind": "table",
+        "shape": null
+      },
+      "test": {
+        "artifact": "observations/f2561ef91234f3eb8f29578a300ef00bea5ce263e6105c7cd10c3fd60df7a3ec.arrow",
+        "kind": "table",
+        "shape": null
+      },
+      "mean": -0.3197508274824694,
+      "metrics": {
+        "group": {
+          "rare": {
+            "rmse": 0.9954833092260065,
+            "normalized_rmse": 0.209621660418507,
+            "baseline_rmse": 4.748952504424097,
+            "rows": 1024
+          },
+          "frequent": {
+            "rmse": 0.10934523866732494,
+            "normalized_rmse": 0.025770364268896888,
+            "baseline_rmse": 4.243061430035638,
+            "rows": 1024
+          },
+          "parameters": 411282,
+          "partition": {
+            "adjusted_rand": 0.9182030641391846,
+            "occupied_groups": 4,
+            "assigned": 64,
+            "assignments": {
+              "artifact": "observations/0c9bf3637f9c7f7d1ed0ffc73a0048e74d8b5ca84eda6ac67cbb292f5113ffb1.arrow",
+              "kind": "array",
+              "shape": [
+                64
+              ]
+            },
+            "expected_partition": {
+              "artifact": "observations/42ea873048d51548a72ca03800e009c89df2eed195636a6d009a085f5cd9cbeb.arrow",
+              "kind": "array",
+              "shape": [
+                64
+              ]
+            }
+          }
+        },
+        "category": {
+          "rare": {
+            "rmse": 0.126201567785424,
+            "normalized_rmse": 0.02657461148913478,
+            "baseline_rmse": 4.748952504424097,
+            "rows": 1024
+          },
+          "frequent": {
+            "rmse": 0.10645084988552686,
+            "normalized_rmse": 0.02508821793905368,
+            "baseline_rmse": 4.243061430035638,
+            "rows": 1024
+          },
+          "parameters": 414862
+        },
+        "no_identity": {
+          "rare": {
+            "rmse": 4.80015921655141,
+            "normalized_rmse": 1.0107827383153674,
+            "baseline_rmse": 4.748952504424097,
+            "rows": 1024
+          },
+          "frequent": {
+            "rmse": 4.296640141505962,
+            "normalized_rmse": 1.0126273711455254,
+            "baseline_rmse": 4.243061430035638,
+            "rows": 1024
+          },
+          "parameters": 410446
+        },
+        "shuffled": {
+          "rare": {
+            "rmse": 4.960242951867273,
+            "normalized_rmse": 1.0444920110795672,
+            "baseline_rmse": 4.748952504424097,
+            "rows": 1024
+          },
+          "frequent": {
+            "rmse": 4.488237635274711,
+            "normalized_rmse": 1.0577828554410096,
+            "baseline_rmse": 4.243061430035638,
+            "rows": 1024
+          },
+          "parameters": 411282,
+          "partition": {
+            "adjusted_rand": -0.0010169060633023988,
+            "occupied_groups": 4,
+            "assigned": 64,
+            "assignments": {
+              "artifact": "observations/1640337577401c60720798a43075400891e3d9155b7053d8ee846892ad672db7.arrow",
+              "kind": "array",
+              "shape": [
+                64
+              ]
+            },
+            "expected_partition": {
+              "artifact": "observations/42ea873048d51548a72ca03800e009c89df2eed195636a6d009a085f5cd9cbeb.arrow",
+              "kind": "array",
+              "shape": [
+                64
+              ]
+            }
+          }
+        },
+        "group_rare_error": 0.209621660418507
+      },
+      "arm": "shuffled",
+      "kind": "group",
+      "shuffle": true,
+      "rows": {
+        "artifact": "observations/9e49c28f5e6323c9a3f678e827779ef4da94e662366d16266fcbb4e927ac8869.arrow",
+        "kind": "table",
+        "shape": null
+      },
+      "rare": {
+        "artifact": "observations/8c2918e59b258988396d398ca71e768fdc52e83b87fba4df333e4bdae90bfa3d.arrow",
+        "kind": "table",
+        "shape": null
+      },
+      "frequent": {
+        "artifact": "observations/2411f68fb27c3e9b6b6da217b650cf968191b53049502d40031770b1ba521fe7.arrow",
+        "kind": "table",
+        "shape": null
+      },
+      "checks": {
+        "Group rare identities improve on no identity": true,
+        "Group rare identities improve on shuffled links": true,
+        "Group records all 64 training identities": true
+      }
+    },
+    "result": {
+      "artifact": "observations/cd433692bf5fa3b7b1e8e1c9f9c1955b6b50e1072fbc54ce7587030f31282fe0.arrow",
+      "kind": "table",
+      "shape": null
+    }
+  }
+]

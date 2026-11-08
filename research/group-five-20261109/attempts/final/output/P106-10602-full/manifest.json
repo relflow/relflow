@@ -1,0 +1,129 @@
+{
+  "schema": 1,
+  "id": "P106",
+  "title": "Can Group adapt when identity behavior changes?",
+  "source_sha256": "e9cafc340818b5eb0b9ff03156a2e082d945a4b0408af6ed91671abf3dd17188",
+  "code_sha256": "3dcdae7c4d96e03e9b7729c4e93ccd8563167225c1702b08a12e7ed9ff45944c",
+  "wheel_sha256": "cabe120b55c0e552e64469ecf337171650c3fd087375e7d56dd629ddccde5e8b",
+  "capture_sha256": "cbdd7d998915defe677d9667f423c9d65cc2ed674fb983daa25bfe2ca5edad4f",
+  "capture_method": "CPython 3.12 PY_RETURN snapshots of unchanged proof functions",
+  "frames": 9,
+  "artifacts": {
+    "observations/94a98c697b57503ba1fbbc32509edb54ee87fe792ea1a481d11d31570daf5e5d.arrow": {
+      "sha256": "94a98c697b57503ba1fbbc32509edb54ee87fe792ea1a481d11d31570daf5e5d",
+      "bytes": 16626,
+      "rows": 512
+    },
+    "observations/d4453dde3693364a05412f1d29bc52e51be8aebcce7e3008e1ac9e2c081f05d8.arrow": {
+      "sha256": "d4453dde3693364a05412f1d29bc52e51be8aebcce7e3008e1ac9e2c081f05d8",
+      "bytes": 4554,
+      "rows": 512
+    },
+    "observations/54613613b55a6e0a6bdb87e0daa0df12d5a2276962a74cf1a33b38f507e63eb2.arrow": {
+      "sha256": "54613613b55a6e0a6bdb87e0daa0df12d5a2276962a74cf1a33b38f507e63eb2",
+      "bytes": 4554,
+      "rows": 512
+    },
+    "observations/570847ff258e0ba799e933763fc1daef67919e06af49cbfcd3587eb30397ec05.arrow": {
+      "sha256": "570847ff258e0ba799e933763fc1daef67919e06af49cbfcd3587eb30397ec05",
+      "bytes": 48370,
+      "rows": 1536
+    },
+    "observations/e4078365c46621491103a3e14c45d735a73160fcaf2d48c835de27b6f4232486.arrow": {
+      "sha256": "e4078365c46621491103a3e14c45d735a73160fcaf2d48c835de27b6f4232486",
+      "bytes": 12746,
+      "rows": 1536
+    },
+    "observations/057cefd465a2339b34aa9a7f9597b3a866226062cbe90e437393dd5de97f348b.arrow": {
+      "sha256": "057cefd465a2339b34aa9a7f9597b3a866226062cbe90e437393dd5de97f348b",
+      "bytes": 12746,
+      "rows": 1536
+    },
+    "observations/b7f275c0a842a507762ea19e5bca007ebdf41bde8e071c4a1ae10ddbdcca5fcf.arrow": {
+      "sha256": "b7f275c0a842a507762ea19e5bca007ebdf41bde8e071c4a1ae10ddbdcca5fcf",
+      "bytes": 4554,
+      "rows": 512
+    },
+    "observations/aa241a1f10216465aca1ed07a4168c6cbafa0345533eb9d30c7871349e01ed57.arrow": {
+      "sha256": "aa241a1f10216465aca1ed07a4168c6cbafa0345533eb9d30c7871349e01ed57",
+      "bytes": 12746,
+      "rows": 1536
+    },
+    "observations/f1ecf96324150a7c939e41352235e536c48f72abe83c51cb5147add920ccb69b.arrow": {
+      "sha256": "f1ecf96324150a7c939e41352235e536c48f72abe83c51cb5147add920ccb69b",
+      "bytes": 4554,
+      "rows": 512
+    },
+    "observations/4a7999e484d8f87a3ddb959a4c8ca2737d7c5594ff1c2415a3ac0ba647327430.arrow": {
+      "sha256": "4a7999e484d8f87a3ddb959a4c8ca2737d7c5594ff1c2415a3ac0ba647327430",
+      "bytes": 12746,
+      "rows": 1536
+    },
+    "observations/4a80b539bdf42e483ac21e4edff3f5a318e13f3dfba063b7c0e60fc96a1dd73c.arrow": {
+      "sha256": "4a80b539bdf42e483ac21e4edff3f5a318e13f3dfba063b7c0e60fc96a1dd73c",
+      "bytes": 127730,
+      "rows": 4096
+    },
+    "observations/4982fd66a36a6549ee46b5b6d69615434421e3f200d1513becdac4a27357999f.arrow": {
+      "sha256": "4982fd66a36a6549ee46b5b6d69615434421e3f200d1513becdac4a27357999f",
+      "bytes": 32498,
+      "rows": 1024
+    },
+    "observations/6992834ebd25fc06e4f6bc60ab7b56c449b4fd7956f7f8212fb700b30e776af6.arrow": {
+      "sha256": "6992834ebd25fc06e4f6bc60ab7b56c449b4fd7956f7f8212fb700b30e776af6",
+      "bytes": 127730,
+      "rows": 4096
+    },
+    "observations/fd1070a43f9871ce939aa80b63a8e21cb92684eedee8b75e17633270d2c3a12d.arrow": {
+      "sha256": "fd1070a43f9871ce939aa80b63a8e21cb92684eedee8b75e17633270d2c3a12d",
+      "bytes": 32498,
+      "rows": 1024
+    },
+    "observations/e8bac6cfb95df3675d5e229c4d5ec17d6f024bd6372394b334d85e289c3169a1.arrow": {
+      "sha256": "e8bac6cfb95df3675d5e229c4d5ec17d6f024bd6372394b334d85e289c3169a1",
+      "bytes": 64242,
+      "rows": 2048
+    },
+    "observations/830c81ae8afc121a1f117d3f17154a739decd1b27713328941f16ce80cc48f78.arrow": {
+      "sha256": "830c81ae8afc121a1f117d3f17154a739decd1b27713328941f16ce80cc48f78",
+      "bytes": 127730,
+      "rows": 4096
+    },
+    "observations/132753e7e21230381a430032cafadda6eb5ec641ae22fb7bb4d5b5ebe8407e0a.arrow": {
+      "sha256": "132753e7e21230381a430032cafadda6eb5ec641ae22fb7bb4d5b5ebe8407e0a",
+      "bytes": 32498,
+      "rows": 1024
+    },
+    "observations/3db23f9466268ebc9c11551a4861165c853198e825a33181d86f9bbccdfc7c97.arrow": {
+      "sha256": "3db23f9466268ebc9c11551a4861165c853198e825a33181d86f9bbccdfc7c97",
+      "bytes": 986,
+      "rows": 64
+    },
+    "observations/2c5a3a8880ba74a5931ef548ffba5dbcfe143fab767c5dc48b072ba46e63b275.arrow": {
+      "sha256": "2c5a3a8880ba74a5931ef548ffba5dbcfe143fab767c5dc48b072ba46e63b275",
+      "bytes": 8498,
+      "rows": 2
+    },
+    "record.json": {
+      "sha256": "2e9d7ead2f08ee40bac84437a9ee1bef28e533b3a7c4b9b930af3378242b268f",
+      "bytes": 3357
+    },
+    "frames.json": {
+      "sha256": "20a3891f7dddb49d59fc2eeced8c1d916a2ca8cd17c4f1636c54019ed3a0f8e6",
+      "bytes": 43791
+    },
+    "proof.py": {
+      "sha256": "e9cafc340818b5eb0b9ff03156a2e082d945a4b0408af6ed91671abf3dd17188",
+      "bytes": 9506
+    }
+  },
+  "task": {},
+  "runtime": {
+    "python": "3.12.16",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.41",
+    "run_id": "",
+    "role": null,
+    "github_run_id": null,
+    "github_run_attempt": null
+  }
+}

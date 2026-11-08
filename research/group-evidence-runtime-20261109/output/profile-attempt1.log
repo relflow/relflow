@@ -1,0 +1,30 @@
+Traceback (most recent call last):
+  File "/work/input/research/group-evidence-runtime-20261109/profile.py", line 11, in <module>
+    import regime_recovery as proof
+  File "/work/input/evidence/experiments/group/regime_recovery.py", line 196, in <module>
+    import lightning.pytorch as lit
+  File "/usr/local/lib/python3.12/site-packages/lightning/__init__.py", line 18, in <module>
+    from lightning.fabric.fabric import Fabric  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/site-packages/lightning/fabric/__init__.py", line 35, in <module>
+    from lightning.fabric.fabric import Fabric  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/site-packages/lightning/fabric/fabric.py", line 41, in <module>
+    from lightning.fabric.loggers import Logger
+  File "/usr/local/lib/python3.12/site-packages/lightning/fabric/loggers/__init__.py", line 15, in <module>
+    from lightning.fabric.loggers.tensorboard import TensorBoardLogger  # noqa: F401
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/site-packages/lightning/fabric/loggers/tensorboard.py", line 31, in <module>
+    from lightning.fabric.wrappers import _unwrap_objects
+  File "/usr/local/lib/python3.12/site-packages/lightning/fabric/wrappers.py", line 33, in <module>
+    from torch._dynamo import OptimizedModule
+  File "/usr/local/lib/python3.12/site-packages/torch/_dynamo/__init__.py", line 13, in <module>
+    from . import (
+  File "/usr/local/lib/python3.12/site-packages/torch/_dynamo/aot_compile.py", line 17, in <module>
+    from torch._dynamo.convert_frame import GraphRuntimeEnv
+  File "/usr/local/lib/python3.12/site-packages/torch/_dynamo/convert_frame.py", line 28, in <module>
+    import cProfile
+  File "/usr/local/lib/python3.12/cProfile.py", line 24, in <module>
+    run.__doc__ = _pyprofile.run.__doc__
+                  ^^^^^^^^^^^^^^
+AttributeError: module 'profile' has no attribute 'run'

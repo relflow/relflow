@@ -91,7 +91,7 @@ def test_comparison_base_is_bound_to_the_actual_event(tmp_path, monkeypatch, nam
 
 def test_standard_cpu_matrix_matches_the_execution_profile_and_collects_failures():
     jobs = CONFIG["jobs"]
-    assert set(jobs) == {"prepare", "shard", "collect"}
+    assert set(jobs) == {"prepare", "shard", "collect", "plots"}
     assert all(job["runs-on"] == "ubuntu-24.04" for job in jobs.values())
     assert jobs["shard"]["strategy"] == {
         "fail-fast": False,
@@ -105,7 +105,7 @@ def test_standard_cpu_matrix_matches_the_execution_profile_and_collects_failures
     assert not any("tailscale" in str(step).lower() for job in jobs.values() for step in job["steps"])
 
 
-@pytest.mark.parametrize("job", ["prepare", "shard", "collect"])
+@pytest.mark.parametrize("job", ["prepare", "shard", "collect", "plots"])
 def test_every_job_checks_out_the_same_immutable_executor(job):
     checkouts = [
         step["with"]
@@ -122,7 +122,7 @@ def test_every_job_checks_out_the_same_immutable_executor(job):
     )
 
 
-@pytest.mark.parametrize("job", ["shard", "collect"])
+@pytest.mark.parametrize("job", ["shard", "collect", "plots"])
 @pytest.mark.parametrize("prepared,current,accepted", [("1", "1", True), ("1", "2", False), ("", "2", False)])
 def test_partial_retry_cannot_mix_previous_attempts(job, prepared, current, accepted):
     step = next(

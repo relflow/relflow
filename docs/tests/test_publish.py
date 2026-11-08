@@ -306,3 +306,28 @@ def test_publish_copies_nothing_when_rendered_assets_or_canonical_prefix_fail_va
         publishing.publish(project, environ=environment)
     assert not (Path(environment["READTHEDOCS_OUTPUT"]) / "html").exists()
     assert list((project / "docs").glob("_quarto-readthedocs-*.yml")) == []
+
+
+def test_pr_preview_selects_reviewed_diagnostics_without_fetching_released_measurements(
+    project, environment, renderer, monkeypatch
+):
+    (project / "evidence/experiments").mkdir(parents=True)
+    environment.update(READTHEDOCS_VERSION_TYPE="external", READTHEDOCS_GIT_IDENTIFIER="86")
+    selected = project.parent / "diagnostic-review.json"
+    selected.write_text("{}")
+    calls = []
+    execute = publishing.subprocess.run
+
+    def run(command, **options):
+        if command[0] == "make":
+            calls.append(options["env"]["RELFLOW_EVIDENCE_PUBLICATION"])
+        return execute(command, **options)
+
+    def fetch(*args, **kwargs):
+        raise AssertionError("A reviewed PR must retain its captured measurements")
+
+    monkeypatch.setattr(publishing, "ci", lambda root, revision: selected)
+    monkeypatch.setattr(publishing, "fetch", fetch)
+    monkeypatch.setattr(publishing.subprocess, "run", run)
+    publishing.publish(project, environ=environment)
+    assert calls == [str(selected), str(selected)]

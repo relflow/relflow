@@ -160,7 +160,9 @@ def test_bootstrap_preserves_historical_measurements_outside_canonical_sources()
     entries = registry(root)
     assert selected["version"] == "0.4.2"
     assert len(selected["results"]) == 79
-    assert selected["results"].keys() <= entries.keys()
+    # P065 measured the retired Cluster contract; retain its original record
+    # even though the corresponding experiment is no longer in the catalog.
+    assert selected["results"].keys() - entries.keys() == {"P065"}
     for identifier, entry in entries.items():
         assert not {"evidence-result", "evidence-report"} & metadata((root / entry["script"]).read_text()).keys()
         if identifier in selected["results"]:

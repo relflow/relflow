@@ -1,0 +1,79 @@
+{
+  "schema": 1,
+  "id": "P105",
+  "title": "Do Group assignments affect predictions?",
+  "source_sha256": "179ea681b2c98342c6c8306477569021ec0ccfea71d503b3330fc66fb952fe08",
+  "code_sha256": "43be6627f5a3e1ccadb62fb128e9f28e03ee703e1306c733cd49bdd6787223e4",
+  "wheel_sha256": "cabe120b55c0e552e64469ecf337171650c3fd087375e7d56dd629ddccde5e8b",
+  "capture_sha256": "cbdd7d998915defe677d9667f423c9d65cc2ed674fb983daa25bfe2ca5edad4f",
+  "capture_method": "CPython 3.12 PY_RETURN snapshots of unchanged proof functions",
+  "frames": 3,
+  "artifacts": {
+    "observations/91e83053bb95557c0c6f2fb1225ebcd0eeda9e1a87076cf1fb1657d33b4d014e.arrow": {
+      "sha256": "91e83053bb95557c0c6f2fb1225ebcd0eeda9e1a87076cf1fb1657d33b4d014e",
+      "bytes": 64242,
+      "rows": 2048
+    },
+    "observations/1886be8bc0e46024bcf8f9e2e4e6abcba6923ca42494d181cee445ae358e36a3.arrow": {
+      "sha256": "1886be8bc0e46024bcf8f9e2e4e6abcba6923ca42494d181cee445ae358e36a3",
+      "bytes": 16842,
+      "rows": 2048
+    },
+    "observations/a29ca4ff9c7457be6bb531f10dfe813867fd0883b2339a9ee93aea723311e564.arrow": {
+      "sha256": "a29ca4ff9c7457be6bb531f10dfe813867fd0883b2339a9ee93aea723311e564",
+      "bytes": 16842,
+      "rows": 2048
+    },
+    "observations/46dcb647182db44492e199c326e0f3a6ed9712269c82779e36e1e6f156830a48.arrow": {
+      "sha256": "46dcb647182db44492e199c326e0f3a6ed9712269c82779e36e1e6f156830a48",
+      "bytes": 16842,
+      "rows": 2048
+    },
+    "observations/7429ae9c6e707e0f69e4703006bbbb30d2acf1c791ac053b5bb13a03853355bd.arrow": {
+      "sha256": "7429ae9c6e707e0f69e4703006bbbb30d2acf1c791ac053b5bb13a03853355bd",
+      "bytes": 127730,
+      "rows": 4096
+    },
+    "observations/84b90b3ec792e2db7810682962b73209e947f39f102500ace1039bc5827c58c2.arrow": {
+      "sha256": "84b90b3ec792e2db7810682962b73209e947f39f102500ace1039bc5827c58c2",
+      "bytes": 32498,
+      "rows": 1024
+    },
+    "observations/3f053512df4f9668a038eb38ad5ed6b0cc4e6a92be55222125cd0108eb407d22.arrow": {
+      "sha256": "3f053512df4f9668a038eb38ad5ed6b0cc4e6a92be55222125cd0108eb407d22",
+      "bytes": 986,
+      "rows": 64
+    },
+    "observations/ce77b708e6b0728b779a5a53df67bc7ba8893db3c3bbcb6bcac0b5bac2353641.arrow": {
+      "sha256": "ce77b708e6b0728b779a5a53df67bc7ba8893db3c3bbcb6bcac0b5bac2353641",
+      "bytes": 986,
+      "rows": 64
+    },
+    "observations/3ca4866c7308d0b5ff587b28b5f172a48641318ecb1f888629fbee1f91bdbaa5.arrow": {
+      "sha256": "3ca4866c7308d0b5ff587b28b5f172a48641318ecb1f888629fbee1f91bdbaa5",
+      "bytes": 5314,
+      "rows": 2
+    },
+    "record.json": {
+      "sha256": "0b9aac36dee244f9dac1350c7a9065a8c811441730d08b03f3f6557e122c3089",
+      "bytes": 3633
+    },
+    "frames.json": {
+      "sha256": "cf271ed4a2e49947e3699b0bdc0be1b2bafa1a3ae158da0b20501eab713f46c2",
+      "bytes": 22298
+    },
+    "proof.py": {
+      "sha256": "179ea681b2c98342c6c8306477569021ec0ccfea71d503b3330fc66fb952fe08",
+      "bytes": 8891
+    }
+  },
+  "task": {},
+  "runtime": {
+    "python": "3.12.16",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.41",
+    "run_id": "",
+    "role": null,
+    "github_run_id": null,
+    "github_run_attempt": null
+  }
+}

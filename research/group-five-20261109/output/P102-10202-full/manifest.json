@@ -1,0 +1,134 @@
+{
+  "schema": 1,
+  "id": "P102",
+  "title": "Does Group help rare identities?",
+  "source_sha256": "132f4780ec1a7b9b549fa7558f11dc84b8c06eac3b2e6f79f4f02ad17cce4f05",
+  "code_sha256": "e88c6d96f15c564e359045cf620b1f36cd0960c09b1642a8df48127e441e9511",
+  "wheel_sha256": "cabe120b55c0e552e64469ecf337171650c3fd087375e7d56dd629ddccde5e8b",
+  "capture_sha256": "cbdd7d998915defe677d9667f423c9d65cc2ed674fb983daa25bfe2ca5edad4f",
+  "capture_method": "CPython 3.12 PY_RETURN snapshots of unchanged proof functions",
+  "frames": 9,
+  "artifacts": {
+    "observations/8c2918e59b258988396d398ca71e768fdc52e83b87fba4df333e4bdae90bfa3d.arrow": {
+      "sha256": "8c2918e59b258988396d398ca71e768fdc52e83b87fba4df333e4bdae90bfa3d",
+      "bytes": 32498,
+      "rows": 1024
+    },
+    "observations/80fe75e80ea3cb3bedb14436762f3a57d8efa84698e73d4e99b5069258a9ecbc.arrow": {
+      "sha256": "80fe75e80ea3cb3bedb14436762f3a57d8efa84698e73d4e99b5069258a9ecbc",
+      "bytes": 8650,
+      "rows": 1024
+    },
+    "observations/a4becbc2f60a6e91af5d9ea2eae55295c5c7d8c9a059d11aaf0ce1be6a0a0668.arrow": {
+      "sha256": "a4becbc2f60a6e91af5d9ea2eae55295c5c7d8c9a059d11aaf0ce1be6a0a0668",
+      "bytes": 8650,
+      "rows": 1024
+    },
+    "observations/2411f68fb27c3e9b6b6da217b650cf968191b53049502d40031770b1ba521fe7.arrow": {
+      "sha256": "2411f68fb27c3e9b6b6da217b650cf968191b53049502d40031770b1ba521fe7",
+      "bytes": 32498,
+      "rows": 1024
+    },
+    "observations/93478eba9dc314ac8f209dd25216f8dccd54871ec81223ee16a285806d557ff5.arrow": {
+      "sha256": "93478eba9dc314ac8f209dd25216f8dccd54871ec81223ee16a285806d557ff5",
+      "bytes": 8650,
+      "rows": 1024
+    },
+    "observations/dc2288a39d33166303bccf8a3556a8bce2649b44244dc840cb3c85b7968b56bc.arrow": {
+      "sha256": "dc2288a39d33166303bccf8a3556a8bce2649b44244dc840cb3c85b7968b56bc",
+      "bytes": 8650,
+      "rows": 1024
+    },
+    "observations/5120e8165a23c599509b50be61c001038f9e5340680f226104d9d393c51df87c.arrow": {
+      "sha256": "5120e8165a23c599509b50be61c001038f9e5340680f226104d9d393c51df87c",
+      "bytes": 8650,
+      "rows": 1024
+    },
+    "observations/b4bc24340336c78f5741ae7ae9841643166cd1bbe277411d8ba469329356fb9f.arrow": {
+      "sha256": "b4bc24340336c78f5741ae7ae9841643166cd1bbe277411d8ba469329356fb9f",
+      "bytes": 8650,
+      "rows": 1024
+    },
+    "observations/a74c81bb2e8a6722bcf171109c1565feaf872c512c03870fa828b179719c728f.arrow": {
+      "sha256": "a74c81bb2e8a6722bcf171109c1565feaf872c512c03870fa828b179719c728f",
+      "bytes": 8650,
+      "rows": 1024
+    },
+    "observations/25c78abf2afd025c59fb8f6c472d504706177070a29549f92c99d0413c569652.arrow": {
+      "sha256": "25c78abf2afd025c59fb8f6c472d504706177070a29549f92c99d0413c569652",
+      "bytes": 8650,
+      "rows": 1024
+    },
+    "observations/03a94a0b67e0be97b0257a554a3e5090827d7e6028ed9ddd82399c733509e2f1.arrow": {
+      "sha256": "03a94a0b67e0be97b0257a554a3e5090827d7e6028ed9ddd82399c733509e2f1",
+      "bytes": 8650,
+      "rows": 1024
+    },
+    "observations/5b5fcc11fc9084f1b5afa104be5b373ce55d27ffc38f16ee3d83e2784557abd2.arrow": {
+      "sha256": "5b5fcc11fc9084f1b5afa104be5b373ce55d27ffc38f16ee3d83e2784557abd2",
+      "bytes": 8650,
+      "rows": 1024
+    },
+    "observations/82f6604c1391ea207d959798effb8df0c1e59702528a39932ac277a3b40b086f.arrow": {
+      "sha256": "82f6604c1391ea207d959798effb8df0c1e59702528a39932ac277a3b40b086f",
+      "bytes": 127730,
+      "rows": 4096
+    },
+    "observations/7bb5910663cde148642348b3dbff905030906d9502fa7babca93507726494ab9.arrow": {
+      "sha256": "7bb5910663cde148642348b3dbff905030906d9502fa7babca93507726494ab9",
+      "bytes": 32498,
+      "rows": 1024
+    },
+    "observations/f2561ef91234f3eb8f29578a300ef00bea5ce263e6105c7cd10c3fd60df7a3ec.arrow": {
+      "sha256": "f2561ef91234f3eb8f29578a300ef00bea5ce263e6105c7cd10c3fd60df7a3ec",
+      "bytes": 64242,
+      "rows": 2048
+    },
+    "observations/0c9bf3637f9c7f7d1ed0ffc73a0048e74d8b5ca84eda6ac67cbb292f5113ffb1.arrow": {
+      "sha256": "0c9bf3637f9c7f7d1ed0ffc73a0048e74d8b5ca84eda6ac67cbb292f5113ffb1",
+      "bytes": 986,
+      "rows": 64
+    },
+    "observations/42ea873048d51548a72ca03800e009c89df2eed195636a6d009a085f5cd9cbeb.arrow": {
+      "sha256": "42ea873048d51548a72ca03800e009c89df2eed195636a6d009a085f5cd9cbeb",
+      "bytes": 986,
+      "rows": 64
+    },
+    "observations/1640337577401c60720798a43075400891e3d9155b7053d8ee846892ad672db7.arrow": {
+      "sha256": "1640337577401c60720798a43075400891e3d9155b7053d8ee846892ad672db7",
+      "bytes": 986,
+      "rows": 64
+    },
+    "observations/9e49c28f5e6323c9a3f678e827779ef4da94e662366d16266fcbb4e927ac8869.arrow": {
+      "sha256": "9e49c28f5e6323c9a3f678e827779ef4da94e662366d16266fcbb4e927ac8869",
+      "bytes": 127730,
+      "rows": 4096
+    },
+    "observations/cd433692bf5fa3b7b1e8e1c9f9c1955b6b50e1072fbc54ce7587030f31282fe0.arrow": {
+      "sha256": "cd433692bf5fa3b7b1e8e1c9f9c1955b6b50e1072fbc54ce7587030f31282fe0",
+      "bytes": 12850,
+      "rows": 2
+    },
+    "record.json": {
+      "sha256": "362044f287d2750e5e72fa0b44e5123193ab40d9b667bbcfd1f40f8e0a7ce8c5",
+      "bytes": 6878
+    },
+    "frames.json": {
+      "sha256": "97276c4362b64226af1d0def8b1f5d197e0efab5e6823e56a2a9dafbbb3a4588",
+      "bytes": 14245
+    },
+    "proof.py": {
+      "sha256": "132f4780ec1a7b9b549fa7558f11dc84b8c06eac3b2e6f79f4f02ad17cce4f05",
+      "bytes": 8963
+    }
+  },
+  "task": {},
+  "runtime": {
+    "python": "3.12.16",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.41",
+    "run_id": "",
+    "role": null,
+    "github_run_id": null,
+    "github_run_attempt": null
+  }
+}

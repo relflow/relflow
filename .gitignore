@@ -35,6 +35,8 @@ docs/site/
 docs/.quarto/
 docs/.gitignore
 docs/assets/diagrams/
+docs/assets/evidence-plots/P*
+docs/assets/evidence-plots/review.json
 docs/evidence/
 docs/**/*.quarto_ipynb
 docs/**/*_files/

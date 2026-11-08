@@ -1,0 +1,237 @@
+{
+  "schema": 1,
+  "entries": {
+    "P102": {
+      "data": "P102.json",
+      "figures": [
+        {
+          "name": "P102",
+          "caption": "The points show the recorded seed and named held-out populations. Each error is normalized by the training-mean prediction error on that population; the dotted line is that baseline."
+        }
+      ],
+      "source_sha256": "132f4780ec1a7b9b549fa7558f11dc84b8c06eac3b2e6f79f4f02ad17cce4f05",
+      "record_sha256": "f2efee43b274e87e0d804cfc0535dcb5f45a005dc0d649c43fd2ab8282cce805",
+      "code_sha256": "e88c6d96f15c564e359045cf620b1f36cd0960c09b1642a8df48127e441e9511",
+      "assets": {
+        "P102.json": "202e534e990f5ba1397f573f95baefe16e8ab12d474c7319e879f8411e4c4022",
+        "P102-record.json": "f2efee43b274e87e0d804cfc0535dcb5f45a005dc0d649c43fd2ab8282cce805",
+        "P102-manifest.json.gz": "6c182b454ae3de8022b631afacf81f0dc144ac05c12c2810365a23a12d8cf204",
+        "P102-proof.py": "132f4780ec1a7b9b549fa7558f11dc84b8c06eac3b2e6f79f4f02ad17cce4f05",
+        "P102-light.svg": "4cd5e7a567c7eaccdf40cb051a8d585552006575d12980ce816e42eac375f7f6",
+        "P102-dark.svg": "4f39bfa8c9ebfac10b1db179815bd98a207a8641c0adcdb9fa39d4cb654f438e"
+      }
+    },
+    "P103": {
+      "data": "P103.json",
+      "figures": [
+        {
+          "name": "P103",
+          "caption": "The points show the recorded seed and named held-out populations. Each error is normalized by the training-mean prediction error on that population; the dotted line is that baseline."
+        }
+      ],
+      "source_sha256": "e21a73872c7f8fcd9fdbb8bed430c10de2a3b06d662d4f47d66c465cc3389a41",
+      "record_sha256": "4c1f282aeb52a5a558a2775a04d411516341423ecacdcd749b088b03732f60b9",
+      "code_sha256": "e28db55e0ffb06ff0c57070aba9ea1ab4fefa5e418f7840f7145f8ec5f26d95a",
+      "assets": {
+        "P103.json": "208ad60a1abf8294dfc5bd1fc2e2a19bbd8c8b9718830d9acb67011b16e4024f",
+        "P103-record.json": "4c1f282aeb52a5a558a2775a04d411516341423ecacdcd749b088b03732f60b9",
+        "P103-manifest.json.gz": "10e06c93d9cd160e5f0df7cf217155c324e5417421b9a88475b13fa2e8292876",
+        "P103-proof.py": "e21a73872c7f8fcd9fdbb8bed430c10de2a3b06d662d4f47d66c465cc3389a41",
+        "P103-light.svg": "0fb0a6bfc947c16df2c36a4a5c1691f93f713e37bee81c86dd141a182d1b6cf7",
+        "P103-dark.svg": "a2ecdefaf66592f77a6226feb5f2a3e2e92e2f8758ad757903607c696c389a08"
+      }
+    },
+    "P104": {
+      "data": "P104.json",
+      "figures": [
+        {
+          "name": "P104",
+          "caption": "The points show the recorded seed and named held-out populations. Each error is normalized by the training-mean prediction error on that population; the dotted line is that baseline."
+        }
+      ],
+      "source_sha256": "a113d2209a657b4fdea7ce4772c6cba6f82d2686b994c382ea7c78c2d87ed271",
+      "record_sha256": "c5d0da8c86c1f38fd7969be86f4b1a096d3ceff811b4ea5630fdc93cd48c7213",
+      "code_sha256": "a8a600c3f0eaef76885fc6a8ee25123ab1d5ec0224cdb32e241ab40def00d659",
+      "assets": {
+        "P104.json": "aa06c53d1cfdbdfd7f27a54b1bd4516a963dfb34da08a25c5d4057442ae665ad",
+        "P104-record.json": "c5d0da8c86c1f38fd7969be86f4b1a096d3ceff811b4ea5630fdc93cd48c7213",
+        "P104-manifest.json.gz": "5483f79d44cb323e87dd4949311c574c16ac17c02866b59a032cb4f689cb81b0",
+        "P104-proof.py": "a113d2209a657b4fdea7ce4772c6cba6f82d2686b994c382ea7c78c2d87ed271",
+        "P104-light.svg": "a9fdbd5608ae36265a35608779488c5c59df36142f439fb7c95dd7db41ed0ea0",
+        "P104-dark.svg": "016da92b9114bb5ab3edd641b055bed012508535a49704a514e313797aed5eac"
+      }
+    },
+    "P105": {
+      "data": "P105.json",
+      "figures": [
+        {
+          "name": "P105",
+          "caption": "The points show the recorded seed and named held-out populations. Each error is normalized by the training-mean prediction error on that population; the dotted line is that baseline."
+        }
+      ],
+      "source_sha256": "941fa545eeefe2401762b53893c6b2eeff51e2cdb3360671c48df0490772a2eb",
+      "record_sha256": "b100edfd277a2de30301006b87eb41a5cd01144ef9fd1f6f04e6aae877297753",
+      "code_sha256": "3e4deaa1cdaa765cbc55a5b854d72cf7f1b4f22d12a6a714883631142b084982",
+      "assets": {
+        "P105.json": "6176a05152a8978ac786b7867e86c7cd13064532da924672dd1119126510457a",
+        "P105-record.json": "b100edfd277a2de30301006b87eb41a5cd01144ef9fd1f6f04e6aae877297753",
+        "P105-manifest.json.gz": "36fc63cd890df11bff0e03708b4a43eeb2f0dd58dc250c0990319364a23c4395",
+        "P105-proof.py": "941fa545eeefe2401762b53893c6b2eeff51e2cdb3360671c48df0490772a2eb",
+        "P105-light.svg": "12e9b1c3853e5b2bd825906b7ca2132f303678e6cb5336667f6af2af9316e378",
+        "P105-dark.svg": "0bed8574869ba0f7168e35062a94b00e9ed4078d687382dbcbb0e14d55ffe00e"
+      }
+    },
+    "P106": {
+      "data": "P106.json",
+      "figures": [
+        {
+          "name": "P106",
+          "caption": "The points show the recorded seed and named held-out populations. Each error is normalized by the training-mean prediction error on that population; the dotted line is that baseline."
+        }
+      ],
+      "source_sha256": "4df53c953c258cbc8845a4940415ec7a05372d7711c6b3acf14e51d54ed30339",
+      "record_sha256": "67a11220585a162b69304eca3fe6171f7ba10b4b03417d273f37cb0fba1598f1",
+      "code_sha256": "120c4eb8ce12a54d04f7ba2720d5a79740fc2ace1ee6c0c86018724469af4bd1",
+      "assets": {
+        "P106.json": "0c6012be4a00c502d69fd6160ab3aaa1632b4be81f140676f97b9d190eefc059",
+        "P106-record.json": "67a11220585a162b69304eca3fe6171f7ba10b4b03417d273f37cb0fba1598f1",
+        "P106-manifest.json.gz": "2a25336cedc552678fed9c3e0f92c2a738b06c924f066f9509b6cf44de4131af",
+        "P106-proof.py": "4df53c953c258cbc8845a4940415ec7a05372d7711c6b3acf14e51d54ed30339",
+        "P106-light.svg": "fe98d4229b216f2cf420f2c8cc4d3552914a1b8aa9be7b1cd056f5b926bb4a11",
+        "P106-dark.svg": "b4dba511453e0460574ca15e286ef46027878fde48ff4ec4f3ec9b50543b2e37"
+      }
+    },
+    "P107": {
+      "data": "P107.json",
+      "figures": [
+        {
+          "name": "P107",
+          "caption": "The points show the recorded seed and named held-out populations. Each error is normalized by the training-mean prediction error on that population; the dotted line is that baseline."
+        }
+      ],
+      "source_sha256": "021c6a89a6c57f66d4114d35f2ac75a652abfd1d35e2b33ab7297cc262f21c25",
+      "record_sha256": "54bbc2216b69ce17f3a90a6a024bebc8999382f91ac00fc8df3ba7af9e83dec2",
+      "code_sha256": "fa7d6b9a9ff04e62f9ccb99c067b744c21fa4b12432e4c51035ea0fa91034b08",
+      "assets": {
+        "P107.json": "3acb94b3fe2e2d1384f1457ad6a7a4b0c5ee49367ccf07e6525010e027edde52",
+        "P107-record.json": "54bbc2216b69ce17f3a90a6a024bebc8999382f91ac00fc8df3ba7af9e83dec2",
+        "P107-manifest.json.gz": "2e1d8c13dce3f8eaaba8703f099784fd76fb23aac31bf18958c10d2a2ea757c5",
+        "P107-proof.py": "021c6a89a6c57f66d4114d35f2ac75a652abfd1d35e2b33ab7297cc262f21c25",
+        "P107-light.svg": "81ea7cce8fb4784a5b29d85079aa9f44f993923a0374ae5868b3af04f6f7cea6",
+        "P107-dark.svg": "ab2302f3748a23ef189e5887f774d13a38bb67bd6d643957a2037b06c3d411fd"
+      }
+    }
+  },
+  "expected": [
+    "P001",
+    "P002",
+    "P003",
+    "P004",
+    "P005",
+    "P006",
+    "P007",
+    "P008",
+    "P009",
+    "P010",
+    "P011",
+    "P012",
+    "P013",
+    "P014",
+    "P015",
+    "P016",
+    "P017",
+    "P018",
+    "P019",
+    "P020",
+    "P021",
+    "P022",
+    "P023",
+    "P024",
+    "P025",
+    "P026",
+    "P027",
+    "P028",
+    "P029",
+    "P030",
+    "P031",
+    "P032",
+    "P033",
+    "P034",
+    "P035",
+    "P036",
+    "P037",
+    "P038",
+    "P039",
+    "P040",
+    "P041",
+    "P042",
+    "P043",
+    "P044",
+    "P045",
+    "P046",
+    "P047",
+    "P048",
+    "P049",
+    "P050",
+    "P051",
+    "P052",
+    "P053",
+    "P054",
+    "P055",
+    "P056",
+    "P057",
+    "P058",
+    "P059",
+    "P060",
+    "P061",
+    "P062",
+    "P063",
+    "P064",
+    "P066",
+    "P067",
+    "P068",
+    "P069",
+    "P070",
+    "P071",
+    "P072",
+    "P073",
+    "P074",
+    "P075",
+    "P076",
+    "P077",
+    "P078",
+    "P079",
+    "P080",
+    "P081",
+    "P082",
+    "P083",
+    "P084",
+    "P085",
+    "P086",
+    "P087",
+    "P088",
+    "P089",
+    "P090",
+    "P091",
+    "P092",
+    "P093",
+    "P094",
+    "P095",
+    "P096",
+    "P097",
+    "P098",
+    "P099",
+    "P100",
+    "P101",
+    "P102",
+    "P103",
+    "P104",
+    "P105",
+    "P106",
+    "P107"
+  ],
+  "errors": {},
+  "ci": null,
+  "revision": "uncommitted-working-tree",
+  "renderer_source_sha256": "e114322011cd3c08b5fe1ec3a643515e7c8f125ca8fb948657448900d63a86bd"
+}

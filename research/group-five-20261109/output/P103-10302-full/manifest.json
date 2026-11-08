@@ -1,0 +1,109 @@
+{
+  "schema": 1,
+  "id": "P103",
+  "title": "How sensitive is Group to its number of slots?",
+  "source_sha256": "e21a73872c7f8fcd9fdbb8bed430c10de2a3b06d662d4f47d66c465cc3389a41",
+  "code_sha256": "e28db55e0ffb06ff0c57070aba9ea1ab4fefa5e418f7840f7145f8ec5f26d95a",
+  "wheel_sha256": "cabe120b55c0e552e64469ecf337171650c3fd087375e7d56dd629ddccde5e8b",
+  "capture_sha256": "cbdd7d998915defe677d9667f423c9d65cc2ed674fb983daa25bfe2ca5edad4f",
+  "capture_method": "CPython 3.12 PY_RETURN snapshots of unchanged proof functions",
+  "frames": 5,
+  "artifacts": {
+    "observations/06c067c2f4ff561862eaf66669ee824cd1782e5cec45da862432e17ea75acb66.arrow": {
+      "sha256": "06c067c2f4ff561862eaf66669ee824cd1782e5cec45da862432e17ea75acb66",
+      "bytes": 64242,
+      "rows": 2048
+    },
+    "observations/371ef68652ddd8e2e488adb9c4dd2667eb1b02ee404c6ae237767460e747d424.arrow": {
+      "sha256": "371ef68652ddd8e2e488adb9c4dd2667eb1b02ee404c6ae237767460e747d424",
+      "bytes": 16842,
+      "rows": 2048
+    },
+    "observations/3b6143562e53c6774443f42c5e488121426def34165b96538c9f530f3932842d.arrow": {
+      "sha256": "3b6143562e53c6774443f42c5e488121426def34165b96538c9f530f3932842d",
+      "bytes": 16842,
+      "rows": 2048
+    },
+    "observations/3193a2be5f39cfc2bb7525cf3115d2d236ca55932a648c5602299f5e7dfac48f.arrow": {
+      "sha256": "3193a2be5f39cfc2bb7525cf3115d2d236ca55932a648c5602299f5e7dfac48f",
+      "bytes": 16842,
+      "rows": 2048
+    },
+    "observations/4d040196af763163fea4e148f8c3a79514a8233b1edbcacf2b3a61caaa38997d.arrow": {
+      "sha256": "4d040196af763163fea4e148f8c3a79514a8233b1edbcacf2b3a61caaa38997d",
+      "bytes": 16842,
+      "rows": 2048
+    },
+    "observations/ea0f271813fe6ed0adbb01254f307b639421e6e697750cce595dd1b19d2d6508.arrow": {
+      "sha256": "ea0f271813fe6ed0adbb01254f307b639421e6e697750cce595dd1b19d2d6508",
+      "bytes": 16842,
+      "rows": 2048
+    },
+    "observations/b38bc1125f9ba52945976d29c8f329d66c2c916f4b42467871d0d25e6337b5b1.arrow": {
+      "sha256": "b38bc1125f9ba52945976d29c8f329d66c2c916f4b42467871d0d25e6337b5b1",
+      "bytes": 127730,
+      "rows": 4096
+    },
+    "observations/afda986b3b87f7ed6a2cdfb4c06e606773267fb4148e2c6e37874eed38afe3ff.arrow": {
+      "sha256": "afda986b3b87f7ed6a2cdfb4c06e606773267fb4148e2c6e37874eed38afe3ff",
+      "bytes": 32498,
+      "rows": 1024
+    },
+    "observations/e09e1ccebee33c5ff6eaade908f3450063f0d83201db137dcc0669f48dc50ee5.arrow": {
+      "sha256": "e09e1ccebee33c5ff6eaade908f3450063f0d83201db137dcc0669f48dc50ee5",
+      "bytes": 986,
+      "rows": 64
+    },
+    "observations/9b3e1577a84508a081874358185c265a916b96ed2c6460e7adc84d14cbf3d186.arrow": {
+      "sha256": "9b3e1577a84508a081874358185c265a916b96ed2c6460e7adc84d14cbf3d186",
+      "bytes": 986,
+      "rows": 64
+    },
+    "observations/b709d4c79bb38462bce4bafb9ebe75a65231c6dbfa25a6657c0654de8c1937af.arrow": {
+      "sha256": "b709d4c79bb38462bce4bafb9ebe75a65231c6dbfa25a6657c0654de8c1937af",
+      "bytes": 986,
+      "rows": 64
+    },
+    "observations/3c298bc05333f0227a1796675bfdb24bc812e9f02ceba3f61e5d780ecd727b5a.arrow": {
+      "sha256": "3c298bc05333f0227a1796675bfdb24bc812e9f02ceba3f61e5d780ecd727b5a",
+      "bytes": 986,
+      "rows": 64
+    },
+    "observations/01c11e2bea691ea8b5adcde808317f25bba17661237f7e770a2215ed0153017a.arrow": {
+      "sha256": "01c11e2bea691ea8b5adcde808317f25bba17661237f7e770a2215ed0153017a",
+      "bytes": 986,
+      "rows": 64
+    },
+    "observations/c20d7a2422809ca6c40e180bd4236eef026b26e9fce9408c1d87423026f9b766.arrow": {
+      "sha256": "c20d7a2422809ca6c40e180bd4236eef026b26e9fce9408c1d87423026f9b766",
+      "bytes": 127730,
+      "rows": 4096
+    },
+    "observations/802a090a53639f39c7c75eef70c1dd0a2d91162ac4e1197f8383c787a5a90d7a.arrow": {
+      "sha256": "802a090a53639f39c7c75eef70c1dd0a2d91162ac4e1197f8383c787a5a90d7a",
+      "bytes": 14258,
+      "rows": 2
+    },
+    "record.json": {
+      "sha256": "1c174294d2e7eb1a98ca7bd34db50383faa42ad33b966a823100d2ce73c46862",
+      "bytes": 9907
+    },
+    "frames.json": {
+      "sha256": "93d09aef105a3426f715453eb470078b90a0fde0df44d898c08f13d592991f96",
+      "bytes": 9852
+    },
+    "proof.py": {
+      "sha256": "e21a73872c7f8fcd9fdbb8bed430c10de2a3b06d662d4f47d66c465cc3389a41",
+      "bytes": 8582
+    }
+  },
+  "task": {},
+  "runtime": {
+    "python": "3.12.16",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.41",
+    "run_id": "",
+    "role": null,
+    "github_run_id": null,
+    "github_run_attempt": null
+  }
+}
