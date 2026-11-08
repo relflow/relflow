@@ -798,22 +798,56 @@ def loss(
 
 @series.register(Component.output)
 def output(module: Model, address: Address) -> pa.StructType:
-    """Arrow type of a prediction: ``horizon`` steps of ``channels`` float64 values per record."""
-    step = pa.list_(pa.field("element", pa.float64()))
+    """Arrow type of a prediction: ``horizon`` steps of ``channels`` float64 values per record.
+
+    Integer channels write each step as a list of values; named channels write
+    each step as a struct with one member per name, in tuple order.
+
+    Args:
+        module: The model that owns the field.
+        address: Field address.
+
+    Returns:
+        A struct with a non-null ``content`` list of steps.
+    """
+    channels = cast(Request, module.schema.requests[address]).channels
+    step = (
+        pa.list_(pa.field("element", pa.float64()))
+        if isinstance(channels, int)
+        else pa.struct([pa.field(name, pa.float64(), nullable=False) for name in channels])
+    )
     return pa.struct([pa.field(TensorKey.content.name, pa.list_(pa.field("element", step)), nullable=False)])
 
 
 @series.register(Component.write)
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
-    """Write ``horizon`` steps of every channel for every coordinate; the rich result's state decides validity."""
+    """Write ``horizon`` steps of every channel for every coordinate; the rich result's state decides validity.
+
+    Args:
+        module: The model that owns the field.
+        prediction: Decoded forecast whose content is ``[..., horizon, channels]``.
+        datatype: The type returned by ``output``; a struct step type writes named channels.
+
+    Returns:
+        A struct array with the ``content`` forecast.
+    """
     content = cast(torch.Tensor, prediction.payload[TensorKey.content])
     *coordinates, horizon, channels = content.shape
     records = math.prod(coordinates)
     nested = datatype.field(TensorKey.content.name).type
-    values = variable(
-        values=array(values=content, dtype=pa.float64()),
-        counts=torch.full((records * horizon,), channels),
-        datatype=nested.value_type,
-    )
-    forecast = variable(values=values, counts=torch.full((records,), horizon), datatype=nested)
+    step = nested.value_type
+    if pa.types.is_struct(step):
+        steps = struct(
+            values={
+                field.name: array(values=content[..., index], dtype=pa.float64()) for index, field in enumerate(step)
+            },
+            dtype=step,
+        )
+    else:
+        steps = variable(
+            values=array(values=content, dtype=pa.float64()),
+            counts=torch.full((records * horizon,), channels),
+            datatype=step,
+        )
+    forecast = variable(values=steps, counts=torch.full((records,), horizon), datatype=nested)
     return struct(values={TensorKey.content.name: forecast}, dtype=datatype)
