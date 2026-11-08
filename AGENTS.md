@@ -199,7 +199,9 @@ model = rf.Model(
   reconstruction targets (`mask=True` or a reconstructing ancestor) and
   rejected otherwise. Forecasts are written as exactly `horizon` steps in source units.
   `Series` does not read elapsed time, so use `Period` or a derived `Number` for
-  irregular sampling.
+  irregular sampling. Steps may also arrive as `list<struct<...>>` or
+  `struct<list<...>>`; `channels` may name struct members, whose order sets the
+  channel order and whose names label forecast steps.
 - `Text` caches automatically: workers send stable IDs; a bounded device
   table and shared Rust Moka RAM cache retain hot entries, with SQLite as the
   durable cold tier. `store` selects a local directory, `memory` budgets RAM

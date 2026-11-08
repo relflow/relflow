@@ -38,17 +38,27 @@ decision time. Use [Number](number.qmd) for a single value per record and
 
 ## Input and options
 
-Each valued input must be an Arrow list of numbers when `channels=1`, or a list
-of lists or fixed-size lists with exactly `channels` numbers per step. Values
-convert to `float64`; integers beyond ±2^53 are rejected. A null, NaN, or
-infinite step is unobserved: the rest of the series stays valid, and the encoder
-sees which steps were observed. An empty series is `valued`. A non-empty series
-with no observed step takes the `other` [value state](index.qmd#value-state).
-A null series is `null`.
+Each valued input is one of these Arrow shapes:
+
+- a list of numbers when `channels=1`;
+- a list of lists or fixed-size lists with exactly `channels` numbers per step;
+- a list of structs, one struct of numbers per step;
+- a struct of lists, one list of numbers per channel, with equal step counts in
+  each record.
+
+Large lists are accepted wherever lists are. Values convert to `float64`;
+integers beyond ±2^53 are rejected. A null, NaN, or infinite step is
+unobserved: the rest of the series stays valid, and the encoder sees which steps
+were observed. In a list of structs, a null step or null member is unobserved.
+A null channel list in a struct of lists warns and leaves the steps of that
+record unobserved; when every channel list is null, the series is empty and the
+warning still appears. An empty series is `valued`. A non-empty series with no
+observed step takes the `other` [value state](index.qmd#value-state). A null
+series is `null`.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `channels` | required | Positive number of values per step. |
+| `channels` | required | Positive number of values per step, or a tuple of struct member names. A tuple sets the count and order, selects those members, and requires struct input. An integer needs exactly that many struct members. |
 | `length` | `None` | Hard cap on retained steps. `None` keeps the whole series and pads each batch to its longest. |
 | `overflow` | `None` | With a finite `length`: `head` (default), `tail`, `random`, or `error`. Rejected when `length` is `None`. |
 | `horizon` | `None` | Steps to predict. Required on reconstruction targets (`mask=True` or a reconstructing ancestor), rejected otherwise. |
@@ -77,6 +87,24 @@ retained observed step, so any of them can influence the token. Choose
 `n_blocks` so that the local context per step matches the patterns that matter.
 Apply `length` to bound memory.
 
+## Channels from several columns
+
+Name the channels of a struct, and gather separate columns or nested paths into
+that struct with a [preprocessor](../guides/preprocessing.qmd).
+
+```python
+@rf.preprocess
+def gather(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(
+        signals=pl.struct(
+            temp=pl.col("temp"),
+            hum=pl.col("weather").struct.field("humidity"),
+        ),
+    )
+```
+
+Read it with `signals=rf.Series(channels=("temp", "hum"))`.
+
 ## Learning and output
 
 As a forecast target, `Series` predicts `horizon` steps of `channels` values
@@ -90,7 +118,9 @@ Classify a series by pairing it with a sibling target such as
 model width. See [shared leaf options](index.qmd#shared-leaf-options).
 
 In [prediction output](../reference/prediction-output.qmd), `content` is a list
-of `horizon` steps, each a list of `channels` float64 values. The writer emits
+of `horizon` steps. With integer `channels`, each step is a list of float64
+values; with named channels, each step is a struct with one float64 member per
+name, in tuple order. The writer emits
 exactly `horizon` steps per coordinate. Parquet round-trips these lists,
 including inside a `Branch` with null items. As with other decoded fields, read
 the shared `state` and `inferred` members to learn whether a series was
