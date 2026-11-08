@@ -808,3 +808,36 @@ def test_forecast_smoke(tmp_path, nested):
 def test_series_rejects_lax_integer_sizes(option):
     with pytest.raises(pydantic.ValidationError):
         rf.Series(**option)
+
+
+def named_forecast_model(*, channels: int | tuple[str, ...], horizon: int) -> rf.Model:
+    return rf.Model.xs(
+        d_model=8,
+        history=rf.Series(channels=1),
+        future=rf.Series(channels=channels, horizon=horizon, mask=True),
+    )
+
+
+def test_named_channel_output_type():
+    model = named_forecast_model(channels=("temp", "hum"), horizon=2)
+    step = output_type(model, Address("/future")).field("content").type.value_type
+    assert pa.types.is_struct(step)
+    assert [field.name for field in step] == ["temp", "hum"]
+    assert all(field.type == pa.float64() for field in step)
+
+
+def test_integer_channel_output_type_unchanged():
+    model = named_forecast_model(channels=2, horizon=2)
+    step = output_type(model, Address("/future")).field("content").type.value_type
+    assert pa.types.is_list(step) and step.value_type == pa.float64()
+
+
+def test_predict_writes_named_steps_and_round_trips_parquet(tmp_path):
+    model = named_forecast_model(channels=("temp", "hum"), horizon=3)
+    table = model.predict(pa.table({"history": [[1.0, 2.0], [3.0]]}))
+    for row in table.to_pylist():
+        content = row["predictions"]["future"]["content"]
+        assert len(content) == 3 and all(list(step) == ["temp", "hum"] for step in content)
+    path = tmp_path / "out.parquet"
+    pq.write_table(table, path)
+    assert pq.read_table(path).equals(table)
