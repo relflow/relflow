@@ -1,4 +1,5 @@
 import ast
+import warnings
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -85,11 +86,12 @@ def test_series_is_exported():
 def test_named_channels_set_width():
     request = build_schema(channels=("temp", "hum")).requests[ADDRESS]
     assert request.channels == ("temp", "hum")
-    assert request.width == 2
+    assert (request.layout.width, request.layout.names) == (2, ("temp", "hum"))
 
 
 def test_integer_channels_width():
-    assert build_schema(channels=3).requests[ADDRESS].width == 3
+    layout = build_schema(channels=3).requests[ADDRESS].layout
+    assert (layout.width, layout.names) == (3, None)
 
 
 @pytest.mark.parametrize("channels", [(), ("temp", "temp"), ("",)])
@@ -192,7 +194,7 @@ def test_named_channels_select_a_subset():
 
 
 def test_missing_named_member_names_address_and_members():
-    with pytest.raises(ValueError, match=r"/items/signal.*rain"):
+    with pytest.raises(ValueError, match=r"/items/signal.*rain.*preprocessor"):
         tensorfield([A_ROW], build_schema(channels=("temp", "rain")), datatype=A_TYPE)
 
 
@@ -208,16 +210,25 @@ def test_named_channels_reject_list_input():
 
 def test_columns_with_different_step_counts_raise():
     row = {"temp": [1.0, 2.0], "hum": [10.0]}
-    with pytest.raises(ValueError, match=r"/items/signal.*step count"):
+    with pytest.raises(ValueError, match=r"/items/signal.*step count.*pad"):
         tensorfield([row], build_schema(channels=2), datatype=B_TYPE)
 
 
 def test_null_column_warns_and_marks_its_steps_unobserved():
     row = {"temp": [1.0, 2.0], "hum": None}
-    with pytest.warns(UserWarning, match=r"/items/signal.*hum.*1 record"):
+    with pytest.warns(UserWarning, match=r"/items/signal.*hum"):
         _, observed, state = steps(tensorfield([row], build_schema(channels=2), datatype=B_TYPE))
     assert state.tolist() == [Tokens.other.value]
     assert not observed.any()
+
+
+def test_null_column_warning_shows_once_per_field_and_member():
+    schema = build_schema(channels=2)
+    with warnings.catch_warnings(record=True) as shown:
+        warnings.simplefilter("default")
+        for count in (1, 2):
+            tensorfield([{"temp": [1.0, 2.0], "hum": None}] * count, schema, datatype=B_TYPE)
+    assert len([w for w in shown if "null channel list" in str(w.message)]) == 1
 
 
 def test_all_null_columns_warn_and_give_zero_steps():
@@ -833,6 +844,7 @@ def test_integer_channel_output_type_unchanged():
 
 
 def test_predict_writes_named_steps_and_round_trips_parquet(tmp_path):
+    seed_everything(SEED, workers=True)
     model = named_forecast_model(channels=("temp", "hum"), horizon=3)
     table = model.predict(pa.table({"history": [[1.0, 2.0], [3.0]]}))
     for row in table.to_pylist():
@@ -851,6 +863,7 @@ def test_predict_writes_named_steps_and_round_trips_parquet(tmp_path):
     ],
 )
 def test_predict_reads_struct_shapes(column):
+    seed_everything(SEED, workers=True)
     model = rf.Model.xs(
         d_model=8,
         history=rf.Series(channels=("temp", "hum")),

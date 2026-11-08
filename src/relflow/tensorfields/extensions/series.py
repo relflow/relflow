@@ -5,7 +5,7 @@ import hashlib
 import math
 import warnings
 from collections.abc import Callable, Mapping
-from dataclasses import InitVar
+from dataclasses import InitVar, dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Annotated, Literal, Self, Unpack, cast
 
@@ -103,6 +103,19 @@ LOSSES: Mapping[Objective, Callable[..., torch.Tensor]] = MappingProxyType(
 )
 
 
+@dataclass(frozen=True, kw_only=True)
+class Channels:
+    """The channels of one step.
+
+    Attributes:
+        width: Number of channels per step.
+        names: Struct member names that are the channels, in channel order; ``None`` for a plain count.
+    """
+
+    width: int
+    names: tuple[str, ...] | None
+
+
 @series.register(Component.Request)
 class Request(RequestBase):
     """One multichannel time series per record.
@@ -173,9 +186,15 @@ class Request(RequestBase):
         return channels
 
     @property
-    def width(self) -> int:
-        """Number of channels per step, whether ``channels`` is a count or names."""
-        return self.channels if isinstance(self.channels, int) else len(self.channels)
+    def layout(self) -> Channels:
+        """The channels of one step.
+
+        Returns:
+            The channel count, with the member names when ``channels`` is a tuple of names.
+        """
+        if isinstance(self.channels, int):
+            return Channels(width=self.channels, names=None)
+        return Channels(width=len(self.channels), names=self.channels)
 
     @pydantic.model_validator(mode="after")
     def check_bounds(self) -> Self:
@@ -225,12 +244,12 @@ def listlike(datatype: pa.DataType) -> bool:
     return pa.types.is_list(datatype) or pa.types.is_large_list(datatype) or pa.types.is_fixed_size_list(datatype)
 
 
-def members(datatype: pa.StructType, *, channels: int | tuple[str, ...], address: Address) -> tuple[str, ...]:
+def members(datatype: pa.StructType, *, channels: Channels, address: Address) -> tuple[str, ...]:
     """Struct member names to read, in channel order.
 
     Args:
         datatype: The Arrow struct type of a step or of a record.
-        channels: A member count, or the member names to select.
+        channels: The channel count, or the member names to select.
         address: Field address, for error messages.
 
     Returns:
@@ -240,27 +259,37 @@ def members(datatype: pa.StructType, *, channels: int | tuple[str, ...], address
         ValueError: If a count differs from the member count or a name is not a member.
     """
     names = tuple(field.name for field in datatype)
-    if isinstance(channels, int) and len(names) != channels:
+    if channels.names is None and len(names) != channels.width:
         message = (
-            f"series field at '{address}' has channels={channels} but its struct has {len(names)} members {names}; "
-            "name the members in channels or select them in a preprocessor"
+            f"series field at '{address}' has channels={channels.width} but its struct has {len(names)} members "
+            f"{names}; name the members in channels or select them in a preprocessor"
         )
         raise ValueError(message)
-    missing = [] if isinstance(channels, int) else [name for name in channels if name not in names]
+    if channels.names is None:
+        return names
+    missing = [name for name in channels.names if name not in names]
     if missing:
-        message = f"series field at '{address}' names channels {missing} absent from its struct members {names}"
+        message = (
+            f"series field at '{address}' names channels {missing} absent from its struct members {names}; "
+            "check the names in channels or rename the members in a preprocessor"
+        )
         raise ValueError(message)
-    return names if isinstance(channels, int) else channels
+    return channels.names
 
 
-def rows(values: pa.Array, *, channels: int | tuple[str, ...], address: Address) -> tuple[np.ndarray, np.ndarray]:
+def children(datatype: pa.StructType, *, flat: list[pa.Array]) -> dict[str, pa.Array]:
+    """Member arrays of a struct by member name."""
+    return dict(zip((field.name for field in datatype), flat, strict=True))
+
+
+def rows(values: pa.Array, *, channels: Channels, address: Address) -> tuple[np.ndarray, np.ndarray]:
     """Steps of lists of structs, one struct per step.
 
     A null step struct or a null member makes the whole step NaN.
 
     Args:
         values: One Arrow list of step structs per record.
-        channels: A member count, or the member names to select.
+        channels: The channel count, or the member names to select.
         address: Field address, for error messages.
 
     Returns:
@@ -271,22 +300,22 @@ def rows(values: pa.Array, *, channels: int | tuple[str, ...], address: Address)
     """
     flat = cast(pa.StructArray, pc.list_flatten(values))
     names = members(flat.type, channels=channels, address=address)
-    children = dict(zip((field.name for field in flat.type), flat.flatten(), strict=True))
-    matrix = np.column_stack([floats(children[name], address=address) for name in names])
+    by_name = children(flat.type, flat=flat.flatten())
+    matrix = np.column_stack([floats(by_name[name], address=address) for name in names])
     return matrix, pc.list_value_length(values).to_numpy(zero_copy_only=False).astype(np.int64)
 
 
-def columns(
-    values: pa.StructArray, *, channels: int | tuple[str, ...], address: Address
-) -> tuple[np.ndarray, np.ndarray]:
+def columns(values: pa.StructArray, *, channels: Channels, address: Address) -> tuple[np.ndarray, np.ndarray]:
     """Steps of structs with one list per channel.
 
     A null channel list is a missing channel: it warns, and the steps of its
     record are NaN. A record whose channel lists are all null has no steps.
+    The warning text is the same for every batch, so Python shows it once per
+    field and member.
 
     Args:
         values: One Arrow struct of channel lists per record.
-        channels: A member count, or the member names to select.
+        channels: The channel count, or the member names to select.
         address: Field address, for error messages.
 
     Returns:
@@ -296,8 +325,8 @@ def columns(
         ValueError: If the channel lists of a record differ in length or the members do not match ``channels``.
     """
     names = members(values.type, channels=channels, address=address)
-    children = dict(zip((field.name for field in values.type), values.flatten(), strict=True))
-    lists = [children[name] for name in names]
+    by_name = children(values.type, flat=values.flatten())
+    lists = [by_name[name] for name in names]
     counts = np.stack(
         [floats(pc.list_value_length(member), address=address) for member in lists]
     )  # NaN marks a null list
@@ -305,7 +334,7 @@ def columns(
     for name, absent in zip(names, missing, strict=True):
         if absent.any():
             message = (
-                f"series field at '{address}' has a null channel list '{name}' in {int(absent.sum())} record(s); "
+                f"series field at '{address}' has a null channel list '{name}' in some records; "
                 "its steps are unobserved. Supply a list of nulls with the record step count, "
                 "or drop or fill the record in a preprocessor"
             )
@@ -316,7 +345,8 @@ def columns(
     if len(differing):
         message = (
             f"series field at '{address}' has channel lists {names} with different step count "
-            f"in record {int(differing[0])}: {counts[:, differing[0]].tolist()}"
+            f"in record {int(differing[0])}: {counts[:, differing[0]].tolist()}; "
+            "pad the shorter lists with nulls or trim them in a preprocessor"
         )
         raise ValueError(message)
     lengths = np.where(missing.all(axis=0), 0, longest).astype(np.int64)
@@ -326,7 +356,7 @@ def columns(
     return matrix, lengths
 
 
-def steps(values: pa.Array, *, channels: int | tuple[str, ...], address: Address) -> tuple[np.ndarray, np.ndarray]:
+def steps(values: pa.Array, *, channels: Channels, address: Address) -> tuple[np.ndarray, np.ndarray]:
     """Every step of every series back to back as ``(steps, channels)`` float64, with the step count per series.
 
     A null step or element is NaN; a step reads as observed only when all
@@ -344,9 +374,8 @@ def steps(values: pa.Array, *, channels: int | tuple[str, ...], address: Address
         ValueError: If a record is not a list or struct, named channels meet a list input,
             or a step does not hold ``channels`` values.
     """
-
+    width = channels.width
     if not len(values):
-        width = channels if isinstance(channels, int) else len(channels)
         return np.empty((0, width)), np.empty(0, dtype=np.int64)
     if pa.types.is_struct(values.type):
         return columns(cast(pa.StructArray, values), channels=channels, address=address)
@@ -355,9 +384,9 @@ def steps(values: pa.Array, *, channels: int | tuple[str, ...], address: Address
         raise ValueError(message)
     if pa.types.is_struct(cast(pa.ListType, values.type).value_type):
         return rows(values, channels=channels, address=address)
-    if not isinstance(channels, int):
+    if channels.names is not None:
         message = (
-            f"series field at '{address}' names channels {channels} but its input has no struct members; "
+            f"series field at '{address}' names channels {channels.names} but its input has no struct members; "
             "provide a list of structs or a struct of lists, or set channels to a count"
         )
         raise ValueError(message)
@@ -365,22 +394,22 @@ def steps(values: pa.Array, *, channels: int | tuple[str, ...], address: Address
     lengths = pc.list_value_length(values).to_numpy(zero_copy_only=False).astype(np.int64)
     flat = pc.list_flatten(values)
     if not listlike(flat.type):
-        if channels != 1:
+        if width != 1:
             message = (
-                f"series field at '{address}' has scalar steps but expects channels={channels} values per step; "
+                f"series field at '{address}' has scalar steps but expects channels={width} values per step; "
                 "nest each step as a list"
             )
             raise ValueError(message)
         return floats(flat, address=address).reshape(-1, 1), lengths
 
     widths = pc.list_value_length(flat)
-    wrong = pc.filter(widths, pc.not_equal(widths, pa.scalar(channels, widths.type)))
+    wrong = pc.filter(widths, pc.not_equal(widths, pa.scalar(width, widths.type)))
     if len(wrong):
-        message = f"series field at '{address}' expects channels={channels} values per step, got {wrong[0].as_py()}"
+        message = f"series field at '{address}' expects channels={width} values per step, got {wrong[0].as_py()}"
         raise ValueError(message)
-    matrix = np.full((len(flat), channels), math.nan)
+    matrix = np.full((len(flat), width), math.nan)
     matrix[pc.is_valid(flat).to_numpy(zero_copy_only=False)] = floats(pc.list_flatten(flat), address=address).reshape(
-        -1, channels
+        -1, width
     )
     return matrix, lengths
 
@@ -489,7 +518,7 @@ def encode(
     one observed step takes the ``other`` state; an empty one stays valued.
     """
 
-    matrix, lengths = steps(combine(field), channels=request.channels, address=address)
+    matrix, lengths = steps(combine(field), channels=request.layout, address=address)
     cap = request.horizon if target else request.length
     kept = lengths if cap is None else np.minimum(lengths, cap)
     start = crop(
@@ -509,7 +538,7 @@ def encode(
     picked = matrix[(np.cumsum(lengths) - lengths)[record] + start[record] + offset]
     finite = np.isfinite(picked).all(axis=1)
 
-    content = np.zeros((len(lengths), width, request.width))
+    content = np.zeros((len(lengths), width, request.layout.width))
     observed = np.zeros((len(lengths), width), dtype=np.bool_)
     content[record[finite], offset[finite]] = picked[finite]
     observed[record[finite], offset[finite]] = True
@@ -518,7 +547,7 @@ def encode(
     state[field.place((kept > 0) & ~observed.any(axis=1), fill=False)] = Tokens.other.value
     encoded = TensorDict(
         {
-            VALUES: torch.from_numpy(field.place(content, fill=0.0, value_shape=(width, request.width))),
+            VALUES: torch.from_numpy(field.place(content, fill=0.0, value_shape=(width, request.layout.width))),
             OBSERVED: torch.from_numpy(field.place(observed, fill=False, value_shape=(width,))),
         },
         batch_size=field.shape,
@@ -592,9 +621,9 @@ def observe(
     if not learn:
         return None
     request = cast(Request, schema.requests[address])
-    matrix, _ = steps(combine(field), channels=request.channels, address=address)
+    matrix, _ = steps(combine(field), channels=request.layout, address=address)
     observed = torch.from_numpy(matrix[np.isfinite(matrix).all(axis=1)])
-    return TensorDict({TensorKey.content: moments(observed, width=request.width)}, batch_size=[])
+    return TensorDict({TensorKey.content: moments(observed, width=request.layout.width)}, batch_size=[])
 
 
 class Block(torch.nn.Module):
@@ -643,8 +672,8 @@ class Embedder(EmbedderBase):
         self.destination: Address = cast("Branch", request.parent).address
         self.jitter: Jitter = request.jitter
 
-        self.normalizer = GlobalOnlineNormalizer(width=request.width)
-        self.projection = torch.nn.Linear(in_features=request.width, out_features=schema.d_model)
+        self.normalizer = GlobalOnlineNormalizer(width=request.layout.width)
+        self.projection = torch.nn.Linear(in_features=request.layout.width, out_features=schema.d_model)
         self.blocks = torch.nn.ModuleList(
             [Block(width=schema.d_model, dilation=2**depth) for depth in range(request.n_blocks)]
         )
@@ -725,10 +754,10 @@ class Decoder(DecoderBase):
 
         horizon = cast(int, request.horizon)
         self.horizon: int = horizon
-        self.channels: int = request.width
-        self.regression = torch.nn.Linear(in_features=schema.d_model, out_features=horizon * request.width)
+        self.width: int = request.layout.width
+        self.regression = torch.nn.Linear(in_features=schema.d_model, out_features=horizon * request.layout.width)
         # Target statistics per channel: the forecast starts at their mean and predicts standardized deviations.
-        self.normalizer: GlobalOnlineNormalizer = GlobalOnlineNormalizer(width=request.width)
+        self.normalizer: GlobalOnlineNormalizer = GlobalOnlineNormalizer(width=request.layout.width)
         self.metrics = Scores(address=address, factory=Errors)
 
     @beartype
@@ -738,7 +767,7 @@ class Decoder(DecoderBase):
             return TensorDict(source={TensorKey.state: state})
 
         with precise(pooled.device):
-            scaled = self.regression(pooled.float()).reshape(*pooled.shape[:-1], self.horizon, self.channels)
+            scaled = self.regression(pooled.float()).reshape(*pooled.shape[:-1], self.horizon, self.width)
             scaled = scaled.to(dtype=self.normalizer.mean.dtype)
             content = self.normalizer.mean + self.normalizer.scale * scaled
         return TensorDict(source={TensorKey.state: state, TensorKey.content: content, SCALED: scaled})
@@ -755,7 +784,7 @@ def loss(
     address: Address = prediction.address
     request: Request = cast(Request, module.schema.requests[address])
     decoder: Decoder = cast(Decoder, module.nodes[address].decoder)
-    horizon, channels = decoder.horizon, request.width
+    horizon, width = decoder.horizon, request.layout.width
 
     size: int = cast(torch.Tensor, batch.targets[TensorKey.state]).numel()
     trainable = batch.trainable.reshape(size)
@@ -774,8 +803,8 @@ def loss(
     )
 
     target = cast(TensorDict, batch.targets[TensorKey.content])
-    scaled = cast(torch.Tensor, prediction.payload[SCALED]).reshape(size, horizon, channels)
-    values = cast(torch.Tensor, target[VALUES]).reshape(size, horizon, channels).to(dtype=scaled.dtype)
+    scaled = cast(torch.Tensor, prediction.payload[SCALED]).reshape(size, horizon, width)
+    values = cast(torch.Tensor, target[VALUES]).reshape(size, horizon, width).to(dtype=scaled.dtype)
     observed = cast(torch.Tensor, target[OBSERVED]).reshape(size, horizon)
     entries = (trainable & state_targets.eq(Tokens.valued.value)).unsqueeze(-1) & observed
     if entries.any():
@@ -789,7 +818,7 @@ def loss(
         output += scaled.sum().to(dtype=output.dtype) * 0.0
 
     # Error metrics report source units whatever the training scale.
-    content = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(size, horizon, channels)
+    content = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(size, horizon, width)
     counts, sums = errors(predicted=content[entries], observed=values[entries])
     decoder.metrics.record(module=module, strata=strata, counts=counts, sums=sums)
 
@@ -798,9 +827,9 @@ def loss(
 
 @series.register(Component.output)
 def output(module: Model, address: Address) -> pa.StructType:
-    """Arrow type of a prediction: ``horizon`` steps of ``channels`` float64 values per record.
+    """Arrow type of a prediction: ``horizon`` steps of one float64 value per channel per record.
 
-    Integer channels write each step as a list of values; named channels write
+    A channel count writes each step as a list of values; channel names write
     each step as a struct with one member per name, in tuple order.
 
     Args:
@@ -810,13 +839,32 @@ def output(module: Model, address: Address) -> pa.StructType:
     Returns:
         A struct with a non-null ``content`` list of steps.
     """
-    channels = cast(Request, module.schema.requests[address]).channels
-    step = (
-        pa.list_(pa.field("element", pa.float64()))
-        if isinstance(channels, int)
-        else pa.struct([pa.field(name, pa.float64(), nullable=False) for name in channels])
-    )
+    names = cast(Request, module.schema.requests[address]).layout.names
+    step = pa.list_(pa.field("element", pa.float64()))
+    if names is not None:
+        step = pa.struct([pa.field(name, pa.float64(), nullable=False) for name in names])
     return pa.struct([pa.field(TensorKey.content.name, pa.list_(pa.field("element", step)), nullable=False)])
+
+
+def struct_steps(content: torch.Tensor, *, step: pa.StructType) -> pa.Array:
+    """Steps written as structs with one member per named channel."""
+    return struct(
+        values={field.name: array(values=content[..., index], dtype=pa.float64()) for index, field in enumerate(step)},
+        dtype=step,
+    )
+
+
+def list_steps(content: torch.Tensor, *, step: pa.ListType) -> pa.Array:
+    """Steps written as lists with one value per channel."""
+    *_, width = content.shape
+    return variable(
+        values=array(values=content, dtype=pa.float64()),
+        counts=torch.full((content.numel() // width,), width),
+        datatype=step,
+    )
+
+
+STEP_WRITERS: Mapping[bool, Callable[..., pa.Array]] = MappingProxyType({True: struct_steps, False: list_steps})
 
 
 @series.register(Component.write)
@@ -825,29 +873,19 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
 
     Args:
         module: The model that owns the field.
-        prediction: Decoded forecast whose content is ``[..., horizon, channels]``.
+        prediction: Decoded forecast whose content is ``[..., horizon, width]``.
         datatype: The type returned by ``output``; a struct step type writes named channels.
 
     Returns:
         A struct array with the ``content`` forecast.
     """
     content = cast(torch.Tensor, prediction.payload[TensorKey.content])
-    *coordinates, horizon, channels = content.shape
-    records = math.prod(coordinates)
+    *coordinates, horizon, _ = content.shape
     nested = datatype.field(TensorKey.content.name).type
-    step = nested.value_type
-    if pa.types.is_struct(step):
-        steps = struct(
-            values={
-                field.name: array(values=content[..., index], dtype=pa.float64()) for index, field in enumerate(step)
-            },
-            dtype=step,
-        )
-    else:
-        steps = variable(
-            values=array(values=content, dtype=pa.float64()),
-            counts=torch.full((records * horizon,), channels),
-            datatype=step,
-        )
-    forecast = variable(values=steps, counts=torch.full((records,), horizon), datatype=nested)
+    step = cast(pa.StructType | pa.ListType, nested.value_type)  # the type written by ``output``
+    forecast = variable(
+        values=STEP_WRITERS[pa.types.is_struct(step)](content, step=step),
+        counts=torch.full((math.prod(coordinates),), horizon),
+        datatype=nested,
+    )
     return struct(values={TensorKey.content.name: forecast}, dtype=datatype)
