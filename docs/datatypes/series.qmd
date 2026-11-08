@@ -48,8 +48,8 @@ three steps of temperature and humidity:
 | list of structs | `list<struct<temp: number, hum: number>>` | `[{temp: 21.5, hum: 0.61}, {temp: 22.0, hum: 0.58}, {temp: 22.4, hum: 0.55}]` | `rf.Series(channels=("temp", "hum"))` |
 | struct of lists | `struct<temp: list<number>, hum: list<number>>` | `{temp: [21.5, 22.0, 22.4], hum: [0.61, 0.58, 0.55]}` | `rf.Series(channels=("temp", "hum"))` |
 
-Large lists are accepted wherever lists are, for the outer list and for the
-channel lists. Values convert to `float64`; integers beyond ±2^53 are rejected.
+Large lists and fixed-size lists are accepted wherever lists are: for the outer
+list of a list of structs and for the channel lists of a struct of lists. Values convert to `float64`; integers beyond ±2^53 are rejected.
 
 The two struct shapes accept either form of `channels`:
 
@@ -62,8 +62,8 @@ The two struct shapes accept either form of `channels`:
 
 Every struct member must be numeric (list of structs) or a list of numbers
 (struct of lists). A struct with a string member or with mixed members is
-rejected when relflow checks the input Arrow types, even when `channels` does not name that
-member; narrow it in a [preprocessor](#reshaping-in-a-preprocessor). A tuple of
+rejected when relflow checks the input Arrow types, even when `channels` does
+not name that member; narrow it in a [preprocessor](#reshaping-in-a-preprocessor). A tuple of
 names on a list or list of lists raises an error, because those shapes have no
 member names.
 
@@ -76,8 +76,9 @@ value inside a list, a null step in a list of lists, and a null step struct or
 null member value in a list of structs.
 
 A null channel list in a struct of lists is a missing channel, not a missing
-step, so it is never silent. relflow emits a `UserWarning` that names the field,
-the channel, and the number of records affected, then reads the record:
+step, so it is never silent. relflow emits a `UserWarning` that names the field and the
+channel, then reads the record. The warning shows once per field and channel
+under the default Python warning filter, so it does not count records:
 
 - When some channel lists are null, those channels are NaN at every step of the
   record, so its steps are unobserved.
@@ -147,6 +148,25 @@ def gather(frame: pl.DataFrame) -> pl.DataFrame:
 
 Read it with `signals=rf.Series(channels=("temp", "hum"))`.
 
+Long-format data has one row per step. Sort by step and group by record to get
+one row per record with a struct of lists:
+
+```python
+@rf.preprocess
+def collect(frame: pl.DataFrame) -> pl.DataFrame:
+    return (
+        frame.sort("step")
+        .group_by("id", maintain_order=True)
+        .agg(pl.col("temp"), pl.col("hum"))
+        .select("id", signals=pl.struct("temp", "hum"))
+    )
+```
+
+Here `frame` has the columns `id`, `step`, `temp` and `hum`. The sort by `step`
+fixes the order of the steps inside each list, and `maintain_order=True` keeps
+the order of the records. Without the sort, the steps follow row order. Read the
+result with `signals=rf.Series(channels=("temp", "hum"))`.
+
 A list of lists becomes a named struct of lists, one channel per position:
 
 ```python
@@ -159,6 +179,22 @@ def name(frame: pl.DataFrame) -> pl.DataFrame:
         ),
     )
 ```
+
+When the steps are fixed-size lists (`list<pl.Array>`), `list.get` fails on the
+inner element. Use `.arr.get` instead:
+
+```python
+@rf.preprocess
+def name_fixed(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(
+        signals=pl.struct(
+            temp=pl.col("readings").list.eval(pl.element().arr.get(0)),
+            hum=pl.col("readings").list.eval(pl.element().arr.get(1)),
+        ),
+    )
+```
+
+Both forms give `struct<temp: list<float64>, hum: list<float64>>`.
 
 A list of step records with a non-numeric member, such as
 `[{temp: 21.5, hum: 0.61, station: "a"}, ...]`, fails the type check. Keep only
@@ -178,6 +214,21 @@ def narrow(frame: pl.DataFrame) -> pl.DataFrame:
 ```
 
 Read it with `hourly=rf.Series(channels=("temp", "hum"))`.
+
+A struct of lists with a text member, such as
+`{temp: [...], hum: [...], station: "a"}`, fails the type check in the same
+way. Rebuild the struct from the numeric members only:
+
+```python
+@rf.preprocess
+def narrow_columns(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(
+        signals=pl.struct(
+            pl.col("signals").struct.field("temp"),
+            pl.col("signals").struct.field("hum"),
+        ),
+    )
+```
 
 To avoid the null channel warning, either drop the records whose channel is
 missing:
