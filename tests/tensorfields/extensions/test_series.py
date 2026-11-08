@@ -21,6 +21,7 @@ from relflow.structs.tree import Address
 from relflow.tensorfields.base import TENSORFIELDS, Context
 from relflow.tensorfields.extensions.series import Block, Decoder, Embedder, TensorField, encode, loss, write
 from relflow.tensorfields.extensions.series import output as output_type
+from relflow.tensorfields.extensions.series import series as extension
 from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.normalizer import GlobalOnlineNormalizer, moments
 from tests.arrow import table as arrow_table
@@ -106,6 +107,28 @@ def test_named_channels_round_trip_yaml(tmp_path):
     loaded = rf.Model.from_yaml(path)
     assert loaded.schema.requests["/signal"].channels == ("temp", "hum")
     assert loaded.schema.model_dump(mode="json")["fields"]["fields"][0]["channels"] == ["temp", "hum"]
+
+
+STEP = pa.struct([("temp", pa.float64()), ("hum", pa.int64())])
+COLUMNS = pa.struct([("temp", pa.list_(pa.float64())), ("hum", pa.large_list(pa.float32()))])
+
+
+@pytest.mark.parametrize("datatype", [pa.list_(STEP), pa.large_list(STEP), COLUMNS])
+def test_extension_accepts_struct_channels(datatype):
+    assert extension.accepts(datatype)
+
+
+@pytest.mark.parametrize(
+    "datatype",
+    [
+        pa.list_(pa.struct([("temp", pa.float64()), ("unit", pa.string())])),
+        pa.struct([("temp", pa.list_(pa.float64())), ("hum", pa.float64())]),
+        pa.list_(pa.struct([])),
+        pa.list_(pa.string()),
+    ],
+)
+def test_extension_rejects_mixed_or_non_numeric_structs(datatype):
+    assert not extension.accepts(datatype)
 
 
 def projection(rows: list, schema: Schema, strata: Strata, datatype: pa.DataType | None = None):
