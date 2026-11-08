@@ -10,6 +10,7 @@ import pyarrow.parquet as pq
 import pydantic
 import pytest
 import torch
+import yaml
 from lightning.pytorch import seed_everything
 from tensordict import TensorDict
 
@@ -98,6 +99,17 @@ def test_integer_channels_width():
 def test_named_channels_reject_empty_duplicate_or_blank(channels):
     with pytest.raises(pydantic.ValidationError):
         rf.Series(channels=channels)
+
+
+def test_named_channels_survive_schema_yaml_and_checkpoint(tmp_path):
+    seed_everything(SEED, workers=True)
+    model = rf.Model.xs(d_model=8, signal=rf.Series(channels=("temp", "hum")))
+    path = tmp_path / "schema.yaml"
+    path.write_text(yaml.safe_dump(model.schema.model_dump(mode="json")), encoding="utf-8")
+    reloaded = Schema.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+    assert reloaded.requests["/signal"].channels == ("temp", "hum")
+    loaded = rf.Model.load(model.save(tmp_path / "model.ckpt"))
+    assert loaded.schema.requests["/signal"].channels == ("temp", "hum")
 
 
 def test_named_channels_round_trip_yaml(tmp_path):
@@ -855,6 +867,14 @@ def test_predict_writes_named_steps_and_round_trips_parquet(tmp_path):
     assert pq.read_table(path).equals(table)
 
 
+def test_fixed_size_outer_list_of_structs_matches_list_of_lists():
+    datatype = pa.list_(pa.struct([("temp", pa.float64()), ("hum", pa.float64())]), 3)
+    expected, _, _ = steps(tensorfield([LISTS], build_schema(channels=2)))
+    values, observed, _ = steps(tensorfield([A_ROW], build_schema(channels=2), datatype=datatype))
+    torch.testing.assert_close(values, expected)
+    assert observed.all()
+
+
 @pytest.mark.parametrize(
     "column",
     [
@@ -872,3 +892,22 @@ def test_predict_reads_struct_shapes(column):
     table = model.predict(pa.table({"history": column}))
     content = table.to_pylist()[0]["predictions"]["future"]["content"]
     assert len(content) == 3 and all(len(step) == 2 for step in content)
+
+
+@pytest.mark.parametrize(
+    "column",
+    [
+        pa.array([[{"temp": 1.0, "hum": 2.0}, {"temp": 3.0, "hum": 4.0}]]),
+        pa.array([{"temp": [1.0, 3.0], "hum": [2.0, 4.0]}]),
+    ],
+)
+def test_predict_int_channels_writes_list_of_lists(column):
+    seed_everything(SEED, workers=True)
+    model = rf.Model.xs(
+        d_model=8,
+        history=rf.Series(channels=2),
+        future=rf.Series(channels=2, horizon=3, mask=True),
+    )
+    table = model.predict(pa.table({"history": column}))
+    content = table["predictions"].type.field("future").type.field("content")
+    assert content.type == pa.list_(pa.field("element", pa.list_(pa.field("element", pa.float64()))))
