@@ -15,8 +15,7 @@ from urllib.parse import urlsplit
 import yaml
 
 from docs.check import ROOT, rendered_checks
-from evidence.assets import fetch
-from evidence.diagnostics.review import prepare, selection
+from evidence.assets import ci, fetch
 from evidence.experiments.source import snapshot
 
 
@@ -66,9 +65,8 @@ def publish(root: Path = ROOT, *, environ: Mapping[str, str] | None = None, quar
             if environment.get("READTHEDOCS_VERSION_TYPE") == "tag"
             else None
         )
-        if environment.get("READTHEDOCS_VERSION_TYPE") == "external":
-            prepare(root)
-            publication = selection(root)
+        if environment.get("READTHEDOCS_VERSION_TYPE") in {"external", "branch"}:
+            publication = ci(root, revision)
         else:
             publication = None
         if publication is None:

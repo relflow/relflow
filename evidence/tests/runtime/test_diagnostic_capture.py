@@ -82,3 +82,59 @@ def test_proof_module_remains_importable_by_spawned_seed_workers(tmp_path):
     proof = load(source)
     with ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn")) as pool:
         assert list(pool.map(proof.trial, [17, 117, 217])) == [289, 13689, 47089]
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_paired_execution_archives_the_canonical_record_without_a_second_run(tmp_path, monkeypatch, failed):
+    import shutil
+
+    from evidence.evidence_ci import digest, execute
+    from evidence.observations import read
+
+    root = tmp_path / "suite"
+    family = root / "experiments/fixtures"
+    family.mkdir(parents=True)
+    canonical = Path(__file__).resolve().parents[2] / "experiments"
+    for name in ["reporting.py", "source.py"]:
+        shutil.copy2(canonical / name, root / "experiments" / name)
+    source = family / "paired_capture_fixture.py"
+    source.write_text(
+        "# %% [markdown]\n# ---\n# title: Capture fixture\n# ---\n# %%\n"
+        "import numpy as np\nfrom reporting import experiment, report\n"
+        "def score(rows, predicted):\n    actual=np.array([r['target'] for r in rows])\n    return float(np.mean((predicted-actual)**2))\n"
+        "@experiment('P901', seed=123)\n"
+        "def run(seed, steps, accelerator):\n    rows=[{'target':1.0},{'target':2.0}]\n    predicted=np.array([1.1,1.8])\n    measured=score(rows,predicted)\n"
+        + (
+            "    raise RuntimeError('retained proof failure')\n"
+            if failed
+            else "    return {'error':measured}, {'deliberately unmet':False}\n"
+        )
+        + "if __name__=='__main__':\n    report(run)\n"
+    )
+    monkeypatch.setenv("EVIDENCE_RUN_ID", "gh-123-1")
+    monkeypatch.setenv("EVIDENCE_WHEEL_SHA256", "a" * 64)
+    task = {
+        "id": "P901",
+        "role": "candidate",
+        "seed": 123,
+        "accelerator": "cpu",
+        "steps": None,
+        "script": source.relative_to(root).as_posix(),
+        "script_sha256": digest(source),
+    }
+    observed = tmp_path / "observations"
+    observed.mkdir()
+    record = execute(task, root=root, timeout=60, observations=observed)
+    assert record["result"] is not None, record["log"]
+    assert record["result"]["outcome"] == ("error" if failed else "not_met")
+    assert bool(record["error"]) == failed, record["log"]
+    captured = read(observed / "bundle.zip", record["observations"])
+    assert captured["record"] == record["result"]
+    assert captured["manifest"]["task"] == task
+    assert captured["manifest"]["runtime"]["github_run_id"] == "123"
+    assert captured["manifest"]["frames"] >= 1
+    assert not (observed / "raw").exists()
+    if not failed:
+        plain = execute(task, root=root, timeout=60)
+        assert plain["result"]["metrics"] == record["result"]["metrics"]
+        assert plain["result"]["checks"] == record["result"]["checks"]

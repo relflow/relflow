@@ -1,69 +1,71 @@
 # Proof diagnostics
 
+Every full paired Evidence CI run captures the observations needed for its plots
+while the original baseline and candidate proofs execute. No second learning or
+inference run is added. Seeds, budgets, checks, optimizers and canonical result
+records remain unchanged. Return-event monitoring retains already-computed
+readouts without random draws; its overhead makes these runs unsuitable as
+performance benchmarks. Spawned trials retain their returned metrics but do not
+inherit monitoring.
+
 Each proof has an authored visual brief in `views.json`: the question to make
-visible, the comparison, and the limits of its interpretation. The core suite
-uses actual full-budget CI captures. Optional research pages have generator
-illustrations until their declared resources and learning records are available.
+visible, comparison and interpretation limits. The plots use the candidate
+role of the paired run. Optional research pages retain generator illustrations
+until their declared resources and learning records are available. Unmet checks
+remain visible; figures never turn an illustration into a measured outcome.
 
-Capturing is an explicit operation, separate from the required paired Evidence
-gate. Dispatch the documentation workflow on the review branch:
+Twelve CPU shards execute both exact wheels and retain separate, checksum-bound
+observation archives. The collector validates the complete paired catalog. A
+following job verifies every source, wheel, task, record and observation receipt,
+then renders static SVG/JSON inside a bounded offline container. Selected plotting
+code never executes on the host. A rendering failure fails Evidence; learning
+regressions can still produce plots showing the failed comparison. Execution or
+provenance errors prevent publication. Never retry an unmet check to get a
+passing result.
 
-```sh
-gh workflow run docs.yml --ref <branch> -f diagnostic_plots=true
-gh run download <run-id> --name proof-visualization-bundles-attempt-1 --dir /tmp/proof-diagnostics
-```
+The plots job uploads `evidence-plots-attempt-<n>` for 90 days. Raw per-task Arrow
+observations are separate `evidence-observations-shard-<i>-attempt-<n>` artifacts
+retained for 14 days, outside the report size limit. The public bundle includes
+reviewed light/dark SVGs, example data, exact records and proof sources, and
+compressed observation manifests. Only authored CSS/JavaScript are tracked in
+`docs/assets/evidence-plots/`; generated files and ZIPs stay outside Git.
 
-`diagnostic_ids=P025,P085` selects a named subset when repairing a recorder
-failure. Keep original attempts and select replacement inputs explicitly; never
-rerun an unmet learning check in search of a passing result. The current review
-uses run `42432931869` for 94 core proofs and run `42437236022` for P025/P085,
-after fixing spawn imports and gradient-safe serialization. All 96 executions
-are full budget: 85 meet their checks and 11 do not. The earlier infrastructure
-attempt is retained as run `42432383859`. No canonical proof or result was edited.
-
-The prepare job builds the exact wheel and freezes its CPU image and catalog.
-Twelve shards run two bounded offline containers each. Return-event monitoring
-retains already-computed proof readouts without extra inference calls or random
-draws. Arrays and Arrow tables are content-addressed IPC artifacts; completed
-frames retain the original call context. Each bundle includes the unchanged
-proof, complete record, source/wheel hashes, runtime identity, and observation
-manifest. Process-pool trials retain their returned metrics; spawned workers do
-not inherit monitoring. Capture overhead makes these unsuitable as performance
-benchmarks.
-
-Generate figures explicitly from the downloaded verified bundles:
+After CI completes, the privileged publication workflow runs a frozen verifier,
+authenticates the original internal CI attempt and helper/executor pins, and
+retains the plots, publication selection, reports, wheels and checksums in an
+immutable `evidence-ci-<run-id>-attempt-<n>` GitHub Release. It creates no source
+commits or publication PRs. Forks cannot publish. Each attempt has its own assets;
+reruns never overwrite earlier measurements. Once this workflow is on `main`,
+its `workflow_run` trigger is automatic. Before merge it can be exercised with:
 
 ```sh
-uv run --project docs --with matplotlib==3.10.7 --with pyarrow==24.0.0 \
-  python -m evidence.diagnostics.build --bundles /tmp/proof-diagnostics \
-  --output /tmp/proof-plots --archive /tmp/proof-visualizations.zip
+gh workflow run publish-evidence.yml --ref <branch> \
+  -f preview=true -f library_run_id=<complete-ci-run-id>
 ```
 
-A complete diagnostic dispatch also uploads `proof-visualization-site-bundle-attempt-1`
-with the ready-to-host ZIP. The builder checks bundle checksums before reading observations. Reviewed SVGs, figure/example JSON, exact records and source copies, and
-compressed manifests are packaged as one immutable preview attachment outside
-Git. `preview.json` pins its URL, size, and SHA256. Only the authored CSS and
-JavaScript live in `docs/assets/evidence-plots/`; generated files there are
-ignored. Keep PNG review images and large raw Arrow bundles outside Git too.
-The bundle includes `review.json`, binding every figure and example to its
-checksums. Review all figures for correct populations, units, control labels,
-matched scales, and legible light/dark layouts. Keep projections fitted to
-training/reference data and explain their scope. Missing learning results stay
-Missing even when a generator diagram is available.
+Set the repository's `READTHEDOCS_TOKEN` Actions secret to a Read the Docs API
+token with build access for the `relflow` project. The publisher requests a build
+of the current PR version or `latest` after publishing the assets. If absent,
+asset publication finishes and the workflow reports the missing configuration.
+It skips rebuilds for superseded heads. Tokens never enter proof containers,
+plot containers, bundles or documentation builds.
 
-Read the Docs external PR builds fetch and verify the pinned static bundle,
-then select its review records automatically. Release builds retain their
-existing frozen publication path.
-A figure renders only beside the identical captured record; released tables
-cannot silently acquire figures from a different execution. To select the same
-review locally, run from the repository root:
+Read the Docs branch and PR builds select the newest CI run and attempt for the
+exact checkout commit, including unsuccessful attempts. Pending or unavailable
+plots show an explicit status with no fallback to an older passing result.
+Package release builds freeze the matching plot bundle in `evidence-v<version>`
+alongside their publication JSON; old releases remain unchanged. Static builds
+verify GitHub asset digests, bundle inventories and exact record equality. They
+never install or import relflow, Torch, Lightning, Matplotlib or Arrow.
+
+For local review of an exact commit after its assets are published:
 
 ```sh
-uv run --project docs python -c 'from pathlib import Path; from evidence.diagnostics.review import prepare, selection; prepare(Path.cwd()); print(selection(Path.cwd()))'
-RELFLOW_EVIDENCE_PUBLICATION="$PWD/.cache/evidence/diagnostic-review.json" make dev
+uv run --project docs python -c 'import subprocess; from pathlib import Path; from evidence.assets import ci; print(ci(Path.cwd(), subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()))'
+RELFLOW_EVIDENCE_PUBLICATION="$PWD/.cache/evidence/ci-preview.json" make dev
 ```
 
-Static validation and rendering require only the isolated docs environment.
-Matplotlib, Arrow, relflow, Torch, and Lightning are not imported by site builds.
-The PR's diagnostic selection is an unpaired visualization run; package release
-publication and the full paired CI gate retain their existing ownership.
+Review populations, units, matched scales, control labels and both light/dark
+layouts when changing visual briefs or renderers. Keep projections fitted to
+training/reference data and state their scope. A figure renders only beside its
+identical candidate record, with exact downloads and the original CI link.

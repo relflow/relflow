@@ -32,8 +32,8 @@ paired predictions, scores, masks, coordinates, and other needed observations
 during the proof; do not limit figures to the latest released scalar metrics.
 Bind every measured figure to its exact source, full-budget record, and artifact
 checksums. Keep missing values explicit and generator illustrations distinct
-from model outcomes. Static builds consume prepared SVG/JSON only; explicit
-diagnostic CI runs own model compute. See [diagnostics/README.md](diagnostics/README.md).
+from model outcomes. Static builds consume prepared SVG/JSON only; paired
+Evidence CI runs own model compute and capture already-computed readouts. See [diagnostics/README.md](diagnostics/README.md).
 Presentation changes never add measurements or alter scientific budgets and checks.
 
 Use `experiments/run.py --new <category>/<name>` for a new authoring file. The
@@ -56,10 +56,10 @@ restoring obsolete execution backends.
 Smoke, partial coverage, invalid provenance, execution failures, and regressions
 of baseline-passing checks cannot satisfy the required gate. Reports use Actions
 artifacts and immutable Releases in relflow/relflow, with no AWS dependency.
-Publish candidate measurements only with a package version release, from its
+Freeze canonical versioned candidate measurements only with a package version release, from its
 complete passing paired CI run in relflow/relflow. Freeze the publication JSON,
 reports, and actual execution provenance in an immutable `evidence-v<version>`
-Release before publishing the package tag. Ordinary CI must not create publication
+Release before publishing the package tag. Ordinary CI retains immutable per-attempt preview report/plot assets, with no publication
 commits, branches, or pull requests. Keep the recorded bootstrap snapshot in
 `results.json` for offline builds; it is historical data, not an automatically
 updated selection. Hosted builds verify the public release asset's digest and

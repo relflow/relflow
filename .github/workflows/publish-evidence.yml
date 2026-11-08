@@ -1,6 +1,9 @@
-name: Publish release evidence assets
+name: Publish evidence assets
 
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
   workflow_call:
     inputs:
       library_run_id:
@@ -17,22 +20,27 @@ on:
         required: true
   workflow_dispatch:
     inputs:
+      preview:
+        description: Retain CI plots and refresh its current documentation preview
+        type: boolean
+        default: false
       library_run_id:
         description: Successful main CI run containing the complete paired report
         required: true
       version:
-        description: Package version being released
-        required: true
+        description: Package version being released (release mode only)
+        required: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: evidence-release-${{ inputs.version }}
+  group: evidence-publication-${{ github.event.workflow_run.id || inputs.library_run_id || inputs.version }}
   queue: max
 
 jobs:
   publish:
+    if: github.event_name != 'workflow_run' && !inputs.preview
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -76,3 +84,39 @@ jobs:
           path: docs/site
           if-no-files-found: ignore
           retention-days: 7
+
+  preview:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.preview) ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Check out the frozen publication verifier
+        uses: actions/checkout@v4
+        with:
+          repository: relflow/relflow
+          ref: '81f803c00bd6b08e4c24e551d832a0082f387d9c'
+          path: executor
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pyyaml==6.0.3
+      - name: Verify and publish the exact CI plot bundle, then refresh Read the Docs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
+          SOURCE_RUN: ${{ github.event.workflow_run.id || inputs.library_run_id }}
+          EVIDENCE_EXECUTOR: '81f803c00bd6b08e4c24e551d832a0082f387d9c'
+          EVIDENCE_HELPER: 'e54d6aceb4059fafc8edc8a43dcc2a54acef5d77'
+        run: >-
+          python executor/evidence/preview.py --run-id "$SOURCE_RUN"
+          --helper "$EVIDENCE_HELPER" --executor "$EVIDENCE_EXECUTOR"
+          --output "$RUNNER_TEMP/evidence-preview"

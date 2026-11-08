@@ -220,9 +220,11 @@ new publication assets in `evidence-v<version>` Releases. Ordinary CI creates no
 publication PR. Local builds use the preserved `evidence/results.json`
 bootstrap snapshot. Hosted builds fetch matching versioned assets, validate
 their digests and source revisions, and cache them outside canonical sources;
-unreleased builds normally use the last released data. PR builds may select
-checksum-bound diagnostic review assets, keeping every figure and displayed
-measurement on the same captured execution. Released selections remain frozen. Keep the static environment
+branch and PR builds select the newest exact-commit CI attempt, showing an explicit
+pending/unavailable status instead of older measurements. Every paired Evidence
+run retains observations and generates its matching static plots; immutable CI
+release assets power previews, and version releases freeze the same bundle with
+the canonical selection. Keep the static environment
 free of model imports and credentials. Clean only generated publication output.
 
 Evidence pages expose the predeclared behavioral criteria before the Example,

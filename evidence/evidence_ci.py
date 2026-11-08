@@ -8,6 +8,7 @@ import hashlib
 import html
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -299,7 +300,7 @@ def task_key(task: dict) -> str:
     return f"{task['role']}/{task['id']}/{task['accelerator']}/seed-{task['seed']}/attempt-{task['attempt']}"
 
 
-def execute(task: dict, *, root: Path = ROOT, timeout: int = 1800) -> dict:
+def execute(task: dict, *, root: Path = ROOT, timeout: int = 1800, observations: Path | None = None) -> dict:
     """Run one experiment in a subprocess; capture partial errors without altering archives."""
     started = time.monotonic()
     record = {"task": task, "result": None, "error": None, "log": ""}
@@ -311,7 +312,7 @@ def execute(task: dict, *, root: Path = ROOT, timeout: int = 1800) -> dict:
             output = Path(temporary) / "result.json"
             env = dict(
                 os.environ,
-                PYTHONPATH=str(root / "experiments"),
+                PYTHONPATH=os.pathsep.join([str(root / "experiments"), str(Path(__file__).parent)]),
                 EVIDENCE_JSON_OUTPUT=str(output),
                 HF_HUB_OFFLINE="1",
                 OMP_NUM_THREADS="1",
@@ -332,6 +333,20 @@ def execute(task: dict, *, root: Path = ROOT, timeout: int = 1800) -> dict:
             ]
             if task["steps"] is not None:
                 command += ["--steps", str(task["steps"])]
+            if observations is not None:
+                env["EVIDENCE_TASK"] = json.dumps(task)
+                command = [
+                    sys.executable,
+                    str(Path(__file__).parent / "diagnostics/capture.py"),
+                    "--source",
+                    str(script),
+                    "--output",
+                    str(observations / "raw"),
+                    "--archive",
+                    str(observations / "bundle.zip"),
+                    "--",
+                    *command[2:],
+                ]
             result = subprocess.run(
                 command,
                 cwd=root,
@@ -345,6 +360,27 @@ def execute(task: dict, *, root: Path = ROOT, timeout: int = 1800) -> dict:
             record["log"] = result.stdout
             if output.is_file():
                 record["result"] = json.loads(output.read_text())
+            if observations is not None and (observations / "bundle.zip").is_file():
+                from observations import digest as archive_digest
+                from observations import read as read_observations
+
+                path = observations / "bundle.zip"
+                captured = read_observations(path)
+                manifest = captured["manifest"]
+                if captured["record"] != record["result"] or manifest["task"] != task:
+                    raise ValueError("Proof observations differ from the canonical measured task")
+                if manifest["capture_sha256"] != digest(Path(__file__).parent / "diagnostics/capture.py"):
+                    raise ValueError("Proof observations differ from the trusted recorder")
+                record["observations"] = {
+                    "schema": 1,
+                    "sha256": archive_digest(path),
+                    "bytes": path.stat().st_size,
+                    "manifest_sha256": captured["manifest_sha256"],
+                    "capture_sha256": manifest["capture_sha256"],
+                }
+                shutil.rmtree(observations / "raw")
+            elif observations is not None and record["result"] is not None:
+                raise ValueError("Measured task produced no observation archive")
             if result.returncode:
                 record["error"] = f"Experiment exited with status {result.returncode}"
             elif record["result"] is None:

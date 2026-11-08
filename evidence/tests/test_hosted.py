@@ -318,6 +318,19 @@ def fresh(manifest, task, *, passed=True):
         "task": task,
         "error": None,
         "log": f"original {task['role']} measurement\n",
+        **(
+            {
+                "observations": {
+                    "schema": 1,
+                    "sha256": "a" * 64,
+                    "manifest_sha256": "b" * 64,
+                    "bytes": 1,
+                    "capture_sha256": manifest["observations"]["capture_sha256"],
+                }
+            }
+            if manifest.get("observations")
+            else {}
+        ),
         "result": {
             "mode": "full",
             "seed": task["seed"],
@@ -370,6 +383,7 @@ def environment(index):
                 "scheduler": "longest-first-v1",
                 "task_timeout_seconds": 1850,
                 "experiment_timeout_seconds": 1700,
+                "observation_capture": "py-return-v1",
             },
             "environment": {
                 "threads": 1,
@@ -478,7 +492,8 @@ def test_full_collection_preserves_twelve_actual_hosts_and_all_original_measurem
     execution = json.loads((output / "execution.json").read_text())
     assert "host" not in execution["identity"]
     assert len({item["identity"]["identity"]["host"]["node"] for item in execution["shards"]}) == 12
-    for shard in root.iterdir():
+    for receipt in root.glob("*/shard.json"):
+        shard = receipt.parent
         index = json.loads((shard / "shard.json").read_text())["index"]
         for path in (shard / "results").rglob("*.json"):
             relative = path.relative_to(shard)

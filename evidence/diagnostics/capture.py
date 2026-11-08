@@ -1,6 +1,6 @@
 """Retain proof readouts without changing their source, budgets, or predictions.
 
-This diagnostic runner is separate from the required paired Evidence gate.
+The paired Evidence worker invokes this recorder around the canonical reporter.
 CPython return events expose completed proof calculations; capture performs no
 additional model calls, random draws, training, or checkpoint selection.
 """
@@ -16,9 +16,7 @@ import math
 import os
 import platform
 import sys
-import time
-import traceback
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from pathlib import Path
 from types import CodeType
 
@@ -258,92 +256,61 @@ def load(source: Path):
     return module
 
 
-def run(source: Path, output: Path, wheel: Path) -> dict:
-    source, output, wheel = source.resolve(), output.resolve(), wheel.resolve()
+def run(source: Path, output: Path, arguments: list[str]) -> dict:
+    """Observe the canonical reporter, preserving its exact result and CLI policy."""
+    source, output = source.resolve(), output.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    os.environ.setdefault("OMP_NUM_THREADS", "1")
-    os.environ.setdefault("MKL_NUM_THREADS", "1")
-    os.environ.setdefault("POLARS_MAX_THREADS", "2")
-    os.environ.setdefault("HF_HUB_OFFLINE", "1")
-    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     sys.path.insert(0, str(source.parents[2] / "experiments"))
     import reporting
-    import torch
     from source import describe
 
-    torch.set_num_threads(1)
-    torch.set_num_interop_threads(1)
     header = describe(source.read_text())
     module = load(source)
-    declared = module.run.experiment
-    record = {
-        "id": declared.id,
-        "mode": "full",
-        "seed": declared.seed,
-        "steps_override": None,
-        "accelerator": "cpu",
-        "threads": 1,
-        "started_at": datetime.now(UTC).isoformat(),
-        "purpose": "Unpaired proof visualization; not the required learning gate",
-        "provenance": reporting.provenance(source),
-    }
-    record["provenance"].update(
-        wheel_sha256=digest(wheel),
-        capture_sha256=digest(Path(__file__)),
-        capture_method="CPython 3.12 PY_RETURN snapshots of unchanged proof functions",
-    )
+    record_path = Path(os.environ.get("EVIDENCE_JSON_OUTPUT", str(output / "record.json")))
+    os.environ["EVIDENCE_JSON_OUTPUT"] = str(record_path)
+    sys.argv = [str(source), *arguments]
     capture = Capture(source, output)
-    started = time.perf_counter()
     capture.start(module)
     try:
-        metrics, checks = module.run(declared.seed, None, "cpu")
-        record.update(
-            metrics=reporting.plain(metrics),
-            checks={key: bool(value) for key, value in checks.items()},
-            outcome="met" if all(checks.values()) else "not_met",
-        )
-    except Exception:
-        record.update(outcome="error", error=traceback.format_exc())
+        reporting.report(module.run)
+    except SystemExit as error:
+        if error.code not in (None, 0, 1):
+            raise
     finally:
         capture.close()
-    record["duration_seconds"] = round(time.perf_counter() - started, 3)
-    write(output / "record.json", record)
+    record = json.loads(record_path.read_text())
+    if record_path != output / "record.json":
+        (output / "record.json").write_bytes(record_path.read_bytes())
     write(output / "frames.json", capture.frames)
-    shutil_source = output / "proof.py"
-    shutil_source.write_bytes(source.read_bytes())
+    (output / "proof.py").write_bytes(source.read_bytes())
     for name in ("record.json", "frames.json", "proof.py"):
         capture.files[name] = {"sha256": digest(output / name), "bytes": (output / name).stat().st_size}
+    run_id = os.environ.get("EVIDENCE_RUN_ID", "")
+    parts = run_id.split("-")
+    task = json.loads(os.environ.get("EVIDENCE_TASK", "{}"))
     write(
         output / "manifest.json",
         {
             "schema": 1,
-            "id": declared.id,
+            "id": module.run.experiment.id,
             "title": header["title"],
             "source_sha256": digest(source),
             "code_sha256": record["provenance"]["code_sha256"],
-            "wheel_sha256": digest(wheel),
+            "wheel_sha256": record["provenance"]["wheel_sha256"],
             "capture_sha256": digest(Path(__file__)),
-            "capture_method": record["provenance"]["capture_method"],
+            "capture_method": "CPython 3.12 PY_RETURN snapshots of unchanged proof functions",
             "frames": len(capture.frames),
             "artifacts": capture.files,
+            "task": task,
             "runtime": {
                 "python": platform.python_version(),
                 "platform": platform.platform(),
-                "github_run_id": os.environ.get("GITHUB_RUN_ID"),
-                "github_run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+                "run_id": run_id,
+                "role": task.get("role"),
+                "github_run_id": parts[1] if len(parts) == 3 and parts[0] == "gh" else None,
+                "github_run_attempt": parts[2] if len(parts) == 3 and parts[0] == "gh" else None,
             },
         },
-    )
-    print(
-        json.dumps(
-            {
-                "id": declared.id,
-                "outcome": record["outcome"],
-                "frames": len(capture.frames),
-                "seconds": record["duration_seconds"],
-            }
-        ),
-        flush=True,
     )
     return record
 
@@ -352,9 +319,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--wheel", type=Path, required=True)
+    parser.add_argument("--archive", type=Path, required=True)
+    parser.add_argument("arguments", nargs=argparse.REMAINDER)
     options = parser.parse_args()
-    record = run(options.source, options.output, options.wheel)
+    arguments = options.arguments[1:] if options.arguments[:1] == ["--"] else options.arguments
+    record = run(options.source, options.output, arguments)
+    from observations import package
+
+    package(options.output, options.archive)
     raise SystemExit(1 if record["outcome"] == "error" else 0)
 
 

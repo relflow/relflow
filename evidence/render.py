@@ -318,15 +318,16 @@ def render(root: Path, *, publication: Path | None = None) -> None:
     review = load(root)
     output = docs / "_generated"
     output.mkdir(parents=True, exist_ok=True)
-    diagnostic = publication is not None and json.loads(publication.read_text()).get("version") == "diagnostic-review"
+    selected = json.loads(publication.read_text()) if publication else {}
+    version = selected.get("version")
+    message = ""
+    if version == "ci-preview":
+        message = "Paired Evidence CI preview. Measurements and plots come from the same candidate execution. Unmet checks remain visible. Optional research illustrations contain no model predictions."
+    elif version == "ci-pending":
+        message = selected["report"]["status"]
     write(
         output / "review-status.md",
-        '<div class="diagnostic-preview-banner" role="note"><strong>Diagnostic visualization preview.</strong> '
-        "The selected core measurements and plots come from full-budget CI captures. Unmet checks remain visible. "
-        "These unpaired runs do not replace the required paired Evidence gate or released results. "
-        "Optional research illustrations contain no model predictions.</div>\n"
-        if diagnostic
-        else "",
+        '<div class="diagnostic-preview-banner" role="note">' + html.escape(message) + "</div>\n" if message else "",
     )
     pages = set()
     for identifier, entry in entries.items():

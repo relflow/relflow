@@ -103,10 +103,116 @@ def fetch(root: Path, version: str | None = None, *, required: bool = False) -> 
             raise ValueError(f"Evidence {tag} publication does not contain its verified full-run selection")
         if required and selected["results"].keys() != registry(root / "evidence").keys():
             raise ValueError(f"Evidence {tag} publication does not cover the release's complete experiment catalog")
+        plots(root, selected, report)
         pending.replace(destination)
     finally:
         pending.unlink(missing_ok=True)
     print(f"Using frozen {tag} publication for {revision}")
+    return destination
+
+
+def plots(root: Path, selected: dict, release: dict) -> None:
+    """Install only the plots bound to this exact publication and GitHub asset."""
+    spec = selected["report"].get("plots")
+    target = root / "docs/assets/evidence-plots/review.json"
+    target.unlink(missing_ok=True)
+    if spec is None:
+        return
+    matches = [asset for asset in release.get("assets", []) if asset.get("name") == "proof-visualizations.zip"]
+    if len(matches) != 1 or any(
+        [
+            matches[0].get("digest") != "sha256:" + spec.get("sha256", ""),
+            matches[0].get("size") != spec.get("size"),
+            matches[0].get("browser_download_url") != spec.get("url"),
+        ]
+    ):
+        raise ValueError("Publication plots differ from the retained GitHub release asset")
+    from evidence.diagnostics.review import load, prepare
+
+    prepare(root, spec)
+    review = load(root)
+    if review is None or review.get("ci", {}).get("run_id") != selected["report"]["run_id"]:
+        raise ValueError("Publication plots identify a different paired Evidence run")
+    results = {}
+    catalog = registry(root / "evidence", measurements=False, lane="all")
+    from evidence.experiments.source import fingerprint
+
+    for identifier, entry in review["entries"].items():
+        if (
+            identifier not in catalog
+            or fingerprint((root / "evidence" / catalog[identifier]["script"]).read_text()) != entry["code_sha256"]
+        ):
+            raise ValueError(f"{identifier}: publication plot computation differs from this checkout")
+        data = json.loads((target.parent / entry["data"]).read_text())
+        if data.get("record") is not None:
+            results[identifier] = data["record"]
+    if results != selected["results"]:
+        raise ValueError("Publication plots differ from the exact selected candidate records")
+
+
+def ci(root: Path, revision: str) -> Path:
+    """Select the newest exact-head attempt; pending or failed attempts never fall back."""
+    if not SHA.fullmatch(revision):
+        raise ValueError("CI documentation requires a full checkout revision")
+    endpoint = f"https://api.github.com/repos/{REPOSITORY}/"
+    payload = download(endpoint + f"actions/workflows/ci.yml/runs?head_sha={revision}&per_page=100")
+    runs = [
+        run
+        for run in json.loads(payload)["workflow_runs"]
+        if run.get("head_sha") == revision
+        and run.get("head_repository", {}).get("full_name") == REPOSITORY
+        and run.get("event") in {"pull_request", "push", "workflow_dispatch"}
+    ]
+    run = max(runs, key=lambda row: row["id"]) if runs else None
+    selected = {
+        "schema": 1,
+        "version": "ci-pending",
+        "revision": revision,
+        "report": {"status": "Evidence CI has not published plots for this commit yet."},
+        "results": {},
+    }
+    (root / "docs/assets/evidence-plots/review.json").unlink(missing_ok=True)
+    if run:
+        tag = f"evidence-ci-{run['id']}-attempt-{run['run_attempt']}"
+        payload = download(endpoint + "releases/tags/" + tag, missing=True)
+        if payload is not None:
+            release = json.loads(payload)
+            if (
+                release.get("draft") is not False
+                or release.get("target_commitish") != revision
+                or release.get("tag_name") != tag
+            ):
+                raise ValueError("CI plots release does not identify this exact source revision")
+            matches = [asset for asset in release["assets"] if asset["name"] == "publication.json"]
+            if len(matches) != 1:
+                raise ValueError("CI plots release requires its single publication selection")
+            asset = matches[0]
+            url = f"https://github.com/{REPOSITORY}/releases/download/{tag}/publication.json"
+            if asset.get("browser_download_url") != url or not re.fullmatch(
+                r"sha256:[0-9a-f]{64}", asset.get("digest") or ""
+            ):
+                raise ValueError("CI publication requires a checksum-bound repository asset")
+            content = download(url)
+            if len(content) != asset["size"] or "sha256:" + hashlib.sha256(content).hexdigest() != asset["digest"]:
+                raise ValueError("CI publication differs from its GitHub asset digest")
+            selected = json.loads(content)
+            if (
+                selected.get("schema") != 1
+                or selected.get("version") != "ci-preview"
+                or selected.get("revision") != revision
+                or selected.get("report", {}).get("run_id") != f"gh-{run['id']}-{run['run_attempt']}"
+            ):
+                raise ValueError("CI publication belongs to another commit or attempt")
+            plots(root, selected, release)
+        else:
+            selected["report"]["status"] = (
+                f"Evidence CI run {run['id']}, attempt {run['run_attempt']}: "
+                + (run.get("conclusion") or run.get("status", "pending"))
+                + ". Plots are not available yet."
+            )
+    destination = root / ".cache/evidence/ci-preview.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps(selected, sort_keys=True, indent=2, allow_nan=False) + "\n")
     return destination
 
 

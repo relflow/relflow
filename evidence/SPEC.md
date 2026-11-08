@@ -243,11 +243,13 @@ fresh learning result.
 `evidence/render.py` generates ignored `docs/evidence/` pages from canonical
 scripts and the selected publication JSON. The checked-in `results.json` is an
 unchanged bootstrap snapshot for offline builds. Hosted release versions fetch
-their matching public asset; unreleased branch and PR builds use the most
-recent released version, or the bootstrap snapshot before the first asset-based
-release. An explicitly prepared PR diagnostic review instead selects its exact
-full-budget captured records and figures together. These unpaired runs do not
-replace the required paired gate or update release publications. Missing or invalid assets for an actual release fail the build.
+their matching public asset with the same run's plots. Branch and PR builds select
+the newest exact-commit CI attempt and its candidate plots; pending or unavailable
+assets show an explicit status rather than older passing measurements. Every
+full paired Evidence execution retains observations without additional model
+calls. CI publishes immutable per-attempt preview assets, while version releases
+freeze the canonical versioned selection. Missing or invalid assets for an actual
+release fail the build.
 Downloaded data is cached outside experiment sources and checked against
 GitHub's asset digest and the package source revision. Never edit generated
 pages as a second source. `make check` validates static sources and tooling;

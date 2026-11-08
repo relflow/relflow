@@ -12,7 +12,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import pytest
 
 from evidence.diagnostics import review as reviewing
-from evidence.diagnostics.review import fragment, load, prepare, selection
+from evidence.diagnostics.review import fragment, load, prepare
 from evidence.experiments.source import fingerprint, registry
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -77,9 +77,7 @@ def test_authored_views_cover_both_catalog_lanes():
 
 def test_figures_require_the_identical_selected_record_and_keep_unmet_checks(project):
     review = load(project)
-    selected = selection(project)
-    results = json.loads(selected.read_text())["results"]
-    run = results["P001"]
+    run = json.loads((project / "docs/assets/evidence-plots/P001.json").read_text())["record"]
     assert run["outcome"] == "not_met" and not all(run["checks"].values())
     markup = fragment(project, "P001", run, review)
     assert "unpaired visualization run" in markup
@@ -120,14 +118,6 @@ def test_static_review_rejects_changed_or_incomplete_assets(project, change):
         load(project)
 
 
-def test_selection_rejects_changed_computation(project):
-    catalog = registry(project / "evidence", measurements=False)
-    source = project / "evidence" / catalog["P001"]["script"]
-    source.write_text(source.read_text().replace("def run(", "def changed_run("))
-    with pytest.raises(ValueError, match="computation changed"):
-        selection(project)
-
-
 @pytest.mark.parametrize("corrupt", [False, True])
 def test_preview_fetch_verifies_archive_and_assets_before_installing(project, monkeypatch, corrupt):
     assets = project / "docs/assets/evidence-plots"
@@ -138,12 +128,10 @@ def test_preview_fetch_verifies_archive_and_assets_before_installing(project, mo
     payload = stream.getvalue()
     spec = {
         "schema": 1,
-        "url": "https://github.com/relflow/relflow/releases/download/docs-preview-unit/bundle.zip",
+        "url": "https://github.com/relflow/relflow/releases/download/evidence-ci-1-attempt-1/proof-visualizations.zip",
         "size": len(payload),
         "sha256": hashlib.sha256(payload).hexdigest(),
     }
-    (project / "evidence/diagnostics").mkdir()
-    (project / "evidence/diagnostics/preview.json").write_text(json.dumps(spec))
     if corrupt:
         payload = payload[:-1] + bytes([payload[-1] ^ 1])
     calls = []
@@ -157,10 +145,55 @@ def test_preview_fetch_verifies_archive_and_assets_before_installing(project, mo
     shutil.rmtree(assets)
     if corrupt:
         with pytest.raises(ValueError, match="pinned checksum"):
-            prepare(project)
+            prepare(project, spec)
         assert not assets.exists()
     else:
-        assert prepare(project) == assets
+        assert prepare(project, spec) == assets
         assert load(project) is not None
-        assert prepare(project) == assets
+        assert prepare(project, spec) == assets
         assert len(calls) == 1
+
+
+def test_paired_bundle_rejects_another_run_or_candidate_record(project, tmp_path):
+    from evidence.visuals import verify
+
+    assets = project / "docs/assets/evidence-plots"
+    data = json.loads((assets / "P001.json").read_text())
+    data["scope"] = "paired Evidence CI candidate"
+    (assets / "P001.json").write_text(json.dumps(data))
+    review = json.loads((assets / "review.json").read_text())
+    review["ci"] = dict(
+        run_id="gh-42-2",
+        candidate_revision="a" * 40,
+        baseline_revision="b" * 40,
+        evidence_revision="a" * 40,
+        executor_sha="c" * 40,
+        capture_sha256="d" * 64,
+    )
+    entry = review["entries"]["P001"]
+    entry["source_sha256"] = hashlib.sha256((assets / "P001-proof.py").read_bytes()).hexdigest()
+    entry["assets"]["P001.json"] = hashlib.sha256((assets / "P001.json").read_bytes()).hexdigest()
+    (assets / "review.json").write_text(json.dumps(review))
+    archive = tmp_path / "plots.zip"
+    with ZipFile(archive, "w") as bundle:
+        for path in assets.iterdir():
+            bundle.write(path, path.name)
+    manifest = dict(
+        run_id="gh-42-2",
+        candidate={"revision": "a" * 40},
+        baseline={"revision": "b" * 40},
+        evidence_sha="a" * 40,
+        executor_sha="c" * 40,
+        observations={"capture_sha256": "d" * 64},
+    )
+    records = [
+        dict(task={"id": "P001", "role": "candidate", "script_sha256": entry["source_sha256"]}, result=data["record"])
+    ]
+    assert verify(archive, manifest, records)["ci"]["run_id"] == "gh-42-2"
+    altered = deepcopy(records)
+    altered[0]["result"]["checks"] = {"Fabricated pass": True}
+    with pytest.raises(ValueError, match="canonical candidate"):
+        verify(archive, manifest, altered)
+    manifest["run_id"] = "gh-42-3"
+    with pytest.raises(ValueError, match="different paired execution"):
+        verify(archive, manifest, records)

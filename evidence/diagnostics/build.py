@@ -8,6 +8,7 @@ import hashlib
 import json
 import math
 import shutil
+import tempfile
 import traceback
 from datetime import date, datetime
 from pathlib import Path
@@ -71,7 +72,7 @@ def package(output: Path, destination: Path) -> None:
             archive.writestr(info, payload)
 
 
-def build(bundles: Path, output: Path, identifiers: list[str] | None = None) -> dict:
+def build(bundles: Path, output: Path, identifiers: list[str] | None = None, *, ci: dict | None = None) -> dict:
     renderer_digest = hashlib.sha256(Path(__file__).with_name("plots.py").read_bytes()).hexdigest()
     from evidence.diagnostics.plots import render
 
@@ -98,9 +99,16 @@ def build(bundles: Path, output: Path, identifiers: list[str] | None = None) -> 
             bundle = Bundle(directory)
             record = bundle.record
             if record["outcome"] == "error":
-                errors[identifier] = record.get("error", "Proof execution failed")
-                continue
-            result = render(bundle, specs[identifier], output)
+                result = {
+                    "id": identifier,
+                    "focus": specs[identifier]["focus"],
+                    "comparison": "This execution failed before complete evaluation. The exact error is retained in its run record.",
+                    "limit": specs[identifier]["limit"],
+                    "figures": [],
+                    "interactive": {},
+                }
+            else:
+                result = render(bundle, specs[identifier], output)
             result.update(
                 record=record,
                 record_sha256=hashlib.sha256((directory / "record.json").read_bytes()).hexdigest(),
@@ -108,7 +116,7 @@ def build(bundles: Path, output: Path, identifiers: list[str] | None = None) -> 
                 code_sha256=bundle.manifest["code_sha256"],
                 manifest=f"{identifier}-manifest.json.gz",
                 capture_run=bundle.manifest["runtime"]["github_run_id"],
-                scope="full-budget unpaired diagnostic execution",
+                scope="paired Evidence CI candidate" if ci else "full-budget unpaired diagnostic execution",
             )
             for source, name in [
                 (directory / "record.json", f"{identifier}-record.json"),
@@ -207,6 +215,7 @@ def build(bundles: Path, output: Path, identifiers: list[str] | None = None) -> 
             "entries": entries,
             "expected": sorted(specs),
             "errors": errors,
+            "ci": ci,
             "revision": next(
                 (
                     json.loads((path / "record.json").read_text())["provenance"]["evidence_revision"]
@@ -227,18 +236,23 @@ def build(bundles: Path, output: Path, identifiers: list[str] | None = None) -> 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--bundles", type=Path, required=True)
+    parser.add_argument("--reports", type=Path, required=True)
+    parser.add_argument("--observations", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=ROOT / "docs/assets/evidence-plots")
     parser.add_argument(
         "--archive", type=Path, help="Write a complete static bundle for an external preview attachment"
     )
-    parser.add_argument("ids", nargs="*")
     options = parser.parse_args()
-    result = build(options.bundles, options.output, options.ids)
+    from evidence.diagnostics.paired import prepare
+
+    with tempfile.TemporaryDirectory() as temporary:
+        bundles = Path(temporary)
+        ci = prepare(options.reports, options.observations, bundles)
+        result = build(bundles, options.output, ci=ci)
     print(json.dumps({key: value for key, value in result.items() if key != "errors"}))
     if options.archive and not result["failed"]:
         package(options.output, options.archive)
-    raise SystemExit(1 if result["failed"] or (result["missing"] and not options.ids) else 0)
+    raise SystemExit(1 if result["failed"] or result["missing"] else 0)
 
 
 if __name__ == "__main__":

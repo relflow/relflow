@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import tomllib
@@ -300,7 +301,7 @@ def publish(root: Path, output: Path, run_id: int, *, version: str | None = None
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(subprocess.check_output(["git", "show", f"{suite_revision}:{name}"], cwd=root))
             destination.chmod(0o755 if mode == "100755" else 0o644)
-        manifest, _, summary = validate(reports, inputs, root=tested)
+        manifest, records, summary = validate(reports, inputs, root=tested)
         if json.loads((reports / "summary.json").read_text()) != summary:
             raise ValueError("Retained report summary differs from the validated task records")
         if not reused:
@@ -332,6 +333,23 @@ def publish(root: Path, output: Path, run_id: int, *, version: str | None = None
             version=version,
             revision=main,
         )
+        if manifest.get("observations"):
+            from visuals import install, verify
+
+            figures = output / "plots"
+            verified_artifact(execution_run["id"], artifact_name(execution_run, "evidence-plots"), figures)
+            bundle = figures / "proof-visualizations.zip"
+            verify(bundle, manifest, records)
+            shutil.copyfile(bundle, output / bundle.name)
+            document = json.loads((output / "publication.json").read_text())
+            document["report"]["plots"] = {
+                "url": f"https://github.com/{REPOSITORY}/releases/download/{tag}/{bundle.name}",
+                "sha256": hashlib.sha256(bundle.read_bytes()).hexdigest(),
+                "size": bundle.stat().st_size,
+            }
+            (output / "publication.json").write_text(json.dumps(document, sort_keys=True, indent=2) + "\n")
+            install(bundle, root / "docs/assets/evidence-plots")
+            assets.append(bundle.name)
         assets += ["publication.json", "measurements.md"]
         (output / "SHA256SUMS").write_text(
             "".join(f"{hashlib.sha256((output / name).read_bytes()).hexdigest()}  {name}\n" for name in assets)

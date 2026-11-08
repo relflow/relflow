@@ -326,7 +326,7 @@ def test_pr_preview_selects_reviewed_diagnostics_without_fetching_released_measu
     def fetch(*args, **kwargs):
         raise AssertionError("A reviewed PR must retain its captured measurements")
 
-    monkeypatch.setattr(publishing, "selection", lambda root: selected)
+    monkeypatch.setattr(publishing, "ci", lambda root, revision: selected)
     monkeypatch.setattr(publishing, "fetch", fetch)
     monkeypatch.setattr(publishing.subprocess, "run", run)
     publishing.publish(project, environ=environment)
