@@ -307,8 +307,8 @@ def rows(values: pa.Array, *, channels: Channels, address: Address) -> tuple[np.
         ValueError: If the members do not match ``channels``.
     """
     flat = cast(pa.StructArray, pc.list_flatten(values))
-    names = members(flat.type, channels=channels, address=address)
-    by_name = children(flat.type, flat=flat.flatten())
+    names = members(datatype=flat.type, channels=channels, address=address)
+    by_name = children(datatype=flat.type, flat=flat.flatten())
     matrix = np.column_stack([floats(values=by_name[name], address=address) for name in names])
     return matrix, pc.list_value_length(values).to_numpy(zero_copy_only=False).astype(np.int64)
 
@@ -332,8 +332,8 @@ def columns(values: pa.StructArray, *, channels: Channels, address: Address) -> 
     Raises:
         ValueError: If the channel lists of a record differ in length or the members do not match ``channels``.
     """
-    names = members(values.type, channels=channels, address=address)
-    by_name = children(values.type, flat=values.flatten())
+    names = members(datatype=values.type, channels=channels, address=address)
+    by_name = children(datatype=values.type, flat=values.flatten())
     lists = [by_name[name] for name in names]
     counts = np.stack(
         [floats(values=pc.list_value_length(member), address=address) for member in lists]
@@ -386,12 +386,12 @@ def steps(values: pa.Array, *, channels: Channels, address: Address) -> tuple[np
     if not len(values):
         return np.empty((0, width)), np.empty(0, dtype=np.int64)
     if pa.types.is_struct(values.type):
-        return columns(cast(pa.StructArray, values), channels=channels, address=address)
+        return columns(values=cast(pa.StructArray, values), channels=channels, address=address)
     if not listlike(values.type):
         message = f"series field at '{address}' expects an Arrow list or struct per record, got {values.type}"
         raise ValueError(message)
     if pa.types.is_struct(cast(pa.ListType, values.type).value_type):
-        return rows(values, channels=channels, address=address)
+        return rows(values=values, channels=channels, address=address)
     if channels.names is not None:
         message = (
             f"series field at '{address}' names channels {channels.names} but its input has no struct members; "
