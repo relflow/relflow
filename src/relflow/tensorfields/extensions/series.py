@@ -40,7 +40,40 @@ if TYPE_CHECKING:
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
 
-series: Extension = Extension(name="series", types=(int | float,), callbacks=(Metrics,))
+
+def numeric(datatype: pa.DataType) -> bool:
+    """Whether an Arrow type is a number or a list of numbers.
+
+    Args:
+        datatype: The Arrow type to test.
+
+    Returns:
+        True for an integer or floating type, or one list level of them.
+    """
+    # Every list layout exposes value_type; pyarrow types it only on ListType.
+    datatype = cast(pa.ListType, datatype).value_type if listlike(datatype) else datatype
+    return pa.types.is_integer(datatype) or pa.types.is_floating(datatype)
+
+
+def channelled(datatype: pa.DataType) -> bool:
+    """Whether an Arrow type is a struct of channels.
+
+    Args:
+        datatype: The Arrow type to test.
+
+    Returns:
+        True for a non-empty struct whose members are all numbers (one step)
+        or all lists of numbers (one list per channel).
+    """
+    if not pa.types.is_struct(datatype) or not datatype.num_fields:
+        return False
+    kinds = [field.type for field in datatype]
+    return all(numeric(kind) and not listlike(kind) for kind in kinds) or all(
+        listlike(kind) and numeric(kind) for kind in kinds
+    )
+
+
+series: Extension = Extension(name="series", types=(int | float, dict), arrow={dict: channelled}, callbacks=(Metrics,))
 
 VALUES = "values"
 OBSERVED = "observed"
