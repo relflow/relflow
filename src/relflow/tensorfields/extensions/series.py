@@ -372,7 +372,7 @@ def steps(values: pa.Array, *, channels: Channels, address: Address) -> tuple[np
 
     Args:
         values: One Arrow list of steps per record, a list of step structs, or a struct of channel lists.
-        channels: Values expected in each step, or the struct member names that are the channels.
+        channels: The channel count, with the member names to select when ``channels`` was a tuple of names.
         address: Field address, for error messages.
 
     Returns:
@@ -380,7 +380,7 @@ def steps(values: pa.Array, *, channels: Channels, address: Address) -> tuple[np
 
     Raises:
         ValueError: If a record is not a list or struct, named channels meet a list input,
-            or a step does not hold ``channels`` values.
+            or a step does not hold ``channels.width`` values.
     """
     width = channels.width
     if not len(values):
@@ -833,6 +833,21 @@ def loss(
     return output
 
 
+def step_type(*, channels: Channels) -> pa.DataType:
+    """Arrow type of one forecast step.
+
+    Args:
+        channels: The channels of one step.
+
+    Returns:
+        A list of float64 values for a channel count, or a struct with one
+        non-null float64 member per name, in name order.
+    """
+    if channels.names is None:
+        return pa.list_(pa.field("element", pa.float64()))
+    return pa.struct([pa.field(name, pa.float64(), nullable=False) for name in channels.names])
+
+
 @series.register(Component.output)
 def output(module: Model, address: Address) -> pa.StructType:
     """Arrow type of a prediction: ``horizon`` steps of one float64 value per channel per record.
@@ -847,10 +862,7 @@ def output(module: Model, address: Address) -> pa.StructType:
     Returns:
         A struct with a non-null ``content`` list of steps.
     """
-    names = cast(Request, module.schema.requests[address]).layout.names
-    step = pa.list_(pa.field("element", pa.float64()))
-    if names is not None:
-        step = pa.struct([pa.field(name, pa.float64(), nullable=False) for name in names])
+    step = step_type(channels=cast(Request, module.schema.requests[address]).layout)
     return pa.struct([pa.field(TensorKey.content.name, pa.list_(pa.field("element", step)), nullable=False)])
 
 
