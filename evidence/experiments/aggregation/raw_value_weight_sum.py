@@ -133,7 +133,7 @@ from copy import deepcopy
 
 import lightning.pytorch as lit
 import numpy as np
-import pyarrow as pa
+import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
@@ -202,7 +202,7 @@ def scale_weights(observations: list[dict], *, factor: float) -> list[dict]:
 
 def prediction(model: rf.Model, observations: list[dict]) -> np.ndarray:
     inputs = [{"items": row["items"]} for row in observations]
-    output = pa.table(model.predict(inputs))["predictions"].to_pylist()
+    output = pl.DataFrame(model.predict(inputs))["predictions"].to_list()
     return np.asarray([row["weighted_sum"]["content"] for row in output], dtype=np.float64)
 
 

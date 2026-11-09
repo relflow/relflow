@@ -88,6 +88,7 @@ from collections.abc import Iterator
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import relflow as rf
 from reporting import experiment, report
@@ -131,9 +132,9 @@ def build(domain: str, arm: str) -> rf.Model:
 
 
 def prediction(model: rf.Model, rows: list[dict], domain: str, arm: str) -> np.ndarray:
-    output = pa.table(model.predict(pa.Table.from_pylist([{"signal": row["signal"]} for row in rows]), batch_size=256))[
-        "predictions"
-    ].to_pylist()
+    output = pl.DataFrame(
+        model.predict(pa.Table.from_pylist([{"signal": row["signal"]} for row in rows]), batch_size=256)
+    )["predictions"].to_list()
     values = [row["rank"]["content"] for row in output]
     if arm == "category":
         values = [item["value"] for item in values]

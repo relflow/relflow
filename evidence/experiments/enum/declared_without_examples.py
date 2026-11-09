@@ -137,6 +137,7 @@ from tempfile import TemporaryDirectory
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import relflow as rf
 from reporting import experiment, report
@@ -205,7 +206,7 @@ def fit(model: rf.Model, phase: str, seed: int, budget: int, accelerator: str) -
 
 
 def prediction(model: rf.Model, rows: list[dict]) -> list[dict]:
-    output = pa.table(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_pylist()
+    output = pl.DataFrame(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_list()
     return [row["label"]["content"] for row in output]
 
 

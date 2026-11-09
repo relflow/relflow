@@ -124,7 +124,7 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
-import pyarrow as pa
+import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
@@ -186,7 +186,7 @@ def scores(train: list[dict], test: list[dict], predicted: np.ndarray, keys: tup
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     inputs = [{key: value for key, value in row.items() if key != "answer"} for row in rows]
-    output = pa.table(model.predict(inputs)).to_pylist()
+    output = pl.DataFrame(model.predict(inputs)).to_dicts()
     return np.asarray([row["predictions"]["answer"]["content"] for row in output])
 
 

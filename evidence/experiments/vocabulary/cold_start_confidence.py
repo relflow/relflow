@@ -110,6 +110,7 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import relflow as rf
 from reporting import experiment, report
@@ -143,7 +144,7 @@ def build(unavailable: float) -> rf.Model:
 
 
 def probability(model: rf.Model, rows: list[dict]) -> np.ndarray:
-    predictions = pa.table(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_pylist()
+    predictions = pl.DataFrame(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_list()
     content = [row["label"]["content"] for row in predictions]
     return np.asarray([item["probability"] if item["value"] == "yes" else 1 - item["probability"] for item in content])
 

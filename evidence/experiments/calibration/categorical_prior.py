@@ -117,6 +117,7 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import relflow as rf
 from relflow.tensorfields.shared.resize import Resize
@@ -185,7 +186,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         vocabulary = rf.Category.vocabulary(model, "/entity")
         for novel in (False, True):
             rows = list(records(rows=8192, seed=seed + 3, novel=novel))
-            predictions = pa.table(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_pylist()
+            predictions = pl.DataFrame(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_list()
             values = [row["label"]["content"] for row in predictions]
             p = np.asarray(
                 [item["probability"] if item["value"] == "yes" else 1 - item["probability"] for item in values]
