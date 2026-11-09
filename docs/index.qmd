@@ -35,7 +35,7 @@ payment prediction, then adds nested context, pretraining, and reuse.
 
 ## Three fields are a model
 
-::: {.column-screen-inset-right}
+::: {.column-body}
 ::: {.grid .home-code}
 
 ::: {.g-col-12 .g-col-lg-5}
@@ -96,7 +96,7 @@ untrained model to a prediction.
 
 ## What the model factory provides
 
-::: {.column-screen-inset-right}
+::: {.column-body}
 ::: {.grid .home-promises}
 
 ::: {.g-col-12 .g-col-md-6}
@@ -180,7 +180,7 @@ the hardware, record shape, and training or inference workload stated.
 
 ## What the schema replaces
 
-::: {.column-screen-inset-right}
+::: {.column-body}
 ```{typst}
 //| fig-cap: "A feature pipeline maintains jobs, a fixed-width table, and serving features. A relflow schema reads nested records and learns its own encodings."
 //| fig-alt: "Two lanes. The feature pipeline lane runs from source tables through feature jobs that aggregate, encode, and scale, to a fixed-width feature table, a model, and a second set of serving features. The relflow lane runs from nested source records through a schema of fields, branches, and targets to a model that learns vocabularies, normalizers, and context, then to predictions on the same records with labels omitted."
