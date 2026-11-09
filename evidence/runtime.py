@@ -127,6 +127,7 @@ def environment(
             "scheduler": "longest-first-v1",
             "task_timeout_seconds": 1850,
             "experiment_timeout_seconds": 1700,
+            "observation_capture": "py-return-v1",
         },
         "environment": {
             "OMP_NUM_THREADS": "1",
@@ -194,6 +195,7 @@ def container(
     run_id: str,
     evidence_sha: str,
     package: dict,
+    observations: Path | None = None,
 ) -> dict:
     """Execute one immutable launch with the shared Docker isolation policy.
 
@@ -248,6 +250,18 @@ def container(
         "EVIDENCE_RELFLOW_REVISION=" + package["revision"],
         "--env",
         "EVIDENCE_WHEEL_SHA256=" + package["wheel_sha256"],
+    ]
+    if observations is not None:
+        observations.mkdir(parents=True, exist_ok=False)
+        command += [
+            "--mount",
+            f"type=bind,src={observations},dst=/observations",
+            "--env",
+            "EVIDENCE_OBSERVATIONS=/observations",
+            "--env",
+            "EVIDENCE_RUN_ID=" + run_id,
+        ]
+    command += [
         execution["role_images"][task["role"]],
         "python",
         "/executor/worker.py",
@@ -305,3 +319,83 @@ def container(
                 "duration_seconds": round(time.monotonic() - launched, 3),
             },
         )
+
+
+def render_plots(reports: Path, observations: Path, output: Path) -> dict:
+    """Execute the selected renderer only inside a bounded offline container."""
+    recipe = (
+        "FROM python:3.12-slim@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30\n"
+        "RUN python -m pip install --no-cache-dir matplotlib==3.10.7 pyarrow==24.0.0 numpy==2.4.6 pyyaml==6.0.3\n"
+    )
+    image = "relflow-evidence-plots:" + hashlib.sha256(recipe.encode()).hexdigest()[:20]
+    output.mkdir(parents=True, exist_ok=False)
+    with tempfile.TemporaryDirectory(prefix="evidence-plot-image-") as directory:
+        (Path(directory) / "Dockerfile").write_text(recipe)
+        subprocess.run(["docker", "build", "--tag", image, directory], check=True)
+    image_id = subprocess.check_output(["docker", "image", "inspect", image, "--format", "{{.Id}}"], text=True).strip()
+    with tempfile.TemporaryDirectory(prefix="evidence-plot-work-") as staging:
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--read-only",
+                "--cap-drop",
+                "ALL",
+                "--security-opt",
+                "no-new-privileges",
+                "--cpus",
+                "2",
+                "--memory",
+                "4g",
+                "--pids-limit",
+                "256",
+                "--user",
+                f"{os.getuid()}:{os.getgid()}",
+                "--tmpfs",
+                "/tmp:rw,nosuid,nodev,size=2g,mode=1777",
+                "--mount",
+                f"type=bind,src={reports.resolve()},dst=/reports,readonly",
+                "--mount",
+                f"type=bind,src={(reports / 'source').resolve()},dst=/workspace/evidence,readonly",
+                "--mount",
+                f"type=bind,src={observations.resolve()},dst=/observations,readonly",
+                "--mount",
+                f"type=bind,src={output.resolve()},dst=/output",
+                "--mount",
+                f"type=bind,src={staging},dst=/work",
+                "--workdir",
+                "/workspace",
+                "--env",
+                "PYTHONPATH=/workspace:/workspace/evidence",
+                "--env",
+                "TMPDIR=/work",
+                "--env",
+                "MPLCONFIGDIR=/tmp/matplotlib",
+                "--env",
+                "OMP_NUM_THREADS=1",
+                "--env",
+                "OPENBLAS_NUM_THREADS=1",
+                "--env",
+                "USER=evidence",
+                "--env",
+                "LOGNAME=evidence",
+                image_id,
+                "python",
+                "-m",
+                "evidence.diagnostics.build",
+                "--reports",
+                "/reports",
+                "--observations",
+                "/observations",
+                "--output",
+                "/output/figures",
+                "--archive",
+                "/output/proof-visualizations.zip",
+            ],
+            check=True,
+            timeout=1700,
+        )
+    return {"schema": 1, "image_id": image_id, "recipe_sha256": hashlib.sha256(recipe.encode()).hexdigest()}

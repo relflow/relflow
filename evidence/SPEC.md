@@ -228,16 +228,28 @@ record available in its own disclosure, and keep training settings, measured
 provenance, reproduction commands, and source code folded. Readable presentation
 must retain all recorded values and named checks.
 
-Use plain readouts and structured tables for selected measurements, keeping
-missing values explicit. Presentation changes never supply new measurements,
-alter scientific budgets or checks, or establish fresh learning evidence.
+Use diagnostic plots alongside readouts and structured tables. During explicit
+proof execution, retain the predictions, scores, visibility conditions, target
+coordinates, reference vectors, and controls needed to explain the result.
+Figures must identify their population, units, references, and evaluation scope;
+use matched scales for compared conditions and distinguish a fitted projection
+from original-space scores. Keep all unmet checks and full raw records visible.
+Missing results remain explicit; generator illustrations contain no model
+predictions. Bind measured figures to the exact captured source, record, and
+observation checksums. See [diagnostics/README.md](diagnostics/README.md).
+Presentation changes never alter scientific budgets or checks or establish a
+fresh learning result.
 
 `evidence/render.py` generates ignored `docs/evidence/` pages from canonical
 scripts and the selected publication JSON. The checked-in `results.json` is an
 unchanged bootstrap snapshot for offline builds. Hosted release versions fetch
-their matching public asset; unreleased branch and PR builds use the most
-recent released version, or the bootstrap snapshot before the first asset-based
-release. Missing or invalid assets for an actual release fail the build.
+their matching public asset with the same run's plots. Branch and PR builds select
+the newest exact-commit CI attempt and its candidate plots; pending or unavailable
+assets show an explicit status rather than older passing measurements. Every
+full paired Evidence execution retains observations without additional model
+calls. CI publishes immutable per-attempt preview assets, while version releases
+freeze the canonical versioned selection. Missing or invalid assets for an actual
+release fail the build.
 Downloaded data is cached outside experiment sources and checked against
 GitHub's asset digest and the package source revision. Never edit generated
 pages as a second source. `make check` validates static sources and tooling;

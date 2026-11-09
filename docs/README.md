@@ -91,10 +91,17 @@ and presentation metadata. Measured results are separate JSON publication
 assets; rendering never rewrites or executes experiments.
 
 Generated Evidence pages put the behavioral criteria before the Example and
-show recorded metrics as plain readouts, labeled groups, and tables. Expanded
+show recorded metrics as diagnostic figures, plain readouts, labeled groups, and tables. Expanded
 details separate Measurements, Method, Reproduce, and Code. Provenance and the
 complete raw record remain available in their own disclosures. See the
 [presentation contract](../evidence/SPEC.md#documentation) for authoring guidance.
+The [diagnostic workflow](../evidence/diagnostics/README.md) retains observations
+inside every paired Evidence execution and renders static SVG/JSON in an offline
+container. After CI, a frozen publisher retains immutable per-attempt GitHub
+Release assets and requests a Read the Docs rebuild. Configure the
+`READTHEDOCS_TOKEN` Actions secret once for automatic rebuild requests. PR and
+branch previews select the newest exact-commit attempt, showing pending status
+until its plots are available. Package releases freeze the matching bundle.
 
 The complete paired evidence gate still runs for PRs, merge groups, and main
 CI. It requires valid full-budget results for both exact wheels and blocks
@@ -103,7 +110,7 @@ baseline-passing checks. Verified reuse keeps the original execution records
 and adds a separate receipt binding the current request. See the
 [hosted guide](../evidence/hosted.md).
 
-Publication happens **only with package version releases**. Before publishing
+Canonical versioned publication happens **only with package version releases**. Before publishing
 `v<version>`, the release workflow freezes a validated `evidence-v<version>`
 Release containing `publication.json`, a generated measurements table, complete
 report and input archives, checksums, and execution/reuse provenance. Published

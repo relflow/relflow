@@ -220,7 +220,11 @@ new publication assets in `evidence-v<version>` Releases. Ordinary CI creates no
 publication PR. Local builds use the preserved `evidence/results.json`
 bootstrap snapshot. Hosted builds fetch matching versioned assets, validate
 their digests and source revisions, and cache them outside canonical sources;
-unreleased previews use the last released data. Keep the static environment
+branch and PR builds select the newest exact-commit CI attempt, showing an explicit
+pending/unavailable status instead of older measurements. Every paired Evidence
+run retains observations and generates its matching static plots; immutable CI
+release assets power previews, and version releases freeze the same bundle with
+the canonical selection. Keep the static environment
 free of model imports and credentials. Clean only generated publication output.
 
 Evidence pages expose the predeclared behavioral criteria before the Example,
@@ -238,7 +242,12 @@ Use the real schema and generator ranges. Explain unfamiliar metric names and
 their reference values. Illustrative answers are separate from model predictions;
 interpret measured outcomes against the displayed record and its scope.
 
-Show only measurements present in the selected record, using plain readouts
-and structured tables. Missing measurements remain visibly unrecorded.
+Show only measurements and observations from the selected execution. Add clear
+diagnostic plots, paired controls, and captured-record explorers when they help
+explain an outcome. Build any needed artifacts during explicit proof execution;
+static docs consume prepared SVG/JSON without model dependencies. Bind figures
+to source and record checksums, use matched scales for comparisons, label
+projection and evaluation scope, and retain unmet checks. Missing measurements
+remain visibly unrecorded; authored generator illustrations contain no predictions.
 Presentation edits never establish a fresh learning result or change
 scientific budgets and checks.

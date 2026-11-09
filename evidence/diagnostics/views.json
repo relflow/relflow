@@ -1,0 +1,755 @@
+{
+  "P001": {
+    "mode": "regression",
+    "target": "total",
+    "focus": "Does the model preserve a bag's total when its complete items are reordered?",
+    "comparison": "Compare held-out totals with the same bags after permutation.",
+    "limit": "An ordering check does not establish extrapolation to longer collections.",
+    "labels": {
+      "test": "Intact held-out bags",
+      "permute(test)": "Complete items reordered"
+    }
+  },
+  "P002": {
+    "mode": "regression",
+    "target": "total",
+    "focus": "Does a learned sum continue to work on longer bags?",
+    "comparison": "Separate training-range bags, unseen lengths, duplicated bags, and equal-value probes.",
+    "limit": "Only the recorded lengths are tested; neural sums are approximate.",
+    "labels": {
+      "in_range": "Familiar lengths: 1–6 items",
+      "unseen": "Unseen lengths: 7–10 items",
+      "short": "Short bags before duplication",
+      "duplicate(short)": "The same short bags duplicated",
+      "probes": "Equal-value count probes"
+    }
+  },
+  "P003": {
+    "mode": "regression",
+    "target": "mean_amount",
+    "focus": "Does duplicating a collection leave its mean unchanged?",
+    "comparison": "Pair each bag with its duplicated and permuted versions.",
+    "limit": "Duplicate invariance concerns complete records, not arbitrary changes to their values.",
+    "labels": {
+      "test": "Original bags",
+      "duplicate(test)": "Every complete item duplicated",
+      "permute(test)": "Complete items reordered"
+    }
+  },
+  "P004": {
+    "mode": "regression",
+    "target": "total",
+    "focus": "Can an explicit count support a learned total?",
+    "comparison": "Compare predictions with the actual sums, including fixed-value count probes.",
+    "limit": "The count is supplied as an input in this proof."
+  },
+  "P005": {
+    "mode": "regression",
+    "target": "total",
+    "focus": "Does a supplied count help on unseen collection lengths?",
+    "comparison": "Inspect longer bags and the paired effect of duplicating shorter bags.",
+    "limit": "Success here relies on the visible count and the tested generator.",
+    "labels": {
+      "unseen": "Unseen lengths: 7–10 items",
+      "short": "Short bags before duplication",
+      "duplicate(short)": "Matched bags and visible count doubled"
+    }
+  },
+  "P006": {
+    "mode": "regression",
+    "target": "covariance",
+    "focus": "Does covariance depend on which values occur together?",
+    "comparison": "Shuffle only the y coordinates while retaining the original answers.",
+    "limit": "The corruption removes pair alignment while preserving each coordinate's marginal values."
+  },
+  "P007": {
+    "mode": "regression",
+    "target": "variance",
+    "focus": "Can the model distinguish equal-mean bags with different dispersion?",
+    "comparison": "Inspect held-out variance predictions and matched bags that vary their spread.",
+    "limit": "A mean alone cannot identify variance; the raw collection supplies additional information."
+  },
+  "P008": {
+    "mode": "regression",
+    "target": "covariance",
+    "focus": "Can pooling combine supplied cross-deviations?",
+    "comparison": "Compare predicted covariance with targets computed from the supplied sufficient features.",
+    "limit": "The cross-deviations are prepared inputs; this does not demonstrate discovering them from raw pairs."
+  },
+  "P009": {
+    "mode": "regression",
+    "target": "variance",
+    "focus": "Can pooling combine supplied squared deviations?",
+    "comparison": "Inspect prediction error across the held-out variance range.",
+    "limit": "The generator supplies squared deviations rather than asking the model to derive them."
+  },
+  "P010": {
+    "mode": "regression",
+    "target": "answer",
+    "focus": "Does the answer depend on the requested group and the correct value-weight pairing?",
+    "comparison": "Compare intact records, rotated group labels, swapped weights, and complete-record permutations.",
+    "limit": "Each corruption retains the original target so its effect measures a broken dependency."
+  },
+  "P011": {
+    "mode": "regression",
+    "target": "answer",
+    "focus": "Can the model select and sum prepared contributions for the requested group?",
+    "comparison": "Compare intact group membership with rotated labels and reordered complete items.",
+    "limit": "Contributions are supplied; the task isolates selection and aggregation."
+  },
+  "P012": {
+    "mode": "regression",
+    "target": "answer",
+    "focus": "Can a visible request select the correct ranked value?",
+    "comparison": "Separate endpoint and interior ranks, bag shapes, hidden requests, and cycled requests.",
+    "limit": "Interior order statistics are evaluated separately so endpoint performance cannot conceal their failures.",
+    "labels": {
+      "test": "Rank request visible",
+      "cycle_rank(test)": "Requested rank changed"
+    }
+  },
+  "P013": {
+    "mode": "regression",
+    "target": "weighted_sum",
+    "focus": "Does the representation retain how many contributions were pooled?",
+    "comparison": "Inspect total and mean readouts and the matched equal-contribution probes.",
+    "limit": "Different targets require different cardinality information.",
+    "additional_targets": [
+      "mean_contribution"
+    ]
+  },
+  "P014": {
+    "mode": "regression",
+    "target": "weighted_sum",
+    "focus": "Are values combined with their own weights?",
+    "comparison": "Compare intact and mispaired weights, complete-item permutations, and uniformly scaled weights.",
+    "limit": "Scaling should change the weighted sum; it is not an invariance control."
+  },
+  "P015": {
+    "mode": "regression",
+    "target": "weighted_sum",
+    "focus": "Can the model sum already prepared weighted contributions?",
+    "comparison": "Compare held-out weighted sums with the actual prepared-contribution totals.",
+    "limit": "This control supplies multiplication in the input and isolates the pooling problem."
+  },
+  "P016": {
+    "mode": "regression",
+    "target": "weighted_mean",
+    "focus": "Does a weighted mean respect pairing while ignoring common rescaling?",
+    "comparison": "Compare swapped weights, complete-item permutations, uniform weight scaling, and duplication.",
+    "limit": "A weighted mean should remain unchanged under common positive scaling and whole-bag duplication."
+  },
+  "P017": {
+    "mode": "ranking",
+    "target": "target",
+    "focus": "Can a real signal be distinguished from independent noise?",
+    "comparison": "Compare the two independently fitted arms using held-out AUC.",
+    "limit": "An AUC summary does not determine an entire ROC curve; a curve is shown only when individual scores exist."
+  },
+  "P018": {
+    "mode": "trajectory",
+    "focus": "How do committed groups and usage evolve during reconstruction?",
+    "comparison": "Follow the actual epoch-by-epoch group count and perplexity.",
+    "limit": "Training and validation reuse observations here. Group occupancy is not held-out prediction or partition recovery."
+  },
+  "P019": {
+    "mode": "trajectory",
+    "focus": "Does a plain input activate adaptive clustering?",
+    "comparison": "Follow committed groups and adherence when the Cluster field is only an input.",
+    "limit": "Dormancy is an architectural behavior; this experiment does not test unseen-identity prediction."
+  },
+  "P020": {
+    "mode": "trajectory",
+    "focus": "How does reconstructing categorical identities change group usage?",
+    "comparison": "Inspect committed groups and perplexity across the recorded training trajectory.",
+    "limit": "Occupancy and usage do not establish agreement with a true partition or held-out prediction quality."
+  },
+  "P021": {
+    "mode": "ranking",
+    "target": "equal",
+    "focus": "Can equality transfer to identities absent from training?",
+    "comparison": "Compare Hash, unknown Category labels, and shuffled-label training.",
+    "limit": "The task tests equality within a record, not learning a persistent identity vocabulary."
+  },
+  "P022": {
+    "mode": "regression",
+    "target": "answer",
+    "focus": "Can a compressed relational route recover the requested numeric payload?",
+    "comparison": "Compare intact and broken identity links using the same original answers.",
+    "limit": "Low intact error and a broken-link gap are separate requirements."
+  },
+  "P023": {
+    "mode": "regression",
+    "target": "answer",
+    "focus": "Does preserving relational tokens support payload retrieval?",
+    "comparison": "Inspect intact and identity-corrupted queries alongside the training diagnostic.",
+    "limit": "Training fit alone is not held-out retrieval evidence."
+  },
+  "P024": {
+    "mode": "regression",
+    "target": "memory/value",
+    "focus": "Can aligned positions explain apparent identity retrieval?",
+    "comparison": "Compare intact and identity-rotated queries while positions remain aligned.",
+    "limit": "Position copying can solve this control; it does not establish use of identity keys."
+  },
+  "P025": {
+    "mode": "paired-seeds",
+    "target": "memory/value",
+    "focus": "Does keyed recall survive independent source and query ordering?",
+    "comparison": "Keep all three declared seeds visible and pair each intact result with its broken-key control.",
+    "limit": "A median must not hide a failing seed or a weak corruption gap."
+  },
+  "P026": {
+    "mode": "regression",
+    "target": "answer",
+    "focus": "Does the model average only the requested group's values?",
+    "comparison": "Compare held-out groups with intact and corrupted group labels.",
+    "limit": "Each group is scored separately to expose selective aggregation failures."
+  },
+  "P027": {
+    "mode": "composition",
+    "target": "answer",
+    "focus": "Can group selection combine with the requested reduction?",
+    "comparison": "Compare every recorded group-operation cell on a shared error scale.",
+    "limit": "The cell grid reports tested combinations; a pooled score cannot establish every operation."
+  },
+  "P028": {
+    "mode": "classification",
+    "target": "has_overlap",
+    "focus": "Does a shared identity across sibling collections control the prediction?",
+    "comparison": "Compare intact overlaps, renamed and permuted identities, and deliberately broken overlaps.",
+    "limit": "Renaming preserves equality structure; breaking overlaps changes the answer's supporting evidence.",
+    "labels": {
+      "test": "Intact sibling overlaps",
+      "invariant": "Equality-preserving rename and reorder",
+      "broken": "Overlapping identities broken"
+    }
+  },
+  "P029": {
+    "mode": "classification",
+    "target": "equal",
+    "focus": "Does direct Hash equality respond when the match is broken?",
+    "comparison": "Pair each intact probability with the corresponding broken-equality probability.",
+    "limit": "The records use previously unseen identities; no persistent vocabulary lookup is available.",
+    "labels": {
+      "test": "Intact equality",
+      "broken": "Equality match broken"
+    }
+  },
+  "P030": {
+    "mode": "regression",
+    "target": "items/subtotal",
+    "focus": "Do repeated output coordinates stay aligned with their inputs?",
+    "comparison": "Inspect coordinate-level subtotal predictions and the permuted-target control.",
+    "limit": "Flattening retains each parent and child position; coordinates are not independent observations."
+  },
+  "P031": {
+    "mode": "composition",
+    "target": "answer",
+    "focus": "Does a visible operation request determine the answer?",
+    "comparison": "Compare requested operations, hidden requests, and complete-item permutations.",
+    "limit": "With the request hidden, one fixed collection can correspond to several correct operation-specific answers."
+  },
+  "P032": {
+    "mode": "regression",
+    "target": "items/deviation",
+    "focus": "Can each item be compared with the peers in its own group?",
+    "comparison": "Compare intact, corrupted-group, translated, and reordered records.",
+    "limit": "Group corruption changes the appropriate peer mean; translation should preserve deviations."
+  },
+  "P033": {
+    "mode": "regression",
+    "target": "items/deviation",
+    "focus": "Does a single query still require the correct peer membership?",
+    "comparison": "Compare intact and corrupted groups with the evaluator's implied-deviation reference.",
+    "limit": "The corruption oracle distinguishes an information change from a model-only failure."
+  },
+  "P034": {
+    "mode": "regression",
+    "target": "items/deviation",
+    "focus": "Can the model use an explicitly supplied peer mean?",
+    "comparison": "Inspect deviations when the aggregation step has already been prepared.",
+    "limit": "This control isolates downstream use of the mean rather than discovering peer groups."
+  },
+  "P035": {
+    "mode": "regression",
+    "target": "items/deviation",
+    "focus": "Can the model compare an item with the ungrouped collection mean?",
+    "comparison": "Compare original, translated, and reordered collections.",
+    "limit": "Translation preserves the true deviations and complete-record permutation preserves their correspondence."
+  },
+  "P036": {
+    "mode": "regression",
+    "target": "target/value",
+    "focus": "Does compressing a Category route lose observation-local associations?",
+    "comparison": "Compare compressed and preserved routes, each with intact and broken identities.",
+    "limit": "The persistent Category vocabulary is small; numeric associations still vary by observation."
+  },
+  "P037": {
+    "mode": "regression",
+    "target": "target/value",
+    "focus": "Does preserving Hash tokens help fresh-key retrieval?",
+    "comparison": "Compare compressed and preserved routes on intact and broken identity links.",
+    "limit": "Fresh keys prevent memorizing a persistent identity-to-value mapping."
+  },
+  "P038": {
+    "mode": "state",
+    "target": "target",
+    "focus": "Does the model distinguish a missing value from a real zero?",
+    "comparison": "Compare preserved state, nulls filled with zero, and an independent control.",
+    "limit": "Filling null with zero removes information before the model sees the record."
+  },
+  "P039": {
+    "mode": "regression",
+    "target": "global_total",
+    "focus": "Can attention learn a total at the declared fixed collection width?",
+    "comparison": "Inspect validation and independent test errors against the training-mean baseline.",
+    "limit": "Fixed-width success does not establish arbitrary-length arithmetic."
+  },
+  "P040": {
+    "mode": "regression",
+    "target": "largest_session_total",
+    "focus": "Does nesting preserve information that a flat bag loses?",
+    "comparison": "Compare predictions for matched nested records and the flat-bag oracle.",
+    "limit": "The important comparison is the paired answer change caused by the hierarchy."
+  },
+  "P041": {
+    "mode": "regression",
+    "target": "global_total",
+    "focus": "Can the same representation support both a mean and a total?",
+    "comparison": "Inspect the two readouts and the matched one-copy/six-copy probes.",
+    "limit": "Mean and total require different responses to repetition.",
+    "additional_targets": [
+      "mean_amount"
+    ]
+  },
+  "P042": {
+    "mode": "temporal",
+    "target": "target",
+    "focus": "Why are both day and hour needed to identify the business window?",
+    "comparison": "Compare day-only, hour-only, and composed calendar evidence.",
+    "limit": "The held-out calendar stream is independent; no performance curve is inferred from the three accuracy values."
+  },
+  "P043": {
+    "mode": "temporal",
+    "target": "target",
+    "focus": "Which added calendar part resolves the date ambiguity?",
+    "comparison": "Compare the day-only model with the declared extra calendar context.",
+    "limit": "The plot follows the generator's actual calendar rule rather than a generic date illustration."
+  },
+  "P044": {
+    "mode": "temporal",
+    "target": "target",
+    "focus": "Does the calendar signal carry information beyond a shuffled date?",
+    "comparison": "Compare periodic-date accuracy with the matched date-permutation control.",
+    "limit": "The permutation retains the target labels while breaking their date relationship."
+  },
+  "P045": {
+    "mode": "temporal",
+    "target": "target",
+    "focus": "Can day-of-year alone identify a weekday across years?",
+    "comparison": "Compare the ambiguous representation with explicitly supplied weekday context.",
+    "limit": "Additional visible context changes identifiability; it does not demonstrate exact calendar reasoning by weights."
+  },
+  "P046": {
+    "mode": "mutation",
+    "target": "y",
+    "focus": "Which schema edits preserve the learned function immediately?",
+    "comparison": "Inspect paired output changes for neutral edits, serialization, and destructive controls.",
+    "limit": "A downstream preservation check is interpretable only after its source model meets the declared prerequisite."
+  },
+  "P047": {
+    "mode": "mutation",
+    "target": "w",
+    "focus": "What transfers when a new prediction target is added?",
+    "comparison": "Compare validation trajectories for the extended model, controls, and a fresh matched adaptation run.",
+    "limit": "The source model has prior training; adaptation steps and cumulative training are different budgets."
+  },
+  "P048": {
+    "mode": "mutation",
+    "target": "u",
+    "focus": "What is lost immediately after selectively resetting a target?",
+    "comparison": "Keep the reset target and sibling target separate during continuation and matched reset controls.",
+    "limit": "Both labels remain in continued training, so sibling retention is not a frozen-head experiment."
+  },
+  "P049": {
+    "mode": "mutation",
+    "target": "y",
+    "focus": "Does deactivating an input remove its influence and does restoration recover it?",
+    "comparison": "Pair active, inactive, restored, omitted, and corrupted inputs on the same records.",
+    "limit": "Zero filling is a distinct intervention from removing an input's participation."
+  },
+  "P050": {
+    "mode": "mutation",
+    "target": "y",
+    "focus": "How does deleting an input change the learnable target?",
+    "comparison": "Compare immediate deletion and adaptation with fresh controls and the remaining-input oracle.",
+    "limit": "The full-input target and the best remaining-input prediction have different information limits."
+  },
+  "P051": {
+    "mode": "regression",
+    "target": "y",
+    "focus": "Can either field be reconstructed from its visible partner?",
+    "comparison": "Inspect both directions, hidden-value poisoning, and shuffled visible context.",
+    "limit": "Only selected hidden targets contribute to each scored reconstruction direction.",
+    "additional_targets": [
+      "x"
+    ]
+  },
+  "P052": {
+    "mode": "masking",
+    "target": "items/value",
+    "focus": "Does query masking hide exactly the selected target coordinates?",
+    "comparison": "Compare selected coordinates with context corruption and hidden-value poisoning.",
+    "limit": "The inferred flags and coordinate positions remain part of the evidence."
+  },
+  "P053": {
+    "mode": "regression",
+    "target": "target",
+    "focus": "How much evidence remains when one or both redundant views are hidden?",
+    "comparison": "Compare both-view, single-view, no-view, and shuffled conditions on matched records.",
+    "limit": "Redundant views can preserve information after one is removed; this is not a causal attribution score.",
+    "labels": {
+      "test": "Both views visible",
+      "selected": "Matched visibility condition",
+      "shuffled": "Visible values shuffled"
+    }
+  },
+  "P054": {
+    "mode": "masking",
+    "target": "events/value",
+    "focus": "Can visible prefixes support the next hidden value and a rollout?",
+    "comparison": "Separate one-step prefix predictions, swapped prefixes, and multi-step generated continuations.",
+    "limit": "Rollout error and one-step normalized error have different scales and are shown separately."
+  },
+  "P055": {
+    "mode": "unknown-fallback",
+    "target": "target",
+    "focus": "What prediction is available for an unseen input label?",
+    "comparison": "Compare known labels, unknown-label renaming, and null inputs against the fixed baseline.",
+    "limit": "An unknown label can use shared context but has no learned persistent identity row."
+  },
+  "P056": {
+    "mode": "coverage",
+    "target": "label",
+    "focus": "How does an unavailable target change total accuracy?",
+    "comparison": "Separate known-target accuracy, all-row accuracy, unavailable-target behavior, and shuffled hints.",
+    "limit": "Conditional accuracy omits unavailable answers; all-row accuracy includes them."
+  },
+  "P057": {
+    "mode": "regression",
+    "target": "target",
+    "focus": "Which labels receive a finite vocabulary's capacity?",
+    "comparison": "Compare common-first and rare-first admission orders, including unknown-label renaming.",
+    "limit": "Admission order changes which input labels have learned rows; it does not change the test generator."
+  },
+  "P058": {
+    "mode": "coverage",
+    "target": "labels",
+    "focus": "How do unknown and duplicate set members affect the result?",
+    "comparison": "Inspect numeric predictions and reconstructed sets alongside boundary probes and shuffled labels.",
+    "limit": "Unknown-member fallback and exact set recovery are separate behaviors."
+  },
+  "P059": {
+    "mode": "admission",
+    "target": "label",
+    "focus": "Does admitting a new class teach its answer?",
+    "comparison": "Separate before admission, immediately after admission, and after continued training; retain old-class accuracy.",
+    "limit": "Admission creates availability. Subsequent training supplies the learning signal."
+  },
+  "P060": {
+    "mode": "calibration",
+    "target": "label",
+    "focus": "Does unused capacity change a learned class prior?",
+    "comparison": "Compare known and novel-label probabilities at both declared capacities with the generating prior.",
+    "limit": "A prior-probability comparison is not an empirical reliability curve."
+  },
+  "P061": {
+    "mode": "calibration",
+    "target": "target",
+    "focus": "What confidence is justified for an unseen identity?",
+    "comparison": "Compare known and unavailable cohorts under each declared prior condition.",
+    "limit": "Probability error, proper loss, and classification accuracy answer different questions."
+  },
+  "P062": {
+    "mode": "coverage",
+    "target": "code",
+    "focus": "Can high conditional accuracy conceal missing target coverage?",
+    "comparison": "Plot coverage, known-target accuracy, and all-target accuracy together as known targets are removed.",
+    "limit": "Conditional accuracy is undefined at zero coverage and remains visibly missing."
+  },
+  "P063": {
+    "mode": "coverage",
+    "target": "labels",
+    "focus": "Does set-target coverage change when spare capacity is added?",
+    "comparison": "Separate member probabilities, target coverage, and the corresponding oracle proper loss.",
+    "limit": "Unused capacity does not supply examples of unavailable members."
+  },
+  "P064": {
+    "mode": "calibration",
+    "target": "nonempty",
+    "focus": "Can training exposure teach a useful unavailable-set fallback?",
+    "comparison": "Compare exposed and unexposed fallback arms on known and unknown members.",
+    "limit": "Identity and duplicate-member interventions are checked separately from fallback prediction error."
+  },
+  "P065": {
+    "mode": "coverage",
+    "target": "code",
+    "focus": "Does Cluster coverage obey the same conditional-score boundary?",
+    "comparison": "Keep coverage and all-target accuracy beside known-target accuracy across the declared removal levels.",
+    "limit": "Zero-coverage conditional scores are undefined; batching checks remain separate."
+  },
+  "P066": {
+    "mode": "cohorts",
+    "target": "target",
+    "focus": "What changes for existing and newly admitted identity cohorts?",
+    "comparison": "Follow the same named cohorts before and after each admission phase.",
+    "limit": "Do not mix a changed cohort population with a change in its predictions."
+  },
+  "P067": {
+    "mode": "quantile-source-units",
+    "target": "cost",
+    "focus": "Can rank-based features predict in original source units?",
+    "comparison": "Compare intact and shuffled inputs, hidden-target tampering, and checkpoint restoration.",
+    "limit": "Target values remain hidden; source-unit error is distinct from percentile error."
+  },
+  "P068": {
+    "mode": "extrapolation",
+    "target": "cost",
+    "focus": "What happens beyond the output representation's observed range?",
+    "comparison": "Separate in-range, below-range, and above-range targets on common source-unit axes.",
+    "limit": "Clipped output endpoints impose a representational limit that extra input evidence cannot remove.",
+    "labels": {
+      "rows": "In-range held-out records",
+      "shifted": "Shifted outer range"
+    }
+  },
+  "P069": {
+    "mode": "classification",
+    "target": "label",
+    "focus": "Can a declared class vocabulary support fixed-class prediction?",
+    "comparison": "Compare informative and shuffled training on independent test examples, with restoration checks separate.",
+    "limit": "Declaring output classes does not itself teach which class fits an input."
+  },
+  "P070": {
+    "mode": "admission",
+    "target": "label",
+    "focus": "What happens to a declared class that has no training examples?",
+    "comparison": "Follow withheld and seen classes through cold, initial, and continued-training stages and an all-class control.",
+    "limit": "The withheld class is available in the output schema but initially lacks supervised examples."
+  },
+  "P071": {
+    "mode": "composition",
+    "target": "answer",
+    "focus": "Which withheld group-operation combinations actually transfer?",
+    "comparison": "Use paired cell heatmaps for complete and restricted training, marking the omitted cells.",
+    "limit": "Both panels share a numerical scale; an overall average cannot hide a hard withheld cell."
+  },
+  "P072": {
+    "mode": "regression",
+    "target": "answer",
+    "focus": "Can context examples specify a previously unseen function?",
+    "comparison": "Compare valid examples, swapped examples, query-only training, and least squares on familiar and withheld families.",
+    "limit": "The explicit least-squares reference has a different inductive bias and is labeled as an evaluator baseline."
+  },
+  "P073": {
+    "mode": "representation",
+    "target": "class",
+    "focus": "Do reconstruction embeddings improve a separate held-out probe?",
+    "comparison": "Compare trained, untrained, permuted-view, and raw representations under the same probe labels.",
+    "limit": "A reconstruction objective need not produce the geometry required by the downstream class task."
+  },
+  "P074": {
+    "mode": "fusion",
+    "target": "target",
+    "focus": "Does combining or removing noisy measurements change predictions for the right reason?",
+    "comparison": "Compare all eight visibility patterns, the exact conditional mean, and paired corruption controls.",
+    "limit": "The generator's conditional interval is not learned model uncertainty; the no-evidence check remains visible."
+  },
+  "P075": {
+    "mode": "retrieval",
+    "target": "target/value",
+    "focus": "Where do distractor count and an extra relation break retrieval?",
+    "comparison": "Separate one-hop and two-hop conditions, capacities, intact links, broken links, and record permutations.",
+    "limit": "Capacity failures and seed failures remain separate; a successful small condition cannot stand in for the grid."
+  },
+  "P076": {
+    "mode": "anomaly",
+    "target": "y",
+    "focus": "Can the score identify an ordinary value in the wrong context?",
+    "comparison": "Compare normal, shuffled-answer, and rare-valid residuals, actual ROC curves, and the validation-selected threshold.",
+    "limit": "Exploring a threshold on this test set does not change the proof's preselected operating point."
+  },
+  "P077": {
+    "mode": "tradeoff",
+    "target": "target",
+    "focus": "When do representation and loss choices favor different answers?",
+    "comparison": "Separate corrupted-input robustness from the noisy-target population optima.",
+    "limit": "Source-unit and percentile objectives need not share an optimum, especially in heavy tails."
+  },
+  "P078": {
+    "mode": "grouping",
+    "target": "y",
+    "focus": "Do the learned groups recover the generating partition and help prediction?",
+    "comparison": "Show the true-versus-assigned partition beside prediction error and the no-regime control.",
+    "limit": "Cluster identifiers are arbitrary; occupancy alone is not recovery, and ARI is invariant to renaming."
+  },
+  "P079": {
+    "mode": "tradeoff",
+    "target": "target",
+    "focus": "Which numeric representation works across additive and heavy-tail tasks?",
+    "comparison": "Keep equal-budget comparisons separate from the declared longer-budget diagnostic and oracle errors.",
+    "limit": "Compare source-unit errors within each task; do not pool incompatible target scales."
+  },
+  "P080": {
+    "mode": "representation",
+    "target": "class",
+    "focus": "Do reconstructed representations form useful held-out semantic groups?",
+    "comparison": "Compare aligned, permuted, untrained, and raw views across every declared seed.",
+    "limit": "Any projection is fitted on training vectors; the original-space clustering and neighbor metrics remain authoritative."
+  },
+  "P081": {
+    "mode": "representation",
+    "target": "class",
+    "focus": "Which semantic changes survive in the exported geometry?",
+    "comparison": "Pair clean, equivalent, missing-view, and contradictory conditions under each declared control and seed.",
+    "limit": "A visually appealing projection cannot substitute for the original-space robustness measurements."
+  },
+  "P082": {
+    "mode": "representation",
+    "target": "class",
+    "focus": "Can nested histories preserve useful behavioral groups?",
+    "comparison": "Compare learned and control embeddings across the declared history interventions and seeds.",
+    "limit": "Representation views preserve observation identity and distinguish harmless order changes from information removal."
+  },
+  "P083": {
+    "mode": "regression",
+    "target": "answer",
+    "focus": "Does the model retain ragged hierarchy rather than just a flat bag?",
+    "comparison": "Inspect intact, flattened, and structural-hole conditions with their paired target changes.",
+    "limit": "Null collections, empty collections, and null items are different structures and remain explicit in examples."
+  },
+  "P084": {
+    "mode": "recent-history",
+    "target": "answer",
+    "focus": "Which retained events determine a recent-history prediction?",
+    "comparison": "Compare crop policies and interventions inside or outside the retained history.",
+    "limit": "An event outside the retained window supplies no model input, even when present in the source record."
+  },
+  "P085": {
+    "mode": "label-efficiency",
+    "target": "class",
+    "focus": "Does pretraining reduce the number of downstream labels needed?",
+    "comparison": "Compare raw, untrained, pretrained, and adapted approaches at each declared label budget.",
+    "limit": "A learning curve connects only evaluated label counts; pretraining and adaptation budgets stay explicit."
+  },
+  "P086": {
+    "mode": "cohorts",
+    "target": "answer",
+    "focus": "What is retained when vocabulary cohorts arrive over time?",
+    "comparison": "Follow each cohort's error after each declared training phase, separating replay policies.",
+    "limit": "Cohort membership is fixed when measuring retention, and unseen cohorts remain separately labeled."
+  },
+  "P087": {
+    "mode": "precision-offsets",
+    "target": "target",
+    "focus": "Can small numeric differences survive a very large offset?",
+    "comparison": "Compare numeric arms on matched source values, including the shuffled-input control.",
+    "limit": "Plots center large-offset values explicitly so the offset cannot visually erase their spread."
+  },
+  "P088": {
+    "mode": "state",
+    "target": "target",
+    "focus": "Are zero, null, and invalid numbers distinguishable?",
+    "comparison": "Use per-state recall and confusion matrices beside the input-normalization controls.",
+    "limit": "A macro score cannot hide the collapse of one state into another.",
+    "labels": {
+      "test": "Balanced state population",
+      "shifted": "Shifted state frequencies"
+    }
+  },
+  "P089": {
+    "mode": "calibration",
+    "target": "target",
+    "focus": "Does confidence follow the evidence that is actually available?",
+    "comparison": "Separate evidence policies and rare strata, comparing predicted probabilities with the known conditional oracle.",
+    "limit": "An oracle conditional probability and empirical outcome frequency are distinct references and are labeled separately."
+  },
+  "P090": {
+    "mode": "jitter-noise",
+    "target": "target",
+    "focus": "When does training jitter help or harm generalization?",
+    "comparison": "Compare clean and perturbed test conditions at each declared jitter level.",
+    "limit": "No test condition selects the training configuration; the clean-data cost stays visible."
+  },
+  "P091": {
+    "mode": "research",
+    "target": "primary",
+    "focus": "Do shared reconstruction objectives interfere with one another?",
+    "comparison": "Plot each target's error separately for single-task, summed, and Jacobian objectives at the declared weights.",
+    "limit": "This optional study needs the TorchJD runtime. A runtime measurement is not a learning-quality advantage."
+  },
+  "P092": {
+    "mode": "research",
+    "target": "review",
+    "focus": "Does real text meaning transfer to held-out phrase families?",
+    "comparison": "Compare joint Text, Category, single-input, shuffled-text, and frozen-vector reference arms.",
+    "limit": "This optional study requires a pinned real encoder snapshot; missing resources never become a passing result."
+  },
+  "P093": {
+    "mode": "regression",
+    "target": "answer",
+    "focus": "Does elapsed time matter beyond event position?",
+    "comparison": "Compare irregular-time predictions with position-only and explicit least-squares references.",
+    "limit": "A reordered or retimed history is labeled according to whether it changes the generating answer."
+  },
+  "P094": {
+    "mode": "composition",
+    "target": "answer",
+    "focus": "Do operation requests transfer when collection length changes?",
+    "comparison": "Separate requested operations, held-out request combinations, and declared cardinality conditions.",
+    "limit": "Each operation-length cell remains visible; success at familiar lengths does not establish all lengths."
+  },
+  "P095": {
+    "mode": "grouping",
+    "target": "answer",
+    "focus": "When does grouping identities help or hurt prediction?",
+    "comparison": "Compare Cluster and Category across declared exposure regimes, with per-identity error and group agreement.",
+    "limit": "Parameter counts and tail identities stay visible; compactness and predictive quality are different outcomes."
+  },
+  "P096": {
+    "mode": "anomaly-variance",
+    "target": "answer",
+    "focus": "Does a global anomaly threshold unfairly flag noisy but valid contexts?",
+    "comparison": "Compare global and conditional residual scoring, including false alarms within each noise group.",
+    "limit": "All operating thresholds are chosen from validation data; group false alarms are not replaced by a pooled average."
+  },
+  "P097": {
+    "mode": "context-extrapolation",
+    "target": "answer",
+    "focus": "Where do context examples stop supporting extrapolation?",
+    "comparison": "Separate familiar, outside-range, sparse-context, and altered-example conditions with least squares.",
+    "limit": "Context count, query range, and consistency are distinct information boundaries."
+  },
+  "P098": {
+    "mode": "lookup",
+    "target": "answer",
+    "focus": "Can the model distinguish missing, unique, and duplicated matches?",
+    "comparison": "Separate match probability from numeric answer error at each declared multiplicity.",
+    "limit": "A correct found/not-found flag does not establish the right numeric aggregation for duplicates."
+  },
+  "P099": {
+    "mode": "research",
+    "target": "target",
+    "focus": "Does elapsed-time Duration behave like the equivalent prepared Number?",
+    "comparison": "Compare the declared Duration and Number arms and the paired joint-endpoint translation.",
+    "limit": "A matching stage/0.5.0 Duration wheel is required; a generator illustration does not establish learned equivalence."
+  },
+  "P100": {
+    "mode": "research",
+    "target": "rank",
+    "focus": "Can an ordered decoder fill ranks absent from training?",
+    "comparison": "Separate familiar and withheld ranks for Ordinal, rounded Number, and Category outputs.",
+    "limit": "A matching stage/0.5.0 Ordinal wheel is required; declared ordering alone is not learned interpolation."
+  }
+}

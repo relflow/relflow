@@ -882,3 +882,24 @@ def test_versioned_release_assets_are_considered_for_report_reuse(tmp_path, monk
         tmp_path, tmp_path / "out", {"execution_identity": IDENTITY}, current_inputs=tmp_path, helper=HELPER
     )
     assert seen == [release]
+
+
+def test_failed_learning_attempt_is_allowed_only_for_review_authentication(bundle, monkeypatch):
+    root, reports, _, run, _ = bundle
+    run = copy.deepcopy(run)
+    run["conclusion"] = "failure"
+    manifest = json.loads((reports / "manifest.json").read_text())
+    request = dict(
+        candidate=manifest["candidate"]["revision"],
+        baseline=manifest["baseline"]["revision"],
+        suite=manifest["evidence_sha"],
+        run_id=run["id"],
+        run_attempt=run["run_attempt"],
+        event=run["event"],
+    )
+    with pytest.raises(ValueError):
+        reuse.trusted(run, manifest, helper=HELPER, executor=EXECUTOR, root=root, request=request)
+    reuse.trusted(run, manifest, helper=HELPER, executor=EXECUTOR, root=root, request=request, review=True)
+    run["head_repository"]["full_name"] = "external/fork"
+    with pytest.raises(ValueError):
+        reuse.trusted(run, manifest, helper=HELPER, executor=EXECUTOR, root=root, request=request, review=True)
