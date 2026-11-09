@@ -107,7 +107,7 @@ def test_checkpoint_exports_evaluated_weights_and_resume_restores_live_optimizer
     inference = Scalar()
     inference.load_state_dict(saved["state_dict"])
     evaluate = trainer(tmp_path)
-    predictions = pa.table(evaluate.predict(inference, inputs))
+    predictions = evaluate.predict(inference, inputs)
     evaluate.test(inference, inputs)
     assert all(torch.allclose(output, saved["state_dict"]["weight"].expand_as(output)) for output in predictions)
     assert inference.tested == pytest.approx([model.validated[-1]] * 2)
