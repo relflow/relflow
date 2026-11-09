@@ -213,6 +213,13 @@ body.home .home-promises {
   margin-top: 1.5rem;
 }
 
+@media (max-width: 767.98px) {
+  body.home .home-code,
+  body.home .home-promises {
+    column-gap: 0;
+  }
+}
+
 body.home .home-code pre {
   margin-bottom: 1rem;
 }
@@ -251,6 +258,6 @@ body.home .quarto-figure img {
   width: 100%;
 }
 
-body.home .column-screen-inset-right + p {
+body.home .column-body + p {
   margin-top: 1.5rem;
 }
