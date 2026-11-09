@@ -131,7 +131,7 @@ def build(domain: str, arm: str) -> rf.Model:
 
 
 def prediction(model: rf.Model, rows: list[dict], domain: str, arm: str) -> np.ndarray:
-    output = model.predict(pa.Table.from_pylist([{"signal": row["signal"]} for row in rows]), batch_size=256)[
+    output = pa.table(model.predict(pa.Table.from_pylist([{"signal": row["signal"]} for row in rows]), batch_size=256))[
         "predictions"
     ].to_pylist()
     values = [row["rank"]["content"] for row in output]

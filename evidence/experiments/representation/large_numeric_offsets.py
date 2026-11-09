@@ -119,7 +119,7 @@ def table(rows: list[dict], *, targets: bool = True) -> pa.Table:
 
 
 def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
-    output = model.predict(table(rows, targets=False), batch_size=256)["predictions"].to_pylist()
+    output = pa.table(model.predict(table(rows, targets=False), batch_size=256))["predictions"].to_pylist()
     return np.asarray([row["target"]["content"] for row in output], dtype=np.float64)
 
 

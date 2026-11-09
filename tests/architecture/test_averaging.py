@@ -107,7 +107,7 @@ def test_checkpoint_exports_evaluated_weights_and_resume_restores_live_optimizer
     inference = Scalar()
     inference.load_state_dict(saved["state_dict"])
     evaluate = trainer(tmp_path)
-    predictions = evaluate.predict(inference, inputs)
+    predictions = pa.table(evaluate.predict(inference, inputs))
     evaluate.test(inference, inputs)
     assert all(torch.allclose(output, saved["state_dict"]["weight"].expand_as(output)) for output in predictions)
     assert inference.tested == pytest.approx([model.validated[-1]] * 2)
@@ -281,7 +281,7 @@ def test_relflow_growth_and_rollback_export_the_selected_averaged_model(tmp_path
             assert all(
                 torch.equal(value, dict(pl_module.named_parameters())[name]) for name, value in ema.average.items()
             )
-            evaluated.append(model.predict(table)["predictions"])
+            evaluated.append(pa.table(model.predict(table))["predictions"])
 
         def on_validation_end(self, trainer, pl_module):
             assert not ema.active
@@ -309,8 +309,8 @@ def test_relflow_growth_and_rollback_export_the_selected_averaged_model(tmp_path
     assert rf.Category.counts(model, "/category") == dict.fromkeys("abcdefgh", saved["epoch"] + 1)
     assert rf.Number.normalization(model, "/amount") == rf.Number.normalization(restored, "/amount")
     expected = evaluated[saved["epoch"]]
-    assert restored.predict(table)["predictions"].equals(expected)
-    assert model.predict(table)["predictions"].equals(expected)
+    assert pa.table(restored.predict(table))["predictions"].equals(expected)
+    assert pa.table(model.predict(table))["predictions"].equals(expected)
     assert not ema.active and not ema.handles
 
 

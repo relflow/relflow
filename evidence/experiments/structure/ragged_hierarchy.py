@@ -169,7 +169,7 @@ def structural_holes(rows: list[dict]) -> list[dict]:
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     visible = [{"days": row["days"]} for row in rows]
-    output = model.predict(pa.Table.from_pylist(visible), batch_size=64)["predictions"].to_pylist()
+    output = pa.table(model.predict(pa.Table.from_pylist(visible), batch_size=64))["predictions"].to_pylist()
     return np.asarray([row["answer"]["content"] for row in output], dtype=np.float64)
 
 

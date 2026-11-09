@@ -122,6 +122,7 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import pyarrow as pa
 import relflow as rf
 import torch
 from reporting import experiment, report
@@ -147,7 +148,7 @@ def records(*, rows: int, seed: int, break_pairs: bool = False) -> Iterator[dict
 
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
-    output = model.predict([{"items": row["items"]} for row in rows]).to_pylist()
+    output = pa.table(model.predict([{"items": row["items"]} for row in rows])).to_pylist()
     return np.asarray([row["predictions"]["answer"]["content"] for row in output])
 
 

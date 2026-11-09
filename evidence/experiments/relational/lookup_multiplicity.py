@@ -152,7 +152,7 @@ def build() -> rf.Model:
 
 def predict(model: rf.Model, rows: list[dict]) -> tuple[np.ndarray, np.ndarray]:
     visible = [{"source": row["source"], "query_key": row["query_key"]} for row in rows]
-    output = model.predict(pa.Table.from_pylist(visible), batch_size=128)["predictions"].to_pylist()
+    output = pa.table(model.predict(pa.Table.from_pylist(visible), batch_size=128))["predictions"].to_pylist()
     return np.asarray([row["found"]["content"]["probability"] for row in output]), np.asarray(
         [row["answer"]["content"] for row in output]
     )

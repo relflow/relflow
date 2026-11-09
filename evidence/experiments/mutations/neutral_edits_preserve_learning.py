@@ -104,6 +104,7 @@ from tempfile import TemporaryDirectory
 
 import lightning.pytorch as lit
 import numpy as np
+import pyarrow as pa
 import relflow as rf
 import torch
 from reporting import experiment, report
@@ -120,7 +121,7 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
 
 
 def prediction(model: rf.Model, rows: list[dict], *, key: str = "x") -> np.ndarray:
-    output = model.predict([{key: row["x"], "code": row["code"]} for row in rows])["predictions"].to_pylist()
+    output = pa.table(model.predict([{key: row["x"], "code": row["code"]} for row in rows]))["predictions"].to_pylist()
     return np.asarray([row["y"]["content"] for row in output], dtype=np.float64)
 
 

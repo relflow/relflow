@@ -122,6 +122,7 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import pyarrow as pa
 import relflow as rf
 import torch
 from reporting import experiment, report
@@ -149,7 +150,7 @@ def records(*, rows: int, seed: int, namespace: str, broken_identity: bool = Fal
 
 def normalized_rmse(model: rf.Model, records: list[dict]) -> float:
     """Score only query coordinates; source values remain visible to the model."""
-    output = model.predict(records).to_pylist()
+    output = pa.table(model.predict(records)).to_pylist()
     actual, predicted = [], []
     for row, result in zip(records, output, strict=True):
         for item, prediction in zip(row["memory"], result["predictions"]["memory"], strict=True):

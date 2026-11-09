@@ -288,7 +288,7 @@ def fit(model: rf.Model, train, validate, seed: int, steps: int | None, accelera
 
 def predict(model: rf.Model, task: str, rows: list[dict]) -> np.ndarray:
     visible = [{name: row[name] for name in INPUTS[task]} for row in rows]
-    predictions = model.predict(pa.Table.from_pylist(visible))["predictions"].to_pylist()
+    predictions = pa.table(model.predict(pa.Table.from_pylist(visible)))["predictions"].to_pylist()
     return np.asarray([row[TARGETS[task]]["content"] for row in predictions], dtype=np.float64)
 
 

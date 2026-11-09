@@ -143,7 +143,7 @@ def build(unavailable: float) -> rf.Model:
 
 
 def probability(model: rf.Model, rows: list[dict]) -> np.ndarray:
-    predictions = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
+    predictions = pa.table(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_pylist()
     content = [row["label"]["content"] for row in predictions]
     return np.asarray([item["probability"] if item["value"] == "yes" else 1 - item["probability"] for item in content])
 

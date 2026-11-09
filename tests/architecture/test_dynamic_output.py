@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -20,12 +21,15 @@ def observations(events):
 def test_variable_targets_keep_types_offsets_and_stream_across_batch_widths(tmp_path):
     model = rf.Model.xs(d_model=8, events=rf.Branch(amount=rf.Number, label=rf.Boolean(mask=True, embed=True))).eval()
     values = [[], None, [None, {"amount": 2.0, "label": True}], [{"amount": float(i)} for i in range(5)]]
-    batches = [model.predict(observations([value])) for value in values]
+    batches = []
+    for value in values:
+        data = rf.ArrowDataModule(model=model, predict=observations([value]))
+        batches.append(model.predict_step(next(iter(data.predict_dataloader())), 0))
     combined = pa.concat_tables(batches)
-    batched = model.predict(observations(values), batch_size=2)
+    batched = pa.table(model.predict(observations(values), batch_size=2))
 
     assert all(batch.schema == combined.schema for batch in batches)
-    assert batched.schema == combined.schema
+    assert batched.schema == pa.table(model.predict(observations(values))).schema
     events = combined["predictions"].combine_chunks().field("events")
     assert pa.types.is_list(events.type)
     assert events.offsets.to_pylist() == [0, 0, 0, 2, 7]
@@ -42,8 +46,8 @@ def test_variable_targets_keep_types_offsets_and_stream_across_batch_widths(tmp_
         writer.write_on_batch_end(SimpleNamespace(global_rank=0), model, batch, None, None, index, 0)
     writer.close()
     assert pq.read_table(tmp_path / "rank-0.parquet", schema=combined.schema).equals(combined)
-    empty = model.predict(observations([]))
-    assert empty.schema == combined.schema
+    empty = pa.table(model.predict(observations([])))
+    assert empty.schema == batched.schema
     assert empty.num_rows == 0
 
 
@@ -55,11 +59,10 @@ def test_explicit_limits_keep_observed_output_lengths(length):
     source = observations([[{"amount": 2.0}]])
 
     assert model.encode(source)["/events/amount"].state.shape == (1, 1, 1)
-    output = model.predict(source)["predictions"].combine_chunks().field("events")
-    assert pa.types.is_list(output.type)
-    assert output.type.value_field.name == "element"
-    assert len(output[0].as_py()) == 1
-    assert list(output[0].as_py()[0]) == ["label"]
+    output = model.predict(source)["predictions"].struct.field("events")
+    assert isinstance(output.dtype, pl.List)
+    assert len(output.to_list()[0]) == 1
+    assert list(output.to_list()[0][0]) == ["label"]
 
 
 def test_nested_variable_axes_and_pass_through_embeddings_preserve_structural_slots():
@@ -78,8 +81,8 @@ def test_nested_variable_axes_and_pass_through_embeddings_preserve_structural_sl
             {"events": [{"amount": 3.0, "items": []}, {"amount": 4.0, "items": [{"amount": 5.0}]}]},
         ]
     )
-    output = model.predict(source)
-    assert output.schema == model.predict(source, batch_size=1).schema
+    output = pa.table(model.predict(source))
+    assert output.schema == pa.table(model.predict(source, batch_size=1)).schema
     rows = output.to_pylist()
     assert len(rows[0]["predictions"]["events"]) == 1
     assert len(rows[0]["predictions"]["events"][0]["items"]) == 2
@@ -106,7 +109,7 @@ def test_checkpoint_keeps_symbolic_geometry_and_predictions(tmp_path):
     torch.manual_seed(103)
     model = rf.Model.xs(d_model=8, events=rf.Branch(amount=rf.Number, label=rf.Boolean(mask=True))).eval()
     source = observations([[{"amount": float(i)} for i in range(4)]])
-    expected = model.predict(source).to_pylist()[0]["predictions"]["events"]
+    expected = pa.table(model.predict(source)).to_pylist()[0]["predictions"]["events"]
     checkpoint = tmp_path / "model.pt"
     model.save(checkpoint)
     restored = rf.Model.load(checkpoint).eval()
@@ -115,7 +118,7 @@ def test_checkpoint_keeps_symbolic_geometry_and_predictions(tmp_path):
     assert branch.length is None
     assert branch.overflow is None
     assert restored.schema.model_dump() == model.schema.model_dump()
-    actual = restored.predict(source).to_pylist()[0]["predictions"]["events"]
+    actual = pa.table(restored.predict(source)).to_pylist()[0]["predictions"]["events"]
     torch.testing.assert_close(
         torch.tensor([value["label"]["content"]["probability"] for value in actual]),
         torch.tensor([value["label"]["content"]["probability"] for value in expected]),
@@ -124,7 +127,7 @@ def test_checkpoint_keeps_symbolic_geometry_and_predictions(tmp_path):
 
 def test_pass_through_outputs_keep_intrinsic_slots_separate_from_item_coordinates():
     model = rf.Model.xs(d_model=8, events=rf.Branch(reduction=None, embed=True, amount=rf.Number)).eval()
-    result = model.predict(observations([[], None, [None]]))
+    result = pa.table(model.predict(observations([[], None, [None]])))
     assert result.column_names == ["representations"]
     rows = result["representations"].to_pylist()
     assert rows == [[], [], []]
@@ -163,7 +166,7 @@ def test_third_party_tensorfields_follow_automatic_axes_without_shared_special_c
             [{"events": []}, {"events": [{"value": "one", "label": "yes"}]}, {"events": [{"value": "two"}] * 5}],
             schema=pa.schema([("events", pa.list_(pa.struct([("value", pa.string()), ("label", pa.string())])))]),
         )
-        result = model.predict(source, batch_size=1)
+        result = pa.table(model.predict(source, batch_size=1))
         assert result.column_names == ["representations"]
         representations = result["representations"].to_pylist()
         assert [len(row) for row in representations] == [0, 1, 5]
@@ -179,7 +182,7 @@ def test_pass_through_representations_skip_null_items_but_keep_their_slots():
         d_model=8, events=rf.Branch(reduction=None, embed=True, amount=rf.Number(embed=True), tag=rf.Hash)
     ).eval()
     source = pa.Table.from_pylist([{"events": [{"amount": 1.0, "tag": "a"}, None, {"amount": 2.0, "tag": "b"}]}])
-    rows = model.predict(source)["representations"].to_pylist()[0]
+    rows = pa.table(model.predict(source))["representations"].to_pylist()[0]
     tokens = [item for item in rows if item["path"] == ["events"]]
     leaves = [item for item in rows if item["path"] == ["events", "amount"]]
 

@@ -176,7 +176,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         )
         trainer = model.trainer
         vocabulary = rf.Set.vocabulary(model, "/labels")
-        written = model.predict(pa.table({"x": [0.0]}))["predictions"].to_pylist()[0]["labels"]["content"]
+        written = pa.table(model.predict(pa.table({"x": [0.0]})))["predictions"].to_pylist()[0]["labels"]["content"]
         probabilities = {item["value"]: item["probability"] for item in written}
         p = np.asarray([probabilities[name] for name in ("red", "blue")]).clip(1e-7, 1 - 1e-7)
         excess = float(np.mean(-prior * np.log(p) - (1 - prior) * np.log1p(-p)) - oracle)

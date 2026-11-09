@@ -126,6 +126,7 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import pyarrow as pa
 import relflow as rf
 import torch
 from reporting import experiment, report
@@ -151,7 +152,7 @@ def records(*, rows: int, seed: int, namespace: str, broken_identity: bool = Fal
 
 def normalized_rmse(model: rf.Model, records: list[dict]) -> float:
     actual = np.asarray([item["value"] for row in records for item in row["target"]])
-    output = model.predict(records).to_pylist()
+    output = pa.table(model.predict(records)).to_pylist()
     predicted = np.asarray([item["value"]["content"] for row in output for item in row["predictions"]["target"]])
     return float(np.sqrt(np.mean(np.square(actual - predicted)) / np.mean(np.square(actual))))
 

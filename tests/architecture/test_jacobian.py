@@ -584,7 +584,7 @@ def test_unsharded_strategy_is_required_for_jacobian_training(descent):
 def test_checkpoint_round_trip_omits_policy_and_preserves_predictions(tmp_path, policy):
     candidate = model(jacobian=policy)
     table = pa.table({"context": [1.0, 2.0], "first": [True, False], "second": [False, True]})
-    expected = candidate.predict(table)
+    expected = pa.table(candidate.predict(table))
     path = tmp_path / "model.ckpt"
 
     candidate.save(path)
@@ -596,7 +596,7 @@ def test_checkpoint_round_trip_omits_policy_and_preserves_predictions(tmp_path, 
     restored = rf.Model.load(path)
 
     assert restored.jacobian is False
-    assert restored.predict(table).equals(expected)
+    assert pa.table(restored.predict(table)).equals(expected)
     assert restored.state_dict().keys() == candidate.state_dict().keys()
 
 

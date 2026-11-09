@@ -314,8 +314,8 @@ def test_persistent_assignment_survives_predict_calls():
     first_row = embedder.embeddings["cluster"].weight[assigned_index].detach().clone()
 
     source = pa.table({"merchant_id": ["returning-token"]})
-    first = model.predict(source)
-    second = model.predict(source)
+    first = pa.table(model.predict(source))
+    second = pa.table(model.predict(source))
     second_row = embedder.embeddings["cluster"].weight[assigned_index].detach().clone()
 
     assert torch.equal(first_row, second_row)

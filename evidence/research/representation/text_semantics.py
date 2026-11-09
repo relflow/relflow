@@ -230,7 +230,7 @@ def encoder_state(path: Path) -> dict:
 
 def probability(model: rf.Model, rows: list[dict], arm: str) -> np.ndarray:
     fields = ("policy",) if arm == "policy_only" else ("request",) if arm == "text_only" else ("request", "policy")
-    output = model.predict(pa.Table.from_pylist([{key: row[key] for key in fields} for row in rows]))[
+    output = pa.table(model.predict(pa.Table.from_pylist([{key: row[key] for key in fields} for row in rows])))[
         "predictions"
     ].to_pylist()
     return np.asarray([row["review"]["content"]["probability"] for row in output])

@@ -142,7 +142,7 @@ def test_query_reader_keeps_scoring_alignment_when_public_collections_have_diffe
         },
     ]
     model = proof.build()
-    public = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
+    public = pa.table(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_pylist()
     assert [len(row["items"]) for row in public] == [0, 1, 2]
     content, inferred = proof.prediction(model, rows)
     assert content.shape == inferred.shape == (len(rows), proof.LENGTH)

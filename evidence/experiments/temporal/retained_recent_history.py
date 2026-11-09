@@ -125,7 +125,7 @@ def build(overflow: str) -> rf.Model:
 
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
-    output = model.predict(pa.Table.from_pylist([{"events": row["events"]} for row in rows]), batch_size=128)[
+    output = pa.table(model.predict(pa.Table.from_pylist([{"events": row["events"]} for row in rows]), batch_size=128))[
         "predictions"
     ].to_pylist()
     return np.asarray([row["answer"]["content"] for row in output])

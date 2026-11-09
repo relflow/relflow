@@ -223,7 +223,7 @@ def test_prefetched_evaluation_unknowns_remain_unknown_without_admission(kind, s
         assert_encoding(model, kind, bound.tensors[ADDRESS], ["never-trained", "a"])
         assert_encoding(model, kind, model.encode(source, strata=strata)[ADDRESS], ["never-trained", "a"])
         assert_shapes(model, kind, capacity)
-        prediction = model.predict(table(kind, ["never-trained"], supervise=True))
+        prediction = pa.table(model.predict(table(kind, ["never-trained"], supervise=True)))
         assert prediction.num_rows == 1
         assert "predictions" in prediction.column_names
         assert "never-trained" not in REQUESTS[kind].vocabulary(model, ADDRESS)
@@ -264,7 +264,7 @@ def test_grown_checkpoint_restores_into_initial_schema_and_can_grow_again(kind, 
     model.encode(table(kind, labels), strata="train")
     assert_shapes(model, kind, 8)
     prediction_source = table(kind, ["a", "e", "unknown"], supervise=True)
-    prediction = model.predict(prediction_source)
+    prediction = pa.table(model.predict(prediction_source))
     path = tmp_path / "grown.pt"
 
     if format == "checkpoint":
@@ -283,7 +283,7 @@ def test_grown_checkpoint_restores_into_initial_schema_and_can_grow_again(kind, 
     assert_shapes(restored, kind, 8)
     assert_counts(restored, kind, Counter(labels))
     assert_state(restored.state_dict(), model.state_dict())
-    assert restored.predict(prediction_source).equals(prediction)
+    assert pa.table(restored.predict(prediction_source)).equals(prediction)
     probe = ["e", "a", "unknown"]
     assert_encoding(restored, kind, restored.encode(table(kind, probe))[ADDRESS], probe)
 
@@ -770,12 +770,12 @@ def test_admitted_rows_stay_zero_until_a_training_batch_starts_them_distinct_and
     admission = pa.table({"group": ["A", "B", "C"], "y": pa.array([None] * 3, pa.float64())})
     model = build()
     model.encode(pa.table({"group": ["X", "Y", "Z", "X"], "y": [1.0, 2.0, 3.0, 4.0]}), strata="train")
-    unknown = model.predict(rows)
+    unknown = pa.table(model.predict(rows))
     model.encode(admission, strata="train")
     weight = model.nodes["/group"].embedder.embeddings["content"].weight
     assert list(model.nodes["/group"].embedder.vocab.master) == ["X", "Y", "Z", "A", "B", "C"]
     # Admission leaves the rows at zero, so the admitted labels still predict as unknown ones.
-    assert weight[3:6].abs().sum() == 0 and model.predict(rows).equals(unknown)
+    assert weight[3:6].abs().sum() == 0 and pa.table(model.predict(rows)).equals(unknown)
     callback = AdmittedRowsCallback()
     callback.on_train_batch_start(SimpleNamespace(current_epoch=0), model, None, 0)
     started = weight[:6].detach().clone()

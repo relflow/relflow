@@ -221,7 +221,7 @@ def fit(model: rf.Model, train, validate, seed: int, steps: int | None, accelera
 
 def predict(model: rf.Model, rows: list[dict], task: str) -> np.ndarray:
     visible = [{"group": row["group"]} if task == "noisy" else {"x": row["x"]} for row in rows]
-    predictions = model.predict(pa.Table.from_pylist(visible))["predictions"].to_pylist()
+    predictions = pa.table(model.predict(pa.Table.from_pylist(visible)))["predictions"].to_pylist()
     name = "target" if task == "noisy" else task
     content = [row[name]["content"] for row in predictions]
     if task == "rank":

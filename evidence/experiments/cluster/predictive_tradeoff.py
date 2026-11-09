@@ -149,7 +149,7 @@ def build(kind: str) -> rf.Model:
 
 def predict(model: rf.Model, rows: list[dict], kind: str) -> np.ndarray:
     field = "group" if kind == "oracle" else "entity"
-    output = model.predict(pa.Table.from_pylist([{field: row[field], "x": row["x"]} for row in rows]))[
+    output = pa.table(model.predict(pa.Table.from_pylist([{field: row[field], "x": row["x"]} for row in rows])))[
         "predictions"
     ].to_pylist()
     return np.asarray([row["answer"]["content"] for row in output])

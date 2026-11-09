@@ -127,7 +127,7 @@ def build(arm: str, weight: float) -> rf.Model:
 
 
 def score(model: rf.Model, rows: list[dict], arm: str) -> dict:
-    output = model.predict(pa.Table.from_pylist([{"observations": row["observations"]} for row in rows]))[
+    output = pa.table(model.predict(pa.Table.from_pylist([{"observations": row["observations"]} for row in rows])))[
         "predictions"
     ].to_pylist()
     names = (

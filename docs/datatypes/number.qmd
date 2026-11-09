@@ -34,7 +34,7 @@ Use [Quantile](quantile.qmd) for percentile-based values,
 
 ## Input and representation
 
-The Arrow leaf must contain integers or floating-point values. Values stay in
+Use an integer or floating-point column. Values stay in
 float64 from tensorization through normalization and the readout (float32 on
 Apple MPS, which has no float64), so values far from zero keep their spread.
 A floating-point NaN is not a number: it takes the `other`

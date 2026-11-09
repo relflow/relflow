@@ -127,6 +127,7 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import pyarrow as pa
 import relflow as rf
 import torch
 from reporting import experiment, report
@@ -218,7 +219,7 @@ def overlap_truth(rows: list[dict]) -> np.ndarray:
 
 
 def probabilities(model: rf.Model, rows: list[dict]) -> np.ndarray:
-    output = model.predict(rows).to_pylist()
+    output = pa.table(model.predict(rows)).to_pylist()
     return np.asarray([row["predictions"]["has_overlap"]["content"]["probability"] for row in output])
 
 

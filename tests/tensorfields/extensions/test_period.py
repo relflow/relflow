@@ -107,10 +107,10 @@ def test_period_checkpoint_preserves_parameters_and_predictions(constructor, tmp
         d_model=8, created=constructor("day_of_week", "hour_of_day", mask=True, embed=True), label=rf.Boolean(mask=True)
     )
     inputs = pa.table({"created": [datetime(2026, 1, 1, 14), None]})
-    expected = model.predict(inputs)
+    expected = pa.table(model.predict(inputs))
     restored = rf.Model.load(model.save(tmp_path / "period.ckpt"))
     assert restored.schema.model_dump() == model.schema.model_dump()
-    assert restored.predict(inputs).equals(expected)
+    assert pa.table(restored.predict(inputs)).equals(expected)
     assert restored.state_dict().keys() == model.state_dict().keys()
     assert any(".dateparts.day_of_week." in name for name in model.state_dict())
     for name, tensor in model.state_dict().items():

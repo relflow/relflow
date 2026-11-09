@@ -205,7 +205,7 @@ def fit(model: rf.Model, phase: str, seed: int, budget: int, accelerator: str) -
 
 
 def prediction(model: rf.Model, rows: list[dict]) -> list[dict]:
-    output = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
+    output = pa.table(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_pylist()
     return [row["label"]["content"] for row in output]
 
 

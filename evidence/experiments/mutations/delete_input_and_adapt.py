@@ -112,6 +112,7 @@ from tempfile import TemporaryDirectory
 
 import lightning.pytorch as lit
 import numpy as np
+import pyarrow as pa
 import relflow as rf
 import torch
 from reporting import experiment, report
@@ -139,7 +140,7 @@ def prediction(model: rf.Model, rows: list[dict], *, include_b: bool = True, cor
     if corrupt:
         for row in inputs:
             row["y"] = 1000.0
-    output = model.predict(inputs)["predictions"].to_pylist()
+    output = pa.table(model.predict(inputs))["predictions"].to_pylist()
     return np.asarray([row["y"]["content"] for row in output], dtype=np.float64)
 
 

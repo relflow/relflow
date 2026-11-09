@@ -136,7 +136,7 @@ def oracle(rows: list[dict], policy: str) -> np.ndarray:
 
 def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
     visible = [{key: value for key, value in row.items() if key != "target"} for row in rows]
-    output = model.predict(pa.Table.from_pylist(visible), batch_size=256)["predictions"].to_pylist()
+    output = pa.table(model.predict(pa.Table.from_pylist(visible), batch_size=256))["predictions"].to_pylist()
     return np.asarray([row["target"]["content"]["probability"] for row in output], dtype=np.float64)
 
 

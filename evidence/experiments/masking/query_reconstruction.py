@@ -145,7 +145,7 @@ def build() -> rf.Model:
 
 
 def prediction(model: rf.Model, rows: list[dict]) -> tuple[np.ndarray, np.ndarray]:
-    output = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
+    output = pa.table(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_pylist()
     # Evaluation compares real coordinates against fixed-width selector matrices.
     # Public output has no cap padding; absent coordinates receive no score.
     content = np.zeros((len(rows), LENGTH), dtype=np.float64)

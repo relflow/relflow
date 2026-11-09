@@ -153,7 +153,7 @@ def build() -> rf.Model:
 
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
-    predictions = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
+    predictions = pa.table(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_pylist()
     return np.asarray([row["cost"]["content"] for row in predictions], dtype=np.float64)
 
 

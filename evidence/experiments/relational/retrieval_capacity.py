@@ -242,7 +242,7 @@ def build(hops: int) -> rf.Model:
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     visible = [{**row, "target": [{"entity_id": item["entity_id"]} for item in row["target"]]} for row in rows]
-    output = model.predict(pa.Table.from_pylist(visible))["predictions"].to_pylist()
+    output = pa.table(model.predict(pa.Table.from_pylist(visible)))["predictions"].to_pylist()
     return np.asarray([[item["value"]["content"] for item in row["target"]] for row in output])
 
 

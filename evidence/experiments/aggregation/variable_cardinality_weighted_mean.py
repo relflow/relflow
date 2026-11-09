@@ -130,6 +130,7 @@ from copy import deepcopy
 
 import lightning.pytorch as lit
 import numpy as np
+import pyarrow as pa
 import relflow as rf
 import torch
 from reporting import experiment, report
@@ -208,7 +209,7 @@ def duplicate_items(observations: list[dict], *, maximum_original: int) -> list[
 
 def prediction(model: rf.Model, observations: list[dict]) -> np.ndarray:
     inputs = [{"items": row["items"]} for row in observations]
-    output = model.predict(inputs)["predictions"].to_pylist()
+    output = pa.table(model.predict(inputs))["predictions"].to_pylist()
     return np.asarray([row["weighted_mean"]["content"] for row in output], dtype=np.float64)
 
 

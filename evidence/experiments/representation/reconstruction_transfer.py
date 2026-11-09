@@ -187,7 +187,7 @@ def build() -> rf.Model:
 
 
 def embedding(model: rf.Model, rows: list[dict]) -> np.ndarray:
-    output = model.predict(pa.Table.from_pylist(rows))["representations"].to_pylist()
+    output = pa.table(model.predict(pa.Table.from_pylist(rows)))["representations"].to_pylist()
     roots = [
         sorted(
             (record for record in row if record["path"] == [] and record["parents"] == []),

@@ -129,6 +129,7 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import pyarrow as pa
 import relflow as rf
 import torch
 from reporting import experiment, report
@@ -150,7 +151,7 @@ def records(*, pairs: int, seed: int) -> Iterator[dict]:
 def prediction(model: rf.Model, rows: list[dict], source: str, target: str) -> np.ndarray:
     """Predict one hidden scalar from its visible repeated context."""
     inputs = [{source: row[source]} for row in rows]
-    output = model.predict(inputs).to_pylist()
+    output = pa.table(model.predict(inputs)).to_pylist()
     return np.asarray([row["predictions"][target]["content"] for row in output], dtype=np.float64)
 
 

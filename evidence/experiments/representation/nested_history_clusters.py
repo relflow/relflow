@@ -256,7 +256,7 @@ def build() -> rf.Model:
 
 
 def embedding(model: rf.Model, rows: list[dict], batch_size: int = 128) -> np.ndarray:
-    outputs = model.predict(pa.Table.from_pylist(rows), batch_size=batch_size)["representations"].to_pylist()
+    outputs = pa.table(model.predict(pa.Table.from_pylist(rows), batch_size=batch_size))["representations"].to_pylist()
     selected = [[item for item in row if item["path"] == [] and item["parents"] == []] for row in outputs]
     if len(selected) != len(rows) or any(len(row) != 1 or row[0]["output_index"] != 0 for row in selected):
         raise ValueError("P082 requires exactly one root representation per customer in input row order")

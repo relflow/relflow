@@ -118,7 +118,7 @@ def build() -> rf.Model:
 
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
-    output = model.predict(pa.Table.from_pylist([{"group": row["group"], "x": row["x"]} for row in rows]))[
+    output = pa.table(model.predict(pa.Table.from_pylist([{"group": row["group"], "x": row["x"]} for row in rows])))[
         "predictions"
     ].to_pylist()
     return np.asarray([row["answer"]["content"] for row in output])

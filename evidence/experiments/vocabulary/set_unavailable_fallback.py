@@ -127,7 +127,10 @@ def build(p_unavailable: float) -> rf.Model:
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray(
-        [row["nonempty"]["content"] for row in model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()]
+        [
+            row["nonempty"]["content"]
+            for row in pa.table(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_pylist()
+        ]
     )
 
 

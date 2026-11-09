@@ -117,12 +117,12 @@ and rollback for Lightning's single-pass diagnostic run.
 | `model.fit(datamodule)` | `train` and, for the default policies, `validate` | Optimize and restore the best model. |
 | `model.validate(datamodule)` | `validate` | Return one metric dictionary per loader. |
 | `model.test(datamodule)` | `test` | Return held-out metrics per loader. |
-| `model.predict(datamodule=...)` | `predict` | Collect an Arrow table on one device or stream with a Writer. |
+| `model.predict(datamodule=...)` | `predict` | Collect a Polars DataFrame on one device or stream with a Writer. |
 
 Stages also control masking and field-owned learning, such as vocabulary and
 normalizer updates. Use the corresponding split rather than repurposing a
 training loader for inference. For bounded requests, the separate
-`model.predict(observations)` convenience returns an Arrow table without a
+`model.predict(observations)` convenience returns a Polars DataFrame without a
 Trainer; see [Prediction output](../reference/prediction-output.qmd).
 
 Hardware defaults to `accelerator="auto"`, `devices="auto"`,
@@ -162,7 +162,7 @@ accumulation. The constructor's `batch_size` remains the initial setting,
 defaulting to one, and is saved in the model artifact. Native Trainer and Tuner
 workflows can continue to use it.
 
-For direct in-memory Arrow input, setting `batch_size=256` on `model.predict(...)` also
+For direct in-memory Polars or Arrow input, setting `batch_size=256` on `model.predict(...)` also
 chunks the processed observations before encoding. Omitting that override
 preserves whole-input execution. See
 [Direct prediction batches](../reference/prediction-output.qmd#batch-direct-requests).

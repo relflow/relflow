@@ -195,7 +195,7 @@ def oracle(rows: list[dict], pattern: tuple[bool, ...]) -> tuple[np.ndarray, flo
 
 
 def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
-    output = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
+    output = pa.table(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_pylist()
     return np.asarray([row["target"]["content"] for row in output], dtype=np.float64)
 
 

@@ -148,7 +148,7 @@ def build() -> rf.Model:
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     visible = [{"cohort": row["cohort"], "x": row["x"]} for row in rows]
-    output = model.predict(pa.Table.from_pylist(visible))["predictions"].to_pylist()
+    output = pa.table(model.predict(pa.Table.from_pylist(visible)))["predictions"].to_pylist()
     return np.asarray([row["answer"]["content"] for row in output])
 
 

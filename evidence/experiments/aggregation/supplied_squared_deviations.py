@@ -124,6 +124,7 @@ from collections.abc import Iterator
 
 import lightning.pytorch as lit
 import numpy as np
+import pyarrow as pa
 import relflow as rf
 import torch
 from reporting import experiment, report
@@ -147,7 +148,7 @@ def dispersion_records(*, rows: int, seed: int) -> Iterator[dict]:
 
 def prediction(model: rf.Model, observations: list[dict]) -> np.ndarray:
     inputs = [{"items": row["items"]} for row in observations]
-    output = model.predict(inputs)["predictions"].to_pylist()
+    output = pa.table(model.predict(inputs))["predictions"].to_pylist()
     return np.asarray([row["variance"]["content"] for row in output], dtype=np.float64)
 
 

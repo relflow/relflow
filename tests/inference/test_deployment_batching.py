@@ -20,6 +20,7 @@ from relflow.inference.deployment import ErrorItem
 
 class PredictModel:
     batch_size = 1
+    version = "test"
 
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
@@ -41,7 +42,7 @@ class PredictModel:
         result = pa.table({"predictions": predictions})
         if retain == "*" or "id" in retain:
             result = result.append_column("inputs", inputs)
-        return apply(result, postprocess)
+        return pl.from_arrow(apply(result, postprocess))
 
 
 def runtime(model=None, **kwargs) -> deployment_module.FastAPIRuntime:
@@ -190,13 +191,15 @@ def test_runtime_preserves_embedding_only_outputs_and_invalid_request_slots():
         ]
     )
 
-    class EmbeddingModel:
+    class EmbeddingModel(PredictModel):
         def predict(self, source, **kwargs):
             rows = [
                 [{"path": [], "parents": [], "output_index": 0, "embedding": [float(value), 0.0, 0.0, 0.0]}]
                 for value in source["id"].to_pylist()
             ]
-            return pa.table({"representations": pa.array(rows, type=pa.list_(pa.field("element", representation)))})
+            return pl.from_arrow(
+                pa.table({"representations": pa.array(rows, type=pa.list_(pa.field("element", representation)))})
+            )
 
     server = runtime(model=EmbeddingModel())
 
@@ -329,21 +332,21 @@ def test_response_signature_validates_each_terminal_arrow_row():
     assert server.predict_payloads([{"id": 7}]) == [{"predictions": {"label": "7"}}]
 
 
-def test_runtime_rejects_non_arrow_model_output():
+def test_runtime_rejects_non_polars_model_output():
     class BrokenModel:
         def predict(self, source, **kwargs):
             return [{"predictions": {}}]
 
     server = runtime(model=BrokenModel())
 
-    with pytest.raises(RuntimeError, match="Model.predict must return a pyarrow.Table"):
+    with pytest.raises(RuntimeError, match="Model.predict must return a polars.DataFrame"):
         server.predict_payloads([{"id": 1}])
 
 
 def test_runtime_rejects_prediction_row_count_drift():
     class BrokenModel:
         def predict(self, source, **kwargs):
-            return pa.table({"predictions": pa.array([], type=pa.null())})
+            return pl.DataFrame(schema={"predictions": pl.Null})
 
     server = runtime(model=BrokenModel())
 
@@ -809,7 +812,10 @@ def test_batcher_reports_unexpected_failures_as_500_envelopes():
 
     failure = {
         "predictions": None,
-        "error": {"status_code": 500, "message": "RuntimeError: Model.predict must return a pyarrow.Table, got list"},
+        "error": {
+            "status_code": 500,
+            "message": "RuntimeError: Model.predict must return a polars.DataFrame, got list",
+        },
     }
     assert responses == [failure, failure]
 
@@ -836,7 +842,7 @@ def test_response_signature_failures_are_server_errors():
 
 
 def test_json_rows_settle_durations_binary_decimals_and_nan():
-    class RichModel:
+    class RichModel(PredictModel):
         def predict(self, source, **kwargs):
             predictions = pa.StructArray.from_arrays(
                 [
@@ -848,7 +854,7 @@ def test_json_rows_settle_durations_binary_decimals_and_nan():
                 ],
                 names=["elapsed", "raw", "amount", "score", "at"],
             )
-            return pa.table({"predictions": predictions})
+            return pl.from_arrow(pa.table({"predictions": predictions}))
 
     rows = runtime(model=RichModel()).predict_payloads([{"id": 1}])
 

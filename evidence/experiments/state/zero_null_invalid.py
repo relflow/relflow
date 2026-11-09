@@ -118,7 +118,7 @@ def table(rows: list[dict], *, arm: str = "intact", targets: bool = True) -> pa.
 
 
 def prediction(model: rf.Model, rows: list[dict], arm: str) -> np.ndarray:
-    output = model.predict(table(rows, arm=arm, targets=False), batch_size=256)["predictions"].to_pylist()
+    output = pa.table(model.predict(table(rows, arm=arm, targets=False), batch_size=256))["predictions"].to_pylist()
     return np.asarray([row["target"]["content"]["value"] for row in output])
 
 
