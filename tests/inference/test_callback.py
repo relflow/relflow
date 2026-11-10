@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import polars as pl
 import pyarrow as pa
+import pyarrow.ipc as ipc
 import pyarrow.parquet as pq
 import pytest
 
@@ -39,6 +40,56 @@ def test_writer_persists_the_written_arrow_table(tmp_path):
     assert not (tmp_path / "rank-0.parquet").exists()
     assert pq.read_table(path).equals(output)
     assert writer.writer is None
+
+
+def test_ipc_writer_streams_sparse_vectors_and_structural_holes(tmp_path):
+    vector = pa.list_(pa.field("element", pa.float32()), 2)
+    item = pa.struct([("embedding", vector)])
+    output = pa.table(
+        {
+            "predictions": pa.array(
+                [None, [], [None], [{"embedding": None}], [{"embedding": [1.0, 2.0]}]],
+                type=pa.list_(pa.field("element", item)),
+            )
+        }
+    )
+    output = output.replace_schema_metadata({b"relflow.model_version": b"test"})
+    writer = rf.Writer(tmp_path, format="ipc", row_group_size=2)
+    write(writer, output.slice(0, 3))
+    assert not (tmp_path / "rank-0.arrow").exists()
+    write(writer, output.slice(3))
+    writer.close()
+    restored = ipc.open_file(tmp_path / "rank-0.arrow").read_all()
+    assert restored.equals(output, check_metadata=True)
+    assert writer.source_rows == writer.written_rows == 5
+    assert rf.source(str(tmp_path)).discover().schema.equals(output.schema)
+
+
+@pytest.mark.parametrize("format", ["parquet", "ipc"])
+def test_writer_discards_both_formats_on_schema_drift(tmp_path, format):
+    writer = rf.Writer(tmp_path, format=format)
+    write(writer, pa.table({"x": [1]}))
+    with pytest.raises(ValueError, match="schema differs"):
+        write(writer, pa.table({"x": ["changed"]}))
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("format", ["parquet", "ipc"])
+def test_writer_does_not_accumulate_empty_postprocessed_batches(tmp_path, format):
+    @rf.postprocess
+    def empty(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.head(0)
+
+    writer = rf.Writer(tmp_path, format=format, postprocessor=empty)
+    for _ in range(10):
+        write(writer, pa.table({"x": [1]}))
+    assert writer.pending == []
+    assert writer.source_rows == 10
+    assert writer.written_rows == 0
+    writer.close()
+    path = tmp_path / ("rank-0.parquet" if format == "parquet" else "rank-0.arrow")
+    table = pq.read_table(path) if format == "parquet" else ipc.open_file(path).read_all()
+    assert table.num_rows == 0
 
 
 def test_writer_applies_polars_postprocessors_in_order_before_persistence(tmp_path):

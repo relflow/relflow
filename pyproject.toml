@@ -24,6 +24,9 @@ dependencies = [
     "typing-extensions>=4.12",
 ]
 
+[project.scripts]
+relflow = "relflow.cli:main"
+
 [project.optional-dependencies]
 torchjd = [
     "torch>=2.9",

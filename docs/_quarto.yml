@@ -96,6 +96,8 @@ website:
             text: Checkpoints, EMA, and resuming
           - href: guides/model-templates.qmd
             text: Model templates
+          - href: guides/command-line.qmd
+            text: Command line
           - href: guides/schema-mutation.qmd
             text: Schema mutation
           - href: guides/installation-troubleshooting.qmd

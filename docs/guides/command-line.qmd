@@ -1,0 +1,250 @@
+---
+title: Command line
+description: "Inspect, check, train, predict, and serve saved relflow models from a shell."
+---
+
+The `relflow` executable runs file-backed model workflows from a terminal,
+container, or scheduler. Keep the model architecture in a
+[YAML template](model-templates.qmd), supply application datasets from disk or
+supported filesystem URIs, and reuse the saved model for streamed prediction
+or HTTP serving. The CLI uses the same model, data-module, processor, and
+tensorfield contracts as the Python API.
+
+The executable is included in the base installation. `python -m relflow` is
+equivalent. Serving requires the existing `relflow[serving]` extra, and text
+encoders require their configured dependencies.
+
+```bash
+relflow --help
+relflow train --help
+```
+
+## Describe the model
+
+Suppose each row describes one payment. The inputs are its amount and merchant;
+the target is whether it was disputed. Training and validation files contain
+the settled Boolean label. Request files omit the target and include a
+`payment_id` for joining results.
+
+Save this architecture as `model.yaml`:
+
+```yaml
+preset: xs
+fields:
+  amount:
+    type: number
+  merchant:
+    type: category
+  disputed:
+    type: boolean
+    mask: true
+```
+
+Inspect its resolved fields and reconstruction targets before constructing
+neural modules:
+
+```bash
+relflow inspect model.yaml
+relflow inspect artifacts/payment.rf --json
+```
+
+Inspection accepts templates and checkpoints. It reads declarations or saved
+CPU state without creating the neural graph or initializing text encoders.
+Reports include canonical addresses, masking, public outputs, preset policy,
+and the producing relflow version. Stored tensor sizes include buffers; they
+are not trainable parameter counts. Checkpoints use the same deserialization
+semantics as `Model.load(...)`.
+
+## Configure and check a run
+
+Keep execution settings in a separate `train.yaml`:
+
+```yaml
+version: 1
+seed: 42
+data:
+  train: payments/train
+  validate: payments/validation
+loader:
+  num_workers: 0
+  shuffle_rows: 65536
+fit:
+  batch_size: 128
+  learning_rate: 0.0001
+  max_epochs: 30
+  accelerator: auto
+```
+
+Local data paths in this file resolve relative to `train.yaml`. Direct
+command-line paths resolve relative to the working directory. Explicit flags
+override their corresponding run settings. Unknown options, duplicate YAML
+keys, and unsupported run-file versions are rejected.
+
+Run files support `data`, `loader`, `fit`, `predict`, and `serve` sections.
+`data` names the `train`, `validate`, `test`, or `predict` splits and accepts a
+location or a list of explicit files. The CLI uses one device for training and
+prediction, and one HTTP server worker. Model architecture and preset options
+continue to belong in the model template. Custom optimizers, schedulers, and
+Trainer callbacks remain Python configurations.
+
+```bash
+relflow check model.yaml --config train.yaml --json
+relflow check model.yaml --config train.yaml --execute --sample 128 --json
+```
+
+Default checks validate declarations, file discovery, and structural binding
+where available without constructing the model or tensorizing source values.
+Discovery can read file headers or infer text-file schemas from records.
+Default binding uses a typed null observation; populated collection paths
+and datatype semantics require sampled execution.
+`--execute` opts into preprocessing and tensorization, with a default cap of
+128 source rows. `--sample` requires `--execute`. Execution may load optional
+encoders or populate configured text stores; it does not overwrite a supplied
+checkpoint.
+
+A row cap does not bound nested collections or rows emitted by processors.
+Dataset-scoped preprocessing is reported as skipped by sampled checks because
+it requires the full dataset. Every data phase reports its actual scope and
+counts. Sampled checks cannot certify all rows or establish that task cutoffs
+and splits avoid leakage. `check` is preflight; use Python
+`model.validate(...)` and `model.test(...)` for evaluation.
+
+For request data, select its prediction contract explicitly:
+
+```bash
+relflow check artifacts/payment.rf --input payments/requests --stage predict
+```
+
+## Train and resume
+
+```bash
+relflow train model.yaml --config train.yaml --output runs/payment --json
+```
+
+The output directory must not exist. A successful job writes `model.rf`,
+`resolved.yaml`, `sources.json`, `report.json`, full checkpoints under
+`checkpoints/`, and `_SUCCESS`. The report records actual checkpoint paths,
+optimizer steps, metrics, hardware and precision, seed, package versions,
+and input and output model digests. Source identity uses available file
+metadata, with no claim that source contents were hashed.
+
+Training retains the SDK's default early stopping and rollback policies.
+Their default validation monitor requires validation data. Configure a
+compatible training monitor or explicitly disable both policies for training
+without a validation split. A last full checkpoint is still retained.
+
+```bash
+relflow train model.yaml --config train.yaml \
+  --learning-rate 0.00003 --max-epochs 60 --output runs/payment-longer
+
+relflow train --resume runs/payment \
+  --max-epochs 60 --output runs/payment-resumed
+```
+
+Resume restores the full last checkpoint named by the prior report, including
+optimizer and loop progress, and reuses its resolved configuration. It accepts
+a new output directory and an optional epoch budget; it rejects replacement
+model, data, or execution settings. A failed run can be resumed if it retained
+a full last checkpoint. A repeated seed alone does not promise identical
+results across changed execution layouts or dependency versions.
+
+Passing `model.rf` as the positional training input starts a new optimizer run
+from its saved learned state. This is adaptation, rather than full training
+resume. See [Checkpoints and resuming](checkpoints-ema-and-resuming.qmd).
+
+## Stream predictions
+
+```bash
+relflow predict runs/payment/model.rf \
+  --input payments/requests \
+  --retain payment_id \
+  --batch-size 256 \
+  --output predictions/payment \
+  --json
+```
+
+Prediction scans files through `ArrowDataModule`, writes batches through
+`rf.Writer`, and avoids collecting the entire result in memory. Repeat
+`--retain` to select multiple processed input columns. The canonical output
+keeps `predictions`, configured `representations`, and retained `inputs`.
+Preprocessors and postprocessors can change row counts, so reports distinguish
+processed observations from written rows.
+
+The default output is `rank-0.parquet`. `--format ipc` writes `rank-0.arrow`
+as an Arrow IPC file, preserving sparse fixed-width vectors beneath null
+containers that Parquet cannot round-trip. Both formats retain Arrow schema
+metadata and require a stable schema across batches. See
+[Batch inference](batch-inference.qmd).
+
+The output directory includes `_metadata/` for configuration, source, and job
+reports. Underscore-prefixed paths are excluded by file-source discovery, so
+the directory can be read as data without including those sidecars. Consume
+the complete result only after `_SUCCESS` appears. Failures retain a failed
+report where possible, discard partial shards, and leave no success marker.
+Choose a fresh output directory for a retry.
+
+Automatic precision follows the SDK's hardware policy. Set
+`--precision 32-true` when comparing with ordinary float32 direct inference.
+
+## Serve a checkpoint
+
+```bash
+relflow serve runs/payment/model.rf \
+  --host 127.0.0.1 --port 8080 --max-batch-size 128
+```
+
+This starts the existing `Deployment` HTTP runtime, including `/health`,
+`/predict`, transport negotiation, and model version headers. Host binding
+defaults to loopback unless configured through the command, run file, or
+`RELFLOW_HOST`. Serving settings otherwise retain the deployment environment
+defaults. Use the application host for ingress, authentication, and process
+supervision. See [Serving](serving.qmd) for request formats and resource limits.
+
+## Use application processors and extensions
+
+Run files can reference installed application modules and configured processor
+objects:
+
+```yaml
+version: 1
+imports:
+  - payments.extensions
+preprocessor: payments.data:prepare
+postprocessor: payments.output:warehouse
+```
+
+Extension modules are imported before schema loading. `--import` adds an
+extension module from the command line. Processor references resolve to
+existing decorated `rf.Preprocessor` or `rf.Postprocessor` objects; export a
+`.partial(...)` object when application arguments need binding. The referenced
+application package must be installed in the CLI environment.
+
+Processor configuration is recorded alongside the run and is not embedded in
+`model.rf`. Supply it again for prediction and serving when needed.
+Preprocessing runs before query selection and retention; postprocessing uses
+the existing output boundary.
+
+## Automate jobs and inspect reports
+
+`--json` emits one versioned JSON object to stdout for inspection, preflight,
+and finished jobs. Progress, application prints, backend logs, and debug
+tracebacks go to stderr. Exit codes are `0` for success, `2` for invalid
+arguments or preflight contracts, `1` for execution failure, and `130` for an
+interrupt. Use `_SUCCESS` as the persisted completion signal for output jobs.
+
+The equivalent inspection functions are available from Python:
+
+```python
+import relflow as rf
+
+description = rf.inspect("artifacts/payment.rf")
+report = rf.check(
+    "model.yaml",
+    data={"train": "payments/train"},
+    execute=False,
+)
+```
+
+Keep credentials in the filesystem backend's authentication mechanism. CLI
+data locations reject embedded credentials and URI query strings so run
+reports can retain source locations.

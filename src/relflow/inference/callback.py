@@ -5,11 +5,12 @@ from __future__ import annotations
 import os
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
+import pyarrow.ipc as ipc
 import pyarrow.parquet as pq
 from lightning.pytorch import callbacks
 
@@ -59,7 +60,7 @@ def check_parquet(array: pa.Array | pa.ChunkedArray, address: str, valid: np.nda
 
 
 class Writer(callbacks.BasePredictionWriter):
-    """Persist each rank's written prediction tables as one Arrow Parquet shard.
+    """Persist each rank's prediction tables as one Parquet or Arrow IPC file.
 
     ``Model.predict_step`` has already converted tensors into the canonical
     Arrow prediction envelope. Configured Polars postprocessors run in order,
@@ -78,18 +79,25 @@ class Writer(callbacks.BasePredictionWriter):
         path: os.PathLike[str] | str,
         postprocessor: PostprocessorInput = (),
         row_group_size: int = 65536,
+        *,
+        format: Literal["parquet", "ipc"] = "parquet",
     ) -> None:
         super().__init__(write_interval="batch")
         if isinstance(row_group_size, bool) or not isinstance(row_group_size, int) or row_group_size <= 0:
             raise ValueError(f"Writer row_group_size must be a positive integer, got {row_group_size!r}")
         self.path = Path(path)
+        if format not in ("parquet", "ipc"):
+            raise ValueError(f"Writer format must be 'parquet' or 'ipc', got {format!r}")
+        self.format = format
         self.postprocessors = Postprocessor.normalize(postprocessor)
         self.row_group_size = row_group_size
         self.schema: pa.Schema | None = None
-        self.writer: pq.ParquetWriter | None = None
+        self.writer: pq.ParquetWriter | ipc.RecordBatchFileWriter | None = None
         self.shard: Path | None = None
         self.pending: list[pa.Table] = []
         self.rows = 0
+        self.source_rows = 0
+        self.written_rows = 0
 
     # Keep the public ``output`` keyword; Lightning calls this hook positionally.
     def write_on_batch_end(  # pyrefly: ignore[bad-override-param-name]
@@ -109,21 +117,30 @@ class Writer(callbacks.BasePredictionWriter):
                 raise TypeError(f"Writer requires predict_step to return a pyarrow.Table, got {type(output).__name__}")
 
             table = apply(output, self.postprocessors).replace_schema_metadata(output.schema.metadata)
-            for name in table.column_names:
-                check_parquet(table[name], f"/{name}")
+            if self.format == "parquet":
+                for name in table.column_names:
+                    check_parquet(table[name], f"/{name}")
 
             if self.writer is None:
                 self.path.mkdir(parents=True, exist_ok=True)
                 self.schema = table.schema
-                self.shard = self.path / f"rank-{trainer.global_rank}.parquet"
-                self.writer = pq.ParquetWriter(where=self.partial(self.shard), schema=table.schema)
+                suffix = "parquet" if self.format == "parquet" else "arrow"
+                self.shard = self.path / f"rank-{trainer.global_rank}.{suffix}"
+                self.writer = (
+                    pq.ParquetWriter(where=self.partial(self.shard), schema=table.schema)
+                    if self.format == "parquet"
+                    else ipc.new_file(str(self.partial(self.shard)), table.schema)
+                )
             elif self.schema is None or not table.schema.equals(self.schema, check_metadata=True):
                 raise ValueError(
                     f"prediction batch schema differs from the first batch; expected {self.schema}, got {table.schema}"
                 )
 
-            self.pending.append(table)
+            if table.num_rows:
+                self.pending.append(table)
             self.rows += table.num_rows
+            self.source_rows += output.num_rows
+            self.written_rows += table.num_rows
             if self.rows >= self.row_group_size:
                 self.flush(final=False)
         except BaseException:
@@ -145,7 +162,10 @@ class Writer(callbacks.BasePredictionWriter):
         table = pa.concat_tables(self.pending)
         rows = table.num_rows if final else table.num_rows - table.num_rows % self.row_group_size
         if rows:
-            self.writer.write_table(table.slice(0, rows), row_group_size=self.row_group_size)
+            if isinstance(self.writer, pq.ParquetWriter):
+                self.writer.write_table(table.slice(0, rows), row_group_size=self.row_group_size)
+            else:
+                self.writer.write_table(table.slice(0, rows), max_chunksize=self.row_group_size)
         remainder = table.slice(rows)
         self.pending = [remainder] if remainder.num_rows else []
         self.rows = remainder.num_rows
