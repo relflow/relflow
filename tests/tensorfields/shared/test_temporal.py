@@ -285,6 +285,10 @@ def test_custom_calendar_validation_preserves_leap_dates_padding_and_supported_f
         ("Thu Feb 29 00:00:00 2024", "%c", datetime(2024, 2, 29)),
         ("2026-02- 3", "%Y-%m-%e", datetime(2026, 2, 3)),
         ("2026-02-30", "%F", None),
+        ("Tuesday, 3 February 2026", "%A, %d %B %Y", datetime(2026, 2, 3)),
+        ("3 fEb 2026 12:34:56", "%d %b %Y %H:%M:%S", datetime(2026, 2, 3, 12, 34, 56)),
+        ("3 Feb 2026 +0130", "%d %h %Y %z", datetime(2026, 2, 2, 22, 30, tzinfo=timezone.utc)),
+        ("Jan: 3 February 2026", "Jan: %d %B %Y", datetime(2026, 2, 3)),
         ("02/30/26", "%D", None),
         ("02/30/26", "%x", None),
         ("Mon Feb 30 00:00:00 2026", "%c", None),
@@ -294,7 +298,9 @@ def test_custom_formats_expand_composites_for_backends_with_only_basic_directive
     strptime = pc.strptime
 
     def portable(values, *, format, **options):
-        assert all(directive not in format for directive in ("%F", "%D", "%x", "%c", "%e", "%z"))
+        assert all(
+            directive not in format for directive in ("%F", "%D", "%x", "%c", "%e", "%z", "%a", "%A", "%b", "%B", "%h")
+        )
         return strptime(values, format=format, **options)
 
     monkeypatch.setattr(pc, "strptime", portable)

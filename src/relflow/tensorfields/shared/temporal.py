@@ -47,16 +47,35 @@ CALENDAR = {
     "w": r"[0-9]",
 }
 COMPOSITES = {"F": "%Y-%m-%d", "D": "%m/%d/%y", "x": "%m/%d/%y", "c": "%a %b %e %H:%M:%S %Y"}
+MONTHS = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
+WEEKDAYS = ("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+NAMES = {
+    code: tuple(name if code in {"A", "B"} else name[:3] for name in names)
+    for code, names in (("a", WEEKDAYS), ("A", WEEKDAYS), ("b", MONTHS), ("B", MONTHS), ("h", MONTHS))
+}
 
 
 @dataclass(frozen=True)
 class Format:
-    """Source coordinates and a format whose numeric offsets are handled by Arrow arithmetic."""
+    """Portable parser directives and captured source coordinates."""
 
     expression: str
     fields: tuple[tuple[str, str], ...]
     pattern: str
-    bodies: tuple[str, ...]
+    pieces: tuple[tuple[str, str], ...]
 
 
 @lru_cache(maxsize=64)
@@ -69,7 +88,7 @@ def calendar(pattern: str) -> Format:
     """
     fragments = ["(?P<body_0>"]
     fields = []
-    bodies = ["body_0"]
+    pieces = [("body_0", "")]
     formats = []
 
     def include(format: str) -> None:
@@ -95,14 +114,25 @@ def calendar(pattern: str) -> Format:
             elif code in {"n", "t"}:
                 fragments.append(r"\s*")
                 formats.append(" ")
-            elif code in CALENDAR or code == "z":
+            elif code in CALENDAR or code == "z" or code in NAMES:
                 name = f"coordinate_{len(fields)}"
                 fields.append((code, name))
-                content = CALENDAR[code] if code != "z" else r"[+-][0-9]{2}:?[0-9]{2}"
-                if code == "z":
-                    body = f"body_{len(bodies)}"
-                    bodies.append(body)
+                if code in CALENDAR:
+                    content = CALENDAR[code]
+                elif code == "z":
+                    content = r"[+-][0-9]{2}:?[0-9]{2}"
+                else:
+                    content = "(?i:" + "|".join(NAMES[code]) + ")"
+                if code in {"z", "e"} or code in NAMES:
+                    body = f"body_{len(fields)}"
                     fragments.append(f")(?P<{name}>{content})(?P<{body}>")
+                    if code in {"b", "B", "h"}:
+                        pieces.append((name, code))
+                        formats.append("%m")
+                    elif code == "e":
+                        pieces.append((name, code))
+                        formats.append("%d")
+                    pieces.append((body, ""))
                 else:
                     fragments.append(f"(?P<{name}>{content})")
                     formats.append("%d" if code == "e" else token)
@@ -111,7 +141,7 @@ def calendar(pattern: str) -> Format:
                 formats.append(token)
 
     include(pattern)
-    return Format("^" + "".join(fragments) + ")$", tuple(fields), "".join(formats), tuple(bodies))
+    return Format("^" + "".join(fragments) + ")$", tuple(fields), "".join(formats), tuple(pieces))
 
 
 def formatted(strings: pa.StringArray, pattern: str) -> pa.Array:
@@ -147,12 +177,19 @@ def formatted(strings: pa.StringArray, pattern: str) -> pa.Array:
             "use hours 00 through 23, minutes 00 through 59, and consistent repeated offsets"
         )
 
-    # Windows strptime does not support %z, while other platforms differ in
-    # their rejection of malformed offsets. Parse the exact non-offset source
-    # pieces as a naive clock, then apply the validated offset in integer ns.
-    body = pc.binary_join_element_wise(
-        *(pc.struct_field(captured, name) for name in format.bodies), pa.repeat(pa.scalar(""), len(strings))
-    )
+    # Windows lacks offsets and symbolic calendar directives. Preserve source
+    # literals, lower English month names to numbers, and consume valid weekday
+    # names. Parse the resulting naive clock before applying its offset in ns.
+    pieces = []
+    for name, code in format.pieces:
+        text = pc.struct_field(captured, name)
+        if code == "e":
+            text = pc.utf8_trim_whitespace(text)
+        elif code in {"b", "B", "h"}:
+            month = pc.index_in(pc.utf8_lower(text), value_set=pa.array([label.lower() for label in NAMES[code]]))
+            text = pc.cast(pc.add(month, 1), pa.string())
+        pieces.append(text)
+    body = pc.binary_join_element_wise(*pieces, pa.repeat(pa.scalar(""), len(strings)))
     values = pc.strptime(body, format=format.pattern, unit="ns", error_is_null=False)
 
     # Calendar validation needs whole source-clock seconds. Integer floor
@@ -164,7 +201,7 @@ def formatted(strings: pa.StringArray, pattern: str) -> pa.Array:
     seconds = pc.subtract(seconds, pc.cast(pc.less(remainder, pa.scalar(0)), pa.int64()))
     clock = cast(pa.TimestampArray, pc.cast(seconds, pa.timestamp("s")))
     for code, name in format.fields:
-        if code == "z":
+        if code not in CALENDAR:
             continue
         supplied = pc.cast(pc.utf8_trim_whitespace(pc.struct_field(captured, name)), pa.int64())
         actual = pc.cast(pc.strftime(clock, format="%" + ("d" if code == "e" else code)), pa.int64())
