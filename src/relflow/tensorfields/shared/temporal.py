@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import date, datetime
 from functools import lru_cache
 from typing import Any, Literal, TypeAlias, cast
@@ -48,16 +49,27 @@ CALENDAR = {
 COMPOSITES = {"F": "%Y-%m-%d", "D": "%m/%d/%y", "x": "%m/%d/%y", "c": "%a %b %e %H:%M:%S %Y"}
 
 
+@dataclass(frozen=True)
+class Format:
+    """Source coordinates and a format whose numeric offsets are handled by Arrow arithmetic."""
+
+    expression: str
+    fields: tuple[tuple[str, str], ...]
+    pattern: str
+    bodies: tuple[str, ...]
+
+
 @lru_cache(maxsize=64)
-def calendar(pattern: str) -> tuple[str, tuple[tuple[str, str], ...]]:
+def calendar(pattern: str) -> Format:
     """Compile supplied calendar coordinates without constraining numeric padding.
 
     Composite expansions affect only validation; Arrow parses the original
     format. Other directives retain Arrow's semantics. Numeric coordinates
     reveal normalized impossible dates even when their text is parseable.
     """
-    fragments = []
+    fragments = ["(?P<body_0>"]
     fields = []
+    bodies = ["body_0"]
 
     def include(format: str) -> None:
         for match in re.finditer(r"%(?:[EO])?.|[^%]+|%$", format):
@@ -83,22 +95,34 @@ def calendar(pattern: str) -> tuple[str, tuple[tuple[str, str], ...]]:
                 name = f"coordinate_{len(fields)}"
                 fields.append((code, name))
                 content = CALENDAR[code] if code != "z" else r"[+-][0-9]{2}:?[0-9]{2}"
-                fragments.append(f"(?P<{name}>{content})")
+                if code == "z":
+                    body = f"body_{len(bodies)}"
+                    bodies.append(body)
+                    fragments.append(f")(?P<{name}>{content})(?P<{body}>")
+                else:
+                    fragments.append(f"(?P<{name}>{content})")
             else:
                 fragments.append(".*?")
 
     include(pattern)
-    return "^" + "".join(fragments) + "$", tuple(fields)
+    naive = "".join(
+        match.group()
+        for match in re.finditer(r"%(?:[EO])?.|[^%]+|%$", pattern)
+        if not (match.group().startswith("%") and match.group()[-1] == "z")
+    )
+    return Format("^" + "".join(fragments) + ")$", tuple(fields), naive, tuple(bodies))
 
 
-def validate_calendar(strings: pa.StringArray, values: pa.Array, pattern: str) -> None:
-    """Reject Arrow strptime's calendar normalization while keeping parsed instants."""
-    expression, fields = calendar(pattern)
-    captured = pc.extract_regex(strings, expression)
+def formatted(strings: pa.StringArray, pattern: str) -> pa.Array:
+    """Parse source clocks and validate numeric offsets independently of platform strptime."""
+    format = calendar(pattern)
+    captured = pc.extract_regex(strings, format.expression)
     invalid = pc.and_(pc.is_valid(strings), pc.invert(pc.is_valid(captured)))
+    if pc.any(invalid).as_py():
+        raise ValueError("duration endpoint could not be parsed; supply strings matching the configured format")
     offset = pa.repeat(pa.scalar(0, type=pa.int64()), len(strings))
     have_offset = False
-    for code, name in fields:
+    for code, name in format.fields:
         if code != "z":
             continue
         text = pc.replace_substring(pc.struct_field(captured, name), ":", "")
@@ -116,6 +140,19 @@ def validate_calendar(strings: pa.StringArray, values: pa.Array, pattern: str) -
             invalid = pc.or_kleene(invalid, pc.not_equal(selected, offset))
         offset = selected
         have_offset = True
+    if pc.any(invalid).as_py():
+        raise ValueError(
+            "duration endpoint contains an invalid numeric timezone offset; "
+            "use hours 00 through 23, minutes 00 through 59, and consistent repeated offsets"
+        )
+
+    # Windows strptime does not support %z, while other platforms differ in
+    # their rejection of malformed offsets. Parse the exact non-offset source
+    # pieces as a naive clock, then apply the validated offset in integer ns.
+    body = pc.binary_join_element_wise(
+        *(pc.struct_field(captured, name) for name in format.bodies), pa.repeat(pa.scalar(""), len(strings))
+    )
+    values = pc.strptime(body, format=format.pattern, unit="ns", error_is_null=False)
 
     # Calendar validation needs whole source-clock seconds. Integer floor
     # avoids both epoch-float cancellation and truncation toward the next day
@@ -124,8 +161,8 @@ def validate_calendar(strings: pa.StringArray, values: pa.Array, pattern: str) -
     seconds = pc.divide(ticks, pa.scalar(1000000000, type=pa.int64()))
     remainder = pc.subtract(ticks, pc.multiply(seconds, 1000000000))
     seconds = pc.subtract(seconds, pc.cast(pc.less(remainder, pa.scalar(0)), pa.int64()))
-    clock = cast(pa.TimestampArray, pc.cast(pc.add(seconds, offset), pa.timestamp("s")))
-    for code, name in fields:
+    clock = cast(pa.TimestampArray, pc.cast(seconds, pa.timestamp("s")))
+    for code, name in format.fields:
         if code == "z":
             continue
         supplied = pc.cast(pc.utf8_trim_whitespace(pc.struct_field(captured, name)), pa.int64())
@@ -136,6 +173,10 @@ def validate_calendar(strings: pa.StringArray, values: pa.Array, pattern: str) -
             "duration endpoint contains an impossible calendar date or numeric timezone offset; "
             "supply actual calendar coordinates matching the configured format"
         )
+    if have_offset:
+        utc = pc.subtract_checked(ticks, pc.multiply(offset, 1000000000))
+        return pc.cast(utc, pa.timestamp("ns", tz="UTC"))
+    return values
 
 
 def common(values: tuple[Temporal, ...]) -> pa.TimestampType[Any, Any]:
@@ -213,10 +254,7 @@ def parse(values: Operand, pattern: str | None = None) -> Temporal:
         strings = cast(pa.StringArray, values)
         try:
             if pattern is not None:
-                calendar(pattern)
-                parsed = pc.strptime(strings, format=pattern, unit="ns", error_is_null=False)
-                validate_calendar(strings, parsed, pattern)
-                return parsed
+                return formatted(strings, pattern)
             offsets = pc.match_substring_regex(strings, OFFSET)
             if pc.any(offsets).as_py() and pc.any(pc.invert(offsets)).as_py():
                 raise ValueError(

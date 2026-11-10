@@ -3,6 +3,7 @@
 from datetime import date, datetime, timedelta, timezone
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pytest
 
 from relflow.tensorfields.shared.temporal import difference, parse
@@ -287,10 +288,61 @@ def test_custom_calendar_validation_uses_each_source_offset_across_midnight(star
     assert difference(start, end, pattern="%Y-%m-%d %H:%M %z", unit="hours").as_py() == expected
 
 
-@pytest.mark.parametrize("offset", ["+2560", "+2400", "-1260"])
-def test_custom_formats_reject_invalid_numeric_timezone_offsets(offset):
+@pytest.mark.parametrize("offset", ["+2560", "+2400", "-1260", "+25:60", "-12:60"])
+def test_custom_formats_reject_invalid_numeric_timezone_offsets_before_backend_parsing(offset, monkeypatch):
+    def unexpected(*args, **kwargs):
+        pytest.fail("invalid numeric offsets must be rejected before platform-dependent strptime")
+
+    monkeypatch.setattr(pc, "strptime", unexpected)
     with pytest.raises(ValueError, match="numeric timezone offset"):
-        parse(f"2026-01-01 00:30 {offset}", "%Y-%m-%d %H:%M %z")
+        parse(pa.array([None, f"2026-01-01 00:30 {offset}"]), "%Y-%m-%d %H:%M %z")
+
+
+@pytest.mark.parametrize(
+    ("text", "pattern", "expected"),
+    [
+        ("2026/03/08 01:30 -0500", "%Y/%m/%d %H:%M %z", datetime(2026, 3, 8, 6, 30, tzinfo=timezone.utc)),
+        ("+01:30|2026-01-01 00:30", "%z|%Y-%m-%d %H:%M", datetime(2025, 12, 31, 23, tzinfo=timezone.utc)),
+        ("2026-01-01 +0100 00:30", "%Y-%m-%d %z %H:%M", datetime(2025, 12, 31, 23, 30, tzinfo=timezone.utc)),
+        ("2026-01-01 00:30 -0530/-05:30", "%Y-%m-%d %H:%M %z/%z", datetime(2026, 1, 1, 6, tzinfo=timezone.utc)),
+        (
+            "+1234 2026-01-01 00:30 +0100",
+            "+1234 %Y-%m-%d %H:%M %z",
+            datetime(2025, 12, 31, 23, 30, tzinfo=timezone.utc),
+        ),
+        ("2026-01-01 %z 00:30 +0100", "%Y-%m-%d %%z %H:%M %z", datetime(2025, 12, 31, 23, 30, tzinfo=timezone.utc)),
+        ("1969-12-31 23:30 -0100", "%Y-%m-%d %H:%M %z", datetime(1970, 1, 1, 0, 30, tzinfo=timezone.utc)),
+    ],
+)
+def test_custom_offsets_preserve_source_clock_when_backend_cannot_parse_timezones(text, pattern, expected, monkeypatch):
+    strptime = pc.strptime
+    calls = []
+
+    def naive(values, *, format, **options):
+        assert "%z" not in format.replace("%%", "")
+        calls.append(format)
+        return strptime(values, format=format, **options)
+
+    monkeypatch.setattr(pc, "strptime", naive)
+    result = parse(pa.array([text, None]), pattern)
+    assert result.type == pa.timestamp("ns", tz="UTC")
+    assert result.to_pylist() == [expected, None]
+    assert len(calls) == 1
+
+
+def test_custom_formats_reject_conflicting_repeated_offsets_before_parsing(monkeypatch):
+    def unexpected(*args, **kwargs):
+        pytest.fail("conflicting offsets must be rejected before platform-dependent strptime")
+
+    monkeypatch.setattr(pc, "strptime", unexpected)
+    with pytest.raises(ValueError, match="numeric timezone offset"):
+        parse("2026-01-01 00:30 +0100/+0200", "%Y-%m-%d %H:%M %z/%z")
+
+
+@pytest.mark.parametrize("text,offset", [("1677-09-21 00:12:44", "+0001"), ("2262-04-11 23:47:16", "-0001")])
+def test_custom_offset_conversion_rejects_integer_timestamp_overflow(text, offset):
+    with pytest.raises(ValueError, match="could not be parsed"):
+        parse(f"{text} {offset}", "%Y-%m-%d %H:%M:%S %z")
 
 
 def test_custom_formats_reject_named_zones_with_an_explicit_offset_or_typed_timestamp_remedy():
