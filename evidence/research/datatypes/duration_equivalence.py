@@ -20,7 +20,7 @@
 #   format: number
 # evidence-group: Temporal
 # evidence-requires:
-# - "relflow 0.5.0 wheel exporting Duration"
+# - "relflow 0.4.6 wheel exporting Duration"
 # ---
 #
 # Compare elapsed-time features derived from two timestamps or one configured endpoint with an
@@ -134,7 +134,7 @@ def table(rows: list[dict], *, arm: str, targets: bool = True) -> pa.Table:
 
 def build(arm: str) -> rf.Model:
     if not hasattr(rf, "Duration"):
-        raise RuntimeError("P099 requires a relflow wheel exporting rf.Duration (0.5.0 or later)")
+        raise RuntimeError("P099 requires a relflow wheel exporting rf.Duration (0.4.6 or later)")
     if arm in ("number", "shuffled"):
         feature = rf.Number
     elif arm == "static":

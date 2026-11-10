@@ -38,7 +38,7 @@ uv run --project docs --with /path/to/provisioned-relflow.whl \
 
 Read the selected page's Reproduce tab for its declared `evidence-requires`.
 P091 requires TorchJD, P092 requires a real offline Text encoder, and P099/P100
-require a relflow 0.5.0 wheel exporting Duration/Ordinal. They remain in research
+require a relflow 0.4.6 wheel exporting Duration/Ordinal. They remain in research
 while the paired baseline predates these datatypes. A research selection does not download
 models, substitute a mocked encoder, or replace a missing measurement with a pass.
 

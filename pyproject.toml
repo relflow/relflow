@@ -1,6 +1,6 @@
 [project]
 name = "relflow"
-version = "0.5.0"
+version = "0.4.6"
 description = "Relationship Flow: schema-first PyTorch models for hierarchical, nested, and sequence data"
 readme = "README.md"
 authors = [

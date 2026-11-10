@@ -40,7 +40,8 @@ concurrency:
 
 jobs:
   publish:
-    if: github.event_name != 'workflow_run' && !inputs.preview
+    # Reusable workflows inherit the caller's event, including workflow_run.
+    if: inputs.library_run_id != '' && !inputs.preview
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -89,6 +90,7 @@ jobs:
     if: >-
       (github.event_name == 'workflow_dispatch' && inputs.preview) ||
       (github.event_name == 'workflow_run' &&
+       inputs.library_run_id == '' &&
        github.event.workflow_run.head_repository.full_name == github.repository &&
        (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'))
     runs-on: ubuntu-24.04

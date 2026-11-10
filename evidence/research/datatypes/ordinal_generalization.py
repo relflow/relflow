@@ -20,7 +20,7 @@
 #   format: percent
 # evidence-group: Representation
 # evidence-requires:
-# - "relflow 0.5.0 wheel exporting Ordinal"
+# - "relflow 0.4.6 wheel exporting Ordinal"
 # ---
 #
 # Compare Ordinal, rounded Number, and Category targets when integer ranks or declared intermediate
@@ -115,7 +115,7 @@ def records(*, rows: int, seed: int, domain: str, novel: bool, arm: str) -> Iter
 
 def build(domain: str, arm: str) -> rf.Model:
     if not hasattr(rf, "Ordinal"):
-        raise RuntimeError("P100 requires a relflow wheel exporting rf.Ordinal (0.5.0 or later)")
+        raise RuntimeError("P100 requires a relflow wheel exporting rf.Ordinal (0.4.6 or later)")
     if arm == "ordinal":
         target = (
             rf.Ordinal(values=LABELS, mask=True, objective="mse")
