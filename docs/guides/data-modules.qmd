@@ -1,7 +1,12 @@
 ---
 title: Data modules
-description: "Supply named train, validate, test, and predict sources from Parquet, Arrow, Polars, or DuckDB."
+description: "Stream training data from disk or cloud storage, connect SQL queries and custom generators, or use in-memory Polars DataFrames."
 ---
+
+relflow trains from data wherever it lives: files on disk or cloud storage,
+SQL queries, custom record streams, or frames already in memory. Start with
+streaming file sources for large datasets; the full input need not fit in RAM.
+Polars is the in-memory interface when you already have loaded frames.
 
 A data module groups sources into named splits: training learns the model,
 validation selects it, testing evaluates it, and prediction scores new records.
@@ -18,7 +23,17 @@ The examples continue the
 [transaction model](../learn/add-transaction-history.qmd). Its `payment_id`
 column remains a source column without becoming a model field.
 
-## Arrow
+| Where the data lives | Interface |
+| --- | --- |
+| Files on disk or cloud storage | `rf.ArrowDataModule` with paths, globs, or `rf.source(...)` |
+| SQL queries | `rf.DuckDBDataModule` |
+| Custom Python record streams | `rf.CustomDataModule` or `rf.SyntheticDataModule` |
+| Eager Polars DataFrames already in memory | `rf.PolarsDataModule` |
+
+The adapters feed the same training pipeline. Your source owns reading the
+data; the model owns its schema, encoding, and learning.
+
+## Files on disk and cloud storage
 
 Pass Parquet file paths to `ArrowDataModule`:
 
@@ -32,8 +47,19 @@ data = rf.ArrowDataModule(
 )
 ```
 
-Nested structs and lists remain part of each observation. Existing in-memory
-`pyarrow.Table` objects are also supported.
+File inputs are scanned in batches so the full split need not fit in memory.
+Nested structs and lists remain part of each observation. Replace the local
+paths with cloud URIs to use the same workflow:
+
+```python
+data = rf.ArrowDataModule(
+    train="s3://your-data-bucket/payments/history/train/*.parquet",
+    validate="s3://your-data-bucket/payments/history/validation/*.parquet",
+)
+```
+
+Custom filesystems and restartable batch sources use the same module; see
+[Files and restartable sources](#files-and-restartable-sources).
 
 ## Bind a model when the loop starts
 
@@ -70,7 +96,7 @@ explicit batch size is applied before binding. An explicit `shuffle_rows`
 value takes precedence. Changing batch size after binding changes subsequent
 loader batches but does not resize that window; set `shuffle_rows` explicitly
 when comparing shuffle behavior across runs. This window applies to streaming
-sources; in-memory Arrow tables use a full permutation. Streaming shuffle can
+sources; in-memory frames use a full permutation. Streaming shuffle can
 buffer up to twice the window, so account for that memory when sizing it.
 
 ## Splits and preparation
@@ -98,13 +124,24 @@ output for downstream joins. See [Batch inference](batch-inference.qmd).
 
 ## Polars
 
-For applications that already use in-memory eager frames, `PolarsDataModule`
-converts each frame to Arrow once and uses the same pipeline. Collect a
-`LazyFrame` explicitly before passing it in.
+Use `PolarsDataModule` when your application already has eager DataFrames in
+memory. Here `train_frame` and `validation_frame` are the prepared frames
+supplied by your application:
+
+```python
+data = rf.PolarsDataModule(train=train_frame, validate=validation_frame)
+model.fit(data, batch_size=128, max_epochs=30)
+```
+
+The same module accepts `test` and `predict` frames. Each frame converts to
+Arrow once inside relflow; callers continue to work with Polars. Collect a
+`LazyFrame` explicitly before passing it in. For direct in-memory inference,
+pass a frame to `model.predict(requests, batch_size=256)` and receive a Polars
+DataFrame without constructing a data module.
 
 ## Files and restartable sources
 
-Each split also accepts a `pa.RecordBatch`, Arrow Dataset, file path or glob,
+Each `ArrowDataModule` split also accepts an Arrow record batch, Dataset, file path or glob,
 `rf.source(...)`, or a callable returning a fresh reader or iterable of Arrow
 batches. A reader itself is one-shot; wrap its creation in a callable when
 repeated epochs need it.

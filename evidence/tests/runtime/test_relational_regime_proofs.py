@@ -106,7 +106,7 @@ def test_adjusted_rand_ignores_label_names_and_penalizes_wrong_partitions():
         ("attention_sum_in_range", "total", ()),
         ("attention_sum_unseen_lengths", "total", ()),
         ("mean_duplicate_invariance", "mean_amount", ()),
-        ("mean_erases_contribution_count", "total", ("total",)),
+        ("mean_keeps_contribution_count", "total", ("total",)),
         ("raw_value_variance", "variance", ()),
         ("raw_value_weight_sum", "weighted_sum", ()),
         ("requested_rank_values", "answer", ()),
@@ -140,7 +140,7 @@ def test_aggregation_readers_accept_named_scalar_outputs(name, target, arguments
 
 @pytest.mark.parametrize(
     "name",
-    ("attention_learns_fixed_width_sum", "attention_preserves_nested_cardinality", "mean_erases_cardinality"),
+    ("attention_learns_fixed_width_sum", "attention_preserves_nested_cardinality", "mean_keeps_cardinality"),
 )
 def test_structure_readers_accept_named_scalar_outputs(name):
     proof = load("structure", name)

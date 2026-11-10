@@ -288,7 +288,7 @@ def test_cluster_float_nan_labels_take_the_other_state(tmp_path):
         assert field.state.flatten().tolist() == expected
         assert field.content.flatten()[2] < 0
     assert rf.Cluster.vocabulary(embedded, "/label") == (1.0, 2.0, 0.0)
-    assert model.predict(rows).num_rows == 4
+    assert pa.table(model.predict(rows)).num_rows == 4
 
 
 def test_cluster_embedder_init_commits_only_lower_columns():

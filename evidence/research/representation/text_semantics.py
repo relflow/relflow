@@ -102,6 +102,7 @@ from pathlib import Path
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import relflow as rf
 import torch
@@ -230,9 +231,9 @@ def encoder_state(path: Path) -> dict:
 
 def probability(model: rf.Model, rows: list[dict], arm: str) -> np.ndarray:
     fields = ("policy",) if arm == "policy_only" else ("request",) if arm == "text_only" else ("request", "policy")
-    output = model.predict(pa.Table.from_pylist([{key: row[key] for key in fields} for row in rows]))[
+    output = pl.DataFrame(model.predict(pa.Table.from_pylist([{key: row[key] for key in fields} for row in rows])))[
         "predictions"
-    ].to_pylist()
+    ].to_list()
     return np.asarray([row["review"]["content"]["probability"] for row in output])
 
 

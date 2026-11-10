@@ -281,7 +281,7 @@ def test_relflow_growth_and_rollback_export_the_selected_averaged_model(tmp_path
             assert all(
                 torch.equal(value, dict(pl_module.named_parameters())[name]) for name, value in ema.average.items()
             )
-            evaluated.append(model.predict(table)["predictions"])
+            evaluated.append(pa.table(model.predict(table))["predictions"])
 
         def on_validation_end(self, trainer, pl_module):
             assert not ema.active
@@ -309,8 +309,8 @@ def test_relflow_growth_and_rollback_export_the_selected_averaged_model(tmp_path
     assert rf.Category.counts(model, "/category") == dict.fromkeys("abcdefgh", saved["epoch"] + 1)
     assert rf.Number.normalization(model, "/amount") == rf.Number.normalization(restored, "/amount")
     expected = evaluated[saved["epoch"]]
-    assert restored.predict(table)["predictions"].equals(expected)
-    assert model.predict(table)["predictions"].equals(expected)
+    assert pa.table(restored.predict(table))["predictions"].equals(expected)
+    assert pa.table(model.predict(table))["predictions"].equals(expected)
     assert not ema.active and not ema.handles
 
 

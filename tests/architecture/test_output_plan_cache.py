@@ -19,9 +19,9 @@ def test_evaluation_prediction_reuses_the_plan_and_training_refreshes_it(monkeyp
         ],
     )
 
-    first = model.predict(table)
+    first = pa.table(model.predict(table))
     compiled = model.output_plans[(model._contract_generation, ())]
-    second = model.predict(table, batch_size=1)
+    second = pa.table(model.predict(table, batch_size=1))
 
     assert refreshes == [False, False]
     assert model.output_plans[(model._contract_generation, ())] is compiled

@@ -33,7 +33,8 @@ disputed: false
 
 ## Input and options
 
-Accepts Arrow date, timestamp, or string values. Strings are parsed by Arrow
+Accepts Polars `Date`, `Datetime`, or `String` columns and their Arrow equivalents.
+Strings are parsed internally by Arrow
 using `pattern` when supplied; otherwise Arrow casts them to timestamps.
 Calendar extraction uses second-resolution timestamps. Naive timestamps are
 read as wall-clock time, and zone-aware timestamps are read in their own zone,

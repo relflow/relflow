@@ -4,6 +4,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import lightning.pytorch as lit
+import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -141,11 +142,12 @@ def test_callbacks_and_prediction_overloads_keep_every_row(model, data, options)
     assert "loss/validate" in validated[0]
     assert "loss/test" in tested[0]
     assert callback.counts == {"train": 1, "validate": 3, "test": 3, "predict": 24}
-    assert predicted.num_rows == 48
-    assert predicted["inputs"].combine_chunks().field("id").to_pylist() == list(range(48))
+    assert isinstance(predicted, pl.DataFrame)
+    assert predicted.height == 48
+    assert predicted["inputs"].struct.field("id").to_list() == list(range(48))
     direct = model.predict(pa.table({"amount": [1.0], "id": [7]}), retain=("id",))
-    assert direct.num_rows == 1
-    assert model.predict(data, limit_predict_batches=2, **options).num_rows == 4
+    assert direct.height == 1
+    assert model.predict(data, limit_predict_batches=2, **options).height == 4
 
 
 @pytest.mark.integration
@@ -175,8 +177,9 @@ def test_each_loop_can_first_bind_a_data_module(model, options, loop):
         assert callback.counts == {"test": 1}
     else:
         result = model.predict(data, **settings)
-        assert result.num_rows == 4
-        assert result["inputs"].combine_chunks().field("id").to_pylist() == [0, 1, 2, 3]
+        assert isinstance(result, pl.DataFrame)
+        assert result.height == 4
+        assert result["inputs"].struct.field("id").to_list() == [0, 1, 2, 3]
         assert callback.counts == {"predict": 1}
 
     assert data.model is model
@@ -909,8 +912,8 @@ def test_loop_batch_size_controls_each_arrow_split_and_retains_partial_batches(m
     assert data.batch_size == model.batch_size == 5
     result = model.predict(datamodule=data, batch_size=6, callbacks=[callback], **options)
     assert callback.rows["predict"] == [6, 1]
-    assert result["inputs"].combine_chunks().field("payment_id").to_pylist() == identifiers
-    assert result.num_rows == 7
+    assert result["inputs"].struct.field("payment_id").to_list() == identifiers
+    assert result.height == 7
     assert data.batch_size == model.batch_size == 6
 
     inherited = model.predict(data, batch_size=None, callbacks=[callback], **options)

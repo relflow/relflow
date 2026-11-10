@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import pytest
 
@@ -142,7 +143,7 @@ def test_query_reader_keeps_scoring_alignment_when_public_collections_have_diffe
         },
     ]
     model = proof.build()
-    public = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
+    public = pl.DataFrame(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_list()
     assert [len(row["items"]) for row in public] == [0, 1, 2]
     content, inferred = proof.prediction(model, rows)
     assert content.shape == inferred.shape == (len(rows), proof.LENGTH)

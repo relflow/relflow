@@ -138,9 +138,9 @@ def test_input_only_targets_remain_empty_after_checkpoint_reload(tmp_path, field
     )
     source = nested(values)
     model.encode(source, strata=Strata.train)
-    before = model.predict(source)
+    before = pa.table(model.predict(source))
     checkpoint = tmp_path / "model.pt"
     model.save(checkpoint)
     restored = rf.Model.load(checkpoint)
     assert restored.encode(source)["/events/value"].targets.is_empty()
-    assert restored.predict(source).equals(before)
+    assert pa.table(restored.predict(source)).equals(before)

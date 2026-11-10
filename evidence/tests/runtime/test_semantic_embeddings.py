@@ -11,6 +11,7 @@ from collections import Counter
 from pathlib import Path
 
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import pytest
 import relflow as rf
@@ -203,7 +204,8 @@ def test_kmeans_fits_only_unlabeled_training_geometry_and_is_deterministic(name)
 
 
 @pytest.mark.parametrize("name", EXPERIMENTS)
-def test_embedding_reader_keeps_row_alignment_and_ignores_leaf_representation_noise(name):
+@pytest.mark.parametrize("frame", [pl.DataFrame, pa.table], ids=["polars", "legacy-arrow-baseline"])
+def test_embedding_reader_keeps_row_alignment_and_ignores_leaf_representation_noise(name, frame, monkeypatch):
     proof = load(name)
     expected = np.eye(4, 64, dtype=np.float32)
 
@@ -216,8 +218,10 @@ def test_embedding_reader_keeps_row_alignment_and_ignores_leaf_representation_no
                 leaf = {"path": ["noise"], "parents": [], "output_index": 0, "embedding": [999.0] * 64}
                 root = {"path": [], "parents": [], "output_index": 0, "embedding": expected[ordinal].tolist()}
                 records.append([leaf, root, {**leaf, "path": ["other"]}])
-            return pa.table({"representations": records})
+            return frame({"representations": records})
 
+    if frame is pl.DataFrame:
+        monkeypatch.setattr(pa, "table", lambda *args, **kwargs: pytest.fail("prediction checks must stay in Polars"))
     actual = proof.embedding(Model(), [{"ordinal": index} for index in range(4)], batch_size=2)
     np.testing.assert_array_equal(actual, expected)
 
@@ -288,7 +292,7 @@ def test_root_reader_rejects_ambiguous_or_misaligned_exports(name, malformed):
             elif malformed == "wrong_parent":
                 first = [leaf, {**root, "parents": [0]}]
             rows = [first] if malformed == "lost_row" else [first, [root]]
-            return pa.table({"representations": rows})
+            return pl.DataFrame({"representations": rows})
 
     with pytest.raises(ValueError):
         proof.embedding(Model(), [{"ordinal": 0}, {"ordinal": 1}], batch_size=2)

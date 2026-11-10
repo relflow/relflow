@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pyarrow as pa
+import polars as pl
 import torch
 
 import relflow as rf
@@ -23,7 +23,9 @@ def environment() -> dict[str, Any]:
         "python": platform.python_version(),
         "platform": platform.platform(),
         "machine": platform.machine(),
-        "packages": {name: version(name) for name in ("relflow", "torch", "lightning", "pyarrow", "numpy", "pydantic")},
+        "packages": {
+            name: version(name) for name in ("relflow", "torch", "lightning", "polars", "pyarrow", "numpy", "pydantic")
+        },
     }
 
 
@@ -64,9 +66,9 @@ def snapshot(model: rf.Model) -> dict[str, Any]:
     }
 
 
-def fit(model: rf.Model, inputs: pa.Table, output: Path, *, checkpoint: Path | None = None) -> None:
+def fit(model: rf.Model, inputs: pl.DataFrame, output: Path, *, checkpoint: Path | None = None) -> None:
     model.fit(
-        rf.ArrowDataModule(model=model, train=inputs, shuffle=False),
+        rf.PolarsDataModule(train=inputs, shuffle=False),
         batch_size=4,
         learning_rate=1e-3,
         fused=False,
@@ -122,7 +124,7 @@ def create(output: Path) -> None:
         [{"sku": "pen", "total": 1.0, "adjustments": [{"amount": 0.5, "estimate": 0.4}]}],
         [None, {"sku": "book", "total": 5.0, "adjustments": [{"amount": 1.5, "estimate": 1.4}, None]}],
     ]
-    inputs = pa.Table.from_pylist(
+    inputs = pl.DataFrame(
         [
             {
                 "amount": float(index + 1),
@@ -143,7 +145,7 @@ def create(output: Path) -> None:
     model.trainer.save_checkpoint(output / "model.ckpt")
     predictions = model.predict(inputs, retain="*")
     # Null collections, empty collections, and null records remain distinct through both repeated axes.
-    rows = predictions["predictions"].to_pylist()
+    rows = predictions["predictions"].to_list()
     for source, prediction in zip(collections, rows, strict=True):
         written = prediction["items"]
         assert (source is None) == (written is None)
@@ -157,9 +159,8 @@ def create(output: Path) -> None:
                     assert (adjustments is None) == (actual is None)
                     if adjustments is not None:
                         assert [value is None for value in adjustments] == [value is None for value in actual]
-    for name, table in (("inputs", inputs), ("predictions", predictions)):
-        with pa.ipc.new_file(output / f"{name}.arrow", table.schema) as writer:
-            writer.write_table(table)
+    for name, frame in (("inputs", inputs), ("predictions", predictions)):
+        frame.write_ipc(output / f"{name}.arrow")
     (output / "schema.json").write_text(model.schema.model_dump_json(indent=2), encoding="utf-8")
     metadata = {"environment": environment(), "model": snapshot(model), "steps": model.trainer.global_step}
     (output / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
@@ -170,15 +171,15 @@ def check(source: Path, output: Path) -> None:
     output.mkdir(parents=True)
     metadata = json.loads((source / "metadata.json").read_text(encoding="utf-8"))
     schema = json.loads((source / "schema.json").read_text(encoding="utf-8"))
-    inputs = pa.ipc.open_file(source / "inputs.arrow").read_all()
-    expected = pa.ipc.open_file(source / "predictions.arrow").read_all()
+    inputs = pl.read_ipc(source / "inputs.arrow")
+    expected = pl.read_ipc(source / "predictions.arrow")
     model = rf.Model.load(source / "model.ckpt")
     for loaded in (model, rf.Model.load(model.save(output / "resaved.ckpt"))):
         assert schema == loaded.schema.model_dump(mode="json"), "checkpoint schema changed"
         compare(metadata["model"], snapshot(loaded), "/model")
         actual = loaded.predict(inputs, retain="*")
-        assert expected.schema.equals(actual.schema, check_metadata=True), "prediction Arrow schemas differ"
-        compare(expected.to_pylist(), actual.to_pylist(), "/rows")
+        assert expected.schema == actual.schema, "prediction Polars schemas differ"
+        compare(expected.to_dicts(), actual.to_dicts(), "/rows")
     state = torch.load(source / "model.ckpt", weights_only=False, map_location="cpu")
     assert state["global_step"] == metadata["steps"] == 2
     assert len(state["optimizer_states"]) == 1 and state["optimizer_states"][0]["state"]

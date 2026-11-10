@@ -35,7 +35,7 @@ is not automatically a separate amount distribution for each merchant.
 
 ## Input and representation
 
-The Arrow leaf accepts integers and floating-point scalars; Booleans,
+Use an integer or floating-point column; Booleans,
 strings, and lists are rejected. NaN and infinity take the `other`
 [value state](index.qmd#value-state) and do not enter the learned distribution
 or numeric reconstruction loss. Put repeated measurements

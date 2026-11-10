@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Literal, TypeAlias, TypedDict, cast, overload
 
+import polars as pl
 import pyarrow as pa
 import torch
 from tensordict import TensorDict
@@ -26,7 +27,8 @@ from relflow.data.processors import (
     PostprocessorInput,
     Preprocessor,
     PreprocessorInput,
-    apply,
+    arrow,
+    polars,
 )
 from relflow.distributed import all_reduce_max
 from relflow.logging import logger
@@ -47,7 +49,7 @@ if TYPE_CHECKING:
 
 __all__ = ["ExecutionPlan", "Output", "PredictionInput", "encode", "forward", "predict", "step", "transfer"]
 
-PredictionInput: TypeAlias = pa.Table | pa.RecordBatch | Sequence[Mapping[str, object]]
+PredictionInput: TypeAlias = pl.DataFrame | pa.Table | pa.RecordBatch | Sequence[Mapping[str, object]]
 
 
 class Output(TypedDict):
@@ -142,17 +144,23 @@ def rows(module: Model, inputs: EncodedInput) -> int:
 
 
 def ingress(source: PredictionInput) -> pa.Table | pa.RecordBatch:
-    """Adapt one small Python prediction collection to Arrow exactly once."""
+    """Adapt Polars or Python prediction observations to Arrow exactly once."""
 
     if isinstance(source, (pa.Table, pa.RecordBatch)):
         return source
+    if isinstance(source, pl.DataFrame):
+        return arrow(source, context="Polars prediction input")
+    if isinstance(source, pl.LazyFrame):
+        raise TypeError("prediction input must be an eager polars.DataFrame; call collect() on the LazyFrame first")
     if isinstance(source, (str, bytes)) or not isinstance(source, Sequence):
         raise TypeError(
-            "prediction input must be a pyarrow Table, pyarrow RecordBatch, "
+            "prediction input must be a polars.DataFrame, pyarrow Table, pyarrow RecordBatch, "
             f"or a sequence of mappings; got {type(source).__name__}"
         )
     if not source:
-        raise ValueError("an empty Python prediction sequence has no Arrow schema; pass a typed Arrow table")
+        raise ValueError(
+            "an empty Python prediction sequence has no Arrow schema; pass a typed Arrow table or Polars DataFrame"
+        )
     try:
         return pa.Table.from_pylist(mappings(source, context="Python prediction observations"))
     except (pa.ArrowException, TypeError, ValueError) as error:
@@ -575,15 +583,17 @@ def learn(
 
 def encode(
     module: Model,
-    batch: pa.Table | pa.RecordBatch,
+    batch: pl.DataFrame | pa.Table | pa.RecordBatch,
     preprocess: PreprocessorInput = (),
     strata: Strata | str = Strata.predict,
     seed: int = 0,
     epoch: int = 0,
 ) -> EncodedInput:
-    """Encode one Arrow input unit to tensorfields."""
+    """Encode one Polars or Arrow input unit to tensorfields."""
 
     normalized = Strata.normalize(strata)
+    if isinstance(batch, pl.DataFrame):
+        batch = arrow(batch, context="encoding input")
     encoded = prepare(
         module,
         batch,
@@ -604,8 +614,8 @@ def predict(
     retain: Retain = (),
     *,
     batch_size: int | None = None,
-) -> pa.Table:
-    """Preprocess once, predict bounded Arrow batches, and postprocess once."""
+) -> pl.DataFrame:
+    """Preprocess once, predict bounded Arrow batches, and postprocess one Polars frame."""
 
     postprocessors = Postprocessor.normalize(postprocess)
     source = observations(
@@ -642,5 +652,7 @@ def predict(
         written.append(output.write(module, raw, source=encoded.source, retain=retain, compiled=compiled))
         del encoded, raw
 
-    combined = pa.concat_tables(written)
-    return apply(combined, postprocessors).replace_schema_metadata(combined.schema.metadata)
+    result = polars(pa.concat_tables(written), context="prediction output")
+    for processor in postprocessors:
+        result = processor.run(result)
+    return result

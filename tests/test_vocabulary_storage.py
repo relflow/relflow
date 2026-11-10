@@ -76,20 +76,20 @@ def test_spare_storage_preserves_predictions_schema_and_checkpoint(kind, width, 
     schema = deepcopy(model.schema.model_dump())
     labels = tuple(model.nodes[ADDRESS].embedder.vocab.master)
     probe = source(kind, ["unseen", "a", None])
-    before = model.predict(probe)
+    before = pa.table(model.predict(probe))
     expected = approximate(before["predictions"].to_pylist())
 
     reserve(model, width)
 
     assert model.schema.model_dump() == schema
     assert tuple(model.nodes[ADDRESS].embedder.vocab.master) == labels
-    after = model.predict(probe)
+    after = pa.table(model.predict(probe))
     assert after.schema.equals(before.schema, check_metadata=True)
     assert after["predictions"].to_pylist() == expected
     loaded = rf.Model.load(model.save(tmp_path / "spare.ckpt"))
     assert loaded.schema.model_dump() == schema
     assert loaded.nodes[ADDRESS].embedder.vocab.size == width
-    restored = loaded.predict(probe)
+    restored = pa.table(loaded.predict(probe))
     assert restored.schema.equals(before.schema, check_metadata=True)
     assert restored["predictions"].to_pylist() == expected
 
@@ -138,7 +138,9 @@ def test_topk_is_capped_by_discovered_labels_including_empty_vocabulary(known):
     model = build("category")
     if known:
         model.encode(source("category", known), strata="train")
-    predicted = model.predict(source("category", ["unseen"]))["predictions"].to_pylist()[0]["label"]["content"]
+    predicted = pa.table(model.predict(source("category", ["unseen"])))["predictions"].to_pylist()[0]["label"][
+        "content"
+    ]
     assert len(predicted["topk"]) == len(known)
     assert {item["value"] for item in predicted["topk"]} == set(known)
     if not known:

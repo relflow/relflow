@@ -170,6 +170,7 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import relflow as rf
 import torch
@@ -256,7 +257,9 @@ def build() -> rf.Model:
 
 
 def embedding(model: rf.Model, rows: list[dict], batch_size: int = 128) -> np.ndarray:
-    outputs = model.predict(pa.Table.from_pylist(rows), batch_size=batch_size)["representations"].to_pylist()
+    outputs = pl.DataFrame(model.predict(pa.Table.from_pylist(rows), batch_size=batch_size))[
+        "representations"
+    ].to_list()
     selected = [[item for item in row if item["path"] == [] and item["parents"] == []] for row in outputs]
     if len(selected) != len(rows) or any(len(row) != 1 or row[0]["output_index"] != 0 for row in selected):
         raise ValueError("P082 requires exactly one root representation per customer in input row order")

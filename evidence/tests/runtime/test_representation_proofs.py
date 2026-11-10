@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import pytest
 import relflow as rf
@@ -127,7 +128,7 @@ def test_frozen_probe_reads_every_root_representation_and_excludes_leaf_embeddin
         amount=rf.Number(embed=True),
     )
     rows = [{"amount": 1.0}, {"amount": 2.0}]
-    records = model.predict(pa.Table.from_pylist(rows))["representations"].to_pylist()
+    records = pl.DataFrame(model.predict(pa.Table.from_pylist(rows)))["representations"].to_list()
     assert any(record["path"] == ["amount"] for record in records[0])
     root = [[record["embedding"] for record in row if record["path"] == []] for row in records]
     actual = proof.embedding(model, rows)

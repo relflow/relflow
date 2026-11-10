@@ -130,6 +130,7 @@ from copy import deepcopy
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
@@ -177,7 +178,7 @@ def permute(observations: list[dict], *, seed: int) -> list[dict]:
 
 def prediction(model: rf.Model, observations: list[dict]) -> np.ndarray:
     inputs = [{"items": row["items"]} for row in observations]
-    output = model.predict(inputs)["predictions"].to_pylist()
+    output = pl.DataFrame(model.predict(inputs))["predictions"].to_list()
     return np.asarray([row["mean_amount"]["content"] for row in output], dtype=np.float64)
 
 
