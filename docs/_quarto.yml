@@ -126,8 +126,12 @@ website:
             text: Category
           - href: datatypes/enum.qmd
             text: Enum
+          - href: datatypes/ordinal.qmd
+            text: Ordinal
           - href: datatypes/dateparts.qmd
             text: Period
+          - href: datatypes/duration.qmd
+            text: Duration
           - href: datatypes/branch.qmd
             text: Branch
           - href: datatypes/hash.qmd

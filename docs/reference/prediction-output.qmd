@@ -117,6 +117,7 @@ Rich leaf payloads keep their datatype-specific structure:
 | --- | --- |
 | `Boolean` | `content.probability`: probability of `True` |
 | `Number` | `content`: floating-point reconstruction |
+| `Ordinal` | `content`: declared ordered label or rounded integer rank |
 | `Quantile` | `content`: reconstruction in source units; null before learning a distribution |
 | `Vector` | `content`: fixed-width float list |
 | `Category`, `Enum` | `content.value`, `content.probability`, `content.topk` |

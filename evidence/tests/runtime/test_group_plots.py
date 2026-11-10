@@ -128,3 +128,37 @@ def test_unmeasured_group_studies_show_only_the_generator(identifier):
     fig, note = illustrate(identifier)
     assert len(fig.axes[0].lines) == 4
     assert "no model predictions" in note
+
+
+@pytest.mark.parametrize(
+    ("identifier", "measured_mode", "expected"),
+    [("P099", "duration", "duration"), ("P100", "ordinal", "ordinal"), ("P101", None, "group")],
+)
+def test_measured_research_uses_the_datatype_or_group_renderer(
+    monkeypatch, tmp_path, identifier, measured_mode, expected
+):
+    import matplotlib.pyplot as plt
+
+    from evidence.diagnostics import plots
+
+    calls = []
+
+    def handler(name):
+        def draw(bundle, spec):
+            calls.append(name)
+            return plt.figure(), name, {}
+
+        return draw
+
+    for name in ("duration", "ordinal", "research"):
+        monkeypatch.setitem(plots.HANDLERS, name, handler(name))
+    monkeypatch.setattr(plots, "group_learning", handler("group"))
+    monkeypatch.setattr(plots, "group_composition", handler("composition"))
+    monkeypatch.setattr(plots, "group_predictions", handler("predictions"))
+    bundle = SimpleNamespace(manifest={"id": identifier}, record={"metrics": {"group_counts": {}}})
+    spec = {"mode": "research", "focus": "focus", "comparison": "comparison", "limit": "limit"}
+    if measured_mode:
+        spec["measured_mode"] = measured_mode
+    plots.render(bundle, spec, tmp_path)
+    assert calls.count(expected) == 2
+    assert calls[0] == expected

@@ -733,17 +733,19 @@
   },
   "P099": {
     "mode": "research",
+    "measured_mode": "duration",
     "target": "target",
     "focus": "Does elapsed-time Duration behave like the equivalent prepared Number?",
-    "comparison": "Compare the declared Duration and Number arms and the paired joint-endpoint translation.",
-    "limit": "A matching stage/0.5.0 Duration wheel is required; a generator illustration does not establish learned equivalence."
+    "comparison": "Compare held-out predictions, error distributions and normalized error for two-query Duration, a fixed start, prepared Number and shuffled training durations.",
+    "limit": "One seed and a fixed synthetic task test numeric equivalence. Joint endpoint translation is an arithmetic invariant, not learned calendar reasoning. Without a matching recorded run, only the generator is illustrated."
   },
   "P100": {
     "mode": "research",
+    "measured_mode": "ordinal",
     "target": "rank",
     "focus": "Can an ordered decoder fill ranks absent from training?",
     "comparison": "Separate familiar and withheld ranks for Ordinal, rounded Number, and Category outputs.",
-    "limit": "A matching stage/0.5.0 Ordinal wheel is required; declared ordering alone is not learned interpolation."
+    "limit": "Withheld ranks lie inside the observed range. One seed does not establish arbitrary extrapolation; Category has no output classes for the withheld answers. Without a matching recorded run, only the split design is illustrated."
   },
   "P101": {
     "mode": "research",
