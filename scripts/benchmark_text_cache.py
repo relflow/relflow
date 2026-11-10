@@ -84,7 +84,12 @@ def definitions(fields, args):
             options.update(store=str(args.store), cache=args.mode != "legacy-store")
             if args.mode == "automatic":
                 options.update(memory=args.memory, resident=args.resident)
-            output[name] = rf.Text(**options)
+            constructor = rf.Text
+            if args.native_backend != "python":
+                from relflow_cache.text import Request
+
+                constructor = Request
+            output[name] = constructor(**options)
         else:
             raise ValueError("this benchmark expects only Text and Branch definitions")
     return output
@@ -105,6 +110,7 @@ def digest(path):
 
 
 def run(args):
+    os.environ["NATIVE_TEXT_MODE"] = args.native_backend
     torch.manual_seed(args.seed)
     torch.set_num_threads(1)
     table = ipc.open_file(pa.memory_map(str(args.input / "observations.arrow"))).read_all()
@@ -116,7 +122,7 @@ def run(args):
     embedders = {
         address: model.nodes[address].embedder
         for address, request in model.schema.requests.items()
-        if request.type == "text"
+        if request.type in ("text", "text_native")
     }
     width = next(iter(embedders.values())).hidden_size
     data = rf.ArrowDataModule(
@@ -224,6 +230,7 @@ def run(args):
         scope="Saved user-badge text-only nested snapshots; actual loader, Text runtime, tiny backward head. No full model training or quality measurement.",
         task=receipt["task"],
         mode=args.mode,
+        native_backend=args.native_backend,
         workers=args.workers,
         memory_mib=args.memory,
         resident_mib=args.resident,
@@ -267,6 +274,7 @@ if __name__ == "__main__":
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--store", type=Path, required=True)
     parser.add_argument("--mode", choices=("automatic", "legacy-store", "legacy-local"), default="automatic")
+    parser.add_argument("--native-backend", choices=("python", "owner", "full"), default="python")
     parser.add_argument("--workers", type=int, default=0)
     parser.add_argument("--memory", type=int, default=64)
     parser.add_argument("--resident", type=int, default=None)

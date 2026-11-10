@@ -301,7 +301,7 @@ class TensorField(TensorFieldBase[TensorDict]):
                 inverse = dictionary.indices.to_numpy(zero_copy_only=False)
                 if identifiers is not None:
                     storage = context.state if isinstance(context.state, Encoding) else encoding(request)
-                    rows = storage.identify(cast(list[str], unique.to_pylist()), tokenizer)
+                    rows = storage.identify(unique, tokenizer)
                     identifiers[placement, 0] = rows[inverse]
                 else:
                     assert encoded_ids is not None and encoded_mask is not None

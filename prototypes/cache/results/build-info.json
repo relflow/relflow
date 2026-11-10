@@ -1,0 +1,38 @@
+{
+  "recorded_at": "2026-11-10T18:34:02.497333+00:00",
+  "relflow_base_revision": "132cb118a6029c923482c0b2c3aa22a6f593fb9a",
+  "host": "lab",
+  "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+  "python": "3.12.6",
+  "rust": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "versions": {
+    "numpy": "2.4.6",
+    "pyarrow": "24.0.0",
+    "polars": "2.1.0",
+    "torch": "2.12.0",
+    "transformers": "5.9.0",
+    "relflow-cache-prototype": "0.1.0"
+  },
+  "binary_sha256": {
+    "/tmp/relflow-native-text-20261110/prototypes/text-cache/target/release/cache-owner": "728517bd2f6666d772a871fe16c2fe641c1cffd3f59f80676f433067798669f2",
+    "/tmp/relflow-generic-cache-20261110/deps/relflow_cache/native.abi3.so": "1b6db3331f7e5ab1fd934507957c3e52766a1753a9e31e200f125e6e0641c5c5",
+    "/tmp/relflow-generic-cache-20261110/source/prototypes/cache/wheels/relflow_cache_prototype-0.1.0-cp312-abi3-manylinux_2_34_x86_64.whl": "c80b5a1e4ddc10dc6c9e97cf2b94a9853f809d262a3ba52b0b5b498b061d81c0",
+    "/tmp/relflow-native-text-20261110/prototypes/text-cache/target/release/text-cache-owner": "34a90148aae4f1c32c5b8c4aebb4cbcbbab6bbad9aceda3d4449a300ff8b5932",
+    "/tmp/relflow-native-text-20261110/deps/relflow_text_native/native.abi3.so": "26ab625eed42c98205dbf377f750b911734bfebff1fcfc4851c4f97b976c77eb"
+  },
+  "validation": {
+    "python_integration": "29 passed, 2 standard fork warnings",
+    "rust_unit": "2 passed",
+    "local_text_core": "46 passed",
+    "pyrefly": "0 errors",
+    "ruff": "passed",
+    "parity": {
+      "rtol": 1e-05,
+      "atol": 2e-06,
+      "maximum_error": 0.0
+    },
+    "warm_encoder_calls": 0,
+    "timed_encoder_calls": 0
+  },
+  "replay_note": "Final 12 jobs randomized with seed 7302 against fully populated stores. Generic stores cloned through SQLite backup from independently prepared generic databases; previous-format stores cloned from the frozen previous fixture. No cold preparation jobs or earlier measurements were reused as final measurements."
+}

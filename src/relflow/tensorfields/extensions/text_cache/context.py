@@ -5,9 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
+import pyarrow as pa
 import torch
 
 from relflow.tensorfields.extensions.text_cache.device import Device
@@ -97,7 +98,9 @@ class Encoding:
     def share(self) -> None:
         self.client
 
-    def identify(self, texts: list[str], tokenizer: Any) -> np.ndarray:
+    def identify(self, texts: list[str] | pa.Array, tokenizer: Any) -> np.ndarray:
+        if isinstance(texts, pa.Array):
+            texts = cast(list[str], texts.to_pylist())
         with self.lock:
             settings = signature(tokenizer)
             if self.tokenizer is not tokenizer:

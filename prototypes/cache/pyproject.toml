@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.8,<2"]
+build-backend = "maturin"
+
+[project]
+name = "relflow-cache-prototype"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["numpy>=2.2.6", "pyarrow>=20"]
+
+[tool.maturin]
+features = ["python"]
+python-source = "python"
+module-name = "relflow_cache.native"
