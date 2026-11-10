@@ -261,3 +261,114 @@ body.home .quarto-figure img {
 body.home .column-body + p {
   margin-top: 1.5rem;
 }
+
+.benchmark-feature {
+  margin-block: 2rem;
+  padding: clamp(1.2rem, 3vw, 2rem);
+  background: var(--rf-surface);
+  border: 1px solid var(--rf-border);
+  border-top: 4px solid var(--rf-accent);
+  border-radius: 8px;
+}
+
+.benchmark-kicker {
+  color: var(--bs-link-color);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.benchmark-kicker > p {
+  margin-bottom: 0.5rem;
+}
+
+.benchmark-feature h2 {
+  margin-top: 0;
+  border: 0;
+}
+
+.benchmark-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-block: 1.5rem;
+}
+
+.benchmark-stats > div {
+  border-top: 1px solid var(--rf-border);
+  padding-top: 1rem;
+}
+
+.benchmark-stats p {
+  margin-bottom: 0.25rem;
+}
+
+.benchmark-value {
+  color: var(--bs-heading-color);
+  font-size: clamp(1.75rem, 4vw, 2.6rem);
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.benchmark-caption {
+  font-size: 0.85rem;
+}
+
+.benchmark-caption > p:last-child {
+  margin-bottom: 0;
+}
+
+.benchmark-board tr:has(td:first-child strong) td {
+  background: var(--rf-surface);
+  border-block: 2px solid var(--rf-accent);
+}
+
+@media (max-width: 575.98px) {
+  .benchmark-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.benchmark-stat-note {
+  display: block;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.benchmark-feature .benchmark-caption {
+  margin-top: 1.25rem;
+  line-height: 1.6;
+}
+
+body.benchmark .benchmark-feature {
+  margin-top: 1rem;
+}
+
+.benchmark-table table {
+  width: 100%;
+  font-size: 0.9rem;
+}
+
+.benchmark-table col {
+  width: auto !important;
+}
+
+.benchmark-table :is(th, td) {
+  padding: 0.6rem 0.75rem;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+
+.benchmark-table :is(th, td)[style*="right"] {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.benchmark-scale table {
+  min-width: 43rem;
+}
+
+.benchmark-scale :is(th, td):first-child {
+  min-width: 12rem;
+}
