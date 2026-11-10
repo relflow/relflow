@@ -46,7 +46,7 @@
 # populations. The example is illustrative; its answer is hidden during scoring.
 #
 # ```{typst}
-# //| label: fig-evidence-p095
+# //| label: fig-evidence-p112
 # //| fig-cap: "Visible fields supply evidence; prediction targets are hidden."
 # //| fig-alt: "Compare Group, Category, and a true-group reference across dense, sparse, and skewed known-identity populations."
 # #tree(node("record",kind:"root",children:(node("entity",type:"Group or Category"),node("x",type:"Number"),node("answer",kind:"target",type:"Number"))))
@@ -60,7 +60,7 @@
 #
 # ## Result
 #
-# {{< evidence P095 status >}}
+# {{< evidence P112 status >}}
 #
 # No result is claimed before a full run is recorded. The checks below are provisional hypotheses, not
 # established capabilities. Lower error and proper loss are better; larger accuracy is better. Controls and
@@ -69,11 +69,11 @@
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
 #
-# {{< evidence P095 evidence >}}
+# {{< evidence P112 evidence >}}
 #
 # ### Run this experiment
 #
-# {{< evidence P095 script >}}
+# {{< evidence P112 script >}}
 #
 # ### Process, splits, and interpretation
 #
@@ -82,14 +82,14 @@
 # generated mapping promise. Independent Gaussian noise has standard deviation 0.15. Train conditions use
 # 4,096 balanced,256 sparse,or2048 power-law-skewed observations. Validation 512 and test 2,048 use
 # independent draws; test includes each identity equally. All models share width 16, one layer, four heads
-# and 500 updates. The oracle is supplied a true-group Enum, so it is an information reference, not
+# and 2,400 updates. The oracle is supplied a true-group Enum, so it is an information reference, not
 # parameter-matched. Parameters are counted after fitting and not assumed smaller for Group.
 # Sparse/rare-identity and comparative scores remain visible even when broad capability gates pass.
 # Arbitrary unseen identities are outside this task.
 #
 # ### Complete experiment code
 # %%
-"""P095: compare Group and Category on sparse, skewed known identities."""
+"""P112: compare Group and Category on sparse, skewed known identities."""
 
 import lightning.pytorch as lit
 import numpy as np
@@ -98,7 +98,7 @@ import pyarrow as pa
 import relflow as rf
 from reporting import experiment, report
 
-BUDGET = 500
+BUDGET = 2400
 ENTITIES = 32
 GROUPS = 4
 INTERCEPT = np.asarray([-3.0, -1.0, 1.0, 3.0])
@@ -208,7 +208,7 @@ def fit(model: rf.Model, train: list[dict], validation: list[dict], seed: int, b
     return int(model.trainer.global_step)
 
 
-@experiment("P095", seed=9501)
+@experiment("P112", seed=11201)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     budget = BUDGET if steps is None else min(steps, BUDGET)
     mapping_seed = seed + 40

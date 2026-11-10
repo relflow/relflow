@@ -1,42 +1,48 @@
 # %% [markdown]
 # ---
-# title: Do stable labels produce the right groups?
+# title: Can a masked Group recover label groups?
 # categories:
 # - Group
-# description: Repeated identities carry stable labels. Ask the Group field to assign identities while predicting
-#   their labels.
+# description: Mask and reconstruct the Group state while a hidden prediction target trains assignments to recover
+#   the label groups.
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
 # toc: false
 # evidence-readout:
-# - label: Assigned groups at the final epoch
+# - label: Label agreement at the final epoch
 #   metric:
-#   - final_assigned_groups
+#   - adjusted_rand
 #   - -1
 #   format: number
+# - label: Held-out label accuracy
+#   metric: [heldout_accuracy]
+#   format: percent
+# - label: Shuffled-identity accuracy
+#   metric: [shuffled_accuracy]
+#   format: percent
 # evidence-group: Representation
 # ---
 #
-# Repeated identities carry one of five stable labels. The model learns the hidden label and also
-# reconstructs the Group state of masked identities. The experiment asks whether the assigned-group
-# count and usage settle near five, rather than assuming that recurrence alone organizes the
-# identities.
+# A Group field learns assignments from downstream objectives. This experiment checks whether that
+# is enough to organize repeated identities. The model predicts a hidden label while masking the Group identity state on half of training rows.
+# The state reconstruction objective and downstream label objective train together.
 #
 # ## Example
 #
 # ```yaml
-# merchant_id: c0-id3
-# label: L0
+# merchant_id: c2-id7
+# context: 0.3
+# label: L2
 # ```
 #
-# The label is hidden; the merchant identity is sometimes masked during training.
+# The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# The illustrated c0-id3 identity always has label L0. Other identities such as c0-id8 share that
-# label, while c1-id3 belongs to L1. These are complete synthetic identity tokens. The model is not
-# given a separate group field, and the hidden label is a training target rather than a visible
-# prediction input.
+# The illustrated identity c2-id7 always accompanies label L2 in the synthetic records. There are
+# ten identities for each of five labels, and every identity repeats twenty times. The names are
+# synthetic identifiers, not evidence about real merchants. Predicting L2 for this familiar identity
+# and updating the adaptive grouping mechanism are separate behaviors.
 #
 # ```{typst}
 # //| label: fig-proof-group-reconstructing-category-labels
@@ -44,73 +50,66 @@
 # //| fig-alt: "Model tree with event, merchant_id, label. Amber cards are hidden prediction targets. Other fields provide the input."
 # #tree(node("event", kind: "root", children: (
 #   node("merchant_id", type: "Group", width: 150pt,),
+#   node("context", type: "Number"),
 #   node("label", kind: "target", type: "Category",),
 # )))
 # ```
 #
 # ## Comparison
 #
-# Compare occupied assignment slots and their entropy with the five hidden label groups.
-#
-# Compared with the plain-input control, the important change is a reconstructing mask on
-# merchant_id. A callback then follows commitment and usage through thirty epochs and checks the
-# final five entries. Both training and validation reuse the same generated records. There is no
-# independent test of predicted labels and no direct comparison between learned memberships and the
-# five generating classes.
+# Compare final assignments and held-out label predictions with a test-time
+# identity-shuffle control. Independent context values carry no label signal.
 #
 # ## Result
 #
-# {{< evidence P020 status >}}
+# {{< evidence P110 status >}}
 #
 # Archived measurements use the former Cluster contract and do not validate this Group-based
-# source. The current fixed-slot assignments still need a full run; occupied slots and their
-# entropy do not by themselves establish correct grouping. Reused validation records also leave
-# independent predictive quality untested.
+# source. This run requires Group assignments to recover the stable labels.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
 #
-# {{< evidence P020 evidence >}}
+# {{< evidence P110 evidence >}}
 #
 # ### Run this experiment
 #
-# {{< evidence P020 script >}}
+# {{< evidence P110 script >}}
 #
 # ### How it works
 #
-# The merchant field uses `rf.Group(n_groups=15, mask=...)`, so it has a fixed
-# set of assignment slots. Its reconstructing mask trains the state head, not
-# the group assignments. The hidden category target supplies the downstream
-# objective that can update assignment angles; repetition ties each assignment
-# to a stable identity.
+# Group assignments are learned through downstream objectives, not by an
+# adaptive commitment mechanism. This proof adds a Group reconstruction mask and measures whether the sibling
+# label objective still organizes repeated identities while the state head trains.
 #
-# Assignments belong to stable identities. Row-varying sibling context does not
-# directly condition the Group identity query. The
-# [plain-input control](plain-input-is-dormant.html) measures assignments without
-# a reconstructing mask.
+# The fixed generator has five label groups and ten known identities per group.
+# Training, validation and test use independently generated nuisance context
+# values, while sharing identities. Training uses 20 records per identity and
+# validation and test each use four. The model trains for 4,800 updates with
+# batch size 64, AdamW at 0.003 and EMA 0.99. A callback records assignment
+# agreement each epoch, but the ARI criterion applies to the final assignment.
+# Require final ARI at least 0.95, held-out accuracy at least 0.90, and
+# shuffled-identity accuracy at most 0.35. These criteria are hypotheses, not
+# reused measurements from the old P019 proof.
 #
-# The model trains for 30 deterministic epochs. A callback snapshots public
-# assignments at each epoch; the gates examine occupancy and entropy over the
-# final five entries.
+# The [plain-input experiment](plain-input-is-dormant.html) leaves the Group
+# state unmasked. Both experiments use independent nuisance contexts and assess
+# known identities with an identity-shuffle control.
 #
 # ### Remaining work
 #
-# Use independent observations for each split, add held-out downstream skill
-# against a marginal baseline, and require adjusted Rand index (ARI) ≥ 0.80
-# for partition recovery. Add unique-identity and no-regime controls.
-#
-# The family requires three passing core seeds and at least ten calibration
-# seeds before its terminal-window thresholds can be promoted.
+# This proof tests new observations of known identities, not unseen identities.
+# The default seed is 11001; fresh confirmation seeds 11002 and 11003 are
+# declared before evaluation. They are separate experiments, not retries.
 #
 # ### Complete experiment code
 #
 
 # %%
-"""P020: track Group assignments across five repeated-identity labels.
+"""P110: test whether a masked Group recovers repeated label groups.
 
-Training and validation deliberately reuse observations. Count and usage
-perplexity diagnose the mechanism; they do not prove partition recovery or
-held-out prediction quality.
+A reconstructing mask trains the Group state head alongside the supervised
+label objective. Require near-perfect agreement with the known labels.
 """
 
 from collections.abc import Iterator
@@ -118,26 +117,28 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import relflow as rf
-import torch
 from reporting import experiment, report
 
+BUDGET = 4800
 
-def records(seed: int) -> Iterator[dict]:
-    """Repeat each of 50 identities twenty times with one stable regime label."""
+
+def records(seed: int, repeats: int = 20) -> Iterator[dict]:
+    """Generate independent nuisance context for each repeated identity."""
+    rng = np.random.default_rng(seed)
     rows = [
-        {"merchant_id": f"c{group}-id{identity}", "label": f"L{group}"}
+        {"merchant_id": f"c{group}-id{identity}", "context": float(rng.uniform(-1, 1)), "label": f"L{group}"}
         for group in range(5)
         for identity in range(10)
-        for _ in range(20)
+        for _ in range(repeats)
     ]
-    order = torch.randperm(len(rows), generator=torch.Generator().manual_seed(seed)).tolist()
-    for index in order:
+    for index in rng.permutation(len(rows)):
         yield rows[index]
 
 
 class Trajectory(lit.Callback):
-    """Track public Group assignments without claiming partition accuracy."""
+    """Measure Group assignments learned from the supervised label target."""
 
     def __init__(self, address: rf.Address) -> None:
         self.address = address
@@ -145,63 +146,105 @@ class Trajectory(lit.Callback):
 
     def on_train_epoch_end(self, trainer: lit.Trainer, pl_module: lit.LightningModule) -> None:
         assignments = rf.Group.assignments(pl_module, self.address)
-        group_ids = np.asarray([assignment["group"] for assignment in assignments.values()])
-        usage = np.bincount(group_ids, minlength=15).astype(float)
-        probabilities = usage / usage.sum()
-        entropy = -np.sum(probabilities[probabilities > 0] * np.log(probabilities[probabilities > 0]))
+        tokens = list(assignments)
+        labels = np.asarray([int(token[1]) for token in tokens])
+        groups = np.asarray([assignments[token]["group"] for token in tokens])
         self.rows.append(
             {
                 "epoch": trainer.current_epoch,
-                "n_assigned_groups": int(np.count_nonzero(usage)),
-                "perplexity": float(np.exp(entropy)),
+                "adjusted_rand": adjusted_rand(labels, groups),
+                "assigned_groups": int(np.unique(groups).size),
             }
         )
 
 
-@experiment("P020", seed=0)
+def adjusted_rand(actual: np.ndarray, predicted: np.ndarray) -> float:
+    """Measure label-group agreement without depending on assignment names."""
+    _, left = np.unique(actual, return_inverse=True)
+    _, right = np.unique(predicted, return_inverse=True)
+    cells = np.zeros((left.max() + 1, right.max() + 1), dtype=np.int64)
+    np.add.at(cells, (left, right), 1)
+    joint = float(np.sum(cells * (cells - 1) / 2))
+    row = cells.sum(axis=1)
+    column = cells.sum(axis=0)
+    left_pairs = float(np.sum(row * (row - 1) / 2))
+    right_pairs = float(np.sum(column * (column - 1) / 2))
+    all_pairs = len(actual) * (len(actual) - 1) / 2
+    expected = left_pairs * right_pairs / all_pairs
+    maximum = (left_pairs + right_pairs) / 2
+    return 1.0 if maximum == expected else (joint - expected) / (maximum - expected)
+
+
+@experiment("P110", seed=11001)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
         d_model=32,
         n_layers=1,
         n_heads=4,
-        merchant_id=rf.Group(n_groups=15, mask=rf.Mask(rate=0.5, reconstruct=True)),
+        merchant_id=rf.Group(n_groups=5, mask=rf.Mask(rate=0.5, reconstruct=True), p_unavailable=0.0),
+        context=rf.Number,
         label=rf.Category(mask=True, p_unavailable=0.0),
     )
-    source = partial(records, seed=seed)
-    data = rf.SyntheticDataModule(train=source, validate=source, seed=seed)
+    data = rf.SyntheticDataModule(
+        train=partial(records, seed=seed * 100 + 1),
+        validate=partial(records, seed=seed * 100 + 2, repeats=4),
+        seed=seed,
+    )
     trajectory = Trajectory(rf.Address("merchant_id"))
     model.fit(
         data,
         batch_size=64,
-        optimizer=lambda module: torch.optim.AdamW(module.parameters(), lr=0.003),
+        learning_rate=0.003,
         early_stopping=False,
         rollback=False,
         precision="32-true",
-        strategy="ddp" if accelerator in ("gpu", "auto") and torch.cuda.device_count() > 1 else "auto",
+        strategy="auto",
         accelerator=accelerator,
-        max_epochs=30,
-        max_steps=steps if steps is not None else -1,
-        callbacks=[trajectory],
+        devices=1,
+        max_epochs=-1,
+        max_steps=BUDGET if steps is None else min(steps, BUDGET),
+        callbacks=[rf.EMA(decay=0.99), trajectory],
         logger=False,
         enable_progress_bar=False,
         enable_model_summary=False,
         enable_checkpointing=False,
         deterministic=True,
+        num_sanity_val_steps=0,
     )
+    model.eval()
+    state = rf.Group.assignments(model, rf.Address("merchant_id"))
+    test = list(records(seed * 100 + 3, repeats=4))
+    order = np.random.default_rng(seed * 100 + 4).permutation(len(test))
+    shuffled = [{**row, "merchant_id": test[index]["merchant_id"]} for row, index in zip(test, order, strict=True)]
 
-    tail = trajectory.rows[-5:]
-    assigned_groups = [row["n_assigned_groups"] for row in tail]
-    perplexity = [row["perplexity"] for row in tail]
+    def accuracy(rows):
+        visible = pl.DataFrame([{key: row[key] for key in ("merchant_id", "context")} for row in rows])
+        output = model.predict(visible)["predictions"].to_list()
+        return float(
+            np.mean([out["label"]["content"]["value"] == row["label"] for out, row in zip(output, rows, strict=True)])
+        )
+
+    heldout_accuracy = accuracy(test)
+    shuffled_accuracy = accuracy(shuffled)
+    scores = [row["adjusted_rand"] for row in trajectory.rows]
+    assigned = [row["assigned_groups"] for row in trajectory.rows]
+    final_ari = scores[-1]
     return {
         "trajectory": trajectory.rows,
-        "final_assigned_groups": assigned_groups,
-        "final_perplexity": perplexity,
+        "adjusted_rand": scores,
+        "assigned_groups": assigned,
+        "final_ari": final_ari,
+        "heldout_accuracy": heldout_accuracy,
+        "shuffled_accuracy": shuffled_accuracy,
+        "assigned_identities": len(state),
+        "steps": model.trainer.global_step,
     }, {
-        "Final assigned-group counts remain between 4 and 7": all(4 <= value <= 7 for value in assigned_groups),
-        "Final perplexity remains within 1.5 of five": all(abs(value - 5) <= 1.5 for value in perplexity),
-        "Terminal assignment count is above the lower bound": assigned_groups[-1] != 3,
-        "Terminal assignment count is below the upper bound": assigned_groups[-1] != 15,
+        "Final assignments recover labels with ARI at least 0.95": final_ari >= 0.95,
+        "Held-out known-identity accuracy is at least 0.90": heldout_accuracy >= 0.90,
+        "Shuffled-identity accuracy is at most 0.35": shuffled_accuracy <= 0.35,
+        "All identities are assigned and evaluation preserves assignments": len(state) == 50
+        and state == rf.Group.assignments(model, rf.Address("merchant_id")),
     }
 
 

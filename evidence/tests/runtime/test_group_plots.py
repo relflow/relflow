@@ -43,10 +43,11 @@ def test_group_partition_plot_uses_fixed_width():
 
 
 @pytest.mark.parametrize("identity", ["cluster", "group"])
-def test_tradeoff_plot_supports_historical_and_current_arms(identity):
+@pytest.mark.parametrize("identifier", ["P095", "P112"])
+def test_tradeoff_plot_supports_historical_and_current_arms(identity, identifier):
     arm = {"nrmse": 0.5, "rare_identity_nrmse": 0.7}
     arms = {name: arm for name in (identity, "category", "oracle", "shuffled")}
-    bundle = SimpleNamespace(manifest={"id": "P095"}, record={"metrics": {"conditions": {"dense": {"arms": arms}}}})
+    bundle = SimpleNamespace(manifest={"id": identifier}, record={"metrics": {"conditions": {"dense": {"arms": arms}}}})
     fig, _, _ = grouping(bundle, {})
     assert len(fig.axes[0].collections) == 4
 

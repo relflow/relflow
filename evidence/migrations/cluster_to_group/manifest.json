@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "baseline_revision": "c0cae6df38010e232c0f12c966eaa6a06fae4b94",
+  "purpose": "Reviewed Cluster-to-Group evidence transition",
+  "proofs": [
+    {
+      "id": "P018",
+      "source_path": "evidence/experiments/cluster/hidden_regression_regimes.py",
+      "archive": "migrations/cluster_to_group/P018.py",
+      "sha256": "e7c41f09ed6405a475d580cc3031f923ad2c11c91d0649919b5aea7abf42f659",
+      "proposed_replacement": "P108",
+      "seed": 0
+    },
+    {
+      "id": "P019",
+      "source_path": "evidence/experiments/cluster/plain_input_is_dormant.py",
+      "archive": "migrations/cluster_to_group/P019.py",
+      "sha256": "3081d4b8881ff5fb1c37256ff0cc55f91ad2a21db60e6d65090424bc0ba7d88a",
+      "proposed_replacement": "P109",
+      "seed": 0
+    },
+    {
+      "id": "P020",
+      "source_path": "evidence/experiments/cluster/reconstructing_category_labels.py",
+      "archive": "migrations/cluster_to_group/P020.py",
+      "sha256": "3d2c71d747880254c81305ef8f38ea04dbe5d3f9742a2058fe824e38e6fe8036",
+      "proposed_replacement": "P110",
+      "seed": 0
+    },
+    {
+      "id": "P065",
+      "source_path": "evidence/experiments/vocabulary/cluster_pretraining_coverage.py",
+      "archive": "migrations/cluster_to_group/P065.py",
+      "sha256": "7abbf08845b6972b5de86f9812e2d5711bdbd7ccfe8056ebaa656193d47829e0",
+      "proposed_replacement": null,
+      "seed": 7651
+    },
+    {
+      "id": "P078",
+      "source_path": "evidence/experiments/cluster/regime_recovery.py",
+      "archive": "migrations/cluster_to_group/P078.py",
+      "sha256": "e34bf315e1e9ac70451caee1bf4847664b5f870f2f2a92565754d6f787d8dac8",
+      "proposed_replacement": "P111",
+      "seed": 7801
+    },
+    {
+      "id": "P095",
+      "source_path": "evidence/experiments/cluster/predictive_tradeoff.py",
+      "archive": "migrations/cluster_to_group/P095.py",
+      "sha256": "fa225d6ef47ff923ae310edb3a38d8dfa57e849149017455e08ad75375250d0a",
+      "proposed_replacement": "P112",
+      "seed": 9501
+    }
+  ]
+}

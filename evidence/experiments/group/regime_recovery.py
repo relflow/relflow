@@ -102,7 +102,7 @@
 # just as often, but remembering its name no longer identifies a response rule.
 # In the detailed measurements, `stable` and `no_regime` name these two conditions.
 #
-# Both arms use the same four-slot model, initialization, and 600-update budget.
+# Both arms use the same four-slot model, initialization, and 4,800-update budget.
 # Train, validation, and test contain the same 64 identities with independent
 # numeric inputs and noise. This tests new observations of known identities;
 # it does not test previously unseen identities.
@@ -125,7 +125,7 @@
 #
 # ## Result
 #
-# {{< evidence P078 status >}}
+# {{< evidence P111 status >}}
 #
 # Archived results use the former Cluster contract and do not validate this Group-based source.
 # Current runs compare assignment recovery and held-out prediction with four fixed Group slots.
@@ -133,11 +133,11 @@
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
 #
-# {{< evidence P078 evidence >}}
+# {{< evidence P111 evidence >}}
 #
 # ### Run this experiment
 #
-# {{< evidence P078 script >}}
+# {{< evidence P111 script >}}
 #
 # ### Process, observability, and split unit
 #
@@ -162,7 +162,7 @@
 # ### Model and predeclared gates
 #
 # Run one capacity of four with the same stable-regime and no-regime data seeds.
-# Each model trains for at most 600 AdamW updates, batch 128, learning rate
+# Each model trains for at most 4,800 AdamW updates, batch 128, learning rate
 # 0.003, with EMA decay 0.99. Each arm receives 4,096 train, 1,024 validation,
 # and 2,048 test rows. This tests recovery with a fixed capacity matching the
 # number of regimes, not adaptive discovery of that number.
@@ -188,7 +188,7 @@
 #
 
 # %%
-"""P078: require near-perfect partition recovery and held-out skill from Group."""
+"""P111: require near-perfect partition recovery and held-out skill from Group."""
 
 from collections.abc import Iterator
 from functools import partial
@@ -200,7 +200,7 @@ import pyarrow as pa
 import relflow as rf
 from reporting import experiment, report
 
-BUDGET = 600
+BUDGET = 4800
 EMA_DECAY = 0.99
 GROUP_COUNTS = (4,)
 BATCH_SIZE = 128
@@ -316,7 +316,7 @@ def measure(model: rf.Model, rows: list[dict], training_mean: float, partition_s
     }
 
 
-@experiment("P078", seed=7801)
+@experiment("P111", seed=11101)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     metrics: dict[str, dict] = {"group_counts": {}}
     checks = {}

@@ -1275,7 +1275,7 @@ def composition(bundle: Bundle, spec: dict):
 
 def grouping(bundle: Bundle, spec: dict):
     m = bundle.record["metrics"]
-    if bundle.manifest["id"] == "P095":
+    if bundle.manifest["id"] in {"P095", "P112"}:
         conditions = list(m["conditions"])
         fig, axes = axes_pair(width=10, height=4.8)
         first = m["conditions"][conditions[0]]["arms"]
@@ -2514,7 +2514,9 @@ def render(bundle: Bundle, spec: dict, output: Path) -> dict:
             "svg.hashsalt": "relflow-evidence-diagnostics",
         }
     )
-    group_proof = bundle.manifest["id"] in {"P078", "P101"} and "group_counts" in bundle.record["metrics"]
+    group_proof = (
+        bundle.manifest["id"] in {"P078", "P101", "P108", "P111"} and "group_counts" in bundle.record["metrics"]
+    )
     group_studies = {"P102", "P103", "P104", "P105", "P106", "P107"}
     handler = (
         group_learning

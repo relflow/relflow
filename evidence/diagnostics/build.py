@@ -116,7 +116,13 @@ def build(bundles: Path, output: Path, identifiers: list[str] | None = None, *, 
                 code_sha256=bundle.manifest["code_sha256"],
                 manifest=f"{identifier}-manifest.json.gz",
                 capture_run=bundle.manifest["runtime"]["github_run_id"],
-                scope="paired Evidence CI candidate" if ci else "full-budget unpaired diagnostic execution",
+                scope=(
+                    "candidate-only Evidence CI migration"
+                    if ci and identifier in ci.get("candidate_only", [])
+                    else "paired Evidence CI candidate"
+                    if ci
+                    else "full-budget unpaired diagnostic execution"
+                ),
             )
             for source, name in [
                 (directory / "record.json", f"{identifier}-record.json"),

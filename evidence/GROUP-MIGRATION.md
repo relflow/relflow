@@ -1,17 +1,52 @@
 # Cluster-to-Group Evidence migration design
 
-Status: **design only; not implemented or approved as a passing Evidence run**.
-The Group change removes `Cluster` intentionally. The current paired executor
+Status: **explicit transition policy; actual CI results are reported by the
+required gate**. The Group change removes `Cluster` intentionally. The ordinary paired executor
 runs the candidate suite against both wheels and requires identical checks.
 That cannot compare a Group-only experiment against a Cluster-only baseline.
 The existing Group scripts also reuse Cluster proof IDs despite changed methods
 and checks. Neither a missing baseline nor a renamed proof is a measurement.
 
-The failed PR #87 attempt `42506090355` retained baseline execution errors and
-check-set mismatches for P018, P019, P020, P078 and P095. All five candidate
-records also had unmet checks in that attempt. Those are historical results for
-that exact run, not measurements of a newer candidate. P065 was removed from the
-candidate catalog. Its historical Cluster result and identity must not be reused.
+The failed PR #87 attempts `42506090355` and `42729355108` retained baseline
+execution errors and check-set mismatches for P018, P019, P020, P078 and P095.
+All five candidate records also had unmet checks in each attempt. Those are
+historical results for those exact runs, not measurements of a newer candidate.
+P065 was removed from the candidate catalog. Its historical Cluster result and
+identity must not be reused.
+
+The six baseline proof sources for current main
+`c0cae6df38010e232c0f12c966eaa6a06fae4b94` are preserved byte-for-byte in
+`migrations/cluster_to_group/`, with source paths and SHA-256 digests in its
+manifest. Their source bytes also match the earlier `a912f291` baseline used in
+the retained lab investigation; its measurements are not measurements of the
+new baseline wheel. The transition planner and collector use this inventory
+when the independently pinned executor includes the reviewed policy.
+
+`migration.py` verifies the pinned inventory and distinct replacement IDs and
+classifies baseline and candidate failures separately. The planner and
+collector integrate that logic and retain their usual task and provenance
+checks. An executor or helper pin without this policy cannot perform the migration.
+The Group scripts use the distinct IDs P108–P112. P109 is a new proof with
+fresh seeds, independent observation splits and final-assignment criteria.
+P111 and P112 retain their quality and control thresholds but use extended
+budgets and fresh seeds in predeclared lab experiments. P108 and P110 have
+new fixed-capacity recovery protocols, independent observations, fresh seeds,
+and held-out identity-shuffle controls in predeclared lab experiments.
+
+The initial P108 and P110 Group versions expected an adaptive reduction from
+15 slots even though Group has fixed slots and does not promise balanced or
+compact use. Their replacements test recovered assignments and held-out
+predictions with controls. The former Group P019 checked every epoch
+against a final-quality ARI target; the new P109 checks final assignments and
+held-out predictions with an identity-shuffle control. The 600-update Group run
+now named P111 missed its partition and prediction gates, and the Group
+experiment now named P112 also missed its error gate. The new lab experiments
+met every check for all three P109 and P112 seeds, but only two of three seeds
+for each of P108, P110, and P111. The [lab record](../research/group-ci-20261110/README.md)
+retains the unmet checks and controls. These results are not hosted CI records.
+Further experiments must
+state their intended behavior, budgets and criteria before independent runs. Do
+not weaken existing checks or reuse old measurements to make the migration pass.
 
 ## Contract
 
@@ -65,6 +100,5 @@ candidate catalog. Its historical Cluster result and identity must not be reused
   publication and reuse reject incomplete, tampered, or unproven migration
   records. Smoke runs cannot satisfy the required gate.
 
-This change needs executor, suite and workflow work and may reveal real Group
-learning failures. Until those pieces are implemented, published and verified,
-`CI / required` should remain failing rather than silently relaxing the gate.
+This transition may reveal real Group learning failures. Until the complete
+hosted run is validated, `CI / required` must not silently relax the gate.

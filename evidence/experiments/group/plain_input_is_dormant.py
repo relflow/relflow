@@ -16,11 +16,12 @@
 #   - adjusted_rand
 #   - -1
 #   format: number
-# - label: Assigned groups at the final epoch
-#   metric:
-#   - assigned_groups
-#   - -1
-#   format: number
+# - label: Held-out label accuracy
+#   metric: [heldout_accuracy]
+#   format: percent
+# - label: Shuffled-identity accuracy
+#   metric: [shuffled_accuracy]
+#   format: percent
 # evidence-group: Representation
 # ---
 #
@@ -32,6 +33,7 @@
 #
 # ```yaml
 # merchant_id: c2-id7
+# context: 0.3
 # label: L2
 # ```
 #
@@ -48,17 +50,19 @@
 # //| fig-alt: "Model tree with event, merchant_id, label. Amber cards are hidden prediction targets. Other fields provide the input."
 # #tree(node("event", kind: "root", children: (
 #   node("merchant_id", type: "Group", width: 150pt,),
+#   node("context", type: "Number"),
 #   node("label", kind: "target", type: "Category",),
 # )))
 # ```
 #
 # ## Comparison
 #
-# Compare public Group assignments with the stable labels when the field has no reconstruction mask.
+# Compare final assignments and held-out label predictions with a test-time
+# identity-shuffle control. Independent context values carry no label signal.
 #
 # ## Result
 #
-# {{< evidence P019 status >}}
+# {{< evidence P109 status >}}
 #
 # Archived measurements use the former Cluster contract and do not validate this Group-based
 # source. This run requires Group assignments to recover the stable labels.
@@ -66,11 +70,11 @@
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
 #
-# {{< evidence P019 evidence >}}
+# {{< evidence P109 evidence >}}
 #
 # ### Run this experiment
 #
-# {{< evidence P019 script >}}
+# {{< evidence P109 script >}}
 #
 # ### How it works
 #
@@ -79,10 +83,15 @@
 # mask and measures whether the sibling label objective alone organizes the
 # repeated identities.
 #
-# This model uses 1,000 observations: five label groups, ten identities per group,
-# and 20 observations per identity. It trains for 1,000 deterministic epochs,
-# reusing the same table for validation. A callback records the public assignment
-# map and its adjusted Rand agreement with the known label groups.
+# The fixed generator has five label groups and ten known identities per group.
+# Training, validation and test use independently generated nuisance context
+# values, while sharing identities. Training uses 20 records per identity and
+# validation and test each use four. The model trains for 4,800 updates with
+# batch size 64, AdamW at 0.003 and EMA 0.99. A callback records assignment
+# agreement each epoch, but the ARI criterion applies to the final assignment.
+# Require final ARI at least 0.95, held-out accuracy at least 0.90, and
+# shuffled-identity accuracy at most 0.35. These criteria are hypotheses, not
+# reused measurements from the old P019 proof.
 #
 # The paired [reconstructing-label experiment](reconstructing-category-labels.html)
 # adds a mask to the Group field. That mask trains the state head; assignment
@@ -90,15 +99,15 @@
 #
 # ### Remaining work
 #
-# Repeat this positive recovery check alongside controls across three core seeds.
-# The broader family still needs independent held-out observations, unique-
-# identity and no-regime controls.
+# This proof tests new observations of known identities, not unseen identities.
+# The default seed is 10901; fresh confirmation seeds 10902 and 10903 are
+# declared before evaluation. They are separate experiments, not retries.
 #
 # ### Complete experiment code
 #
 
 # %%
-"""P019: test whether a plain Group recovers repeated label groups.
+"""P109: test whether a plain Group recovers repeated label groups.
 
 The supervised label objective can update Group assignments without a
 reconstructing mask. Require near-perfect agreement with the known labels.
@@ -109,21 +118,23 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import relflow as rf
-import torch
 from reporting import experiment, report
 
+BUDGET = 4800
 
-def records(seed: int) -> Iterator[dict]:
-    """Repeat each of 50 identities twenty times with one stable regime label."""
+
+def records(seed: int, repeats: int = 20) -> Iterator[dict]:
+    """Generate independent nuisance context for each repeated identity."""
+    rng = np.random.default_rng(seed)
     rows = [
-        {"merchant_id": f"c{group}-id{identity}", "label": f"L{group}"}
+        {"merchant_id": f"c{group}-id{identity}", "context": float(rng.uniform(-1, 1)), "label": f"L{group}"}
         for group in range(5)
         for identity in range(10)
-        for _ in range(20)
+        for _ in range(repeats)
     ]
-    order = torch.randperm(len(rows), generator=torch.Generator().manual_seed(seed)).tolist()
-    for index in order:
+    for index in rng.permutation(len(rows)):
         yield rows[index]
 
 
@@ -165,49 +176,76 @@ def adjusted_rand(actual: np.ndarray, predicted: np.ndarray) -> float:
     return 1.0 if maximum == expected else (joint - expected) / (maximum - expected)
 
 
-@experiment("P019", seed=0)
+@experiment("P109", seed=10901)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = rf.Model(
         d_model=32,
         n_layers=1,
         n_heads=4,
-        merchant_id=rf.Group(n_groups=5),
+        merchant_id=rf.Group(n_groups=5, p_unavailable=0.0),
+        context=rf.Number,
         label=rf.Category(mask=True, p_unavailable=0.0),
     )
-    source = partial(records, seed=seed)
-    data = rf.SyntheticDataModule(train=source, validate=source, seed=seed)
+    data = rf.SyntheticDataModule(
+        train=partial(records, seed=seed * 100 + 1),
+        validate=partial(records, seed=seed * 100 + 2, repeats=4),
+        seed=seed,
+    )
     trajectory = Trajectory(rf.Address("merchant_id"))
     model.fit(
         data,
         batch_size=64,
-        optimizer=lambda module: torch.optim.AdamW(module.parameters(), lr=0.003),
+        learning_rate=0.003,
         early_stopping=False,
         rollback=False,
         precision="32-true",
-        strategy="ddp" if accelerator in ("gpu", "auto") and torch.cuda.device_count() > 1 else "auto",
+        strategy="auto",
         accelerator=accelerator,
-        max_epochs=1000,
-        max_steps=steps if steps is not None else -1,
-        callbacks=[trajectory],
+        devices=1,
+        max_epochs=-1,
+        max_steps=BUDGET if steps is None else min(steps, BUDGET),
+        callbacks=[rf.EMA(decay=0.99), trajectory],
         logger=False,
         enable_progress_bar=False,
         enable_model_summary=False,
         enable_checkpointing=False,
         deterministic=True,
+        num_sanity_val_steps=0,
     )
+    model.eval()
+    state = rf.Group.assignments(model, rf.Address("merchant_id"))
+    test = list(records(seed * 100 + 3, repeats=4))
+    order = np.random.default_rng(seed * 100 + 4).permutation(len(test))
+    shuffled = [{**row, "merchant_id": test[index]["merchant_id"]} for row, index in zip(test, order, strict=True)]
 
-    adjusted_rand_scores = [row["adjusted_rand"] for row in trajectory.rows]
-    assigned_groups = [row["assigned_groups"] for row in trajectory.rows]
+    def accuracy(rows):
+        visible = pl.DataFrame([{key: row[key] for key in ("merchant_id", "context")} for row in rows])
+        output = model.predict(visible)["predictions"].to_list()
+        return float(
+            np.mean([out["label"]["content"]["value"] == row["label"] for out, row in zip(output, rows, strict=True)])
+        )
+
+    heldout_accuracy = accuracy(test)
+    shuffled_accuracy = accuracy(shuffled)
+    scores = [row["adjusted_rand"] for row in trajectory.rows]
+    assigned = [row["assigned_groups"] for row in trajectory.rows]
+    final_ari = scores[-1]
     return {
         "trajectory": trajectory.rows,
-        "adjusted_rand": adjusted_rand_scores,
-        "assigned_groups": assigned_groups,
+        "adjusted_rand": scores,
+        "assigned_groups": assigned,
+        "final_ari": final_ari,
+        "heldout_accuracy": heldout_accuracy,
+        "shuffled_accuracy": shuffled_accuracy,
+        "assigned_identities": len(state),
+        "steps": model.trainer.global_step,
     }, {
-        "Plain Group assignments recover label groups at ARI 0.95 or better": all(
-            value >= 0.95 for value in adjusted_rand_scores
-        ),
-        "More than one group is assigned": all(value > 1 for value in assigned_groups),
+        "Final assignments recover labels with ARI at least 0.95": final_ari >= 0.95,
+        "Held-out known-identity accuracy is at least 0.90": heldout_accuracy >= 0.90,
+        "Shuffled-identity accuracy is at most 0.35": shuffled_accuracy <= 0.35,
+        "All identities are assigned and evaluation preserves assignments": len(state) == 50
+        and state == rf.Group.assignments(model, rf.Address("merchant_id")),
     }
 
 

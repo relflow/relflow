@@ -216,6 +216,29 @@ def test_exact_input_reuse_preserves_records_revisions_and_unmet_checks(bundle):
     assert git(root, "status", "--porcelain") == ""
 
 
+def test_migration_reuse_preserves_roles_and_rejects_unmet_group_checks(tmp_path, monkeypatch):
+    monkeypatch.setattr(reuse, "registry", lambda root: {"P001": {}, "P108": {}})
+    manifest = {"migration": [{"id": "P018", "proposed_replacement": "P108"}]}
+    roles = {"baseline": "baseline", "candidate": "candidate"}
+    measured = {
+        ("baseline", "P001"): {"checks": {"paired": True}},
+        ("candidate", "P001"): {"checks": {"paired": True}},
+        ("baseline", "P018"): {"checks": {"old limitation": False}, "outcome": "not_met"},
+        ("candidate", "P108"): {"checks": {"new group": True}, "outcome": "met"},
+    }
+    assert reuse.comparison(tmp_path, manifest, measured, roles) == [{"id": "P018", "check": "old limitation"}]
+    with pytest.raises(ValueError, match="cannot exchange"):
+        reuse.comparison(tmp_path, manifest, measured, {"baseline": "candidate", "candidate": "candidate"})
+    bad = copy.deepcopy(measured)
+    bad["candidate", "P108"] = {"checks": {"new group": False}, "outcome": "not_met"}
+    with pytest.raises(ValueError, match="unmet candidate Group"):
+        reuse.comparison(tmp_path, manifest, bad, roles)
+    bad = copy.deepcopy(measured)
+    bad["candidate", "P001"]["checks"]["paired"] = False
+    with pytest.raises(ValueError, match="regresses"):
+        reuse.comparison(tmp_path, manifest, bad, roles)
+
+
 @pytest.mark.parametrize(
     "fault",
     [

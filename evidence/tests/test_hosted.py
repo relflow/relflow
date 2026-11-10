@@ -15,6 +15,7 @@ import hosted
 import pytest
 import runtime
 from evidence_ci import digest, plan, registry, suite_identity, task_key, write_json
+from migration import BASELINE
 
 
 def wheel(path, content):
@@ -59,7 +60,17 @@ def hints(root, tasks):
 
 @pytest.fixture
 def planned(tmp_path, monkeypatch, request):
-    suite = source(tmp_path / "suite", count=getattr(request, "param", 24))
+    selected = getattr(request, "param", 24)
+    suite = source(tmp_path / "suite", count=24 if selected == "migration" else selected)
+    if selected == "migration":
+        original = Path(__file__).resolve().parents[1]
+        shutil.copytree(original / "migrations", suite / "migrations")
+        entries = registry(original, measurements=False)
+        for identifier in ("P108", "P109", "P110", "P111", "P112"):
+            path = entries[identifier]["script"]
+            destination = suite / path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(original / path, destination)
     inputs = tmp_path / "inputs"
     wheel(inputs / "baseline/relflow-0.4.5-py3-none-any.whl", "baseline runtime\n")
     wheel(inputs / "candidate/relflow-0.4.5-py3-none-any.whl", "candidate runtime\n")
@@ -83,7 +94,7 @@ def planned(tmp_path, monkeypatch, request):
     )
     request = {
         "candidate": "a" * 40,
-        "baseline": "b" * 40,
+        "baseline": BASELINE if selected == "migration" else "b" * 40,
         "suite": "c" * 40,
         "run_id": 123,
         "run_attempt": 1,
@@ -336,7 +347,14 @@ def fresh(manifest, task, *, passed=True):
             "seed": task["seed"],
             "accelerator": "cpu",
             "outcome": "met" if passed else "not_met",
-            "checks": {"held-out signal": passed, "existing baseline limitation": False},
+            "checks": {
+                "held-out signal": passed,
+                **(
+                    {}
+                    if manifest.get("policy") == "cluster-group-transition-v1"
+                    else {"existing baseline limitation": False}
+                ),
+            },
             "metrics": {"score": 0.8 if passed else 0.2},
             "provenance": {
                 "evidence_revision": manifest["evidence_sha"],
@@ -500,6 +518,37 @@ def test_full_collection_preserves_twelve_actual_hosts_and_all_original_measurem
             assert (output / relative).read_bytes() == path.read_bytes()
             assert (output / "shards" / f"shard-{index}" / relative).read_bytes() == path.read_bytes()
     assert {task_key(task) for task in state["launches"]} == {task_key(task) for task in manifest["tasks"]}
+
+
+@pytest.mark.parametrize("planned", ["migration"], indirect=True)
+def test_migration_collects_all_twelve_shards_with_distinct_roles(shards, tmp_path):
+    prepared, manifest, _, root, execute, state = shards
+    assert manifest["policy"] == "cluster-group-transition-v1"
+    execute()
+    summary = collected(prepared, root, tmp_path / "migration-collected")
+    assert summary["passed"] and summary["complete"]
+    assert summary["fresh_tasks"] == 59 and len(state["launches"]) == 59
+    for entry in manifest["migration"]:
+        old, replacement = entry["id"], entry["proposed_replacement"]
+        if replacement:
+            assert any(old in shard and replacement in shard for shard in manifest["shards"])
+    assert summary["migration_candidate_unmet_checks"] == []
+
+
+@pytest.mark.parametrize("planned", ["migration"], indirect=True)
+def test_migration_collector_fails_on_each_unmet_new_group_proof(shards, tmp_path):
+    prepared, manifest, _, root, execute, state = shards
+    execute(candidate_passes=False)
+    summary = collected(prepared, root, tmp_path / "migration-failed")
+    assert summary["complete"] and not summary["passed"]
+    assert len(state["launches"]) == len(manifest["tasks"])
+    assert {item["id"] for item in summary["migration_candidate_unmet_checks"]} == {
+        "P108",
+        "P109",
+        "P110",
+        "P111",
+        "P112",
+    }
 
 
 def test_completed_failed_learning_checks_are_never_retried_and_only_collector_fails(shards, tmp_path):

@@ -25,11 +25,18 @@ def validate(reports: Path, inputs: Path | None = None, *, root: Path | None = N
         )
     if root is not None:
         entries = registry(root)
+        retired = {entry["id"]: entry for entry in manifest.get("migration", [])}
         for task in manifest["tasks"]:
-            entry = entries[task["id"]]
-            if task.get("script") != entry["script"]:
+            if task["id"] in retired:
+                entry = retired[task["id"]]
+                if task["role"] != "baseline":
+                    raise ValueError(f"{task['id']}: retired proof is not a baseline task")
+                script = entry["archive"]
+            else:
+                script = entries[task["id"]]["script"]
+            if task.get("script") != script:
                 raise ValueError(f"{task['id']}: publication source path differs from the tested catalog")
-            if digest(root / entry["script"]) != task.get("script_sha256"):
+            if digest(root / script) != task.get("script_sha256"):
                 raise ValueError(f"{task['id']}: publication source fingerprint differs from the tested script")
     try:
         json.dumps(records, allow_nan=False)

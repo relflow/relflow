@@ -43,6 +43,15 @@ The helper has three phases:
    Missing, duplicate, altered, cancelled, or failed execution cannot become a
    passing `CI / required` result.
 
+The Cluster-to-Group transition is documented in
+[GROUP-MIGRATION.md](GROUP-MIGRATION.md). When the separately reviewed executor
+and helper run against the pinned baseline, the policy preserves each archived
+Cluster proof as a required baseline-only task and runs each new Group proof as
+a required candidate-only task on the same shard. These results have distinct
+identities and are not a direct paired comparison. Every unaffected proof
+remains paired, every new Group check must pass, and plots identify the
+candidate-only scope. A different baseline uses the ordinary paired policy.
+
 Keep helper and executor pins immutable. To update trusted mechanics, first
 review and freeze the executor commit, then freeze a helper commit pointing to
 it, then update the consumer to that helper. A suite-only revision does not

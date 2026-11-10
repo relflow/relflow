@@ -85,6 +85,11 @@ def verify(path: Path, manifest: dict, records: list[dict]) -> dict:
         or ci.get("capture_sha256") != manifest["observations"]["capture_sha256"]
     ):
         raise ValueError("Evidence plots belong to a different paired execution")
+    candidate_only = {
+        entry["proposed_replacement"] for entry in manifest.get("migration", []) if entry["proposed_replacement"]
+    }
+    if set(ci.get("candidate_only", [])) != candidate_only:
+        raise ValueError("Evidence plot migration scope differs from the measured task plan")
     candidates = {r["task"]["id"]: r for r in records if r["task"]["role"] == "candidate"}
     with ZipFile(path) as archive:
         measured = set()
@@ -102,8 +107,13 @@ def verify(path: Path, manifest: dict, records: list[dict]) -> dict:
                 or entry["source_sha256"] != record["task"]["script_sha256"]
             ):
                 raise ValueError(f"{identifier}: plots differ from the canonical candidate measurement or source")
-            if data.get("scope") != "paired Evidence CI candidate":
-                raise ValueError(f"{identifier}: plots must identify their paired candidate scope")
+            scope = (
+                "candidate-only Evidence CI migration"
+                if identifier in candidate_only
+                else "paired Evidence CI candidate"
+            )
+            if data.get("scope") != scope:
+                raise ValueError(f"{identifier}: plots must identify their measured candidate scope")
     if measured != candidates.keys():
         raise ValueError("Evidence plots omit or duplicate candidate measurements")
     return review
