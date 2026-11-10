@@ -75,6 +75,7 @@ from relflow.tensorfields import (
     BatchContext,
     Context,
     DecoderBase,
+    Derive,
     EmbedderBase,
     Extension,
     RequestBase,
@@ -86,9 +87,11 @@ from relflow.tensorfields.extensions.category import Request as Category
 from relflow.tensorfields.extensions.cluster import Request as Cluster
 from relflow.tensorfields.extensions.dateparts import Request as DateParts
 from relflow.tensorfields.extensions.dateparts import Request as Period
+from relflow.tensorfields.extensions.duration import Request as Duration
 from relflow.tensorfields.extensions.enum import Request as Enum
 from relflow.tensorfields.extensions.hashable import Request as Hash
 from relflow.tensorfields.extensions.number import Request as Number
+from relflow.tensorfields.extensions.ordinal import Request as Ordinal
 from relflow.tensorfields.extensions.quantile import Request as Quantile
 from relflow.tensorfields.extensions.set import Request as Set
 from relflow.tensorfields.extensions.text import Request as Text
@@ -177,6 +180,9 @@ __all__ = [
     "NodePredicate",
     "NodeSelector",
     "Number",
+    "Ordinal",
+    "Duration",
+    "Derive",
     "Quantile",
     "OptimizerConfig",
     "Overflow",

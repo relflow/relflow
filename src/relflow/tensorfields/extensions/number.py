@@ -83,8 +83,7 @@ class Objective(enum.StrEnum):
                 return torch.nn.functional.huber_loss(input=input, target=target, reduction=reduction)
 
 
-@number.register(Component.Request)
-class Request(RequestBase):
+class Numeric(RequestBase):
     """Continuous numeric scalar with raw and signed-log lanes and a standardized readout.
 
     Inputs embed two standardized lanes: the source value and its signed log
@@ -111,26 +110,11 @@ class Request(RequestBase):
     scalar a supervised, unembedded target.
     """
 
-    type: Literal["number"] = "number"
     jitter: Jitter = pydantic.Field(default_factory=Jitter)
     n_bands: Annotated[int, pydantic.Field(gt=0, default=8)] = 8
     offset: Annotated[int, pydantic.Field(gt=0, default=4)] = 4
     alpha: Annotated[float | None, pydantic.Field(gt=0.0, lt=1.0, default=None)] = None
     objective: Objective = Objective.mae
-
-    if TYPE_CHECKING:
-
-        def __init__(
-            self,
-            *,
-            jitter: Jitter = ...,
-            n_bands: int = 8,
-            offset: int = 4,
-            alpha: float | None = None,
-            objective: Objective | Literal["mae", "mse", "huber"] = Objective.mae,
-            type: Literal["number"] = "number",
-            **options: Unpack[FieldOptions],
-        ) -> None: ...
 
     @property
     def log(self) -> bool:
@@ -174,6 +158,25 @@ class Request(RequestBase):
             "count": count,
             "alpha": normalizer.alpha,
         }
+
+
+@number.register(Component.Request)
+class Request(Numeric):
+    type: Literal["number"] = "number"
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            jitter: Jitter = ...,
+            n_bands: int = 8,
+            offset: int = 4,
+            alpha: float | None = None,
+            objective: Objective | Literal["mae", "mse", "huber"] = Objective.mae,
+            type: Literal["number"] = "number",
+            **options: Unpack[FieldOptions],
+        ) -> None: ...
 
 
 def compress(values: torch.Tensor) -> torch.Tensor:

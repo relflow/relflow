@@ -118,7 +118,7 @@ class FieldOptions(TypedDict, total=False):
     ffnx: int
     dropout: float | None
     active: bool
-    query: str | None
+    query: str | tuple[str, ...] | None
     nullable: bool
     pooling: Literal["query", "mean"]
     decoder_position: bool | None
@@ -270,7 +270,7 @@ class Leaf(Node):
         def type(self) -> str: ...
     else:
         type: str
-    query: str | None = None
+    query: str | tuple[str, ...] | None = None
     nullable: bool = True
     pooling: Literal["query", "mean"] = "query"
     decoder_position: pydantic.StrictBool | None = None
@@ -310,10 +310,33 @@ class Leaf(Node):
         if self.query is None:
             return self
 
-        from relflow.data.query import compile
+        from relflow.data.query import scope
 
-        compile(self.query)
+        for expression in (self.query,) if isinstance(self.query, str) else self.query:
+            scope(expression)
         return self
+
+    def post_bind_validate(self) -> None:
+        """Check scoped sources and derived-input capability against the live registry."""
+        from relflow.data.query import scope
+        from relflow.structs.enums import Component
+        from relflow.tensorfields.base import TENSORFIELDS
+
+        if isinstance(self.query, tuple) and Component.derive not in TENSORFIELDS[self.type].components:
+            raise ValueError(
+                f"field '{self.address}' has multiple source queries but extension '{self.type}' has no "
+                "derive component; register Component.derive or use one query"
+            )
+        if self.query is None:
+            return
+        ancestors = sum(node.type == "branch" for node in self.path) - 1
+        for expression in (self.query,) if isinstance(self.query, str) else self.query:
+            depth, _ = scope(expression)
+            if depth > ancestors:
+                raise ValueError(
+                    f"source query {expression!r} at '{self.address}' ascends {depth} owner branches, "
+                    f"but only {ancestors} ancestor branches exist; keep the source within the model root"
+                )
 
     @functools.cached_property
     def shape(self) -> tuple[int | None, ...]:

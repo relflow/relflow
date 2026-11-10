@@ -237,6 +237,19 @@ def compile(expression: str) -> Query:
     return Parser(expression).parse()
 
 
+@cache
+def scope(expression: str) -> tuple[int, str]:
+    """Separate explicit leaf ancestor steps from the ordinary structural path."""
+    if not isinstance(expression, str):
+        raise TypeError(f"query must be a string, got {type(expression).__name__}")
+    depth = 0
+    while expression.startswith("../"):
+        depth += 1
+        expression = expression[3:]
+    compile(expression)
+    return depth, expression
+
+
 def listed(datatype: pa.DataType) -> TypeGuard[ListType]:
     """Return whether an Arrow type owns one traversable list axis."""
 
@@ -582,4 +595,4 @@ def query(
     return selected
 
 
-__all__ = ["Plan", "Projection", "Query", "bind", "compile", "query"]
+__all__ = ["Plan", "Projection", "Query", "bind", "compile", "query", "scope"]

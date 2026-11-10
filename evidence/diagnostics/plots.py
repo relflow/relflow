@@ -2085,7 +2085,173 @@ def context_extrapolation(bundle: Bundle, spec: dict):
     )
 
 
+def duration(bundle: Bundle, spec: dict) -> tuple[plt.Figure, str, dict]:
+    """Compare elapsed-time readouts with the prepared and shuffled numeric controls."""
+    pairs = bundle.pairs(spec["target"])
+    arms = ("duration", "static", "number", "shuffled")
+    labels = ("Two-query Duration", "Configured-start Duration", "Prepared Number", "Shuffled training Number")
+    measured = bundle.record["metrics"]
+    selected = []
+    for arm in arms:
+        matches = [pair for pair in pairs if pair["context"].get("arm") == arm and "shifted" not in pair["call"]]
+        if len(matches) != 1:
+            raise ValueError(f"P099: expected one held-out prediction array for {arm}, got {len(matches)}")
+        selected.append(matches[0])
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.5), layout="constrained")
+    primary = selected[0]
+    actual, predicted = finite(primary["actual"]), finite(primary["predicted"])
+    density = axes[0].hexbin(actual, predicted, gridsize=30, mincnt=1, bins="log", cmap="viridis")
+    fig.colorbar(density, ax=axes[0], fraction=0.04, label="Held-out rows (log count)")
+    bounds = [min(actual.min(), predicted.min()), max(actual.max(), predicted.max())]
+    axes[0].plot(bounds, bounds, color="gray", ls="--", lw=1)
+    axes[0].set(title="Duration predicts the held-out target", xlabel="Actual target", ylabel="Predicted target")
+    axes[0].set_aspect("equal", adjustable="box")
+    drift = measured["arms"]["duration"]["joint_endpoint_shift_max_drift"]
+    axes[0].text(
+        0.03,
+        0.97,
+        f"n = {len(actual):,}\n371-day endpoint shift\nmax prediction drift = {drift:.3g}",
+        transform=axes[0].transAxes,
+        va="top",
+        fontsize=8,
+    )
+    examples = []
+    for index, (pair, label) in enumerate(zip(selected, labels, strict=True)):
+        truth, prediction = finite(pair["actual"]), finite(pair["predicted"])
+        errors = np.sort(np.abs(truth - prediction))
+        axes[1].step(
+            errors, np.arange(1, len(errors) + 1) / len(errors), where="post", color=COLORS[index], label=label
+        )
+        examples.append(
+            {
+                "label": label,
+                "field": spec["target"],
+                "population": "test",
+                "n": len(truth),
+                "records": [
+                    {
+                        "coordinate": [i],
+                        "input": pair["rows"][i],
+                        "actual": float(truth[i]),
+                        "predicted": float(prediction[i]),
+                    }
+                    for i in range(min(16, len(truth)))
+                ],
+            }
+        )
+    axes[1].set(
+        title="How much error remains?",
+        xlabel="Absolute target error",
+        ylabel="Fraction of held-out rows",
+        ylim=(0, 1.02),
+    )
+    axes[1].yaxis.set_major_formatter(PercentFormatter(1))
+    axes[1].grid(alpha=0.18)
+    axes[1].legend(fontsize=8, loc="lower right")
+    dots(
+        axes[2],
+        labels,
+        {"Held-out nRMSE": [measured["arms"][arm]["nrmse"] for arm in arms]},
+        xlabel="RMSE / training-mean predictor RMSE",
+        reference=(1, "Training-mean reference"),
+    )
+    axes[2].axvline(0.25, color=COLORS[0], ls="--", lw=1, label="Informative-arm criterion")
+    axes[2].set(title="Does the input carry information?", xlim=(0, None))
+    axes[2].legend(fontsize=8)
+    note = (
+        "All four arms use 2,048 independent held-out rows and 400 updates. "
+        "The shuffled control permutes only training durations; test inputs remain intact. "
+        "The dashed diagonal is exact prediction; the error curves retain every held-out row. "
+        f"Duration versus prepared Number prediction RMSE is {measured['duration_number_prediction_rmse']:.4g}. "
+        "The endpoint-shift annotation uses the same trained model. One seed; no uncertainty interval."
+    )
+    return fig, note, {"kind": "numeric", "conditions": examples}
+
+
+def ordinal(bundle: Bundle, spec: dict) -> tuple[plt.Figure, str, dict]:
+    """Show familiar and withheld rank accuracy without averaging away individual gaps."""
+    measured = bundle.record["metrics"]["domains"]
+    arms = ("ordinal", "number", "category")
+    labels = ("Ordinal", "Rounded Number", "Category")
+    fig, axes = plt.subplots(2, 2, figsize=(11, 7.5), layout="constrained", width_ratios=(1, 1.5))
+    for row, domain in enumerate(("integer", "labels")):
+        scores = measured[domain]
+        dots(
+            axes[row, 0],
+            ("Familiar ranks", "Withheld ranks"),
+            {
+                label: [scores[arm][condition]["exact_accuracy"] for condition in ("seen", "unseen")]
+                for arm, label in zip(arms, labels, strict=True)
+            },
+            xlabel="Exact rank accuracy",
+            percent=True,
+        )
+        axes[row, 0].set(
+            title="Integer ranks" if domain == "integer" else "Declared ordered labels", xlim=(-0.03, 1.03)
+        )
+        ranks = sorted(
+            {int(rank) for condition in ("seen", "unseen") for rank in scores["ordinal"][condition]["ranks"]}
+        )
+        withheld = {int(rank) for rank in scores["ordinal"]["unseen"]["ranks"]}
+        matrix = np.array(
+            [
+                [
+                    scores[arm]["unseen" if rank in withheld else "seen"]["ranks"][str(rank)]["exact_accuracy"]
+                    for rank in ranks
+                ]
+                for arm in arms
+            ]
+        )
+        image = axes[row, 1].imshow(matrix, vmin=0, vmax=1, cmap="viridis", aspect="auto")
+        axes[row, 1].set(
+            yticks=range(3),
+            yticklabels=labels,
+            xticks=range(len(ranks)),
+            xticklabels=[str(rank) + ("*" if rank in withheld else "") for rank in ranks],
+            xlabel="Actual rank (* withheld from training)",
+            title="Where does interpolation succeed?",
+        )
+        axes[row, 1].tick_params(axis="x", labelsize=8)
+        fig.colorbar(
+            image, ax=axes[row, 1], fraction=0.035, format=PercentFormatter(1), label="Exact accuracy within rank"
+        )
+    examples = []
+    for frame in bundle.frames:
+        if frame["function"] != "evaluate":
+            continue
+        context = {
+            **bundle.context(frame),
+            **{key: bundle.value(frame["values"].get(key)) for key in ("domain", "arm")},
+        }
+        predicted, expected, rows = bundle.values(frame, "predicted", "expected", "rows")
+        if predicted is None or expected is None or rows is None:
+            raise ValueError("P100: evaluated ranks must retain predictions, expected ranks and source rows")
+        examples.append(
+            {
+                "label": f"{human(context['domain'])} · {human(context['arm'])} · {human(context['condition'])}",
+                "field": "rank",
+                "population": "test",
+                "n": len(expected),
+                "records": [
+                    {"coordinate": [i], "input": rows[i], "actual": int(expected[i]), "predicted": int(predicted[i])}
+                    for i in range(min(16, len(expected)))
+                ],
+            }
+        )
+    if len(examples) != 12:
+        raise ValueError(f"P100: expected all twelve held-out rank populations, got {len(examples)}")
+    note = (
+        "Each decoder receives the same signal and 400 updates. Each familiar/withheld test population has 2,048 rows; "
+        "heatmap cells score every row at that rank. Asterisks mark answers excluded from training. "
+        "Category cannot emit those absent target classes. Rank positions 0–4 map to the five declared labels. "
+        "This tests interpolation within the training range, with one seed and no uncertainty interval."
+    )
+    return fig, note, {"kind": "numeric", "conditions": examples}
+
+
 HANDLERS = {
+    "duration": duration,
+    "ordinal": ordinal,
     "regression": numeric,
     "unknown-fallback": unknown_fallback,
     "quantile-source-units": quantile_source_units,
@@ -2147,7 +2313,7 @@ def render(bundle: Bundle, spec: dict, output: Path) -> dict:
             "svg.hashsalt": "relflow-evidence-diagnostics",
         }
     )
-    handler = HANDLERS.get(spec["mode"], summary)
+    handler = HANDLERS.get(spec.get("measured_mode", spec["mode"]), summary)
     result = {
         "id": bundle.manifest["id"],
         "focus": spec["focus"],
