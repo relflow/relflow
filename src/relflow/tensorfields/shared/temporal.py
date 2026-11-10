@@ -123,7 +123,7 @@ def calendar(pattern: str) -> Format:
                     content = r"[+-][0-9]{2}:?[0-9]{2}"
                 else:
                     content = "(?i:" + "|".join(NAMES[code]) + ")"
-                if code in {"z", "e"} or code in NAMES:
+                if code in {"z", "e", "j"} or code in NAMES:
                     body = f"body_{len(fields)}"
                     fragments.append(f")(?P<{name}>{content})(?P<{body}>")
                     if code in {"b", "B", "h"}:
@@ -179,7 +179,7 @@ def formatted(strings: pa.StringArray, pattern: str) -> pa.Array:
 
     # Windows lacks offsets and symbolic calendar directives. Preserve source
     # literals, lower English month names to numbers, and consume valid weekday
-    # names. Parse the resulting naive clock before applying its offset in ns.
+    # names. Parse the naive clock before applying its offset and converting to ns.
     pieces = []
     for name, code in format.pieces:
         text = pc.struct_field(captured, name)
@@ -190,16 +190,19 @@ def formatted(strings: pa.StringArray, pattern: str) -> pa.Array:
             text = pc.cast(pc.add(month, 1), pa.string())
         pieces.append(text)
     body = pc.binary_join_element_wise(*pieces, pa.repeat(pa.scalar(""), len(strings)))
-    values = pc.strptime(body, format=format.pattern, unit="ns", error_is_null=False)
-
-    # Calendar validation needs whole source-clock seconds. Integer floor
-    # avoids both epoch-float cancellation and truncation toward the next day
-    # for negative subsecond epochs; seconds also avoid ns offset overflow.
-    ticks = pc.cast(values, pa.int64())
-    seconds = pc.divide(ticks, pa.scalar(1000000000, type=pa.int64()))
-    remainder = pc.subtract(ticks, pc.multiply(seconds, 1000000000))
-    seconds = pc.subtract(seconds, pc.cast(pc.less(remainder, pa.scalar(0)), pa.int64()))
-    clock = cast(pa.TimestampArray, pc.cast(seconds, pa.timestamp("s")))
+    # strptime resolves whole seconds. Keep calendar arithmetic at that
+    # resolution and convert to ns only after validation and UTC adjustment.
+    clock = cast(pa.TimestampArray, pc.strptime(body, format=format.pattern, unit="s", error_is_null=False))
+    for code, name in format.fields:
+        if code != "j":
+            continue
+        supplied = pc.cast(pc.struct_field(captured, name), pa.int64())
+        year = pc.cast(pc.floor_temporal(clock, unit="year"), pa.int64())
+        day = pc.cast(pc.floor_temporal(clock, unit="day"), pa.int64())
+        elapsed = pc.add_checked(
+            pc.multiply_checked(pc.subtract(supplied, 1), 86400), pc.subtract(pc.cast(clock, pa.int64()), day)
+        )
+        clock = cast(pa.TimestampArray, pc.cast(pc.add_checked(year, elapsed), pa.timestamp("s")))
     for code, name in format.fields:
         if code not in CALENDAR:
             continue
@@ -212,9 +215,9 @@ def formatted(strings: pa.StringArray, pattern: str) -> pa.Array:
             "supply actual calendar coordinates matching the configured format"
         )
     if have_offset:
-        utc = pc.subtract_checked(ticks, pc.multiply(offset, 1000000000))
+        utc = pc.cast(pc.subtract_checked(pc.cast(clock, pa.int64()), offset), pa.timestamp("s", tz="UTC"))
         return pc.cast(utc, pa.timestamp("ns", tz="UTC"))
-    return values
+    return pc.cast(clock, pa.timestamp("ns"))
 
 
 def common(values: tuple[Temporal, ...]) -> pa.TimestampType[Any, Any]:

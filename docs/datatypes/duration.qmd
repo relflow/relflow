@@ -87,8 +87,8 @@ elapsed = rf.Duration(
 
 Named-zone `%Z` string formats are unsupported; use `%z` numeric offsets or
 typed timezone-aware timestamps.
-Numeric offsets, composite formats (`%F`, `%D`, `%x`, `%c`), and English month
-and weekday names are normalized before parsing for consistent platform support.
+Numeric offsets, composite formats (`%F`, `%D`, `%x`, `%c`), English month
+and weekday names, and day-of-year coordinates are handled portably with Arrow.
 
 ## Timestamps and missing values
 

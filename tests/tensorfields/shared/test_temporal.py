@@ -285,6 +285,12 @@ def test_custom_calendar_validation_preserves_leap_dates_padding_and_supported_f
         ("Thu Feb 29 00:00:00 2024", "%c", datetime(2024, 2, 29)),
         ("2026-02- 3", "%Y-%m-%e", datetime(2026, 2, 3)),
         ("2026-02-30", "%F", None),
+        ("2024-366", "%Y-%j", datetime(2024, 12, 31)),
+        ("2025-060", "%Y-%j", datetime(2025, 3, 1)),
+        ("366/24 23:30 +0130", "%j/%y %H:%M %z", datetime(2024, 12, 31, 22, tzinfo=timezone.utc)),
+        ("2024-02-29 060", "%Y-%m-%d %j", datetime(2024, 2, 29)),
+        ("2024-02-28 060", "%Y-%m-%d %j", None),
+        ("2025-366", "%Y-%j", None),
         ("Tuesday, 3 February 2026", "%A, %d %B %Y", datetime(2026, 2, 3)),
         ("3 fEb 2026 12:34:56", "%d %b %Y %H:%M:%S", datetime(2026, 2, 3, 12, 34, 56)),
         ("3 Feb 2026 +0130", "%d %h %Y %z", datetime(2026, 2, 2, 22, 30, tzinfo=timezone.utc)),
@@ -299,7 +305,8 @@ def test_custom_formats_expand_composites_for_backends_with_only_basic_directive
 
     def portable(values, *, format, **options):
         assert all(
-            directive not in format for directive in ("%F", "%D", "%x", "%c", "%e", "%z", "%a", "%A", "%b", "%B", "%h")
+            directive not in format
+            for directive in ("%F", "%D", "%x", "%c", "%e", "%z", "%a", "%A", "%b", "%B", "%h", "%j")
         )
         return strptime(values, format=format, **options)
 
