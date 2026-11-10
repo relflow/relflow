@@ -63,6 +63,7 @@ def build_schema(
                 model=model,
                 max_length=max_length,
                 encoder_batch_size=encoder_batch_size,
+                cache=False,
                 encoder_pooling=encoder_pooling,
                 objective=objective,
                 mask=mask,
@@ -100,6 +101,9 @@ class FakeTokenizer:
 
     def __init__(self):
         self.batches: list[list[str]] = []
+
+    def get_vocab(self):
+        return {"fake-length-tokens": 1}
 
     def __call__(self, texts, *, padding, truncation, max_length, return_tensors):
         assert padding == "max_length"
@@ -240,7 +244,7 @@ def test_text_raises_when_transformers_is_missing(monkeypatch: pytest.MonkeyPatc
     with pytest.raises(ModuleNotFoundError, match="relflow\\[text\\]"):
         rf.Model.xs(body=rf.Text, d_model=8)
 
-    assert TENSORFIELDS["text"].requires == {"transformers": "relflow[text]"}
+    assert TENSORFIELDS["text"].requires == {"transformers": "relflow[text]", "moka_py": "relflow[text]"}
 
 
 def test_text_cached_model_reuses_same_model(monkeypatch: pytest.MonkeyPatch):

@@ -145,15 +145,15 @@ model = rf.Model(
   Zone-aware timestamps describe their own wall clock; strings carrying an offset
   are read as UTC. A `Vector` with a NaN or infinite element, and a float NaN label
   in `Category`, take the `other` state; a NaN `Set` member is dropped like a null.
-- `Text(store="dir")` keeps frozen-encoder vectors on disk, keyed by encoder
-  configuration and token row and shared by every split, run, and field with
-  that encoder; misses are encoded once and appended as shards, the
-  extension's callback flushes at epoch and phase ends, and
-  `embedder.warm(strings)` fills it ahead of training. A store that fits
-  `resident` MiB of accelerator memory (default a quarter of the device, up
-  to 2 GiB) is uploaded once per index version and answered on the device;
-  rows hash identically on numpy and torch. The in-process `cache` stays for
-  runs without a store.
+- `Text` caches automatically: workers send stable IDs; a bounded device
+  table and shared Rust Moka RAM cache retain hot entries, with SQLite as the
+  durable cold tier. `store` selects a local directory, `memory` budgets RAM
+  (default 64 MiB), and `resident` budgets device tables and replacement
+  workspace (CUDA default: one eighth of free memory, up to 512 MiB).
+  `cache=False` disables all tiers; `cache=N` additionally caps hot entries.
+  Disk storage grows with observed text; only hot state is memory bounded.
+  `embedder.warm(strings)` fills the cache ahead of training. Cache owners are
+  shared by a trainer's loader family; separate DDP ranks share disk, not RAM.
 - `rf.Jitter(add=..., multiply=..., normalize=...)` is a shared frozen
   configuration whose `apply(inputs, mask)` method owns the vectorized affine
   tensor operation. Consumers own training activation, eligible coordinates,

@@ -1,252 +1,202 @@
-"""The Text embedding store persists frozen-encoder vectors across runs, splits, and fields."""
+"""Disk, Rust admission, bounded device state, and real owner failure recovery."""
 
-import gc
-import pickle
-import weakref
+import sys
+import time
 
 import numpy as np
-import pyarrow as pa
 import pytest
 import torch
 
-import relflow as rf
-from relflow.structs.enums import Strata
-from relflow.tensorfields.extensions.text import Embedder, EmbeddingStore, flush_stores, hash_rows, hash_rows_torch
-from tests.tensorfields.extensions.test_text import patch_hf
+from relflow.tensorfields.extensions.text_cache.backend import Disk
+from relflow.tensorfields.extensions.text_cache.device import Device
+from relflow.tensorfields.extensions.text_cache.store import Client, Owner, digest
 
-MODEL = "test-text-store"  # a fake encoder from patch_hf: the tests run offline, like CI
-
-
-def test_hash_rows_is_deterministic_and_row_sensitive():
-    rows = np.array([[1, 2, 3, 1, 1, 0], [1, 2, 4, 1, 1, 0], [1, 2, 3, 1, 1, 0]], dtype=np.int64)
-    keys = hash_rows(rows)
-    assert keys.shape == (3, 2) and keys.dtype == np.int64
-    assert np.array_equal(keys[0], keys[2]) and not np.array_equal(keys[0], keys[1])
-    assert not np.array_equal(hash_rows(rows, salt=1)[0], keys[0])
-    assert np.array_equal(hash_rows(rows), keys)
-    on_device = hash_rows_torch(torch.from_numpy(rows), salt=7).numpy()
-    assert np.array_equal(on_device, hash_rows(rows, salt=7)), "numpy and torch hash the same rows to the same words"
+pytestmark = pytest.mark.integration
 
 
-def test_store_round_trips_through_shards_and_later_openers(tmp_path):
-    first = EmbeddingStore(tmp_path, "enc", 4, flush_every=1000)
-    keys = hash_rows(np.arange(12, dtype=np.int64).reshape(3, 4))
-    vectors = np.arange(12, dtype=np.float32).reshape(3, 4)
-    assert first.put(keys, vectors) == 3 and first.put(keys, vectors) == 0
-    found, out = first.lookup(keys[[2, 0]])
-    assert found.all() and np.array_equal(out, vectors[[2, 0]])
-    assert first.flush() == 3 and first.flush() == 0
-
-    second = EmbeddingStore(tmp_path, "enc", 4)
-    found, out = second.lookup(keys)
-    assert found.all() and np.array_equal(out, vectors)
-    more = hash_rows(np.arange(100, 108, dtype=np.int64).reshape(2, 4))
-    assert second.put(more, np.ones((2, 4), dtype=np.float32)) == 2
-    second.flush()
-
-    third = EmbeddingStore(tmp_path, "enc", 4)
-    found, out = third.lookup(np.concatenate((keys, more)))
-    assert found.all() and len(third) == 5 and np.array_equal(out[3:], np.ones((2, 4)))
-    assert len(list(tmp_path.glob("enc.*.keys.npy"))) == 2, "each flush is its own shard"
-    missing, blank = third.lookup(hash_rows(np.array([[7, 7, 7, 7]], dtype=np.int64)))
-    assert not missing.any() and not blank.any()
-    assert len(EmbeddingStore(tmp_path, "other", 4)) == 0, "another encoder has its own files"
+@pytest.fixture
+def native_disk():
+    if sys.platform == "darwin":
+        pytest.skip("Moka/Arrow native binding conflict on macOS; real owner tests cover the isolated runtime")
 
 
-def test_store_flushes_itself_at_its_interval(tmp_path):
-    store = EmbeddingStore(tmp_path, "enc", 2, flush_every=2)
-    store.put(hash_rows(np.array([[1, 2]], dtype=np.int64)), np.zeros((1, 2), np.float32))
-    assert not list(tmp_path.glob("enc.*.keys.npy"))
-    store.put(hash_rows(np.array([[3, 4]], dtype=np.int64)), np.zeros((1, 2), np.float32))
-    assert len(list(tmp_path.glob("enc.*.keys.npy"))) == 1 and len(store.pending_keys) == 0 and len(store) == 2
-
-
-def configured(store):
-    return rf.Model.xs(
-        note=rf.Text(model=MODEL, store=str(store), max_length=8), label=rf.Boolean(mask=True), d_model=8, batch_size=4
+def rows(count, length=2):
+    return np.stack(
+        (np.arange(count * length, dtype=np.int64).reshape(count, length), np.ones((count, length), dtype=np.int64)),
+        axis=1,
     )
 
 
-def test_embedder_consults_the_store_before_the_encoder(tmp_path, monkeypatch):
-    patch_hf(monkeypatch)
-    table = pa.table({"note": ["alpha", "beta", "alpha", None], "label": [True, False, True, False]})
-    model = configured(tmp_path)
-    embedder = model.nodes["/note"].embedder
-    calls: list[int] = []
-    original = Embedder.pool
-
-    def counted(self, ids, mask):
-        calls.append(len(ids))
-        return original(self, ids, mask)
-
-    monkeypatch.setattr(Embedder, "pool", counted)
-    inputs = model.encode(table, strata=Strata.validate)
-    first = embedder.encode(content=inputs["/note"].content, state=inputs["/note"].state)
-    assert calls == [2], "two distinct strings reach the encoder once"
-    second = embedder.encode(content=inputs["/note"].content, state=inputs["/note"].state)
-    assert calls == [2] and torch.equal(first, second)
-    assert flush_stores(model) == {"/note": 2}
-
-    later = configured(tmp_path)
-    calls.clear()
-    third = later.nodes["/note"].embedder.encode(content=inputs["/note"].content, state=inputs["/note"].state)
-    assert calls == [] and torch.allclose(first, third)
-
-    plain = rf.Model.xs(note=rf.Text(model=MODEL, max_length=8), label=rf.Boolean(mask=True), d_model=8, batch_size=4)
-    direct = plain.nodes["/note"].embedder.encode(content=inputs["/note"].content, state=inputs["/note"].state)
-    assert torch.allclose(first, direct, atol=1e-5), "stored vectors are the encoder's own"
+def populate(store, count=4):
+    keys = [digest("test", str(i)) for i in range(count)]
+    aliases, ready = store.identify(keys, 2)
+    assert not ready.any()
+    identifiers = store.tokens(aliases, rows(count), keys, "test")
+    return keys, identifiers
 
 
-def test_warm_fills_the_store_for_every_later_split(tmp_path, monkeypatch):
-    patch_hf(monkeypatch)
-    model = configured(tmp_path)
-    embedder = model.nodes["/note"].embedder
-    # The fake tokenizer keys rows by length, so distinct strings here have distinct lengths.
-    assert embedder.warm(pa.array(["a", "bbb", None, "a"])) == 2
-    assert embedder.warm(["bbb", "ccccc"]) == 1
-    monkeypatch.setattr(Embedder, "pool", lambda self, ids, mask: (_ for _ in ()).throw(AssertionError("encoder ran")))
-    for strata in (Strata.train, Strata.validate, Strata.test):
-        table = pa.table({"note": ["a", "bbb", "ccccc"], "label": [True, False, True]})
-        inputs = model.encode(table, strata=strata)
-        encoded = embedder.encode(content=inputs["/note"].content, state=inputs["/note"].state)
-        assert encoded.shape[0] == 3 and encoded.shape[-1] == embedder.hidden_size and torch.isfinite(encoded).all()
+def test_disk_roundtrip_canonical_ids_and_reopen(tmp_path, native_disk):
+    path = tmp_path / "store.sqlite3"
+    store = Disk(path, 1024)
+    keys, ids = populate(store)
+    identity = store.identity
+    payload = store.get(ids, "fp32", 4, 2, 1)
+    assert bytes(payload[:4]) == b"\0" * 4
+    expected = np.arange(16, dtype=np.float32).reshape(4, 4)
+    assert store.put(ids, "fp32", expected, 1) == expected.tobytes()
+    store.close()
+    reopened = Disk(path, 0)
+    try:
+        assert reopened.identity == identity
+        actual, ready = reopened.identify(keys, 2)
+        np.testing.assert_array_equal(actual, ids)
+        assert ready.all()
+        payload = reopened.get(ids, "fp32", 4, 2, 2)
+        assert payload[:4] == b"\1" * 4
+        assert payload[4:] == expected.tobytes()
+        assert reopened.stats()["hot_bytes"] == 0
+    finally:
+        reopened.close()
 
 
-def test_fields_with_the_same_encoder_share_one_store(tmp_path, monkeypatch):
-    patch_hf(monkeypatch)
-    model = rf.Model.xs(
-        a=rf.Text(model=MODEL, store=str(tmp_path), max_length=8),
-        b=rf.Text(model=MODEL, store=str(tmp_path), max_length=8),
-        label=rf.Boolean(mask=True),
-        d_model=8,
-        batch_size=2,
-    )
-    table = pa.table({"a": ["shared"], "b": ["shared"], "label": [True]})
-    inputs = model.encode(table, strata=Strata.train)
-    first = model.nodes["/a"].embedder.encode(content=inputs["/a"].content, state=inputs["/a"].state)
-    monkeypatch.setattr(Embedder, "pool", lambda self, ids, mask: (_ for _ in ()).throw(AssertionError("encoder ran")))
-    second = model.nodes["/b"].embedder.encode(content=inputs["/b"].content, state=inputs["/b"].state)
-    assert torch.equal(first, second)
+def test_aliases_share_tokens_without_duplicating_the_vector(tmp_path, native_disk):
+    store = Disk(tmp_path / "store.sqlite3", 4096)
+    try:
+        keys = [digest("test", "alpha"), digest("test", "ALPHA")]
+        aliases, _ = store.identify(keys, 2)
+        same = np.repeat(rows(1), 2, axis=0)
+        ids = store.tokens(aliases, same, keys, "tokenizer-v1")
+        assert ids[0] == ids[1]
+        assert store.stats()["aliases"] == 2
+        assert store.stats()["entries"] == 1
+    finally:
+        store.close()
 
 
-def test_live_models_share_store_until_the_last_owner_is_collected(tmp_path, monkeypatch):
-    patch_hf(monkeypatch)
-    first = configured(tmp_path)
-    second = configured(tmp_path)
-    store = first.nodes["/note"].embedder.store
-    assert store is second.nodes["/note"].embedder.store
-    assert first.nodes["/note"].embedder.warm(["a", "bbb"]) == 2
-    store = EmbeddingStore.open(tmp_path, store.fingerprint, store.hidden_size, resident=64)
-    view = store.view(torch.device("cpu"))
+def test_conflicting_token_fill_rolls_back_without_poisoning_ram(tmp_path, native_disk):
+    store = Disk(tmp_path / "store.sqlite3", 4096)
+    try:
+        keys, ids = populate(store, 2)
+        new = keys + [digest("test", "new")]
+        aliases, _ = store.identify(new, 2)
+        # Known IDs are canonical; the first aliases also happen to be 1 and 2.
+        wrong = rows(3)
+        wrong[0, 0, 0] += 100
+        with pytest.raises(ValueError, match="conflicting"):
+            store.tokens(aliases, wrong, new, "test")
+        _, ready = store.identify([new[-1]], 2)
+        assert not ready.any()
+        assert store.stats()["entries"] == 2
+        assert not store.claims
+    finally:
+        store.close()
+
+
+def test_disk_index_and_cache_stay_bounded_beyond_hot_capacity(tmp_path, native_disk):
+    store = Disk(tmp_path / "store.sqlite3", 2048)
+    try:
+        _, ids = populate(store, 1000)
+        store.get(ids, "fp32", 128, 2, 1)
+        values = np.ones((1000, 128), dtype=np.float32)
+        store.put(ids, "fp32", values, 1)
+        for start in range(0, 1000, 100):
+            result = store.get(ids[start : start + 100], "fp32", 128, 2, 2)
+            assert result[:100] == b"\1" * 100
+        stats = store.stats()
+        assert stats["entries"] == stats["vectors"] == 1000
+        assert stats["hot_bytes"] <= 2048
+        assert stats["hot_entries"] < 20
+        statements = []
+        store.connection.set_trace_callback(statements.append)
+        store.stats()
+        assert not any("count(" in statement.lower() for statement in statements)
+    finally:
+        store.close()
+
+
+def test_precision_claims_and_owner_release(tmp_path, native_disk):
+    store = Disk(tmp_path / "store.sqlite3", 4096)
+    try:
+        _, ids = populate(store, 1)
+        assert store.get(ids, "fp32", 4, 2, 1)[0] == 0
+        assert store.get(ids, "fp32", 4, 2, 2)[0] == 2
+        store.release(1)
+        assert store.get(ids, "fp32", 4, 2, 2)[0] == 0
+        store.put(ids, "fp32", np.ones((1, 4), dtype=np.float32), 2)
+        assert store.get(ids, "bf16", 4, 2, 3)[0] == 0
+        store.put(ids, "bf16", np.zeros((1, 4), dtype=np.float32), 3)
+        assert store.stats()["vectors"] == 2
+        assert store.stats()["claims"] == 0
+    finally:
+        store.close()
+
+
+def test_rust_admission_keeps_frequent_vectors_through_a_scan(tmp_path, native_disk):
+    store = Disk(tmp_path / "store.sqlite3", 64 * 1024)
+    try:
+        _, ids = populate(store, 3000)
+        store.get(ids, "fp32", 128, 2, 1)
+        store.put(ids, "fp32", np.ones((3000, 128), dtype=np.float32), 1)
+        for _ in range(100):
+            store.get(ids[:8], "fp32", 128, 2, 1)
+        for start in range(8, len(ids), 100):
+            store.get(ids[start : start + 100], "fp32", 128, 2, 1)
+        before = store.stats()["vector_hits"]
+        store.get(ids[:8], "fp32", 128, 2, 1)
+        assert store.stats()["vector_hits"] - before >= 6
+        assert store.stats()["hot_bytes"] <= 64 * 1024
+    finally:
+        store.close()
+
+
+def test_device_cache_preserves_hot_rows_and_respects_row_and_byte_caps(tmp_path):
+    view = Device.open(str(tmp_path), "fp32", 4, torch.device("cpu"), 1, 2)
     assert view is not None
-    tensors = [weakref.ref(tensor) for tensor in view]
-    reference = weakref.ref(store)
-    key = (str(tmp_path.resolve()), store.fingerprint, store.hidden_size)
-    del view, store, first
-    gc.collect()
-    assert reference() is second.nodes["/note"].embedder.store
-
-    del second
-    gc.collect()
-    assert reference() is None
-    assert key not in EmbeddingStore.instances
-    assert all(tensor() is None for tensor in tensors)
-
-    # Releasing process-local indices and views never removes persistent vectors.
-    later = configured(tmp_path)
-    monkeypatch.setattr(Embedder, "pool", lambda self, ids, mask: (_ for _ in ()).throw(AssertionError("encoder ran")))
-    assert later.nodes["/note"].embedder.warm(["a", "bbb"]) == 0
-    assert len(later.nodes["/note"].embedder.store) == 2
+    view.admit(np.array([1, 2]), torch.ones((2, 4)), np.array([1, 1]))
+    view.lookup(torch.tensor([1] * 10))
+    view.admit(np.array([3]), torch.full((1, 4), 3.0), np.array([2]))
+    assert len(view.ids) <= 2
+    assert view.lookup(torch.tensor([1]))[0].all()
+    assert not view.lookup(torch.tensor([2]))[0].any()
+    with torch.inference_mode():
+        view.admit(np.array([4]), torch.full((1, 4), 4.0), np.array([3]))
+    view.lookup(torch.tensor([1]))
+    assert view.vectors.numel() * 4 <= view.limit
 
 
-def test_shared_store_resident_budget_changes_release_cached_views(tmp_path):
-    store = EmbeddingStore.open(tmp_path, "enc", 4, resident=64)
-    keys = hash_rows(np.arange(8, dtype=np.int64).reshape(2, 4))
-    vectors = np.arange(8, dtype=np.float32).reshape(2, 4)
-    store.put(keys, vectors)
-    store.flush()
-    view = store.view(torch.device("cpu"))
-    assert view is not None
-    references = [weakref.ref(tensor) for tensor in view]
-    del view
-
-    assert EmbeddingStore.open(tmp_path, "enc", 4, resident=0) is store
-    assert all(reference() is None for reference in references)
-    assert store.lookup_device(torch.from_numpy(keys)) is None
-    found, out = store.lookup(keys)
-    assert found.all() and np.array_equal(out, vectors)
-
-    assert EmbeddingStore.open(tmp_path, "enc", 4, resident=64) is store
-    found, resident = store.lookup_device(torch.from_numpy(keys))
-    assert found.all() and torch.equal(resident, torch.from_numpy(vectors))
-
-
-def test_negative_resident_budget_does_not_change_a_live_store(tmp_path):
-    with pytest.raises(ValueError, match="nonnegative budget"):
-        EmbeddingStore.open(tmp_path, "enc", 4, resident=-1)
-    store = EmbeddingStore.open(tmp_path, "enc", 4, resident=64)
-    keys = hash_rows(np.arange(4, dtype=np.int64).reshape(1, 4))
-    store.put(keys, np.ones((1, 4), dtype=np.float32))
-    store.flush()
-    view = store.view(torch.device("cpu"))
-    assert view is not None
-    with pytest.raises(ValueError, match="nonnegative resident budget"):
-        EmbeddingStore.open(tmp_path, "enc", 4, resident=-1)
-    assert store.resident == 64 and store.view(torch.device("cpu")) is view
-
-
-@pytest.mark.parametrize("resident", [None, 0, 64])
-def test_store_pickle_preserves_budget_and_pending_vectors(tmp_path, monkeypatch, resident):
-    store = EmbeddingStore.open(tmp_path, "enc", 4, flush_every=2, resident=resident)
-    keys = hash_rows(np.arange(4, dtype=np.int64).reshape(1, 4))
-    vectors = np.arange(4, dtype=np.float32).reshape(1, 4)
-    store.put(keys, vectors)
-    serialized = pickle.dumps(store)
-    assert not len(store.pending_keys)
-    # A new registry models reopening in another process, without inheriting views.
-    monkeypatch.setattr(EmbeddingStore, "instances", weakref.WeakValueDictionary())
-    restored = pickle.loads(serialized)
-    assert restored is not store
-    assert restored.resident == resident
-    assert restored.flush_every == 2
-    assert restored.views == {}
-    found, out = restored.lookup(keys)
-    assert found.all() and np.array_equal(out, vectors)
-    assert (restored.view(torch.device("cpu")) is not None) == (resident == 64)
-
-
-def test_resident_view_answers_on_device_within_its_budget(tmp_path):
-    store = EmbeddingStore(tmp_path, "enc", 4, flush_every=1000, resident=64)
-    keys = hash_rows(np.arange(20, dtype=np.int64).reshape(5, 4))
-    vectors = np.arange(20, dtype=np.float32).reshape(5, 4)
-    store.put(keys, vectors)
-    assert store.lookup_device(torch.from_numpy(keys)) is None, "pending vectors are not resident until flushed"
-    store.flush()
-    found, out = store.lookup_device(torch.from_numpy(keys[[4, 1]]))
-    assert found.all() and torch.equal(out, torch.from_numpy(vectors[[4, 1]]))
-    found, _ = store.lookup_device(torch.from_numpy(hash_rows(np.array([[9, 9, 9, 9]], dtype=np.int64))))
-    assert not found.any()
-    assert EmbeddingStore(tmp_path, "enc", 4, resident=0).lookup_device(torch.from_numpy(keys)) is None
-    assert EmbeddingStore(tmp_path, "enc", 4).view(torch.device("cpu")) is None, "a CPU model keeps the host index"
-
-
-def test_embedder_uses_the_resident_view_after_a_flush(tmp_path, monkeypatch):
-    patch_hf(monkeypatch)
-    model = rf.Model.xs(
-        note=rf.Text(model=MODEL, store=str(tmp_path), resident=64, max_length=8),
-        label=rf.Boolean(mask=True),
-        d_model=8,
-        batch_size=4,
-    )
-    embedder = model.nodes["/note"].embedder
-    table = pa.table({"note": ["alpha", "beta", "alpha", None], "label": [True, False, True, False]})
-    inputs = model.encode(table, strata=Strata.train)
-    first = embedder.encode(content=inputs["/note"].content, state=inputs["/note"].state)
-    assert flush_stores(model) == {"/note": 2}
-    assert embedder.store.view(torch.device("cpu")) is not None
-    monkeypatch.setattr(Embedder, "pool", lambda self, ids, mask: (_ for _ in ()).throw(AssertionError("encoder ran")))
-    monkeypatch.setattr(
-        embedder.store, "lookup", lambda keys: (_ for _ in ()).throw(AssertionError("host index consulted"))
-    )
-    second = embedder.encode(content=inputs["/note"].content, state=inputs["/note"].state)
-    assert torch.equal(first, second)
+@pytest.mark.integration
+def test_real_owner_protocol_claim_disconnect_and_durable_reopen(tmp_path):
+    owner = Owner.open(tmp_path / "disk", 1, None)
+    client = owner.start()
+    endpoint = client.endpoint
+    keys = [digest("tokenizer", "alpha")]
+    aliases, _ = client.identify(keys, 2)
+    ids = client.tokens(aliases, keys, rows(1), "tokenizer")
+    first = Client(endpoint)
+    second = Client(endpoint)
+    workers = [Client(endpoint) for _ in range(40)]
+    try:
+        assert all(worker.stats()["identity"] == endpoint.identity for worker in workers)
+        assert first.get(ids, "fp32", 4, 2)[0][0] == 0
+        assert second.get(ids, "fp32", 4, 2)[0][0] == 2
+        first.close()
+        deadline = time.monotonic() + 5
+        while second.get(ids, "fp32", 4, 2)[0][0] == 2:
+            assert time.monotonic() < deadline
+            second.wait()
+        second.put(ids, "fp32", np.ones((1, 4), dtype=np.float32))
+        with pytest.raises(RuntimeError, match="4096"):
+            second.request(1, dict(n=4097, length=2), b"")
+        assert client.stats()["claims"] == 0
+    finally:
+        for worker in workers:
+            worker.close()
+        first.close()
+        second.close()
+        process = owner.process
+        owner.close()
+    assert process.returncode == 0
+    reopened = owner.start()
+    assert reopened.endpoint.identity == endpoint.identity
+    assert reopened.get(ids, "fp32", 4, 2)[0][0] == 1
+    owner.close()

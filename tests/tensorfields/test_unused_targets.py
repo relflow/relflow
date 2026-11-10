@@ -31,7 +31,7 @@ class Tokenizer:
         (rf.Set, ["known"], {"p_unavailable": 0.0}),
         (rf.DateParts, datetime(2026, 1, 1), {"dateparts": ["day_of_week"]}),
         (rf.Hash, "identifier", {}),
-        (rf.Text, "hello", {"model": "local-test", "max_length": 4}),
+        (rf.Text, "hello", {"model": "local-test", "max_length": 4, "cache": False}),
     ],
 )
 @pytest.mark.parametrize("objective", [False, True])
