@@ -4,8 +4,8 @@ Status: **explicit transition policy; actual CI results are reported by the
 required gate**. The Group change removes `Cluster` intentionally. The ordinary paired executor
 runs the candidate suite against both wheels and requires identical checks.
 That cannot compare a Group-only experiment against a Cluster-only baseline.
-The existing Group scripts also reuse Cluster proof IDs despite changed methods
-and checks. Neither a missing baseline nor a renamed proof is a measurement.
+The failed runs also reused Cluster proof IDs for Group scripts despite changed
+methods and checks. Neither a missing baseline nor a renamed proof is a measurement.
 
 The failed PR #87 attempts `42506090355` and `42729355108` retained baseline
 execution errors and check-set mismatches for P018, P019, P020, P078 and P095.

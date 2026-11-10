@@ -103,7 +103,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
-          ref: '787625f1b2a88fda23d002999dc25499f735ad41'
+          ref: '0f70203bb29ca6f2245bb9a61a0dc8274fb3d617'
           path: executor
           fetch-depth: 0
           persist-credentials: false
@@ -116,8 +116,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
           SOURCE_RUN: ${{ github.event.workflow_run.id || inputs.library_run_id }}
-          EVIDENCE_EXECUTOR: '787625f1b2a88fda23d002999dc25499f735ad41'
-          EVIDENCE_HELPER: '9b0dd6037f4a8bc48ef0638aa6329eb859d87c16'
+          EVIDENCE_EXECUTOR: '0f70203bb29ca6f2245bb9a61a0dc8274fb3d617'
+          EVIDENCE_HELPER: 'd6e20c46e8a458a04b879db3795012879d015d0a'
         run: >-
           python executor/evidence/preview.py --run-id "$SOURCE_RUN"
           --helper "$EVIDENCE_HELPER" --executor "$EVIDENCE_EXECUTOR"
