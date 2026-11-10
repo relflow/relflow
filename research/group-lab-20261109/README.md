@@ -1,5 +1,7 @@
 # Group optimization search on the lab
 
+Raw captures, logs, and input snapshots are in the [lab research archive](../README.md).
+
 This is an exploratory validation search, not a canonical Evidence run. The
 candidate wheel was built from merge commit `e5d6f42` (the code is Reid's PR
 head merged with main). The wheel, scripts, P078 source, and reporting inputs

@@ -1,5 +1,7 @@
 # Does Group need more training time?
 
+Raw captures, logs, and input snapshots are in the [lab research archive](../README.md).
+
 This is an exploratory lab study, not the canonical P078 result or a paired
 Evidence CI run. It compares the P078 Group model at 600 and 4,800 optimizer
 updates for seeds 7801, 7802, and 7803. All six trials completed successfully;
@@ -36,7 +38,7 @@ other two seeds ended with all 64 identities matched; seed 7802 also showed
 a transient later validation-error spike. Longer training alone is not proof
 of robust convergence.
 
-![Per-seed assignment agreement and validation error across updates](training-duration.svg)
+![Per-seed assignment agreement and validation error across updates](training-duration.png)
 
 The chart uses actual end-of-epoch observations from the 4,800-step trials;
 the x-axis is logarithmic. Dashed gray lines are separate no-regime control

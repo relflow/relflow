@@ -1,6 +1,0 @@
-{
-  "purpose": "validation-only gradient-surrogate prototype; not canonical Evidence",
-  "temperature": 2.0,
-  "runner_sha256": "3798c6146423ae25bbdf44bf62574d8c8a340a5a8ca83df706109f670e67af18",
-  "result_sha256": "5e64ff1f46cf614b7a62a1ea620cb121a1b054a7bce14823b6caf41897a0ea71"
-}

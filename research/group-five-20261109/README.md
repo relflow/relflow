@@ -1,5 +1,7 @@
 # Group evidence studies, 2026-11-09
 
+Raw captures, logs, and input snapshots are in the [lab research archive](../README.md).
+
 Six standalone optional research-lane experiments examine five questions about the unreleased Group datatype. All results here are unpaired local lab observations, not required CI results or published evidence. Each full run uses an exact-source capture, three predeclared seeds, independent held-out observations, 2,400 updates per training stage, batch size 128, AdamW learning rate 0.003, 32-bit CPU execution, and EMA decay 0.99. Except for the unseen-label study, evaluation uses identities that appeared in training. Scores below are normalized RMSE: 1 means matching the training-mean predictor and lower is better. Denominators are calculated separately for each held-out population.
 
 Seed-level plots: [rare identities](plots/P102.png), [slot counts](plots/P103.png), [unseen identities](plots/P104.png), [assignment intervention](plots/P105.png), [drift](plots/P106.png), and [fresh-seed drift confirmation](plots/P107.png). The canonical Evidence renderer also produced record-bound single-seed diagnostics for all six studies, including the unmet confirmation.

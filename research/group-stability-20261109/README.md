@@ -1,5 +1,7 @@
 # Group stability exploration, 2026-11-09
 
+Raw captures, logs, and input snapshots are in the [lab research archive](../README.md).
+
 These are local research runs on `lab.tail815717.ts.net`, not paired CI evidence. They use the candidate `relflow` wheel with SHA-256 `cabe120b55c0e552e64469ecf337171650c3fd087375e7d56dd629ddccde5e8b`, Python 3.12.16 and CPU Torch 2.12.0. The containers ran without network access, with a two-CPU and 4 GiB limit and one Torch thread. Runs in a panel were concurrent, so their elapsed times are comparative observations, not isolated benchmarks. The image identity and input checksums are in `input/`. Raw per-run JSON, logs, exit statuses, and the captured P101 observations are in `output/`.
 
 ## Validation-selected checkpoints
@@ -43,7 +45,7 @@ We also applied the same validation-selection policy to P101 on seed 10101. It s
 - [Learning trajectories](plots/P101.png)
 - [Composition of learned groups](plots/P101-groups.png)
 - [Predictions and controls](plots/P101-predictions.png)
-- [Captured result](plots/P101-record.json)
+- [Captured result (restore the lab archive)](../README.md)
 
 ## Reproducing and provenance
 

@@ -1,5 +1,7 @@
 # Group PR CI diagnosis
 
+Raw captures, logs, and input snapshots are in the [lab research archive](../README.md).
+
 PR #87's latest GitHub run at inspection time was [42506090355](https://github.com/relflow/relflow/actions/runs/42506090355), head `0acf8f0e76a0de262339750451211430f248ea81`. Its documentation failure came from links to `Group.qmd` on a case-sensitive filesystem. Every failed package matrix job reported the same logging test dereferencing a disabled checkpoint callback. The collector's original summary is retained in `pr87-42506090355-summary.json`; all twelve shards completed, but the collector reported baseline execution errors and differing check sets for P018, P019, P020, P078, and P095. Those baseline wheels do not export Group. The candidate records for all five IDs also contained unmet checks in that historical run.
 
 The separate full-budget local `p078-current.json` is an unpaired diagnostic of commit `fbc310352efaaad229e93737e81d876fbf344d5a` after merging `main` at `8c466560e2c2db94453e1405a6990ea5f99fbc02`. It used the editable source tree on macOS CPU, Python 3.12.10, one Torch thread, seed 7801, and the declared 600 updates per arm. The record did not use a packaged wheel (`wheel_sha256` is null); its exact source, script and code hashes remain in the record. The stable arm reached ARI 0.2252 and normalized RMSE 0.6528, so both the ARI >= 0.95 and nRMSE <= 0.35 checks were unmet. This is not a paired CI execution and does not predict a different runner's numerical result.

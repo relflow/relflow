@@ -1,5 +1,7 @@
 # Group Evidence runtime and EMA exploration
 
+Raw captures, logs, and input snapshots are in the [lab research archive](../README.md).
+
 This is a local, unpaired lab investigation, not a replacement for P078 or
 paired Evidence CI. It uses the exact candidate wheel and P078 source identified
 in `input/SHA256SUMS`, the recorded container image in `input/image-id.txt`, and
