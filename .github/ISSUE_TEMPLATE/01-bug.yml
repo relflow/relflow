@@ -1,0 +1,49 @@
+name: Bug or regression
+description: Report incorrect behavior, compatibility failures, or crashes in relflow.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe what failed and what you expected. Share only the details you have;
+        a diagnosis or proposed fix is not required. Remove credentials and private data from examples and logs.
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+      description: Describe the incorrect behavior and how it affects your task.
+      placeholder: Predicting with this schema fails when a repeated collection is empty.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen?
+      description: Give a concrete expected result that would show the issue is resolved.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How can we reproduce it?
+      description: |
+        Include minimal code, schema, input, and a command when possible. For data issues,
+        include Arrow types and relevant null, empty collection, or nested record cases.
+        Use fenced code blocks for code and output. If you cannot share a reproduction, describe the trigger.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Where does it happen?
+      description: |
+        Include the relflow version or commit, Python and relevant dependency versions,
+        operating system, and device. Mention workers, distributed execution, compilation,
+        or serving when relevant.
+  - type: input
+    id: regression
+    attributes:
+      label: Did this work previously?
+      description: Last known working version or commit, if known.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Supporting evidence
+      description: Attach a traceback, logs, output comparison, or failing run link.
