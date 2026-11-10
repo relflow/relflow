@@ -122,7 +122,7 @@ Rich leaf payloads keep their datatype-specific structure:
 | `Vector` | `content`: fixed-width float list |
 | `Category`, `Enum` | `content.value`, `content.probability`, `content.topk` |
 | `Set` | `content`: list of value/probability candidates |
-| `Cluster` | `cluster.value`, `cluster.probability`, plus content value/probability |
+| `Group` | `group.value`, `group.probability` |
 | `Text`, `Hash`, `Period` | No decoded public value; embeddings can be requested |
 
 Number and Quantile use the units supplied after preprocessing. Quantile clips

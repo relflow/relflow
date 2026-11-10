@@ -82,10 +82,33 @@ def test_figures_require_the_identical_selected_record_and_keep_unmet_checks(pro
     markup = fragment(project, "P001", run, review)
     assert "unpaired visualization run" in markup
     assert "P001-record.json" in markup
+    assert "CI observation bundles" not in markup
     altered = deepcopy(run)
     altered["seed"] += 1
     assert fragment(project, "P001", altered, review) == ""
     assert fragment(project, "P001", None, review) == ""
+
+
+def test_paired_figures_link_to_the_recorded_ci_run(project):
+    path = project / "docs/assets/evidence-plots/P001.json"
+    data = json.loads(path.read_text())
+    data["scope"] = "paired Evidence CI candidate"
+    path.write_text(json.dumps(data))
+    review = json.loads((path.parent / "review.json").read_text())
+    markup = fragment(project, "P001", data["record"], review)
+    assert "https://github.com/relflow/relflow/actions/runs/1" in markup
+    assert "paired Evidence CI run" in markup
+
+
+def test_introduced_figure_explains_its_candidate_only_scope(project):
+    path = project / "docs/assets/evidence-plots/P001.json"
+    data = json.loads(path.read_text())
+    data["scope"] = "candidate-only Evidence CI proof"
+    path.write_text(json.dumps(data))
+    review = json.loads((path.parent / "review.json").read_text())
+    markup = fragment(project, "P001", data["record"], review)
+    assert "no directly comparable baseline measurement" in markup
+    assert "https://github.com/relflow/relflow/actions/runs/1" in markup
 
 
 def test_illustrations_do_not_gain_a_learning_claim(project):
@@ -196,4 +219,49 @@ def test_paired_bundle_rejects_another_run_or_candidate_record(project, tmp_path
         verify(archive, manifest, altered)
     manifest["run_id"] = "gh-42-3"
     with pytest.raises(ValueError, match="different paired execution"):
+        verify(archive, manifest, records)
+
+
+def test_introduced_plots_authenticate_candidate_only_scope(project, tmp_path):
+    from evidence.visuals import verify
+
+    assets = project / "docs/assets/evidence-plots"
+    data_path = assets / "P001.json"
+    review_path = assets / "review.json"
+    data = json.loads(data_path.read_text())
+    data["scope"] = "candidate-only Evidence CI proof"
+    data_path.write_text(json.dumps(data))
+    review = json.loads(review_path.read_text())
+    review["ci"] = dict(
+        run_id="gh-42-2",
+        candidate_revision="a" * 40,
+        baseline_revision="b" * 40,
+        evidence_revision="a" * 40,
+        executor_sha="c" * 40,
+        capture_sha256="d" * 64,
+        candidate_only=["P001"],
+    )
+    entry = review["entries"]["P001"]
+    entry["source_sha256"] = hashlib.sha256((assets / "P001-proof.py").read_bytes()).hexdigest()
+    entry["assets"]["P001.json"] = hashlib.sha256(data_path.read_bytes()).hexdigest()
+    review_path.write_text(json.dumps(review))
+    archive = tmp_path / "plots.zip"
+    with ZipFile(archive, "w") as bundle:
+        for path in assets.iterdir():
+            bundle.write(path, path.name)
+    manifest = dict(
+        run_id="gh-42-2",
+        candidate={"revision": "a" * 40},
+        baseline={"revision": "b" * 40},
+        evidence_sha="a" * 40,
+        executor_sha="c" * 40,
+        observations={"capture_sha256": "d" * 64},
+        introduced=["P001"],
+    )
+    records = [
+        dict(task={"id": "P001", "role": "candidate", "script_sha256": entry["source_sha256"]}, result=data["record"])
+    ]
+    assert verify(archive, manifest, records)["ci"]["candidate_only"] == ["P001"]
+    manifest["introduced"] = []
+    with pytest.raises(ValueError, match="introduced-proof scope"):
         verify(archive, manifest, records)

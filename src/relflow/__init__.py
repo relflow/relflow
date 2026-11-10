@@ -84,11 +84,11 @@ from relflow.tensorfields import (
 )
 from relflow.tensorfields.extensions.boolean import Request as Boolean
 from relflow.tensorfields.extensions.category import Request as Category
-from relflow.tensorfields.extensions.cluster import Request as Cluster
 from relflow.tensorfields.extensions.dateparts import Request as DateParts
 from relflow.tensorfields.extensions.dateparts import Request as Period
 from relflow.tensorfields.extensions.duration import Request as Duration
 from relflow.tensorfields.extensions.enum import Request as Enum
+from relflow.tensorfields.extensions.group import Request as Group
 from relflow.tensorfields.extensions.hashable import Request as Hash
 from relflow.tensorfields.extensions.number import Request as Number
 from relflow.tensorfields.extensions.ordinal import Request as Ordinal
@@ -154,7 +154,6 @@ __all__ = [
     "AttentionInput",
     "ArrowDataModule",
     "ArrowInput",
-    "Cluster",
     "Category",
     "Component",
     "Context",
@@ -166,6 +165,7 @@ __all__ = [
     "EMA",
     "DecoderBase",
     "EmbedderBase",
+    "Group",
     "Hash",
     "Schema",
     "Jitter",

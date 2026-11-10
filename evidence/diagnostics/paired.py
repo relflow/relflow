@@ -14,7 +14,14 @@ def prepare(reports: Path, observations: Path, destination: Path) -> dict:
     manifest = json.loads((reports / "manifest.json").read_text())
     catalog = registry(reports / "source", measurements=False)
     tasks = manifest["tasks"]
-    expected = {(key, role) for key in catalog for role in ["baseline", "candidate"]}
+    policy = manifest.get("policy", "paired-passing-checks-v1")
+    if policy not in {"paired-passing-checks-v1", "introduced-passing-checks-v1"}:
+        raise ValueError("Unknown Evidence plot comparison policy")
+    candidate_only = set(manifest.get("introduced", []))
+    if not candidate_only <= catalog.keys() or (candidate_only and policy != "introduced-passing-checks-v1"):
+        raise ValueError("Plot scope differs from the registered catalog")
+    expected = {(key, "candidate") for key in catalog}
+    expected |= {(key, "baseline") for key in catalog if key not in candidate_only}
     if (
         manifest.get("mode") != "full"
         or manifest.get("full_catalog") is not True
@@ -63,4 +70,5 @@ def prepare(reports: Path, observations: Path, destination: Path) -> dict:
         "executor_sha": manifest["executor_sha"],
         "report_manifest_sha256": digest(reports / "manifest.json"),
         "capture_sha256": manifest["observations"]["capture_sha256"],
+        **({"candidate_only": sorted(candidate_only)} if candidate_only else {}),
     }

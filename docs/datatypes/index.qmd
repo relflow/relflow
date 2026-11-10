@@ -33,7 +33,7 @@ matters to the task; the first model does not need every available type.
 | Elapsed account age or time between events | [Duration](duration.qmd) |
 | Account identifier equality without a learned vocabulary | [Hash](hash.qmd) |
 | Amount represented by its learned distribution | [Quantile](quantile.qmd) |
-| Merchant labels sharing learned latent groups | [Cluster](cluster.qmd) |
+| Merchant labels sharing learned latent groups | [Group](group.qmd) |
 | Merchant representation supplied by another system | [Vector](vector.qmd) |
 | Meaning of a payment description from a frozen text encoder | [Text](text.qmd) |
 
@@ -41,7 +41,7 @@ Choose by meaning rather than storage format: a numeric merchant code is
 usually a Category. Unordered tags belong in a Set; transactions with amounts
 and dates belong in a Branch.
 
-Category, Set, and Cluster learn labels through an
+Category, Set, and Group learn labels through an
 [online vocabulary](../concepts/online-vocabulary.qmd). Its capacity, admission timing, and unknown
 values affect both training and prediction.
 Enum uses the labels declared in its schema and rejects values outside that set.
@@ -143,7 +143,7 @@ its remaining payload:
 | Boolean | Probability of true |
 | Category, Enum | Best label, probability, and optional candidates |
 | Ordinal | Declared ordered label or integer rank |
-| Cluster | Best cluster and best vocabulary label, each with probability |
+| Group | Group decoder output; see its training limitation on the [Group page](group.qmd#prediction) |
 | Set | Label/probability pairs |
 | Vector | Fixed-width reconstructed vector |
 | Period, Hash, Text | No decoded public payload |

@@ -15,11 +15,13 @@ import time
 from pathlib import Path
 
 from evidence_ci import (
+    baseline_catalog,
     collect,
     digest,
     finish,
     plan,
     runtime_inputs,
+    script_paths,
     suite_identity,
     task_key,
     wheel_payload,
@@ -136,11 +138,13 @@ def schedule(tasks: list[dict], costs: dict) -> list[dict]:
 def assignments(manifest: dict, suite: Path) -> list[list[str]]:
     """Balance whole pairs using immutable historical durations as hints only."""
     costs = scheduling(suite)["costs"]
-    durations = {identifier: sum(roles.values()) for identifier, roles in costs.items()}
-    identifiers = {task["id"] for task in manifest["tasks"]}
+    durations = {}
+    for task in manifest["tasks"]:
+        identifier = task["id"]
+        durations[identifier] = durations.get(identifier, 0.0) + costs[identifier][task["role"]]
     buckets: list[list[str]] = [[] for _ in range(PROFILE["shards"])]
     weights = [0.0] * len(buckets)
-    for identifier in sorted(identifiers, key=lambda value: (-durations[value], value)):
+    for identifier in sorted(durations, key=lambda value: (-durations[value], value)):
         index = min(range(len(buckets)), key=lambda value: (weights[value], len(buckets[value]), value))
         buckets[index].append(identifier)
         weights[index] += durations[identifier]
@@ -217,9 +221,10 @@ def load_plan(root: Path) -> dict:
         evidence_sha=manifest["evidence_sha"],
         executor_sha=manifest["executor_sha"],
         root=suite,
+        baseline_ids=baseline_catalog(manifest["baseline"]["revision"]),
     )
-    for name in ("tasks", "policy", "mode", "full_catalog", "runtime_sha256"):
-        if manifest.get(name) != expected[name]:
+    for name in ("tasks", "policy", "mode", "full_catalog", "runtime_sha256", "introduced", "retired"):
+        if manifest.get(name) != expected.get(name):
             raise ValueError(f"Evidence plan changed canonical tasks or budgets: {name}")
     if manifest.get("scheduling") != scheduling(suite):
         raise ValueError("Evidence scheduling hints differ from the frozen source file or resolved costs")
@@ -288,6 +293,7 @@ def create_plan(options: argparse.Namespace) -> None:
         evidence_sha=options.evidence_sha,
         executor_sha=options.executor_sha,
         root=output / "source",
+        baseline_ids=baseline_catalog(options.baseline_sha),
     )
     manifest.update(
         backend=BACKEND,
@@ -407,7 +413,7 @@ def launch(
     """Retry a Docker 125 without a record, preserving every launch and log."""
     root = output / "tasks" / task_key(task)
     inputs = runtime_inputs(suite)
-    scripts = {entry["script"] for entry in registry(suite, measurements=False).values()}
+    scripts = script_paths(suite, registry(suite, measurements=False))
     journals = []
     for attempt in range(1, PROFILE["launch_attempts"] + 1):
         scratch = root / f"launch-{attempt}"

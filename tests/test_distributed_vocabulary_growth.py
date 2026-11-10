@@ -17,7 +17,7 @@ from relflow.structs.enums import TensorKey, Tokens
 from tests.distributed import launch
 
 LABELS = (("rank0-a", "rank0-b", "rank0-b", "rank0-a"), ("rank1-a", "rank1-b", "rank1-late", "rank1-late"))
-FIELDS = ("category", "tags", "cluster")
+FIELDS = ("category", "tags", "group")
 CAPACITIES = (2, 4, 8, 8)
 CASES = (
     ("ddp", False, 1, True),
@@ -39,11 +39,11 @@ def schedule(model, optimizer):
 
 
 def parameters(model):
-    """Include growing rows, decoder biases, and Cluster's fixed latent decoder."""
+    """Include growing rows, decoder biases, and Group's fixed latent decoder."""
     result = {}
     for name in FIELDS:
         node = model.nodes[f"/{name}"]
-        key = "cluster" if name == "cluster" else "content"
+        key = "group" if name == "group" else "content"
         result[f"{name}/embedding"] = node.embedder.embeddings[key].weight
         result[f"{name}/decoder.weight"] = node.decoder.linears[key].weight
         if node.decoder.linears[key].bias is not None:
@@ -88,7 +88,7 @@ def assert_migration(before, after):
     for name, old in before["weights"].items():
         new = after["weights"][name]
         destinations = torch.arange(old.shape[0])
-        if name == "cluster/embedding":
+        if name == "group/embedding":
             destinations[-1] = new.shape[0] - 1
         unstarted = old.eq(0).all(dim=1) if old.ndim == 2 else torch.zeros(old.shape[0], dtype=torch.bool)
         assert torch.equal(new[destinations][~unstarted], old[~unstarted]), name
@@ -234,7 +234,7 @@ def train(directory, bucket_view, accumulation, init_sync):
         batch_size=2,
         category=rf.Category(p_unavailable=0, mask=selected),
         tags=rf.Set(p_unavailable=0, mask=selected),
-        cluster=rf.Cluster(bounds=2, p_unavailable=0, revive_temperature=0, mask=selected),
+        group=rf.Group(n_groups=2, p_unavailable=0, mask=selected),
         outcome=rf.Boolean(mask=True),
     )
     # Visible rows train the input embeddings through outcome; masked rows train each vocabulary decoder.
@@ -249,7 +249,7 @@ def train(directory, bucket_view, accumulation, init_sync):
                         "row": len(records),
                         "category": label,
                         "tags": [label],
-                        "cluster": label,
+                        "group": label,
                         "selected": selected_row,
                         "outcome": bool(rank),
                     }
@@ -343,7 +343,7 @@ def check_growth(directory, accumulation):
                 lower, upper = (2, 4) if batch_idx == 1 else (4, 5)
                 trained = result["ends"][(batch_idx // accumulation + 1) * accumulation - 1]
                 for name, weights in start["weights"].items():
-                    if name == "cluster/decoder.weight":
+                    if name == "group/decoder.weight":
                         continue
                     # No weight decay: changed rows plus nonzero Adam moments prove actual training.
                     assert (
@@ -386,7 +386,7 @@ def check_growth(directory, accumulation):
                 after = result["starts"][1]["gradients"][name]
                 assert after is not None, (rank, name)
                 destinations = torch.arange(left.shape[0])
-                if name == "cluster/embedding":
+                if name == "group/embedding":
                     destinations[-1] = after.shape[0] - 1
                 assert torch.equal(after[destinations], expected), (rank, name)
                 introduced = torch.ones(after.shape[0], dtype=torch.bool)

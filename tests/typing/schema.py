@@ -31,8 +31,8 @@ def schema_api() -> None:
     assert_type(ordinal.values, tuple[bool | int | float | str | bytes, ...] | None)
     assert_type(ordinal.mask, tuple[rf.Mask, ...])
     rf.Model.xs(rank=rf.Ordinal, rating=ordinal)
-    assert_type(rf.Cluster(bounds=4).n_clusters, tuple[int, int])
-    assert_type(rf.Cluster(n_clusters=(2, 8)).n_clusters, tuple[int, int])
+    assert_type(rf.Group(n_groups=4).n_groups, int)
+    assert_type(rf.Group(n_groups=8).n_groups, int)
     assert_type(rf.DateParts(dateparts=["day_of_week", DatePart.hour_of_day]).dateparts, list[DatePart])
     assert_type(rf.Period("day_of_week", DatePart.hour_of_day).dateparts, list[DatePart])
     assert_type(rf.Period(dateparts=("day_of_week", DatePart.hour_of_day)).dateparts, list[DatePart])
@@ -65,6 +65,12 @@ def schema_api() -> None:
     assert_type(candidate.jacobian, bool)
     rf.Model(d_model=32, n_heads=4, n_layers=1, jacobian=True, label=rf.Boolean(mask=True))
     rf.Model(d_model=32, n_heads=4, n_layers=1, attention=None, items=rf.Branch(attention=None, value=rf.Number))
+
+
+def group_assignments(model: rf.Model) -> None:
+    assert_type(rf.Group.assign(model, "/group", "token", 2), int)
+    with rf.Group.override(model, "/group", {"token": 1}):
+        pass
 
 
 def third_party_schema() -> None:

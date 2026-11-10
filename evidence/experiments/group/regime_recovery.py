@@ -1,10 +1,10 @@
 # %% [markdown]
 # ---
-# title: Can it discover hidden groups with different behaviors?
+# title: Can Group recover known hidden regimes?
 # categories:
-# - Cluster
-# description: Predict new measurements for repeated identities whose behavior follows four hidden curves, and test
-#   whether Cluster recovers the groups behind those curves.
+# - Group
+# description: Repeated identities follow four hidden numerical rules. Test whether four fixed Group slots recover
+#   the groups while predicting new observations.
 # execute:
 #   enabled: false
 #   eval: false
@@ -13,16 +13,22 @@
 # evidence-readout:
 # - label: Stable groups — ARI
 #   metric:
+#   - group_counts
+#   - '4'
 #   - stable
 #   - adjusted_rand
 #   format: number
 # - label: No persistent groups — ARI
 #   metric:
+#   - group_counts
+#   - '4'
 #   - no_regime
 #   - adjusted_rand
 #   format: number
 # - label: Stable groups — prediction error
 #   metric:
+#   - group_counts
+#   - '4'
 #   - stable
 #   - normalized_rmse
 #   format: error
@@ -32,7 +38,7 @@
 # The model sees an opaque identity and a numeric input `x`, then predicts `y`.
 # Across repeated observations, each of 64 identities follows one of four hidden
 # curves. The group labels and curve parameters are never supplied to the model;
-# training targets provide the behavioral evidence. Can `Cluster` recover which
+# training targets provide the behavioral evidence. Can `Group` recover which
 # identities behave alike, as well as predict their next measurement?
 #
 # Think of the identities as 64 named devices, each measured at different
@@ -70,17 +76,19 @@
 # measurements, and the evaluator keeps the true grouping for scoring.
 #
 # ```{typst}
-# //| label: fig-evidence-cluster-regime-recovery
-# //| fig-cap: "Amber cards are hidden prediction targets. Identity is sometimes reconstructed; y is always hidden."
-# //| fig-alt: "Model tree with event, entity, x, y. Amber cards are hidden prediction targets. Identity is sometimes reconstructed; y is always hidden."
+# //| label: fig-proof-group-regime-recovery
+# //| fig-cap: "The entity identity is visible input; y is the hidden prediction target."
+# //| fig-alt: "Model tree with event, entity, x, y. The entity identity is visible input; y is the hidden prediction target."
 # #tree(node("event", kind: "root", children: (
-#   node("entity", type: "Cluster", detail: "Repeated identity; 10% training mask"),
+#   node("entity", type: "Group", detail: "Repeated identity; fixed group slots"),
 #   node("x", type: "Number"),
 #   node("y", kind: "target", type: "Number"),
 # )))
 # ```
 #
 # ## Comparison
+#
+# Compare four fixed Group slots with a no-regime control on the same hidden regimes.
 #
 # | Condition | What an identity tells the model | Expected behavior |
 # | --- | --- | --- |
@@ -94,19 +102,19 @@
 # just as often, but remembering its name no longer identifies a response rule.
 # In the detailed measurements, `stable` and `no_regime` name these two conditions.
 #
-# Both arms use the same model, initialization, and 600-update training budget.
+# Both arms use the same four-slot model, initialization, and 4,800-update budget.
 # Train, validation, and test contain the same 64 identities with independent
 # numeric inputs and noise. This tests new observations of known identities;
 # it does not test previously unseen identities.
 #
 # **Grouping:** the adjusted Rand index (ARI) compares which identities share
-# a group, regardless of the names or numbers assigned to clusters. An ARI of
+# a group, regardless of the names or numbers assigned to groups. An ARI of
 # 1 means the partitions match, 0 means chance-level agreement, and negative
 # values mean less agreement than expected by chance. The stable arm must reach
-# at least 0.80; the no-group control must remain at or below 0.15.
+# at least 0.95; the no-group control must remain at or below 0.15.
 # If two devices truly share a rule, putting them in groups called 2 and 5 is
 # a disagreement; renaming a correctly recovered group from 2 to 5 is harmless.
-# ARI scores that distinction, so merely producing four or eight clusters is
+# ARI scores that distinction, so merely occupying all four slots is
 # insufficient.
 #
 # **Prediction:** normalized RMSE divides test prediction error by the error of
@@ -117,22 +125,19 @@
 #
 # ## Result
 #
-# {{< evidence P078 status >}}
+# {{< evidence P111 status >}}
 #
-# The selected run does not meet the stable arm's grouping or prediction gates.
-# Identity information helps prediction, but producing several clusters does
-# not show that the right groups were discovered. These are final measurements
-# after 600 updates per arm. No ARI history was recorded, so they do not show
-# how grouping agreement changes during training.
+# Archived results use the former Cluster contract and do not validate this Group-based source.
+# Current runs compare assignment recovery and held-out prediction with four fixed Group slots.
 #
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
 #
-# {{< evidence P078 evidence >}}
+# {{< evidence P111 evidence >}}
 #
 # ### Run this experiment
 #
-# {{< evidence P078 script >}}
+# {{< evidence P111 script >}}
 #
 # ### Process, observability, and split unit
 #
@@ -140,9 +145,9 @@
 # follows `y = intercept[group] + slope[group] * x + Normal(0, 0.1)`, with
 # `x ~ Uniform(-1, 1)`. Intercepts are `(-6, -2, 2, 6)` and slopes are
 # `(-0.6, 0.6, -0.6, 0.6)`. The partition stays fixed across independent train,
-# validation, and test observations. Neither the group nor its parameters are
+# validation and test observations. Neither the group nor its parameters are
 # schema fields. Repeated IDs supply behavioral evidence through the hidden
-# numeric target, and a reconstructing identity mask engages Cluster's head.
+# numeric target, and assignment angles learn through its downstream gradient.
 #
 # The split unit is the observation of a known identity. This tests whether
 # repeated evidence reveals stable groups, not unseen-identity generalization.
@@ -156,42 +161,34 @@
 #
 # ### Model and predeclared gates
 #
-# Fit the same `xs` model from the same initialization for stable-regime and
-# no-regime data, each for 600 AdamW updates, batch 128, learning rate 0.003.
-# Use adaptive bounds 2 through 8; the true count four is not supplied. Each arm
-# receives 4,096 train, 1,024 validation, and 2,048 test rows. Validation is
-# independent and does not select checkpoints. The reconstruction mask hides
-# 10% of entity inputs during training; all entity inputs are visible at test.
+# Run one capacity of four with the same stable-regime and no-regime data seeds.
+# Each model trains for at most 4,800 AdamW updates, batch 128, learning rate
+# 0.003, with EMA decay 0.99. Each arm receives 4,096 train, 1,024 validation,
+# and 2,048 test rows. This tests recovery with a fixed capacity matching the
+# number of regimes, not adaptive discovery of that number.
 #
-# The fixed gates require ARI at least 0.80 and source-unit normalized RMSE at
-# most 0.35 for the stable arm. The separately trained no-regime control must
-# have ARI at most 0.15 against the now-irrelevant generating partition and
-# normalized RMSE at least 0.85. For a direct dependency check, shuffling stable
-# test IDs must give normalized RMSE at least 0.85 and increase it by at least
-# 0.40. Require finite metrics, full identity exposure, and frozen evaluation
-# assignments. The population conditional-mean oracle for the no-regime arm
-# has RMSE approximately 4.49; the informed regime oracle has noise RMSE 0.1.
-# Count and usage have no success gate.
+# The fixed gates require stable-arm ARI at least 0.95 and normalized RMSE at
+# most 0.35. The no-regime control must have ARI at most 0.15 and normalized
+# RMSE at least 0.85. Shuffling stable test IDs must give normalized RMSE at
+# least 0.85 and increase it by at least 0.40. Require finite metrics, full
+# identity exposure, and frozen evaluation assignments.
 #
 # ### Remaining work
 #
-# The selected run retains the original gates and 600-update budget. It fails
-# both partition-recovery and prediction-quality gates; the thresholds are not
-# redefined to make this outcome pass. Diagnose optimization
-# and assignment behavior with training and validation data before proposing a
-# distinct follow-up experiment or a ten-seed promotion panel.
+# Preserve the near-perfect ARI gate across three seeds; any failure remains a
+# failed recovery result rather than a reason to lower the threshold. Diagnose
+# optimization behavior with training and validation data before a promotion
+# panel.
 #
 # This task has strongly separated intercepts; crossing curves, unbalanced
 # groups, unseen identities, and a benefit over a parameter-matched Category
-# model remain separate questions. Occupying several clusters is not a success
-# criterion: low ARI can reveal that these assignments have not recovered the
-# generating groups. The no-regime arm checks that distinction directly.
+# model remain separate questions.
 #
 # ### Complete experiment code
 #
 
 # %%
-"""P078: require real partition recovery and held-out skill from Cluster."""
+"""P111: require near-perfect partition recovery and held-out skill from Group."""
 
 from collections.abc import Iterator
 from functools import partial
@@ -203,7 +200,9 @@ import pyarrow as pa
 import relflow as rf
 from reporting import experiment, report
 
-BUDGET = 600
+BUDGET = 4800
+EMA_DECAY = 0.99
+GROUP_COUNTS = (4,)
 BATCH_SIZE = 128
 TRAIN_ROWS = 4096
 TEST_ROWS = 2048
@@ -234,7 +233,7 @@ def records(*, rows: int, seed: int, partition_seed: int, no_regime: bool = Fals
 
 
 def adjusted_rand(actual: np.ndarray, predicted: np.ndarray) -> float:
-    """Adjusted Rand agreement, invariant to the arbitrary cluster labels."""
+    """Adjusted Rand agreement, invariant to the arbitrary group labels."""
     _, left = np.unique(actual, return_inverse=True)
     _, right = np.unique(predicted, return_inverse=True)
     cells = np.zeros((left.max() + 1, right.max() + 1), dtype=np.int64)
@@ -250,9 +249,37 @@ def adjusted_rand(actual: np.ndarray, predicted: np.ndarray) -> float:
     return 1.0 if maximum == expected else (joint - expected) / (maximum - expected)
 
 
-def build() -> rf.Model:
+class AssignmentTrajectory(lit.Callback):
+    def __init__(self, partition_seed: int, validation_rows: list[dict]) -> None:
+        self.partition_seed = partition_seed
+        self.validation_rows = validation_rows
+        self.rows: list[dict] = []
+
+    def on_validation_epoch_end(self, trainer: lit.Trainer, pl_module: lit.LightningModule) -> None:
+        assignments = rf.Group.assignments(pl_module, rf.Address("entity"))
+        assigned = np.asarray(
+            [assignments.get(f"entity-{index:04d}", {}).get("group", -1) for index in range(ENTITY_COUNT)]
+        )
+        present = assigned >= 0
+        validation_target = np.asarray([row["y"] for row in self.validation_rows])
+        validation_prediction = predict(pl_module, self.validation_rows)
+        validation_rmse = float(np.sqrt(np.mean(np.square(validation_target - validation_prediction))))
+        self.rows.append(
+            {
+                "epoch": trainer.current_epoch,
+                "step": trainer.global_step,
+                "adjusted_rand": adjusted_rand(partition(self.partition_seed)[present], assigned[present])
+                if present.sum() == ENTITY_COUNT
+                else None,
+                "validation_rmse": validation_rmse,
+                "assigned_entities": int(present.sum()),
+            }
+        )
+
+
+def build(n_groups: int) -> rf.Model:
     model = rf.Model.xs(
-        entity=rf.Cluster(bounds=(2, 8), p_unavailable=0.0, mask=rf.Mask(rate=0.1, reconstruct=True)),
+        entity=rf.Group(n_groups=n_groups, p_unavailable=0.0),
         x=rf.Number,
         y=rf.Number(mask=True, objective="mse"),
     )
@@ -270,12 +297,12 @@ def measure(model: rf.Model, rows: list[dict], training_mean: float, partition_s
     predicted = predict(model, rows)
     baseline = float(np.sqrt(np.mean((target - training_mean) ** 2)))
     rmse = float(np.sqrt(np.mean((target - predicted) ** 2)))
-    assignments = rf.Cluster.assignments(model, rf.Address("entity"))
+    assignments = rf.Group.assignments(model, rf.Address("entity"))
     groups = partition(partition_seed)
     # Partial-budget smoke runs may not yet encounter every ID; absence remains
     # an explicit failed coverage gate rather than silently dropping entities.
     assigned = np.asarray(
-        [assignments.get(f"entity-{index:04d}", {}).get("cluster", -1) for index in range(ENTITY_COUNT)]
+        [assignments.get(f"entity-{index:04d}", {}).get("group", -1) for index in range(ENTITY_COUNT)]
     )
     return {
         "rmse": rmse,
@@ -283,77 +310,102 @@ def measure(model: rf.Model, rows: list[dict], training_mean: float, partition_s
         "normalized_rmse": rmse / baseline,
         "adjusted_rand": adjusted_rand(groups, assigned),
         "assigned_entities": int((assigned >= 0).sum()),
-        "occupied_clusters": int(len(np.unique(assigned[assigned >= 0]))),
+        "occupied_groups": int(len(np.unique(assigned[assigned >= 0]))),
         "assignments": assigned.tolist(),
         "expected_partition": groups.tolist(),
-        "status": rf.Cluster.status(model, rf.Address("entity")),
     }
 
 
-@experiment("P078", seed=7801)
+@experiment("P111", seed=11101)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
-    metrics, checks = {}, {}
+    metrics: dict[str, dict] = {"group_counts": {}}
+    checks = {}
     partition_seed = seed * 100
-    for arm, no_regime in (("stable", False), ("no_regime", True)):
-        lit.seed_everything(seed, workers=True)
-        model = build()
-        options = {"partition_seed": partition_seed, "no_regime": no_regime}
-        data = rf.SyntheticDataModule(
-            train=partial(records, rows=TRAIN_ROWS, seed=seed * 100 + 1, **options),
-            validate=partial(records, rows=1024, seed=seed * 100 + 2, **options),
-            seed=seed,
+    for n_groups in GROUP_COUNTS:
+        group_key = str(n_groups)
+        metrics["group_counts"][group_key] = {}
+        for arm, no_regime in (("stable", False), ("no_regime", True)):
+            lit.seed_everything(seed, workers=True)
+            model = build(n_groups)
+            ema = rf.EMA(decay=EMA_DECAY)
+            options = {"partition_seed": partition_seed, "no_regime": no_regime}
+            validation_rows = list(records(rows=1024, seed=seed * 100 + 2, **options))
+            trajectory = AssignmentTrajectory(partition_seed, validation_rows)
+            data = rf.SyntheticDataModule(
+                train=partial(records, rows=TRAIN_ROWS, seed=seed * 100 + 1, **options),
+                validate=partial(records, rows=1024, seed=seed * 100 + 2, **options),
+                seed=seed,
+            )
+            model.fit(
+                data,
+                batch_size=BATCH_SIZE,
+                learning_rate=0.003,
+                early_stopping=False,
+                rollback=False,
+                precision="32-true",
+                strategy="auto",
+                accelerator=accelerator,
+                devices=1,
+                max_steps=BUDGET if steps is None else min(steps, BUDGET),
+                max_epochs=-1,
+                logger=False,
+                enable_checkpointing=False,
+                enable_progress_bar=False,
+                enable_model_summary=False,
+                deterministic=True,
+                num_sanity_val_steps=0,
+                callbacks=[ema, trajectory],
+            )
+            trainer = model.trainer
+            model.eval()
+            state = rf.Group.assignments(model, rf.Address("entity"))
+            training_mean = float(
+                np.mean([row["y"] for row in records(rows=TRAIN_ROWS, seed=seed * 100 + 1, **options)])
+            )
+            test = list(records(rows=TEST_ROWS, seed=seed * 100 + 3, **options))
+            measured = measure(model, test, training_mean, partition_seed)
+            measured.update(
+                steps=trainer.global_step,
+                training_mean=training_mean,
+                noise_rmse=0.1,
+                ema_decay=EMA_DECAY,
+                group_count=n_groups,
+                ari_by_step=trajectory.rows,
+            )
+            if arm == "stable":
+                shuffled = list(
+                    records(rows=TEST_ROWS, seed=seed * 100 + 3, partition_seed=partition_seed, no_regime=True)
+                )
+                measured["shuffled"] = measure(model, shuffled, training_mean, partition_seed)
+            metrics["group_counts"][group_key][arm] = measured
+            label = f"{n_groups} groups / {arm}"
+            checks[f"{label}: finite prediction and partition scores"] = bool(
+                np.isfinite([measured["rmse"], measured["normalized_rmse"], measured["adjusted_rand"]]).all()
+            )
+            checks[f"{label}: all 64 known identities have assignments"] = measured["assigned_entities"] == ENTITY_COUNT
+            checks[f"{label}: evaluation preserves assignment state"] = state == rf.Group.assignments(
+                model, rf.Address("entity")
+            )
+        stable = metrics["group_counts"][group_key]["stable"]
+        control = metrics["group_counts"][group_key]["no_regime"]
+        checks.update(
+            {
+                f"{n_groups} groups: stable regimes recover ARI at least 0.95": stable["adjusted_rand"] >= 0.95,
+                f"{n_groups} groups: stable regimes predict with normalized RMSE at most 0.35": (
+                    stable["normalized_rmse"] <= 0.35
+                ),
+                f"{n_groups} groups: no-regime control has ARI at most 0.15": control["adjusted_rand"] <= 0.15,
+                f"{n_groups} groups: no-regime control has normalized RMSE at least 0.85": (
+                    control["normalized_rmse"] >= 0.85
+                ),
+                f"{n_groups} groups: shuffled test IDs give normalized RMSE at least 0.85": (
+                    stable["shuffled"]["normalized_rmse"] >= 0.85
+                ),
+                f"{n_groups} groups: shuffling increases normalized RMSE by at least 0.40": (
+                    stable["shuffled"]["normalized_rmse"] - stable["normalized_rmse"] >= 0.40
+                ),
+            }
         )
-        model.fit(
-            data,
-            batch_size=BATCH_SIZE,
-            learning_rate=0.003,
-            early_stopping=False,
-            rollback=False,
-            precision="32-true",
-            strategy="auto",
-            accelerator=accelerator,
-            devices=1,
-            max_steps=BUDGET if steps is None else min(steps, BUDGET),
-            max_epochs=-1,
-            logger=False,
-            enable_checkpointing=False,
-            enable_progress_bar=False,
-            enable_model_summary=False,
-            deterministic=True,
-            num_sanity_val_steps=0,
-        )
-        trainer = model.trainer
-        model.eval()
-        state = rf.Cluster.assignments(model, rf.Address("entity"))
-        training_mean = float(np.mean([row["y"] for row in records(rows=TRAIN_ROWS, seed=seed * 100 + 1, **options)]))
-        test = list(records(rows=TEST_ROWS, seed=seed * 100 + 3, **options))
-        measured = measure(model, test, training_mean, partition_seed)
-        measured.update(steps=trainer.global_step, training_mean=training_mean, noise_rmse=0.1)
-        if arm == "stable":
-            shuffled = list(records(rows=TEST_ROWS, seed=seed * 100 + 3, partition_seed=partition_seed, no_regime=True))
-            measured["shuffled"] = measure(model, shuffled, training_mean, partition_seed)
-        metrics[arm] = measured
-        checks[f"{arm}: finite prediction and partition scores"] = bool(
-            np.isfinite([measured["rmse"], measured["normalized_rmse"], measured["adjusted_rand"]]).all()
-        )
-        checks[f"{arm}: all 64 known identities have assignments"] = measured["assigned_entities"] == ENTITY_COUNT
-        checks[f"{arm}: evaluation preserves assignment state"] = state == rf.Cluster.assignments(
-            model, rf.Address("entity")
-        )
-    stable, control = metrics["stable"], metrics["no_regime"]
-    checks.update(
-        {
-            "Stable regimes recover ARI at least 0.80": stable["adjusted_rand"] >= 0.80,
-            "Stable regimes predict with normalized RMSE at most 0.35": stable["normalized_rmse"] <= 0.35,
-            "No-regime control has ARI at most 0.15": control["adjusted_rand"] <= 0.15,
-            "No-regime control has normalized RMSE at least 0.85": control["normalized_rmse"] >= 0.85,
-            "Shuffling stable test IDs gives normalized RMSE at least 0.85": stable["shuffled"]["normalized_rmse"]
-            >= 0.85,
-            "Shuffling stable test IDs increases normalized RMSE by at least 0.40": (
-                stable["shuffled"]["normalized_rmse"] - stable["normalized_rmse"] >= 0.40
-            ),
-        }
-    )
     return metrics, checks
 
 

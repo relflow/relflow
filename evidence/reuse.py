@@ -565,6 +565,25 @@ def trusted(
         raise ValueError("Reuse source candidate differs from the trusted workflow commit")
 
 
+def comparison(suite: Path, manifest: dict, measured: dict, role_mapping: dict) -> list[dict]:
+    """Reapply the requested comparison without changing measured roles or checks."""
+    requested_unmet = []
+    introduced = set(manifest.get("introduced", []))
+    if introduced and role_mapping != {"baseline": "baseline", "candidate": "candidate"}:
+        raise ValueError("Introduced proof reuse cannot exchange baseline and candidate roles")
+    for identifier in registry(suite):
+        if identifier in introduced:
+            if not all(measured["candidate", identifier]["checks"].values()):
+                raise ValueError("Introduced proof reuse cannot promote unmet candidate checks")
+            continue
+        left = measured[role_mapping["baseline"], identifier]["checks"]
+        right = measured[role_mapping["candidate"], identifier]["checks"]
+        if left.keys() != right.keys() or any(passed and not right[name] for name, passed in left.items()):
+            raise ValueError("Mapped requested comparison changes checks or regresses a baseline-passing check")
+        requested_unmet.extend({"id": identifier, "check": name} for name, passed in left.items() if not passed)
+    return requested_unmet
+
+
 def verify(
     root: Path,
     reports: Path,
@@ -691,13 +710,7 @@ def verify(
             else records
         )
         measured = {(record["task"]["role"], record["task"]["id"]): record["result"] for record in measured}
-        requested_unmet = []
-        for identifier in registry(suite):
-            left = measured[role_mapping["baseline"], identifier]["checks"]
-            right = measured[role_mapping["candidate"], identifier]["checks"]
-            if left.keys() != right.keys() or any(passed and not right[name] for name, passed in left.items()):
-                raise ValueError("Mapped requested comparison changes checks or regresses a baseline-passing check")
-            requested_unmet.extend({"id": identifier, "check": name} for name, passed in left.items() if not passed)
+        requested_unmet = comparison(suite, manifest, measured, role_mapping)
     return {
         "schema": 1,
         "kind": "verified-full-report-reuse",
@@ -714,7 +727,7 @@ def verify(
         "requested_comparison": {
             "complete": True,
             "passed": True,
-            "experiments": len(measured) // 2,
+            "experiments": len(registry(suite)),
             "baseline_unmet_checks": requested_unmet,
         },
         "source": {

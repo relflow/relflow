@@ -144,8 +144,8 @@ website:
             text: Vector
           - href: datatypes/quantile.qmd
             text: Quantile
-          - href: datatypes/cluster.qmd
-            text: Cluster
+          - href: datatypes/group.qmd
+            text: Group
           - href: datatypes/custom-tensorfields.qmd
             text: Custom tensorfields
       - section: Reference

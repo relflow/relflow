@@ -50,7 +50,7 @@ names for decoded results and a separate column for requested representations.
 | `rf.Enum`, `rf.Set`, `rf.Period` | Represent declared currency codes, merchant tags, or booking calendar parts. |
 | `rf.Ordinal` | Represent ordered labels or integer ranks through their numeric positions. |
 | `rf.Duration` | Derive signed elapsed time from two timestamps in fixed units. |
-| `rf.Hash`, `rf.Quantile`, `rf.Text`, `rf.Vector`, `rf.Cluster` | Represent identifier equality, numeric percentiles, text, supplied vectors, or learned label groups. |
+| `rf.Hash`, `rf.Quantile`, `rf.Text`, `rf.Vector`, `rf.Group` | Represent identifier equality, numeric percentiles, text, supplied vectors, or learned label groups. |
 | `rf.Attention`, `rf.Mean` | Choose branch reduction; `reduction=None` preserves routed tokens. |
 | `rf.Mask`, `rf.Jitter` | Configure visibility/objectives and continuous input perturbation. |
 
