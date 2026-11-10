@@ -5,6 +5,7 @@ project:
     - uv run --directory .. --project docs python -m evidence.render
   resources:
     - assets/fonts/OFL.txt
+    - assets/benchmarks/**
     - assets/evidence-plots/**
     - evidence/_generated/*.py
   render:
@@ -27,6 +28,10 @@ website:
     title: relflow
     logo: assets/branding/logos/logo.navbar.svg
     logo-alt: relflow
+    right:
+      - href: https://github.com/relflow/relflow
+        text: GitHub
+        icon: github
   sidebar:
     style: floating
     search: false
@@ -160,6 +165,8 @@ website:
             text: API map
           - href: reference/troubleshooting.qmd
             text: Troubleshooting
+      - href: benchmarks.qmd
+        text: Benchmarks
       - href: evidence.qmd
         text: Evidence
   page-footer:
