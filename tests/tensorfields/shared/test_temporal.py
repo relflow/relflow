@@ -277,6 +277,35 @@ def test_custom_calendar_validation_preserves_leap_dates_padding_and_supported_f
 
 
 @pytest.mark.parametrize(
+    "text,pattern,expected",
+    [
+        ("2024-02-29", "%F", datetime(2024, 2, 29)),
+        ("02/29/24", "%D", datetime(2024, 2, 29)),
+        ("02/29/24", "%x", datetime(2024, 2, 29)),
+        ("Thu Feb 29 00:00:00 2024", "%c", datetime(2024, 2, 29)),
+        ("2026-02- 3", "%Y-%m-%e", datetime(2026, 2, 3)),
+        ("2026-02-30", "%F", None),
+        ("02/30/26", "%D", None),
+        ("02/30/26", "%x", None),
+        ("Mon Feb 30 00:00:00 2026", "%c", None),
+    ],
+)
+def test_custom_formats_expand_composites_for_backends_with_only_basic_directives(text, pattern, expected, monkeypatch):
+    strptime = pc.strptime
+
+    def portable(values, *, format, **options):
+        assert all(directive not in format for directive in ("%F", "%D", "%x", "%c", "%e", "%z"))
+        return strptime(values, format=format, **options)
+
+    monkeypatch.setattr(pc, "strptime", portable)
+    if expected is None:
+        with pytest.raises(ValueError, match="impossible calendar date"):
+            parse(pa.array([text, None]), pattern)
+    else:
+        assert parse(pa.array([text, None]), pattern).to_pylist() == [expected, None]
+
+
+@pytest.mark.parametrize(
     ("start", "end", "expected"),
     [
         ("2026-01-01 00:30 +0100", "2026-01-01 00:30 +0000", 1.0),

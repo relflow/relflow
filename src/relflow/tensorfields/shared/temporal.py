@@ -63,23 +63,26 @@ class Format:
 def calendar(pattern: str) -> Format:
     """Compile supplied calendar coordinates without constraining numeric padding.
 
-    Composite expansions affect only validation; Arrow parses the original
-    format. Other directives retain Arrow's semantics. Numeric coordinates
-    reveal normalized impossible dates even when their text is parseable.
+    Expand composite directives into portable coordinates for both parsing
+    and validation. Numeric coordinates reveal normalized impossible dates
+    even when their text is parseable.
     """
     fragments = ["(?P<body_0>"]
     fields = []
     bodies = ["body_0"]
+    formats = []
 
     def include(format: str) -> None:
         for match in re.finditer(r"%(?:[EO])?.|[^%]+|%$", format):
             token = match.group()
             if not token.startswith("%"):
                 fragments.extend(r"\s*" if character.isspace() else re.escape(character) for character in token)
+                formats.append(token)
                 continue
             code = token[-1]
             if token == "%%":
                 fragments.append("%")
+                formats.append(token)
             elif token == "%":
                 raise ValueError("duration format has an incomplete '%' directive")
             elif code == "Z":
@@ -91,6 +94,7 @@ def calendar(pattern: str) -> Format:
                 include(COMPOSITES[code])
             elif code in {"n", "t"}:
                 fragments.append(r"\s*")
+                formats.append(" ")
             elif code in CALENDAR or code == "z":
                 name = f"coordinate_{len(fields)}"
                 fields.append((code, name))
@@ -101,16 +105,13 @@ def calendar(pattern: str) -> Format:
                     fragments.append(f")(?P<{name}>{content})(?P<{body}>")
                 else:
                     fragments.append(f"(?P<{name}>{content})")
+                    formats.append("%d" if code == "e" else token)
             else:
                 fragments.append(".*?")
+                formats.append(token)
 
     include(pattern)
-    naive = "".join(
-        match.group()
-        for match in re.finditer(r"%(?:[EO])?.|[^%]+|%$", pattern)
-        if not (match.group().startswith("%") and match.group()[-1] == "z")
-    )
-    return Format("^" + "".join(fragments) + ")$", tuple(fields), naive, tuple(bodies))
+    return Format("^" + "".join(fragments) + ")$", tuple(fields), "".join(formats), tuple(bodies))
 
 
 def formatted(strings: pa.StringArray, pattern: str) -> pa.Array:
