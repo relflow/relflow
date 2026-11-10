@@ -172,6 +172,12 @@ def run(args):
     start = time.perf_counter()
     for ordinal, batch in enumerate(loader):
         consume(batch, check=ordinal == 0)
+    if args.mode != "automatic":
+        for store in {id(embedder.store): embedder.store for embedder in embedders.values()}.values():
+            store.flush()
+        # A fresh legacy store uploads its resident index only after flushing.
+        for ordinal, batch in enumerate(loader):
+            consume(batch, check=ordinal == 0)
     torch.cuda.synchronize()
     warm_seconds = time.perf_counter() - start
     before = stats(embedders)

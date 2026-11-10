@@ -216,7 +216,7 @@ def test_real_local_encoder_training_and_weight_invalidation(tmp_path, device):
         enable_checkpointing=False,
         enable_progress_bar=False,
     )
-    assert not torch.equal(before, embedder.linear[0].weight)
+    assert not torch.equal(before.cpu(), embedder.linear[0].weight.detach().cpu())
     frozen = CachedModel.get_model(str(assets))
     assert all(parameter.grad is None for parameter in frozen.model.parameters())
     old = embedder.variant(torch.device(device))
