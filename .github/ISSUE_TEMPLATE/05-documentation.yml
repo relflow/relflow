@@ -1,0 +1,42 @@
+name: Documentation or website
+description: Improve explanations, examples, navigation, layout, or accessibility.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the reader's task and the improvement needed. For a small correction,
+        the problem and desired outcome are enough.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is confusing, missing, inaccurate, or broken?
+      description: Explain the problem and include the affected page, section, file, or URL if known.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What should the reader understand or see afterward?
+      description: Describe the correction, learning outcome, or observable visual result.
+    validations:
+      required: true
+  - type: textarea
+    id: reader
+    attributes:
+      label: Reader and task
+      description: Who is the reader, what are they trying to accomplish, and what knowledge can we assume?
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Supporting material
+      description: |
+        Include a corrected API example, implementation reference, measured evidence, or screenshot.
+        For layout or accessibility issues, include the browser, viewport, zoom, or assistive technology
+        and reproduction steps when relevant. Include the documentation version for hosted pages.
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation and scope
+      description: |
+        Identify affected links or related pages, preview checks, and concrete content or visual
+        acceptance criteria. Documentation builds must remain static and independent of model execution.

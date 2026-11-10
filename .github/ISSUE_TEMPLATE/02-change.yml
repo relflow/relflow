@@ -1,0 +1,47 @@
+name: Feature or architecture change
+description: Propose a capability, API improvement, or architectural simplification.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Start with the task or limitation. A proposed implementation is optional;
+        a usage example or concrete invariant helps define the outcome.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What task or limitation motivates this?
+      description: Describe the current behavior, who is affected, and any workaround.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What should become possible or simpler?
+      description: |
+        Describe the desired behavior and observable completion criteria. Include a usage
+        example if helpful. For a refactor, explain which invariant becomes simpler or better enforced.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Identify the affected components and any explicit exclusions.
+  - type: textarea
+    id: contracts
+    attributes:
+      label: Affected contracts and compatibility
+      description: |
+        Note changes to public APIs, extension ownership, output schemas, checkpoints,
+        or serialization. Describe intended breaking changes and migration needs.
+        For extension changes, explain whether third-party datatypes can use the same path.
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation and documentation
+      description: Identify examples, boundary cases, tests, or documentation needed to establish the outcome.
+  - type: textarea
+    id: approach
+    attributes:
+      label: Possible approach or alternatives
+      description: Optional implementation ideas, relevant prior work, or alternatives considered.
