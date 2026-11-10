@@ -205,5 +205,5 @@ def test_duration_can_train_and_predict_with_number_objectives(tmp_path):
     poisoned = records.set_column(records.schema.get_field_index("end"), "end", pa.array(["2050-01-01"] * 4))
 
     assert len(output) == 4
-    assert "elapsed" in output["predictions"].type.names
+    assert "elapsed" in output["predictions"].struct.fields
     assert output.equals(model.predict(poisoned))

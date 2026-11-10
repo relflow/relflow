@@ -20,7 +20,7 @@
 #   format: percent
 # evidence-group: Representation
 # evidence-requires:
-# - "relflow stage/0.5.0 wheel exporting Ordinal"
+# - "relflow 0.5.0 wheel exporting Ordinal"
 # ---
 #
 # Compare Ordinal, rounded Number, and Category targets when integer ranks or declared intermediate
@@ -37,8 +37,9 @@
 # permit the even rank 2. It is not an unknown vocabulary label for an implicit Ordinal.
 #
 # The second task declares five ordered labels but trains only on positions zero, two, and four.
-# Positions one and three are held out. This research experiment needs the stage/0.5.0 wheel; merely
-# declaring an order does not guarantee the model will learn to interpolate it.
+# Positions one and three are held out. This study requires a wheel exporting Ordinal and remains in
+# the research lane while the paired baseline predates it. Merely declaring an order does not guarantee
+# the model will learn to interpolate it.
 #
 # ```{typst}
 # //| label: fig-evidence-p100
@@ -88,7 +89,6 @@ from collections.abc import Iterator
 
 import lightning.pytorch as lit
 import numpy as np
-import polars as pl
 import pyarrow as pa
 import relflow as rf
 from reporting import experiment, report
@@ -115,9 +115,7 @@ def records(*, rows: int, seed: int, domain: str, novel: bool, arm: str) -> Iter
 
 def build(domain: str, arm: str) -> rf.Model:
     if not hasattr(rf, "Ordinal"):
-        raise RuntimeError(
-            "P100 requires the stage/0.5.0 relflow wheel exporting rf.Ordinal; the ordinary core wheel cannot execute this research experiment"
-        )
+        raise RuntimeError("P100 requires a relflow wheel exporting rf.Ordinal (0.5.0 or later)")
     if arm == "ordinal":
         target = (
             rf.Ordinal(values=LABELS, mask=True, objective="mse")
@@ -132,9 +130,9 @@ def build(domain: str, arm: str) -> rf.Model:
 
 
 def prediction(model: rf.Model, rows: list[dict], domain: str, arm: str) -> np.ndarray:
-    output = pl.DataFrame(
-        model.predict(pa.Table.from_pylist([{"signal": row["signal"]} for row in rows]), batch_size=256)
-    )["predictions"].to_list()
+    output = model.predict(pa.Table.from_pylist([{"signal": row["signal"]} for row in rows]), batch_size=256)[
+        "predictions"
+    ].to_list()
     values = [row["rank"]["content"] for row in output]
     if arm == "category":
         values = [item["value"] for item in values]
@@ -151,6 +149,24 @@ def actual(rows: list[dict], domain: str, arm: str) -> np.ndarray:
     if arm == "category":
         return np.asarray([int(row["rank"].removeprefix("rank_")) for row in rows], dtype=np.int64)
     return np.asarray([row["rank"] for row in rows], dtype=np.int64)
+
+
+def evaluate(model: rf.Model, rows: list[dict], domain: str, arm: str) -> dict:
+    """Score each held-out rank and retain the same readouts for diagnostic plots."""
+    predicted = prediction(model, rows, domain, arm)
+    expected = actual(rows, domain, arm)
+    return {
+        "exact_accuracy": float(np.mean(predicted == expected)),
+        "rank_mae": float(np.mean(np.abs(predicted - expected))),
+        "ranks": {
+            str(rank): {
+                "rows": int(np.sum(expected == rank)),
+                "exact_accuracy": float(np.mean(predicted[expected == rank] == rank)),
+                "rank_mae": float(np.mean(np.abs(predicted[expected == rank] - rank))),
+            }
+            for rank in np.unique(expected)
+        },
+    }
 
 
 def fit(model: rf.Model, train: pa.Table, validate: pa.Table, seed: int, steps: int | None, accelerator: str) -> int:
@@ -197,12 +213,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             scores = {"steps": updates}
             for condition, novel in (("seen", False), ("unseen", True)):
                 rows = list(records(rows=TEST_ROWS, seed=seed + 3, domain=domain, novel=novel, arm=arm))
-                predicted = prediction(model, rows, domain, arm)
-                expected = actual(rows, domain, arm)
-                scores[condition] = {
-                    "exact_accuracy": float(np.mean(predicted == expected)),
-                    "rank_mae": float(np.mean(np.abs(predicted - expected))),
-                }
+                scores[condition] = evaluate(model, rows, domain, arm)
             metrics["domains"][domain][arm] = scores
             checks[f"{domain}, {arm}: full budget retained"] = updates == BUDGET
             checks[f"{domain}, {arm}: seen accuracy at least 0.85"] = scores["seen"]["exact_accuracy"] >= 0.85

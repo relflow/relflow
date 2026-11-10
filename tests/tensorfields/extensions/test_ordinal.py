@@ -3,6 +3,7 @@
 import json
 
 import lightning.pytorch as lit
+import polars as pl
 import pyarrow as pa
 import pytest
 import torch
@@ -303,9 +304,9 @@ def test_one_batch_training_and_validation_keep_native_rank_or_label_output(valu
     )
     assert len(gradients) == 1 and torch.isfinite(gradients[0]).all() and gradients[0].abs().sum() > 0
     predicted = (
-        configured.predict(validate.drop(["level"]))["predictions"].combine_chunks().field("level").field("content")
+        configured.predict(validate.drop(["level"]))["predictions"].struct.field("level").struct.field("content")
     )
-    assert predicted.type == (pa.int64() if values is None else pa.string())
+    assert predicted.dtype == (pl.Int64 if values is None else pl.String)
     assert len(predicted) == len(validate)
     if values is not None:
-        assert set(predicted.to_pylist()) <= set(values)
+        assert set(predicted.to_list()) <= set(values)

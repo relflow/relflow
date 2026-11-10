@@ -342,8 +342,8 @@ def test_full_reconstruction_derived_targets_predict_without_required_source_col
 
     assert encoded.present.eq(False).all()
     assert encoded.inferred.all()
-    assert output.num_rows == 2
-    assert "total" in output["predictions"].type.names
+    assert output.height == 2
+    assert "total" in output["predictions"].struct.fields
 
 
 def test_target_vacancy_preserves_derived_target_poison_invariance(arithmetic):
@@ -387,7 +387,7 @@ def test_inherited_full_reconstruction_keeps_branch_geometry_without_derived_tar
     axis = encoded["/"]["/events"]
     assert axis.lengths.reshape(-1).tolist() == [2, 0, 0]
     assert axis.valid.reshape(-1).tolist() == [True, True, False]
-    output = model.predict(source)["predictions"].to_pylist()
+    output = model.predict(source)["predictions"].to_list()
     assert len(output[0]["events"]) == 2
     assert output[1]["events"] == []
     assert output[2]["events"] is None

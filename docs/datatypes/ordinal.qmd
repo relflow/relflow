@@ -92,7 +92,7 @@ model = rf.Model.xs(
 The numeric decoder predicts a rank. Prediction writing rounds it to the nearest
 integer, with halfway values rounded to the nearest even rank. With declared
 labels, it also clamps the position to the declaration's bounds and returns the
-corresponding label in its declared Arrow value family. Without declared labels,
+corresponding label in its declared scalar type. Without declared labels,
 `content` is an integer rank, clamped to ±2^53. A rank that was absent from
 training may be predicted, but input acceptance does not establish extrapolation
 quality.

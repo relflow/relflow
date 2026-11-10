@@ -14,6 +14,14 @@ role of the paired run. Optional research pages retain generator illustrations
 until their declared resources and learning records are available. Unmet checks
 remain visible; figures never turn an illustration into a measured outcome.
 
+P099 and P100 accept measured views when a matching Duration/Ordinal wheel has
+been explicitly provisioned. P099 compares elapsed-time predictions, error
+distributions and a shuffled-training control. P100 separates familiar and
+withheld ranks with per-rank accuracy heatmaps. The same captured executions
+supply their example viewers. Without those records, keep the generator
+illustrations. These studies remain in research while the paired baseline
+predates the datatypes.
+
 Twelve CPU shards execute both exact wheels and retain separate, checksum-bound
 observation archives. The collector validates the complete paired catalog. A
 following job verifies every source, wheel, task, record and observation receipt,
