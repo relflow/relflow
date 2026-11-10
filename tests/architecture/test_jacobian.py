@@ -144,17 +144,17 @@ def test_optional_dependency_is_only_required_for_enabled_training(tmp_path):
         assert model.jacobian is False
         model.on_fit_start()
         model.training_step(model.encode(table, strata="train"), 0)["loss"].backward()
-        assert model.predict(table).num_rows == 2
+        assert model.predict(table).height == 2
 
         model.jacobian = True
-        assert model.predict(table).num_rows == 2
+        assert model.predict(table).height == 2
         assert model.validation_step(model.encode(table, strata="validate"), 0)["loss"].isfinite()
         assert model.test_step(model.encode(table, strata="test"), 0)["loss"].isfinite()
         model.save(sys.argv[1])
         loaded = rf.Model.load(sys.argv[1])
         assert loaded.jacobian is False
         loaded.on_fit_start()
-        assert loaded.predict(table).num_rows == 2
+        assert loaded.predict(table).height == 2
         assert not any(name == "torchjd" or name.startswith("torchjd.") for name in sys.modules)
         assert "relflow.architecture.jacobian" not in sys.modules
         loaded.jacobian = True
@@ -584,7 +584,7 @@ def test_unsharded_strategy_is_required_for_jacobian_training(descent):
 def test_checkpoint_round_trip_omits_policy_and_preserves_predictions(tmp_path, policy):
     candidate = model(jacobian=policy)
     table = pa.table({"context": [1.0, 2.0], "first": [True, False], "second": [False, True]})
-    expected = candidate.predict(table)
+    expected = pa.table(candidate.predict(table))
     path = tmp_path / "model.ckpt"
 
     candidate.save(path)
@@ -596,7 +596,7 @@ def test_checkpoint_round_trip_omits_policy_and_preserves_predictions(tmp_path, 
     restored = rf.Model.load(path)
 
     assert restored.jacobian is False
-    assert restored.predict(table).equals(expected)
+    assert pa.table(restored.predict(table)).equals(expected)
     assert restored.state_dict().keys() == candidate.state_dict().keys()
 
 

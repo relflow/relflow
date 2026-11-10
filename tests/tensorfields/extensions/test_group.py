@@ -371,7 +371,7 @@ def test_group_float_nan_labels_take_the_other_state(tmp_path):
         assert field.state.flatten().tolist() == expected
         assert field.content.flatten()[2] < 0
     assert rf.Group.vocabulary(embedded, "/label") == (1.0, 2.0, 0.0)
-    assert model.predict(rows).num_rows == 4
+    assert model.predict(rows).height == 4
 
 
 def write_module(count: int = 4):
@@ -536,7 +536,7 @@ def test_group_predict_writes_group_probabilities_without_vocabulary_labels(know
 
     result = model.predict(pa.table({"signal": [1.0]}))
 
-    label = result["predictions"][0].as_py()["label"]
+    label = result["predictions"][0]["label"]
     assert label["group"]["value"] == 0
     assert label["group"]["probability"] == pytest.approx(0.25)
     assert set(label) == {"state", "group", "inferred"}

@@ -80,6 +80,7 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import relflow as rf
 from reporting import experiment, report
@@ -166,7 +167,10 @@ def train(model, train_rows, valid_rows, seed, steps, accelerator):
 def predictions(model, rows):
     visible = [{"entity": row["entity"], "x": row["x"]} for row in rows]
     return np.asarray(
-        [row["y"]["content"] for row in model.predict(pa.Table.from_pylist(visible))["predictions"].to_pylist()]
+        [
+            row["y"]["content"]
+            for row in pl.DataFrame(model.predict(pa.Table.from_pylist(visible)))["predictions"].to_list()
+        ]
     )
 
 

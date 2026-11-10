@@ -527,7 +527,7 @@ def test_predict_encodes_batch_and_returns_supervised_outputs_and_root_embedding
     model = primed()
     model.train()
 
-    supervised = model.predict(table([{"color": "red"}, {"color": "blue"}]))
+    supervised = pa.table(model.predict(table([{"color": "red"}, {"color": "blue"}])))
 
     assert model.training
     label = supervised["predictions"].combine_chunks().field("label")
@@ -653,7 +653,7 @@ def test_encode_and_predict_accept_preprocess() -> None:
         torch.tensor([[Tokens.valued.value], [Tokens.valued.value]], dtype=torch.int64),
     )
 
-    supervised = model.predict(table([{"hue": "red"}, {"hue": "blue"}]), preprocess=recolor)
+    supervised = pa.table(model.predict(table([{"hue": "red"}, {"hue": "blue"}]), preprocess=recolor))
     predictions = supervised["predictions"].combine_chunks()
     assert predictions.type.get_field_index("label") >= 0
 
@@ -707,7 +707,7 @@ def test_inference_helpers_accept_postprocess() -> None:
 
     batch = table([{"color": "red"}, {"color": "blue"}])
 
-    predictions = model.predict(batch=batch, postprocess=compact)
+    predictions = pa.table(model.predict(batch=batch, postprocess=compact))
 
     assert len(calls) == 1
     assert calls[0].columns == ["predictions", "representations"]

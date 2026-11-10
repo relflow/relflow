@@ -51,7 +51,7 @@ def test_accelerator_fit_and_prediction_use_real_parameters(tmp_path, accelerato
     assert any(not torch.equal(parameter.detach().cpu(), before[name]) for name, parameter in model.named_parameters())
     assert all(torch.isfinite(parameter).all() for parameter in model.parameters())
     model.to(accelerator)
-    result = model.predict(rows)
+    result = pa.table(model.predict(rows))
     assert model.device.type == accelerator
     assert result.num_rows == 2
     assert all(

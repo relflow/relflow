@@ -14,6 +14,7 @@ from typing import Any, TypeAlias, TypeVar, cast
 
 import fastapi
 import orjson
+import polars as pl
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pydantic
@@ -28,7 +29,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from relflow.architecture.output import metadata
 from relflow.architecture.root import Model
 from relflow.data.arrow import Retain, mappings, retention
-from relflow.data.processors import Postprocessor, PostprocessorInput, Preprocessor, PreprocessorInput
+from relflow.data.processors import Postprocessor, PostprocessorInput, Preprocessor, PreprocessorInput, arrow
 from relflow.logging import logger
 from relflow.logging.config import LEVELS, configure
 from relflow.structs.experiment import NodeAttribute, NodePredicate
@@ -218,13 +219,13 @@ class FastAPIRuntime:
             # ``Model.predict`` adopts a supplied size as the model's current batch size.
             if previous is not None:
                 model.batch_size = previous
-        if not isinstance(result, pa.Table):
-            raise RuntimeError(f"Model.predict must return a pyarrow.Table, got {type(result).__name__}")
-        if result.num_rows != data.num_rows:
+        if not isinstance(result, pl.DataFrame):
+            raise RuntimeError(f"Model.predict must return a polars.DataFrame, got {type(result).__name__}")
+        if result.height != data.num_rows:
             raise RuntimeError(
-                f"Model.predict returned {result.num_rows} rows for {data.num_rows} valid deployment requests"
+                f"Model.predict returned {result.height} rows for {data.num_rows} valid deployment requests"
             )
-        return result
+        return arrow(result, context="deployment prediction output").replace_schema_metadata(metadata(model))
 
     def predict_rows(self, rows: list[Input]) -> list[dict[str, Any]]:
         """Predict one group of valid requests together.

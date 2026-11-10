@@ -114,6 +114,7 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
@@ -147,7 +148,7 @@ def auc(target: np.ndarray, predicted: np.ndarray) -> float:
 
 
 def probabilities(model: rf.Model, rows: list[dict]) -> np.ndarray:
-    output = model.predict(rows).to_pylist()
+    output = pl.DataFrame(model.predict(rows)).to_dicts()
     return np.asarray([row["predictions"]["equal"]["content"]["probability"] for row in output])
 
 

@@ -90,7 +90,10 @@ defaults. See [how declarations become a model](concepts/model-tree.qmd#how-decl
 
 You supply historical records with known outcomes, separate training and
 validation files, and new records to score. The YAML above illustrates one
-row; the file paths stand for data prepared by your application.
+row; the file paths stand for data prepared by your application. Stream training
+data from disk or cloud storage without loading the full dataset into memory.
+SQL queries and custom record generators connect through
+[data modules](guides/data-modules.qmd); use Polars for data already in memory.
 [Your first model](learn/your-first-model.qmd) explains each step from an
 untrained model to a prediction.
 

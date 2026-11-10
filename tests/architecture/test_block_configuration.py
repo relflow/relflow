@@ -140,7 +140,7 @@ def test_python_yaml_and_presets_build_the_same_node_local_architecture(tmp_path
         assert model.schema.requests[rf.Address("events", "target")].ffnx == 2
         assert model.schema.requests[rf.Address("amount")].ffnx == 8
         assert_blocks(model)
-        result = model.predict(observations())
+        result = pa.table(model.predict(observations()))
         predictions = result["predictions"].combine_chunks()
         assert predictions.field("events").values.type.get_field_index("target") >= 0
         assert predictions.type.get_field_index("target") >= 0
@@ -233,7 +233,7 @@ def test_invalid_width_mutation_preserves_schema_graph_and_weights(address):
 
 def test_checkpoint_restores_exact_weights_predictions_and_preset(tmp_path):
     original = configured(preset="xs").eval()
-    before = original.predict(observations())
+    before = pa.table(original.predict(observations()))
     path = original.save(tmp_path / "model.ckpt")
     restored = rf.Model.load(path).eval()
     assert restored.schema.model_dump() == original.schema.model_dump()
@@ -242,7 +242,7 @@ def test_checkpoint_restores_exact_weights_predictions_and_preset(tmp_path):
     assert restored.state_dict().keys() == original.state_dict().keys()
     for name, value in original.state_dict().items():
         torch.testing.assert_close(restored.state_dict()[name], value, rtol=0, atol=0)
-    assert restored.predict(observations()).equals(before)
+    assert pa.table(restored.predict(observations())).equals(before)
 
 
 def test_extension_after_restore_uses_fixed_blocks_and_preserves_retained_weights(tmp_path):

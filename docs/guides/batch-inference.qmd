@@ -42,7 +42,7 @@ the output only after prediction finishes successfully. During a run, shards
 have a `.partial` suffix and receive their final names at completion.
 
 To collect bounded batched output in memory, use
-`model.predict(datamodule=data, batch_size=256, devices=1)`. This returns one Arrow table.
+`model.predict(datamodule=data, batch_size=256, devices=1)`. This returns one Polars DataFrame.
 The batch size is per device and updates the model's current size.
 Prediction has no automatic time limit.
 
@@ -66,13 +66,16 @@ Pass this `writer` in `callbacks=[writer]` instead of the original Writer to
 produce `warehouse-predictions/`. Processors may change rows and columns for
 offline output.
 
-For the original job above, open its completed shards as one Arrow dataset
-for further batch processing:
+For the original job above, scan its completed shards with Polars. Select and
+filter the needed results before collecting an in-memory DataFrame:
 
 ```python
-import pyarrow.dataset as ds
+import polars as pl
 
-result = ds.dataset("payment-predictions", format="parquet")
+results = pl.scan_parquet("payment-predictions/rank-*.parquet")
+payment_ids = results.select(
+    payment_id=pl.col("inputs").struct.field("payment_id"),
+).collect()
 ```
 
 ## Fixed-size vectors and null containers
@@ -83,15 +86,12 @@ field in a structurally null repeated record can trigger this guard, as can a
 retained source vector. Null components inside a nonnull fixed-size vector are
 different and remain supported. The guard runs after configured postprocessing.
 
-Use Arrow IPC for affected tables to preserve their exact types and nulls.
+Use Arrow IPC for affected results to preserve their vector widths and nulls.
 For a job small enough to collect in memory:
 
 ```python
-import pyarrow.ipc as ipc
-
-table = model.predict(datamodule=data, batch_size=256, devices=1)
-with ipc.new_stream("payment-predictions.arrow", table.schema) as writer:
-    writer.write_table(table)
+result = model.predict(datamodule=data, batch_size=256, devices=1)
+result.write_ipc("payment-predictions.arrow")
 ```
 
 For streaming IPC, consume written prediction batches in an application callback;
@@ -100,7 +100,7 @@ project away unneeded vectors, but it must deliberately define the resulting
 output contract.
 
 Direct prediction also supports bounded in-memory requests, processing rows in
-batches and collecting one Arrow table.
+batches and collecting one Polars DataFrame.
 [Prediction output](../reference/prediction-output.qmd#batch-direct-requests) explains its
 preprocessing and postprocessing order. Data-module prediction with a Writer
 streams file-backed datasets. Use [Serving](serving.qmd) for online requests.

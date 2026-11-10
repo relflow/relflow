@@ -99,6 +99,7 @@ from copy import deepcopy
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import relflow as rf
 import torch
@@ -154,7 +155,7 @@ def build() -> rf.Model:
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     visible = [{key: value for key, value in row.items() if key != "answer"} for row in rows]
-    output = model.predict(pa.Table.from_pylist(visible), batch_size=128)["predictions"].to_pylist()
+    output = pl.DataFrame(model.predict(pa.Table.from_pylist(visible), batch_size=128))["predictions"].to_list()
     return np.asarray([row["answer"]["content"] for row in output])
 
 

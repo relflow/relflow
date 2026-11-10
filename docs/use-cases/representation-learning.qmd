@@ -31,15 +31,17 @@ coverage and quality.
 Load that artifact and enable a root context export:
 
 ```python
+import polars as pl
 import relflow as rf
 
 model = rf.Model.load("artifacts/customer-outcomes.rf")
 model.update(rf.where("address") == rf.Address(), embed=True)
-requests = rf.ArrowDataModule(
-    predict="customers/representation-requests.parquet",
+requests = pl.read_parquet("customers/representation-requests.parquet")
+result = model.predict(
+    requests,
+    batch_size=256,
     retain=("customer_id", "cutoff"),
 )
-result = model.predict(datamodule=requests, batch_size=256, devices=1)
 ```
 
 `embed=True` requests an export. It creates no new learning objective and does
@@ -50,20 +52,25 @@ The `sm` schema in that example uses two root summary outputs. Keep them in
 `output_index` order when assembling features for one snapshot:
 
 ```python
-snapshot_features = []
-for row in result.to_pylist():
-    root_outputs = sorted(
-        (record for record in row["representations"] if record["path"] == []),
-        key=lambda record: record["output_index"],
+snapshot_features = (
+    result.with_row_index("observation")
+    .select("observation", "inputs", "representations")
+    .unnest("inputs")
+    .explode("representations")
+    .unnest("representations")
+    .filter(pl.col("path").list.len() == 0)
+    .sort("observation", "output_index")
+    .group_by("observation", maintain_order=True)
+    .agg(
+        pl.col("customer_id").first(),
+        pl.col("cutoff").first(),
+        features=pl.col("embedding").arr.explode(),
     )
-    snapshot_features.append({
-        "customer_id": row["inputs"]["customer_id"],
-        "cutoff": row["inputs"]["cutoff"],
-        "features": [value for record in root_outputs for value in record["embedding"]],
-    })
+)
 ```
 
-The result is one feature vector per customer snapshot. A customer can have
+For request files that fit in memory, this produces a Polars DataFrame with
+one feature vector per customer snapshot. A customer can have
 many snapshots, so join the new spending label by both customer and cutoff.
 Root context describes the whole observation. An event-level task instead
 needs a representation at the matching event positions; see
