@@ -110,31 +110,6 @@ def illustrate(identifier: str):
             fig,
             "Illustrated generating mean and exact endpoint-translation property. Learning records are unavailable. A matching wheel exporting Duration is required before its model-equivalence checks can be evaluated.",
         )
-    if identifier == "P101":
-        fig, ax = plt.subplots(figsize=(9, 4.2), layout="constrained")
-        x = np.linspace(-1, 1, 101)
-        for index, slope in enumerate((-3.0, -1.0, 1.0, 3.0)):
-            ax.plot(x, slope * (x + 0.1), color=COLORS[index], lw=2, label=f"Hidden rule {index}")
-        ax.axvline(-0.1, color="gray", linestyle=":", label="Rules meet")
-        ax.set(xlabel="Visible setting x", ylabel="Noiseless response y", title="Four hidden rules cross")
-        ax.grid(alpha=0.18)
-        ax.legend(fontsize=8)
-        return (
-            fig,
-            "Generator illustration only: four rules meet at x = -0.1. Actual records add independent noise with standard deviation 0.1; no model predictions are shown.",
-        )
-    if identifier in {"P102", "P103", "P104", "P105", "P106", "P107"}:
-        fig, ax = plt.subplots(figsize=(9, 4.2), layout="constrained")
-        x = np.linspace(-1, 1, 101)
-        for index, (intercept, slope) in enumerate(zip((-6, -2, 2, 6), (-0.6, 0.6, -0.6, 0.6), strict=True)):
-            ax.plot(x, intercept + slope * x, color=COLORS[index], lw=2, label=f"Hidden rule {index}")
-        ax.set(xlabel="Visible setting x", ylabel="Noiseless response y", title="Four hidden generating rules")
-        ax.grid(alpha=0.18)
-        ax.legend(fontsize=8)
-        return (
-            fig,
-            "Generator illustration only: identities follow one of four rules and observations add independent noise. The experiment's populations and controls are described in its method; no model predictions are shown.",
-        )
     if identifier == "P100":
         fig, axes = axes_pair(width=10, height=4.5)
         domains = [

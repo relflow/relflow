@@ -6,8 +6,10 @@ import argparse
 import ast
 import hashlib
 import html
+import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -19,7 +21,7 @@ import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-from experiments.source import declaration, frontmatter, metadata, registry
+from experiments.source import declaration, describe, frontmatter, metadata, registry
 
 ROOT = Path(__file__).resolve().parent
 
@@ -82,9 +84,6 @@ def runtime_inputs(root: Path) -> dict:
     """Bind experiment code and shared runtime files, excluding publication and test tooling."""
     inputs = {}
     paths = list((root / "experiments").rglob("*"))
-    archive = root / "migrations/cluster_to_group"
-    if archive.exists():
-        paths.extend(archive.rglob("*"))
     for path in sorted(paths):
         name = path.relative_to(root).as_posix()
         if "__pycache__" in path.parts:
@@ -100,17 +99,38 @@ def runtime_inputs(root: Path) -> dict:
 
 
 def script_paths(root: Path, entries: dict) -> set[str]:
-    """Identify all isolated proof scripts, including reviewed retired sources."""
-    scripts = {entry["script"] for entry in entries.values()}
-    archive = root / "migrations/cluster_to_group"
-    if archive.exists():
-        from migration import BASELINE, verify_sources
+    """Identify experiment scripts that must be isolated from one another."""
+    return {entry["script"] for entry in entries.values()}
 
-        retired = verify_sources(root, BASELINE)["proofs"]
-        if {entry["id"] for entry in retired} & entries.keys():
-            raise ValueError("Retired Cluster proof IDs cannot be reused by the candidate catalog")
-        scripts.update(entry["archive"] for entry in retired)
-    return scripts
+
+def baseline_catalog(revision: str) -> set[str]:
+    """Read proof identities from the exact baseline Git tree without executing it."""
+    if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise ValueError("Baseline catalog requires a full Git revision")
+    try:
+        data = subprocess.check_output(
+            ["git", "archive", revision, "evidence/experiments"], cwd=ROOT.parent, stderr=subprocess.PIPE
+        )
+        entries = set()
+        with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+            for member in archive:
+                parts = Path(member.name).parts
+                if len(parts) != 4 or parts[:2] != ("evidence", "experiments") or not parts[-1].endswith(".py"):
+                    continue
+                if not member.isfile():
+                    raise ValueError(f"Baseline experiment must be a regular file: {member.name}")
+                stream = archive.extractfile(member)
+                if stream is None:
+                    raise ValueError(f"Cannot read baseline experiment: {member.name}")
+                identifier = describe(stream.read().decode())["evidence-id"]
+                if identifier in entries:
+                    raise ValueError(f"Duplicate baseline experiment: {identifier}")
+                entries.add(identifier)
+        if not entries:
+            raise ValueError("Baseline catalog is empty")
+        return entries
+    except (subprocess.CalledProcessError, OSError, tarfile.TarError, UnicodeError) as error:
+        raise ValueError(f"Cannot read baseline catalog at {revision}") from error
 
 
 def execution_key(manifest: dict, task: dict, execution: dict) -> str:
@@ -267,6 +287,7 @@ def plan(
     root: Path = ROOT,
     identifiers: list[str] | None = None,
     steps: int | None = None,
+    baseline_ids: set[str] | None = None,
 ) -> dict:
     entries = registry(root, measurements=False)
     selected = identifiers if identifiers is not None else list(entries)
@@ -275,17 +296,10 @@ def plan(
     tasks = []
     inputs = runtime_inputs(root)
     scripts = script_paths(root, entries)
-    migration = None
-    archive = root / "migrations/cluster_to_group/manifest.json"
-    if archive.is_file():
-        from migration import BASELINE, transition
-
-        if baseline.get("revision") == BASELINE:
-            migration = transition(root, BASELINE, entries)
-    replacements = {entry["proposed_replacement"] for entry in migration or [] if entry["proposed_replacement"]}
+    introduced = set(entries) - baseline_ids if baseline_ids is not None else set()
     for identifier in selected:
         script = root / entries[identifier]["script"]
-        for role in ("candidate",) if identifier in replacements else ("baseline", "candidate"):
+        for role in ("candidate",) if identifier in introduced else ("baseline", "candidate"):
             tasks.append(
                 {
                     "id": identifier,
@@ -306,50 +320,20 @@ def plan(
                     "executor_sha": executor_sha,
                 }
             )
-    if migration is not None:
-        for entry in migration:
-            replacement = entry["proposed_replacement"]
-            if replacement is not None and replacement not in selected:
-                continue
-            if replacement is None and set(selected) != set(entries):
-                continue
-            script = root / entry["archive"]
-            if default_seed(script) != entry["seed"]:
-                raise ValueError(f"Migration seed differs from archived proof: {entry['id']}")
-            tasks.append(
-                {
-                    "id": entry["id"],
-                    "role": "baseline",
-                    "seed": entry["seed"],
-                    "accelerator": "cpu",
-                    "attempt": 1,
-                    "steps": steps,
-                    "script": entry["archive"],
-                    "script_sha256": digest(script),
-                    "inputs_sha256": identity(
-                        {
-                            name: value
-                            for name, value in inputs.items()
-                            if name not in scripts or name == entry["archive"]
-                        }
-                    ),
-                    "executor_sha": executor_sha,
-                }
-            )
     return {
         "schema": 3,
         "run_id": run_id,
         "created_at": datetime.now(UTC).isoformat(),
         "evidence_sha": evidence_sha,
         "executor_sha": executor_sha,
-        "policy": "cluster-group-transition-v1" if migration is not None else "paired-passing-checks-v1",
+        "policy": "introduced-passing-checks-v1" if introduced else "paired-passing-checks-v1",
         "candidate": candidate,
         "baseline": baseline,
         "full_catalog": set(selected) == set(entries),
         "mode": "full" if steps is None else "smoke",
         "tasks": tasks,
         "runtime_sha256": identity(inputs),
-        **({"migration": migration} if migration is not None else {}),
+        **({"introduced": sorted(introduced), "retired": sorted(baseline_ids - set(entries))} if introduced else {}),
     }
 
 
@@ -497,16 +481,13 @@ def evaluate(
     seen = {}
     errors = reuse_errors + verify_execution(manifest, records, reports)
     catalog = registry(root, measurements=False)
-    migration = None
-    if manifest.get("policy") not in {"paired-passing-checks-v1", "cluster-group-transition-v1"}:
+    introduced = set()
+    if manifest.get("policy") not in {"paired-passing-checks-v1", "introduced-passing-checks-v1"}:
         errors.append("Unknown Evidence comparison policy")
-    if manifest.get("policy") != "cluster-group-transition-v1" and "migration" in manifest:
-        errors.append("Migration declaration requires the reviewed transition policy")
-    if manifest.get("policy") == "cluster-group-transition-v1":
+    if manifest.get("policy") == "introduced-passing-checks-v1":
         try:
-            from migration import transition
-
-            migration = transition(root, manifest["baseline"]["revision"], catalog)
+            baseline_ids = baseline_catalog(manifest["baseline"]["revision"])
+            introduced = set(catalog) - baseline_ids
             planned = plan(
                 run_id=manifest["run_id"],
                 candidate=manifest["candidate"],
@@ -514,12 +495,14 @@ def evaluate(
                 evidence_sha=manifest["evidence_sha"],
                 executor_sha=manifest["executor_sha"],
                 root=root,
+                baseline_ids=baseline_ids,
             )
-            if manifest.get("migration") != migration or manifest["tasks"] != planned["tasks"]:
-                raise ValueError("Migration task plan differs from the reviewed transition")
+            if any(manifest.get(key) != planned.get(key) for key in ("policy", "introduced", "retired", "tasks")):
+                raise ValueError("Task plan differs from the baseline catalog")
         except (ValueError, KeyError, OSError, TypeError) as error:
-            errors.append(f"Invalid migration: {error}")
-            migration = None
+            errors.append(f"Invalid baseline catalog: {error}")
+    elif "introduced" in manifest or "retired" in manifest:
+        errors.append("Introduced proofs require the catalog comparison policy")
     if "runtime_sha256" in manifest:
         inputs = runtime_inputs(root)
         scripts = script_paths(root, catalog)
@@ -538,23 +521,13 @@ def evaluate(
         errors.append("Task executor differs from the manifest")
     if len(expected) != len(manifest["tasks"]):
         errors.append("Manifest contains duplicate tasks")
-    retired = {entry["id"] for entry in migration or []}
-    replacements = {entry["proposed_replacement"] for entry in migration or [] if entry["proposed_replacement"]}
-    if {task["id"] for task in manifest["tasks"]} != set(catalog) | retired:
-        errors.append("Manifest does not cover the complete registered catalog and retired migration proofs")
-    for identifier in set(catalog) | retired:
+    if {task["id"] for task in manifest["tasks"]} != set(catalog):
+        errors.append("Manifest does not cover the complete registered catalog")
+    for identifier in catalog:
         roles = {task["role"] for task in manifest["tasks"] if task["id"] == identifier}
-        wanted = (
-            {"baseline"}
-            if identifier in retired
-            else {"candidate"}
-            if identifier in replacements
-            else {"baseline", "candidate"}
-        )
+        wanted = {"candidate"} if identifier in introduced else {"baseline", "candidate"}
         if roles != wanted:
             errors.append(f"Missing or unexpected task roles: {identifier}")
-    if migration is None and len(expected) != 2 * len(catalog):
-        errors.append("Every experiment needs both baseline and candidate execution")
     for record in records:
         key = task_key(record["task"])
         if key not in expected or key in seen or record["task"] != expected.get(key):
@@ -592,7 +565,13 @@ def evaluate(
     for task in manifest["tasks"]:
         if task["role"] != "candidate":
             continue
-        if task["id"] in replacements:
+        if task["id"] in introduced:
+            candidate = seen.get(task_key(task), {}).get("result") or {}
+            new_unmet.extend(
+                {"id": task["id"], "seed": task["seed"], "check": name}
+                for name, passed in candidate.get("checks", {}).items()
+                if passed is False
+            )
             continue
         candidate = seen.get(task_key(task), {}).get("result") or {}
         baseline = seen.get(task_key(dict(task, role="baseline")), {}).get("result") or {}
@@ -606,34 +585,6 @@ def evaluate(
                 limitations.append(
                     {"id": task["id"], "seed": task["seed"], "check": check, "candidate_passed": cc.get(check)}
                 )
-    if migration is not None:
-        try:
-            from migration import compare_checks
-
-            old = {
-                task["id"]: seen.get(task_key(task), {}).get("result")
-                for task in manifest["tasks"]
-                if task["id"] in retired
-            }
-            new = {
-                task["id"]: seen.get(task_key(task), {}).get("result")
-                for task in manifest["tasks"]
-                if task["id"] in replacements
-            }
-            compared = compare_checks(migration, old, new)
-            seeds = {(task["role"], task["id"]): task["seed"] for task in manifest["tasks"]}
-            limitations.extend(
-                {
-                    **entry,
-                    "seed": seeds[("baseline", entry["id"])],
-                    "candidate_passed": None,
-                    "comparison": "not directly comparable",
-                }
-                for entry in compared["baseline_unmet"]
-            )
-            new_unmet = [{**entry, "seed": seeds[("candidate", entry["id"])]} for entry in compared["candidate_unmet"]]
-        except (ValueError, KeyError, TypeError) as error:
-            errors.append(f"Invalid migration checks: {error}")
     if manifest["mode"] != "full" or not manifest["full_catalog"]:
         errors.append("Smoke or partial-catalog execution cannot satisfy the required gate")
     return {
@@ -644,7 +595,7 @@ def evaluate(
         "errors": errors,
         "regressions": regressions,
         "baseline_unmet_checks": limitations,
-        **({"migration_candidate_unmet_checks": new_unmet} if migration is not None else {}),
+        **({"introduced_unmet_checks": new_unmet} if introduced else {}),
         "expected_tasks": len(expected),
         "received_tasks": len(seen),
         **(

@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 from evidence_ci import (
+    baseline_catalog,
     collect,
     digest,
     finish,
@@ -71,11 +72,6 @@ def duration(value: object) -> float | None:
 def scheduling(suite: Path) -> dict:
     """Freeze operative costs; timing provenance is data, never an execution proof."""
     entries = registry(suite)
-    if (suite / "migrations/cluster_to_group").exists():
-        from migration import BASELINE, verify_sources
-
-        for entry in verify_sources(suite, BASELINE)["proofs"]:
-            entries.setdefault(entry["id"], {"run": None})
     published = {
         identifier: duration((entry["run"] or {}).get("duration_seconds")) for identifier, entry in entries.items()
     }
@@ -142,23 +138,15 @@ def schedule(tasks: list[dict], costs: dict) -> list[dict]:
 def assignments(manifest: dict, suite: Path) -> list[list[str]]:
     """Balance whole pairs using immutable historical durations as hints only."""
     costs = scheduling(suite)["costs"]
-    roots = {
-        entry["proposed_replacement"]: entry["id"]
-        for entry in manifest.get("migration", [])
-        if entry["proposed_replacement"]
-    }
-    groups = {}
     durations = {}
     for task in manifest["tasks"]:
         identifier = task["id"]
-        key = roots.get(identifier, identifier)
-        groups.setdefault(key, set()).add(identifier)
-        durations[key] = durations.get(key, 0.0) + costs[identifier][task["role"]]
+        durations[identifier] = durations.get(identifier, 0.0) + costs[identifier][task["role"]]
     buckets: list[list[str]] = [[] for _ in range(PROFILE["shards"])]
     weights = [0.0] * len(buckets)
-    for identifier in sorted(groups, key=lambda value: (-durations[value], value)):
+    for identifier in sorted(durations, key=lambda value: (-durations[value], value)):
         index = min(range(len(buckets)), key=lambda value: (weights[value], len(buckets[value]), value))
-        buckets[index].extend(sorted(groups[identifier]))
+        buckets[index].append(identifier)
         weights[index] += durations[identifier]
     return buckets
 
@@ -233,8 +221,9 @@ def load_plan(root: Path) -> dict:
         evidence_sha=manifest["evidence_sha"],
         executor_sha=manifest["executor_sha"],
         root=suite,
+        baseline_ids=baseline_catalog(manifest["baseline"]["revision"]),
     )
-    for name in ("tasks", "policy", "mode", "full_catalog", "runtime_sha256", "migration"):
+    for name in ("tasks", "policy", "mode", "full_catalog", "runtime_sha256", "introduced", "retired"):
         if manifest.get(name) != expected.get(name):
             raise ValueError(f"Evidence plan changed canonical tasks or budgets: {name}")
     if manifest.get("scheduling") != scheduling(suite):
@@ -304,6 +293,7 @@ def create_plan(options: argparse.Namespace) -> None:
         evidence_sha=options.evidence_sha,
         executor_sha=options.executor_sha,
         root=output / "source",
+        baseline_ids=baseline_catalog(options.baseline_sha),
     )
     manifest.update(
         backend=BACKEND,

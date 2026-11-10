@@ -100,10 +100,10 @@ def test_paired_figures_link_to_the_recorded_ci_run(project):
     assert "paired Evidence CI run" in markup
 
 
-def test_migration_figure_explains_its_candidate_only_scope(project):
+def test_introduced_figure_explains_its_candidate_only_scope(project):
     path = project / "docs/assets/evidence-plots/P001.json"
     data = json.loads(path.read_text())
-    data["scope"] = "candidate-only Evidence CI migration"
+    data["scope"] = "candidate-only Evidence CI proof"
     path.write_text(json.dumps(data))
     review = json.loads((path.parent / "review.json").read_text())
     markup = fragment(project, "P001", data["record"], review)
@@ -222,14 +222,14 @@ def test_paired_bundle_rejects_another_run_or_candidate_record(project, tmp_path
         verify(archive, manifest, records)
 
 
-def test_migration_plots_authenticate_candidate_only_scope(project, tmp_path):
+def test_introduced_plots_authenticate_candidate_only_scope(project, tmp_path):
     from evidence.visuals import verify
 
     assets = project / "docs/assets/evidence-plots"
     data_path = assets / "P001.json"
     review_path = assets / "review.json"
     data = json.loads(data_path.read_text())
-    data["scope"] = "candidate-only Evidence CI migration"
+    data["scope"] = "candidate-only Evidence CI proof"
     data_path.write_text(json.dumps(data))
     review = json.loads(review_path.read_text())
     review["ci"] = dict(
@@ -256,12 +256,12 @@ def test_migration_plots_authenticate_candidate_only_scope(project, tmp_path):
         evidence_sha="a" * 40,
         executor_sha="c" * 40,
         observations={"capture_sha256": "d" * 64},
-        migration=[{"proposed_replacement": "P001"}],
+        introduced=["P001"],
     )
     records = [
         dict(task={"id": "P001", "role": "candidate", "script_sha256": entry["source_sha256"]}, result=data["record"])
     ]
     assert verify(archive, manifest, records)["ci"]["candidate_only"] == ["P001"]
-    manifest["migration"] = []
-    with pytest.raises(ValueError, match="migration scope"):
+    manifest["introduced"] = []
+    with pytest.raises(ValueError, match="introduced-proof scope"):
         verify(archive, manifest, records)

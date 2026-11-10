@@ -117,7 +117,7 @@ def build(bundles: Path, output: Path, identifiers: list[str] | None = None, *, 
                 manifest=f"{identifier}-manifest.json.gz",
                 capture_run=bundle.manifest["runtime"]["github_run_id"],
                 scope=(
-                    "candidate-only Evidence CI migration"
+                    "candidate-only Evidence CI proof"
                     if ci and identifier in ci.get("candidate_only", [])
                     else "paired Evidence CI candidate"
                     if ci

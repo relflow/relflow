@@ -1445,70 +1445,6 @@ def group_composition(bundle: Bundle, spec: dict):
     )
 
 
-def group_study(bundle: Bundle, spec: dict):
-    """Compare held-out populations and controls for the Group studies."""
-    conditions = {
-        "P102": [
-            ("Group / rare", ("group", "rare")),
-            ("Category / rare", ("category", "rare")),
-            ("No identity / rare", ("no_identity", "rare")),
-            ("Shuffled / rare", ("shuffled", "rare")),
-            ("Group / frequent", ("group", "frequent")),
-            ("Category / frequent", ("category", "frequent")),
-        ],
-        "P103": [
-            ("2 slots", ("two", "test")),
-            ("4 slots", ("four", "test")),
-            ("8 slots", ("eight", "test")),
-            ("4 / shuffled", ("shuffled", "test")),
-        ],
-        "P104": [
-            ("Known / no dropout", ("no_dropout", "known")),
-            ("Unseen / no dropout", ("no_dropout", "unseen")),
-            ("Null / no dropout", ("no_dropout", "null")),
-            ("Known / dropout .10", ("dropout", "known")),
-            ("Unseen / dropout .10", ("dropout", "unseen")),
-            ("Null / dropout .10", ("dropout", "null")),
-        ],
-        "P105": [("Original assignment", ("original",)), ("Rotated assignment", ("intervention",))],
-        "P106": [
-            ("Before / changed", ("drift", "before", "changed")),
-            ("After drift / changed", ("drift", "after", "changed")),
-            ("After stable training / changed", ("stable_control", "after", "changed")),
-            ("Before / unchanged", ("drift", "before", "unchanged")),
-            ("After drift / unchanged", ("drift", "after", "unchanged")),
-            ("After stable training / unchanged", ("stable_control", "after", "unchanged")),
-        ],
-    }
-    identifier = bundle.manifest["id"]
-    selected = conditions["P106" if identifier == "P107" else identifier]
-    values = []
-    paths = []
-    for _, path in selected:
-        value = bundle.record["metrics"]
-        for key in path:
-            value = value[key]
-        paths.append([*path, "normalized_rmse"])
-        values.append(value["normalized_rmse"])
-    fig, ax = plt.subplots(figsize=(8.5, max(3.5, 1.5 + len(selected) * 0.4)), layout="constrained")
-    dots(
-        ax,
-        [name for name, _ in selected],
-        {"Held-out error": values},
-        xlabel="Normalized RMSE (lower is better)",
-        reference=(1, "Predict training mean"),
-    )
-    ax.legend_.remove()
-    ax.set_title(spec["focus"])
-    return (
-        fig,
-        (
-            "The points show the recorded seed and named held-out populations. Each error is normalized by the training-mean prediction error on that population; the dotted line is that baseline."
-        ),
-        {"metric_paths": paths},
-    )
-
-
 def group_predictions(bundle: Bundle, spec: dict):
     """Distinguish shuffled identities from the stable arm's ordinary test."""
     if "group_counts" not in bundle.record["metrics"]:
@@ -2514,19 +2450,8 @@ def render(bundle: Bundle, spec: dict, output: Path) -> dict:
             "svg.hashsalt": "relflow-evidence-diagnostics",
         }
     )
-    group_proof = (
-        bundle.manifest["id"] in {"P078", "P101", "P108", "P111"} and "group_counts" in bundle.record["metrics"]
-    )
-    group_studies = {"P102", "P103", "P104", "P105", "P106", "P107"}
-    handler = (
-        group_learning
-        if group_proof
-        else (
-            group_study
-            if bundle.manifest["id"] in group_studies
-            else HANDLERS.get(spec.get("measured_mode", spec["mode"]), summary)
-        )
-    )
+    group_proof = bundle.manifest["id"] in {"P078", "P108", "P111"} and "group_counts" in bundle.record["metrics"]
+    handler = group_learning if group_proof else HANDLERS.get(spec.get("measured_mode", spec["mode"]), summary)
     result = {
         "id": bundle.manifest["id"],
         "focus": spec["focus"],

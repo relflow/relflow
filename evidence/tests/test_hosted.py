@@ -11,11 +11,11 @@ from copy import deepcopy
 from pathlib import Path
 from threading import Barrier, Lock
 
+import evidence_ci
 import hosted
 import pytest
 import runtime
 from evidence_ci import digest, plan, registry, suite_identity, task_key, write_json
-from migration import BASELINE
 
 
 def wheel(path, content):
@@ -64,13 +64,18 @@ def planned(tmp_path, monkeypatch, request):
     suite = source(tmp_path / "suite", count=24 if selected == "migration" else selected)
     if selected == "migration":
         original = Path(__file__).resolve().parents[1]
-        shutil.copytree(original / "migrations", suite / "migrations")
         entries = registry(original, measurements=False)
         for identifier in ("P108", "P109", "P110", "P111", "P112"):
             path = entries[identifier]["script"]
             destination = suite / path
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(original / path, destination)
+    baseline_ids = set(registry(suite, measurements=False))
+    if selected == "migration":
+        baseline_ids -= {"P108", "P109", "P110", "P111", "P112"}
+        baseline_ids.add("P018")
+    monkeypatch.setattr(hosted, "baseline_catalog", lambda revision: baseline_ids)
+    monkeypatch.setattr(evidence_ci, "baseline_catalog", lambda revision: baseline_ids)
     inputs = tmp_path / "inputs"
     wheel(inputs / "baseline/relflow-0.4.5-py3-none-any.whl", "baseline runtime\n")
     wheel(inputs / "candidate/relflow-0.4.5-py3-none-any.whl", "candidate runtime\n")
@@ -94,7 +99,7 @@ def planned(tmp_path, monkeypatch, request):
     )
     request = {
         "candidate": "a" * 40,
-        "baseline": BASELINE if selected == "migration" else "b" * 40,
+        "baseline": "b" * 40,
         "suite": "c" * 40,
         "run_id": 123,
         "run_attempt": 1,
@@ -351,7 +356,7 @@ def fresh(manifest, task, *, passed=True):
                 "held-out signal": passed,
                 **(
                     {}
-                    if manifest.get("policy") == "cluster-group-transition-v1"
+                    if manifest.get("policy") == "introduced-passing-checks-v1"
                     else {"existing baseline limitation": False}
                 ),
             },
@@ -521,28 +526,25 @@ def test_full_collection_preserves_twelve_actual_hosts_and_all_original_measurem
 
 
 @pytest.mark.parametrize("planned", ["migration"], indirect=True)
-def test_migration_collects_all_twelve_shards_with_distinct_roles(shards, tmp_path):
+def test_introduced_proofs_collect_all_twelve_shards_with_distinct_roles(shards, tmp_path):
     prepared, manifest, _, root, execute, state = shards
-    assert manifest["policy"] == "cluster-group-transition-v1"
+    assert manifest["policy"] == "introduced-passing-checks-v1"
     execute()
     summary = collected(prepared, root, tmp_path / "migration-collected")
     assert summary["passed"] and summary["complete"]
-    assert summary["fresh_tasks"] == 59 and len(state["launches"]) == 59
-    for entry in manifest["migration"]:
-        old, replacement = entry["id"], entry["proposed_replacement"]
-        if replacement:
-            assert any(old in shard and replacement in shard for shard in manifest["shards"])
-    assert summary["migration_candidate_unmet_checks"] == []
+    assert summary["fresh_tasks"] == 53 and len(state["launches"]) == 53
+    assert manifest["retired"] == ["P018"]
+    assert summary["introduced_unmet_checks"] == []
 
 
 @pytest.mark.parametrize("planned", ["migration"], indirect=True)
-def test_migration_collector_fails_on_each_unmet_new_group_proof(shards, tmp_path):
+def test_introduced_collector_fails_on_each_unmet_new_group_proof(shards, tmp_path):
     prepared, manifest, _, root, execute, state = shards
     execute(candidate_passes=False)
     summary = collected(prepared, root, tmp_path / "migration-failed")
     assert summary["complete"] and not summary["passed"]
     assert len(state["launches"]) == len(manifest["tasks"])
-    assert {item["id"] for item in summary["migration_candidate_unmet_checks"]} == {
+    assert {item["id"] for item in summary["introduced_unmet_checks"]} == {
         "P108",
         "P109",
         "P110",

@@ -79,9 +79,7 @@ def fragment(root: Path, identifier: str, run: dict | None, review: dict | None)
         scope += "These figures and the selected measurements come from the same captured execution. "
         scope += {
             "paired Evidence CI candidate": "This is the candidate role of the paired Evidence CI run.",
-            "candidate-only Evidence CI migration": (
-                "This candidate-only migration proof has no directly comparable baseline measurement."
-            ),
+            "candidate-only Evidence CI proof": ("This new proof has no directly comparable baseline measurement."),
         }.get(data.get("scope"), "This is an unpaired visualization run.")
     blocks.append('<p class="diagnostic-scope">' + html.escape(scope) + "</p>")
     if run is None and data.get("requires"):
@@ -107,7 +105,7 @@ def fragment(root: Path, identifier: str, run: dict | None, review: dict | None)
             f'<a href="{base}{entry["data"]}">Figure and example data</a>'
         )
         if (
-            data.get("scope") in {"paired Evidence CI candidate", "candidate-only Evidence CI migration"}
+            data.get("scope") in {"paired Evidence CI candidate", "candidate-only Evidence CI proof"}
             and run_id is not None
         ):
             downloads += f' · <a href="https://github.com/relflow/relflow/actions/runs/{html.escape(str(run_id), quote=True)}">CI observation bundles</a>'

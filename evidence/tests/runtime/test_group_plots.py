@@ -8,12 +8,10 @@ import pytest
 
 pytest.importorskip("matplotlib")
 
-from evidence.diagnostics.illustrations import illustrate
 from evidence.diagnostics.plots import (
     group_composition,
     group_learning,
     group_predictions,
-    group_study,
     grouping,
     trajectory,
 )
@@ -88,7 +86,7 @@ def test_group_learning_uses_recorded_epoch_trajectories():
     stable = {"ari_by_step": [{"step": 32, "adjusted_rand": 0.2, "validation_rmse": 3.0}]}
     control = {"ari_by_step": [{"step": 32, "adjusted_rand": 0.0, "validation_rmse": 4.0}]}
     bundle = SimpleNamespace(
-        manifest={"id": "P101"}, record={"metrics": {"group_counts": {"4": {"stable": stable, "no_regime": control}}}}
+        manifest={"id": "P111"}, record={"metrics": {"group_counts": {"4": {"stable": stable, "no_regime": control}}}}
     )
     fig, note, _ = group_learning(bundle, {})
     assert len(fig.axes[0].lines) == 3
@@ -98,42 +96,15 @@ def test_group_learning_uses_recorded_epoch_trajectories():
 
 def test_group_composition_retains_unassigned_identities():
     stable = {"expected_partition": [0, 0, 1, 1], "assignments": [0, -1, 1, 1]}
-    bundle = SimpleNamespace(manifest={"id": "P101"}, record={"metrics": {"group_counts": {"4": {"stable": stable}}}})
+    bundle = SimpleNamespace(manifest={"id": "P111"}, record={"metrics": {"group_counts": {"4": {"stable": stable}}}})
     fig, _, _ = group_composition(bundle, {})
     assert "Unassigned" in [label.get_text() for label in fig.axes[0].get_yticklabels()]
     assert sum(patch.get_width() for patch in fig.axes[0].patches) == 4
 
 
-def test_group_study_plots_rare_and_frequent_controls_from_the_record():
-    def arm(rare, frequent):
-        return {"rare": {"normalized_rmse": rare}, "frequent": {"normalized_rmse": frequent}}
-
-    bundle = SimpleNamespace(
-        manifest={"id": "P102"},
-        record={
-            "metrics": {
-                "group": arm(0.3, 0.1),
-                "category": arm(0.2, 0.05),
-                "no_identity": arm(1.0, 1.0),
-                "shuffled": arm(1.1, 1.1),
-            }
-        },
-    )
-    fig, _, data = group_study(bundle, {"focus": "Rare identities"})
-    assert fig.axes[0].collections[0].get_offsets()[:, 0].tolist() == [0.3, 0.2, 1.0, 1.1, 0.1, 0.05]
-    assert data["metric_paths"][0] == ["group", "rare", "normalized_rmse"]
-
-
-@pytest.mark.parametrize("identifier", ["P102", "P103", "P104", "P105", "P106", "P107"])
-def test_unmeasured_group_studies_show_only_the_generator(identifier):
-    fig, note = illustrate(identifier)
-    assert len(fig.axes[0].lines) == 4
-    assert "no model predictions" in note
-
-
 @pytest.mark.parametrize(
     ("identifier", "measured_mode", "expected"),
-    [("P099", "duration", "duration"), ("P100", "ordinal", "ordinal"), ("P101", None, "group")],
+    [("P099", "duration", "duration"), ("P100", "ordinal", "ordinal"), ("P111", None, "group")],
 )
 def test_measured_research_uses_the_datatype_or_group_renderer(
     monkeypatch, tmp_path, identifier, measured_mode, expected

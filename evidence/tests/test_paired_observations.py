@@ -118,67 +118,24 @@ def test_archive_rejects_changed_bytes_before_installing(paired, tmp_path):
     assert value["manifest"]["runtime"]["run_id"] == "gh-42-2"
 
 
-def test_migration_selects_only_replacement_candidates_and_requires_retired_observations(paired, tmp_path):
-    from evidence.migration import BASELINE, verify_sources
-
+def test_introduced_proof_has_candidate_only_observations(paired, tmp_path):
     reports, observations, selected = paired
-    source = reports / "source"
-    shutil.copytree(ROOT / "evidence/migrations", source / "migrations")
-    migration = verify_sources(source, BASELINE)["proofs"]
-    full_catalog = registry(ROOT / "evidence", measurements=False)
     manifest_path = reports / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
-    manifest.update(policy="cluster-group-transition-v1", migration=migration)
-    manifest["baseline"]["revision"] = BASELINE
-    for entry in migration:
-        replacement = entry["proposed_replacement"]
-        tasks = [(entry["id"], "baseline", entry["archive"])]
-        if replacement:
-            path = full_catalog[replacement]["script"]
-            target = source / path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(ROOT / "evidence" / path, target)
-            tasks.append((replacement, "candidate", path))
-        for identifier, role, script in tasks:
-            proof = source / script
-            task = dict(
-                id=identifier,
-                role=role,
-                script_sha256=hashlib.sha256(proof.read_bytes()).hexdigest(),
-                seed=0,
-                accelerator="cpu",
-                attempt=1,
-            )
-            manifest["tasks"].append(task)
-            raw = tmp_path / f"raw-{identifier}-{role}"
-            raw.mkdir()
-            record = {"checks": {"criterion": True}, "outcome": "met", "seed": 0}
-            (raw / "record.json").write_text(json.dumps(record))
-            (raw / "frames.json").write_text("[]")
-            shutil.copyfile(proof, raw / "proof.py")
-            header = dict(
-                id=identifier,
-                task=task,
-                source_sha256=task["script_sha256"],
-                wheel_sha256=manifest[role]["wheel_sha256"],
-                capture_sha256="c" * 64,
-                runtime={"run_id": "gh-42-2"},
-                artifacts={
-                    path.name: {"sha256": hashlib.sha256(path.read_bytes()).hexdigest()} for path in raw.iterdir()
-                },
-            )
-            (raw / "manifest.json").write_text(json.dumps(header))
-            destination = observations / f"{identifier}-{role}" / "bundle.zip"
-            destination.parent.mkdir()
-            receipt = package(raw, destination)
-            record_path = reports / "results" / (task_key(task) + ".json")
-            record_path.parent.mkdir(parents=True, exist_ok=True)
-            record_path.write_text(json.dumps(dict(task=task, result=record, observations=receipt)))
+    manifest.update(policy="introduced-passing-checks-v1", introduced=["P001"], retired=["P018"])
+    baseline = next(task for task in manifest["tasks"] if task["role"] == "baseline")
+    manifest["tasks"].remove(baseline)
+    (reports / "results" / (task_key(baseline) + ".json")).unlink()
+    for path in observations.rglob("bundle.zip"):
+        if read(path)["manifest"]["task"] == baseline:
+            path.unlink()
+            break
     manifest_path.write_text(json.dumps(manifest))
     ci = prepare(reports, observations, selected)
-    assert ci["candidate_only"] == ["P108", "P109", "P110", "P111", "P112"]
-    assert {path.name for path in selected.iterdir()} == {"P001", *ci["candidate_only"]}
+    assert ci["candidate_only"] == ["P001"]
+    assert {path.name for path in selected.iterdir()} == {"P001"}
     shutil.rmtree(selected)
-    (observations / "P065-baseline/bundle.zip").unlink()
-    with pytest.raises(ValueError, match="exact measured task union"):
+    manifest["introduced"] = []
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="complete full-budget"):
         prepare(reports, observations, selected)

@@ -14,26 +14,14 @@ def prepare(reports: Path, observations: Path, destination: Path) -> dict:
     manifest = json.loads((reports / "manifest.json").read_text())
     catalog = registry(reports / "source", measurements=False)
     tasks = manifest["tasks"]
-    candidate_only = set()
-    retired = set()
-    if manifest.get("policy", "paired-passing-checks-v1") not in {
-        "paired-passing-checks-v1",
-        "cluster-group-transition-v1",
-    }:
+    policy = manifest.get("policy", "paired-passing-checks-v1")
+    if policy not in {"paired-passing-checks-v1", "introduced-passing-checks-v1"}:
         raise ValueError("Unknown Evidence plot comparison policy")
-    if manifest.get("policy") == "cluster-group-transition-v1":
-        from evidence.migration import transition
-
-        migration = transition(reports / "source", manifest["baseline"]["revision"], catalog)
-        if manifest.get("migration") != migration:
-            raise ValueError("Plot migration declaration differs from the reviewed transition")
-        candidate_only = {entry["proposed_replacement"] for entry in migration if entry["proposed_replacement"]}
-        retired = {entry["id"] for entry in migration}
-    elif manifest.get("migration"):
-        raise ValueError("Plot migration requires the reviewed transition policy")
+    candidate_only = set(manifest.get("introduced", []))
+    if not candidate_only <= catalog.keys() or (candidate_only and policy != "introduced-passing-checks-v1"):
+        raise ValueError("Plot scope differs from the registered catalog")
     expected = {(key, "candidate") for key in catalog}
     expected |= {(key, "baseline") for key in catalog if key not in candidate_only}
-    expected |= {(key, "baseline") for key in retired}
     if (
         manifest.get("mode") != "full"
         or manifest.get("full_catalog") is not True

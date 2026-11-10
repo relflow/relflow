@@ -568,27 +568,19 @@ def trusted(
 def comparison(suite: Path, manifest: dict, measured: dict, role_mapping: dict) -> list[dict]:
     """Reapply the requested comparison without changing measured roles or checks."""
     requested_unmet = []
-    migration = manifest.get("migration", [])
-    replacements = {entry["proposed_replacement"] for entry in migration if entry["proposed_replacement"]}
-    if migration and role_mapping != {"baseline": "baseline", "candidate": "candidate"}:
-        raise ValueError("Migration reuse cannot exchange the original baseline and candidate roles")
+    introduced = set(manifest.get("introduced", []))
+    if introduced and role_mapping != {"baseline": "baseline", "candidate": "candidate"}:
+        raise ValueError("Introduced proof reuse cannot exchange baseline and candidate roles")
     for identifier in registry(suite):
-        if identifier in replacements:
+        if identifier in introduced:
+            if not all(measured["candidate", identifier]["checks"].values()):
+                raise ValueError("Introduced proof reuse cannot promote unmet candidate checks")
             continue
         left = measured[role_mapping["baseline"], identifier]["checks"]
         right = measured[role_mapping["candidate"], identifier]["checks"]
         if left.keys() != right.keys() or any(passed and not right[name] for name, passed in left.items()):
             raise ValueError("Mapped requested comparison changes checks or regresses a baseline-passing check")
         requested_unmet.extend({"id": identifier, "check": name} for name, passed in left.items() if not passed)
-    if migration:
-        from migration import compare_checks
-
-        old = {entry["id"]: measured["baseline", entry["id"]] for entry in migration}
-        new = {identifier: measured["candidate", identifier] for identifier in replacements}
-        compared = compare_checks(migration, old, new)
-        if compared["candidate_unmet"]:
-            raise ValueError("Migration reuse cannot promote unmet candidate Group checks")
-        requested_unmet.extend(compared["baseline_unmet"])
     return requested_unmet
 
 
@@ -661,8 +653,7 @@ def verify(
                     "mode": int(mode, 8) & 0o777,
                 }
                 for name, (mode, content) in tree(root, requested["suite"]).items()
-                if name.startswith(("evidence/experiments/", "evidence/migrations/cluster_to_group/"))
-                and "__pycache__" not in PurePosixPath(name).parts
+                if name.startswith("evidence/experiments/") and "__pycache__" not in PurePosixPath(name).parts
             }
             if identity(current_runtime) != manifest["runtime_sha256"]:
                 raise ValueError("Requested runtime input bytes differ from the original execution")

@@ -17,8 +17,8 @@
     "comparison": "Separate training-range bags, unseen lengths, duplicated bags, and equal-value probes.",
     "limit": "Only the recorded lengths are tested; neural sums are approximate.",
     "labels": {
-      "in_range": "Familiar lengths: 1\u20136 items",
-      "unseen": "Unseen lengths: 7\u201310 items",
+      "in_range": "Familiar lengths: 1–6 items",
+      "unseen": "Unseen lengths: 7–10 items",
       "short": "Short bags before duplication",
       "duplicate(short)": "The same short bags duplicated",
       "probes": "Equal-value count probes"
@@ -50,7 +50,7 @@
     "comparison": "Inspect longer bags and the paired effect of duplicating shorter bags.",
     "limit": "Success here relies on the visible count and the tested generator.",
     "labels": {
-      "unseen": "Unseen lengths: 7\u201310 items",
+      "unseen": "Unseen lengths: 7–10 items",
       "short": "Short bags before duplication",
       "duplicate(short)": "Matched bags and visible count doubled"
     }
@@ -714,55 +714,6 @@
     "focus": "Can an ordered decoder fill ranks absent from training?",
     "comparison": "Separate familiar and withheld ranks for Ordinal, rounded Number, and Category outputs.",
     "limit": "Withheld ranks lie inside the observed range. One seed does not establish arbitrary extrapolation; Category has no output classes for the withheld answers. Without a matching recorded run, only the split design is illustrated."
-  },
-  "P101": {
-    "mode": "research",
-    "target": "y",
-    "focus": "Can Group recover identity-specific rules when their responses cross?",
-    "comparison": "Follow assignment agreement and validation error, then compare final group composition and held-out predictions with shuffled controls.",
-    "limit": "The rules meet at x = -0.1. Results concern repeated known identities in one synthetic setting, not unseen-identity generalization."
-  },
-  "P102": {
-    "mode": "research",
-    "target": "y",
-    "focus": "Does Group help rarely observed identities?",
-    "comparison": "Compare Group, Category, no identity, and shuffled identities for rare and frequent populations.",
-    "limit": "The same model preset is used; parameter counts are measured and may differ."
-  },
-  "P103": {
-    "mode": "research",
-    "target": "y",
-    "focus": "How does the group-slot count affect recovery?",
-    "comparison": "Compare two, four, and eight slots and a shuffled-identity control.",
-    "limit": "Extra groups can split a true regime, so prediction quality and agreement are separate."
-  },
-  "P104": {
-    "mode": "research",
-    "target": "y",
-    "focus": "How well does Group handle unseen identities?",
-    "comparison": "Compare known, unseen, and null identities with and without unavailable-content dropout.",
-    "limit": "Unseen identities share an unavailable assignment and do not identify a new hidden rule."
-  },
-  "P105": {
-    "mode": "research",
-    "target": "y",
-    "focus": "Do learned group assignments affect predictions?",
-    "comparison": "Compare predictions before, during, and after a temporary slot intervention.",
-    "limit": "Group slot numbers are arbitrary; the intervention rotates slots without assuming an ordering."
-  },
-  "P106": {
-    "mode": "research",
-    "target": "y",
-    "focus": "Can Group adapt to changing identity behavior?",
-    "comparison": "Compare changed and unchanged identities after changed versus stable training streams.",
-    "limit": "Continued training starts a new optimizer and EMA and is measured on known identities."
-  },
-  "P107": {
-    "mode": "research",
-    "target": "y",
-    "focus": "Do changed identities move groups without disrupting unchanged identities?",
-    "comparison": "Compare changed and unchanged identity errors and movement after drift or stable continuation.",
-    "limit": "Fresh confirmation seeds follow P106; group movement and unchanged accuracy are separately predeclared criteria."
   },
   "P108": {
     "mode": "grouping",

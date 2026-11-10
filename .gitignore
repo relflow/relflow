@@ -42,20 +42,6 @@ docs/**/*.quarto_ipynb
 docs/**/*_files/
 docs/**/*_cache/
 evidence/runs/
-# Generated files from the archived Group lab investigations.
-/research/group-*-20261109/**/output/
-/research/group-*-20261109/**/input/
-/research/group-*-20261109/attempts/
-/research/group-*-20261109/evidence-plots/*
-/research/group-*-20261109/plots/*.json
-/research/group-*-20261109/*.json
-/research/group-*-20261109/*.log
-/research/group-*-20261109/*.svg
-/research/group-ci-20261110/**/output/
-/research/group-ci-20261110/input/
-/research/group-ci-20261110/ci-42864454945/
-/research/group-ci-20261110/*.json
-/research/group-ci-20261110/current-validation/verified-summary.json
 /.quarto/
 /_readthedocs/
 /docs/_quarto-readthedocs-*.yml
