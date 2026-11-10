@@ -315,7 +315,8 @@ def test_custom_formats_expand_composites_for_backends_with_only_basic_directive
         with pytest.raises(ValueError, match="impossible calendar date"):
             parse(pa.array([text, None]), pattern)
     else:
-        assert parse(pa.array([text, None]), pattern).to_pylist() == [expected, None]
+        datatype = pa.timestamp("ns", tz="UTC" if expected.tzinfo is not None else None)
+        assert parse(pa.array([text, None]), pattern).equals(pa.array([expected, None], type=datatype))
 
 
 @pytest.mark.parametrize(
@@ -368,7 +369,7 @@ def test_custom_offsets_preserve_source_clock_when_backend_cannot_parse_timezone
     monkeypatch.setattr(pc, "strptime", naive)
     result = parse(pa.array([text, None]), pattern)
     assert result.type == pa.timestamp("ns", tz="UTC")
-    assert result.to_pylist() == [expected, None]
+    assert result.equals(pa.array([expected, None], type=result.type))
     assert len(calls) == 1
 
 
