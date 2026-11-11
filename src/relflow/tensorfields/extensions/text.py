@@ -406,7 +406,7 @@ class Embedder(EmbedderBase):
             raise ValueError(f"text field at '{self.origin}' has cache=False; enable caching before warming")
         texts = values.to_pylist() if isinstance(values, (pa.Array, pa.ChunkedArray)) else list(values)
         texts = list(dict.fromkeys(text for text in texts if text is not None))
-        before = self.store.stats()["vectors"]
+        before = self.store.stats()["results"]
         device = self.anchor.device
         tokenizer = CachedModel.get_tokenizer(self.request.model)
         for start in range(0, len(texts), self.request.tokenizer_batch_size):
@@ -418,7 +418,7 @@ class Embedder(EmbedderBase):
                 resident=self.request.resident,
                 pool=self.pool,
             )
-        return self.store.stats()["vectors"] - before
+        return self.store.stats()["results"] - before
 
     @property
     def padding_side(self) -> str:

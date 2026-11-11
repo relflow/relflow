@@ -693,7 +693,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "relflow-cache-prototype"
+name = "relflow-cache-native"
 version = "0.1.0"
 dependencies = [
  "anyhow",

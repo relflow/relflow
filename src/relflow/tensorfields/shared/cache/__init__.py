@@ -3,18 +3,26 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
+import importlib.util
 import json
 import os
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 from weakref import WeakValueDictionary, finalize
 
 import numpy as np
+
+if TYPE_CHECKING:
+    import pyarrow as pa
 
 MAX_FRAME = 32 * 2**20
 MAX_ROWS = 4096
@@ -142,21 +150,25 @@ def receive(stream, size):
 class Connection:
     """One capability-authenticated connection per worker and transport."""
 
-    instances = WeakValueDictionary()
+    instances: ClassVar[WeakValueDictionary[tuple, Connection]] = WeakValueDictionary()
     registry_lock = threading.RLock()
 
-    def __init__(self, endpoint, native=True):
+    def __init__(self, endpoint: Endpoint, native: bool | None = None):
         self.endpoint, self.use_native, self.process = endpoint, native, os.getpid()
         self.lock, self.resolve_lock = threading.RLock(), threading.RLock()
-        self.stream = None
-        self.native = None
-        if native:
-            from .native import Client
-
-            self.native = Client(endpoint.port, endpoint.auth)
+        self.stream: socket.socket | None = None
+        self.native: Any = None
+        if native is not False:
+            try:
+                module = importlib.import_module("relflow_cache_native.native")
+            except ModuleNotFoundError as error:
+                if native or error.name not in ("relflow_cache_native", "relflow_cache_native.native"):
+                    raise
+            else:
+                self.native = module.Client(endpoint.port, endpoint.auth)
 
     @classmethod
-    def open(cls, endpoint, native=True):
+    def open(cls, endpoint: Endpoint, native: bool | None = None) -> Connection:
         key = (endpoint, native, os.getpid())
         with cls.registry_lock:
             client = cls.instances.get(key)
@@ -197,15 +209,18 @@ class Connection:
 class Owner:
     """One disk index and managed RAM budget for all fields in a worker family."""
 
-    instances = WeakValueDictionary()
+    instances: ClassVar[WeakValueDictionary[tuple, Owner]] = WeakValueDictionary()
     lock = threading.RLock()
 
-    def __init__(self, path, memory, capacity):
+    def __init__(self, path: Path, memory: int, capacity: int | None):
         self.path, self.memory, self.capacity = path, memory, capacity
-        self.pid, self.process, self.endpoint, self.finalizer = os.getpid(), None, None, None
+        self.pid = os.getpid()
+        self.process: subprocess.Popen | None = None
+        self.endpoint: Endpoint | None = None
+        self.finalizer: finalize | None = None
 
     @classmethod
-    def open(cls, path=None, memory=64 * 2**20, capacity=None):
+    def open(cls, path: str | Path | None = None, memory: int = 64 * 2**20, capacity: int | None = None) -> Owner:
         path = (Path(path).expanduser() if path is not None else directory()).resolve()
         if memory < 0 or (capacity is not None and capacity <= 0):
             raise ValueError("artifact RAM budget must be nonnegative and capacity must be positive")
@@ -221,27 +236,40 @@ class Owner:
             return owner
 
     @classmethod
-    def hold(cls, endpoint):
+    def hold(cls, endpoint: Endpoint) -> Owner | None:
         with cls.lock:
             return next((owner for owner in cls.instances.values() if owner.endpoint == endpoint), None)
 
-    def start(self):
+    def start(self) -> Endpoint:
         with self.lock:
             if self.process is not None:
                 if self.process.poll() is not None:
                     raise RuntimeError("artifact owner exited; recreate the cache and data loader")
+                assert self.endpoint is not None
                 return self.endpoint
             self.path.mkdir(parents=True, exist_ok=True)
             auth = os.urandom(32)
-            binary = os.environ.get("RELFLOW_CACHE_OWNER") or str(Path(__file__).with_name("cache-owner"))
+            configured = os.environ.get("RELFLOW_CACHE_OWNER")
+            specification = importlib.util.find_spec("relflow_cache_native")
+            binary = None
+            if specification is not None and specification.origin is not None:
+                name = "cache-owner.exe" if sys.platform == "win32" else "cache-owner"
+                binary = Path(specification.origin).with_name(name)
+            if configured:
+                command = [configured]
+            elif binary is not None and binary.is_file():
+                command = [str(binary)]
+            else:
+                command = [sys.executable, str(Path(__file__).with_name("backend.py"))]
             log = tempfile.TemporaryFile()
             self.process = subprocess.Popen(
-                [binary, str(self.path / "artifacts.sqlite3"), str(self.memory), str(self.capacity or 0)],
+                [*command, str(self.path / "artifacts.sqlite3"), str(self.memory), str(self.capacity or 0)],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=log,
             )
             self.finalizer = finalize(self, stop, self.process, log, self.pid)
+            assert self.process.stdin is not None and self.process.stdout is not None
             self.process.stdin.write(auth)
             self.process.stdin.flush()
             ready = self.process.stdout.readline()
@@ -288,24 +316,33 @@ class Cache:
     store; namespaces must identify their complete deterministic transformations.
     """
 
-    def __init__(self, path=None, memory=64 * 2**20, capacity=None, endpoint=None, native=True):
+    def __init__(
+        self,
+        path: str | Path | None = None,
+        memory: int = 64 * 2**20,
+        capacity: int | None = None,
+        endpoint: Endpoint | None = None,
+        native: bool | None = None,
+    ):
         self.path, self.memory, self.capacity, self.native = path, memory, capacity, native
         self.owner = Owner.open(path, memory, capacity) if endpoint is None else Owner.hold(endpoint)
-        self.saved_endpoint, self.saved_connection = endpoint, None
+        self.saved_endpoint = endpoint
+        self.saved_connection: Connection | None = None
 
     def __reduce__(self):
         self.share()
         return type(self), (self.path, self.memory, self.capacity, self.endpoint, self.native)
 
     @property
-    def endpoint(self):
+    def endpoint(self) -> Endpoint:
         if self.saved_endpoint is None:
+            assert self.owner is not None
             self.saved_endpoint = self.owner.start()
         return self.saved_endpoint
 
     @property
-    def connection(self):
-        if self.saved_connection is None:
+    def connection(self) -> Connection:
+        if self.saved_connection is None or self.saved_connection.process != os.getpid():
             self.saved_connection = Connection.open(self.endpoint, self.native)
         return self.saved_connection
 
@@ -313,10 +350,10 @@ class Cache:
     def resolve_lock(self):
         return self.connection.resolve_lock
 
-    def share(self):
+    def share(self) -> None:
         self.connection
 
-    def lookup_keys(self, keys):
+    def lookup_keys(self, keys: bytes | np.ndarray) -> References:
         keys = (
             np.frombuffer(keys, dtype=np.uint8).reshape(-1, 32)
             if isinstance(keys, bytes)
@@ -327,26 +364,43 @@ class Cache:
         reply = self.connection.request(1, dict(n=len(keys)), keys.tobytes())
         return self.references(reply, keys)
 
-    def lookup_arrow(self, values, namespace):
+    def lookup_arrow(self, values: pa.Array, namespace: str) -> References:
+        import pyarrow as pa
+
+        kind = values.type
+        if not any(
+            check(kind)
+            for check in (
+                pa.types.is_string,
+                pa.types.is_large_string,
+                pa.types.is_string_view,
+                pa.types.is_binary,
+                pa.types.is_large_binary,
+                pa.types.is_binary_view,
+                pa.types.is_fixed_size_binary,
+            )
+        ):
+            raise ValueError(f"artifact lookup expects Arrow strings or binary, got {kind}")
         digest(namespace, b"")  # Validate the namespace once, outside the native row loop.
         if values.null_count or len(values) > MAX_ROWS:
             raise ValueError("artifact lookup expects at most 4096 nonnull Arrow values")
         if self.connection.native is None:
             keys = b"".join(
-                digest(namespace, value.encode() if isinstance(value, str) else value) for value in values.to_pylist()
+                digest(namespace, value.encode() if isinstance(value, str) else value)
+                for value in cast(list[str | bytes], values.to_pylist())
             )
             return self.lookup_keys(keys)
         reply, keys = self.connection.native.identify_arrow(values, namespace)
         return self.references(reply, np.frombuffer(keys, dtype=np.uint8).reshape(-1, 32))
 
     @staticmethod
-    def references(reply, keys):
+    def references(reply: bytes | memoryview, keys: np.ndarray) -> References:
         if len(reply) != len(keys) * 16:
             raise ValueError("artifact owner returned invalid reference IDs")
         ids = np.frombuffer(reply, dtype="<i8").reshape(2, len(keys)).copy()
         return References(ids[0], ids[1], keys)
 
-    def bind(self, references, inputs, namespace):
+    def bind(self, references: References, inputs: Payloads, namespace: str) -> np.ndarray:
         digest(namespace, b"")
         if len(inputs) != len(references.aliases):
             raise ValueError("prepared artifact count must match alias count")
@@ -359,7 +413,7 @@ class Cache:
             raise ValueError("artifact owner returned invalid canonical IDs")
         return np.frombuffer(reply, dtype="<i8").copy()
 
-    def fetch(self, ids, namespace):
+    def fetch(self, ids: np.ndarray | Sequence[int], namespace: str) -> Fetch:
         digest(namespace, b"")
         ids = np.asarray(ids, dtype="<i8")
         reply = self.connection.request(3, dict(n=len(ids), namespace=namespace), ids.tobytes())
@@ -372,7 +426,7 @@ class Cache:
             raise ValueError("artifact owner returned trailing payload bytes")
         return Fetch(status, hits, inputs)
 
-    def publish(self, ids, namespace, values):
+    def publish(self, ids: np.ndarray | Sequence[int], namespace: str, values: Payloads) -> Payloads:
         digest(namespace, b"")
         if len(ids) != len(values):
             raise ValueError("artifact result count must match ID count")
@@ -384,11 +438,14 @@ class Cache:
             raise ValueError("artifact owner returned trailing result bytes")
         return committed
 
-    def release(self):
+    def release(self) -> None:
         self.connection.request(7)
 
-    def wait(self):
+    def wait(self) -> None:
         self.connection.request(8)
 
-    def stats(self):
+    def stats(self) -> dict[str, Any]:
         return json.loads(bytes(self.connection.request(5)))
+
+
+__all__ = ["Cache", "Fetch", "Payloads", "References"]

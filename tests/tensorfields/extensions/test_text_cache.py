@@ -91,7 +91,7 @@ def test_equal_token_rows_share_a_stable_id(encoder):
     assert batch.content[IDENTIFIERS].unique().numel() == 1
     encoded(model, ["a", "b", "a"])
     assert encoder.calls == 1
-    assert model.nodes["/body"].embedder.store.stats()["entries"] == 1
+    assert model.nodes["/body"].embedder.store.stats()["objects"] == 1
 
 
 def test_fields_share_frozen_vectors_but_keep_their_projections(encoder):
@@ -211,6 +211,8 @@ def test_real_local_encoder_training_and_weight_invalidation(tmp_path, device):
         num_sanity_val_steps=0,
         accelerator=device,
         devices=1,
+        # CPU training exercises cache/gradient behavior without requiring BF16 CPU instructions.
+        precision="32-true" if device == "cpu" else "bf16-mixed",
         logger=False,
         rollback=False,
         enable_checkpointing=False,
@@ -223,6 +225,6 @@ def test_real_local_encoder_training_and_weight_invalidation(tmp_path, device):
     with torch.no_grad():
         next(frozen.model.parameters()).add_(0.1)
     assert embedder.variant(torch.device(device)) != old
-    before = embedder.store.stats()["vectors"]
+    before = embedder.store.stats()["results"]
     embedder.encode(content=actual.content, state=actual.state)
-    assert embedder.store.stats()["vectors"] > before
+    assert embedder.store.stats()["results"] > before

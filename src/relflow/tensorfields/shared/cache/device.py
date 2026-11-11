@@ -1,4 +1,4 @@
-"""Bounded, frequency-aware device tables addressed by persistent text IDs."""
+"""Bounded, frequency-aware device tables addressed by persistent artifact IDs."""
 
 from __future__ import annotations
 

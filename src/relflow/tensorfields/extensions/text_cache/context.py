@@ -5,14 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 import pyarrow as pa
 import torch
 
-from relflow.tensorfields.extensions.text_cache.device import Device
-from relflow.tensorfields.extensions.text_cache.store import MAX_FRAME, MAX_ROWS, Client, Endpoint, Owner, digest
+from relflow.tensorfields.shared.cache import MAX_FRAME, MAX_ROWS, Cache, Endpoint, Owner, Payloads
+from relflow.tensorfields.shared.cache.device import Device
 
 
 def signature(tokenizer: Any) -> tuple:
@@ -50,6 +50,31 @@ def tokenizer_identity(tokenizer: Any) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def tokens(rows: np.ndarray) -> Payloads:
+    """Versioned token records preserve both matrices and their explicit length."""
+    length = rows.shape[-1]
+    codec = np.dtype([("length", "<u4"), ("tokens", "<i8", (2, length))])
+    records = np.empty(len(rows), dtype=codec)
+    records["length"], records["tokens"] = length, rows
+    return Payloads.fixed(records, codec.itemsize)
+
+
+def token_rows(payloads: Payloads, length: int) -> np.ndarray:
+    codec = np.dtype([("length", "<u4"), ("tokens", "<i8", (2, length))])
+    if np.any(np.diff(payloads.offsets) != codec.itemsize):
+        raise ValueError("cached text preparation has a different token shape")
+    records = np.frombuffer(payloads.data, dtype=codec)
+    if np.any(records["length"] != length):
+        raise ValueError("cached text preparation has a different token length")
+    return records["tokens"].copy()
+
+
+def vectors(payloads: Payloads, width: int) -> np.ndarray:
+    if np.any(np.diff(payloads.offsets) != width * 4):
+        raise ValueError("cached text vector width does not match encoder namespace")
+    return np.frombuffer(payloads.data, dtype="<f4").reshape(-1, width).copy()
+
+
 class Encoding:
     """Only configuration and the local capability travel to spawned workers."""
 
@@ -66,8 +91,12 @@ class Encoding:
         self.model, self.length, self.batch_size = model, length, batch_size
         self.path, self.memory, self.capacity = path, memory, capacity
         self.endpoint = endpoint
-        self.owner = Owner.open(path, memory, capacity) if endpoint is None else Owner.hold(endpoint)
-        self.connection: Client | None = None
+        self.owner = (
+            Owner.open(path, (64 if memory is None else memory) * 2**20, capacity)
+            if endpoint is None
+            else Owner.hold(endpoint)
+        )
+        self.connection: Cache | None = None
         self.tokenizer = None
         self.base = ""
         self.settings = None
@@ -87,20 +116,20 @@ class Encoding:
         )
 
     @property
-    def client(self) -> Client:
+    def client(self) -> Cache:
         if self.connection is None:
             if self.endpoint is None:
                 assert self.owner is not None
-                self.endpoint = self.owner.start().endpoint
-            self.connection = Client.open(self.endpoint)
+                self.endpoint = self.owner.start()
+            self.connection = Cache(endpoint=self.endpoint)
         return self.connection
 
     def share(self) -> None:
         self.client
 
     def identify(self, texts: list[str] | pa.Array, tokenizer: Any) -> np.ndarray:
-        if isinstance(texts, pa.Array):
-            texts = cast(list[str], texts.to_pylist())
+        if not isinstance(texts, pa.Array):
+            texts = pa.array(texts, type=pa.large_string())
         with self.lock:
             settings = signature(tokenizer)
             if self.tokenizer is not tokenizer:
@@ -109,25 +138,22 @@ class Encoding:
                 self.namespace = ""
             if self.settings != settings or not self.namespace:
                 self.namespace = hashlib.sha256(
-                    repr((self.model, self.base, self.length, settings)).encode()
+                    repr(("rf.text.tokens/v1", self.model, self.base, self.length, settings)).encode()
                 ).hexdigest()
                 self.settings = settings
-            keys = [digest(self.namespace, text) for text in texts]
             output = np.empty(len(texts), dtype=np.int64)
-            chunk = min(MAX_ROWS, self.batch_size, (MAX_FRAME - 65536) // (self.length * 16 + 40))
+            chunk = min(MAX_ROWS, self.batch_size, (MAX_FRAME - 65536) // (self.length * 16 + 48))
             if chunk <= 0:
                 raise ValueError(f"text token length {self.length} exceeds the cache frame budget; reduce max_length")
             for start in range(0, len(texts), chunk):
-                stop = min(start + chunk, len(texts))
-                ids, ready = self.client.identify(keys[start:stop], self.length)
-                missing = np.flatnonzero(~ready)
+                selected = texts.slice(start, min(chunk, len(texts) - start))
+                references = self.client.lookup_arrow(selected, self.namespace)
+                ids = references.objects
+                missing = np.flatnonzero(~references.ready)
                 if len(missing):
+                    strings = selected.take(missing).to_pylist()
                     encoded = tokenizer(
-                        [texts[start + int(i)] for i in missing],
-                        padding="max_length",
-                        truncation=True,
-                        max_length=self.length,
-                        return_tensors="np",
+                        strings, padding="max_length", truncation=True, max_length=self.length, return_tensors="np"
                     )
                     rows = np.stack(
                         (
@@ -140,10 +166,8 @@ class Encoding:
                         raise ValueError(
                             f"text tokenizer '{self.model}' returned {rows.shape}; expected {(len(missing), 2, self.length)}"
                         )
-                    ids[missing] = self.client.tokens(
-                        ids[missing], [keys[start + int(i)] for i in missing], rows, self.namespace
-                    )
-                output[start:stop] = ids
+                    ids[missing] = self.client.bind(references.take(missing), tokens(rows), self.namespace)
+                output[start : start + len(selected)] = ids
             return output
 
     @torch.compiler.disable
@@ -151,6 +175,7 @@ class Encoding:
         self, identifiers: torch.Tensor, *, variant: str, width: int, resident: int | None, pool
     ) -> torch.Tensor:
         client = self.client
+        variant = f"rf.text.vector.f32/v1:{variant}"
         name = f"{identifiers.device}|{variant}"
         view = self.views.get(name)
         if view is None:
@@ -180,7 +205,7 @@ class Encoding:
         host = identifiers.detach().cpu().numpy()
         unique, inverse = np.unique(host, return_inverse=True)
         output = np.empty((len(unique), width), dtype=np.float32)
-        chunk = min(MAX_ROWS, (MAX_FRAME - 65536) // max(width * 4, self.length * 16))
+        chunk = min(MAX_ROWS, (MAX_FRAME - 65536) // (max(width * 4, self.length * 16 + 4) + 8))
         if chunk <= 0:
             raise ValueError("text encoder vector or token row exceeds the cache frame budget")
         try:
@@ -188,16 +213,17 @@ class Encoding:
                 selected = unique[start : start + chunk]
                 pending = np.arange(len(selected))
                 while len(pending):
-                    status, vectors, tokens = self.client.get(selected[pending], variant, width, self.length)
-                    output[start + pending[status == 1]] = vectors
+                    fetched = self.client.fetch(selected[pending], variant)
+                    status = fetched.status
+                    output[start + pending[status == 1]] = vectors(fetched.hits, width)
                     owned = pending[status == 0]
                     if len(owned):
                         device = identifiers.device
-                        fresh = pool(
-                            torch.from_numpy(tokens[:, 0]).to(device), torch.from_numpy(tokens[:, 1]).to(device)
-                        )
-                        committed = self.client.put(selected[owned], variant, fresh.detach().cpu().numpy())
-                        output[start + owned] = committed
+                        rows = token_rows(fetched.inputs, self.length)
+                        fresh = pool(torch.from_numpy(rows[:, 0]).to(device), torch.from_numpy(rows[:, 1]).to(device))
+                        values = np.ascontiguousarray(fresh.detach().cpu().numpy(), dtype="<f4")
+                        committed = self.client.publish(selected[owned], variant, Payloads.fixed(values, width * 4))
+                        output[start + owned] = vectors(committed, width)
                     pending = pending[status == 2]
                     if len(pending):
                         self.client.wait()

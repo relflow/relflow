@@ -104,11 +104,17 @@ cache tiers and tokenizes and encodes each batch directly.
 
 The disk store grows with observed aliases, token rows, and vector variants;
 there is no automatic disk quota or pruning. Place it on storage sized for
-the workload. `RELFLOW_TEXT_CACHE_DIR` changes the default directory for the
+the workload. `RELFLOW_CACHE_DIR` changes the default directory for the
 application; otherwise relflow uses `XDG_CACHE_HOME`, `LOCALAPPDATA`, or
-`~/.cache`, under `relflow/text-v2`. Use a local filesystem that supports
+`~/.cache`, under `relflow/artifacts-v1`. Use a local filesystem that supports
 SQLite locking. Existing NPY stores are left intact; this format creates a
-new `cache.sqlite3` and fills it as text is observed.
+new `artifacts.sqlite3` and fills it as text is observed.
+
+Text uses the shared tensorfield artifact cache. Its standard owner isolates
+Rust Moka and SQLite from encoder libraries. The optional native cache add-on
+uses the same storage format and accelerates transport and lookups without
+changing the Text schema. Other extensions can reuse the shared store with
+their own payload codecs and identities.
 
 One owner serves a trainer's loader family through authenticated loopback
 connections, including spawned workers. Independently started trainers and

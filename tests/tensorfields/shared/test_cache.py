@@ -11,8 +11,8 @@ from copy import deepcopy
 import numpy as np
 import pyarrow as pa
 import pytest
-from relflow_cache import Cache, Payloads
-from relflow_cache.core import MAX_FRAME, digest
+
+from relflow.tensorfields.shared.cache import MAX_FRAME, Cache, Payloads, digest
 
 pytestmark = pytest.mark.integration
 
@@ -33,12 +33,19 @@ def prepare(cache, values, namespace="prepare/v1"):
     return ids
 
 
-def test_import_has_no_model_dependencies():
+def test_cache_module_has_no_encoder_or_model_dependencies():
+    from relflow.tensorfields.shared import cache
+
     subprocess.run(
         [
             sys.executable,
             "-c",
-            "import sys, relflow_cache; assert not {'relflow', 'torch', 'transformers'} & sys.modules.keys()",
+            "import importlib.util, sys; "
+            "spec=importlib.util.spec_from_file_location('artifact_cache', sys.argv[1]); "
+            "module=importlib.util.module_from_spec(spec); sys.modules[spec.name]=module; "
+            "spec.loader.exec_module(module); "
+            "assert not {'relflow', 'torch', 'transformers'} & sys.modules.keys()",
+            cache.__file__,
         ],
         check=True,
     )
@@ -66,6 +73,8 @@ def test_arrow_hashing_matches_bytes_and_preserves_slices(cache, kind):
     assert len(cache.lookup_arrow(pa.array([], type=kind), namespace).objects) == 0
     with pytest.raises(ValueError, match="nonnull"):
         cache.lookup_arrow(pa.array([None], type=kind), namespace)
+    with pytest.raises(ValueError, match="strings or binary"):
+        cache.lookup_arrow(pa.array([1, 2]), namespace)
 
 
 def tensor_payload(array):
@@ -278,3 +287,65 @@ def test_variable_payload_reply_limit_can_be_retried_in_smaller_batches(cache):
     for identifier in ids:
         assert bytes(next(iter(cache.fetch([identifier], "result/v1").hits))) == payload
     assert cache.stats()["hot_bytes"] <= 4096
+
+
+def test_owner_serves_many_connections_and_releases_them(cache):
+    import json
+
+    from relflow.tensorfields.shared.cache import Connection
+
+    clients = [Connection(cache.endpoint, native=False) for _ in range(40)]
+    try:
+        assert all(json.loads(bytes(client.request(5)))["identity"] == cache.endpoint.identity for client in clients)
+    finally:
+        for client in clients:
+            client.close()
+    process = cache.owner.process
+    cache.owner.close()
+    assert process.returncode == 0
+
+
+def test_native_and_portable_owners_share_committed_artifacts(tmp_path):
+    import importlib.util
+
+    from relflow.tensorfields.shared.cache import Endpoint, backend
+
+    if importlib.util.find_spec("relflow_cache_native") is None:
+        pytest.skip("optional native cache wheel is not installed")
+    path = tmp_path / "interoperability"
+    path.mkdir()
+    auth = b"c" * 32
+    process = subprocess.Popen(
+        [sys.executable, backend.__file__, str(path / "artifacts.sqlite3"), "4096", "0"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+    )
+    try:
+        process.stdin.write(auth)
+        process.stdin.flush()
+        import json
+
+        description = json.loads(process.stdout.readline())
+        portable = Cache(endpoint=Endpoint(description["port"], auth, description["identity"], 0), native=False)
+        ids = prepare(portable, [b"shared input", b"second input"])
+        portable.fetch(ids, "encoder/v1")
+        expected = [b"opaque output", b""]
+        portable.publish(ids, "encoder/v1", Payloads.from_values(expected))
+        identity = portable.endpoint.identity
+        portable.connection.close()
+    finally:
+        process.stdin.close()
+        process.wait(timeout=10)
+        process.stdout.close()
+    native = Cache(path, memory=4096)
+    try:
+        assert native.endpoint.identity == identity
+        assert native.connection.native is not None
+        assert "cache-owner" in str(native.owner.process.args[0])
+        assert [bytes(value) for value in native.fetch(ids, "encoder/v1").hits] == expected
+        aliases = native.lookup_arrow(pa.array([b"from native"]), "native/prepare-v1")
+        ids = native.bind(aliases, Payloads.from_values([b"native prepared"]), "native/payload-v1")
+        native.fetch(ids, "native/encoder-v1")
+        native.publish(ids, "native/encoder-v1", Payloads.from_values([b"native output"]))
+    finally:
+        native.owner.close()
