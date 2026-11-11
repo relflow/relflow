@@ -65,6 +65,18 @@ model = rf.Model(
 
 ## Gotchas
 
+- `Branch` and `Model` subclasses may declare children as class attributes,
+  such as `amount = rf.Number` and `transactions = Transaction(length=64)`.
+  For classes with declared children, constructor arguments configure the
+  enclosing node exclusively; add or replace children through subclassing,
+  not constructor keywords or `fields`. A declared child named `length` or
+  `d_model` is separate from the corresponding constructor setting. Declarations
+  are consumed at class creation; inspect bound children through the schema.
+  Inherited children keep their order, replacements replace whole definitions,
+  and conflicting multiple bases require an explicit child redeclaration.
+  Resolved schemas, checkpoints, and YAML loading remain authoritative rather
+  than merging class declarations. Ordinary `Model(...)` and `Branch(...)`
+  keyword and mapping schemas remain supported.
 - Do not use a public `Struct(...)` constructor. Public examples should use `Model(...)` and `Branch(...)`.
 - `Model(...)` has no root-name option. `name=rf.Category` defines an ordinary
   child field at `/name`; neither `name="customer"` nor `root="customer"` names the model.

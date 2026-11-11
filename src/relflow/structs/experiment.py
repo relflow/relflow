@@ -74,7 +74,10 @@ def bind_tree_field(name: str, value: TreeFieldInput, *, defaults: Defaults | No
         )
     if isinstance(value, Branch):
         payload["fields"] = [bind_tree_field(cast(str, child.name), child, defaults=defaults) for child in value.fields]
-    constructor = TENSORFIELDS[value.type].Request if type(value) is Leaf else type(value)
+    if isinstance(value, Branch) and getattr(type(value), "__relflow_fields__", {}):
+        constructor = Branch
+    else:
+        constructor = TENSORFIELDS[value.type].Request if type(value) is Leaf else type(value)
     bound = constructor.model_validate(payload)
     # Cloning retains materialized defaults (including extension factories),
     # while preserving which options the reusable definition supplied.

@@ -46,6 +46,8 @@ from relflow.data.processors import PostprocessorInput, PreprocessorInput
 from relflow.helpers.optimizers import adamw
 from relflow.logging import logger
 from relflow.logging.throughput import ThroughputLogger
+from relflow.presets.base import resolve
+from relflow.structs import declaration
 from relflow.structs.enums import AttentionInput, AttentionMode, Strata, StrataInput
 from relflow.structs.experiment import (
     NodeSelector,
@@ -106,12 +108,15 @@ __all__ = [
 _DEFAULT_REDUCTION = Attention()
 
 
-class Model(lit.LightningModule):
+class Model(lit.LightningModule, metaclass=declaration.Declarations):
     """Neural model generated from a `relflow` schema tree.
 
     `Model` owns the schema tree, tensorfield embedders, branch
     encoders, decoders, and convenience methods for prediction, checkpointing,
     schema display and mutation.
+
+    Subclasses may declare children in their class bodies. Their constructor
+    arguments configure the root; use subclassing to add or replace children.
 
     Example:
         ```python
@@ -226,6 +231,7 @@ class Model(lit.LightningModule):
             if reduction is not _DEFAULT_REDUCTION:
                 raise TypeError("schema cannot be combined with a root reduction")
         else:
+            fields = declaration.fields(type(self), fields, field_kwargs)
             required = {"d_model": d_model, "n_layers": n_layers, "n_heads": n_heads}
             missing = [key for key, value in required.items() if value is None]
             if missing:
@@ -297,9 +303,12 @@ class Model(lit.LightningModule):
         validation, registered datatype options, and subclass construction.
         """
         options, profile = template.read(pathname, overrides)
-        constructor = cls if profile is None else presets.factory(profile).__get__(None, cls)
+        runtime = {name: options.pop(name) for name in ("batch_size", "optimizer", "scheduler") if name in options}
         try:
-            return constructor(**options)
+            schema = Schema.from_tree(**options) if profile is None else resolve(profile, **options)
+            model = cls(schema=schema, **runtime)
+            model.preset = profile
+            return model
         except (TypeError, ValueError, BeartypeCallHintParamViolation) as error:
             raise ValueError(f"model template {pathname}: {error}") from error
 

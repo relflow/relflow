@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, TypeVar, cast
 
 from relflow.presets.base import Preset, resolve
+from relflow.structs import declaration
 from relflow.structs.enums import AttentionInput
 from relflow.structs.experiment import TreeFieldInput
 from relflow.structs.reduction import ReductionConfig
@@ -51,6 +52,7 @@ def factory(profile: Preset):
     ) -> M:
         if "schema" in field_kwargs:
             raise TypeError("Model preset factories cannot accept schema; use Model(schema=...) for a resolved schema")
+        fields = declaration.fields(cls, fields, field_kwargs)
         schema = resolve(
             profile,
             d_model=d_model,

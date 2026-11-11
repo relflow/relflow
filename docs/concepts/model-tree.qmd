@@ -157,6 +157,91 @@ as shown below. Child names must be nonempty and contain only letters,
 digits, underscores, or hyphens; mapping keys also support names that cannot
 be written as Python keywords. Names must be unique within each parent.
 
+### Define children in classes
+
+For reusable definitions, declare children in a `Branch` or `Model` subclass.
+The class body defines the children; constructor arguments configure the
+enclosing node. For example, this model predicts whether an account observation
+is fraudulent from its identifier and transaction history:
+
+```python
+import relflow as rf
+
+
+class Transaction(rf.Branch):
+    amount = rf.Number
+    merchant = rf.Category
+
+
+class FraudDetector(rf.Model):
+    account = rf.Hash
+    transactions = Transaction(length=64, overflow="tail")
+    fraudulent = rf.Boolean(mask=True)
+
+
+model = FraudDetector.xs()
+# Or configure the root explicitly:
+model = FraudDetector(d_model=64, n_layers=2, n_heads=4)
+```
+
+`Transaction` defines reusable children. `Transaction(length=64, overflow="tail")`
+creates a branch declaration with a collection cap and cropping policy. The
+parent's `transactions` attribute supplies its name and address, `/transactions`.
+Instantiate branch subclasses when declaring a child; a bare tensorfield class
+such as `rf.Number` still means a leaf with default options.
+
+Class declarations and constructor configuration have separate namespaces:
+
+```python
+class Measurements(rf.Branch):
+    length = rf.Number
+    description = rf.Category
+
+
+measurements = Measurements(length=32, description="Recent measurements")
+```
+
+Here, the numeric child is named `length`; the enclosing collection retains at
+most 32 records. The categorical child is named `description`; the constructor's
+description documents the branch. Declared children are consumed during class
+creation, so they do not replace configuration attributes or methods. Inspect
+`measurements.fields` or the constructed model's `schema` to access bound children.
+For example, a model child named `predict` leaves `model.predict(...)` callable.
+
+Subclasses inherit children in declaration order. Redeclaring a child replaces
+its whole definition; new children follow inherited children:
+
+```python
+class InternationalTransaction(Transaction):
+    merchant = rf.Category(cased=False)
+    currency = rf.Category
+```
+
+If multiple bases supply different definitions for the same child, redeclare
+that child explicitly in the subclass. Replacing an inherited child with an
+ordinary value or method is rejected. A static type checker may also flag
+replacements whose inferred Python types differ, such as replacing a bare
+tensorfield class with a configured instance. Annotate both declarations as
+`rf.TreeFieldInput` when they need a common static type. Declarations that collide
+with inherited configuration or method names may need a checker-specific
+suppression; Python type checkers do not model the declaration collection step.
+
+For a class with declared children, constructor keywords configure the enclosing
+node exclusively: adding or replacing children through keywords or a `fields`
+mapping is rejected. Use a subclass for structural variants. The existing
+`rf.Model(...)` and `rf.Branch(...)` forms remain available for schemas assembled
+from keywords or mappings.
+
+Each construction binds independent nodes and creates independent learned state.
+Reusing `Transaction` in two placements does not share weights. Class definitions
+and branch declarations allocate no neural parameters. Their resolved schemas
+contain ordinary branches, so checkpoints can be loaded with `rf.Model.load(...)`
+without importing the declaration classes. Use `FraudDetector.load(...)` when
+the subclass's Python methods are needed. An explicitly supplied resolved schema,
+including one loaded from a checkpoint or YAML template, is authoritative and
+is not merged with class declarations. Runtime schema mutations affect the model
+instance rather than its Python class.
+
 ### Inspect what was constructed
 
 The resolved schema and generated modules are available immediately after
