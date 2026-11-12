@@ -1,6 +1,6 @@
 [project]
 name = "relflow"
-version = "0.4.5"
+version = "0.5.0"
 description = "Relationship Flow: schema-first PyTorch models for hierarchical, nested, and sequence data"
 readme = "README.md"
 authors = [
@@ -73,7 +73,7 @@ build-backend = "setuptools.build_meta"
 package-dir = { "" = "src" }
 
 [tool.setuptools.package-data]
-relflow = ["py.typed"]
+relflow = ["py.typed", "presets/provenance.json"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -37,7 +37,8 @@ payload:
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     query="payload",
     trxns=rf.Branch(
         query="transactions[-32:]",

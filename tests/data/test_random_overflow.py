@@ -195,7 +195,8 @@ def test_random_windows_are_invariant_to_dictionary_chunks_and_sliced_arrow_stor
 
 
 def test_random_overflow_prediction_keeps_tail_null_slots_and_local_parent_ordinals():
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         events=rf.Branch(length=3, overflow="random", amount=rf.Number, label=rf.Boolean(mask=True, embed=True)),
     ).eval()

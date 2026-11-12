@@ -17,7 +17,8 @@ ADDRESS = rf.Address("/tags")
 
 
 def model(*, mask=False, p_unavailable=0.0):
-    return rf.Model.xs(
+    return rf.Model(
+        preset="small",
         d_model=8,
         attention=None,
         tags=rf.Set(mask=mask, p_unavailable=p_unavailable),
@@ -120,7 +121,8 @@ def test_unavailable_augmentation_preserves_compact_pristine_targets():
 
 @pytest.mark.parametrize("objective", [False, True])
 def test_nested_member_axis_survives_clone_device_transfer_and_coordinate_selection(objective):
-    module = rf.Model.xs(
+    module = rf.Model(
+        preset="small",
         d_model=8,
         attention=None,
         events=rf.Branch(

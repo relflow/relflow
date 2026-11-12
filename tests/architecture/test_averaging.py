@@ -260,7 +260,8 @@ def test_validation_restores_live_parameters_and_exception_removes_hooks(tmp_pat
 
 @pytest.mark.integration
 def test_relflow_growth_and_rollback_export_the_selected_averaged_model(tmp_path):
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         n_layers=1,
         attention=None,
@@ -323,7 +324,8 @@ def test_weights_only_callbacks_are_rejected_before_training(tmp_path):
 @pytest.mark.integration
 def test_relflow_full_resume_restores_live_rows_before_admitting_new_categories(tmp_path):
     def build():
-        return rf.Model.xs(
+        return rf.Model(
+            preset="small",
             d_model=8,
             n_layers=1,
             attention=None,

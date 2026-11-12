@@ -237,7 +237,7 @@ def test_cluster_embedder_zeros_cluster_contribution_for_non_valued_state():
 
 
 def test_cluster_bind_rejects_worker_ids_outside_the_batch():
-    model = rf.Model.xs(d_model=8, batch_size=2, cluster=rf.Cluster(bounds=4, p_unavailable=0.0))
+    model = rf.Model(preset="small", d_model=8, batch_size=2, cluster=rf.Cluster(bounds=4, p_unavailable=0.0))
     address = rf.Address("cluster")
     field = TensorField(
         state=torch.tensor([Tokens.valued.value], dtype=torch.int64),
@@ -256,7 +256,7 @@ def test_cluster_bind_rejects_worker_ids_outside_the_batch():
 
 @pytest.mark.integration
 def test_cluster_float_nan_labels_take_the_other_state(tmp_path):
-    model = rf.Model.xs(d_model=8, label=rf.Cluster(bounds=2, mask=True), signal=rf.Number)
+    model = rf.Model(preset="small", d_model=8, label=rf.Cluster(bounds=2, mask=True), signal=rf.Number)
     rows = pa.table({"label": [1.0, 2.0, float("nan"), 0.0], "signal": [1.0, 2.0, 3.0, 4.0]})
     data = rf.ArrowDataModule(model, train=rows, validate=rows, shuffle=False)
     model.fit(
@@ -282,7 +282,7 @@ def test_cluster_float_nan_labels_take_the_other_state(tmp_path):
     targets = model.encode(rows, strata="train")[rf.Address("label")].targets
     assert targets[TensorKey.state].flatten().tolist() == expected
     assert targets[TensorKey.content].flatten()[2] < 0
-    embedded = rf.Model.xs(d_model=8, label=rf.Cluster(bounds=2), signal=rf.Number)
+    embedded = rf.Model(preset="small", d_model=8, label=rf.Cluster(bounds=2), signal=rf.Number)
     for strata in ("train", "predict"):
         field = embedded.encode(rows, strata=strata)[rf.Address("label")]
         assert field.state.flatten().tolist() == expected

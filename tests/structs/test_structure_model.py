@@ -50,7 +50,7 @@ def test_branch_accepts_mapping_and_keyword_children():
 
 
 def test_branch_rejects_children_that_are_not_definitions():
-    with pytest.raises(TypeError, match="tree field 'unexpected'.*must be a Branch, Leaf, or Leaf class"):
+    with pytest.raises(TypeError, match="tree field 'unexpected'.*must be a Branch or Leaf instance or class"):
         Branch(category_leaf=Category(), unexpected=0.1)
 
 

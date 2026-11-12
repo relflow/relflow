@@ -37,7 +37,7 @@ __all__ = [
     "where",
 ]
 
-TreeFieldInput: TypeAlias = SchemaField | type[Leaf]
+TreeFieldInput: TypeAlias = SchemaField | type[Leaf] | type[Branch]
 Defaults: TypeAlias = Callable[[TreeFieldInput], Mapping[str, Any]]
 
 _MISSING = object()
@@ -54,6 +54,8 @@ class Roles:
 
 def bind_tree_field(name: str, value: TreeFieldInput, *, defaults: Defaults | None = None) -> SchemaField:
     """Bind a fresh subtree without changing the reusable definition or its parent links."""
+    if isinstance(value, type) and issubclass(value, Branch):
+        value = value()
     if isinstance(value, type) and issubclass(value, Leaf):
         payload = {} if defaults is None else dict(defaults(value))
         bound = value.model_validate({**payload, "name": name})
@@ -61,7 +63,7 @@ def bind_tree_field(name: str, value: TreeFieldInput, *, defaults: Defaults | No
             object.__setattr__(bound, "__pydantic_fields_set__", set(type(bound).model_fields))
         return bound
     if not isinstance(value, (Branch, Leaf)):
-        raise TypeError(f"tree field {name!r} must be a Branch, Leaf, or Leaf class; got {type(value).__name__}")
+        raise TypeError(f"tree field {name!r} must be a Branch or Leaf instance or class; got {type(value).__name__}")
 
     excluded = {"name", "mask"}
     if isinstance(value, Branch):

@@ -64,7 +64,8 @@ and learning task:
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     series_id=rf.Category,
     history=rf.Branch(
         length=168,

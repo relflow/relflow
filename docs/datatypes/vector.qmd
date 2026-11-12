@@ -11,7 +11,8 @@ width and be available at the payment's decision time.
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     amount=rf.Number,
     merchant=rf.Category,
     merchant_embedding=rf.Vector(n_dim=4),

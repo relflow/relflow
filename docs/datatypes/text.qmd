@@ -18,7 +18,8 @@ uv add "relflow[text]"
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     amount=rf.Number,
     merchant=rf.Category,
     memo=rf.Text,
@@ -98,7 +99,8 @@ Frozen encoder vectors can be reused across tasks, splits, and training
 runs when their encoder configuration and token rows match:
 
 ```python
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     amount=rf.Number,
     merchant=rf.Category,
     memo=rf.Text(store="embeddings/payment-memos", cache=4096),

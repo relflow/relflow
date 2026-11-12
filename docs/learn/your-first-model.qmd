@@ -66,7 +66,8 @@ Declare those two inputs and the hidden outcome in a small model:
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     amount=rf.Number,
     merchant=rf.Category,
     disputed=rf.Boolean(mask=True),
@@ -76,7 +77,7 @@ model = rf.Model.xs(
 `Number` represents the amount, `Category` represents the merchant, and
 `Boolean` represents the yes-or-no outcome. `mask=True` marks `disputed` as
 a prediction target: the model learns from its value without seeing it as
-an input. `Model.xs` selects a small capacity preset and creates a fresh,
+an input. `Model(preset="small", ...)` selects a small capacity preset and creates a fresh,
 untrained model.
 
 The names on the left of `=` come from your records. `amount`, `merchant`,
@@ -88,7 +89,7 @@ determines whether to predict it.
 
 Together these declarations form the **schema**: the field names, datatypes,
 structure, and targets. relflow acts as a **model factory**: calling
-`rf.Model.xs(...)` generates a custom neural architecture from those
+`rf.Model(preset="small", ...)` generates a custom neural architecture from those
 declarations, using the chosen preset for capacity. Adding fields or nesting
 them in branches changes the model it builds. Training then learns the
 weights and data-dependent state, such as the merchant vocabulary and amount

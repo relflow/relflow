@@ -23,7 +23,7 @@ def build(kind):
         "set": rf.Set(mask=True),
         "cluster": rf.Cluster(bounds=3, mask=True, revive_temperature=0),
     }[kind]
-    return rf.Model.xs(d_model=8, x=rf.Number, label=field)
+    return rf.Model(preset="small", d_model=8, x=rf.Number, label=field)
 
 
 def source(kind, labels):

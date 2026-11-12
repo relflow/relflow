@@ -91,6 +91,7 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
+from relflow.presets.base import resolve
 from reporting import experiment, report
 
 BUDGET = 500
@@ -194,11 +195,23 @@ def fit(model: rf.Model, train: pa.Table, validate: pa.Table, seed: int, steps: 
 @experiment("P089", seed=8901)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
-    model = rf.Model.xs(
-        group=rf.Enum(values=GROUPS, p_unavailable=0.0),
-        signal=rf.Number(mask=rf.Mask(query="hide_signal", skip=True, dropout=False)),
-        target=rf.Boolean(mask=True),
+    # Freeze the experimental architecture independently of SDK preset changes.
+    control_preset = rf.presets.Preset(
+        name="xs",
+        d_model=64,
+        root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        leaf=rf.presets.LeafDefaults(n_heads=2),
     )
+    model = rf.Model(
+        schema=resolve(
+            control_preset,
+            group=rf.Enum(values=GROUPS, p_unavailable=0.0),
+            signal=rf.Number(mask=rf.Mask(query="hide_signal", skip=True, dropout=False)),
+            target=rf.Boolean(mask=True),
+        )
+    )
+    model.preset = control_preset
     train = list(records(rows=TRAIN_ROWS, seed=seed + 1))
     updates = fit(
         model,

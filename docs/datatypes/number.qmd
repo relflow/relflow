@@ -12,7 +12,8 @@ training and prediction.
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     amount=rf.Number,
     merchant=rf.Category,
     disputed=rf.Boolean(mask=True),

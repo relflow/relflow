@@ -43,7 +43,7 @@ class CustomMixedPrecision(MixedPrecision):
 
 
 def configured() -> tuple[rf.Model, rf.ArrowDataModule]:
-    model = LargeGradient.xs(d_model=8, batch_size=2, amount=rf.Number, target=rf.Boolean(mask=True))
+    model = LargeGradient(preset="small", d_model=8, batch_size=2, amount=rf.Number, target=rf.Boolean(mask=True))
     table = pa.table({"amount": [1.0, 3.0], "target": [False, True]})
     datamodule = rf.ArrowDataModule(
         model=model,

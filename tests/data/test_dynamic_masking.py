@@ -88,7 +88,7 @@ def test_query_and_rate_sample_only_eligible_owner_coordinates():
     ],
 )
 def test_category_observes_pristine_values_before_mask_projection(mask):
-    configured = rf.Model.xs(d_model=8, value=rf.Category(mask=mask))
+    configured = rf.Model(preset="small", d_model=8, value=rf.Category(mask=mask))
     source = arrow_table(
         [
             {"value": "hidden", "selected": True},
@@ -110,7 +110,7 @@ def test_category_observes_pristine_values_before_mask_projection(mask):
 
 
 def test_fully_skipped_source_is_prepared_and_observed(monkeypatch):
-    configured = rf.Model.xs(d_model=8, value=rf.Category(mask=rf.Mask(skip=True, dropout=False)))
+    configured = rf.Model(preset="small", d_model=8, value=rf.Category(mask=rf.Mask(skip=True, dropout=False)))
     source = arrow_table([{"value": "A"}, {"value": "B"}])
     extension = TENSORFIELDS["category"]
     prepare = extension.prepare
@@ -135,7 +135,7 @@ def test_fully_skipped_source_is_prepared_and_observed(monkeypatch):
 
 
 def test_number_learns_pristine_moments_once_before_forward():
-    configured = rf.Model.xs(d_model=8, value=rf.Number(mask=rf.Mask(query="selected")))
+    configured = rf.Model(preset="small", d_model=8, value=rf.Number(mask=rf.Mask(query="selected")))
     source = arrow_table(
         [
             {"value": 1.0, "selected": True},
@@ -167,7 +167,7 @@ def test_number_learns_pristine_moments_once_before_forward():
 
 
 def test_observation_learning_is_frozen_outside_training():
-    configured = rf.Model.xs(d_model=8, value=rf.Category)
+    configured = rf.Model(preset="small", d_model=8, value=rf.Category)
     source = arrow_table([{"value": "A"}, {"value": "B"}])
 
     encoded = encode(

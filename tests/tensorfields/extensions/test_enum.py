@@ -19,11 +19,13 @@ ADDRESS = rf.Address("status")
 VALUES = ("pending", "complete", "rejected")
 
 
-def model(labels=VALUES, **options) -> rf.Model:
-    return rf.Model.xs(
+def model(labels=VALUES, *, positional=False, **options) -> rf.Model:
+    options = {"p_unavailable": 0.0, **options}
+    return rf.Model(
+        preset="small",
         d_model=8,
         batch_size=2,
-        status=rf.Enum(values=labels, **{"p_unavailable": 0.0, **options}),
+        status=rf.Enum(*labels, **options) if positional else rf.Enum(values=labels, **options),
     )
 
 
@@ -48,13 +50,45 @@ def test_enum_requires_values_and_preserves_declared_order():
     with pytest.raises((TypeError, pydantic.ValidationError)):
         rf.Enum(VALUES)
     with pytest.raises((TypeError, pydantic.ValidationError)):
-        rf.Model.xs(status=rf.Enum)
+        rf.Model(preset="small", status=rf.Enum)
 
     request = rf.Enum(values=VALUES)
     assert request.values == VALUES
     assert request.p_unavailable == 0.01
     assert request.topk == []
     assert request.type == "enum"
+
+
+@pytest.mark.parametrize("labels", [(False, True), (7, -4), (2.5, -7.25), ("z", "a"), (b"\xff", b"\x00"), ("only",)])
+def test_enum_positional_labels_preserve_types_options_and_keyword_schema(labels):
+    positional = rf.Enum(*labels, mask=True, embed=True, topk=[2], p_unavailable=0.2)
+    keyword = rf.Enum(values=labels, mask=True, embed=True, topk=[2], p_unavailable=0.2)
+
+    assert positional.model_dump() == keyword.model_dump()
+    assert positional.values == labels
+    assert [type(value) for value in positional.values] == [type(value) for value in labels]
+    schema = rf.Schema.from_tree(d_model=8, n_layers=1, n_heads=2, status=positional)
+    restored = rf.Schema.model_validate_json(schema.model_dump_json())
+    assert restored.requests[ADDRESS].model_dump(exclude={"name"}) == keyword.model_dump(exclude={"name"})
+
+
+@pytest.mark.parametrize("values", [None, (), VALUES, []])
+def test_enum_rejects_mixed_positional_and_keyword_labels(values):
+    with pytest.raises(TypeError, match="positionally or with values="):
+        rf.Enum("pending", values=values)
+
+
+@pytest.mark.parametrize("labels", [("a", "a"), (None,), (True, 1), (1, "a"), (float("inf"),), ({"bytes": "ff"},)])
+def test_enum_positional_labels_retain_validation(labels):
+    with pytest.raises((TypeError, ValueError)):
+        rf.Enum(*labels)
+
+
+def test_enum_positional_labels_follow_string_folding():
+    request = rf.Enum(" Foo", "BAR ", strip=True, cased=False)
+    assert request.values == ("foo", "bar")
+    with pytest.raises(ValueError, match="collide"):
+        rf.Enum("Foo", "foo", cased=False)
 
 
 @pytest.mark.parametrize(
@@ -89,8 +123,9 @@ def test_enum_rejects_invalid_category_options(options):
 
 
 @pytest.mark.parametrize("labels", [(False, True), (7, -4), (2.5, -7.25), ("z", "a"), (b"\xff", b"\x00")])
-def test_enum_scalar_families_keep_stable_ids_and_schema_round_trips(labels):
-    configured = model(labels)
+@pytest.mark.parametrize("positional", [False, True])
+def test_enum_scalar_families_keep_stable_ids_and_schema_round_trips(labels, positional):
+    configured = model(labels, positional=positional)
     source = pa.table({"status": pa.chunked_array([[labels[1]], [labels[0], labels[1]]])})
     field = configured.encode(source, strata=rf.Strata.train)[ADDRESS]
     assert field.content.flatten().tolist() == [1, 0, 1]
@@ -139,7 +174,8 @@ def test_enum_rejects_undeclared_pristine_values_even_when_masked(strata, masked
 @pytest.mark.parametrize("owner", ["leaf", "branch", "root"])
 def test_enum_repeated_masked_targets_preserve_nulls_padding_and_counts(owner):
     address = rf.Address("items", "status")
-    configured = rf.Model.xs(
+    configured = rf.Model(
+        preset="small",
         d_model=8,
         mask=owner == "root",
         items=rf.Branch(
@@ -258,8 +294,9 @@ def test_enum_empty_prediction_and_single_class_are_well_defined():
     assert result == {"value": "only", "probability": 1.0, "topk": [{"value": "only", "probability": 1.0}]}
 
 
-def test_enum_checkpoint_and_unchanged_rebuild_preserve_weights_and_counts(tmp_path: Path):
-    configured = model(mask=True)
+@pytest.mark.parametrize("positional", [False, True])
+def test_enum_checkpoint_and_unchanged_rebuild_preserve_weights_and_counts(tmp_path: Path, positional):
+    configured = model(mask=True, positional=positional)
     configured.encode(records("pending", "rejected"), strata=rf.Strata.train)
     node = configured.nodes[ADDRESS]
     assert node.embedder.embeddings[TensorKey.content.name].num_embeddings == len(VALUES)
@@ -319,7 +356,7 @@ def test_enum_rejects_checkpoint_weights_for_different_class_meanings():
 
 
 def test_enum_introspection_rejects_wrong_fields_and_sources():
-    configured = rf.Model.xs(status=rf.Enum(values=VALUES), amount=rf.Number)
+    configured = rf.Model(preset="small", status=rf.Enum(values=VALUES), amount=rf.Number)
     for inspect in (rf.Enum.vocabulary, rf.Enum.counts):
         with pytest.raises(KeyError, match="missing"):
             inspect(configured, rf.Address("missing"))
@@ -332,7 +369,8 @@ def test_enum_introspection_rejects_wrong_fields_and_sources():
 @pytest.mark.integration
 def test_enum_lightning_training_preserves_fixed_classes_and_training_counts():
     torch.manual_seed(923)
-    configured = rf.Model.xs(
+    configured = rf.Model(
+        preset="small",
         d_model=8,
         batch_size=64,
         amount=rf.Number,
@@ -415,14 +453,17 @@ def test_enum_strip_and_cased_fold_declared_values_and_inputs():
     assert request.values == ("foo", "bar")
     assert rf.Enum.model_validate(request.model_dump(mode="json")).values == ("foo", "bar")
 
-    model = rf.Model.xs(
-        d_model=8, kind=rf.Enum(values=("Foo", "Bar"), strip=True, cased=False), label=rf.Boolean(mask=True)
+    model = rf.Model(
+        preset="small",
+        d_model=8,
+        kind=rf.Enum(values=("Foo", "Bar"), strip=True, cased=False),
+        label=rf.Boolean(mask=True),
     )
     field = model.encode(pa.table({"kind": pa.array([" FOO ", "bar", "Bar "])}), strata="predict")[rf.Address("kind")]
     assert field.content.reshape(-1).tolist() == [0, 1, 1]
 
     with pytest.raises(ValueError, match="collide after strip/cased folding"):
         rf.Enum(values=("Foo", "foo"), cased=False)
-    exact = rf.Model.xs(d_model=8, kind=rf.Enum(values=("Foo", "Bar")), label=rf.Boolean(mask=True))
+    exact = rf.Model(preset="small", d_model=8, kind=rf.Enum(values=("Foo", "Bar")), label=rf.Boolean(mask=True))
     with pytest.raises(ValueError, match="undeclared value"):
         exact.encode(pa.table({"kind": pa.array(["foo"])}), strata="predict")

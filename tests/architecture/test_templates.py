@@ -18,7 +18,7 @@ def template(directory: Path, content: str) -> Path:
     return path
 
 
-@pytest.mark.parametrize("preset", ["xs", "sm", "md", "lg", "xl"])
+@pytest.mark.parametrize("preset", ["small", "medium"])
 def test_yaml_and_python_resolve_the_same_preset_schema(tmp_path, preset):
     path = template(
         tmp_path,
@@ -52,7 +52,8 @@ def test_yaml_and_python_resolve_the_same_preset_schema(tmp_path, preset):
     )
 
     loaded = rf.Model.from_yaml(path)
-    expected = getattr(rf.Model, preset)(
+    expected = rf.Model(
+        preset=preset,
         d_model=16,
         embed=True,
         reduction=rf.Attention(n_outputs=1),
@@ -108,7 +109,7 @@ def test_python_overrides_replace_root_options_and_forward_runtime_configuration
     path = template(
         tmp_path,
         """
-        preset: md
+        preset: medium
         d_model: 32
         n_layers: 2
         batch_size: 3
@@ -142,8 +143,8 @@ def test_python_overrides_replace_root_options_and_forward_runtime_configuration
     assert loaded.schema.fields.n_layers == 1
     assert loaded.schema.fields.attention is None
     assert loaded.schema.fields.reduction == rf.Attention(n_outputs=1)
-    assert loaded.schema.branches["/events"].n_layers == rf.presets.MD.branch.n_layers
-    assert loaded.schema.branches["/events"].reduction == rf.presets.MD.branch.reduction
+    assert loaded.schema.branches["/events"].n_layers == rf.presets.MEDIUM.branch.n_layers
+    assert loaded.schema.branches["/events"].reduction == rf.presets.MEDIUM.branch.reduction
     assert loaded.batch_size == 7
     assert loaded.optimizer is optimizer
     assert loaded.scheduler is scheduler
@@ -153,7 +154,7 @@ def test_yaml_preserves_explicit_nulls_and_normalizes_mask_mappings(tmp_path):
     path = template(
         tmp_path,
         """
-        preset: sm
+        preset: small
         d_model: 16
         batch_size: 3
         attention: null
@@ -185,7 +186,8 @@ def test_yaml_preserves_explicit_nulls_and_normalizes_mask_mappings(tmp_path):
     )
 
     loaded = rf.Model.from_yaml(path)
-    expected = rf.Model.sm(
+    expected = rf.Model(
+        preset="small",
         d_model=16,
         batch_size=3,
         attention=None,
@@ -217,7 +219,7 @@ def test_yaml_subclass_preserves_preset_through_checkpoint_and_mutation(tmp_path
     path = template(
         tmp_path,
         """
-        preset: xs
+        preset: small
         d_model: 16
         fields:
           amount:
@@ -229,24 +231,24 @@ def test_yaml_subclass_preserves_preset_through_checkpoint_and_mutation(tmp_path
 
     assert type(original) is Specialized
     assert type(loaded) is Specialized
-    assert loaded.preset == rf.presets.XS
+    assert loaded.preset == rf.presets.SMALL
     assert loaded.schema.model_dump() == original.schema.model_dump()
     for key, weight in original.state_dict().items():
         torch.testing.assert_close(loaded.state_dict()[key], weight, rtol=0, atol=0)
 
     loaded.extend(rf.where("address") == rf.Address(), events=rf.Branch(value=rf.Number))
-    assert loaded.schema.branches["/events"].n_heads == rf.presets.XS.branch.n_heads
-    assert loaded.schema.requests["/events/value"].n_heads == rf.presets.XS.leaf.n_heads
+    assert loaded.schema.branches["/events"].n_heads == rf.presets.SMALL.branch.n_heads
+    assert loaded.schema.requests["/events/value"].n_heads == rf.presets.SMALL.leaf.n_heads
 
 
 def test_yaml_resolves_late_registered_extensions_and_their_validators(tmp_path):
-    rf.Model.from_yaml(template(tmp_path, "preset: xs\nd_model: 16\nfields: {amount: {type: number}}"))
+    rf.Model.from_yaml(template(tmp_path, "preset: small\nd_model: 16\nfields: {amount: {type: number}}"))
     extension, Request = build_extension()
     try:
         path = template(
             tmp_path,
             f"""
-            preset: xs
+            preset: small
             d_model: 16
             fields:
               events:
@@ -263,7 +265,7 @@ def test_yaml_resolves_late_registered_extensions_and_their_validators(tmp_path)
 
         assert isinstance(request, Request)
         assert request.family == "bytes"
-        assert request.n_heads == rf.presets.XS.leaf.n_heads
+        assert request.n_heads == rf.presets.SMALL.leaf.n_heads
         assert request.mask == rf.Number(mask=True).mask
 
         path.write_text(path.read_text().replace("family: bytes", "family: unknown"))
@@ -280,7 +282,7 @@ def test_shared_yaml_anchors_bind_independent_names_and_mutable_nodes(tmp_path):
     path = template(
         tmp_path,
         """
-        preset: xs
+        preset: small
         d_model: 16
         fields:
           outbound: &leg
@@ -301,8 +303,8 @@ def test_shared_yaml_anchors_bind_independent_names_and_mutable_nodes(tmp_path):
         request = model.schema.requests[rf.Address(leg, "fare")]
         assert branch.name == leg
         assert branch.length == 2
-        assert branch.n_heads == rf.presets.XS.branch.n_heads
-        assert request.n_heads == rf.presets.XS.leaf.n_heads
+        assert branch.n_heads == rf.presets.SMALL.branch.n_heads
+        assert request.n_heads == rf.presets.SMALL.leaf.n_heads
         assert request.dropout is None
 
     model.update(rf.where("address") == rf.Address("outbound", "fare"), weight=0.25)
@@ -315,7 +317,7 @@ def test_recursive_yaml_branch_alias_reports_the_source(tmp_path):
     path = template(
         tmp_path,
         """
-        preset: xs
+        preset: small
         fields:
           events: &events
             type: branch
@@ -336,7 +338,7 @@ def test_yaml_model_predicts_nested_targets_and_exports_root_embedding(tmp_path)
     path = template(
         tmp_path,
         """
-        preset: xs
+        preset: small
         d_model: 16
         embed: true
         fields:
@@ -371,15 +373,15 @@ def test_yaml_model_predicts_nested_targets_and_exports_root_embedding(tmp_path)
         ("[]", "mapping"),
         ("preset: enormous\nfields: {}", "preset"),
         ("preset: 3\nfields: {}", "preset"),
-        ("preset: xs\nn_head: 2\nfields: {}", "n_head"),
-        ("preset: xs\nfields: []", "fields"),
-        ("preset: xs\nfields: {amount: {}}", "type"),
-        ("preset: xs\nfields: {amount: {type: missing}}", "missing"),
-        ("preset: xs\nfields: {amount: {type: number, name: other}}", "name"),
-        ("preset: xs\nfields: {amount: {type: number, surprise: 1}}", "surprise"),
-        ("preset: xs\nfields: {kind: {type: enum, values: [a, a]}}", "unique"),
-        ("preset: xs\noptimizer: adamw\nfields: {}", "optimizer"),
-        ("preset: xs\nscheduler: {}\nfields: {}", "scheduler"),
+        ("preset: small\nn_head: 2\nfields: {}", "n_head"),
+        ("preset: small\nfields: []", "fields"),
+        ("preset: small\nfields: {amount: {}}", "type"),
+        ("preset: small\nfields: {amount: {type: missing}}", "missing"),
+        ("preset: small\nfields: {amount: {type: number, name: other}}", "name"),
+        ("preset: small\nfields: {amount: {type: number, surprise: 1}}", "surprise"),
+        ("preset: small\nfields: {kind: {type: enum, values: [a, a]}}", "unique"),
+        ("preset: small\noptimizer: adamw\nfields: {}", "optimizer"),
+        ("preset: small\nscheduler: {}\nfields: {}", "scheduler"),
         ("fields: {amount: {type: number}}", "d_model"),
         ("preset: [xs", "line 1"),
     ],
@@ -397,12 +399,12 @@ def test_invalid_templates_report_the_source_and_problem(tmp_path, content, frag
 @pytest.mark.parametrize(
     "content, key",
     [
-        ("preset: xs\npreset: sm\nfields: {}", "preset"),
-        ("preset: xs\nfields:\n  amount: {type: number}\n  amount: {type: category}", "amount"),
-        ("preset: xs\nfields: {amount: {type: number, mask: true, mask: false}}", "mask"),
+        ("preset: small\npreset: small\nfields: {}", "preset"),
+        ("preset: small\nfields:\n  amount: {type: number}\n  amount: {type: category}", "amount"),
+        ("preset: small\nfields: {amount: {type: number, mask: true, mask: false}}", "mask"),
         (
             """
-            preset: xs
+            preset: small
             fields:
               amount: &number
                 type: number
@@ -453,7 +455,7 @@ def test_invalid_root_option_values_without_preset_report_the_source(tmp_path, o
 
 @pytest.mark.parametrize("overrides", [{"preset": "sm"}, {"fields": {}}, {"n_head": 2}])
 def test_python_overrides_cannot_replace_template_fields_or_preset(tmp_path, overrides):
-    path = template(tmp_path, "preset: xs\nfields: {amount: {type: number}}")
+    path = template(tmp_path, "preset: small\nfields: {amount: {type: number}}")
 
     with pytest.raises(TypeError, match=next(iter(overrides))):
         rf.Model.from_yaml(path, **overrides)

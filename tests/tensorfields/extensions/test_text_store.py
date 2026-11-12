@@ -62,8 +62,12 @@ def test_store_flushes_itself_at_its_interval(tmp_path):
 
 
 def configured(store):
-    return rf.Model.xs(
-        note=rf.Text(model=MODEL, store=str(store), max_length=8), label=rf.Boolean(mask=True), d_model=8, batch_size=4
+    return rf.Model(
+        preset="small",
+        note=rf.Text(model=MODEL, store=str(store), max_length=8),
+        label=rf.Boolean(mask=True),
+        d_model=8,
+        batch_size=4,
     )
 
 
@@ -92,7 +96,9 @@ def test_embedder_consults_the_store_before_the_encoder(tmp_path, monkeypatch):
     third = later.nodes["/note"].embedder.encode(content=inputs["/note"].content, state=inputs["/note"].state)
     assert calls == [] and torch.allclose(first, third)
 
-    plain = rf.Model.xs(note=rf.Text(model=MODEL, max_length=8), label=rf.Boolean(mask=True), d_model=8, batch_size=4)
+    plain = rf.Model(
+        preset="small", note=rf.Text(model=MODEL, max_length=8), label=rf.Boolean(mask=True), d_model=8, batch_size=4
+    )
     direct = plain.nodes["/note"].embedder.encode(content=inputs["/note"].content, state=inputs["/note"].state)
     assert torch.allclose(first, direct, atol=1e-5), "stored vectors are the encoder's own"
 
@@ -114,7 +120,8 @@ def test_warm_fills_the_store_for_every_later_split(tmp_path, monkeypatch):
 
 def test_fields_with_the_same_encoder_share_one_store(tmp_path, monkeypatch):
     patch_hf(monkeypatch)
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         a=rf.Text(model=MODEL, store=str(tmp_path), max_length=8),
         b=rf.Text(model=MODEL, store=str(tmp_path), max_length=8),
         label=rf.Boolean(mask=True),
@@ -232,7 +239,8 @@ def test_resident_view_answers_on_device_within_its_budget(tmp_path):
 
 def test_embedder_uses_the_resident_view_after_a_flush(tmp_path, monkeypatch):
     patch_hf(monkeypatch)
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         note=rf.Text(model=MODEL, store=str(tmp_path), resident=64, max_length=8),
         label=rf.Boolean(mask=True),
         d_model=8,

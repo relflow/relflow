@@ -1,5 +1,6 @@
 """Reusable definitions retain explicit options separately from ordinary defaults."""
 
+from functools import partial
 from itertools import count
 from typing import Literal
 
@@ -106,7 +107,7 @@ def test_extension_subclasses_keep_custom_defaults_and_intent_when_bound():
         rf.TENSORFIELDS.pop("field_intent", None)
 
 
-@pytest.mark.parametrize("constructor", [rf.Model, rf.Model.xs])
+@pytest.mark.parametrize("constructor", [rf.Model, partial(rf.Model, preset="small")])
 @pytest.mark.parametrize("kind", ["number", "branch", "custom"])
 def test_binding_revalidates_corrupted_reusable_definitions(constructor, kind):
     class PositiveNumber(rf.Number):

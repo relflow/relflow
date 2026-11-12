@@ -101,6 +101,7 @@ import numpy as np
 import pyarrow as pa
 import relflow as rf
 import torch
+from relflow.presets.base import resolve
 from reporting import experiment, report
 
 BUDGET = 500
@@ -118,10 +119,23 @@ def records(*, rows: int, seed: int, long: bool = False) -> Iterator[dict]:
 
 
 def build(overflow: str) -> rf.Model:
-    return rf.Model.xs(
-        events=rf.Branch(length=CAPACITY, overflow=overflow, reduction=rf.Attention(), amount=rf.Number),
-        answer=rf.Number(mask=True, objective="mse"),
+    # Freeze the experimental architecture independently of SDK preset changes.
+    control_preset = rf.presets.Preset(
+        name="xs",
+        d_model=64,
+        root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        leaf=rf.presets.LeafDefaults(n_heads=2),
     )
+    model = rf.Model(
+        schema=resolve(
+            control_preset,
+            events=rf.Branch(length=CAPACITY, overflow=overflow, reduction=rf.Attention(), amount=rf.Number),
+            answer=rf.Number(mask=True, objective="mse"),
+        )
+    )
+    model.preset = control_preset
+    return model
 
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:

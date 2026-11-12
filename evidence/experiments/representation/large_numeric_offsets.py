@@ -86,6 +86,7 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
+from relflow.presets.base import resolve
 from reporting import experiment, report
 
 BUDGET = 400
@@ -156,7 +157,16 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     checks = {}
     for arm in ARMS:
         lit.seed_everything(seed, workers=True)
-        model = rf.Model.xs(x=rf.Number, target=rf.Number(mask=True, objective="mse"))
+        # Freeze the experimental architecture independently of SDK preset changes.
+        control_preset = rf.presets.Preset(
+            name="xs",
+            d_model=64,
+            root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+            branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+            leaf=rf.presets.LeafDefaults(n_heads=2),
+        )
+        model = rf.Model(schema=resolve(control_preset, x=rf.Number, target=rf.Number(mask=True, objective="mse")))
+        model.preset = control_preset
         train = list(records(rows=TRAIN_ROWS, seed=seed + 1, arm=arm))
         test = list(records(rows=TEST_ROWS, seed=seed + 3, arm=arm))
         updates = fit(

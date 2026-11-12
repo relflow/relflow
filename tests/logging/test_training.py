@@ -52,7 +52,7 @@ def fit_options(tmp_path):
 
 
 def test_track_logs_only_steps_and_keeps_training_loss_internal_with_accumulation(fit_options):
-    model = FixedLosses.xs(d_model=8, label=rf.Boolean(mask=True))
+    model = FixedLosses(preset="small", d_model=8, label=rf.Boolean(mask=True))
     rows = pa.table({"label": [True, False, True, False, True, False, True]})
     data = rf.ArrowDataModule(train=rows)
     logger = RecordingLogger()
@@ -77,7 +77,7 @@ def test_track_logs_only_steps_and_keeps_training_loss_internal_with_accumulatio
 
 
 def test_logging_interval_samples_steps_and_zero_keeps_training_loss_internal(fit_options):
-    model = FixedLosses.xs(d_model=8, label=rf.Boolean(mask=True))
+    model = FixedLosses(preset="small", d_model=8, label=rf.Boolean(mask=True))
     rows = pa.table({"label": [True, False] * 5})
     data = rf.ArrowDataModule(train=rows)
     logger = RecordingLogger()
@@ -103,7 +103,7 @@ def test_logging_interval_samples_steps_and_zero_keeps_training_loss_internal(fi
 
 
 def test_validation_keeps_its_metric_name_and_default_checkpoint_monitor(fit_options):
-    model = rf.Model.xs(d_model=8, label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, label=rf.Boolean(mask=True))
     rows = pa.table({"label": [True, False] * 3})
     data = rf.ArrowDataModule(train=rows, validate=rows)
     logger = RecordingLogger()
@@ -137,7 +137,7 @@ def test_validation_keeps_its_metric_name_and_default_checkpoint_monitor(fit_opt
     ],
 )
 def test_vocabulary_scores_log_per_batch_and_validation_keeps_pass_totals(fit_options, field, labels):
-    model = rf.Model.xs(d_model=8, amount=rf.Number, label=field)
+    model = rf.Model(preset="small", d_model=8, amount=rf.Number, label=field)
     rows = pa.table({"amount": [1.0, 2.0, 3.0, 4.0], "label": labels})
     data = rf.ArrowDataModule(train=rows, validate=rows, shuffle=False)
     logger = RecordingLogger()

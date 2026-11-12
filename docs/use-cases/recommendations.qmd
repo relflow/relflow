@@ -53,7 +53,8 @@ for this observation structure:
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     candidate_item_id=rf.Hash,
     candidate_category=rf.Category,
     candidate_price=rf.Number,

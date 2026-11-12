@@ -92,6 +92,7 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
+from relflow.presets.base import resolve
 from reporting import experiment, report
 
 BUDGET = 400
@@ -134,7 +135,17 @@ def build(arm: str) -> rf.Model:
         feature = rf.Duration(query="ended_at", start=ANCHOR, granularity="days")
     else:
         feature = rf.Duration(query=("started_at", "ended_at"), granularity="days")
-    return rf.Model.xs(elapsed=feature, target=rf.Number(mask=True, objective="mse"))
+    # Freeze the experimental architecture independently of SDK preset changes.
+    control_preset = rf.presets.Preset(
+        name="xs",
+        d_model=64,
+        root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        leaf=rf.presets.LeafDefaults(n_heads=2),
+    )
+    model = rf.Model(schema=resolve(control_preset, elapsed=feature, target=rf.Number(mask=True, objective="mse")))
+    model.preset = control_preset
+    return model
 
 
 def prediction(model: rf.Model, rows: list[dict], arm: str) -> np.ndarray:

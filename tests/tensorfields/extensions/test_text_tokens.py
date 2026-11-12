@@ -40,7 +40,8 @@ def resources(monkeypatch):
 
 
 def build(cache=True, *, mask=False):
-    return rf.Model.xs(
+    return rf.Model(
+        preset="small",
         attention=None,
         body=rf.Text(model=MODEL, cache=cache, max_length=4, mask=mask),
     )
@@ -74,7 +75,8 @@ def test_disabled_cache_retains_per_batch_deduplication(resources):
 
 
 def test_token_caches_are_separate_for_each_field_and_model(resources):
-    one = rf.Model.xs(
+    one = rf.Model(
+        preset="small",
         attention=None,
         body=rf.Text(model=MODEL, cache=True, max_length=4),
         title=rf.Text(model=MODEL, cache=True, max_length=1),
@@ -178,7 +180,8 @@ def test_shared_field_cache_serializes_concurrent_misses(resources):
 
 
 def test_ragged_hidden_targets_reuse_tokens_without_revealing_inputs(resources):
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         attention=None,
         events=rf.Branch(
             length=None,

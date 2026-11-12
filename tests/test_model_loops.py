@@ -45,7 +45,7 @@ class DistributedState(lit.Callback):
 
 @pytest.fixture
 def model():
-    return rf.Model.xs(d_model=8, batch_size=2, amount=rf.Number, label=rf.Boolean(mask=True))
+    return rf.Model(preset="small", d_model=8, batch_size=2, amount=rf.Number, label=rf.Boolean(mask=True))
 
 
 @pytest.fixture
@@ -189,7 +189,7 @@ def test_lazy_binding_keeps_model_ownership_across_loops(model, options):
     table = pa.table({"amount": [1.0, 2.0], "label": [False, True]})
     data = rf.ArrowDataModule(validate=table, predict=table)
     model.validate(data, limit_val_batches=1, verbose=False, **options)
-    other = rf.Model.xs(d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
+    other = rf.Model(preset="small", d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
     with pytest.raises(ValueError, match="different model"):
         other.predict(data, **options)
     assert data.model is model
@@ -233,7 +233,7 @@ def test_custom_lightning_data_module_can_own_lazy_binding(model, options):
     explicit.model = model
     model.validate(explicit, limit_val_batches=1, verbose=False, **options)
     assert explicit.bindings == 0
-    other = rf.Model.xs(d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
+    other = rf.Model(preset="small", d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
     with pytest.raises(ValueError, match="different model"):
         other.validate(data, **options)
     assert data.model is model
@@ -246,7 +246,7 @@ def test_custom_model_owned_data_module_retains_ownership_guard(model, options):
             super().__init__()
             self.model = model
 
-    other = rf.Model.xs(d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
+    other = rf.Model(preset="small", d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
     with pytest.raises(ValueError, match="different model"):
         other.validate(Owned(), **options)
 
@@ -359,7 +359,7 @@ def test_custom_policies_replace_defaults_and_train_only_requires_a_policy_choic
 
 
 def test_input_ownership_and_option_conflicts_fail_before_execution(model, data, options):
-    other = rf.Model.xs(d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
+    other = rf.Model(preset="small", d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
     with pytest.raises(ValueError, match="different model"):
         other.fit(data, **options)
     with pytest.raises(TypeError, match="LightningDataModule"):
@@ -964,7 +964,9 @@ class DistributedCapacity(lit.Callback):
 def test_distributed_ranks_share_reduced_losses_and_observed_capacity(options, tmp_path):
     from lightning.pytorch.strategies import DDPStrategy
 
-    model = rf.Model.xs(d_model=8, batch_size=2, events=rf.Branch(amount=rf.Number), label=rf.Boolean(mask=True))
+    model = rf.Model(
+        preset="small", d_model=8, batch_size=2, events=rf.Branch(amount=rf.Number), label=rf.Boolean(mask=True)
+    )
     # Only row 1 carries the longest collection, so a single rank observes it directly.
     table = pa.Table.from_pylist(
         [

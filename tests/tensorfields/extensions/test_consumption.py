@@ -12,7 +12,8 @@ from relflow.architecture.binding import bind
 @pytest.mark.parametrize("workers", [0, pytest.param(1, marks=pytest.mark.integration)])
 def test_prefetch_preserves_enum_ids_and_consumes_each_quantile_delta_once(workers):
     labels = ("pending", "complete", "rejected")
-    configured = rf.Model.xs(
+    configured = rf.Model(
+        preset="small",
         d_model=8,
         batch_size=2,
         status=rf.Enum(values=labels, p_unavailable=0, mask=True),

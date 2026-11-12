@@ -21,7 +21,7 @@ class Field(TensorFieldBase):
 
 def empty_path(kind, batch_size):
     if kind in {"embedder", "decoder", "branch"}:
-        model = rf.Model.xs(d_model=8, value=rf.Number, answer=rf.Number(mask=True))
+        model = rf.Model(preset="small", d_model=8, value=rf.Number, answer=rf.Number(mask=True))
     memory = torch.full((batch_size, 3, 8), torch.nan)
     present = torch.zeros(batch_size, 3, dtype=torch.bool)
     match kind:

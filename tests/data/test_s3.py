@@ -163,7 +163,7 @@ def test_native_s3_data_pipeline_closes_scans_after_preprocessing_failure_or_epo
             raise ValueError("injected preprocessing failure")
         return frame
 
-    model = rf.Model.xs(id=rf.Number, d_model=8, batch_size=2)
+    model = rf.Model(preset="small", id=rf.Number, d_model=8, batch_size=2)
     source = rf.source("diagnostics/records", match=r".*\.parquet", filesystem=partial(fs.S3FileSystem, **s3.options))
     data = rf.ArrowDataModule(model, predict=source, preprocessor=prepare, epoch_size=1 if stop == "epoch" else None)
     stream = iter(data.predict_dataloader())
@@ -188,7 +188,7 @@ import pyarrow.parquet as pq
 import relflow as rf
 
 options, mode, output = json.loads(sys.argv[1]), sys.argv[2], sys.argv[3]
-model = rf.Model.xs(id=rf.Number, d_model=8, batch_size=2, embed=True)
+model = rf.Model(preset="small", id=rf.Number, d_model=8, batch_size=2, embed=True)
 source = rf.source('diagnostics/records', match=r'.*\.parquet', filesystem=partial(fs.S3FileSystem, **options))
 
 @rf.preprocess

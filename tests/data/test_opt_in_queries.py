@@ -6,7 +6,8 @@ from tests.arrow import table
 
 
 def test_direct_schema_binding_and_explicit_nested_query_can_share_a_batch():
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         items=rf.Branch(value=rf.Number, length=2),
         gross_amount=rf.Number(query='payload.metrics["gross amount"]'),
@@ -49,7 +50,7 @@ def test_filters_are_rejected_with_a_preprocessor_remedy():
 
 
 def test_query_backed_leaf_ignores_same_named_direct_source_values():
-    model = rf.Model.xs(d_model=8, label=rf.Category(query="payload.label", p_unavailable=0.0))
+    model = rf.Model(preset="small", d_model=8, label=rf.Category(query="payload.label", p_unavailable=0.0))
 
     encoded = model.encode(
         table(
@@ -69,7 +70,7 @@ def test_query_backed_leaf_ignores_same_named_direct_source_values():
 
 
 def test_scalar_extension_rejects_list_valued_query_with_field_context():
-    model = rf.Model.xs(d_model=8, items=rf.Branch(value=rf.Number(query="values[*]"), length=2))
+    model = rf.Model(preset="small", d_model=8, items=rf.Branch(value=rf.Number(query="values[*]"), length=2))
 
     with pytest.raises(
         ValueError,
@@ -82,7 +83,7 @@ def test_scalar_extension_rejects_list_valued_query_with_field_context():
 
 
 def test_set_owns_the_list_produced_by_a_traversal_query():
-    model = rf.Model.xs(d_model=8, aliases=rf.Set(query="contacts[*].alias", p_unavailable=0.0))
+    model = rf.Model(preset="small", d_model=8, aliases=rf.Set(query="contacts[*].alias", p_unavailable=0.0))
 
     encoded = model.encode(
         table(
@@ -105,7 +106,7 @@ def test_set_owns_the_list_produced_by_a_traversal_query():
 
 
 def test_vector_owns_the_list_produced_by_a_traversal_query():
-    model = rf.Model.xs(d_model=8, coordinates=rf.Vector(query="measurements[*].value", n_dim=2))
+    model = rf.Model(preset="small", d_model=8, coordinates=rf.Vector(query="measurements[*].value", n_dim=2))
 
     encoded = model.encode(
         table(

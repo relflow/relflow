@@ -84,7 +84,7 @@ def test_extension_prepare_validates_and_preserves_one_whole_arrow_array():
     ],
 )
 def test_multifamily_extensions_accept_all_null_arrow_columns(field):
-    model = rf.Model.xs(value=field, d_model=8)
+    model = rf.Model(preset="small", value=field, d_model=8)
 
     encoded = model.encode(pa.table({"value": pa.nulls(2)}))["/value"]
 
@@ -95,7 +95,7 @@ def test_multifamily_extensions_accept_all_null_arrow_columns(field):
 
 
 def test_encode_calls_extension_prepare_once_with_the_whole_leaf_column(monkeypatch: pytest.MonkeyPatch):
-    model = rf.Model.xs(value=rf.Number, d_model=8)
+    model = rf.Model(preset="small", value=rf.Number, d_model=8)
     calls: list[pa.DataType] = []
     original = number.prepare
 
@@ -116,7 +116,7 @@ def test_encode_calls_extension_prepare_once_with_the_whole_leaf_column(monkeypa
 
 
 def test_builtin_extension_type_contract_fails_before_codec_coercion():
-    model = rf.Model.xs(value=rf.Number, d_model=8)
+    model = rf.Model(preset="small", value=rf.Number, d_model=8)
 
     with pytest.raises(TypeError, match="extension 'number'.*does not accept Arrow type string"):
         model.encode(pa.table({"value": ["1.5"]}))
@@ -140,7 +140,8 @@ def test_nested_dictionary_chunks_decode_without_combining_indices():
         )
         expected.extend(labels)
     source = pa.table({"items": pa.chunked_array(chunks)})
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         items=rf.Branch(
             length=100,
             value=rf.Category(p_unavailable=0.0),
@@ -159,7 +160,8 @@ def test_dictionary_null_values_remain_null_after_decoding():
         pa.array([0, 1, None], type=pa.int8()),
         pa.array(["value", None]),
     )
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         value=rf.Category(p_unavailable=0.0),
         d_model=8,
     )
@@ -194,7 +196,8 @@ def test_extension_storage_uses_dictionary_value_validity():
         pa.array(["value", None]),
     )
     values = pa.ExtensionArray.from_storage(EncodedType(), storage)
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         value=rf.Category(p_unavailable=0.0),
         d_model=8,
     )
@@ -218,7 +221,8 @@ def test_dateparts_encodes_heterogeneous_date_union():
             pa.array([datetime(2024, 3, 4, 5, 6)], type=pa.timestamp("us")),
         ],
     )
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         value=rf.DateParts(dateparts=["day_of_month"]),
         d_model=8,
     )
@@ -274,7 +278,8 @@ def test_typed_empty_union_branch_encodes_zero_extent():
     )
     item = pa.struct([pa.field("value", union)])
     source = pa.table({"items": pa.chunked_array([], type=pa.list_(item))})
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         items=rf.Branch(length=3, value=rf.Number),
         d_model=8,
     )

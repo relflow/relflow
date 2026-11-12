@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from relflow.structs.tree import Leaf, Node
+from relflow.structs.tree import Node
 
 if TYPE_CHECKING:
     from relflow.structs.experiment import TreeFieldInput
@@ -18,10 +18,7 @@ class Declarations(type):
     def __new__(mcls, name: str, bases: tuple[type, ...], namespace: dict[str, Any], **kwargs: Any) -> type:
         local: dict[str, Any] = {}
         for key, value in tuple(namespace.items()):
-            if isinstance(value, type) and issubclass(value, Node):
-                if not issubclass(value, Leaf):
-                    raise TypeError(f"{name}.{key} must be an instantiated branch; use {value.__name__}(...)")
-            elif not isinstance(value, Node):
+            if not (isinstance(value, Node) or isinstance(value, type) and issubclass(value, Node)):
                 continue
             if key.startswith("__"):
                 raise TypeError(f"{name}.{key} cannot declare a child using a Python protocol name")

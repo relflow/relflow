@@ -105,7 +105,8 @@ def test_batcher_runs_processors_once_for_one_collated_arrow_batch():
         return frame.select("value")
 
     async def run():
-        model = rf.Model.xs(
+        model = rf.Model(
+            preset="small",
             value=rf.Number,
             d_model=8,
             embed=True,
@@ -402,7 +403,7 @@ def test_runtime_setup_applies_updates_before_device_placement(monkeypatch):
 
 
 def test_runtime_setup_uses_an_in_memory_model(monkeypatch):
-    model = rf.Model.xs(amount=rf.Number, d_model=8)
+    model = rf.Model(preset="small", amount=rf.Number, d_model=8)
     monkeypatch.setattr(
         deployment_module.Model,
         "load",
@@ -436,7 +437,11 @@ def test_deployment_builder_replaces_processor_collections():
         return frame.select(id=pl.col("inputs").struct.field("id"))
 
     app = (
-        rf.Deployment(model=rf.Model.xs(id=rf.Number, d_model=8, embed=True), accelerator="cpu", retain=("id",))
+        rf.Deployment(
+            model=rf.Model(preset="small", id=rf.Number, d_model=8, embed=True),
+            accelerator="cpu",
+            retain=("id",),
+        )
         .preprocess([prepare])
         .preprocess((replace,))
         .postprocess([compact])
@@ -533,7 +538,7 @@ def test_arrow_deployment_batches_processed_rows_and_runs_global_processors_once
             .with_row_index("row")
         )
 
-    model = rf.Model.xs(value=rf.Number, d_model=8, embed=True)
+    model = rf.Model(preset="small", value=rf.Number, d_model=8, embed=True)
     hook = model.register_forward_pre_hook(lambda module, inputs: batches.append(inputs[0]["/value"].state.shape[0]))
     monkeypatch.setattr(
         deployment_module,
@@ -596,7 +601,7 @@ def test_arrow_deployment_rejects_final_prediction_cardinality_drift(stage):
     def drop_outputs(frame: pl.DataFrame) -> pl.DataFrame:
         return frame.head(2)
 
-    model = rf.Model.xs(value=rf.Number, d_model=8, embed=True)
+    model = rf.Model(preset="small", value=rf.Number, d_model=8, embed=True)
     deployment = rf.Deployment(checkpoint=model, accelerator="cpu", max_batch_size=2)
     if stage == "preprocess":
         deployment.preprocess(drop_inputs)
@@ -726,14 +731,14 @@ def test_multiworker_deployment_rejects_in_process_builder_configuration(monkeyp
 
 
 def test_deployment_rejects_explicit_checkpoint_and_model():
-    model = rf.Model.xs(amount=rf.Number, d_model=8)
+    model = rf.Model(preset="small", amount=rf.Number, d_model=8)
 
     with pytest.raises(ValueError, match="pass either checkpoint or model"):
         rf.Deployment(checkpoint="model.ckpt", model=model)
 
 
 def test_deployment_model_ignores_an_environment_checkpoint(monkeypatch):
-    model = rf.Model.xs(amount=rf.Number, d_model=8)
+    model = rf.Model(preset="small", amount=rf.Number, d_model=8)
     monkeypatch.setenv("RELFLOW_CHECKPOINT", "/srv/models/leftover.ckpt")
 
     deployment = rf.Deployment(model=model)
@@ -871,7 +876,7 @@ def test_json_rows_settle_durations_binary_decimals_and_nan():
 
 
 def test_runtime_restores_the_model_batch_size_after_bounded_prediction():
-    model = rf.Model.xs(value=rf.Number, d_model=8, embed=True)
+    model = rf.Model(preset="small", value=rf.Number, d_model=8, embed=True)
     server = deployment_module.FastAPIRuntime(checkpoint=model, accelerator=deployment_module.Accelerator.cpu)
     server.setup()
 
@@ -882,7 +887,7 @@ def test_runtime_restores_the_model_batch_size_after_bounded_prediction():
 
 
 def test_json_route_isolates_request_failures_within_one_microbatch():
-    model = rf.Model.xs(value=rf.Number, vector=rf.Vector(n_dim=2), d_model=8, embed=True)
+    model = rf.Model(preset="small", value=rf.Number, vector=rf.Vector(n_dim=2), d_model=8, embed=True)
     app = rf.Deployment(checkpoint=model, accelerator="cpu", max_batch_size=4).app()
     good = {"value": 1.0, "vector": [0.1, 0.2]}
     bad = {"value": 2.0, "vector": [0.1]}
@@ -910,7 +915,7 @@ def test_json_route_isolates_request_failures_within_one_microbatch():
 
 
 def test_arrow_route_reports_data_errors_as_422_envelopes():
-    model = rf.Model.xs(value=rf.Number, d_model=8, embed=True)
+    model = rf.Model(preset="small", value=rf.Number, d_model=8, embed=True)
     app = rf.Deployment(checkpoint=model, accelerator="cpu").app()
     source = pa.table({"value": ["not a number"]})
     sink = pa.BufferOutputStream()

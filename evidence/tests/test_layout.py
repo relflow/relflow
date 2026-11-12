@@ -132,7 +132,7 @@ def test_experiments_keep_explicit_training_protocols_on_model_fit() -> None:
             ), path
         assert ("optimizer" in options) != ("learning_rate" in options), path
         for call in calls:
-            if ast.unparse(call.func) in {"rf.Model", "rf.Model.xs"}:
+            if ast.unparse(call.func) in {"rf.Model", "resolve"}:
                 assert all(keyword.arg not in {"optimizer", "batch_size"} for keyword in call.keywords), path
             if ast.unparse(call.func) == "rf.Cluster":
                 assert all(keyword.arg != "n_clusters" for keyword in call.keywords), path

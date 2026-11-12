@@ -25,7 +25,8 @@ def build(kind):
     request = (
         rf.Cluster(bounds=3, revive_temperature=0.0, **options) if kind == "cluster" else REQUESTS[kind](**options)
     )
-    return rf.Model.xs(
+    return rf.Model(
+        preset="small",
         d_model=8,
         attention=None,
         reduction=rf.Mean(),
@@ -377,7 +378,8 @@ def test_late_registered_category_subclass_uses_its_registered_bind_component():
                 module, field, observation, binding, address=address, strata=strata, resize=resize
             )
 
-        model = rf.Model.xs(
+        model = rf.Model(
+            preset="small",
             d_model=8,
             value=Request(p_unavailable=0.0, mask=True),
         )
@@ -442,7 +444,8 @@ class TrainingTrace(Callback):
 @pytest.mark.parametrize("workers", [0, 2], ids=["main-process", "persistent-workers"])
 def test_one_fit_admits_late_labels_without_restarting_epoch_or_optimizer(workers, tmp_path):
     selected = rf.Mask(query="supervise", reconstruct=True)
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         attention=None,
         reduction=rf.Mean(),
@@ -763,7 +766,7 @@ def test_admitted_rows_stay_zero_until_a_training_batch_starts_them_distinct_and
 
     def build():
         lit.seed_everything(7)
-        return rf.Model.xs(d_model=8, group=rf.Category, y=rf.Number(mask=True))
+        return rf.Model(preset="small", d_model=8, group=rf.Category, y=rf.Number(mask=True))
 
     rows = pa.table({"group": ["A", "B", "C", "A"], "y": [1.0, 2.0, 3.0, 4.0]})
     # Admission with null targets touches the vocabulary alone; the target statistics are already set.

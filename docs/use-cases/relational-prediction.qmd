@@ -94,7 +94,8 @@ tree, with the retirement objective attached to the entry at its root:
 ```python
 import relflow as rf
 
-model = rf.Model.sm(
+model = rf.Model(
+    preset="small",
     driver_nationality=rf.Category,
     upcoming_circuit=rf.Category,
     constructor=rf.Category,

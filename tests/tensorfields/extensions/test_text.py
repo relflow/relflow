@@ -238,7 +238,7 @@ def test_text_raises_when_transformers_is_missing(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(importlib.util, "find_spec", missing_transformers)
 
     with pytest.raises(ModuleNotFoundError, match="relflow\\[text\\]"):
-        rf.Model.xs(body=rf.Text, d_model=8)
+        rf.Model(preset="small", body=rf.Text, d_model=8)
 
     assert TENSORFIELDS["text"].requires == {"transformers": "relflow[text]"}
 

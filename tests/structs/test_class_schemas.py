@@ -38,10 +38,11 @@ def test_class_declarations_build_the_same_schema_as_constructor_fields():
     assert list(Transaction.model_fields) == list(rf.Branch.model_fields)
 
 
-@pytest.mark.parametrize("profile", ["xs", "sm", "md", "lg", "xl"])
+@pytest.mark.parametrize("profile", ["small", "medium"])
 def test_preset_factories_resolve_declared_children(profile):
-    model = getattr(FraudDetector, profile)(d_model=16, n_layers=1, n_heads=2)
-    ordinary = getattr(rf.Model, profile)(
+    model = FraudDetector(preset=profile, d_model=16, n_layers=1, n_heads=2)
+    ordinary = rf.Model(
+        preset=profile,
         d_model=16,
         n_layers=1,
         n_heads=2,
@@ -107,7 +108,7 @@ def test_inheritance_replaces_whole_children_and_keeps_declaration_order():
             return "international"
 
     branch = InternationalTransaction(length=8)
-    model = InternationalFraud.xs(d_model=16, n_layers=1, n_heads=2)
+    model = InternationalFraud(preset="small", d_model=16, n_layers=1, n_heads=2)
 
     assert [field.name for field in branch.fields] == ["amount", "merchant", "country"]
     assert branch.fields[1].type == "hash"
@@ -115,7 +116,7 @@ def test_inheritance_replaces_whole_children_and_keeps_declaration_order():
     assert model.label() == "international"
     assert model.schema.branches["/transactions"].length == 2
     assert Transaction(length=1).fields[1].type == "category"
-    assert FraudDetector.xs(d_model=16, n_layers=1, n_heads=2).schema.branches["/transactions"].length == 4
+    assert FraudDetector(preset="small", d_model=16, n_layers=1, n_heads=2).schema.branches["/transactions"].length == 4
 
 
 def test_repeated_bindings_and_model_instances_own_independent_nodes_and_state():
@@ -160,6 +161,66 @@ def test_nested_declarations_lower_to_portable_branches():
     assert schema.requests["/baskets/items/sku"].parent is schema.branches["/baskets/items"]
 
 
+@pytest.mark.parametrize("preset", [False, True])
+def test_bare_branch_classes_match_empty_calls_and_preset_defaults(preset):
+    class BareModel(rf.Model):
+        transactions = Transaction
+        result = rf.Boolean(mask=True)
+
+    class CalledModel(rf.Model):
+        transactions = Transaction()
+        result = rf.Boolean(mask=True)
+
+    options = {"d_model": 16, "n_layers": 1, "n_heads": 2}
+    bare = BareModel(preset="small", **options) if preset else BareModel(**options)
+    called = CalledModel(preset="small", **options) if preset else CalledModel(**options)
+
+    assert bare.schema.model_dump() == called.schema.model_dump()
+    assert bare.schema.branches["/transactions"].length is None
+    assert bare.schema.branches["/transactions"].overflow is None
+    assert rf.presets.SMALL.defaults(Transaction) == rf.presets.SMALL.defaults(Transaction())
+
+
+def test_bare_branch_classes_bind_in_keywords_mappings_and_mutations():
+    nested = rf.Branch(length=2, fields={"history": Transaction})
+    model = rf.Model(
+        preset="small", d_model=16, histories=nested, transactions=Transaction, result=rf.Boolean(mask=True)
+    )
+    model.extend(rf.where("address") == "/", extra=Transaction)
+
+    assert "/histories/history/merchant" in model.schema.requests
+    assert "/transactions/merchant" in model.schema.requests
+    assert "/extra/merchant" in model.schema.requests
+    assert model.schema.branches["/extra"].n_heads == model.preset.branch.n_heads
+    assert all(type(branch) is rf.Branch for branch in model.schema.branches.values())
+
+
+def test_nested_bare_branches_are_independent_and_checkpoint_portable(tmp_path):
+    class Basket(rf.Branch):
+        transactions = Transaction
+
+    class ExtendedBasket(Basket):
+        region = rf.Category
+
+    class Comparison(rf.Model):
+        first = ExtendedBasket
+        second = ExtendedBasket
+        bounded = Basket(length=3, overflow="tail")
+        result = rf.Boolean(mask=True)
+
+    first = Comparison(d_model=16, n_layers=1, n_heads=2)
+    second = Comparison(d_model=16, n_layers=1, n_heads=2)
+    first.schema.requests["/first/transactions/merchant"].topk.append(4)
+
+    assert first.schema.requests["/second/transactions/merchant"].topk == [2, 3]
+    assert second.schema.requests["/first/transactions/merchant"].topk == [2, 3]
+    assert first.schema.requests["/first/transactions/merchant"].parent is first.schema.branches["/first/transactions"]
+    assert first.schema.branches["/bounded"].length == 3
+    assert first.schema.shapes["/first/transactions/amount"] == (1, None, None)
+    restored = rf.Model.load(first.save(tmp_path / "bare-branches.rf"))
+    assert restored.schema.model_dump() == first.schema.model_dump()
+
+
 @pytest.mark.parametrize(
     "construct",
     [
@@ -167,8 +228,8 @@ def test_nested_declarations_lower_to_portable_branches():
         lambda: Transaction(length=2, extra=rf.Number),
         lambda: Transaction(length=2, fields={"amount": rf.Number}),
         lambda: FraudDetector(d_model=16, n_layers=1, n_heads=2, account=rf.Hash),
-        lambda: FraudDetector.xs(extra=rf.Number),
-        lambda: FraudDetector.xs(fields={"account": rf.Hash}),
+        lambda: FraudDetector(preset="small", extra=rf.Number),
+        lambda: FraudDetector(preset="small", fields={"account": rf.Hash}),
     ],
 )
 def test_declarative_constructors_reject_child_definitions(construct):
@@ -205,10 +266,10 @@ def test_multiple_inheritance_requires_explicit_resolution_of_conflicting_childr
 
 
 def test_invalid_class_declarations_identify_the_child():
-    with pytest.raises(TypeError, match=r"Bare.transactions.*Transaction\(\.\.\.\)"):
+    with pytest.raises(TypeError, match="Protocol.__call__.*Python protocol name"):
 
-        class Bare(rf.Model):
-            transactions = Transaction
+        class Protocol(rf.Model):
+            __call__ = Transaction
 
     with pytest.raises(TypeError, match="TransactionReplacement.amount must replace an inherited child"):
 
@@ -216,7 +277,8 @@ def test_invalid_class_declarations_identify_the_child():
             amount = 12
 
 
-def test_late_registered_extensions_use_the_same_declaration_path():
+@pytest.mark.parametrize("bare", [False, True])
+def test_late_registered_extensions_use_the_same_declaration_path(bare):
     extension = rf.Extension(name="class_schema_custom", types=(float,))
     try:
 
@@ -229,7 +291,9 @@ def test_late_registered_extensions_use_the_same_declaration_path():
             default = Custom
             configured = Custom(scale=5)
 
-        schema = rf.Schema.from_tree(d_model=16, n_layers=1, n_heads=2, items=CustomBranch(length=2))
+        schema = rf.Schema.from_tree(
+            d_model=16, n_layers=1, n_heads=2, items=CustomBranch if bare else CustomBranch(length=2)
+        )
         restored = rf.Schema.model_validate_json(schema.model_dump_json())
 
         assert isinstance(restored.requests["/items/default"], Custom)
@@ -256,7 +320,7 @@ def test_saved_schema_is_authoritative_for_base_and_subclass_loading(tmp_path):
 @pytest.mark.parametrize("preset", [False, True])
 def test_yaml_schema_is_authoritative_for_a_declarative_subclass(tmp_path, preset):
     path = tmp_path / "different.yaml"
-    dimensions = "preset: xs\n" if preset else ""
+    dimensions = "preset: small\n" if preset else ""
     path.write_text(
         dimensions
         + "d_model: 16\nn_layers: 1\nn_heads: 2\n"
@@ -269,7 +333,7 @@ def test_yaml_schema_is_authoritative_for_a_declarative_subclass(tmp_path, prese
     assert list(model.schema.requests) == ["/different"]
     assert model.batch_size == 7
     assert model.optimizer is optimizer
-    assert model.preset == (rf.presets.XS if preset else None)
+    assert model.preset == (rf.presets.SMALL if preset else None)
 
 
 @pytest.mark.integration

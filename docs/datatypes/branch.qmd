@@ -14,7 +14,8 @@ context within an event and across the sequence.
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     trxns=rf.Branch(
         length=32,
         overflow="tail",
@@ -177,7 +178,7 @@ starts also do not give every item the same inclusion probability.
 
 These are the direct `rf.Branch` defaults. A
 [size preset](../concepts/model-tree.qmd#choose-a-size) such as
-`Model.xs` fills omitted branch settings; explicit node settings take precedence.
+`Model(preset="small", ...)` fills omitted branch settings; explicit node settings take precedence.
 
 | Option | Default | Meaning |
 | --- | --- | --- |

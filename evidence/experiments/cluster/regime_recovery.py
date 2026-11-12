@@ -200,6 +200,7 @@ import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
 import relflow as rf
+from relflow.presets.base import resolve
 from reporting import experiment, report
 
 BUDGET = 600
@@ -250,11 +251,23 @@ def adjusted_rand(actual: np.ndarray, predicted: np.ndarray) -> float:
 
 
 def build() -> rf.Model:
-    model = rf.Model.xs(
-        entity=rf.Cluster(bounds=(2, 8), p_unavailable=0.0, mask=rf.Mask(rate=0.1, reconstruct=True)),
-        x=rf.Number,
-        y=rf.Number(mask=True, objective="mse"),
+    # Freeze the experimental architecture independently of SDK preset changes.
+    control_preset = rf.presets.Preset(
+        name="xs",
+        d_model=64,
+        root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        leaf=rf.presets.LeafDefaults(n_heads=2),
     )
+    model = rf.Model(
+        schema=resolve(
+            control_preset,
+            entity=rf.Cluster(bounds=(2, 8), p_unavailable=0.0, mask=rf.Mask(rate=0.1, reconstruct=True)),
+            x=rf.Number,
+            y=rf.Number(mask=True, objective="mse"),
+        )
+    )
+    model.preset = control_preset
     return model
 
 

@@ -17,7 +17,7 @@ duckdb = pytest.importorskip("duckdb")
 
 
 def model(batch_size: int = 2) -> rf.Model:
-    return rf.Model.xs(id=rf.Number, d_model=8, batch_size=batch_size)
+    return rf.Model(preset="small", id=rf.Number, d_model=8, batch_size=batch_size)
 
 
 @pytest.fixture
@@ -35,7 +35,8 @@ def database(tmp_path: Path) -> Path:
 
 
 def test_named_splits_bind_parameters_and_preserve_nested_arrow_values(database: Path):
-    configured = rf.Model.xs(
+    configured = rf.Model(
+        preset="small",
         id=rf.Number,
         line_items=rf.Branch(length=2, amount=rf.Number),
         d_model=8,

@@ -10,7 +10,8 @@ from relflow import presets
 
 
 def configured() -> rf.Model:
-    return rf.Model.sm(
+    return rf.Model(
+        preset="small",
         d_model=16,
         n_layers=1,
         n_heads=2,
@@ -27,14 +28,14 @@ def test_checkpoint_preserves_policy_and_resolved_overrides_despite_new_defaults
     saved = torch.load(path, weights_only=False, map_location="cpu")
     assert saved["preset"] == original.preset.model_dump(mode="json")
 
-    monkeypatch.setattr(
-        presets,
-        "SM",
-        presets.SM.model_copy(
+    monkeypatch.setitem(
+        presets.registry.PRESETS,
+        "small",
+        presets.SMALL.model_copy(
             update={
                 "revision": 2,
-                "branch": presets.SM.branch.model_copy(update={"n_layers": 4, "n_heads": 2}),
-                "leaf": presets.SM.leaf.model_copy(update={"n_heads": 2}),
+                "branch": presets.SMALL.branch.model_copy(update={"n_layers": 4, "n_heads": 2}),
+                "leaf": presets.SMALL.leaf.model_copy(update={"n_heads": 2}),
             }
         ),
     )
@@ -53,7 +54,7 @@ def test_checkpoint_preserves_policy_and_resolved_overrides_despite_new_defaults
         added = model.schema.branches[rf.Address("purchases")]
         assert added.n_layers == 1
         assert added.n_heads == 4
-        assert added.reduction.n_outputs == 2
+        assert added.reduction.n_outputs == 4
         assert model.schema.requests[rf.Address("purchases", "price")].n_heads == 4
         assert model.schema.requests[rf.Address("score")].n_heads == 2
         assert model.schema.branches[rf.Address("events")].n_layers == 3
@@ -88,7 +89,7 @@ def test_failed_restore_preserves_previous_policy_and_graph(failure):
     else:
         checkpoint["preset"]["revision"] = 0
 
-    target = rf.Model.xs(d_model=16, amount=rf.Number).eval()
+    target = rf.Model(preset="small", d_model=16, amount=rf.Number).eval()
     policy, schema, nodes, version = target.preset, target.schema, target.nodes, target.version
     with pytest.raises((RuntimeError, ValueError)):
         target.restore_checkpoint_state(checkpoint)

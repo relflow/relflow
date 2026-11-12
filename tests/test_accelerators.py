@@ -24,7 +24,7 @@ def test_accelerator_fit_and_prediction_use_real_parameters(tmp_path, accelerato
             assert pl_module.device.type == accelerator
             assert batch.tensors["/amount"].content.device.type == accelerator
 
-    model = rf.Model.xs(d_model=8, embed=True, amount=rf.Number, label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, embed=True, amount=rf.Number, label=rf.Boolean(mask=True))
     rows = pa.table({"amount": [1.0, 3.0], "label": [False, True]})
     data = rf.ArrowDataModule(model, train=rows, validate=rows, shuffle=False)
     before = {name: parameter.detach().cpu().clone() for name, parameter in model.named_parameters()}

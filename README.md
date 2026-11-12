@@ -122,7 +122,8 @@ Declare the two inputs and that observed outcome:
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     amount=rf.Number,
     merchant=rf.Category,
     disputed=rf.Boolean(mask=True),
@@ -135,13 +136,16 @@ the field. `mask=True` makes `disputed` a supervised target: its label trains
 the decoder but is never included in the inputs. Mark additional fields to
 train multiple targets in the same model.
 
-`xs` supplies architecture defaults for the root, child branches, and field
-decoders. The [preset ladder](https://www.relflow.ai/en/latest/reference/model-presets.html)
-runs from `rf.Model.xs(...)` through `.sm(...)`, `.md(...)`, `.lg(...)`, and
-`.xl(...)`; each creates a fresh, untrained model from your declared schema.
+`small` supplies architecture defaults for the root, child branches, and field
+decoders. The [presets](https://www.relflow.ai/en/latest/reference/model-presets.html)
+provides `small` and `medium`, derived from the frozen arena HPO recipes. Select one with
+`rf.Model(preset="small", ...)` to create a fresh, untrained model from your declared schema.
 Override options such
 as `d_model`, `n_layers`, or `n_heads` when needed. Use `fields={...}` for
 generated schemas or field names that collide with configuration options.
+
+Training presets are selected independently with `model.fit(datamodule, preset="small")`.
+They supply optimizer, batch-size, EMA, and run-budget defaults; explicit fit arguments win.
 
 <p align="center">
   <a href="https://www.relflow.ai/en/latest/learn/your-first-model.html">
@@ -205,7 +209,8 @@ include a `history` list of records in each observation and describe it with
 `rf.Branch(...)`:
 
 ```python
-history_model = rf.Model.xs(
+history_model = rf.Model(
+    preset="small",
     amount=rf.Number,
     merchant=rf.Category,
     history=rf.Branch(

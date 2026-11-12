@@ -12,7 +12,7 @@ import relflow as rf
 
 
 def configured() -> rf.Model:
-    return rf.Model.xs(d_model=8, attention=None, amount=rf.Number)
+    return rf.Model(preset="small", d_model=8, attention=None, amount=rf.Number)
 
 
 def test_public_version_matches_installed_distribution() -> None:

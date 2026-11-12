@@ -13,7 +13,7 @@ For example, `payment-model.yaml` defines the sequence model from
 [Add transaction history](../learn/add-transaction-history.qmd):
 
 ```yaml
-preset: xs
+preset: small
 fields:
   trxns:
     type: branch
@@ -54,9 +54,10 @@ it. The root remains anonymous at `rf.Address()`; the target has address
 
 ## Defaults and overrides
 
-The optional `preset` selects `xs`, `sm`, `md`, `lg`, or `xl`, with the same
-defaults as the [size factories](../concepts/model-tree.qmd#choose-a-size).
-The `preset` entry is file-only and accepts these five bundled names.
+The optional `preset` selects `small` or `medium`, with the same
+defaults as [`Model(preset=...)`](../concepts/model-tree.qmd#choose-a-size).
+It also accepts application names registered with `rf.presets.register(...)`
+before loading the file. The `preset` entry is file-only.
 Without a preset, supply the required `d_model`, `n_layers`, and `n_heads` as
 top-level options in the file or the Python call. For example, an explicit
 configuration can replace the `preset` entry with:

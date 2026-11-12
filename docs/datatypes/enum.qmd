@@ -11,10 +11,11 @@ conversion and units in data preparation.
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     amount=rf.Number,
     merchant=rf.Category,
-    currency=rf.Enum(values=("USD", "EUR", "GBP")),
+    currency=rf.Enum("USD", "EUR", "GBP"),
     disputed=rf.Boolean(mask=True),
 )
 ```
@@ -34,10 +35,17 @@ Enum to predict one of its declared labels.
 
 ## Input and options
 
-`values` is a required, nonempty tuple of unique labels. Use one exact built-in
-Python type throughout the tuple: `bool`, `int`, `float`, `str`, or `bytes`.
+Supply one or more unique labels as positional arguments, such as
+`rf.Enum("USD", "EUR", "GBP")`, or pass the existing
+`rf.Enum(values=("USD", "EUR", "GBP"))` form. Do not combine the two forms.
+To expand a tuple of labels, use `rf.Enum(*labels)`; passing a tuple as one
+positional argument does not unpack it. Both forms retain one canonical
+`values` tuple in the schema.
+
+Use one exact built-in Python type throughout the labels: `bool`, `int`,
+`float`, `str`, or `bytes`.
 Mixed types, null labels, NaN, and infinity are rejected. For example,
-`values=(1, 2, 3)` declares integer labels; floating-point inputs must not be
+`rf.Enum(1, 2, 3)` declares integer labels; floating-point inputs must not be
 used in their place. Arrow widths may differ within the declared type family.
 
 Null inputs are separate [value states](index.qmd#value-state),
@@ -49,7 +57,7 @@ that you include in `values`.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `values` | Required | Nonempty tuple of unique labels of one built-in type; tuple order defines their internal indices. |
+| `values` | Required | Labels supplied positionally or as a tuple with `values=`; declaration order defines their internal indices. |
 | `p_unavailable` | `0.01` | Training probability of replacing known valued input content with unavailable content. Reconstruction targets remain unchanged. |
 | `topk` | `[]` | Sorted, unique integer accuracy cutoffs greater than one; also controls prediction candidates. Each cutoff is capped by the declared label count. |
 | `strip` | `False` | Trim surrounding whitespace from string labels, in `values` and in every input alike. |
@@ -57,7 +65,8 @@ that you include in `values`.
 
 See [shared leaf options](index.qmd#shared-leaf-options)
 for reconstruction, masking, and embedding configuration. Since `values` is
-required, construct each field with `rf.Enum(values=(...))`.
+required, construct each field with `rf.Enum("first", "second")` or
+`rf.Enum(values=(...))`. YAML and serialized schemas keep their `values` list.
 
 ## Fixed vocabulary and learning
 

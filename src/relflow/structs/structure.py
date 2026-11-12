@@ -71,6 +71,7 @@ class Branch(Node, metaclass=BranchMeta):
     ``mask`` accepts the same policies as a leaf and applies to its descendants.
     Subclasses may declare children in their class bodies; constructing those
     subclasses configures the enclosing branch without replacing children.
+    A bare branch subclass uses its default options, just like a bare leaf class.
     """
 
     model_config = pydantic.ConfigDict(extra="forbid", validate_default=True)
@@ -89,7 +90,7 @@ class Branch(Node, metaclass=BranchMeta):
     def __init__(
         self,
         *,
-        fields: Mapping[str, Branch | Leaf | builtins.type[Leaf]] | None = None,
+        fields: Mapping[str, Branch | Leaf | builtins.type[Leaf] | builtins.type[Branch]] | None = None,
         query: str | None = None,
         description: str | None = None,
         embed: bool = False,
@@ -103,7 +104,7 @@ class Branch(Node, metaclass=BranchMeta):
         dropout: Rate | None = cast(Rate | None, OMITTED),
         mask: MaskInput = False,
         type: Literal["branch"] = "branch",
-        **children: Branch | Leaf | builtins.type[Leaf],
+        **children: Branch | Leaf | builtins.type[Leaf] | builtins.type[Branch],
     ) -> None:
         from relflow.structs.experiment import bind_fields
 

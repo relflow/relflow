@@ -12,7 +12,8 @@ label; its words are not processed as a text description.
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     amount=rf.Number,
     merchant=rf.Category,
     disputed=rf.Boolean(mask=True),

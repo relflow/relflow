@@ -33,7 +33,8 @@ data module. Each data module binds to one model. This short fit updates
 [Prepare observations](prepare-observations.qmd) waits for the full run:
 
 ```python
-smoke_model = rf.Model.xs(
+smoke_model = rf.Model(
+    preset="small",
     trxns=rf.Branch(
         length=32,
         overflow="tail",

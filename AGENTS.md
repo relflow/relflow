@@ -67,6 +67,9 @@ model = rf.Model(
 
 - `Branch` and `Model` subclasses may declare children as class attributes,
   such as `amount = rf.Number` and `transactions = Transaction(length=64)`.
+  Use a bare branch class, such as `transactions = Transaction`, when no
+  placement options are needed; it is equivalent to `Transaction()`. Bare
+  branches also work in keyword schemas, `fields` mappings, and `extend`.
   For classes with declared children, constructor arguments configure the
   enclosing node exclusively; add or replace children through subclassing,
   not constructor keywords or `fields`. A declared child named `length` or
@@ -78,10 +81,18 @@ model = rf.Model(
   than merging class declarations. Ordinary `Model(...)` and `Branch(...)`
   keyword and mapping schemas remain supported.
 - Do not use a public `Struct(...)` constructor. Public examples should use `Model(...)` and `Branch(...)`.
+- Select named architecture defaults with `Model(preset="small", ...)`.
+  The bundled names are `small` and `medium`, from the frozen arena HPO
+  architectures; custom policies use
+  `rf.presets.register(Preset(...))`. Generated size methods and
+  `rf.presets.factory`, `with_preset`, and old size names are removed.
+  A child named `preset` belongs in `fields` or a class declaration.
 - `Model(...)` has no root-name option. `name=rf.Category` defines an ordinary
   child field at `/name`; neither `name="customer"` nor `root="customer"` names the model.
 - Branch and leaf names come from their parent; definitions have no `name` argument.
-  `Period` accepts positional calendar parts; other fields and branches use keyword options.
+  `Period` accepts positional calendar parts and `Enum` accepts positional
+  scalar labels (or a `values=(...)` tuple, never both). Other fields and
+  branches use keyword options.
   Their parent supplies names through keywords, such as
   `amount=rf.Number` or `events=rf.Branch(...)`. Use a `fields` mapping for
   generated schemas or child names that collide with parent configuration:
@@ -192,6 +203,14 @@ model = rf.Model(
 
 ## Data And Training
 
+`model.fit(datamodule, preset="small")` or `preset="medium"` selects the
+same policy's optional `FitDefaults` independently of its architecture. Explicit
+options win; an explicit optimizer replaces preset optimizer defaults, a
+supplied EMA callback replaces preset averaging, and `ema_decay=None` disables
+it. Preset fits default to eight epochs with early stopping and rollback off.
+An explicit epoch, step, or time budget replaces the epoch default. Fits never
+apply schema masks, jitter, or history policy from the source HPO recipe.
+
 Configure AdamW directly on `model.fit(...)`, such as
 `model.fit(datamodule, batch_size=128, learning_rate=1e-4, weight_decay=0.01, max_epochs=30)`.
 Omitted options use sensible defaults. Each fit starts a new optimizer run
@@ -200,7 +219,7 @@ Supply any scheduler for that run through `fit(scheduler=...)`. Keep
 `rf.adamw(...)` factories for custom optimizers and direct `lit.Trainer` setup;
 ordinary examples do not assign `model.optimizer` before calling `fit`.
 
-`Model(..., jacobian=True)` or a factory such as `Model.xs(..., jacobian=True)`
+`Model(..., jacobian=True)` or `Model(preset="small", jacobian=True, ...)`
 opts into TorchJD UPGrad for multiple reconstruction
 objectives and requires `relflow[torchjd]`. One weighted scalar per reconstruction
 address participates; Lightning retains automatic optimization. The session

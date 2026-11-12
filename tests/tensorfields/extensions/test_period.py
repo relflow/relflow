@@ -44,7 +44,7 @@ def test_period_requires_an_explicit_nonempty_selection(constructor, options):
 @pytest.mark.parametrize("constructor", [rf.Period, rf.DateParts])
 def test_bare_period_class_requires_a_selection_in_a_schema(constructor):
     with pytest.raises(pydantic.ValidationError, match="dateparts"):
-        rf.Model.xs(created=constructor)
+        rf.Model(preset="small", created=constructor)
 
 
 @pytest.mark.parametrize(
@@ -79,7 +79,7 @@ def test_period_preserves_rejection_of_a_null_keyword_selection():
 @pytest.mark.parametrize("constructor", [rf.Period, rf.DateParts])
 def test_period_preserves_json_yaml_and_legacy_request_restoration(constructor, tmp_path):
     request = constructor("day_of_week", DatePart.hour_of_day, embed=True)
-    model = rf.Model.xs(d_model=8, events=rf.Branch(length=2, created=request))
+    model = rf.Model(preset="small", d_model=8, events=rf.Branch(length=2, created=request))
     payload = model.schema.model_dump(mode="json")
     restored = rf.Schema.model_validate_json(model.schema.model_dump_json())
     assert restored.model_dump(mode="json") == payload
@@ -94,17 +94,20 @@ def test_period_preserves_json_yaml_and_legacy_request_restoration(constructor, 
     path.write_text(yaml.safe_dump(payload))
     assert rf.Schema.model_validate(yaml.safe_load(path.read_text())).model_dump(mode="json") == payload
     path.write_text(
-        "preset: xs\nd_model: 8\nfields:\n  created:\n    type: dateparts\n"
+        "preset: small\nd_model: 8\nfields:\n  created:\n    type: dateparts\n"
         "    dateparts: [day_of_week, hour_of_day]\n    embed: true\n"
     )
     loaded = rf.Model.from_yaml(path)
-    assert loaded.schema.model_dump() == rf.Model.xs(d_model=8, created=request).schema.model_dump()
+    assert loaded.schema.model_dump() == rf.Model(preset="small", d_model=8, created=request).schema.model_dump()
 
 
 @pytest.mark.parametrize("constructor", [rf.Period, rf.DateParts])
 def test_period_checkpoint_preserves_parameters_and_predictions(constructor, tmp_path):
-    model = rf.Model.xs(
-        d_model=8, created=constructor("day_of_week", "hour_of_day", mask=True, embed=True), label=rf.Boolean(mask=True)
+    model = rf.Model(
+        preset="small",
+        d_model=8,
+        created=constructor("day_of_week", "hour_of_day", mask=True, embed=True),
+        label=rf.Boolean(mask=True),
     )
     inputs = pa.table({"created": [datetime(2026, 1, 1, 14), None]})
     expected = model.predict(inputs)

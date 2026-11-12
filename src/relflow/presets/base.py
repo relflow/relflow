@@ -13,7 +13,7 @@ from relflow.structs.reduction import ReductionConfig
 from relflow.structs.structure import OMITTED, Branch
 from relflow.structs.tree import MaskInput, Rate
 
-__all__ = ["BranchDefaults", "LeafDefaults", "Preset", "resolve"]
+__all__ = ["BranchDefaults", "LeafDefaults", "FitDefaults", "Preset", "resolve"]
 
 
 class BranchDefaults(pydantic.BaseModel):
@@ -42,6 +42,21 @@ class LeafDefaults(pydantic.BaseModel):
     decoder_position: bool | None = None
 
 
+class FitDefaults(pydantic.BaseModel):
+    """Run defaults applied only when a fit explicitly selects this policy."""
+
+    model_config = pydantic.ConfigDict(frozen=True, extra="forbid")
+
+    batch_size: Annotated[pydantic.StrictInt, pydantic.Field(gt=0)]
+    learning_rate: Annotated[float, pydantic.Field(gt=0, allow_inf_nan=False)]
+    weight_decay: Annotated[float, pydantic.Field(ge=0, allow_inf_nan=False)]
+    max_epochs: Annotated[pydantic.StrictInt, pydantic.Field(gt=0)]
+    ema_decay: Annotated[float, pydantic.Field(ge=0, lt=1, allow_inf_nan=False)] | None = None
+    gradient_clip_val: Annotated[float, pydantic.Field(ge=0, allow_inf_nan=False)] = 0.0
+    early_stopping: bool = False
+    rollback: bool = False
+
+
 class Preset(pydantic.BaseModel):
     """Persisted construction policy; a resolved schema remains authoritative."""
 
@@ -53,10 +68,12 @@ class Preset(pydantic.BaseModel):
     root: BranchDefaults
     branch: BranchDefaults
     leaf: LeafDefaults
+    fit: FitDefaults | None = None
 
     def defaults(self, definition: TreeFieldInput) -> Mapping[str, Any]:
         """Select the architecture defaults for one unbound branch or leaf."""
-        scope = self.branch if isinstance(definition, Branch) else self.leaf
+        branch = isinstance(definition, Branch) or isinstance(definition, type) and issubclass(definition, Branch)
+        scope = self.branch if branch else self.leaf
         return {option: getattr(scope, option) for option in type(scope).model_fields}
 
 

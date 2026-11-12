@@ -115,6 +115,7 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
+from relflow.presets.base import resolve
 from reporting import experiment, report
 
 
@@ -152,10 +153,22 @@ def score(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator: s
 
 def fit(*, signal: bool, seed: int, steps: int | None, accelerator: str) -> rf.Model:
     lit.seed_everything(seed, workers=True)
-    model = rf.Model.xs(
-        measurement=rf.Number,
-        target=rf.Boolean(mask=True),
+    # Freeze the experimental architecture independently of SDK preset changes.
+    control_preset = rf.presets.Preset(
+        name="xs",
+        d_model=64,
+        root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        leaf=rf.presets.LeafDefaults(n_heads=2),
     )
+    model = rf.Model(
+        schema=resolve(
+            control_preset,
+            measurement=rf.Number,
+            target=rf.Boolean(mask=True),
+        )
+    )
+    model.preset = control_preset
     data = rf.SyntheticDataModule(
         train=partial(records, rows=1024, seed=seed + 1, signal=signal),
         validate=partial(records, rows=512, seed=seed + 2, signal=signal),

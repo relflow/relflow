@@ -6,7 +6,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import InitVar, dataclass, field
 from functools import partial
-from typing import TYPE_CHECKING, Any, Literal, Unpack, cast
+from typing import TYPE_CHECKING, Any, Literal, Unpack, cast, overload
 
 import numpy as np
 import pyarrow as pa
@@ -21,6 +21,7 @@ from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
+    OMITTED,
     Context,
     DecoderBase,
     EmbedderBase,
@@ -59,6 +60,8 @@ class Request(RequestBase):
     ``strip=True`` trims surrounding whitespace from string labels and
     ``cased=False`` lowercases them, applied to the declared values and to
     every input alike, as an escape hatch for look-alike labels.
+    Pass labels positionally, such as ``Enum("low", "high")``, or supply
+    the existing ``values=("low", "high")`` tuple; do not combine both forms.
     """
 
     type: Literal["enum"] = "enum"
@@ -68,6 +71,21 @@ class Request(RequestBase):
     strip: bool = False
     cased: bool = True
 
+    @overload
+    def __init__(
+        self,
+        label: Value,
+        /,
+        *labels: Value,
+        p_unavailable: float = 0.01,
+        topk: list[int] | None = None,
+        strip: bool = False,
+        cased: bool = True,
+        type: Literal["enum"] = "enum",
+        **options: Unpack[FieldOptions],
+    ) -> None: ...
+
+    @overload
     def __init__(
         self,
         *,
@@ -78,8 +96,23 @@ class Request(RequestBase):
         cased: bool = True,
         type: Literal["enum"] = "enum",
         **options: Unpack[FieldOptions],
+    ) -> None: ...
+
+    def __init__(
+        self,
+        *labels: Value,
+        values: tuple[Value, ...] = cast(tuple[Value, ...], OMITTED),
+        p_unavailable: float = 0.01,
+        topk: list[int] | None = None,
+        strip: bool = False,
+        cased: bool = True,
+        type: Literal["enum"] = "enum",
+        **options: Unpack[FieldOptions],
     ) -> None:
-        # Serialized schemas use JSON arrays; public Python calls require tuples.
+        if labels and values is not OMITTED:
+            raise TypeError("Enum accepts labels positionally or with values=; use one form")
+        values = labels if values is OMITTED else values
+        # Both constructor forms normalize to the serialized declaration tuple.
         if not isinstance(values, tuple):
             raise TypeError("Enum values must be a tuple of unique scalar labels")
         if any(isinstance(value, Mapping) for value in values):

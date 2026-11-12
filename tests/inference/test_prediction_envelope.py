@@ -6,7 +6,8 @@ import relflow as rf
 
 
 def test_prediction_envelope_includes_target_state_and_normalized_embedding() -> None:
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         embed=True,
         amount=rf.Number,
@@ -36,7 +37,7 @@ def test_prediction_envelope_includes_target_state_and_normalized_embedding() ->
 
 
 def test_embedding_only_leaf_emits_representations_without_predictions() -> None:
-    model = rf.Model.xs(d_model=8, merchant=rf.Category(embed=True))
+    model = rf.Model(preset="small", d_model=8, merchant=rf.Category(embed=True))
     model.encode(pa.table({"merchant": ["shop", "cafe"]}), strata="train")
 
     output = model.predict(pa.table({"merchant": ["shop"]}))

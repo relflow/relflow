@@ -19,6 +19,8 @@ rf.Enum()  # rejected
 rf.Enum(values=["yes", "no"])  # rejected
 rf.Enum(values=(None,))  # rejected
 rf.Enum(("yes", "no"))  # rejected
+rf.Enum("yes", values=("no",))  # rejected
+rf.Enum(None)  # rejected
 rf.Enum(values=("yes", "no"), size=16)  # rejected
 rf.Vector()  # rejected
 rf.Cluster(bounds=(1, 2, 3))  # rejected
@@ -29,23 +31,26 @@ rf.Model(d_model=32, n_heads=4, n_layers=1, value=rf.Number, scheduler="cosine")
 model = rf.Model(d_model=32, n_heads=4, n_layers=1, value=rf.Number)
 model.compile(encoders="yes")  # rejected
 model.predict(123)  # rejected
-rf.Model.xs(d_model="wide", value=rf.Number)  # rejected
-rf.Model.sm(n_heads="four", value=rf.Number)  # rejected
-rf.Model.md(attention="fast", value=rf.Number)  # rejected
-rf.Model.lg(reduction="mean", value=rf.Number)  # rejected
-rf.Model.xl(schema=model.schema)  # rejected
-rf.Model.md(model.schema)  # rejected
-rf.Model.xs(scheduler="cosine", value=rf.Number)  # rejected
-rf.presets.factory(3)  # rejected
-rf.presets.factory("sm")  # rejected
+rf.Model(preset="small", d_model="wide", value=rf.Number)  # rejected
+rf.Model(preset="small", n_heads="four", value=rf.Number)  # rejected
+rf.Model(preset="medium", attention="fast", value=rf.Number)  # rejected
+rf.Model(preset="medium", reduction="mean", value=rf.Number)  # rejected
+rf.Model(preset="medium", schema=model.schema)  # rejected
+rf.Model(model.schema, preset="medium")  # rejected
+rf.Model(preset="small", scheduler="cosine", value=rf.Number)  # rejected
+rf.presets.register(3)  # rejected
+rf.presets.register("sm")  # rejected
+rf.Model(value=rf.Number)  # rejected
+rf.Model(preset=3, value=rf.Number)  # rejected
+rf.Model("sm", value=rf.Number)  # rejected
 
 
 class CustomModel(rf.Model):
-    compact = rf.presets.factory(rf.presets.SM)
+    pass
 
 
-CustomModel.compact(d_model="wide", value=rf.Number)  # rejected
-CustomModel.compact(rf.presets.SM, value=rf.Number)  # rejected
+CustomModel(preset="small", d_model="wide", value=rf.Number)  # rejected
+CustomModel(rf.presets.SMALL, value=rf.Number)  # rejected
 
 rf.Number("amount")  # rejected
 rf.Number(name="amount")  # rejected
@@ -69,3 +74,6 @@ class CustomRequest(rf.RequestBase):
 
 
 CustomRequest(width=8, name="custom")  # rejected
+
+model.fit(rf.ArrowDataModule(train="train.parquet"), preset=3)  # rejected
+model.fit(rf.ArrowDataModule(train="train.parquet"), ema_decay="slow")  # rejected

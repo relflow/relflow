@@ -60,7 +60,7 @@ def smoke(plotting: str) -> None:
     assert Path(rf.__file__).resolve().is_relative_to(Path(sysconfig.get_paths()["purelib"]).resolve())
     print(json.dumps({"relflow_file": rf.__file__}), flush=True)
     torch.set_num_threads(1)
-    model = rf.Model.xs(d_model=8, value=rf.Number, target=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, value=rf.Number, target=rf.Boolean(mask=True))
     rows = pa.table({"value": [1.0, 2.0], "target": [False, True]})
     data = rf.ArrowDataModule(train=rows, validate=rows, num_workers=0, persistent_workers=False, pin_memory=False)
     model.fit(

@@ -23,7 +23,7 @@ def model(*, nested: bool = False, embed: bool = False) -> rf.Model:
         if nested
         else {"value": rf.Number, "label": rf.Boolean(mask=True)}
     )
-    return rf.Model.xs(d_model=8, batch_size=2, embed=embed, **fields)
+    return rf.Model(preset="small", d_model=8, batch_size=2, embed=embed, **fields)
 
 
 def test_predict_returns_canonical_arrow_table_with_retained_inputs():
@@ -179,7 +179,7 @@ def test_predict_batches_after_global_preprocessor_expansion_and_postprocesses_o
 
 
 def test_predict_rejects_fieldless_mapping_rows():
-    configured = rf.Model.xs(label=rf.Boolean(mask=True), d_model=8)
+    configured = rf.Model(preset="small", label=rf.Boolean(mask=True), d_model=8)
 
     with pytest.raises(TypeError, match="without fields"):
         configured.predict([{}, {}])
@@ -302,7 +302,8 @@ def test_predict_batches_nested_outputs_with_retained_row_identity():
 
 
 def test_nested_sibling_results_share_structural_slots_and_allow_metadata_names():
-    configured = rf.Model.xs(
+    configured = rf.Model(
+        preset="small",
         d_model=8,
         events=rf.Branch(
             length=3,
@@ -354,7 +355,7 @@ def test_embedding_only_address_has_no_state_or_inferred_fields():
 
 
 def test_root_embedding_exposes_each_configured_reduction_output():
-    configured = rf.Model.xs(value=rf.Number, d_model=8, embed=True, reduction=rf.Attention(n_outputs=3))
+    configured = rf.Model(preset="small", value=rf.Number, d_model=8, embed=True, reduction=rf.Attention(n_outputs=3))
 
     result = configured.predict(pa.table({"value": [1.0, 2.0]}))
     rows = result["representations"].to_pylist()
@@ -366,7 +367,9 @@ def test_root_embedding_exposes_each_configured_reduction_output():
 
 
 def test_none_reduction_root_embedding_exposes_every_input_token():
-    configured = rf.Model.xs(first=rf.Number, second=rf.Number, d_model=8, embed=True, attention=None, reduction=None)
+    configured = rf.Model(
+        preset="small", first=rf.Number, second=rf.Number, d_model=8, embed=True, attention=None, reduction=None
+    )
 
     result = configured.predict(pa.table({"first": [1.0], "second": [2.0]}))
     root = result["representations"].to_pylist()[0]
@@ -377,7 +380,8 @@ def test_none_reduction_root_embedding_exposes_every_input_token():
 
 
 def test_nested_branch_embedding_preserves_parent_and_reduction_axes():
-    configured = rf.Model.xs(
+    configured = rf.Model(
+        preset="small",
         parents=rf.Branch(
             length=3, children=rf.Branch(length=2, embed=True, reduction=rf.Attention(n_outputs=2), value=rf.Number)
         ),
@@ -411,7 +415,7 @@ def test_empty_retain_omits_inputs_without_changing_row_count():
 
 
 def test_reconstruction_without_public_extension_output_rejects_an_empty_plan():
-    configured = rf.Model.xs(value=rf.Number, identifier=rf.Hash(mask=True), d_model=8)
+    configured = rf.Model(preset="small", value=rf.Number, identifier=rf.Hash(mask=True), d_model=8)
 
     with pytest.raises(ValueError, match="no public prediction outputs"):
         configured.predict(pa.table({"value": [1.0, 2.0]}))

@@ -106,6 +106,7 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 import torch
+from relflow.presets.base import resolve
 from reporting import experiment, report
 
 OFFSETS = (-0.75, -0.25, 0.25, 0.75)
@@ -157,11 +158,23 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     actual = np.asarray([row["y"] for row in test])
     baseline = float(np.sqrt(np.mean((actual - np.mean([row["y"] for row in train])) ** 2)))
     scale = float(np.std([row["y"] for row in train]))
-    model = rf.Model.xs(
-        x=rf.Number,
-        code=rf.Category(p_unavailable=0.0),
-        y=rf.Number(mask=True, objective="mse"),
+    # Freeze the experimental architecture independently of SDK preset changes.
+    control_preset = rf.presets.Preset(
+        name="xs",
+        d_model=64,
+        root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        leaf=rf.presets.LeafDefaults(n_heads=2),
     )
+    model = rf.Model(
+        schema=resolve(
+            control_preset,
+            x=rf.Number,
+            code=rf.Category(p_unavailable=0.0),
+            y=rf.Number(mask=True, objective="mse"),
+        )
+    )
+    model.preset = control_preset
     data = rf.SyntheticDataModule(
         train=partial(records, rows=2048, seed=seed + 1),
         validate=partial(records, rows=512, seed=seed + 2),

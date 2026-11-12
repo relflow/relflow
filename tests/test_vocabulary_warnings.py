@@ -30,7 +30,8 @@ def records():
 
 
 def model():
-    return rf.Model.xs(
+    return rf.Model(
+        preset="small",
         d_model=8,
         batch_size=4,
         category=rf.Category(mask=True, p_unavailable=1.0),

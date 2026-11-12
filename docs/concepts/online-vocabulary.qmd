@@ -42,7 +42,8 @@ trxns:
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     trxns=rf.Branch(
         length=32,
         overflow="tail",

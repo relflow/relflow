@@ -7,7 +7,7 @@ from relflow.architecture import output
 
 
 def test_evaluation_prediction_reuses_the_plan_and_training_refreshes_it(monkeypatch):
-    model = rf.Model.xs(d_model=8, amount=rf.Number, label=rf.Boolean(mask=True)).eval()
+    model = rf.Model(preset="small", d_model=8, amount=rf.Number, label=rf.Boolean(mask=True)).eval()
     table = pa.table({"amount": [1.0, 2.0], "label": [True, False]})
     refreshes = []
     plan = output.plan

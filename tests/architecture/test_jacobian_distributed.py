@@ -163,7 +163,8 @@ def train_distributed(rank: int, directory: str, accumulation: int) -> None:
 
         # Exercise the real Arrow binding and DDP rewrapping path while both
         # objective and input vocabularies grow between accumulated batches.
-        candidate = rf.Model.xs(
+        candidate = rf.Model(
+            preset="small",
             d_model=8,
             dropout=0.0,
             batch_size=2,

@@ -16,7 +16,8 @@ def test_schema_binding_preserves_sparse_coordinates() -> None:
         ]
     )
 
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         events=rf.Branch(
             length=3,

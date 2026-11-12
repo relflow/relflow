@@ -9,7 +9,7 @@ from relflow.architecture.graph import ModelGraph
 
 def test_load_installs_the_graph_once_and_restores_tensors_and_provenance(tmp_path, monkeypatch):
     torch.manual_seed(11)
-    model = rf.Model.xs(d_model=8, batch_size=3, amount=rf.Number, label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, batch_size=3, amount=rf.Number, label=rf.Boolean(mask=True))
     model.save(tmp_path / "model.pt")
     installs = []
     install = ModelGraph.install
