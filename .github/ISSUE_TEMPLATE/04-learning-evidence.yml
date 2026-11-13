@@ -1,0 +1,52 @@
+name: Learning evidence
+description: Propose an experiment, behavioral claim, control, or learning diagnostic.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe a claim we should test and what would decide it. Unknown protocol details
+        can remain open. A negative result is a valid conclusion; criteria should be declared
+        before measurement. Existing evidence follows evidence/SPEC.md.
+  - type: textarea
+    id: claim
+    attributes:
+      label: What behavioral claim should be tested?
+      description: State the claim, why it matters, and any existing evidence or coverage gap.
+    validations:
+      required: true
+  - type: textarea
+    id: criteria
+    attributes:
+      label: What would decide the result?
+      description: |
+        Describe observable success and failure criteria, candidate metrics, and predeclared
+        checks. Explain what a negative or inconclusive result would mean.
+    validations:
+      required: true
+  - type: textarea
+    id: task
+    attributes:
+      label: Task and data
+      description: |
+        Describe what one observation represents, inputs and targets, the generator or dataset,
+        and how the task distinguishes the claimed behavior from shortcuts or leakage.
+  - type: textarea
+    id: controls
+    attributes:
+      label: Controls and baselines
+      description: Identify matched comparisons, ablations, or oracle checks needed to interpret the outcome.
+  - type: textarea
+    id: protocol
+    attributes:
+      label: Proposed protocol and resources
+      description: |
+        Include splits, seeds, model capacity, optimizer, training budget, and required hardware
+        or optional dependencies when known. Reference existing experiment IDs if extending coverage.
+  - type: textarea
+    id: artifacts
+    attributes:
+      label: Artifacts and completion criteria
+      description: |
+        Identify records, diagnostic observations, plots, provenance, and reproduction commands
+        needed to support the conclusion. Keep illustrative figures distinct from measured outcomes.
+        If changing existing evidence, identify the scientific settings and historical records to preserve.

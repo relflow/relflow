@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import math
 import textwrap
 from pathlib import Path
@@ -291,9 +292,14 @@ def roc(normal, anomalous):
 def trajectory(bundle: Bundle, spec: dict):
     points = bundle.record["metrics"]["trajectory"]
     fig, axes = axes_pair()
-    keys = [("n_committed", "Committed groups"), ("perplexity", "Usage perplexity")]
-    if not any("perplexity" in point for point in points):
-        keys[1] = ("adherence", "Input adherence")
+    if any("n_assigned_groups" in point for point in points):
+        keys = [("n_assigned_groups", "Assigned groups"), ("perplexity", "Usage perplexity")]
+    elif any("assigned_groups" in point for point in points):
+        keys = [("assigned_groups", "Assigned groups"), ("adjusted_rand", "Adjusted Rand index")]
+    else:
+        keys = [("n_committed", "Committed groups"), ("perplexity", "Usage perplexity")]
+        if not any("perplexity" in point for point in points):
+            keys[1] = ("adherence", "Input adherence")
     for ax, (key, label) in zip(axes, keys, strict=True):
         selected = [point for point in points if key in point]
         if not selected:
@@ -1269,10 +1275,12 @@ def composition(bundle: Bundle, spec: dict):
 
 def grouping(bundle: Bundle, spec: dict):
     m = bundle.record["metrics"]
-    if bundle.manifest["id"] == "P095":
+    if bundle.manifest["id"] in {"P095", "P112"}:
         conditions = list(m["conditions"])
         fig, axes = axes_pair(width=10, height=4.8)
-        arms = ["cluster", "category", "oracle", "shuffled"]
+        first = m["conditions"][conditions[0]]["arms"]
+        identity_arm = "group" if "group" in first else "cluster"
+        arms = [identity_arm, "category", "oracle", "shuffled"]
         dots(
             axes[0],
             [human(c) for c in conditions],
@@ -1299,12 +1307,19 @@ def grouping(bundle: Bundle, spec: dict):
         )
     fig = plt.figure(figsize=(10, 4.8), layout="constrained")
     grid = fig.add_gridspec(1, 3, width_ratios=[1, 1, 0.04])
+    if "group_counts" in m:
+        counts = m["group_counts"]
+        count = "4" if "4" in counts else next(iter(counts))
+        m = counts[count]
+        width = int(count)
+    else:
+        width = 8
     matrices = []
     for arm in ["stable", "no_regime"]:
         truth = np.asarray(m[arm]["expected_partition"])
         assigned = np.asarray(m[arm]["assignments"])
         rows = sorted(set(truth))
-        columns = list(range(max(8, int(assigned.max()) + 1)))
+        columns = list(range(max(width, int(assigned.max()) + 1)))
         if np.any(assigned < 0):
             columns = [-1, *columns]
         matrices.append(
@@ -1323,7 +1338,7 @@ def grouping(bundle: Bundle, spec: dict):
             xticklabels=["Missing" if c < 0 else str(c) for c in columns],
             yticks=range(len(rows)),
             yticklabels=[f"True group {r}" for r in rows],
-            xlabel="Assigned cluster (arbitrary label)",
+            xlabel="Assigned group (arbitrary label)",
             title=f"{human(arm)}\nARI {m[arm]['adjusted_rand']:.3f}",
         )
         for i, j in np.ndindex(matrix.shape):
@@ -1339,9 +1354,131 @@ def grouping(bundle: Bundle, spec: dict):
     fig.colorbar(image, cax=fig.add_subplot(grid[0, 2]), label="Identity count")
     return (
         fig,
-        "Each identity contributes once to the matrix. Both arms use the same count scale. Cluster labels have no intrinsic order; ARI compares partitions without requiring their names to match.",
+        "Each identity contributes once to the matrix. Both arms use the same count scale. Group labels have no intrinsic order; ARI compares partitions without requiring their names to match.",
         {},
     )
+
+
+def group_learning(bundle: Bundle, spec: dict):
+    """Show recorded assignment and validation trajectories for fixed groups."""
+    counts = bundle.record["metrics"]["group_counts"]
+    count = "4" if "4" in counts else next(iter(counts))
+    arms = counts[count]
+    fig, axes = axes_pair(width=10, height=4.5)
+    for index, (arm, label) in enumerate((("stable", "Stable identities"), ("no_regime", "No-regime control"))):
+        points = arms[arm]["ari_by_step"]
+        if not points:
+            raise ValueError(f"{bundle.manifest['id']}: no assignment trajectory was recorded")
+        x = [point["step"] for point in points]
+        for ax, metric in zip(axes, ("adjusted_rand", "validation_rmse"), strict=True):
+            selected = [
+                (step, point[metric]) for step, point in zip(x, points, strict=True) if point[metric] is not None
+            ]
+            ax.plot(
+                [step for step, _ in selected],
+                finite([value for _, value in selected]),
+                color=COLORS[index],
+                lw=2,
+                marker="o",
+                ms=2.5,
+                label=label,
+            )
+    axes[0].axhline(0.95, color="#a8524e", linestyle="--", label="Final test ARI target")
+    axes[0].set(ylabel="Assignment agreement (ARI)", ylim=(-0.05, 1.04), title="Do identities find the true groups?")
+    axes[1].set(ylabel="Validation RMSE (target units)", title="Does prediction improve?")
+    for ax in axes:
+        ax.set_xlabel("Optimizer updates")
+        ax.grid(axis="y", alpha=0.18)
+        ax.legend(fontsize=8, loc="best")
+    return (
+        fig,
+        "Points are recorded epoch-end checkpoints. The dashed ARI criterion applies to the final test, not every checkpoint. Prediction error here uses validation observations; final test error is reported separately.",
+        {},
+    )
+
+
+def group_composition(bundle: Bundle, spec: dict):
+    """Show which generating rules contribute identities to each learned group."""
+    counts = bundle.record["metrics"]["group_counts"]
+    count = "4" if "4" in counts else next(iter(counts))
+    stable = counts[count]["stable"]
+    truth, assigned = np.asarray(stable["expected_partition"]), np.asarray(stable["assignments"])
+    if truth.shape != assigned.shape or np.any(assigned < -1) or np.any(assigned >= int(count)):
+        raise ValueError(f"{bundle.manifest['id']}: group composition has invalid identity assignments")
+    groups = list(range(int(count)))
+    if np.any(assigned == -1):
+        groups.append(-1)
+    rules = sorted(set(truth))
+    values = np.array([[np.sum((assigned == group) & (truth == rule)) for rule in rules] for group in groups])
+    fig, ax = plt.subplots(figsize=(9, 4), layout="constrained")
+    left = np.zeros(len(groups))
+    for index, rule in enumerate(rules):
+        column = values[:, index]
+        ax.barh(
+            list(groups), column, left=left, height=0.65, color=COLORS[index % len(COLORS)], label=f"Hidden rule {rule}"
+        )
+        for index_in_groups, (row, value) in enumerate(zip(groups, column, strict=True)):
+            if value:
+                ax.text(
+                    left[index_in_groups] + value / 2,
+                    row,
+                    str(value),
+                    ha="center",
+                    va="center",
+                    color="white",
+                    fontsize=9,
+                )
+        left += column
+    ax.invert_yaxis()
+    ax.set(
+        yticks=list(groups),
+        yticklabels=["Unassigned" if group < 0 else f"Learned group {group}" for group in groups],
+        xlabel="Number of identities",
+    )
+    ax.set_title("Which hidden rules are mixed within each learned group?", pad=32)
+    ax.legend(ncols=min(len(rules), 4), fontsize=8, loc="lower left", bbox_to_anchor=(0, 1.01))
+    ax.grid(axis="x", alpha=0.16)
+    return (
+        fig,
+        "Each identity appears once. Colors are the generating rules; learned group numbers are arbitrary. Mixed colors show rules combined, and the same color in several bars shows a rule split across groups.",
+        {},
+    )
+
+
+def group_predictions(bundle: Bundle, spec: dict):
+    """Distinguish shuffled identities from the stable arm's ordinary test."""
+    if "group_counts" not in bundle.record["metrics"]:
+        return numeric(bundle, spec)
+    pairs = bundle.pairs(spec["target"])
+    frames = {frame["ordinal"]: frame for frame in bundle.frames}
+    for pair in pairs:
+        if pair["population"] != "test":
+            continue
+        frame = frames[pair["frame"]]
+        run = next((caller for caller in frame["context"] if caller["function"] == "run"), None)
+        if run is None:
+            raise ValueError(f"{bundle.manifest['id']} prediction is missing its run context")
+        calls = [
+            node
+            for node in ast.walk(bundle.syntax)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "measure"
+            and node.lineno <= run["line"] <= node.end_lineno
+            and len(node.args) >= 2
+        ]
+        if len(calls) != 1 or not isinstance(calls[0].args[1], ast.Name):
+            raise ValueError(f"{bundle.manifest['id']} prediction is missing its measured population")
+        population = calls[0].args[1].id
+        if population == "shuffled":
+            pair["label"] = "Stable model, shuffled test identities"
+        elif population == "test" and pair["context"].get("arm") == "stable":
+            pair["label"] = "Stable identities"
+        elif population == "test" and pair["context"].get("arm") == "no_regime":
+            pair["label"] = "No stable identity regimes"
+        else:
+            raise ValueError(f"{bundle.manifest['id']} prediction has an unrecognized population: {population}")
+    return numeric(bundle, spec, pairs=pairs)
 
 
 def retrieval(bundle: Bundle, spec: dict):
@@ -2085,7 +2222,173 @@ def context_extrapolation(bundle: Bundle, spec: dict):
     )
 
 
+def duration(bundle: Bundle, spec: dict) -> tuple[plt.Figure, str, dict]:
+    """Compare elapsed-time readouts with the prepared and shuffled numeric controls."""
+    pairs = bundle.pairs(spec["target"])
+    arms = ("duration", "static", "number", "shuffled")
+    labels = ("Two-query Duration", "Configured-start Duration", "Prepared Number", "Shuffled training Number")
+    measured = bundle.record["metrics"]
+    selected = []
+    for arm in arms:
+        matches = [pair for pair in pairs if pair["context"].get("arm") == arm and "shifted" not in pair["call"]]
+        if len(matches) != 1:
+            raise ValueError(f"P099: expected one held-out prediction array for {arm}, got {len(matches)}")
+        selected.append(matches[0])
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.5), layout="constrained")
+    primary = selected[0]
+    actual, predicted = finite(primary["actual"]), finite(primary["predicted"])
+    density = axes[0].hexbin(actual, predicted, gridsize=30, mincnt=1, bins="log", cmap="viridis")
+    fig.colorbar(density, ax=axes[0], fraction=0.04, label="Held-out rows (log count)")
+    bounds = [min(actual.min(), predicted.min()), max(actual.max(), predicted.max())]
+    axes[0].plot(bounds, bounds, color="gray", ls="--", lw=1)
+    axes[0].set(title="Duration predicts the held-out target", xlabel="Actual target", ylabel="Predicted target")
+    axes[0].set_aspect("equal", adjustable="box")
+    drift = measured["arms"]["duration"]["joint_endpoint_shift_max_drift"]
+    axes[0].text(
+        0.03,
+        0.97,
+        f"n = {len(actual):,}\n371-day endpoint shift\nmax prediction drift = {drift:.3g}",
+        transform=axes[0].transAxes,
+        va="top",
+        fontsize=8,
+    )
+    examples = []
+    for index, (pair, label) in enumerate(zip(selected, labels, strict=True)):
+        truth, prediction = finite(pair["actual"]), finite(pair["predicted"])
+        errors = np.sort(np.abs(truth - prediction))
+        axes[1].step(
+            errors, np.arange(1, len(errors) + 1) / len(errors), where="post", color=COLORS[index], label=label
+        )
+        examples.append(
+            {
+                "label": label,
+                "field": spec["target"],
+                "population": "test",
+                "n": len(truth),
+                "records": [
+                    {
+                        "coordinate": [i],
+                        "input": pair["rows"][i],
+                        "actual": float(truth[i]),
+                        "predicted": float(prediction[i]),
+                    }
+                    for i in range(min(16, len(truth)))
+                ],
+            }
+        )
+    axes[1].set(
+        title="How much error remains?",
+        xlabel="Absolute target error",
+        ylabel="Fraction of held-out rows",
+        ylim=(0, 1.02),
+    )
+    axes[1].yaxis.set_major_formatter(PercentFormatter(1))
+    axes[1].grid(alpha=0.18)
+    axes[1].legend(fontsize=8, loc="lower right")
+    dots(
+        axes[2],
+        labels,
+        {"Held-out nRMSE": [measured["arms"][arm]["nrmse"] for arm in arms]},
+        xlabel="RMSE / training-mean predictor RMSE",
+        reference=(1, "Training-mean reference"),
+    )
+    axes[2].axvline(0.25, color=COLORS[0], ls="--", lw=1, label="Informative-arm criterion")
+    axes[2].set(title="Does the input carry information?", xlim=(0, None))
+    axes[2].legend(fontsize=8)
+    note = (
+        "All four arms use 2,048 independent held-out rows and 400 updates. "
+        "The shuffled control permutes only training durations; test inputs remain intact. "
+        "The dashed diagonal is exact prediction; the error curves retain every held-out row. "
+        f"Duration versus prepared Number prediction RMSE is {measured['duration_number_prediction_rmse']:.4g}. "
+        "The endpoint-shift annotation uses the same trained model. One seed; no uncertainty interval."
+    )
+    return fig, note, {"kind": "numeric", "conditions": examples}
+
+
+def ordinal(bundle: Bundle, spec: dict) -> tuple[plt.Figure, str, dict]:
+    """Show familiar and withheld rank accuracy without averaging away individual gaps."""
+    measured = bundle.record["metrics"]["domains"]
+    arms = ("ordinal", "number", "category")
+    labels = ("Ordinal", "Rounded Number", "Category")
+    fig, axes = plt.subplots(2, 2, figsize=(11, 7.5), layout="constrained", width_ratios=(1, 1.5))
+    for row, domain in enumerate(("integer", "labels")):
+        scores = measured[domain]
+        dots(
+            axes[row, 0],
+            ("Familiar ranks", "Withheld ranks"),
+            {
+                label: [scores[arm][condition]["exact_accuracy"] for condition in ("seen", "unseen")]
+                for arm, label in zip(arms, labels, strict=True)
+            },
+            xlabel="Exact rank accuracy",
+            percent=True,
+        )
+        axes[row, 0].set(
+            title="Integer ranks" if domain == "integer" else "Declared ordered labels", xlim=(-0.03, 1.03)
+        )
+        ranks = sorted(
+            {int(rank) for condition in ("seen", "unseen") for rank in scores["ordinal"][condition]["ranks"]}
+        )
+        withheld = {int(rank) for rank in scores["ordinal"]["unseen"]["ranks"]}
+        matrix = np.array(
+            [
+                [
+                    scores[arm]["unseen" if rank in withheld else "seen"]["ranks"][str(rank)]["exact_accuracy"]
+                    for rank in ranks
+                ]
+                for arm in arms
+            ]
+        )
+        image = axes[row, 1].imshow(matrix, vmin=0, vmax=1, cmap="viridis", aspect="auto")
+        axes[row, 1].set(
+            yticks=range(3),
+            yticklabels=labels,
+            xticks=range(len(ranks)),
+            xticklabels=[str(rank) + ("*" if rank in withheld else "") for rank in ranks],
+            xlabel="Actual rank (* withheld from training)",
+            title="Where does interpolation succeed?",
+        )
+        axes[row, 1].tick_params(axis="x", labelsize=8)
+        fig.colorbar(
+            image, ax=axes[row, 1], fraction=0.035, format=PercentFormatter(1), label="Exact accuracy within rank"
+        )
+    examples = []
+    for frame in bundle.frames:
+        if frame["function"] != "evaluate":
+            continue
+        context = {
+            **bundle.context(frame),
+            **{key: bundle.value(frame["values"].get(key)) for key in ("domain", "arm")},
+        }
+        predicted, expected, rows = bundle.values(frame, "predicted", "expected", "rows")
+        if predicted is None or expected is None or rows is None:
+            raise ValueError("P100: evaluated ranks must retain predictions, expected ranks and source rows")
+        examples.append(
+            {
+                "label": f"{human(context['domain'])} · {human(context['arm'])} · {human(context['condition'])}",
+                "field": "rank",
+                "population": "test",
+                "n": len(expected),
+                "records": [
+                    {"coordinate": [i], "input": rows[i], "actual": int(expected[i]), "predicted": int(predicted[i])}
+                    for i in range(min(16, len(expected)))
+                ],
+            }
+        )
+    if len(examples) != 12:
+        raise ValueError(f"P100: expected all twelve held-out rank populations, got {len(examples)}")
+    note = (
+        "Each decoder receives the same signal and 400 updates. Each familiar/withheld test population has 2,048 rows; "
+        "heatmap cells score every row at that rank. Asterisks mark answers excluded from training. "
+        "Category cannot emit those absent target classes. Rank positions 0–4 map to the five declared labels. "
+        "This tests interpolation within the training range, with one seed and no uncertainty interval."
+    )
+    return fig, note, {"kind": "numeric", "conditions": examples}
+
+
 HANDLERS = {
+    "duration": duration,
+    "ordinal": ordinal,
     "regression": numeric,
     "unknown-fallback": unknown_fallback,
     "quantile-source-units": quantile_source_units,
@@ -2121,7 +2424,7 @@ HANDLERS = {
 SUPPLEMENTS = {
     "P074": [("controls", fusion_controls)],
     "P076": [("context", anomaly_context)],
-    "P078": [("predictions", numeric)],
+    "P078": [("predictions", group_predictions)],
     "P073": [("geometry", representation_geometry)],
     "P080": [("geometry", representation_geometry)],
     "P081": [("geometry", representation_geometry)],
@@ -2147,7 +2450,8 @@ def render(bundle: Bundle, spec: dict, output: Path) -> dict:
             "svg.hashsalt": "relflow-evidence-diagnostics",
         }
     )
-    handler = HANDLERS.get(spec["mode"], summary)
+    group_proof = bundle.manifest["id"] in {"P078", "P108", "P111"} and "group_counts" in bundle.record["metrics"]
+    handler = group_learning if group_proof else HANDLERS.get(spec.get("measured_mode", spec["mode"]), summary)
     result = {
         "id": bundle.manifest["id"],
         "focus": spec["focus"],
@@ -2185,6 +2489,8 @@ def render(bundle: Bundle, spec: dict, output: Path) -> dict:
             if theme == "light":
                 result["figures"] = [{"name": bundle.manifest["id"], "caption": note}]
             supplements = [(suffix, view, spec) for suffix, view in SUPPLEMENTS.get(bundle.manifest["id"], [])]
+            if group_proof:
+                supplements = [("groups", group_composition, spec), ("predictions", group_predictions, spec)]
             supplements.extend(
                 (target.replace("/", "-"), numeric, dict(spec, target=target))
                 for target in spec.get("additional_targets", [])

@@ -132,6 +132,7 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import relflow as rf
 from reporting import experiment, report
@@ -160,7 +161,7 @@ def build() -> rf.Model:
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     visible = pa.Table.from_pylist([{"amount": row["amount"]} for row in rows])
-    predictions = model.predict(visible)["predictions"].to_pylist()
+    predictions = pl.DataFrame(model.predict(visible))["predictions"].to_list()
     return np.asarray([row["cost"]["content"] for row in predictions], dtype=np.float64)
 
 

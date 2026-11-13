@@ -20,7 +20,7 @@ def load(name):
 
 @pytest.mark.parametrize(
     "name",
-    ["numeric_shifts", "typed_shifts", "policies_and_checkpoints", "enum_shifts", "hash_shifts", "cluster_shifts"],
+    ["numeric_shifts", "typed_shifts", "policies_and_checkpoints", "enum_shifts", "hash_shifts", "group_shifts"],
 )
 def test_distribution_studies_have_independent_restartable_streams_and_fixed_budgets(name):
     proof = load(name)
@@ -83,7 +83,7 @@ def test_policy_control_fields_have_identical_values():
         assert row["monitored"] == row["tolerant"] == row["disabled"]
 
 
-@pytest.mark.parametrize("name", ["enum_shifts", "hash_shifts", "cluster_shifts"])
+@pytest.mark.parametrize("name", ["enum_shifts", "hash_shifts", "group_shifts"])
 @pytest.mark.parametrize("condition", ["frequencies", "nulls"])
 def test_identity_drift_interventions_preserve_independent_targets(name, condition):
     proof = load(name)
@@ -98,7 +98,7 @@ def test_identity_drift_interventions_preserve_independent_targets(name, conditi
         assert all(row["value"] is None for row in changed)
 
 
-@pytest.mark.parametrize("name", ["hash_shifts", "cluster_shifts"])
+@pytest.mark.parametrize("name", ["hash_shifts", "group_shifts"])
 def test_novel_population_changes_only_identity_spelling_or_value(name):
     proof = load(name)
     original = list(proof.records(rows=2048, seed=11))
@@ -129,9 +129,7 @@ def test_hash_generator_preserves_large_integer_precision_and_within_row_equalit
     assert len({float(value) for value in values}) == 1
 
 
-@pytest.mark.parametrize(
-    "name, kind", [("enum_shifts", "enum"), ("hash_shifts", "hash"), ("cluster_shifts", "cluster")]
-)
+@pytest.mark.parametrize("name, kind", [("enum_shifts", "enum"), ("hash_shifts", "hash"), ("group_shifts", "group")])
 def test_identity_studies_keep_target_hidden_and_monitoring_enabled(name, kind):
     import relflow as rf
 

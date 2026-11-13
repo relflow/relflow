@@ -57,7 +57,7 @@ separates construction from learning.
 
 | Feature pipeline step | What relflow does instead | Where to read more |
 | --- | --- | --- |
-| Encode labels as integers with an encoder fitted offline, and decide what to do with unseen labels | `Category`, `Set`, and `Cluster` learn labels from training batches. Storage grows as new labels arrive. An unknown label at prediction stays a valued input whose content is marked unavailable. | [Online vocabulary](../concepts/online-vocabulary.qmd) |
+| Encode labels as integers with an encoder fitted offline, and decide what to do with unseen labels | `Category`, `Set`, and `Group` learn labels from training batches. Storage grows as new labels arrive. An unknown label at prediction stays a valued input whose content is marked unavailable. | [Online vocabulary](../concepts/online-vocabulary.qmd) |
 | Fit scalers on training data and store them beside the model | `Number` learns online normalization statistics and `Quantile` learns a distribution. Both are saved in the model artifact. | [Number](../datatypes/number.qmd), [Quantile](../datatypes/quantile.qmd) |
 | Aggregate a history into counts, totals, and recency columns | A `Branch` keeps each event's fields together. Attention can learn relationships within an event and across the sequence, and a learned summary reaches the parent. | [How fields interact](../concepts/how-fields-interact.qmd), [Branch summaries](../concepts/branch-summaries.qmd) |
 | Pad or truncate every history to one width | Branch widths follow each batch. A cap is optional, and predictions return variable lists. | [Branch](../datatypes/branch.qmd) |

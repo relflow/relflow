@@ -19,6 +19,7 @@ def build(root: Path) -> dict:
         "P104": "enum_shifts.py",
         "P105": "hash_shifts.py",
         "P106": "cluster_shifts.py",
+        "P113": "group_shifts.py",
     }
     requested = sorted(path.name.removeprefix("full-") for path in (root / "results").glob("full-*") if path.is_dir())
     if not requested or set(requested) - scripts.keys():
@@ -140,11 +141,11 @@ def build(root: Path) -> dict:
         plt.close(figure)
     identities = {
         identifier: selected[identifier][1]
-        for identifier in ("P104", "P105", "P106")
+        for identifier in ("P104", "P105", "P106", "P113")
         if identifier in selected and selected[identifier][1].get("metrics")
     }
     if identities:
-        labels = {"P104": "Enum", "P105": "Hash", "P106": "Cluster"}
+        labels = {"P104": "Enum", "P105": "Hash", "P106": "Cluster", "P113": "Group"}
         conditions = ["same_population", "folded", "frequencies", "novel", "nulls", "batched_frequencies"]
         matrix, rows = [], []
         for identifier, record in identities.items():
@@ -226,7 +227,7 @@ def build(root: Path) -> dict:
                 "",
                 "Cells show the fraction of three fixed seeds meeting the declared expectation. Stable and folded controls must be quiet; shifted populations must warn. Five 64-row batches must accumulate profiles, wait for the sample minimum, and produce one label warning per field and window.",
                 "",
-                "Enum additionally rejects undeclared labels in every stratum. Hash checks that training salts change tensor hashes without changing profile frequencies. Cluster checks frozen vocabulary, assignments, committed clusters, and usage statistics.",
+                "Enum additionally rejects undeclared labels in every stratum. Hash checks that training salts change tensor hashes without changing profile frequencies. Identity studies check frozen vocabulary, assignment probabilities, and learned tensors.",
             ]
         )
     lines.extend(
@@ -235,14 +236,14 @@ def build(root: Path) -> dict:
             (
                 "The correlation flip is an intentional detection boundary: nearly +1 to nearly -1 correlation can preserve both marginal populations and remain quiet. Identity buckets can collide, vector mean/norm omit rotations, and profiles remain rank-local."
                 if "P101" in selected
-                else "These studies monitor marginal input-identity frequencies and structural states. Hash buckets can collide; Enum rejects undeclared labels separately from drift warnings. Cluster profiles source labels rather than learned cluster usage. Profiles remain rank-local."
+                else "These studies monitor marginal input-identity frequencies and structural states. Hash buckets can collide; Enum rejects undeclared labels separately from drift warnings. Group and historical Cluster studies profile source labels rather than learned assignment usage. Profiles remain rank-local."
             ),
             "",
             "The figures use exact recorded distances and warning events. They show these synthetic populations only and do not estimate a production false-positive rate. Smoke results are retained separately and are not capability evidence.",
             "",
             "Inputs, wheel, source archive, environment receipt, full records, smoke records, and execution logs are retained alongside this report. summary.json binds each full record to its source and wheel. manifest.json binds every report artifact and raw record by SHA256.",
             "",
-            "Replay the experiments from the repository root using the retained wheel: `uv run --project docs --with /absolute/path/to/inputs/relflow-0.4.5-py3-none-any.whl python evidence/experiments/run.py --lane research "
+            f"Replay the experiments from the repository root using the retained wheel: `uv run --project docs --with /absolute/path/to/inputs/{next(iter(manifest['wheels']))} python evidence/experiments/run.py --lane research "
             + " ".join(requested)
             + " --threads 1 --accelerator cpu --output-dir /new/result/directory`. This requires the same declared dependencies; inputs/execute.py records the actual lab commands and thread policy.",
             "",

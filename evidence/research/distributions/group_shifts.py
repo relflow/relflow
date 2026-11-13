@@ -1,15 +1,15 @@
 # %% [markdown]
 # ---
-# title: "Does Cluster detect label drift without learning from evaluation?"
+# title: "Does Group detect label drift without learning from evaluation?"
 # categories: ["Input distributions"]
-# description: "Measure Cluster label-frequency and null-rate drift across validation, test, and prediction while freezing vocabulary and learned assignments."
+# description: "Measure Group label-frequency and null-rate drift across validation, test, and prediction while freezing vocabulary and learned assignments."
 # execute:
 #   enabled: false
 #   eval: false
 # code-fold: true
 # toc: false
 # evidence-requires:
-# - "An unreleased relflow wheel exporting Drift, Enum, Hash, Cluster, and model.distributions"
+# - "An unreleased relflow wheel exporting Drift, Enum, Hash, Group, and model.distributions"
 # evidence-group: Input distributions
 # evidence-readout:
 # - label: "Declared shifts detected"
@@ -20,7 +20,7 @@
 #   format: number
 # ---
 #
-# Measure Cluster label-frequency and null-rate drift across validation, test, and prediction while freezing vocabulary and learned assignments.
+# Measure Group label-frequency and null-rate drift across validation, test, and prediction while freezing vocabulary and learned assignments.
 #
 # ## Example
 #
@@ -34,18 +34,18 @@
 # these experiments claim monitoring behavior rather than predictive accuracy.
 #
 # ```{typst}
-# //| label: fig-evidence-p106
+# //| label: fig-evidence-p113
 # //| fig-cap: "Typed input frequencies are monitored; the Boolean target is hidden during prediction."
 # //| fig-alt: "A record has typed identity inputs and a hidden Boolean prediction target."
 # #tree(node("record", kind: "root", children: (
-#   node("value", type: "Cluster", detail: "bounds = 4"),
+#   node("value", type: "Group", detail: "n_groups = 4"),
 #   node("target", kind: "target", type: "Boolean"),
 # )))
 # ```
 #
 # ## Comparison
 #
-# Compare an independent uniform-label control with an all-customer-0 frequency shift, four novel customer labels, and all-null inputs. The monitor observes source label frequencies, not learned cluster usage. All evaluation arms must preserve vocabulary, per-label assignment probabilities, committed clusters, usage EMA, and learned tensors.
+# Compare an independent uniform-label control with an all-customer-0 frequency shift, four novel customer labels, and all-null inputs. The monitor observes source label frequencies, not learned group usage. All evaluation arms must preserve vocabulary, per-label assignment probabilities and learned tensors.
 #
 # Training builds the reference through 16 real AdamW updates. Validation, test,
 # and prediction each receive their own independent held-out stream. Within a
@@ -59,7 +59,7 @@
 #
 # ## Result
 #
-# {{< evidence P106 status >}}
+# {{< evidence P113 status >}}
 #
 # The declared shift detection rate should be one and control warnings zero.
 # These predeclared checks are provisional until a full-budget record exists.
@@ -68,11 +68,11 @@
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
 #
-# {{< evidence P106 evidence >}}
+# {{< evidence P113 evidence >}}
 #
 # ### Run this experiment
 #
-# {{< evidence P106 script >}}
+# {{< evidence P113 script >}}
 #
 # ### Population, budgets, and limits
 #
@@ -85,7 +85,7 @@
 # keeps its default threshold 0.2 and minimum count 128. Canonical input labels are
 # uniform among four values, independently missing in 5% of rows.
 #
-# Four familiar customer labels and bounds=4 define a small fixed cluster budget. Revival is disabled to keep the training setup explicit. Novel labels are valid unknown inputs during evaluation but must not be admitted to training resources. Monitoring does not assess cluster quality, calibrated cluster confidence, or whether identities assigned to one cluster behave similarly.
+# Four familiar customer labels and n_groups=4 define a small fixed group budget. Novel labels are valid unknown inputs during evaluation but must not be admitted to training resources. Monitoring does not assess group quality, calibrated group confidence, or whether identities assigned to one group behave similarly.
 #
 # These are rank-local marginal diagnostics. They do not estimate a production
 # false-positive rate or prove joint-distribution detection. Actual warning
@@ -94,7 +94,7 @@
 # ### Complete experiment code
 
 # %%
-"""P106: Cluster identity drift across strata without vocabulary or assignment changes during evaluation."""
+"""P113: Group identity drift across strata without vocabulary or assignment changes during evaluation."""
 
 import logging
 
@@ -149,7 +149,7 @@ def build():
         n_layers=1,
         n_heads=2,
         attention=None,
-        value=rf.Cluster(bounds=4, revive_temperature=0),
+        value=rf.Group(n_groups=4),
         target=rf.Boolean(mask=True),
     )
 
@@ -199,9 +199,8 @@ def trial(seed, steps, accelerator):
         reference["state"]["count"] == model.trainer.global_step * 128
     )
 
-    vocabulary = rf.Cluster.vocabulary(model, "/value")
-    assignments = rf.Cluster.assignments(model, "/value")
-    status = rf.Cluster.status(model, "/value")
+    vocabulary = rf.Group.vocabulary(model, "/value")
+    assignments = rf.Group.assignments(model, "/value")
 
     try:
         for ordinal, split in enumerate(STRATA):
@@ -282,11 +281,8 @@ def trial(seed, steps, accelerator):
                 "batch_trace": trace,
             }
 
-        checks["evaluation cannot admit new vocabulary labels"] = rf.Cluster.vocabulary(model, "/value") == vocabulary
-        checks["evaluation cannot change learned assignments"] = rf.Cluster.assignments(model, "/value") == assignments
-        checks["evaluation cannot change committed clusters or usage EMA"] = (
-            rf.Cluster.status(model, "/value") == status
-        )
+        checks["evaluation cannot admit new vocabulary labels"] = rf.Group.vocabulary(model, "/value") == vocabulary
+        checks["evaluation cannot change learned assignments"] = rf.Group.assignments(model, "/value") == assignments
 
         checks["evaluation leaves learned tensor state unchanged"] = all(
             torch.equal(value, model.state_dict()[name]) for name, value in frozen.items()
@@ -300,7 +296,7 @@ def trial(seed, steps, accelerator):
     return {"seed": seed, "steps": model.trainer.global_step, "arms": arms, "training_reference": reference}, checks
 
 
-@experiment("P106", seed=10601)
+@experiment("P113", seed=11301)
 def run(seed, steps, accelerator):
     trials, checks = [], {}
     for offset in SEED_OFFSETS:

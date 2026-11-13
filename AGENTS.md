@@ -141,7 +141,15 @@ model = rf.Model(
   MPS, which has no float64), so large offsets keep their spread. A float NaN
   tensorizes as the `other` state, not as a value or a null; ±inf stays valued
   but is never a regression target. Integers beyond ±2^53 are rejected.
-- `Period` is for calendar parts (`DateParts` remains a compatible alias). If elapsed time or recency matters, derive a `Number`.
+- `Ordinal(values=(...))` models declared labels by their ordered positions;
+  bare `Ordinal` accepts integer ranks, including unseen ranks. Predictions
+  round to the nearest rank with ties to even and return native labels or integers.
+- `Duration(query=(start_path, end_path), granularity="days")` computes signed
+  elapsed time before Number's numeric modeling. A single query pairs with a
+  configured `start` or `end`; ancestor sources use leading `../` within an
+  explicit Branch. Endpoints must agree on aware versus naive semantics.
+- `Period` is for calendar parts (`DateParts` remains a compatible alias).
+  Use `Duration` for elapsed time, or `Number` when it is already derived upstream.
   Zone-aware timestamps describe their own wall clock; strings carrying an offset
   are read as UTC. A `Vector` with a NaN or infinite element, and a float NaN label
   in `Category`, take the `other` state; a NaN `Set` member is dropped like a null.
@@ -207,17 +215,25 @@ and supports native Trainer and Tuner workflows. Direct
 processed Arrow rows before encoding, and postprocesses the combined output
 once. Omitting the direct-prediction override preserves whole-input execution.
 
-Use `ArrowDataModule(...)` for canonical examples. Documentation uses static
-illustrations; use tiny data only in executable tests and proofs:
+Lead user documentation with training from any data source, primarily streaming
+from disk or cloud storage. Keep file paths and streaming data modules as the
+default training workflow; also describe query and custom-generator adapters.
+Prefer Polars specifically for user-facing in-memory examples: `pl.DataFrame` with
+`model.predict(...)`, `model.encode(...)`, or `model.write(source=...)`, and
+`rf.PolarsDataModule(...)` for training and evaluation. Use `ArrowDataModule`
+with file paths for streaming; ordinary examples should not require PyArrow
+imports. Keep Arrow explicit in extension contracts, transport, and internal
+data-plane documentation. Documentation uses static illustrations; use tiny
+data only in executable tests and proofs:
 
 ```python
-import pyarrow as pa
+import polars as pl
 
-table = pa.Table.from_pylist(records)
-datamodule = rf.ArrowDataModule(
+frame = pl.DataFrame(records)
+datamodule = rf.PolarsDataModule(
     model=model,
-    train=table,
-    validate=table,
+    train=frame,
+    validate=frame,
     num_workers=0,
     persistent_workers=False,
     pin_memory=False,
@@ -234,17 +250,22 @@ pickles at its own size rather than its shuffle window's. In-process batches
 are untouched. Keep `pin_memory` off with workers; pinning is a main-process
 cost, not an overlap.
 
-`model.predict(...)` returns a `pyarrow.Table`. It accepts Arrow inputs directly
+`model.predict(...)` and `model.write(...)` return eager `polars.DataFrame`
+objects. Prediction accepts eager Polars DataFrames and Arrow inputs directly
 and retains a nonempty sequence of mappings as a small interactive convenience;
-pass a typed empty Arrow object when there are no rows. Canonical decoded
+pass a Polars DataFrame or Arrow object with an explicit schema when there are
+no rows. Collect a Polars LazyFrame before prediction. Canonical decoded
 results use actual schema child names under `predictions`, with branches stored
 as `list<struct<...>>`. Rich leaf results retain `state`, extension-owned output,
 and `inferred`. Requested embeddings are separate `representations` records:
 `path` segments (root `[]`), repeated ancestor `parents` ordinals, intrinsic
 `output_index`, and a fixed-width `embedding`. Omit unconfigured output columns;
 `inputs` appears only when retention is selected. Models with no public output
-reject prediction. The model's recorded relflow version travels with Arrow tables
-and HTTP headers. Extension output list children must be named `element`.
+reject prediction. Polars output uses `Struct`, variable `List`, and fixed-width
+`Array` types; it does not carry Arrow schema or field metadata. Read the model's
+recorded relflow version from `model.version`. Batch `predict_step` and `rf.Writer`
+retain Arrow tables and metadata, and HTTP serving retains Arrow IPC/JSON and
+version headers. Extension output list children must be named `element`.
 
 PyArrow Parquet cannot round-trip fixed-size lists below null containers.
 `rf.Writer` rejects those batches before writing; use Arrow IPC for sparse

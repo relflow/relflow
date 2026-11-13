@@ -113,6 +113,7 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
@@ -148,7 +149,7 @@ def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
         {"items": [{key: value for key, value in item.items() if key != "deviation"} for item in row["items"]]}
         for row in rows
     ]
-    output = model.predict(inputs).to_pylist()
+    output = pl.DataFrame(model.predict(inputs)).to_dicts()
     return np.asarray([item["deviation"]["content"] for row in output for item in row["predictions"]["items"]])
 
 

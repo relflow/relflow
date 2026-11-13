@@ -38,8 +38,8 @@ uv run --project docs --with /path/to/provisioned-relflow.whl \
 
 Read the selected page's Reproduce tab for its declared `evidence-requires`.
 P091 requires TorchJD, P092 requires a real offline Text encoder, and P099/P100
-require the Duration/Ordinal wheel from `stage/0.5.0`. The current core wheel
-does not supply those pending datatypes. A research selection does not download
+require a relflow 0.4.6 wheel exporting Duration/Ordinal. They remain in research
+while the paired baseline predates these datatypes. A research selection does not download
 models, substitute a mocked encoder, or replace a missing measurement with a pass.
 
 P101–P103 probe input-distribution monitoring with three fixed seeds each and
@@ -49,9 +49,9 @@ monitoring disabled. They
 cover numeric and typed shifts, quiet controls, the correlation blind spot,
 warning policies, and checkpoint persistence. Run them explicitly with
 `--lane research P101 P102 P103`; local records do not change published results.
-P104–P106 add Enum, Hash, and Cluster drift checks across validation, test, and
+P104, P105, and P113 add Enum, Hash, and Group drift checks across validation, test, and
 prediction, including incremental batches, sample guards, and warning
-suppression. Run these with `--lane research P104 P105 P106` using the same
+suppression. Run these with `--lane research P104 P105 P113` using the same
 monitoring-capable wheel.
 
 Create an authoring file from the repository root:

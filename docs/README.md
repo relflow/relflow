@@ -38,6 +38,8 @@ installing the relflow package.
 
 The [use cases](use-cases/index.qmd) formulate forecasting,
 recommendations, customer outcomes, and relational prediction. The
+[Benchmarks](benchmarks.qmd) section presents relflow's published RelArena placement
+and comparisons on million-row training tasks. The
 [evidence](evidence.qmd) records mechanism experiments;
 [Performance](guides/performance.qmd) explains workload-specific
 throughput measurement. Predictive comparisons need named tasks, baselines,

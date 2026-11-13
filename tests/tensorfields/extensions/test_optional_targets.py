@@ -15,7 +15,7 @@ from relflow.structs.enums import Strata, TensorKey
 CASES = [
     (rf.DateParts, [datetime(2026, 1, 1), None, datetime(2026, 2, 1)], {"dateparts": ["day_of_week"]}),
     (rf.Set, [["a", "b", "a"], [], None], {"p_unavailable": 0.0}),
-    (rf.Cluster, ["a", None, "b"], {"n_clusters": 3, "p_unavailable": 0.0}),
+    (rf.Group, ["a", None, "b"], {"n_groups": 3, "p_unavailable": 0.0}),
 ]
 
 
@@ -73,10 +73,10 @@ def test_nested_target_roles_follow_reconstruction_owner(field_type, values, opt
     assert torch.isfinite(output).all()
 
 
-@pytest.mark.parametrize("field_type", [rf.Set, rf.Cluster])
+@pytest.mark.parametrize("field_type", [rf.Set, rf.Group])
 @pytest.mark.parametrize("objective", [False, True])
 def test_target_omission_preserves_prefetched_vocabulary_bindings(field_type, objective):
-    options = {"n_clusters": 3} if field_type is rf.Cluster else {}
+    options = {"n_groups": 3} if field_type is rf.Group else {}
     model = rf.Model.xs(
         d_model=8,
         attention=None,
@@ -138,9 +138,9 @@ def test_input_only_targets_remain_empty_after_checkpoint_reload(tmp_path, field
     )
     source = nested(values)
     model.encode(source, strata=Strata.train)
-    before = model.predict(source)
+    before = pa.table(model.predict(source))
     checkpoint = tmp_path / "model.pt"
     model.save(checkpoint)
     restored = rf.Model.load(checkpoint)
     assert restored.encode(source)["/events/value"].targets.is_empty()
-    assert restored.predict(source).equals(before)
+    assert pa.table(restored.predict(source)).equals(before)

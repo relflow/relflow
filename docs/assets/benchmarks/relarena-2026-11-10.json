@@ -1,0 +1,926 @@
+{
+  "source": {
+    "repository": "PriorLabs/relarena",
+    "revision": "fa4f1468c02b7dafd0c7b107544a887b83ca04c1",
+    "checked_at_utc": "2026-11-10T16:33:56.843688+00:00",
+    "results_sha256": "46f0a1d642349224d335c9361ee00ca9f0ab0483de4d8c8a065eb9e9b5f3a123",
+    "readme_sha256": "fd33c4d658e7eddffae3e06bffbb8574855e6f0ed094d60689787deed77172fb",
+    "urls": {
+      "README.md": "https://github.com/PriorLabs/relarena/blob/fa4f1468c02b7dafd0c7b107544a887b83ca04c1/README.md",
+      "baseline_results/results.csv": "https://github.com/PriorLabs/relarena/blob/fa4f1468c02b7dafd0c7b107544a887b83ca04c1/baseline_results/results.csv",
+      "docs/models/relflow.md": "https://github.com/PriorLabs/relarena/blob/fa4f1468c02b7dafd0c7b107544a887b83ca04c1/docs/models/relflow.md",
+      "packages/relarena/src/relarena/models/relflow/recipes.json": "https://github.com/PriorLabs/relarena/blob/fa4f1468c02b7dafd0c7b107544a887b83ca04c1/packages/relarena/src/relarena/models/relflow/recipes.json"
+    },
+    "selection": "selected=True and nonempty test_score; unique (model, dataset, task, seed)",
+    "derived_csv_sha256": "60bd636be6d4a936efc6247b76ef67677c62fdd74b00de218b9f7c9aa87fc70c"
+  },
+  "population": {
+    "tasks": 21,
+    "databases": 7,
+    "seed": 0,
+    "methods": 17,
+    "models": 13,
+    "systems": 4,
+    "classification_tasks": 12,
+    "regression_tasks": 9
+  },
+  "leaderboards": {
+    "models": [
+      {
+        "rank": 1,
+        "method": "tabpfn-rel-client-latest",
+        "kind": "model",
+        "elo": 1979.4,
+        "elo_interval": [
+          1905.1,
+          2096.6
+        ]
+      },
+      {
+        "rank": 2,
+        "method": "tabpfn-rel-local-latest",
+        "kind": "model",
+        "elo": 1932.0,
+        "elo_interval": [
+          1865.0,
+          2028.8
+        ]
+      },
+      {
+        "rank": 3,
+        "method": "relflow-2026-11-04",
+        "kind": "model",
+        "elo": 1897.1,
+        "elo_interval": [
+          1776.1,
+          2041.9
+        ]
+      },
+      {
+        "rank": 4,
+        "method": "tabpfn-rel-client-2026-08-15",
+        "kind": "model",
+        "elo": 1816.8,
+        "elo_interval": [
+          1758.0,
+          1896.8
+        ]
+      },
+      {
+        "rank": 5,
+        "method": "nori-rel",
+        "kind": "model",
+        "elo": 1778.9,
+        "elo_interval": [
+          1705.0,
+          1881.9
+        ]
+      },
+      {
+        "rank": 6,
+        "method": "tabpfn-rel-local-2026-08-15",
+        "kind": "model",
+        "elo": 1716.4,
+        "elo_interval": [
+          1621.0,
+          1814.8
+        ]
+      },
+      {
+        "rank": 7,
+        "method": "graphsage",
+        "kind": "model",
+        "elo": 1676.4,
+        "elo_interval": [
+          1562.4,
+          1768.1
+        ]
+      },
+      {
+        "rank": 8,
+        "method": "relgt",
+        "kind": "model",
+        "elo": 1585.5,
+        "elo_interval": [
+          1477.0,
+          1699.0
+        ]
+      },
+      {
+        "rank": 9,
+        "method": "rdblearn",
+        "kind": "model",
+        "elo": 1540.9,
+        "elo_interval": [
+          1454.7,
+          1616.4
+        ]
+      },
+      {
+        "rank": 10,
+        "method": "relgnn-es",
+        "kind": "model",
+        "elo": 1527.0,
+        "elo_interval": [
+          1434.1,
+          1625.0
+        ]
+      },
+      {
+        "rank": 11,
+        "method": "lightgbm",
+        "kind": "model",
+        "elo": 1363.9,
+        "elo_interval": [
+          1205.4,
+          1494.6
+        ]
+      },
+      {
+        "rank": 12,
+        "method": "constant-per-entity",
+        "kind": "model",
+        "elo": 1268.2,
+        "elo_interval": [
+          1093.2,
+          1412.1
+        ]
+      },
+      {
+        "rank": 13,
+        "method": "constant-global",
+        "kind": "model",
+        "elo": 1000.0,
+        "elo_interval": [
+          851.7,
+          1066.2
+        ]
+      }
+    ],
+    "models_and_systems": [
+      {
+        "rank": 1,
+        "method": "tabpfn-rel-client-latest",
+        "kind": "model",
+        "elo": 1926.2,
+        "elo_interval": [
+          1863.7,
+          2024.9
+        ]
+      },
+      {
+        "rank": 2,
+        "method": "kurversc-latest",
+        "kind": "system",
+        "elo": 1917.1,
+        "elo_interval": [
+          1838.8,
+          2050.1
+        ]
+      },
+      {
+        "rank": 3,
+        "method": "tabpfn-rel-local-latest",
+        "kind": "model",
+        "elo": 1887.8,
+        "elo_interval": [
+          1826.2,
+          1974.1
+        ]
+      },
+      {
+        "rank": 4,
+        "method": "relflow-2026-11-04",
+        "kind": "model",
+        "elo": 1865.3,
+        "elo_interval": [
+          1781.3,
+          1984.4
+        ]
+      },
+      {
+        "rank": 5,
+        "method": "rt-j",
+        "kind": "system",
+        "elo": 1843.4,
+        "elo_interval": [
+          1724.8,
+          1993.3
+        ]
+      },
+      {
+        "rank": 6,
+        "method": "tabpfn-rel-client-2026-08-15",
+        "kind": "model",
+        "elo": 1795.8,
+        "elo_interval": [
+          1734.5,
+          1882.5
+        ]
+      },
+      {
+        "rank": 7,
+        "method": "rt-plurel",
+        "kind": "system",
+        "elo": 1788.0,
+        "elo_interval": [
+          1692.7,
+          1887.5
+        ]
+      },
+      {
+        "rank": 8,
+        "method": "kurversc-2026-09-03",
+        "kind": "system",
+        "elo": 1775.1,
+        "elo_interval": [
+          1706.3,
+          1847.7
+        ]
+      },
+      {
+        "rank": 9,
+        "method": "nori-rel",
+        "kind": "model",
+        "elo": 1741.8,
+        "elo_interval": [
+          1665.9,
+          1858.7
+        ]
+      },
+      {
+        "rank": 10,
+        "method": "tabpfn-rel-local-2026-08-15",
+        "kind": "model",
+        "elo": 1703.2,
+        "elo_interval": [
+          1605.8,
+          1775.3
+        ]
+      },
+      {
+        "rank": 11,
+        "method": "graphsage",
+        "kind": "model",
+        "elo": 1656.3,
+        "elo_interval": [
+          1547.4,
+          1743.4
+        ]
+      },
+      {
+        "rank": 12,
+        "method": "relgt",
+        "kind": "model",
+        "elo": 1560.7,
+        "elo_interval": [
+          1426.6,
+          1662.1
+        ]
+      },
+      {
+        "rank": 13,
+        "method": "rdblearn",
+        "kind": "model",
+        "elo": 1538.3,
+        "elo_interval": [
+          1436.0,
+          1619.8
+        ]
+      },
+      {
+        "rank": 14,
+        "method": "relgnn-es",
+        "kind": "model",
+        "elo": 1527.6,
+        "elo_interval": [
+          1431.5,
+          1637.6
+        ]
+      },
+      {
+        "rank": 15,
+        "method": "lightgbm",
+        "kind": "model",
+        "elo": 1365.1,
+        "elo_interval": [
+          1166.3,
+          1509.6
+        ]
+      },
+      {
+        "rank": 16,
+        "method": "constant-per-entity",
+        "kind": "model",
+        "elo": 1270.0,
+        "elo_interval": [
+          1079.3,
+          1417.1
+        ]
+      },
+      {
+        "rank": 17,
+        "method": "constant-global",
+        "kind": "model",
+        "elo": 1000.0,
+        "elo_interval": [
+          836.8,
+          1076.4
+        ]
+      }
+    ]
+  },
+  "pairwise": {
+    "constant-global": {
+      "wins": 21,
+      "ties": 0,
+      "losses": 0,
+      "total": 21
+    },
+    "constant-per-entity": {
+      "wins": 20,
+      "ties": 0,
+      "losses": 1,
+      "total": 21
+    },
+    "graphsage": {
+      "wins": 18,
+      "ties": 0,
+      "losses": 3,
+      "total": 21
+    },
+    "kurversc-2026-09-03": {
+      "wins": 13,
+      "ties": 0,
+      "losses": 8,
+      "total": 21
+    },
+    "kurversc-2026-10-22": {
+      "wins": 8,
+      "ties": 0,
+      "losses": 13,
+      "total": 21
+    },
+    "lightgbm": {
+      "wins": 20,
+      "ties": 0,
+      "losses": 1,
+      "total": 21
+    },
+    "nori-rel": {
+      "wins": 11,
+      "ties": 0,
+      "losses": 10,
+      "total": 21
+    },
+    "rdblearn": {
+      "wins": 16,
+      "ties": 0,
+      "losses": 5,
+      "total": 21
+    },
+    "relgnn-es": {
+      "wins": 18,
+      "ties": 0,
+      "losses": 3,
+      "total": 21
+    },
+    "relgt": {
+      "wins": 19,
+      "ties": 0,
+      "losses": 2,
+      "total": 21
+    },
+    "rt-j": {
+      "wins": 11,
+      "ties": 0,
+      "losses": 10,
+      "total": 21
+    },
+    "rt-plurel": {
+      "wins": 13,
+      "ties": 0,
+      "losses": 8,
+      "total": 21
+    },
+    "tabpfn-rel-client-2026-08-15": {
+      "wins": 14,
+      "ties": 0,
+      "losses": 7,
+      "total": 21
+    },
+    "tabpfn-rel-client-2026-09-28": {
+      "wins": 11,
+      "ties": 0,
+      "losses": 10,
+      "total": 21
+    },
+    "tabpfn-rel-local-2026-08-15": {
+      "wins": 15,
+      "ties": 0,
+      "losses": 6,
+      "total": 21
+    },
+    "tabpfn-rel-local-2026-09-28": {
+      "wins": 10,
+      "ties": 0,
+      "losses": 11,
+      "total": 21
+    }
+  },
+  "task_results": [
+    {
+      "dataset": "rel-amazon",
+      "task": "item-churn",
+      "metric": "roc_auc",
+      "score": 0.8300385609468495,
+      "device": "rtx-pro-6000",
+      "model_rank": 2,
+      "combined_rank": 4,
+      "fit_seconds": 12478.745661119,
+      "predict_seconds": 321.92169651199947,
+      "training_rows": 2536014,
+      "tier": "LARGE"
+    },
+    {
+      "dataset": "rel-amazon",
+      "task": "item-ltv",
+      "metric": "mae",
+      "score": 39.8579934533261,
+      "device": "rtx-pro-6000",
+      "model_rank": 1,
+      "combined_rank": 1,
+      "fit_seconds": 12128.056251744,
+      "predict_seconds": 323.7931991649966,
+      "training_rows": 2707679,
+      "tier": "LARGE"
+    },
+    {
+      "dataset": "rel-amazon",
+      "task": "user-churn",
+      "metric": "roc_auc",
+      "score": 0.7123158681716346,
+      "device": "rtx-pro-6000",
+      "model_rank": 1,
+      "combined_rank": 4,
+      "fit_seconds": 18192.473764655,
+      "predict_seconds": 585.2539458110114,
+      "training_rows": 4708383,
+      "tier": "LARGE"
+    },
+    {
+      "dataset": "rel-avito",
+      "task": "ad-ctr",
+      "metric": "mae",
+      "score": 0.0341523511362376,
+      "device": "rtx-pro-6000",
+      "model_rank": 7,
+      "combined_rank": 9,
+      "fit_seconds": 152.818266252,
+      "predict_seconds": 3.924926855999957,
+      "training_rows": 5100,
+      "tier": "SMALL"
+    },
+    {
+      "dataset": "rel-avito",
+      "task": "user-clicks",
+      "metric": "roc_auc",
+      "score": 0.6597622953069879,
+      "device": "rtx-pro-6000",
+      "model_rank": 6,
+      "combined_rank": 9,
+      "fit_seconds": 1795.504027483,
+      "predict_seconds": 176.54688797100016,
+      "training_rows": 59454,
+      "tier": "MEDIUM"
+    },
+    {
+      "dataset": "rel-avito",
+      "task": "user-visits",
+      "metric": "roc_auc",
+      "score": 0.6682431756210705,
+      "device": "rtx-pro-6000",
+      "model_rank": 4,
+      "combined_rank": 6,
+      "fit_seconds": 2495.1858474129995,
+      "predict_seconds": 142.29427020000003,
+      "training_rows": 86619,
+      "tier": "MEDIUM"
+    },
+    {
+      "dataset": "rel-event",
+      "task": "user-attendance",
+      "metric": "mae",
+      "score": 0.2400964264129661,
+      "device": "rtx-pro-6000",
+      "model_rank": 4,
+      "combined_rank": 5,
+      "fit_seconds": 780.9418684599999,
+      "predict_seconds": 5.535793423000087,
+      "training_rows": 18984,
+      "tier": "SMALL"
+    },
+    {
+      "dataset": "rel-event",
+      "task": "user-ignore",
+      "metric": "roc_auc",
+      "score": 0.8190425201202032,
+      "device": "rtx-pro-6000",
+      "model_rank": 4,
+      "combined_rank": 8,
+      "fit_seconds": 789.5166072290001,
+      "predict_seconds": 5.600590187000307,
+      "training_rows": 18984,
+      "tier": "SMALL"
+    },
+    {
+      "dataset": "rel-event",
+      "task": "user-repeat",
+      "metric": "roc_auc",
+      "score": 0.7695187165775401,
+      "device": "rtx-pro-6000",
+      "model_rank": 3,
+      "combined_rank": 7,
+      "fit_seconds": 169.67622193900002,
+      "predict_seconds": 1.1224515809999502,
+      "training_rows": 3797,
+      "tier": "SMALL"
+    },
+    {
+      "dataset": "rel-f1",
+      "task": "driver-dnf",
+      "metric": "roc_auc",
+      "score": 0.7077441077441077,
+      "device": "rtx-pro-6000",
+      "model_rank": 11,
+      "combined_rank": 13,
+      "fit_seconds": 345.8575886850001,
+      "predict_seconds": 1.26335423799992,
+      "training_rows": 11411,
+      "tier": "SMALL"
+    },
+    {
+      "dataset": "rel-f1",
+      "task": "driver-position",
+      "metric": "mae",
+      "score": 3.8893532351531217,
+      "device": "rtx-pro-6000",
+      "model_rank": 7,
+      "combined_rank": 10,
+      "fit_seconds": 223.141668749,
+      "predict_seconds": 1.5072828930000242,
+      "training_rows": 7453,
+      "tier": "SMALL"
+    },
+    {
+      "dataset": "rel-f1",
+      "task": "driver-top3",
+      "metric": "roc_auc",
+      "score": 0.7537298808528428,
+      "device": "rtx-pro-6000",
+      "model_rank": 9,
+      "combined_rank": 11,
+      "fit_seconds": 60.39292221299999,
+      "predict_seconds": 1.3253576889999863,
+      "training_rows": 1353,
+      "tier": "SMALL"
+    },
+    {
+      "dataset": "rel-hm",
+      "task": "item-sales",
+      "metric": "mae",
+      "score": 0.0445304519473717,
+      "device": "rtx-pro-6000",
+      "model_rank": 4,
+      "combined_rank": 8,
+      "fit_seconds": 12075.123872336,
+      "predict_seconds": 93.91267828700074,
+      "training_rows": 5488184,
+      "tier": "LARGE"
+    },
+    {
+      "dataset": "rel-hm",
+      "task": "user-churn",
+      "metric": "roc_auc",
+      "score": 0.7085057524696476,
+      "device": "rtx-pro-6000",
+      "model_rank": 1,
+      "combined_rank": 1,
+      "fit_seconds": 11225.845946767,
+      "predict_seconds": 76.67676404400117,
+      "training_rows": 3832692,
+      "tier": "LARGE"
+    },
+    {
+      "dataset": "rel-stack",
+      "task": "post-votes",
+      "metric": "mae",
+      "score": 0.063615881895169,
+      "device": "rtx-pro-6000",
+      "model_rank": 3,
+      "combined_rank": 5,
+      "fit_seconds": 35956.555277565,
+      "predict_seconds": 869.0574734440015,
+      "training_rows": 2453921,
+      "tier": "LARGE"
+    },
+    {
+      "dataset": "rel-stack",
+      "task": "user-badge",
+      "metric": "roc_auc",
+      "score": 0.8931522850062874,
+      "device": "rtx-pro-6000",
+      "model_rank": 1,
+      "combined_rank": 3,
+      "fit_seconds": 58944.348701102,
+      "predict_seconds": 1186.3061100600023,
+      "training_rows": 3386276,
+      "tier": "LARGE"
+    },
+    {
+      "dataset": "rel-stack",
+      "task": "user-engagement",
+      "metric": "roc_auc",
+      "score": 0.9071239366676848,
+      "device": "rtx-pro-6000",
+      "model_rank": 3,
+      "combined_rank": 3,
+      "fit_seconds": 27264.46905011,
+      "predict_seconds": 505.25700218899874,
+      "training_rows": 1360743,
+      "tier": "LARGE"
+    },
+    {
+      "dataset": "rel-trial",
+      "task": "site-success",
+      "metric": "mae",
+      "score": 0.2786621733102857,
+      "device": "rtx-pro-6000",
+      "model_rank": 1,
+      "combined_rank": 1,
+      "fit_seconds": 6034.243071055001,
+      "predict_seconds": 130.81751317900125,
+      "training_rows": 151407,
+      "tier": "MEDIUM"
+    },
+    {
+      "dataset": "rel-trial",
+      "task": "study-adverse",
+      "metric": "mae",
+      "score": 33.851073251615695,
+      "device": "rtx-pro-6000",
+      "model_rank": 2,
+      "combined_rank": 3,
+      "fit_seconds": 490.67120247700007,
+      "predict_seconds": 15.853385316999947,
+      "training_rows": 43335,
+      "tier": "MEDIUM"
+    },
+    {
+      "dataset": "rel-trial",
+      "task": "study-outcome",
+      "metric": "roc_auc",
+      "score": 0.7329525504582713,
+      "device": "rtx-pro-6000",
+      "model_rank": 5,
+      "combined_rank": 6,
+      "fit_seconds": 705.3298673619998,
+      "predict_seconds": 5.016007334999813,
+      "training_rows": 11994,
+      "tier": "SMALL"
+    },
+    {
+      "dataset": "rel-amazon",
+      "task": "user-ltv",
+      "metric": "mae",
+      "score": 13.87528672329461,
+      "device": "rtx-pro-6000",
+      "model_rank": 1,
+      "combined_rank": 2,
+      "fit_seconds": 18064.563699942,
+      "predict_seconds": 603.5649810379982,
+      "training_rows": 4708383,
+      "tier": "LARGE"
+    }
+  ],
+  "claims": {
+    "model_task_wins": 6,
+    "combined_task_wins": 3,
+    "all_gpu_devices": [
+      "rtx-pro-6000"
+    ]
+  },
+  "scale": {
+    "selection": "predefined adapter LARGE tier: original inner training anchors >=500000",
+    "task_count": 9,
+    "min_training_rows": 1360743,
+    "max_training_rows": 5488184,
+    "pairwise": {
+      "tabpfn-rel-client-2026-09-28": {
+        "wins": 6,
+        "total": 9,
+        "tasks": [
+          {
+            "dataset": "rel-amazon",
+            "task": "item-churn",
+            "training_rows": 2536014,
+            "metric": "roc_auc",
+            "relflow_score": 0.8300385609468495,
+            "comparator_score": 0.8286527397830145,
+            "relflow_wins": true
+          },
+          {
+            "dataset": "rel-amazon",
+            "task": "item-ltv",
+            "training_rows": 2707679,
+            "metric": "mae",
+            "relflow_score": 39.8579934533261,
+            "comparator_score": 45.27051479241541,
+            "relflow_wins": true
+          },
+          {
+            "dataset": "rel-amazon",
+            "task": "user-churn",
+            "training_rows": 4708383,
+            "metric": "roc_auc",
+            "relflow_score": 0.7123158681716346,
+            "comparator_score": 0.7116975645100978,
+            "relflow_wins": true
+          },
+          {
+            "dataset": "rel-hm",
+            "task": "item-sales",
+            "training_rows": 5488184,
+            "metric": "mae",
+            "relflow_score": 0.0445304519473717,
+            "comparator_score": 0.0364787779830473,
+            "relflow_wins": false
+          },
+          {
+            "dataset": "rel-hm",
+            "task": "user-churn",
+            "training_rows": 3832692,
+            "metric": "roc_auc",
+            "relflow_score": 0.7085057524696476,
+            "comparator_score": 0.7060214083108701,
+            "relflow_wins": true
+          },
+          {
+            "dataset": "rel-stack",
+            "task": "post-votes",
+            "training_rows": 2453921,
+            "metric": "mae",
+            "relflow_score": 0.063615881895169,
+            "comparator_score": 0.0627329871405511,
+            "relflow_wins": false
+          },
+          {
+            "dataset": "rel-stack",
+            "task": "user-badge",
+            "training_rows": 3386276,
+            "metric": "roc_auc",
+            "relflow_score": 0.8931522850062874,
+            "comparator_score": 0.8834433132787123,
+            "relflow_wins": true
+          },
+          {
+            "dataset": "rel-stack",
+            "task": "user-engagement",
+            "training_rows": 1360743,
+            "metric": "roc_auc",
+            "relflow_score": 0.9071239366676848,
+            "comparator_score": 0.9076619476134612,
+            "relflow_wins": false
+          },
+          {
+            "dataset": "rel-amazon",
+            "task": "user-ltv",
+            "training_rows": 4708383,
+            "metric": "mae",
+            "relflow_score": 13.87528672329461,
+            "comparator_score": 13.877122272542712,
+            "relflow_wins": true
+          }
+        ]
+      },
+      "tabpfn-rel-local-2026-09-28": {
+        "wins": 6,
+        "total": 9,
+        "tasks": [
+          {
+            "dataset": "rel-amazon",
+            "task": "item-churn",
+            "training_rows": 2536014,
+            "metric": "roc_auc",
+            "relflow_score": 0.8300385609468495,
+            "comparator_score": 0.8276848113436708,
+            "relflow_wins": true
+          },
+          {
+            "dataset": "rel-amazon",
+            "task": "item-ltv",
+            "training_rows": 2707679,
+            "metric": "mae",
+            "relflow_score": 39.8579934533261,
+            "comparator_score": 45.349611919727955,
+            "relflow_wins": true
+          },
+          {
+            "dataset": "rel-amazon",
+            "task": "user-churn",
+            "training_rows": 4708383,
+            "metric": "roc_auc",
+            "relflow_score": 0.7123158681716346,
+            "comparator_score": 0.7066695514511213,
+            "relflow_wins": true
+          },
+          {
+            "dataset": "rel-hm",
+            "task": "item-sales",
+            "training_rows": 5488184,
+            "metric": "mae",
+            "relflow_score": 0.0445304519473717,
+            "comparator_score": 0.0365385235837179,
+            "relflow_wins": false
+          },
+          {
+            "dataset": "rel-hm",
+            "task": "user-churn",
+            "training_rows": 3832692,
+            "metric": "roc_auc",
+            "relflow_score": 0.7085057524696476,
+            "comparator_score": 0.705416000194907,
+            "relflow_wins": true
+          },
+          {
+            "dataset": "rel-stack",
+            "task": "post-votes",
+            "training_rows": 2453921,
+            "metric": "mae",
+            "relflow_score": 0.063615881895169,
+            "comparator_score": 0.0628415549809546,
+            "relflow_wins": false
+          },
+          {
+            "dataset": "rel-stack",
+            "task": "user-badge",
+            "training_rows": 3386276,
+            "metric": "roc_auc",
+            "relflow_score": 0.8931522850062874,
+            "comparator_score": 0.8846334560946378,
+            "relflow_wins": true
+          },
+          {
+            "dataset": "rel-stack",
+            "task": "user-engagement",
+            "training_rows": 1360743,
+            "metric": "roc_auc",
+            "relflow_score": 0.9071239366676848,
+            "comparator_score": 0.9077414258983942,
+            "relflow_wins": false
+          },
+          {
+            "dataset": "rel-amazon",
+            "task": "user-ltv",
+            "training_rows": 4708383,
+            "metric": "mae",
+            "relflow_score": 13.87528672329461,
+            "comparator_score": 13.88577099426453,
+            "relflow_wins": true
+          }
+        ]
+      }
+    },
+    "model_task_wins": 5,
+    "model_top_three": 8,
+    "same_tasks_beat_both_tabpfn_variants": 6,
+    "additional_pairwise": {
+      "graphsage": {
+        "wins": 8,
+        "total": 9
+      },
+      "relgt": {
+        "wins": 9,
+        "total": 9
+      },
+      "relgnn-es": {
+        "wins": 9,
+        "total": 9
+      }
+    }
+  },
+  "methodology": {
+    "leaderboards": "Published upstream README tables, each population fitted separately; intervals are 100 task bootstraps, not training seeds.",
+    "pairwise": "Compare unrounded selected test_score at equal (dataset, task, seed); higher roc_auc and lower mae win.",
+    "ranks": "One plus number of strictly better scores in the stated population.",
+    "training_rows": "Original inner training-anchor count emitted in the relflow selected row config.training_rows; not unique entity or database table counts.",
+    "scale": "All tasks in predefined LARGE tier, selected by original inner training anchors >=500000. All nine exceed one million."
+  },
+  "development_compute": {
+    "approximate_usd": 1500,
+    "provider": "Modal",
+    "scope": "Research compute used to develop and calibrate shared size-tier training recipes",
+    "attribution": "Submission-author reported approximate budget",
+    "source_url": "https://github.com/PriorLabs/relarena/blob/f6d81c38947e3a9a69207321d3b0bc170f799392/docs/models/relflow.md"
+  }
+}

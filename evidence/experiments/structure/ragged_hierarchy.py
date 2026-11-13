@@ -98,6 +98,7 @@ from copy import deepcopy
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import relflow as rf
 import torch
@@ -169,7 +170,7 @@ def structural_holes(rows: list[dict]) -> list[dict]:
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     visible = [{"days": row["days"]} for row in rows]
-    output = model.predict(pa.Table.from_pylist(visible), batch_size=64)["predictions"].to_pylist()
+    output = pl.DataFrame(model.predict(pa.Table.from_pylist(visible), batch_size=64))["predictions"].to_list()
     return np.asarray([row["answer"]["content"] for row in output], dtype=np.float64)
 
 

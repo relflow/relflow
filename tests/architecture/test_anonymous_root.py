@@ -148,7 +148,7 @@ def test_root_query_prediction_envelope_and_checkpoint_round_trip(tmp_path):
         items=rf.Branch(length=2, value=rf.Number(mask=True)),
     )
     table = pa.Table.from_pylist([{"payload": {"items": [{"value": 3.0}, {"value": 5.0}]}}])
-    expected = model.predict(table)
+    expected = pa.table(model.predict(table))
     predictions = expected["predictions"].combine_chunks()
     assert [field.name for field in predictions.type] == ["items"]
     root = expected["representations"].combine_chunks().values
@@ -157,7 +157,7 @@ def test_root_query_prediction_envelope_and_checkpoint_round_trip(tmp_path):
     assert len(predictions.field("items")[0]) == 2
     assert predictions.field("items").values.type.names == ["value"]
     restored = rf.Model.load(model.save(tmp_path / "anonymous.ckpt"))
-    assert restored.predict(table).equals(expected)
+    assert pa.table(restored.predict(table)).equals(expected)
     assert set(restored.nodes) == {"/", "/items", "/items/value"}
 
 

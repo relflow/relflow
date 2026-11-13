@@ -34,7 +34,7 @@ from relflow.distributions import Distributions
 
 SEED = 22001
 SIZES = {"numbers": (64, 256, 1024), "identities": (64, 256, 1024), "nested": (32, 128, 512)}
-KINDS = ("Number", "Quantile", "Boolean", "Category", "Enum", "Hash", "Cluster", "Set", "Vector", "Period", "Text")
+KINDS = ("Number", "Quantile", "Boolean", "Category", "Enum", "Hash", "Group", "Set", "Vector", "Period", "Text")
 
 
 def records(workload, rows, seed):
@@ -50,7 +50,7 @@ def records(workload, rows, seed):
                 row[f"category{i}"] = None if rng.random() < 0.05 else f"label-{rng.integers(64)}"
                 row[f"enum{i}"] = None if rng.random() < 0.05 else f"class-{rng.integers(16)}"
                 row[f"hash{i}"] = None if rng.random() < 0.05 else 2**60 + int(rng.integers(128))
-                row[f"cluster{i}"] = None if rng.random() < 0.05 else f"label-{rng.integers(64)}"
+                row[f"group{i}"] = None if rng.random() < 0.05 else f"label-{rng.integers(64)}"
             row["flag"] = bool(rng.integers(2))
         else:
             row = {
@@ -87,7 +87,7 @@ def build(workload, enabled):
             fields[f"category{i}"] = rf.Category(drift=True)
             fields[f"enum{i}"] = rf.Enum(values=tuple(f"class-{j}" for j in range(16)), drift=True)
             fields[f"hash{i}"] = rf.Hash(n_hashes=2, drift=True)
-            fields[f"cluster{i}"] = rf.Cluster(bounds=4, revive_temperature=0, drift=True)
+            fields[f"group{i}"] = rf.Group(n_groups=4, drift=True)
         fields["flag"] = rf.Boolean(drift=True)
     else:
         fields = {
@@ -274,9 +274,7 @@ def pipeline(workload, size, options, output):
         ]
         for name, model in models.items()
     }
-    assert models["off"].predict(inputs[0]).equals(models["on"].predict(inputs[0]), check_metadata=True), (
-        "prediction outputs differ"
-    )
+    assert models["off"].predict(inputs[0]).equals(models["on"].predict(inputs[0])), "prediction outputs differ"
     assert not models["on"].distributions.warned, "same-population warmup unexpectedly warned"
     baseline = {name: model.distributions.state_dict() for name, model in models.items()}
     rows = []
@@ -305,7 +303,7 @@ def pipeline(workload, size, options, output):
         if phase == "predict_cuda":
             for model in models.values():
                 model.to("cuda")
-            assert models["off"].predict(inputs[0]).equals(models["on"].predict(inputs[0]), check_metadata=True), (
+            assert models["off"].predict(inputs[0]).equals(models["on"].predict(inputs[0])), (
                 "CUDA prediction outputs differ"
             )
         batches = train if phase == "public_train_encode" else inputs
@@ -377,11 +375,11 @@ def atoms(kind, rows, seed):
         request = getattr(rf, kind)()
     elif kind == "Boolean":
         values, request = (rng.random(rows) < 0.5).tolist(), rf.Boolean()
-    elif kind in ("Category", "Cluster", "Enum"):
+    elif kind in ("Category", "Group", "Enum"):
         values = [f"label-{i}" for i in rng.integers(0, 64, rows)]
         request = (
-            rf.Cluster(bounds=4)
-            if kind == "Cluster"
+            rf.Group(n_groups=4)
+            if kind == "Group"
             else rf.Enum(values=tuple(f"label-{i}" for i in range(64)))
             if kind == "Enum"
             else rf.Category()

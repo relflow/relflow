@@ -9,7 +9,7 @@
 # code-fold: true
 # toc: false
 # evidence-requires:
-# - "An unreleased relflow wheel exporting Drift, Enum, Hash, Cluster, and model.distributions"
+# - "An unreleased relflow wheel exporting Drift, Enum, Hash, Group, and model.distributions"
 # evidence-group: Input distributions
 # evidence-readout:
 # - label: "Declared shifts detected"

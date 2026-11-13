@@ -287,17 +287,20 @@ model can express as well as how well it predicts them. For example, monitor
 `.trxns.merchant/validate.coverage.content` alongside
 `.trxns.merchant/validate.nll.content` and
 `.trxns.merchant/validate.accuracy.all`.
-The [Category metrics](../datatypes/category.qmd#vocabulary-and-learning) and
-[Cluster metrics](../datatypes/cluster.qmd#learning-and-inspection)
+The [Category metrics](../datatypes/category.qmd#vocabulary-and-learning)
 define these denominators and count unavailable targets explicitly.
 
-An unknown Category or Cluster target contributes no label gradient. Forcing its
+An unknown Category target contributes no label gradient. Forcing its
 prediction to be uniform over known labels would teach a different task, not
 recover the missing answer. With no known targets, conditional reconstruction
 quality is `NaN`; zero coverage means the validation objective is unmeasurable,
-not that the model reconstructed everything perfectly. Cluster balancing and
-adaptive-cluster updates also exclude unknown answers. Do not select a
+not that the model reconstructed everything perfectly. Do not select a
 checkpoint from such a conditional score without checking coverage.
+
+Group reconstruction trains state classification only; it does not predict
+vocabulary labels or report Category's content-coverage metrics. A visible
+Group input can learn assignments through downstream objectives. See
+[Group learning](../datatypes/group.qmd#learning-and-inspection).
 
 Vocabulary growth can change the evaluated known-target population between
 epochs. NLL can increase when newly admitted, difficult labels join it even
@@ -317,7 +320,6 @@ downstream confidence separately for familiar and unseen input identities.
 [P062](../evidence/vocabulary/pretraining-coverage.py) isolates vocabulary
 coverage with fixed query-selected masks and checks that rebatching the same
 targets cannot change the reported counts or conditional scores.
-[P065](../evidence/vocabulary/cluster-pretraining-coverage.py) tests Cluster coverage.
 
 [P066](../evidence/vocabulary/rolling-input-admission.py) separately checks cold
 Category inputs across successive training cohorts. Its selected run records

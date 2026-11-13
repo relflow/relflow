@@ -33,6 +33,52 @@ payment prediction, then adds nested context, pretraining, and reuse.
 [See what it automates](learn/featureless-models.qmd){.btn .btn-outline-primary}
 :::
 
+::: {.benchmark-feature}
+::: {.benchmark-kicker}
+Featureless · Open source · No ICL · No DFS
+:::
+
+## Top three on RelArena. Built for scale.
+
+**The highest-ranked model outside the TabPFN family.** The only models
+ahead are TabPFN-Rel's API and local variants. relflow trains directly on
+typed, nested records and **beats both leaders on 6 of 9 million-row
+training tasks**, including all four Amazon tasks.
+
+Featureless models with [real-time serving](guides/serving.qmd), using
+shared recipes calibrated with approximately **US$1,500 in research compute**.
+
+::: {.benchmark-stats}
+::: {}
+[**#1**]{.benchmark-value}
+
+Model without ICL
+:::
+
+::: {}
+[**#3**]{.benchmark-value}
+
+Of all 13 models
+:::
+
+::: {}
+[**6 / 9**]{.benchmark-value}
+
+Million-row tasks won
+
+::: {.benchmark-stat-note}
+Against both TabPFN variants
+:::
+:::
+:::
+
+[**Explore the benchmarks →**](benchmarks.qmd)
+
+::: {.benchmark-caption}
+RelArena's published model board, November 10, 2026 · 7 databases · seed 0
+:::
+:::
+
 ## Three fields are a model
 
 ::: {.column-body}
@@ -90,7 +136,10 @@ defaults. See [how declarations become a model](concepts/model-tree.qmd#how-decl
 
 You supply historical records with known outcomes, separate training and
 validation files, and new records to score. The YAML above illustrates one
-row; the file paths stand for data prepared by your application.
+row; the file paths stand for data prepared by your application. Stream training
+data from disk or cloud storage without loading the full dataset into memory.
+SQL queries and custom record generators connect through
+[data modules](guides/data-modules.qmd); use Polars for data already in memory.
 [Your first model](learn/your-first-model.qmd) explains each step from an
 untrained model to a prediction.
 

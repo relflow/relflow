@@ -25,6 +25,12 @@ data = rf.ArrowDataModule(
 )
 ```
 
+The files can live on disk or in cloud storage, such as
+`s3://your-data-bucket/payments/history/train.parquet`. Training streams them
+in batches; the full dataset need not fit in memory. SQL queries, custom record
+generators, and in-memory Polars frames use the other
+[data-module adapters](../guides/data-modules.qmd).
+
 ## Smoke-test before the long run
 
 Check that the files bind and the loop completes using a separate model and

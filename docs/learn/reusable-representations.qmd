@@ -86,38 +86,24 @@ which keeps representations separate from decoded field results.
 Use the same account profile and `trxns` records in your application's request
 file, omitting `disputed` from every transaction. The snapshot cutoff remains
 the final booking time; all vectors describe the evidence available then.
-Export the vectors in prediction mode:
-
-```python
-requests = rf.ArrowDataModule(
-    predict="payments/finetuning/requests.parquet",
-)
-result = model.predict(datamodule=requests, batch_size=256, devices=1)
-```
-
-Each row's `representations` list holds one record per exported vector. An
-empty `path` is the anonymous root, and `["trxns"]` is the transaction
-summary. Rows come back in request order:
-
-```python
-snapshot_vectors = []
-history_vectors = []
-for row in result.to_pylist():
-    for record in row["representations"]:
-        if record["path"] == []:
-            snapshot_vectors.append(record["embedding"])
-        elif record["path"] == ["trxns"]:
-            history_vectors.append(record["embedding"])
-```
-
-For many rows, let Polars give you one row per vector, with an `observation`
-index that ties each vector back to its request row:
+For request files that fit in memory, export the vectors directly from Polars:
 
 ```python
 import polars as pl
 
+requests = pl.read_parquet("payments/finetuning/requests.parquet")
+result = model.predict(requests, batch_size=256)
+```
+
+Each row's `representations` list holds one record per exported vector. An
+empty `path` is the anonymous root, and `["trxns"]` is the transaction
+summary. Rows come back in request order. Use Polars to get one row per vector,
+with an `observation`
+index that ties each vector back to its request row:
+
+```python
 vectors = (
-    pl.from_arrow(result)
+    result
     .with_row_index("observation")
     .select("observation", "representations")
     .explode("representations")
@@ -130,6 +116,10 @@ history_vectors = vectors.filter(pl.col("path") == "trxns")
 
 Field names cannot contain `/`, so joining path segments does not merge
 distinct paths.
+
+`snapshot_vectors` and `history_vectors` are Polars DataFrames. At a Python
+library boundary, use `snapshot_vectors["embedding"].to_list()` for ordinary
+lists or `.to_numpy()` for a numerical array.
 
 Exported vectors are float32 and L2-normalized along their fixed `d_model`
 axis; zero vectors remain zero. Each representation record also carries

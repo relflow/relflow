@@ -15,10 +15,11 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from relflow.data.arrow import variants
-from relflow.data.query import Literal, Member, MissingFieldError, compile, listed, parts, query
+from relflow.data.query import Literal, Member, MissingFieldError, compile, listed, parts, query, scope
+from relflow.data.query import Projection as SourceProjection
 from relflow.logging.config import logger
-from relflow.structs.enums import Overflow, Strata, Tokens
-from relflow.structs.tree import Address
+from relflow.structs.enums import Component, Overflow, Strata, Tokens
+from relflow.structs.tree import Address, Leaf
 
 if TYPE_CHECKING:
     from relflow.structs.experiment import Schema
@@ -331,11 +332,33 @@ def referenced(branch: Branch) -> set[str]:
     if branch.query is not None:
         return names
     for child in branch.fields:
-        names.add(head(child.query) if child.query is not None else cast(str, child.name))
+        if getattr(child, "type", None) == "branch":
+            branch_child = cast("Branch", child)
+            names.add(head(branch_child.query) if branch_child.query is not None else cast(str, child.name))
+        else:
+            for expression in queries(cast(Leaf, child)):
+                depth, path = scope(expression)
+                if not depth:
+                    names.add(head(path))
         for mask in child.mask:
             if mask.query is not None and getattr(child, "type", None) != "branch":
                 names.add(head(mask.query))
+    for child in branch.descendants:
+        if not isinstance(child, Leaf):
+            continue
+        owners = [node for node in child.path if node.type == "branch"]
+        for expression in queries(child):
+            depth, path = scope(expression)
+            if depth and depth < len(owners) and owners[-1 - depth] is branch:
+                names.add(head(path))
     return names
+
+
+def queries(request: Leaf) -> tuple[str, ...]:
+    """Normalize one leaf's declared source paths without changing explicit empty inputs."""
+    if request.query is None:
+        return (member(cast(str, request.name)),)
+    return (request.query,) if isinstance(request.query, str) else request.query
 
 
 def root(values: pa.Table, branch: Branch, *, size: int | None = None) -> Layout:
@@ -505,11 +528,75 @@ def vacancy(layout: Layout) -> RaggedField:
     )
 
 
-def pristine(layout: Layout, request: Any) -> RaggedField:
+def source(
+    layout: Layout,
+    expression: str,
+    *,
+    ancestors: tuple[Layout, ...],
+    address: Address,
+) -> SourceProjection[pa.Array | pa.ChunkedArray]:
+    """Resolve a local source or gather an ancestor source by retained coordinates."""
+    depth, path = scope(expression)
+    if not depth:
+        return query(layout.records, path, address=str(address))
+    if depth > len(ancestors):
+        raise ValueError(
+            f"source query {expression!r} at '{address}' ascends {depth} owner branches, "
+            f"but only {len(ancestors)} ancestor branches exist; keep the source within the model root"
+        )
+    owner = ancestors[-depth]
+    selected = query(owner.records, path, address=str(address))
+    stride = math.prod(layout.shape[len(owner.shape) :])
+    positions = layout.placement // stride if stride else np.empty(0, dtype=np.int64)
+    indices = np.searchsorted(owner.placement, positions)
+    if np.any(indices >= len(owner.placement)) or not np.array_equal(owner.placement[indices], positions):
+        raise RuntimeError(f"source query {expression!r} at '{address}' has no retained ancestor coordinate")
+    gather = pa.array(indices, type=pa.int64())
+    return SourceProjection(values=pc.take(selected.values, gather), present=pc.take(selected.present, gather))
+
+
+def derived(selected: object, *, rows: int, address: Address) -> SourceProjection[pa.Array | pa.ChunkedArray]:
+    """Validate the one-value-per-owner invariant at the extension derivation boundary."""
+    if not isinstance(selected, SourceProjection):
+        raise TypeError(
+            f"derived field '{address}' must return an Arrow query Projection, got {type(selected).__name__}"
+        )
+    for name, values in (("values", selected.values), ("presence", selected.present)):
+        if not isinstance(values, (pa.Array, pa.ChunkedArray)):
+            raise TypeError(f"derived field '{address}' {name} must be an Arrow array, got {type(values).__name__}")
+        if len(values) != rows:
+            raise ValueError(f"derived field '{address}' {name} must retain {rows} owner rows, got {len(values)}")
+    if selected.present.type != pa.bool_() or selected.present.null_count:
+        raise ValueError(
+            f"derived field '{address}' presence must contain one non-null Boolean per owner row, "
+            f"got {selected.present.type} with {selected.present.null_count} nulls"
+        )
+    return selected
+
+
+def pristine(layout: Layout, request: Leaf, *, ancestors: tuple[Layout, ...]) -> RaggedField:
     """Project one untouched leaf while preserving extension-owned Arrow values."""
 
-    expression = request.query or member(request.name)
-    selected = query(layout.records, expression, address=str(request.address))
+    from relflow.tensorfields.base import TENSORFIELDS
+
+    extension = TENSORFIELDS[request.type]
+    expressions = queries(request)
+    if Component.derive in extension.components:
+        inputs = tuple(
+            source(layout, expression, ancestors=ancestors, address=request.address) for expression in expressions
+        )
+        selected = derived(
+            extension.derive(inputs, request=request, address=request.address, rows=len(layout.records)),
+            rows=len(layout.records),
+            address=request.address,
+        )
+    else:
+        if isinstance(request.query, tuple):
+            raise ValueError(
+                f"field '{request.address}' has multiple source queries but extension '{request.type}' has no "
+                "derive component; register Component.derive or use one query"
+            )
+        selected = source(layout, expressions[0], ancestors=ancestors, address=request.address)
     present = (
         boolean(selected.present) if selected.present.type == pa.bool_() else boolean(pc.is_valid(selected.present))
     )
@@ -679,6 +766,7 @@ def project(
     decisions: tuple[Decision, ...],
     *,
     strata: Strata,
+    ancestors: tuple[Layout, ...],
 ) -> Projection:
     """Build pristine values and resolved input/objective routing for one leaf."""
 
@@ -693,7 +781,18 @@ def project(
         and pa.types.is_struct(layout.records.type)
         and not layout.records.type.get_all_field_indices(request.name)
     )
-    field = vacancy(layout) if source_less else pristine(layout, request)
+    if source_less:
+        field = vacancy(layout)
+    else:
+        try:
+            field = pristine(layout, request, ancestors=ancestors)
+        except MissingFieldError:
+            from relflow.tensorfields.base import TENSORFIELDS
+
+            if not allow_vacancy or Component.derive not in TENSORFIELDS[request.type].components:
+                raise
+            field = vacancy(layout)
+            source_less = True
     state = field.state.to_numpy(zero_copy_only=False)
     observed = state != Tokens.padded.value
     owner = np.zeros(len(state), dtype=bool)
@@ -765,7 +864,12 @@ def coalesce(
     fields: dict[Address, Projection] = {}
     layouts: dict[Address, Layout] = {}
 
-    def visit(branch: Branch, layout: Layout, inherited: tuple[Decision, ...]) -> None:
+    def visit(
+        branch: Branch,
+        layout: Layout,
+        inherited: tuple[Decision, ...],
+        ancestors: tuple[Layout, ...],
+    ) -> None:
         layouts[branch.address] = layout
         for child in branch.fields:
             if getattr(child, "type", None) == "branch":
@@ -783,7 +887,7 @@ def coalesce(
                         ordinal=ordinal,
                         strata=strata,
                     )
-                    visit(child, child_layout, (*inherited, *decisions))
+                    visit(child, child_layout, (*inherited, *decisions), (*ancestors, layout))
             elif child.address in schema.active_requests:
                 decisions = resolve(
                     layout,
@@ -793,11 +897,13 @@ def coalesce(
                     ordinal=ordinal,
                     strata=strata,
                 )
-                fields[child.address] = project(layout, child, (*inherited, *decisions), strata=strata)
+                fields[child.address] = project(
+                    layout, child, (*inherited, *decisions), strata=strata, ancestors=ancestors
+                )
 
     layout = root(values, schema.fields)
     decisions = resolve(layout, schema.fields, seed=seed, epoch=epoch, ordinal=ordinal, strata=strata)
-    visit(schema.fields, layout, decisions)
+    visit(schema.fields, layout, decisions, ())
 
     return Coalesced(fields=fields, layouts=layouts)
 

@@ -157,14 +157,25 @@ branches; input caps do not add public padding. Fixed-width vectors retain
 their feature axis. Explain memory costs and the warning
 for public serving; automatic widths do not make padding free.
 
+Lead with training from any data source, primarily streaming from disk and
+cloud storage without materializing the whole dataset. Show SQL and custom
+record streams as supported adapters. Polars is the preferred user-facing
+in-memory interface, not a requirement to load training data into RAM.
 Prefer application-supplied Parquet file paths (`.parquet`) for ordinary
 training and prediction examples. Pass paths to `rf.ArrowDataModule`, including
 its `predict` split; the direct `model.predict(...)` input is an in-memory API.
-Reserve table-input examples for explaining that API. Returned predictions
-remain Arrow tables.
+Whenever an example illustrates in-memory data, lead with eager Polars
+DataFrames and ordinary Polars operations. Use `rf.PolarsDataModule` for
+in-memory training and evaluation, and pass frames directly to `model.predict`,
+`model.encode`, and `model.write(source=...)`. Read and write collected results
+with Polars methods. Arrow tables and record batches remain supported; reserve
+PyArrow examples for explicit Arrow interoperability, extension contracts, or
+transport details. In-memory predictions return eager Polars DataFrames; batch
+prediction steps and Writer retain Arrow.
 
-Use `rf.ArrowDataModule(train=train, validate=validate)` for canonical training
-examples. Omit the model argument in every data-module example: model loops
+Use `rf.ArrowDataModule` with paths for streaming training examples, and
+`rf.PolarsDataModule(train=train, validate=validate)` for in-memory frames.
+Omit the model argument in every data-module example: model loops
 and native Lightning Trainer loops bind the module automatically. Direct
 loader access requires an explicit `data.bind(model)` first. Name
 application-supplied inputs. Configure AdamW

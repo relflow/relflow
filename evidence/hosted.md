@@ -43,12 +43,19 @@ The helper has three phases:
    Missing, duplicate, altered, cancelled, or failed execution cannot become a
    passing `CI / required` result.
 
+The planner reads proof identities from the exact baseline Git tree without
+executing its sources. Proofs in both catalogs run as pairs. A newly introduced
+proof runs on the candidate and every check must pass; removed proofs are listed
+as retired in the manifest. The collector independently verifies these identities,
+and plots identify candidate-only measurements. Once a proof exists in the
+baseline, it runs as a pair on subsequent comparisons.
+
 Keep helper and executor pins immutable. To update trusted mechanics, first
 review and freeze the executor commit, then freeze a helper commit pointing to
 it, then update the consumer to that helper. A suite-only revision does not
 authorize changing host code. The consumer and publication verifier must agree
 on the reviewed executor identity. Historical reports retain their original
-executor and helper pins; do not rewrite their provenance during migration.
+executor and helper pins; do not rewrite their provenance.
 
 ## Isolation and parallelism
 

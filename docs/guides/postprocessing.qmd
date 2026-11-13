@@ -72,6 +72,20 @@ The direct in-memory prediction API accepts `postprocess=` on the prediction
 call. It applies the processor to the combined result once, after all model
 batches have completed. A Writer applies it to each output batch.
 
+For a request frame that fits in memory, return the application columns directly:
+
+```python
+requests = pl.read_parquet("payments/history/requests.parquet")
+decisions = model.predict(
+    requests,
+    batch_size=256,
+    retain=("payment_id",),
+    postprocess=decision.partial(threshold=0.8),
+)
+```
+
+`decisions` is the Polars DataFrame returned by `decision`.
+
 The threshold is an application decision rule. The example uses the content
 probability; incorporate the predicted value state when your application needs
 to treat missingness separately. Select the threshold on validation data for
@@ -81,8 +95,9 @@ the team's review capacity and error costs; `0.8` here illustrates configuration
 
 The first callback parameter must be `frame`; additional parameters are
 keyword-only and bound with `.partial(...)`. A tuple of decorated processors
-runs left to right. The pipeline converts Arrow to Polars before its first
-stage and back to Arrow after its last.
+runs left to right. In-memory prediction returns the last stage's Polars frame
+directly. A Writer converts Arrow to Polars before its first stage and back to
+Arrow after its last; serving also converts the final frame for HTTP transport.
 
 Use the same configured processor in each output path:
 

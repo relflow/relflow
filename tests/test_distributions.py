@@ -108,12 +108,15 @@ def test_nulls_nonfinite_and_padding_are_distinct(monkeypatch):
         (rf.Boolean, [True, False], {"state", "value"}),
         (rf.Category, ["A", "B"], {"state", "label"}),
         (rf.Enum(values=("A", "B")), ["A", "B"], {"state", "label"}),
-        (rf.Cluster(bounds=4), ["A", "B"], {"state", "label"}),
+        (rf.Group(n_groups=4), ["A", "B"], {"state", "label"}),
         (rf.Hash, ["A", "B"], {"state", "label"}),
         (rf.Set, [["A", "A"], ["B"]], {"state", "size", "member"}),
         (rf.Vector(n_dim=2), [[1.0, 2.0], [3.0, 4.0]], {"state", "mean", "norm", "finite"}),
         (rf.Period("month_of_year"), ["2026-01-01", "2026-02-01"], {"state", "month_of_year.sin", "month_of_year.cos"}),
         (rf.Quantile, [1.0, 2.0], {"state", "value", "nonfinite"}),
+        (rf.Duration(start="2026-01-01"), ["2026-01-02", "2026-01-03"], {"state", "value", "nonfinite"}),
+        (rf.Ordinal, [1, 2], {"state", "value", "nonfinite"}),
+        (rf.Ordinal(values=("low", "high")), ["low", "high"], {"state", "value", "nonfinite"}),
     ],
 )
 def test_builtins_offer_explicit_profile_components(spec, values, expected):
@@ -310,7 +313,7 @@ def test_categorical_shift_does_not_admit_evaluation_labels(monkeypatch):
 def test_chunked_prediction_counts_processed_inputs_once():
     model = rf.Model.xs(drift=True, value=rf.Number(embed=True))
     output = model.predict(pa.table({"value": np.arange(9.0)}), batch_size=4)
-    assert output.num_rows == 9
+    assert output.height == 9
     assert model.distributions.summary()["/value"]["predict"]["value"]["count"] == 9
 
 
@@ -381,7 +384,7 @@ def test_disabled_model_skips_all_profile_work_for_direct_and_loader_paths(monke
     monkeypatch.setitem(rf.TENSORFIELDS["number"].components, rf.Component.profile, forbidden)
     for strata in rf.Strata:
         model.encode(source, strata=strata)
-    assert model.predict(source, batch_size=128).num_rows == 256
+    assert model.predict(source, batch_size=128).height == 256
     data = rf.ArrowDataModule(model=model, train=source, validate=source, test=source, predict=source, num_workers=0)
     for strata in rf.Strata:
         assert all(not batch.profiles for batch in data.dataloader(strata))
@@ -484,4 +487,4 @@ def test_default_prediction_does_not_copy_pristine_fields_for_profiling(monkeypa
 
     monkeypatch.setattr(iterables, "replace", forbidden)
     model.encode(pa.table({"value": [1.0, 2.0]}))
-    assert model.predict(pa.table({"value": [1.0, 2.0]})).num_rows == 2
+    assert model.predict(pa.table({"value": [1.0, 2.0]})).height == 2

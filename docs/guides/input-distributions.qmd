@@ -85,8 +85,9 @@ Within a window, each field, comparison stratum, and feature logs at most once.
 |---|---|
 | Every active field after model opt-in | Structural value/null/other state frequencies, excluding padding |
 | `Number`, `Quantile` | Finite source-value distribution; separate finite, NaN, positive-infinity, and negative-infinity frequencies |
+| `Duration`, `Ordinal` | Numeric profiles of derived elapsed values or ranks, after their source queries and declarations are applied |
 | `Boolean` | False/true frequencies |
-| `Category`, `Enum`, `Cluster`, `Hash` | Label frequencies in 128 fixed identity buckets |
+| `Category`, `Enum`, `Group`, `Hash` | Label frequencies in 128 fixed identity buckets |
 | `Set` | Deduplicated member frequencies and set size, after label folding and dropping null/NaN members |
 | `Text` | Character length, without running its encoder |
 | `Vector` | Component mean, vector norm, and finite-vector frequency |
@@ -159,9 +160,9 @@ these studies do not replace the complete paired core gate.
 
 The [Enum](../evidence/distributions/enum-shifts.py),
 [Hash](../evidence/distributions/hash-shifts.py), and
-[Cluster](../evidence/distributions/cluster-shifts.py) studies extend detection
+[Group](../evidence/distributions/group-shifts.py) studies extend detection
 and quiet-control checks across validation, test, and prediction. They also
 check incremental batch accumulation, minimum sample counts, and warning
 suppression. Enum checks undeclared-label rejection, Hash separates profiling
-from training salts, and Cluster checks that evaluation leaves its vocabulary
+from training salts, and Group checks that evaluation leaves its vocabulary
 and learned assignments unchanged.

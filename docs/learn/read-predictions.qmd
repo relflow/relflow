@@ -23,21 +23,19 @@ amount: 84.50
 merchant: North Market
 ```
 
-Load the fitted flat-payment artifact and score your application's request
-file, retaining the identifier alongside each result:
+Load the fitted flat-payment artifact and read a request file that fits in
+memory into Polars, retaining the identifier alongside each result:
 
 ```python
+import polars as pl
 import relflow as rf
 
 flat_model = rf.Model.load("artifacts/payment-flat.rf")
-requests = rf.ArrowDataModule(
-    predict="payments/flat/requests.parquet",
-    retain=("payment_id",),
-)
-flat_result = flat_model.predict(datamodule=requests, batch_size=256, devices=1)
+requests = pl.read_parquet("payments/flat/requests.parquet")
+flat_result = flat_model.predict(requests, batch_size=256, retain=("payment_id",))
 ```
 
-`devices=1` collects one Arrow table on one device. `retain` copies the named
+The result is a Polars DataFrame. `retain` copies the named
 source columns into an `inputs` column; nothing else from the request is
 echoed. One row of the result has this shape, with placeholders for the
 numbers:
@@ -64,15 +62,19 @@ scores as observed dispute rates. `state` predicts whether the value is
 valued, null, padded, masked, or other; both `true` and `false` are valued
 Booleans. These states describe how a value is represented; see
 [value states](../datatypes/index.qmd#value-state). `inferred` marks that this
-position was requested as a prediction; it is not a confidence. To read the
-probabilities as Python values:
+position was requested as a prediction; it is not a confidence. Select the
+identifiers and probabilities into a flat Polars DataFrame:
 
 ```python
-rows = flat_result.to_pylist()
-probabilities = {
-    row["inputs"]["payment_id"]: row["predictions"]["disputed"]["content"]["probability"]
-    for row in rows
-}
+probabilities = flat_result.select(
+    payment_id=pl.col("inputs").struct.field("payment_id"),
+    probability=(
+        pl.col("predictions")
+        .struct.field("disputed")
+        .struct.field("content")
+        .struct.field("probability")
+    ),
+)
 ```
 
 ## Score the transaction model
@@ -106,11 +108,12 @@ alongside the predictions so their identifiers remain available:
 
 ```python
 history_model = rf.Model.load("artifacts/payment-history.rf")
-requests = rf.ArrowDataModule(
-    predict="payments/history/requests.parquet",
+requests = pl.read_parquet("payments/history/requests.parquet")
+result = history_model.predict(
+    requests,
+    batch_size=256,
     retain=("payment_id", "trxns"),
 )
-result = history_model.predict(datamodule=requests, batch_size=256, devices=1)
 ```
 
 This result contains `predictions.trxns`, a list with one result per retained
@@ -118,7 +121,7 @@ transaction in request order. Each item carries the same `disputed` payload
 as above:
 
 ```python
-observation = result.slice(0, 1).to_pylist()[0]
+observation = result.slice(0, 1).to_dicts()[0]
 probabilities = [
     transaction["disputed"]["content"]["probability"]
     for transaction in observation["predictions"]["trxns"]
@@ -156,7 +159,7 @@ columns, following the record's shape from the outside in:
 import polars as pl
 
 transactions = (
-    pl.from_arrow(result)
+    result
     .select(
         pl.col("inputs").struct.field("payment_id"),
         (
@@ -195,7 +198,7 @@ Two other columns can appear. `representations` holds exported embeddings
 when a node has `embed=True`. These expose the trained model's learned
 context for separate predictors; see
 [Reusable representations](reusable-representations.qmd). Nested targets,
-structural nulls, and the full Arrow contract are described in
+structural nulls, and the full output contract are described in
 [Prediction output](../reference/prediction-output.qmd).
 
 Next, [evaluate](evaluation.qmd) the model against the review

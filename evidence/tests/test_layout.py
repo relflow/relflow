@@ -134,8 +134,9 @@ def test_experiments_keep_explicit_training_protocols_on_model_fit() -> None:
         for call in calls:
             if ast.unparse(call.func) in {"rf.Model", "rf.Model.xs"}:
                 assert all(keyword.arg not in {"optimizer", "batch_size"} for keyword in call.keywords), path
-            if ast.unparse(call.func) == "rf.Cluster":
-                assert all(keyword.arg != "n_clusters" for keyword in call.keywords), path
+            if ast.unparse(call.func) == "rf.Group":
+                options = {keyword.arg: keyword.value for keyword in call.keywords}
+                assert "n_groups" in options, path
             if ast.unparse(call.func) == "rf.Address":
                 assert all(
                     "/" not in argument.value

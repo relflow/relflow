@@ -10,7 +10,7 @@ import relflow as rf
 REQUESTS = [
     (rf.Boolean, {}),
     (rf.Category, {}),
-    (rf.Cluster, {"bounds": 4}),
+    (rf.Group, {"n_groups": 4}),
     (rf.DateParts, {"dateparts": ["day_of_week"]}),
     (rf.Hash, {}),
     (rf.Number, {}),
@@ -95,10 +95,12 @@ def test_mutations_reject_metadata_even_when_validation_is_disabled(schema_only)
     [
         (rf.Category(), "topk", [2, 100], "topk"),
         (rf.Set(), "threshold", 0.8, "threshold"),
-        (rf.Cluster(bounds=4), "n_clusters", (4, 8), "n_clusters"),
+        (rf.Group, "n_groups", 8, "n_groups"),
     ],
 )
 def test_mutations_accept_declared_options_with_serialization_aliases(schema_only, field, attribute, value, canonical):
+    if field is rf.Group:
+        field = rf.Group(n_groups=4)
     model = rf.Model.xs(d_model=16, value=field)
     target = model.schema if schema_only else model
     selector = rf.where("name") == "value"

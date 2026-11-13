@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import polars as pl
+import pyarrow as pa
 import pytest
 
 import relflow as rf
@@ -95,14 +96,16 @@ def test_category_vocabulary_is_available_to_inference_preprocessor() -> None:
             .alias("category")
         )
 
-    predictions = model.predict(
-        table(
-            [
-                {"raw_category": "ALPHA"},
-                {"raw_category": "UNKNOWN"},
-            ]
-        ),
-        preprocess=keep_known_category,
+    predictions = pa.table(
+        model.predict(
+            table(
+                [
+                    {"raw_category": "ALPHA"},
+                    {"raw_category": "UNKNOWN"},
+                ]
+            ),
+            preprocess=keep_known_category,
+        )
     )
 
     assert seen == [("ALPHA", "BETA")]

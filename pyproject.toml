@@ -1,6 +1,6 @@
 [project]
 name = "relflow"
-version = "0.4.5"
+version = "0.4.7"
 description = "Relationship Flow: schema-first PyTorch models for hierarchical, nested, and sequence data"
 readme = "README.md"
 authors = [
@@ -115,7 +115,7 @@ output = "coverage.json"
 
 [tool.ruff]
 line-length = 120
-extend-exclude = ["docs", "evidence"]
+extend-exclude = ["docs", "evidence", "research/**/output", "research/**/attempts", "research/**/evidence-plots"]
 lint.extend-select = ["I"]
 
 [tool.pyrefly]

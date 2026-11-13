@@ -16,7 +16,7 @@ while initializing incompatible parts anew.
 Runtime resources can own their rebuild rules. Online vocabularies preserve
 their grown storage, label IDs, and compatible learned rows across schema
 edits. Storage is managed automatically, not configured through field options.
-Changing Cluster bounds can reinitialize assignment columns while preserving
+Changing `n_groups` can reinitialize assignment columns while preserving
 its vocabulary; changing embedding dimensions likewise resets incompatible weights.
 
 ## Select and update

@@ -1,12 +1,14 @@
 ---
 title: Prediction output
-description: "The Arrow contract for prediction tables: columns, leaf payloads, repeated coordinates, representations, and retained inputs."
+description: "The Polars contract for in-memory predictions: columns, leaf payloads, repeated coordinates, representations, and retained inputs."
 ---
 
-`model.predict(...)` returns a `pyarrow.Table`. Before application
+`model.predict(...)` returns an eager `polars.DataFrame`. Before application
 postprocessing, each row represents one processed observation. Named fields
-form Arrow structs; repeated records form
-`list<struct<...>>` collections. For the transaction tutorial, read the
+form Polars `Struct` columns; repeated records form
+`List(Struct(...))` collections. Fixed-width vectors use `Array`.
+`model.write(...)` returns the same eager frame when writing raw tensor
+predictions. For the transaction tutorial, read the
 transaction dispute predictions under `predictions.trxns[i].disputed`.
 [Read predictions](../learn/read-predictions.qmd) walks through one
 record; this page is the complete contract.
@@ -30,18 +32,17 @@ trxns:
 ```
 
 ```python
+import polars as pl
 import relflow as rf
 
-# The model is trained; the application supplies the request file.
-requests = rf.ArrowDataModule(
-    predict="payments/history/requests.parquet",
-    retain=("payment_id",),
-)
-result = model.predict(datamodule=requests, batch_size=256, devices=1)
+# The trained model scores a request file that fits in memory.
+requests = pl.read_parquet("payments/history/requests.parquet")
+result = model.predict(requests, batch_size=256, retain=("payment_id",))
 ```
 
-`devices=1` collects the result on one device. For large outputs, use a
-[Writer](../guides/batch-inference.qmd) to persist batches as they complete.
+`result` is an eager Polars DataFrame. For large files, use a
+[data module and Writer](../guides/batch-inference.qmd) to stream input and
+persist output batches as they complete.
 
 ## Read a field
 
@@ -52,7 +53,7 @@ prediction field names.
 Inspect one nonempty result row to read its transaction probabilities:
 
 ```python
-observation = result.slice(0, 1).to_pylist()[0]
+observation = result.slice(0, 1).to_dicts()[0]
 transactions = observation["predictions"]["trxns"]
 probabilities = [
     transaction["disputed"]["content"]["probability"]
@@ -116,11 +117,12 @@ Rich leaf payloads keep their datatype-specific structure:
 | --- | --- |
 | `Boolean` | `content.probability`: probability of `True` |
 | `Number` | `content`: floating-point reconstruction |
+| `Ordinal` | `content`: declared ordered label or rounded integer rank |
 | `Quantile` | `content`: reconstruction in source units; null before learning a distribution |
 | `Vector` | `content`: fixed-width float list |
 | `Category`, `Enum` | `content.value`, `content.probability`, `content.topk` |
 | `Set` | `content`: list of value/probability candidates |
-| `Cluster` | `cluster.value`, `cluster.probability`, plus content value/probability |
+| `Group` | `group.value`, `group.probability` |
 | `Text`, `Hash`, `Period` | No decoded public value; embeddings can be requested |
 
 Number and Quantile use the units supplied after preprocessing. Quantile clips
@@ -128,14 +130,14 @@ its inverse transformation to its learned range. Vector writes zeros where
 the most likely state is not `valued`. Reverse application-specific unit
 transforms in a [postprocessor](../guides/postprocessing.qmd).
 
-Category, Enum, and Set labels are Arrow `large_string` values. Top-k and Set
+Category, Enum, and Set labels are Polars `String` values. Top-k and Set
 candidates are lists of structs pairing each value with its probability.
 Category and Enum retain `topk` even when empty. A Set threshold can change
 candidate counts without changing the schema.
 
 ## Repeated coordinates
 
-All repeated record collections use variable Arrow lists, including
+All repeated record collections use variable Polars `List` values, including
 `Branch(length=1)` and other finite limits. `length` caps retained input;
 it does not pad public output to the cap. The root is a struct with no
 singleton observation list.
@@ -183,7 +185,7 @@ widths. Fixed-width vectors retain their feature-width axis.
 | `path` | Field-name segments; `[]` identifies the anonymous root. |
 | `parents` | Item ordinals for repeated ancestors, outermost first. |
 | `output_index` | The representation's intrinsic output index at that site. |
-| `embedding` | A fixed-size float32 list of model width. |
+| `embedding` | A float32 `Array` of model width. |
 
 A history summary uses `path=[trxns], parents=[]`. A leaf
 embedding on its third transaction uses
@@ -211,16 +213,42 @@ relflow does not invent an application identity or promise global shard order.
 
 ## Batch direct requests
 
-The direct API accepts Arrow tables and record batches, plus a nonempty
-sequence of mappings for small interactive requests. Use a typed Arrow object
-for empty input: the planned output schema is preserved without a forward pass.
-Put file paths on a data module's `predict` split.
+The direct API accepts eager Polars DataFrames, Arrow tables and record batches,
+plus a nonempty sequence of mappings for small interactive requests. Polars
+input converts to Arrow once before preprocessing and batching; nested structs,
+lists, and structural nulls are preserved. Call `.collect()` on a LazyFrame
+before passing it to prediction.
+
+For empty input, supply a Polars DataFrame or Arrow object with an explicit
+schema: the planned output schema is preserved without a forward pass. Put
+file paths on a data module's `predict` split.
 
 A positive direct `batch_size` preprocesses the full input once, chunks processed
-Arrow rows before encoding, combines output tables, and postprocesses once.
+Arrow rows before encoding, combines output batches into a Polars frame, and postprocesses once.
 It also updates the model's current batch size. Omitting the override, or using
 `None`, preserves whole-input direct execution. File-backed data modules and
 [Batch inference](../guides/batch-inference.qmd) provide streaming input/output.
+
+## Encode and write directly
+
+For a custom inference loop, `model.encode(...)` accepts an eager Polars frame
+and returns tensorfields. `model.write(...)` accepts the corresponding Polars
+frame as `source` and returns a Polars DataFrame:
+
+```python
+import torch
+
+model.eval()
+with torch.inference_mode():
+    tensors = model.encode(requests)
+    raw_predictions = model(tensors, strata="predict")
+    result = model.write(raw_predictions, source=requests, retain=("payment_id",))
+```
+
+Use the same prepared observation rows for encoding and writing so retention
+and nested collection positions stay aligned. `model.predict(...)` owns
+preprocessing, batching, and evaluation mode for ordinary inference. Arrow
+tables remain valid sources, and `encode` also accepts Arrow record batches.
 
 ## Files and HTTP
 
@@ -229,9 +257,16 @@ selected columns. JSON renders their records; Arrow HTTP writes their schema
 through IPC. Postprocessors can deliberately define an application-specific
 response at the table boundary.
 
-Arrow schema metadata records the model's recorded package version under
-`relflow.model_version`, and HTTP mirrors it in a header. This value does not
-uniquely identify a checkpoint. See
+In-memory Polars results do not carry Arrow schema or field metadata. Read the
+model's recorded package version from `model.version`. Use `result.to_arrow()`
+to pass the output to an Arrow consumer, `result.to_dicts()` for Python records,
+or ordinary Polars expressions to select nested fields. Arrow conversion uses
+Polars' Arrow types and does not restore source field metadata.
+
+Batch prediction steps and `rf.Writer` retain their Arrow table contract,
+including schema and extension field metadata. Batch files and Arrow HTTP
+responses carry the model's version under `relflow.model_version`; HTTP also
+mirrors it in a header. This value does not uniquely identify a checkpoint. See
 [Serving](../guides/serving.qmd) for error responses and request-order requirements.
 
 `rf.Writer` requires an exact stable schema and metadata across batches.
