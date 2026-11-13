@@ -1,6 +1,9 @@
 [package]
-name = "relflow-cache-native"
+name = "relflow-native"
 version = "0.1.0"
+description = "Native kernels and shared local runtimes for relflow"
+license = "Apache-2.0"
+repository = "https://github.com/relflow/relflow"
 edition = "2024"
 rust-version = "1.88"
 publish = false
@@ -8,10 +11,6 @@ publish = false
 [lib]
 name = "native"
 crate-type = ["cdylib", "rlib"]
-
-[[bin]]
-name = "cache-owner"
-path = "src/bin/owner.rs"
 
 [features]
 python = ["dep:pyo3", "dep:arrow-array", "dep:arrow-data", "dep:arrow-pyarrow", "dep:arrow-schema"]

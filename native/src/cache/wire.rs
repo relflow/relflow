@@ -39,8 +39,10 @@ pub fn call(stream: &mut TcpStream, op: u8, meta: &[u8], payload: &[u8]) -> Resu
 pub fn ids(data: &[u8], n: usize) -> Result<Vec<i64>> {
     ensure!(data.len() == n * 8, "artifact ID batch has incorrect size");
     Ok(data
-        .chunks_exact(8)
-        .map(|row| i64::from_le_bytes(row.try_into().unwrap()))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|row| i64::from_le_bytes(*row))
         .collect())
 }
 
@@ -69,8 +71,10 @@ pub fn unpack(data: &[u8], n: usize) -> Result<(Vec<&[u8]>, usize)> {
     let header = (n + 1) * 4;
     ensure!(data.len() >= header, "truncated artifact offsets");
     let offsets: Vec<usize> = data[..header]
-        .chunks_exact(4)
-        .map(|v| u32::from_le_bytes(v.try_into().unwrap()) as usize)
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|v| u32::from_le_bytes(*v) as usize)
         .collect();
     ensure!(
         offsets[0] == 0 && offsets.windows(2).all(|v| v[0] <= v[1]),

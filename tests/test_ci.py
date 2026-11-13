@@ -42,6 +42,7 @@ def test_complete_jobs_satisfy_the_gate(gate, event):
             "docs": "success",
             "evidence": "success",
             "package": "success",
+            "native": "success",
         },
     )
 
@@ -53,6 +54,7 @@ def test_normal_tests_are_always_required(gate, event, status):
         "docs": "success",
         "evidence": "success",
         "package": "success",
+        "native": "success",
     }
     with pytest.raises(AssertionError):
         gate(event, results)
@@ -71,6 +73,7 @@ def test_evidence_errors_or_skips_never_satisfy_validation(gate, event, status):
                 "docs": "success",
                 "evidence": status,
                 "package": "success",
+                "native": "success",
             },
         )
 
@@ -82,6 +85,7 @@ def test_documentation_is_required_for_every_event(gate, event, status):
         "docs": status,
         "evidence": "success",
         "package": "success",
+        "native": "success",
     }
     with pytest.raises(AssertionError):
         gate(event, results)
@@ -90,14 +94,25 @@ def test_documentation_is_required_for_every_event(gate, event, status):
 @pytest.mark.parametrize("event,status", itertools.product(EVENTS, ["failure", "cancelled", "skipped"]))
 def test_shared_package_is_required_for_every_event(gate, event, status):
     with pytest.raises(AssertionError):
-        gate(event, {"tests": "success", "docs": "success", "evidence": "success", "package": status})
+        gate(
+            event,
+            {"tests": "success", "docs": "success", "evidence": "success", "package": status, "native": "success"},
+        )
+
+
+@pytest.mark.parametrize("event,status", itertools.product(EVENTS, ["failure", "cancelled", "skipped"]))
+def test_native_checks_are_required_for_every_event(gate, event, status):
+    results = {name: "success" for name in ("tests", "docs", "evidence", "package")}
+    results["native"] = status
+    with pytest.raises(AssertionError):
+        gate(event, results)
 
 
 def test_forks_and_missing_jobs_cannot_report_a_passing_gate(gate):
     with pytest.raises(AssertionError):
         gate(
             "pull_request",
-            {"tests": "success", "docs": "success", "evidence": "success", "package": "success"},
+            {"tests": "success", "docs": "success", "evidence": "success", "package": "success", "native": "success"},
             head="fork/relflow",
         )
     with pytest.raises(AssertionError):
@@ -110,7 +125,7 @@ def test_partial_ci_retries_require_a_complete_current_attempt(gate, event, pack
     with pytest.raises(AssertionError, match="re-run all jobs"):
         gate(
             event,
-            {name: "success" for name in ("tests", "docs", "evidence", "package")},
+            {name: "success" for name in ("tests", "docs", "evidence", "package", "native")},
             package_attempt=package,
             evidence_attempt=evidence,
         )

@@ -1,4 +1,4 @@
-use crate::wire::{self, MAX_ROWS};
+use super::wire::{self, MAX_ROWS};
 use arrow_array::{
     Array, BinaryArray, BinaryViewArray, FixedSizeBinaryArray, LargeBinaryArray, LargeStringArray,
     StringArray, StringViewArray, make_array,
@@ -12,12 +12,12 @@ use pyo3::{
     types::PyBytes,
 };
 use sha2::{Digest, Sha256};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::sync::Mutex;
 use std::time::Duration;
 
-#[pyclass(frozen)]
+#[pyclass(frozen, module = "relflow_native.native.cache")]
 struct Client {
     port: u16,
     auth: [u8; 32],
@@ -31,6 +31,13 @@ impl Client {
             socket.set_read_timeout(Some(Duration::from_secs(300)))?;
             socket.set_write_timeout(Some(Duration::from_secs(300)))?;
             socket.write_all(&self.auth)?;
+            socket.write_all(&super::PROTOCOL.to_le_bytes())?;
+            let mut version = [0; 4];
+            socket.read_exact(&mut version)?;
+            anyhow::ensure!(
+                u32::from_le_bytes(version) == super::PROTOCOL,
+                "incompatible artifact cache protocol; install matching relflow and relflow-native versions"
+            );
             *stream = Some(socket);
         }
         wire::call(stream.as_mut().unwrap(), op, meta, payload)
@@ -190,8 +197,15 @@ impl Client {
     }
 }
 
-#[pymodule]
-fn native(module: &Bound<'_, PyModule>) -> PyResult<()> {
+#[pyfunction]
+fn run(py: Python<'_>, path: std::path::PathBuf, memory: u64, capacity: u64) -> PyResult<()> {
+    py.detach(|| super::owner::run(&path, memory, capacity))
+        .map_err(|error| PyRuntimeError::new_err(error.to_string()))
+}
+
+pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<Client>()?;
+    module.add("PROTOCOL", super::PROTOCOL)?;
+    module.add_function(wrap_pyfunction!(run, module)?)?;
     Ok(())
 }

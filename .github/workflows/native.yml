@@ -1,0 +1,102 @@
+name: Native
+
+on:
+  workflow_call:
+    inputs:
+      distribution_artifact:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  rust:
+    name: Rust / ${{ matrix.toolchain }}
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        toolchain: [stable, '1.88.0']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: rustfmt, clippy
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: '3.12'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+      - name: Check Rust and the Python bindings
+        working-directory: native
+        run: |
+          if [ "${{ matrix.toolchain }}" = stable ]; then cargo fmt --check; fi
+          cargo test --locked
+          cargo clippy --locked --features python --all-targets -- -D warnings
+
+  wheels:
+    name: Installed packages / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.distribution_artifact }}
+          path: package/
+      - name: Verify the shared relflow distribution
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: python scripts/release.py verify package --source-sha "$SOURCE_SHA"
+      - name: Build portable wheel and source distribution
+        uses: PyO3/maturin-action@v1
+        with:
+          maturin-version: '1.16.0'
+          manylinux: '2_28'
+          args: --manifest-path native/Cargo.toml --locked --release --sdist --out native-dist --interpreter 3.12
+      - name: Test installed wheel on supported Python versions and rebuild the source distribution
+        shell: python
+        run: |
+          import os
+          import pathlib
+          import subprocess
+          wheel = next(pathlib.Path("native-dist").glob("*.whl"))
+          source = next(pathlib.Path("native-dist").glob("*.tar.gz"))
+          relflow = next(pathlib.Path("package").glob("*.whl"))
+          for label, version, artifact in (("min", "3.12", wheel), ("max", "3.14", wheel), ("source", "3.12", source)):
+              environment = pathlib.Path(f".venv-native-{label}")
+              subprocess.run(["uv", "venv", "--python", version, str(environment)], check=True)
+              python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+              subprocess.run(["uv", "pip", "install", "--python", str(python), "--no-deps", str(relflow)], check=True)
+              subprocess.run(["uv", "pip", "install", "--python", str(python), str(artifact), "pytest", "pytest-xdist", "moka-py>=0.5,<0.6"], check=True)
+              subprocess.run([str(python), "-m", "pytest", "--confcutdir=native/tests", "native/tests", "-m", "integration", f"--junitxml=native-test-{label}.xml"], check=True)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-${{ runner.os }}-attempt-${{ github.run_attempt }}
+          path: |
+            native-dist/
+            native-test-*.xml
+          if-no-files-found: error
+          retention-days: 14

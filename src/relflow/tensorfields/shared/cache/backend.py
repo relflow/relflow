@@ -22,6 +22,7 @@ import numpy as np
 
 MAX_FRAME = 32 * 2**20
 MAX_ROWS = 4096
+PROTOCOL = 2
 CHARGE = 160
 
 
@@ -247,6 +248,8 @@ class Disk:
             self.hot.run_pending_tasks()
             return dict(
                 self.counters,
+                backend="python",
+                protocol=PROTOCOL,
                 identity=self.identity,
                 **{
                     name: int(self.connection.execute("SELECT value FROM metadata WHERE key=?", (name,)).fetchone()[0])
@@ -320,6 +323,10 @@ def serve(stream: socket.socket, store: Disk, auth: bytes, stop: threading.Event
         stream.settimeout(30)
         if not hmac.compare_digest(receive(stream, 32), auth):
             return
+        version = struct.unpack("<I", receive(stream, 4))[0]
+        stream.sendall(struct.pack("<I", PROTOCOL))
+        if version != PROTOCOL:
+            return
         stream.settimeout(None)
         while not stop.is_set():
             size = struct.unpack("<I", receive(stream, 4))[0]
@@ -356,7 +363,10 @@ def main():
     listener.listen(128)
     listener.settimeout(0.2)
     threading.Thread(target=parent, daemon=True).start()
-    print(json.dumps(dict(port=listener.getsockname()[1], identity=store.identity)), flush=True)
+    print(
+        json.dumps(dict(port=listener.getsockname()[1], identity=store.identity, protocol=PROTOCOL, backend="python")),
+        flush=True,
+    )
     clients: list[tuple[threading.Thread, socket.socket]] = []
     try:
         while not stop.is_set():

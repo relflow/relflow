@@ -310,7 +310,7 @@ def test_native_and_portable_owners_share_committed_artifacts(tmp_path):
 
     from relflow.tensorfields.shared.cache import Endpoint, backend
 
-    if importlib.util.find_spec("relflow_cache_native") is None:
+    if importlib.util.find_spec("relflow_native") is None:
         pytest.skip("optional native cache wheel is not installed")
     path = tmp_path / "interoperability"
     path.mkdir()
@@ -341,7 +341,8 @@ def test_native_and_portable_owners_share_committed_artifacts(tmp_path):
     try:
         assert native.endpoint.identity == identity
         assert native.connection.native is not None
-        assert "cache-owner" in str(native.owner.process.args[0])
+        assert native.stats()["backend"] == "rust"
+        assert native.stats()["transport"] == "rust"
         assert [bytes(value) for value in native.fetch(ids, "encoder/v1").hits] == expected
         aliases = native.lookup_arrow(pa.array([b"from native"]), "native/prepare-v1")
         ids = native.bind(aliases, Payloads.from_values([b"native prepared"]), "native/payload-v1")

@@ -1,4 +1,4 @@
-use crate::wire::{MAX_FRAME, MAX_ROWS, ids, pack, unpack};
+use super::wire::{MAX_FRAME, MAX_ROWS, ids, pack, unpack};
 use anyhow::{Result, bail, ensure};
 use moka::sync::Cache;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -379,7 +379,7 @@ impl Store {
         };
         let load = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
         Ok(
-            json!({"identity":self.identity,"identified":load(&self.counts.identified),"alias_hits":load(&self.counts.alias_hits),"requests":load(&self.counts.requests),"hits":load(&self.counts.hits),"disk_reads":load(&self.counts.disk_reads),"compute_claims":load(&self.counts.compute_claims),"aliases":count("aliases")?,"objects":count("objects")?,"results":count("results")?,"memory":self.memory,"hot_bytes":self.hot.weighted_size(),"hot_entries":self.hot.entry_count(),"page_bytes":4194304,"claims":self.claims.lock().unwrap().len()}),
+            json!({"backend":"rust","protocol":super::PROTOCOL,"identity":self.identity,"identified":load(&self.counts.identified),"alias_hits":load(&self.counts.alias_hits),"requests":load(&self.counts.requests),"hits":load(&self.counts.hits),"disk_reads":load(&self.counts.disk_reads),"compute_claims":load(&self.counts.compute_claims),"aliases":count("aliases")?,"objects":count("objects")?,"results":count("results")?,"memory":self.memory,"hot_bytes":self.hot.weighted_size(),"hot_entries":self.hot.entry_count(),"page_bytes":4194304,"claims":self.claims.lock().unwrap().len()}),
         )
     }
     pub fn dispatch(&self, frame: &[u8], owner: u64) -> Result<Vec<u8>> {
@@ -412,10 +412,7 @@ impl Store {
         ensure!(n <= MAX_ROWS, "request exceeds 4096 rows");
         if op == 1 {
             ensure!(data.len() == n * 32, "invalid key batch");
-            let keys: Vec<[u8; 32]> = data
-                .chunks_exact(32)
-                .map(|v| v.try_into().unwrap())
-                .collect();
+            let keys: Vec<[u8; 32]> = data.as_chunks::<32>().0.to_vec();
             return self.identify(&keys);
         }
         ensure!(data.len() >= n * 8, "truncated ID batch");
@@ -434,10 +431,7 @@ impl Store {
         match op {
             2 => {
                 ensure!(data.len() >= n * 32, "truncated alias key batch");
-                let keys: Vec<[u8; 32]> = data[..n * 32]
-                    .chunks_exact(32)
-                    .map(|v| v.try_into().unwrap())
-                    .collect();
+                let keys: Vec<[u8; 32]> = data[..n * 32].as_chunks::<32>().0.to_vec();
                 let (rows, used) = unpack(&data[n * 32..], n)?;
                 ensure!(
                     used == data.len() - n * 32,

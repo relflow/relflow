@@ -1,10 +1,15 @@
-# Artifact cache protocol v1
+# Artifact cache protocol v2
 
 The owner is a local, capability-authenticated process. Other clients can use
 this protocol without Python, relflow, or a modality-specific dependency.
-`src/wire.rs` and `src/store.rs` implement the contract.
+`wire.rs` and `store.rs` implement the contract. SQLite format 1 remains unchanged.
 
-A connection first sends the owner's 32-byte capability. The owner receives it
+A connection first sends the owner's 32-byte capability and a little-endian
+`u32` protocol version (currently 2). The owner replies with its `u32` version
+after authentication; both sides reject a mismatch before sending any frames.
+The owner's startup JSON reports `port`, `identity`, `protocol` and `backend`
+(`rust` or `python`), and clients validate it before constructing a handle.
+The owner receives its capability
 through stdin at launch, not an argument or log. Every connection has its own
 compute-claim identity. Closing it releases unfinished claims. The owner listens
 on loopback and exits when its parent's stdin closes or operation 6 succeeds.
@@ -41,7 +46,7 @@ represent empty artifacts. There is no implicit element dtype or shape.
 | 2: bind | `n`, `namespace` | `i64 aliases[n]`, keys (32 bytes each), `packed(n)` prepared inputs | `i64 artifacts[n]` |
 | 3: fetch | `n`, `namespace` | `i64 artifacts[n]` | `u8 statuses[n]`, `packed(hit_count)` results, `packed(owned_count)` prepared inputs |
 | 4: publish | `n`, `namespace` | `i64 artifacts[n]`, `packed(n)` results | `packed(n)` committed results |
-| 5: stats | `{}` | empty | JSON counters, counts, budget, hot weight, identity |
+| 5: stats | `{}` | empty | JSON counters, counts, budget, hot weight, identity, backend, protocol |
 | 6: stop | `{}` | empty | empty, followed by owner shutdown |
 | 7: release | `{}` | empty | empty; release all claims on this connection |
 | 8: wait | `{}` | empty | empty after a completion notification or a 100 ms timeout |

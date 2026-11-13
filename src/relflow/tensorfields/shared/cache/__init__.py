@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import importlib
-import importlib.util
 import json
 import os
 import socket
@@ -26,6 +25,25 @@ if TYPE_CHECKING:
 
 MAX_FRAME = 32 * 2**20
 MAX_ROWS = 4096
+PROTOCOL = 2
+
+
+def native_cache(required: bool = False) -> Any:
+    """An absent add-on is optional; an incompatible installed add-on is an error."""
+    try:
+        module = importlib.import_module("relflow_native.native")
+    except ModuleNotFoundError as error:
+        if required or error.name != "relflow_native":
+            raise
+        return None
+    cache = getattr(module, "cache", None)
+    version = getattr(cache, "PROTOCOL", None)
+    if version != PROTOCOL:
+        raise RuntimeError(
+            f"relflow-native cache protocol {version!r} is incompatible with expected {PROTOCOL}; "
+            "install matching relflow and relflow-native versions"
+        )
+    return cache
 
 
 def digest(namespace: str, value: bytes) -> bytes:
@@ -159,12 +177,8 @@ class Connection:
         self.stream: socket.socket | None = None
         self.native: Any = None
         if native is not False:
-            try:
-                module = importlib.import_module("relflow_cache_native.native")
-            except ModuleNotFoundError as error:
-                if native or error.name not in ("relflow_cache_native", "relflow_cache_native.native"):
-                    raise
-            else:
+            module = native_cache(required=bool(native))
+            if module is not None:
                 self.native = module.Client(endpoint.port, endpoint.auth)
 
     @classmethod
@@ -187,8 +201,19 @@ class Connection:
             if self.native is not None:
                 return memoryview(self.native.request(op, metadata, payload))
             if self.stream is None:
-                self.stream = socket.create_connection(("127.0.0.1", self.endpoint.port), timeout=300)
-                self.stream.sendall(self.endpoint.auth)
+                stream = socket.create_connection(("127.0.0.1", self.endpoint.port), timeout=300)
+                try:
+                    stream.sendall(self.endpoint.auth + struct.pack("<I", PROTOCOL))
+                    version = struct.unpack("<I", receive(stream, 4))[0]
+                    if version != PROTOCOL:
+                        raise RuntimeError(
+                            f"artifact owner protocol {version} is incompatible with expected {PROTOCOL}; "
+                            "install matching relflow and relflow-native versions"
+                        )
+                except BaseException:
+                    stream.close()
+                    raise
+                self.stream = stream
             self.stream.sendall(struct.pack("<IBI", size, op, len(metadata)) + metadata + payload)
             size = struct.unpack("<I", receive(self.stream, 4))[0]
             if not 1 <= size <= MAX_FRAME + 1:
@@ -250,15 +275,10 @@ class Owner:
             self.path.mkdir(parents=True, exist_ok=True)
             auth = os.urandom(32)
             configured = os.environ.get("RELFLOW_CACHE_OWNER")
-            specification = importlib.util.find_spec("relflow_cache_native")
-            binary = None
-            if specification is not None and specification.origin is not None:
-                name = "cache-owner.exe" if sys.platform == "win32" else "cache-owner"
-                binary = Path(specification.origin).with_name(name)
             if configured:
                 command = [configured]
-            elif binary is not None and binary.is_file():
-                command = [str(binary)]
+            elif native_cache() is not None:
+                command = [sys.executable, "-m", "relflow_native.cache"]
             else:
                 command = [sys.executable, str(Path(__file__).with_name("backend.py"))]
             log = tempfile.TemporaryFile()
@@ -279,7 +299,17 @@ class Owner:
                 detail = log.read().decode(errors="replace")
                 self.close()
                 raise RuntimeError(f"could not start artifact owner: {detail}")
-            description = json.loads(ready)
+            try:
+                description = json.loads(ready)
+                version = description.get("protocol")
+                if version != PROTOCOL:
+                    raise RuntimeError(
+                        f"artifact owner protocol {version!r} is incompatible with expected {PROTOCOL}; "
+                        "install matching relflow and relflow-native versions"
+                    )
+            except (ValueError, RuntimeError):
+                self.close()
+                raise
             self.endpoint = Endpoint(description["port"], auth, description["identity"], self.pid)
             return self.endpoint
 
@@ -445,7 +475,10 @@ class Cache:
         self.connection.request(8)
 
     def stats(self) -> dict[str, Any]:
-        return json.loads(bytes(self.connection.request(5)))
+        return dict(
+            json.loads(bytes(self.connection.request(5))),
+            transport="rust" if self.connection.native is not None else "python",
+        )
 
 
 __all__ = ["Cache", "Fetch", "Payloads", "References"]

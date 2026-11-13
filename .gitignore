@@ -54,7 +54,6 @@ evidence/runs/
 /scripts/benchmarks/text-cache/
 /scripts/text_throughput.py
 /scripts/text_throughput_report.py
-/native/cache/target/
-/native/cache/python/relflow_cache_native/cache-owner*
-/native/cache/python/relflow_cache_native/native*.so
-/native/cache/python/relflow_cache_native/native*.pyd
+/native/target/
+/native/python/relflow_native/native*.so
+/native/python/relflow_native/native*.pyd

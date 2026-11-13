@@ -111,7 +111,7 @@ SQLite locking. Existing NPY stores are left intact; this format creates a
 new `artifacts.sqlite3` and fills it as text is observed.
 
 Text uses the shared tensorfield artifact cache. Its standard owner isolates
-Rust Moka and SQLite from encoder libraries. The optional native cache add-on
+Rust Moka and SQLite from encoder libraries. The optional `relflow-native` add-on
 uses the same storage format and accelerates transport and lookups without
 changing the Text schema. Other extensions can reuse the shared store with
 their own payload codecs and identities.

@@ -1,5 +1,5 @@
+use super::{PROTOCOL, store::Store, wire::MAX_FRAME};
 use anyhow::{Result, ensure};
-use native::{store::Store, wire::MAX_FRAME};
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::Path;
@@ -22,6 +22,13 @@ fn serve(
     ensure!(
         constant_time_eq::constant_time_eq(&token, auth),
         "invalid local capability"
+    );
+    let mut version = [0; 4];
+    stream.read_exact(&mut version)?;
+    stream.write_all(&PROTOCOL.to_le_bytes())?;
+    ensure!(
+        u32::from_le_bytes(version) == PROTOCOL,
+        "incompatible artifact cache protocol"
     );
     stream.set_read_timeout(None)?;
     loop {
@@ -64,19 +71,10 @@ fn serve(
     }
 }
 
-fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().collect();
-    ensure!(
-        args.len() == 4,
-        "usage: cache-owner DATABASE HOT_BYTES ENTRY_CAP"
-    );
+pub fn run(path: &Path, memory: u64, capacity: u64) -> Result<()> {
     let mut auth = [0; 32];
     std::io::stdin().read_exact(&mut auth)?;
-    let store = Arc::new(Store::open(
-        Path::new(&args[1]),
-        args[2].parse()?,
-        args[3].parse()?,
-    )?);
+    let store = Arc::new(Store::open(path, memory, capacity)?);
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     listener.set_nonblocking(true)?;
     let stop = Arc::new(AtomicBool::new(false));
@@ -88,7 +86,7 @@ fn main() -> Result<()> {
     });
     println!(
         "{}",
-        serde_json::json!({"port":listener.local_addr()?.port(),"identity":store.identity})
+        serde_json::json!({"port":listener.local_addr()?.port(),"identity":store.identity,"protocol":PROTOCOL,"backend":"rust"})
     );
     std::io::stdout().flush()?;
     let next = AtomicU64::new(1);
