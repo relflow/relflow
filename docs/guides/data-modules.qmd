@@ -18,6 +18,10 @@ The examples continue the
 [transaction model](../learn/add-transaction-history.qmd). Its `payment_id`
 column remains a source column without becoming a model field.
 
+[Input distributions](input-distributions.qmd) explains the field metadata and
+opt-in monitoring and configurable warnings when validation, test, or prediction populations differ
+from training.
+
 ## Arrow
 
 Pass Parquet file paths to `ArrowDataModule`:

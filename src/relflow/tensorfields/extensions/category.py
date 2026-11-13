@@ -28,6 +28,7 @@ from relflow.tensorfields.base import (
 )
 from relflow.tensorfields.output import array, labels, struct, variable
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
+from relflow.tensorfields.shared.distributions import categorical as profile
 from relflow.tensorfields.shared.reconstruction import Metrics, Reconstruction, Scores
 from relflow.tensorfields.shared.resize import SILENT_LOGIT
 from relflow.tensorfields.shared.rows import Embedding, Linear
@@ -592,3 +593,6 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
         content_type,
     )
     return struct({TensorKey.content.name: content}, datatype)
+
+
+category.register(Component.profile, profile)

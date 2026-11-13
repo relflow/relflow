@@ -47,6 +47,7 @@ def factory(profile: Preset):
         optimizer: OptimizerConfig | None = None,
         scheduler: SchedulerConfig | None = None,
         jacobian: bool = False,
+        drift: bool = False,
         **field_kwargs: TreeFieldInput,
     ) -> M:
         if "schema" in field_kwargs:
@@ -67,7 +68,14 @@ def factory(profile: Preset):
             mask=mask,
             **field_kwargs,
         )
-        model = cls(schema=schema, batch_size=batch_size, optimizer=optimizer, scheduler=scheduler, jacobian=jacobian)
+        model = cls(
+            schema=schema,
+            batch_size=batch_size,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            jacobian=jacobian,
+            drift=drift,
+        )
         model.preset = profile
         return model
 

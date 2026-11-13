@@ -42,6 +42,18 @@ require the Duration/Ordinal wheel from `stage/0.5.0`. The current core wheel
 does not supply those pending datatypes. A research selection does not download
 models, substitute a mocked encoder, or replace a missing measurement with a pass.
 
+P101–P103 probe input-distribution monitoring with three fixed seeds each and
+require the unreleased wheel exporting `Drift` and `model.distributions`. Each
+study explicitly opts in with `Model(..., drift=True)`; ordinary models keep
+monitoring disabled. They
+cover numeric and typed shifts, quiet controls, the correlation blind spot,
+warning policies, and checkpoint persistence. Run them explicitly with
+`--lane research P101 P102 P103`; local records do not change published results.
+P104–P106 add Enum, Hash, and Cluster drift checks across validation, test, and
+prediction, including incremental batches, sample guards, and warning
+suppression. Run these with `--lane research P104 P105 P106` using the same
+monitoring-capable wheel.
+
 Create an authoring file from the repository root:
 
 ```sh

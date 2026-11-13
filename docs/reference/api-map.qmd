@@ -125,3 +125,15 @@ output, and related behavior. `rf.RequestBase`, `rf.TensorFieldBase`,
 An extension adds a field type to the model factory, including its
 representation, supported objectives, and decoded output contract. It can be
 used inside the same nested branches as built-in types.
+
+## Input distribution metadata
+
+| API | Purpose |
+|---|---|
+| `Model(..., drift=True)` | Opt into input profiling and drift warnings; defaults to disabled |
+| `rf.Drift` | Per-field tolerance and minimum sample counts after model opt-in |
+| `model.distributions` / `rf.Distributions` | Inspect or clear cumulative field profiles across strata |
+| `rf.Distribution` | Mergeable numeric or categorical feature for extension profiling |
+
+See [Input distributions](../guides/input-distributions.qmd) for defaults,
+limitations, checkpoint behavior, and custom extension components.

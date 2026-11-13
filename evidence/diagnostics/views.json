@@ -751,5 +751,41 @@
     "focus": "Can an ordered decoder fill ranks absent from training?",
     "comparison": "Separate familiar and withheld ranks for Ordinal, rounded Number, and Category outputs.",
     "limit": "A matching stage/0.5.0 Ordinal wheel is required; declared ordering alone is not learned interpolation."
+  },
+  "P101": {
+    "mode": "research",
+    "focus": "Which numeric shifts warn, and which joint changes remain invisible to marginal profiles?",
+    "comparison": "Compare location, spread, and bimodal shifts with independent same-population draws and a correlation sign flip.",
+    "limit": "Synthetic marginal diagnostics across three fixed seeds do not establish production false-positive rates or joint-distribution detection."
+  },
+  "P102": {
+    "mode": "research",
+    "focus": "Do typed profiles warn for their declared held-out population changes?",
+    "comparison": "Change one of label frequencies, Boolean frequency, set members, set size, vector norm, calendar parts, or nested null rates while retaining a matched control.",
+    "limit": "Fixed identity buckets can collide; vector and calendar projections do not characterize every possible distribution shift."
+  },
+  "P103": {
+    "mode": "research",
+    "focus": "Do sampling guards, configured tolerances, and checkpoint round trips preserve warning behavior?",
+    "comparison": "Apply one shift to monitored, tolerant, and disabled numeric inputs; inspect repeated, loaded, and cleared prediction windows.",
+    "limit": "These are local monitoring contracts, not predictive accuracy, runtime overhead, or globally aggregated distributed evidence."
+  },
+  "P104": {
+    "mode": "research",
+    "focus": "Does Enum distinguish real frequency drift from label folding and reject undeclared labels?",
+    "comparison": "Across validation, test, and prediction, compare stable, folded, concentrated, and all-null labels; inspect incremental batches and undeclared inputs.",
+    "limit": "Declared-label checks are separate from drift warnings; this study does not admit new Enum classes or establish a production false-positive rate."
+  },
+  "P105": {
+    "mode": "research",
+    "focus": "Does Hash detect identity drift without treating training salts as population changes?",
+    "comparison": "Compare stable, concentrated, novel, and all-null large integer identities across strata; retain salted tensor and fixed-profile controls.",
+    "limit": "Fixed identity buckets can collide. The selected IDs near 2^60 demonstrate precision and salt behavior, not collision-free detection."
+  },
+  "P106": {
+    "mode": "research",
+    "focus": "Does Cluster detect label drift while freezing learned evaluation resources?",
+    "comparison": "Compare stable, concentrated, novel, and all-null customer labels across strata; verify batch accumulation and unchanged vocabulary, assignments, and usage.",
+    "limit": "Input label-frequency monitoring does not measure cluster quality or detect every change in learned or joint relationships."
   }
 }
