@@ -8,8 +8,7 @@ import json
 import math
 import os
 import sys
-import traceback
-from contextlib import redirect_stdout
+from contextlib import nullcontext, redirect_stdout
 from pathlib import Path
 from typing import Any
 
@@ -18,12 +17,15 @@ import pyarrow as pa
 import torch
 import yaml
 from lightning.pytorch.callbacks import ModelCheckpoint
+from rich.console import Console
+from rich.text import Text
 
 from relflow._version import __version__
 from relflow.architecture.output import write
 from relflow.architecture.template import Loader
 from relflow.cli.config import Fit, Predict, Run, Serve, location, processor, read
 from relflow.cli.jobs import ExecutionError, Job, digest, manifest
+from relflow.cli.terminal import render
 from relflow.data.datasets.arrow import ArrowDataModule
 from relflow.data.processors import Postprocessor, Preprocessor
 from relflow.data.sources import source
@@ -298,13 +300,20 @@ def execute(arguments: dict[str, Any], run: Run, pathname: str, checkpoint: str 
 def main(argv: list[str] | None = None) -> int:
     """Run one command, keeping backend output off machine-readable stdout."""
     arguments = vars(parser().parse_args(argv))
+    console = Console(markup=False, highlight=False)
+    errors = Console(stderr=True, markup=False, highlight=False)
     configure(level="debug" if arguments.get("debug") else "warning", output=sys.stderr)
+    activity = (
+        errors.status(Text(f"Running {arguments['command']}…"))
+        if errors.is_terminal and not arguments.get("json") and arguments["command"] != "serve"
+        else nullcontext()
+    )
     try:
-        with redirect_stdout(sys.stderr):
+        with activity, redirect_stdout(sys.stderr):
             run, pathname, checkpoint = settings(arguments)
             report = execute(arguments, run, pathname, checkpoint)
     except KeyboardInterrupt:
-        print("relflow: interrupted", file=sys.stderr)
+        errors.print(Text("relflow: interrupted", style="yellow"))
         return 130
     except Exception as error:
         code = (
@@ -324,17 +333,12 @@ def main(argv: list[str] | None = None) -> int:
             report = error.report
         if arguments.get("json"):
             print(json.dumps(report, allow_nan=False))
-        print(f"relflow {arguments['command']}: {error}", file=sys.stderr)
+        errors.print(Text.assemble((f"relflow {arguments['command']}: ", "bold red"), str(error)))
         if arguments.get("debug"):
-            traceback.print_exc(file=sys.stderr)
+            errors.print_exception(show_locals=False)
         return code
     if arguments.get("json"):
         print(json.dumps(report, allow_nan=False))
-    elif arguments["command"] == "inspect":
-        print(f"Model: {report['model']} (relflow {report['model_version']})")
-        for node in report["nodes"]:
-            print(f"  {node['address']}: {node['type']}")
-        print("Objectives: " + ", ".join(report["objectives"]))
     else:
-        print(json.dumps(report, indent=2, allow_nan=False))
+        render(report, console)
     return 0

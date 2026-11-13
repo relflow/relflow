@@ -74,6 +74,49 @@ def test_writer_discards_both_formats_on_schema_drift(tmp_path, format):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_ipc_file_is_closed_before_publishing_the_shard(tmp_path, monkeypatch):
+    writer = rf.Writer(tmp_path, format="ipc")
+    write(writer, pa.table({"x": [1]}))
+    sink = writer.sink
+    assert sink is not None and not sink.closed
+    replace = type(tmp_path).replace
+
+    def publish(path, destination):
+        assert sink.closed, "Windows cannot rename a file with an open Arrow sink"
+        return replace(path, destination)
+
+    monkeypatch.setattr(type(tmp_path), "replace", publish)
+    writer.close()
+    assert writer.sink is None
+    assert ipc.open_file(tmp_path / "rank-0.arrow").read_all().to_pydict() == {"x": [1]}
+
+
+def test_ipc_discard_closes_its_sink_before_removing_the_partial(tmp_path):
+    writer = rf.Writer(tmp_path, format="ipc")
+    write(writer, pa.table({"x": [1]}))
+    sink = writer.sink
+    writer.discard()
+    assert sink is not None and sink.closed
+    assert writer.sink is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_ipc_construction_failure_closes_its_sink_and_removes_the_partial(tmp_path, monkeypatch):
+    opened = []
+
+    def fail(sink, schema):
+        opened.append(sink)
+        raise RuntimeError("could not initialize IPC writer")
+
+    monkeypatch.setattr(ipc, "new_file", fail)
+    writer = rf.Writer(tmp_path, format="ipc")
+    with pytest.raises(RuntimeError, match="could not initialize"):
+        write(writer, pa.table({"x": [1]}))
+    assert len(opened) == 1 and opened[0].closed
+    assert writer.sink is None
+    assert list(tmp_path.iterdir()) == []
+
+
 @pytest.mark.parametrize("format", ["parquet", "ipc"])
 def test_writer_does_not_accumulate_empty_postprocessed_batches(tmp_path, format):
     @rf.postprocess

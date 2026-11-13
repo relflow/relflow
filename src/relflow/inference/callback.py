@@ -93,6 +93,7 @@ class Writer(callbacks.BasePredictionWriter):
         self.row_group_size = row_group_size
         self.schema: pa.Schema | None = None
         self.writer: pq.ParquetWriter | ipc.RecordBatchFileWriter | None = None
+        self.sink: pa.NativeFile | None = None
         self.shard: Path | None = None
         self.pending: list[pa.Table] = []
         self.rows = 0
@@ -126,11 +127,11 @@ class Writer(callbacks.BasePredictionWriter):
                 self.schema = table.schema
                 suffix = "parquet" if self.format == "parquet" else "arrow"
                 self.shard = self.path / f"rank-{trainer.global_rank}.{suffix}"
-                self.writer = (
-                    pq.ParquetWriter(where=self.partial(self.shard), schema=table.schema)
-                    if self.format == "parquet"
-                    else ipc.new_file(str(self.partial(self.shard)), table.schema)
-                )
+                if self.format == "parquet":
+                    self.writer = pq.ParquetWriter(where=self.partial(self.shard), schema=table.schema)
+                else:
+                    self.sink = pa.OSFile(str(self.partial(self.shard)), "wb")
+                    self.writer = ipc.new_file(self.sink, table.schema)
             elif self.schema is None or not table.schema.equals(self.schema, check_metadata=True):
                 raise ValueError(
                     f"prediction batch schema differs from the first batch; expected {self.schema}, got {table.schema}"
@@ -177,7 +178,7 @@ class Writer(callbacks.BasePredictionWriter):
             return
         try:
             self.flush(final=True)
-            self.writer.close()
+            self.release()
             assert self.shard is not None
             self.partial(self.shard).replace(self.shard)
         except BaseException:
@@ -188,16 +189,27 @@ class Writer(callbacks.BasePredictionWriter):
     def discard(self) -> None:
         """Drop the partial shard so a failed run leaves no complete-looking output."""
 
-        if self.writer is not None:
+        try:
+            self.release()
+        finally:
             try:
-                self.writer.close()
+                if self.shard is not None:
+                    self.partial(self.shard).unlink(missing_ok=True)
             finally:
-                assert self.shard is not None
-                self.partial(self.shard).unlink(missing_ok=True)
-        self.reset()
+                self.reset()
+
+    def release(self) -> None:
+        """Close the IPC file as well as its writer before rename or deletion."""
+        try:
+            if self.writer is not None:
+                self.writer.close()
+        finally:
+            if self.sink is not None:
+                self.sink.close()
 
     def reset(self) -> None:
         self.writer = None
+        self.sink = None
         self.schema = None
         self.shard = None
         self.pending = []

@@ -226,6 +226,11 @@ the existing output boundary.
 
 ## Automate jobs and inspect reports
 
+Human-readable reports use Rich model trees, preflight tables, and job
+summaries. Interactive terminals show a status spinner on stderr while a job
+runs; redirected stderr has no live animation. Rich detects terminal color
+support and respects `NO_COLOR`. Commands and flags are parsed by `argparse`.
+
 `--json` emits one versioned JSON object to stdout for inspection, preflight,
 and finished jobs. Progress, application prints, backend logs, and debug
 tracebacks go to stderr. Exit codes are `0` for success, `2` for invalid

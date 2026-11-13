@@ -239,6 +239,44 @@ def test_json_stdout_has_only_the_report_on_success_and_failure(inputs, capsys):
     assert "requires --execute" in captured.err
 
 
+def test_human_reports_show_the_model_and_check_results(inputs, capsys):
+    model, data, _ = inputs
+    assert main(["inspect", str(model)]) == 0
+    captured = capsys.readouterr()
+    assert "/events/amount" in captured.out
+    assert "/events/label" in captured.out
+    assert "target" in captured.out
+    assert "Stored tensors" in captured.out
+    assert main(["check", str(model), "--input", str(data)]) == 0
+    captured = capsys.readouterr()
+    assert "Preflight" in captured.out
+    assert "passed" in captured.out
+    assert "tensorized" in captured.out
+    assert "--execute" in captured.out
+    assert "\x1b[" not in captured.out
+
+
+def test_rich_output_treats_model_paths_as_literal_text(inputs, capsys, monkeypatch):
+    model, _, _ = inputs
+    monkeypatch.setenv("COLUMNS", "240")
+    named = model.with_name("[bold]model.yaml")
+    model.rename(named)
+    assert main(["inspect", str(named)]) == 0
+    assert "[bold]model.yaml" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("command", ["inspect", "check"])
+def test_json_bypasses_rich_even_when_terminal_colors_are_forced(inputs, capsys, monkeypatch, command):
+    model, _, _ = inputs
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.setenv("COLUMNS", "30")
+    assert main([command, str(model), "--json"]) == 0
+    output = capsys.readouterr().out
+    assert "\x1b[" not in output
+    assert len(output.splitlines()) == 1
+    assert json.loads(output)["command"] == command
+
+
 def test_existing_job_is_a_contract_error_and_keeps_its_receipt(inputs, tmp_path, capsys):
     model, data, _ = inputs
     checkpoint = tmp_path / "saved.rf"
