@@ -49,6 +49,47 @@ def test_numeric_shift_warns_once_and_preserves_training_state(monkeypatch):
     json.dumps(summary, allow_nan=False)
 
 
+def test_comparisons_only_revisit_changed_profiles_but_training_checks_every_stratum(monkeypatch):
+    monitor = rf.Distributions()
+    address = rf.Address("value")
+    policies = {address: rf.Drift()}
+    incoming = {address: {"value": rf.Distribution.categorical(np.tile([0, 1], 256), bins=2)}}
+    for strata in rf.Strata:
+        monitor.update(incoming, strata=strata, policies=policies)
+    comparisons = []
+    compare = rf.Distribution.compare
+
+    def capture(self, other):
+        comparisons.append(id(other))
+        return compare(self, other)
+
+    monkeypatch.setattr(rf.Distribution, "compare", capture)
+    monitor.update(incoming, strata=rf.Strata.predict, policies=policies)
+    profiles = monitor.profiles[str(address)]
+    assert comparisons == [id(profiles["predict"]["value"])]
+    assert profiles["predict"]["value"].count == 1024
+    assert profiles["validate"]["value"].count == profiles["test"]["value"].count == 512
+    comparisons.clear()
+    monitor.update(incoming, strata=rf.Strata.train, policies=policies)
+    assert set(comparisons) == {id(profiles[split]["value"]) for split in ("validate", "test", "predict")}
+    assert profiles["train"]["value"].count == 1024
+
+
+@pytest.mark.parametrize(
+    "left, right, expected",
+    [
+        ([0.0] * 256, [1.0] * 256, 1.0),
+        ([0.0] * 128 + [1.0] * 128, [0.0] * 64 + [1.0] * 192, 0.25),
+        ([np.finfo(np.float64).max], [np.nextafter(np.finfo(np.float64).max, 0)], 1.0),
+    ],
+)
+def test_numeric_distance_preserves_one_sided_point_mass_limits(left, right, expected):
+    baseline, observed = (rf.Distribution.numeric(pa.array(values)) for values in (left, right))
+    assert baseline.compare(observed)[0] == expected
+    assert observed.compare(baseline)[0] == expected
+    assert baseline.compare(baseline)[0] == 0
+
+
 def test_matching_small_and_missing_references_are_quiet(monkeypatch):
     records = captured(monkeypatch)
     model = rf.Model.xs(drift=True, value=rf.Number)

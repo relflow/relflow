@@ -79,6 +79,13 @@ Call `model.distributions.clear()` to start over, including the training
 reference. Clearing a reference or comparison also rearms the relevant warnings.
 Within a window, each field, comparison stratum, and feature logs at most once.
 
+Profiles include every consumed batch. Comparisons run when the relevant profile
+changes: an evaluation update checks its own stratum, while a training update
+checks all available comparison strata against the new reference. This avoids
+rechecking unchanged populations without reducing observation counts or delaying
+eligible warnings. Exclude unneeded fields with `drift=False` to reduce profiling
+work; changing a warning threshold does not reduce profile construction cost.
+
 ## What is measured
 
 | Field | Features |

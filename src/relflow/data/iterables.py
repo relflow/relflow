@@ -86,7 +86,11 @@ def encode(
 
         values = pa.nulls(0) if projection.vacant else extension.prepare(pristine.values, address=address)
         profiling = drift and request.drift is not None and (strata != Strata.predict or request.embedded)
-        canonical = replace(pristine, values=values) if strata == Strata.train or profiling else pristine
+        canonical = (
+            replace(pristine, values=values)
+            if values is not pristine.values and (strata == Strata.train or profiling)
+            else pristine
+        )
         state = interprocess_encoding_context.get(address)
         if isinstance(state, BatchContext):
             if Component.bind not in extension.components:

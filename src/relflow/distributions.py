@@ -92,13 +92,23 @@ class Distribution:
             raise ValueError("distribution comparison requires observations in both profiles")
         uncertainty = 1 / self.count + 1 / other.count
         if self.digest is not None and other.digest is not None:
+            from relflow.tensorfields.shared.digest import interpolate
+
             knots = np.unique(
                 np.concatenate((self.digest.centroids["mean"].to_numpy(), other.digest.centroids["mean"].to_numpy()))
             )
-            with np.errstate(over="ignore"):
-                knots = np.unique(np.concatenate((knots, np.nextafter(knots, -np.inf), np.nextafter(knots, np.inf))))
-            knots = pa.array(knots[np.isfinite(knots)])
-            score = float(np.max(np.abs(self.digest.cdf(knots).to_numpy() - other.digest.cdf(knots).to_numpy())))
+            bounds = []
+            for digest in (self.digest, other.digest):
+                coordinates, ranks, _ = digest.knots()
+                right = interpolate(knots, coordinates, ranks)
+                positions = np.minimum(coordinates[::2].searchsorted(knots), len(coordinates) // 2 - 1)
+                tied = coordinates[::2][positions] == knots
+                # Between knots each CDF is linear, so its maximum separation
+                # occurs at an endpoint or on either side of a point-mass jump.
+                left = np.where(tied, ranks[2 * positions], right)
+                right = np.where(tied, ranks[2 * positions + 1], right)
+                bounds.append(np.stack((left, right)))
+            score = float(np.max(np.abs(bounds[0] - bounds[1])))
             return score, math.sqrt(math.log(2000) * uncertainty / 2)
         if self.counts is not None and other.counts is not None and self.counts.shape == other.counts.shape:
             score = float(np.abs(self.counts / self.count - other.counts / other.count).sum() / 2)
@@ -183,7 +193,7 @@ class Distributions:
                     current[name].merge(distribution)
             reference = by_strata.get("train", {})
             for split, observed in by_strata.items():
-                if split == "train":
+                if split == "train" or (strata != Strata.train and split != strata.value):
                     continue
                 for name in reference.keys() & observed.keys():
                     baseline, candidate = reference[name], observed[name]
