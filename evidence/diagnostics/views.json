@@ -748,45 +748,6 @@
     "comparison": "Compare Group and Category across declared exposure regimes, with per-identity error and group agreement.",
     "limit": "Parameter counts and tail identities stay visible; compactness and predictive quality are different outcomes."
   },
-  "P018": {
-    "mode": "trajectory",
-    "focus": "How do committed groups and usage evolve during reconstruction?",
-    "comparison": "Follow the actual epoch-by-epoch group count and perplexity.",
-    "limit": "Training and validation reuse observations here. Group occupancy is not held-out prediction or partition recovery."
-  },
-  "P019": {
-    "mode": "trajectory",
-    "focus": "Does a plain input activate adaptive clustering?",
-    "comparison": "Follow committed groups and adherence when the Cluster field is only an input.",
-    "limit": "Dormancy is an architectural behavior; this experiment does not test unseen-identity prediction."
-  },
-  "P020": {
-    "mode": "trajectory",
-    "focus": "How does reconstructing categorical identities change group usage?",
-    "comparison": "Inspect committed groups and perplexity across the recorded training trajectory.",
-    "limit": "Occupancy and usage do not establish agreement with a true partition or held-out prediction quality."
-  },
-  "P065": {
-    "mode": "coverage",
-    "target": "code",
-    "focus": "Does Cluster coverage obey the same conditional-score boundary?",
-    "comparison": "Keep coverage and all-target accuracy beside known-target accuracy across the declared removal levels.",
-    "limit": "Zero-coverage conditional scores are undefined; batching checks remain separate."
-  },
-  "P078": {
-    "mode": "grouping",
-    "target": "y",
-    "focus": "Do the learned groups recover the generating partition and help prediction?",
-    "comparison": "Show the true-versus-assigned partition beside prediction error and the no-regime control.",
-    "limit": "Cluster identifiers are arbitrary; occupancy alone is not recovery, and ARI is invariant to renaming."
-  },
-  "P095": {
-    "mode": "grouping",
-    "target": "answer",
-    "focus": "When does grouping identities help or hurt prediction?",
-    "comparison": "Compare Cluster and Category across declared exposure regimes, with per-identity error and group agreement.",
-    "limit": "Parameter counts and tail identities stay visible; compactness and predictive quality are different outcomes."
-  },
   "P101": {
     "mode": "research",
     "focus": "Which numeric shifts warn, and which joint changes remain invisible to marginal profiles?",
