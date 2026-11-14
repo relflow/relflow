@@ -113,6 +113,8 @@ website:
             text: How fields interact
           - href: concepts/branch-summaries.qmd
             text: Branch summaries
+          - href: concepts/chronological-branches.qmd
+            text: Chronological branches
           - href: concepts/tree-routing-and-decoding.qmd
             text: Tree routing and decoding
           - href: concepts/masking-and-reconstruction.qmd
