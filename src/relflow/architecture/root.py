@@ -518,10 +518,11 @@ class Model(lit.LightningModule):
         return callbacks
 
     def on_fit_start(self) -> None:
-        if not self.schema.objectives:
+        if not runtime.execution(self).objectives:
             raise RuntimeError(
                 "model has no reconstruction objectives; configure at least one active node "
-                "with mask=True or Mask(reconstruct=True) before fitting"
+                "with mask=True or Mask(reconstruct=True), or a branch with contrastive=rf.Contrastive(), "
+                "before fitting"
             )
         if self.jacobian:
             from relflow.architecture.jacobian import validate
