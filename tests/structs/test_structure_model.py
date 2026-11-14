@@ -6,6 +6,7 @@ import pytest
 import relflow as rf
 from relflow.structs.enums import Overflow
 from relflow.structs.experiment import Schema
+from relflow.structs.grain import Steps
 from relflow.structs.structure import Branch
 from relflow.tensorfields.extensions.category import Request as Category
 
@@ -306,3 +307,31 @@ def test_inactive_leaf_nodes_are_kept_in_tree_but_removed_from_runtime_maps():
     assert structure.shapes["/branch/category_leaf"] == (1, 4)
     assert structure.reconstruct == []
     assert structure.embed == []
+
+
+def test_plain_branch_resolves_todays_sequence_settings_and_dumps_without_them():
+    branch = rf.Branch(value=rf.Number)
+    assert branch.grain == rf.Coordinates()
+    assert branch.mixer == rf.Transformer()
+    assert branch.direction is rf.Direction.bidirectional
+    for mode in ("python", "json"):
+        assert {"grain", "mixer", "direction"}.isdisjoint(branch.model_dump(mode=mode))
+
+
+def test_branch_sequence_settings_round_trip_when_changed():
+    branch = rf.Branch(mixer=None, value=rf.Number)
+    payload = branch.model_dump(mode="json", round_trip=True)
+    assert payload["mixer"] is None
+    assert rf.Branch.model_validate(payload).mixer is None
+    restored = rf.Branch.model_validate({"type": "branch", "fields": [], "grain": {"type": "steps"}})
+    assert restored.grain == Steps()
+
+
+def test_branch_rejects_unknown_direction():
+    with pytest.raises(pydantic.ValidationError, match="bidirectional"):
+        rf.Branch.model_validate({"type": "branch", "fields": [], "direction": "causal"})
+
+
+def test_child_named_items_is_still_a_child():
+    branch = rf.Branch(items=rf.Branch(value=rf.Number))
+    assert [child.name for child in branch.fields] == ["items"]

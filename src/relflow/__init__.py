@@ -50,6 +50,7 @@ from relflow.structs.enums import (
     AttentionInput,
     AttentionMode,
     Component,
+    Direction,
     Metric,
     Overflow,
     OverflowInput,
@@ -68,6 +69,8 @@ from relflow.structs.experiment import (
     predicate,
     where,
 )
+from relflow.structs.grain import Coordinates
+from relflow.structs.mixer import Transformer
 from relflow.structs.reduction import Attention, Mean, ReductionConfig
 from relflow.structs.structure import Branch, Mask
 from relflow.structs.tree import Address, Leaf, MaskInput
@@ -159,7 +162,9 @@ __all__ = [
     "Category",
     "Component",
     "Context",
+    "Coordinates",
     "CustomDataModule",
+    "Direction",
     "DuckDBDataModule",
     "DateParts",
     "Enum",
@@ -219,6 +224,7 @@ __all__ = [
     "TensorKey",
     "Text",
     "Tokens",
+    "Transformer",
     "TreeFieldInput",
     "Vector",
     "VocabularySyncCallback",

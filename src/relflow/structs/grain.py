@@ -1,0 +1,46 @@
+"""Frozen schema configurations for what one branch sequence token stands for."""
+
+from __future__ import annotations
+
+from typing import Annotated, Literal, TypeAlias
+
+import pydantic
+
+
+class Coordinates(pydantic.BaseModel):
+    """Keep one sequence token for every leaf coordinate of every item.
+
+    This is the standard grain. It adds no parameters and is the default of
+    ``Branch(grain=...)``.
+    """
+
+    model_config = pydantic.ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal["coordinates"] = "coordinates"
+
+
+class Steps(pydantic.BaseModel):
+    """Pool every row of a branch into one sequence token.
+
+    ``pooling`` chooses how the coordinates of a row combine: ``"query"`` uses
+    a learned query and ``"mean"`` averages them. A relflow version that does
+    not build this grain rejects it when the model is built.
+    """
+
+    model_config = pydantic.ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal["steps"] = "steps"
+    pooling: Literal["query", "mean"] = "query"
+
+
+GrainConfig: TypeAlias = Annotated[
+    Coordinates | Steps,
+    pydantic.Field(discriminator="type"),
+]
+
+
+__all__ = [
+    "Coordinates",
+    "GrainConfig",
+    "Steps",
+]
