@@ -80,24 +80,30 @@ payment_ids = results.select(
 
 ## Fixed-size vectors and null containers
 
-`rf.Writer` rejects a fixed-size list beneath a null ancestor or a null vector
+When writing Parquet, `rf.Writer` rejects a fixed-size list beneath a null ancestor or a null vector
 value because PyArrow 24 cannot round-trip that shape through Parquet. A Vector
 field in a structurally null repeated record can trigger this guard, as can a
 retained source vector. Null components inside a nonnull fixed-size vector are
 different and remain supported. The guard runs after configured postprocessing.
 
-Use Arrow IPC for affected results to preserve their vector widths and nulls.
-For a job small enough to collect in memory:
+Use streaming Arrow IPC for affected results to preserve their vector widths
+and nulls without collecting the entire job:
 
 ```python
-result = model.predict(datamodule=data, batch_size=256, devices=1)
-result.write_ipc("payment-predictions.arrow")
+model.predict(
+    datamodule=data,
+    batch_size=256,
+    devices=1,
+    callbacks=[rf.Writer("payment-predictions-ipc", format="ipc")],
+    return_predictions=False,
+)
 ```
 
-For streaming IPC, consume written prediction batches in an application callback;
-`rf.Writer` itself writes Parquet. An alternative application postprocessor may
-project away unneeded vectors, but it must deliberately define the resulting
-output contract.
+IPC shards use `rank-N.arrow` and the Arrow IPC file format, readable by
+Polars, PyArrow, and `rf.source(...)`. Both formats retain schema metadata,
+buffer batches into bounded groups, and publish their final filenames only
+after prediction ends successfully. The [CLI](command-line.qmd) exposes the
+same choice through `relflow predict ... --format ipc`.
 
 Direct prediction also supports bounded in-memory requests, processing rows in
 batches and collecting one Polars DataFrame.

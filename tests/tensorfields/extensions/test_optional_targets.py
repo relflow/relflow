@@ -45,7 +45,8 @@ def nested(values):
 @pytest.mark.parametrize("strata", list(Strata))
 def test_nested_target_roles_follow_reconstruction_owner(field_type, values, options, owner, objective, strata):
     policy = rf.Mask(rate=0.5, reconstruct=objective)
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         attention=None,
         mask=policy if owner == "root" else False,
@@ -77,7 +78,8 @@ def test_nested_target_roles_follow_reconstruction_owner(field_type, values, opt
 @pytest.mark.parametrize("objective", [False, True])
 def test_target_omission_preserves_prefetched_vocabulary_bindings(field_type, objective):
     options = {"n_groups": 3} if field_type is rf.Group else {}
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         attention=None,
         embed=True,
@@ -130,7 +132,8 @@ def test_target_omission_preserves_prefetched_vocabulary_bindings(field_type, ob
 
 @pytest.mark.parametrize(("field_type", "values", "options"), CASES)
 def test_input_only_targets_remain_empty_after_checkpoint_reload(tmp_path, field_type, values, options):
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         attention=None,
         embed=True,

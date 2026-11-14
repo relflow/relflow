@@ -48,7 +48,8 @@ def arithmetic():
 
 def test_two_sources_derive_before_numeric_observation_and_target_masking(arithmetic):
     _, Request = arithmetic
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         total=Request(query=("left", "right"), mask=rf.Mask(rate=1.0, reconstruct=True, dropout=False)),
     )
@@ -64,7 +65,7 @@ def test_two_sources_derive_before_numeric_observation_and_target_masking(arithm
 
 def test_source_presence_and_null_values_remain_distinct(arithmetic):
     _, Request = arithmetic
-    model = rf.Model.xs(d_model=8, total=Request(query=("left.value", "right")))
+    model = rf.Model(preset="small", d_model=8, total=Request(query=("left.value", "right")))
     source = pa.Table.from_pylist(
         [
             {"left": {"value": 2.0}, "right": 3.0},
@@ -76,14 +77,14 @@ def test_source_presence_and_null_values_remain_distinct(arithmetic):
 
     assert field.state.reshape(-1).tolist() == [Tokens.valued, Tokens.null, Tokens.padded]
     assert field.content.reshape(-1).tolist() == [5.0, 0.0, 0.0]
-    strict = rf.Model.xs(d_model=8, total=Request(query=("left.value", "right"), nullable=False))
+    strict = rf.Model(preset="small", d_model=8, total=Request(query=("left.value", "right"), nullable=False))
     with pytest.raises(ValueError, match="/total.*nullable=False.*1 null"):
         strict.encode(source)
 
 
 def test_explicit_empty_query_receives_retained_row_count_for_constants(arithmetic):
     _, Request = arithmetic
-    model = rf.Model.xs(d_model=8, total=Request(query=(), constant=9.5))
+    model = rf.Model(preset="small", d_model=8, total=Request(query=(), constant=9.5))
     field = model.encode(pa.table({"unreferenced": [1, 2, 3]}))["/total"]
 
     assert field.state.reshape(-1).tolist() == [Tokens.valued] * 3
@@ -94,7 +95,7 @@ def test_explicit_empty_query_receives_retained_row_count_for_constants(arithmet
 def test_default_single_and_one_element_tuple_queries_preserve_source_order(arithmetic, query):
     _, Request = arithmetic
     options = {} if query is None else {"query": query}
-    model = rf.Model.xs(d_model=8, total=Request(constant=1.5, **options))
+    model = rf.Model(preset="small", d_model=8, total=Request(constant=1.5, **options))
     field = model.encode(pa.table({"total": [1.0, 2.0], "source": [4.0, 8.0]}))["/total"]
 
     assert field.content.reshape(-1).tolist() == ([2.5, 3.5] if query is None else [5.5, 9.5])
@@ -107,9 +108,9 @@ def test_derive_capability_is_read_from_the_live_registry(arithmetic):
     derive = extension.components.pop(Component.derive)
     request = Request(query=("left", "right"))
     with pytest.raises(ValueError, match="/total.*no derive component"):
-        rf.Model.xs(d_model=8, total=request)
+        rf.Model(preset="small", d_model=8, total=request)
     extension.register(Component.derive, derive)
-    model = rf.Model.xs(d_model=8, total=request)
+    model = rf.Model(preset="small", d_model=8, total=request)
 
     assert model.encode(pa.table({"left": [2.0], "right": [5.0]}))["/total"].content.item() == 7.0
 
@@ -117,7 +118,7 @@ def test_derive_capability_is_read_from_the_live_registry(arithmetic):
 @pytest.mark.parametrize("query", [("left", "right"), ()])
 def test_extensions_without_derive_reject_query_tuples(query):
     with pytest.raises(ValueError, match="no derive component"):
-        rf.Model.xs(d_model=8, total=rf.Number(query=query))
+        rf.Model(preset="small", d_model=8, total=rf.Number(query=query))
 
 
 @pytest.mark.parametrize(
@@ -129,9 +130,9 @@ def test_source_scope_preserves_the_native_query_after_ancestor_prefixes(express
 
 def test_ancestor_scope_cannot_escape_selected_model_root():
     with pytest.raises(ValueError, match="ascends 1 owner branches.*only 0 ancestor"):
-        rf.Model.xs(d_model=8, value=rf.Number(query="../value"))
+        rf.Model(preset="small", d_model=8, value=rf.Number(query="../value"))
     with pytest.raises(ValueError, match="ascends 2 owner branches.*only 1 ancestor"):
-        rf.Model.xs(d_model=8, events=rf.Branch(length=2, value=rf.Number(query="../../value")))
+        rf.Model(preset="small", d_model=8, events=rf.Branch(length=2, value=rf.Number(query="../../value")))
     with pytest.raises(ValueError):
         rf.Branch(length=2, query="../events", value=rf.Number)
     with pytest.raises(ValueError):
@@ -140,7 +141,8 @@ def test_ancestor_scope_cannot_escape_selected_model_root():
 
 def test_selected_root_is_the_upper_bound_for_ancestor_queries(arithmetic):
     _, Request = arithmetic
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         query="payload",
         events=rf.Branch(length=2, total=Request(query=("../base", "value"))),
@@ -159,7 +161,8 @@ def test_selected_root_is_the_upper_bound_for_ancestor_queries(arithmetic):
 
 
 def test_single_source_extensions_can_broadcast_ancestors_without_derive():
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         events=rf.Branch(length=2, overflow="tail", source=rf.Number(query="../context.value")),
     )
@@ -182,7 +185,8 @@ def test_single_source_extensions_can_broadcast_ancestors_without_derive():
 
 def test_nested_tail_crops_and_null_items_preserve_ancestor_identity_and_chunking(arithmetic):
     _, Request = arithmetic
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         groups=rf.Branch(
             length=2,
@@ -230,7 +234,8 @@ def test_nested_tail_crops_and_null_items_preserve_ancestor_identity_and_chunkin
 
 def test_random_windows_share_parent_coordinates_across_sources_and_arrow_chunks(arithmetic):
     _, Request = arithmetic
-    schema = rf.Model.xs(
+    schema = rf.Model(
+        preset="small",
         d_model=8,
         groups=rf.Branch(
             length=2,
@@ -282,7 +287,8 @@ def test_random_windows_share_parent_coordinates_across_sources_and_arrow_chunks
 @pytest.mark.parametrize("collections", [[None, [], [None], [{"value": 2.0}]], [None, [], [None]], [None, []], []])
 def test_derived_sources_preserve_empty_and_null_collection_geometry(arithmetic, collections):
     _, Request = arithmetic
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         events=rf.Branch(length=2, total=Request(query=("../base", "value"))),
     )
@@ -323,7 +329,7 @@ def test_derive_result_validation_owns_shape_and_presence_invariants(arithmetic,
         return Projection(values=values, present=present)
 
     extension.components[Component.derive] = invalid
-    model = rf.Model.xs(d_model=8, total=Request(query=("left", "right")))
+    model = rf.Model(preset="small", d_model=8, total=Request(query=("left", "right")))
     with pytest.raises((TypeError, ValueError), match="derived field '/total'"):
         model.encode(pa.table({"left": [2.0, 3.0], "right": [4.0, 5.0]}))
 
@@ -331,7 +337,8 @@ def test_derive_result_validation_owns_shape_and_presence_invariants(arithmetic,
 @pytest.mark.parametrize("source", [{"context": [1.0, 2.0]}, {"context": [1.0, 2.0], "left": [3.0, 4.0]}])
 def test_full_reconstruction_derived_targets_predict_without_required_source_columns(arithmetic, source):
     _, Request = arithmetic
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         context=rf.Number,
         total=Request(query=("left", "future"), mask=True),
@@ -348,7 +355,8 @@ def test_full_reconstruction_derived_targets_predict_without_required_source_col
 
 def test_target_vacancy_preserves_derived_target_poison_invariance(arithmetic):
     _, Request = arithmetic
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         context=rf.Number,
         total=Request(query=("left", "future"), mask=True),
@@ -362,7 +370,8 @@ def test_target_vacancy_preserves_derived_target_poison_invariance(arithmetic):
 
 def test_inherited_full_reconstruction_keeps_branch_geometry_without_derived_target_sources(arithmetic):
     _, Request = arithmetic
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         context=rf.Number,
         events=rf.Branch(
@@ -396,7 +405,7 @@ def test_inherited_full_reconstruction_keeps_branch_geometry_without_derived_tar
 @pytest.mark.parametrize("strata", ["train", "validate", "test"])
 def test_missing_derived_target_sources_remain_strict_outside_prediction(arithmetic, strata):
     _, Request = arithmetic
-    model = rf.Model.xs(d_model=8, total=Request(query=("left", "future"), mask=True))
+    model = rf.Model(preset="small", d_model=8, total=Request(query=("left", "future"), mask=True))
     with pytest.raises(MissingFieldError, match="future"):
         model.encode(pa.table({"left": [3.0]}), strata=strata)
 
@@ -407,21 +416,22 @@ def test_missing_derived_target_sources_remain_strict_outside_prediction(arithme
 )
 def test_missing_input_or_conditional_derived_sources_do_not_become_vacant(arithmetic, mask):
     _, Request = arithmetic
-    model = rf.Model.xs(d_model=8, total=Request(query=("left", "future"), mask=mask))
+    model = rf.Model(preset="small", d_model=8, total=Request(query=("left", "future"), mask=mask))
     with pytest.raises(MissingFieldError, match="future"):
         model.encode(pa.table({"left": [3.0], "selected": [True]}), strata="predict")
 
 
 def test_target_vacancy_does_not_hide_derived_type_errors(arithmetic):
     _, Request = arithmetic
-    model = rf.Model.xs(d_model=8, total=Request(query=("left", "future"), mask=True))
+    model = rf.Model(preset="small", d_model=8, total=Request(query=("left", "future"), mask=True))
     with pytest.raises(pa.ArrowException):
         model.encode(pa.table({"left": [3.0], "future": ["not numeric"]}), strata="predict")
 
 
 def test_canonical_full_rate_reconstruction_retains_masked_input_tokens_without_sources(arithmetic):
     _, Request = arithmetic
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         total=Request(query=("left", "future"), mask=rf.Mask(rate=1.0, reconstruct=True)),
     )
@@ -433,6 +443,6 @@ def test_canonical_full_rate_reconstruction_retains_masked_input_tokens_without_
 
 
 def test_explicit_nonderived_target_query_keeps_its_existing_missing_source_error():
-    model = rf.Model.xs(d_model=8, total=rf.Number(query="future", mask=True))
+    model = rf.Model(preset="small", d_model=8, total=rf.Number(query="future", mask=True))
     with pytest.raises(MissingFieldError, match="future"):
         model.encode(pa.table({"left": [3.0]}), strata="predict")

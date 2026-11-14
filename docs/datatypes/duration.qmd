@@ -10,7 +10,8 @@ Both timestamps must be available at the payment's scoring cutoff.
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     account_age=rf.Duration(
         query=("account.created_at", "posted_at"),
         granularity="days",
@@ -46,7 +47,8 @@ its source with exactly one configured `start` or `end`. Endpoint strings are
 timestamp literals; strings inside `query` are structural paths.
 
 ```python
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     since_launch=rf.Duration(
         query="posted_at",
         start="2026-01-01T00:00:00Z",
@@ -116,7 +118,8 @@ leading `../` selects an ancestor source and broadcasts it over the branch's
 retained records:
 
 ```python
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     transactions=rf.Branch(
         length=64,
         overflow="tail",

@@ -218,7 +218,8 @@ def test_group_embedder_evaluation_has_no_assignment_gradient():
 def test_group_assignments_learn_from_downstream_supervision():
     with torch.random.fork_rng(devices=[]):
         torch.manual_seed(123)
-        model = rf.Model.xs(
+        model = rf.Model(
+            preset="small",
             d_model=8,
             batch_size=4,
             value=rf.Group(n_groups=3, p_unavailable=0.0),
@@ -306,7 +307,7 @@ def test_group_embedder_uses_the_input_device(device):
 
 
 def test_group_bind_rejects_worker_ids_outside_the_batch():
-    model = rf.Model.xs(d_model=8, batch_size=2, group=rf.Group(n_groups=4, p_unavailable=0.0))
+    model = rf.Model(preset="small", d_model=8, batch_size=2, group=rf.Group(n_groups=4, p_unavailable=0.0))
     address = rf.Address("group")
     field = input_field(torch.tensor([Tokens.valued.value]), torch.tensor([9]))
     binding = VocabularyBatch(labels=pa.array(["ALPHA", "BETA"]), size=2)
@@ -316,7 +317,7 @@ def test_group_bind_rejects_worker_ids_outside_the_batch():
 
 
 def test_group_bind_grows_vectors_and_preserves_assignments_and_sentinel():
-    model = rf.Model.xs(d_model=8, group=rf.Group(n_groups=4, p_unavailable=0.0))
+    model = rf.Model(preset="small", d_model=8, group=rf.Group(n_groups=4, p_unavailable=0.0))
     address = rf.Address("/group")
     rf.Group.assign(model, address, "A", 2)
     embedder = model.nodes[address].embedder
@@ -340,7 +341,7 @@ def test_group_bind_grows_vectors_and_preserves_assignments_and_sentinel():
 
 
 def test_group_float_nan_labels_take_the_other_state(tmp_path):
-    model = rf.Model.xs(d_model=8, label=rf.Group(n_groups=2, mask=True), signal=rf.Number)
+    model = rf.Model(preset="small", d_model=8, label=rf.Group(n_groups=2, mask=True), signal=rf.Number)
     rows = pa.table({"label": [1.0, 2.0, float("nan"), 0.0], "signal": [1.0, 2.0, 3.0, 4.0]})
     data = rf.ArrowDataModule(model, train=rows, validate=rows, shuffle=False)
     model.fit(
@@ -365,7 +366,7 @@ def test_group_float_nan_labels_take_the_other_state(tmp_path):
     targets = model.encode(rows, strata="train")[rf.Address("label")].targets
     assert targets[TensorKey.state].flatten().tolist() == expected
     assert targets[TensorKey.content].flatten()[2] < 0
-    embedded = rf.Model.xs(d_model=8, label=rf.Group(n_groups=2), signal=rf.Number)
+    embedded = rf.Model(preset="small", d_model=8, label=rf.Group(n_groups=2), signal=rf.Number)
     for strata in ("train", "predict"):
         field = embedded.encode(rows, strata=strata)[rf.Address("label")]
         assert field.state.flatten().tolist() == expected
@@ -526,7 +527,7 @@ def test_group_write_uses_the_prediction_device(device):
 
 @pytest.mark.parametrize("known", [False, True], ids=["empty-vocabulary", "known-labels"])
 def test_group_predict_writes_group_probabilities_without_vocabulary_labels(known):
-    model = rf.Model.xs(d_model=8, label=rf.Group(n_groups=4, mask=True), signal=rf.Number)
+    model = rf.Model(preset="small", d_model=8, label=rf.Group(n_groups=4, mask=True), signal=rf.Number)
     if known:
         rf.Group.assign(model, "/label", "A", 0)
         rf.Group.assign(model, "/label", "B", 2)
@@ -583,7 +584,7 @@ class TrackingModule:
     ],
 )
 def test_group_metrics_describe_populated_vocabulary(monkeypatch, n_groups, assignments, proportions, device):
-    model = rf.Model.xs(d_model=8, label=rf.Group(n_groups=n_groups))
+    model = rf.Model(preset="small", d_model=8, label=rf.Group(n_groups=n_groups))
     for index, assignment in enumerate(assignments):
         rf.Group.assign(model, "/label", str(index), assignment)
     embedder = model.nodes["/label"].embedder
@@ -626,7 +627,8 @@ def test_group_metrics_describe_populated_vocabulary(monkeypatch, n_groups, assi
 
 
 def test_group_metrics_skip_empty_fields_and_refresh_each_batch(monkeypatch):
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         empty=rf.Group(n_groups=2),
         label=rf.Group(n_groups=3),
@@ -728,7 +730,8 @@ def test_group_state_loss_respects_trainable_coordinates(trainable, strata, nonf
 
 
 def test_group_state_loss_logs_zero_without_accuracy(monkeypatch: pytest.MonkeyPatch):
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         label=rf.Group(n_groups=4, mask=rf.Mask(query="selected", dropout=False, reconstruct=True)),
     )

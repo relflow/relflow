@@ -180,6 +180,7 @@ import numpy as np
 import polars as pl
 import pyarrow as pa
 import relflow as rf
+from relflow.presets.base import resolve
 from reporting import experiment, report
 
 BUDGET = 500
@@ -259,7 +260,17 @@ def build(task: str, inputs: str, target: str) -> rf.Model:
         fields[TARGETS[task]] = rf.Quantile(objective="mae", mask=True)
     else:
         fields[TARGETS[task]] = rf.Number(mask=True)
-    return rf.Model.xs(fields=fields)
+    # Freeze the experimental architecture independently of SDK preset changes.
+    control_preset = rf.presets.Preset(
+        name="xs",
+        d_model=64,
+        root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        leaf=rf.presets.LeafDefaults(n_heads=2),
+    )
+    model = rf.Model(schema=resolve(control_preset, fields=fields))
+    model.preset = control_preset
+    return model
 
 
 def fit(model: rf.Model, train, validate, seed: int, steps: int | None, accelerator: str, budget: int) -> int:

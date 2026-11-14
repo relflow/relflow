@@ -132,12 +132,7 @@ def read(pathname: str | Path, overrides: Mapping[str, Any]) -> tuple[dict[str, 
         profile = None
         if "preset" in options:
             name = options.pop("preset")
-            profiles = {
-                profile.name: profile for profile in (presets.XS, presets.SM, presets.MD, presets.LG, presets.XL)
-            }
-            if not isinstance(name, str) or name not in profiles:
-                raise ValueError(f"preset must be one of {', '.join(profiles)}; got {name!r}")
-            profile = profiles[name]
+            profile = presets.get(name)
         options.update(overrides)
         options["fields"] = fields(options.get("fields"))
         if "mask" in options:

@@ -22,7 +22,7 @@ pytestmark = pytest.mark.integration
 
 def distributed_statistics(rank: int, directory: str) -> None:
     # Rank-local history predates synchronization and must be replaced by rank zero's.
-    model = rf.Model.xs(d_model=8, value=rf.Quantile)
+    model = rf.Model(preset="small", d_model=8, value=rf.Quantile)
     model.encode(pa.table({"value": [float(rank * 100)]}), strata="train")
     distributed.init_process_group(
         "gloo",

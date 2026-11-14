@@ -18,7 +18,7 @@ def batch(model: rf.Model):
 
 
 def test_loss_metric_is_uniform_and_weighted_by_batch_rows(monkeypatch):
-    model = rf.Model.xs(d_model=8, batch_size=8, amount=rf.Number, label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, batch_size=8, amount=rf.Number, label=rf.Boolean(mask=True))
     entries = logged(monkeypatch)
 
     output = runtime.step(model, batch(model), 0, strata=rf.Strata.train)
@@ -35,7 +35,7 @@ def test_loss_metric_is_uniform_and_weighted_by_batch_rows(monkeypatch):
 
 
 def test_rank_without_local_targets_still_emits_the_anchored_loss(monkeypatch):
-    model = rf.Model.xs(d_model=8, batch_size=8, amount=rf.Number, label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, batch_size=8, amount=rf.Number, label=rf.Boolean(mask=True))
     entries = logged(monkeypatch)
     monkeypatch.setattr(runtime, "participation", lambda module, inputs, strata: (set(), {rf.Address("/label")}))
 

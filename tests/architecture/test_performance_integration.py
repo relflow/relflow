@@ -15,7 +15,9 @@ from tests.tensorfields.extensions.test_text import patch_hf
 
 
 @pytest.mark.parametrize("embed", [False, True])
-def test_ragged_text_and_input_only_fields_preserve_dense_objective_and_gradients(monkeypatch, embed):
+@pytest.mark.integration
+def test_ragged_text_and_input_only_fields_preserve_dense_objective_and_gradients(monkeypatch, tmp_path, embed):
+    monkeypatch.setenv("RELFLOW_CACHE_DIR", str(tmp_path / "text-cache"))
     patch_hf(monkeypatch)
     torch.manual_seed(107)
     model = rf.Model(

@@ -189,7 +189,7 @@ def test_schema_rejects_string_none_attention(nested: bool) -> None:
 
 @pytest.mark.parametrize("constructor", [rf.Model, rf.Schema.from_tree])
 def test_tree_constructors_reject_children_that_are_not_definitions(constructor) -> None:
-    with pytest.raises(TypeError, match="tree field 'unexpected'.*must be a Branch, Leaf, or Leaf class"):
+    with pytest.raises(TypeError, match="tree field 'unexpected'.*must be a Branch or Leaf instance or class"):
         constructor(amount=rf.Number(), d_model=16, n_layers=1, n_heads=4, unexpected=2)
 
 
@@ -217,7 +217,7 @@ def test_model_constructor_accepts_root_mask():
 
 
 def test_model_select_returns_nodes_and_update_refreshes_cached_role_views():
-    model = rf.Model.xs(amount=rf.Number, label=rf.Category(mask=True, embed=False), d_model=16)
+    model = rf.Model(preset="small", amount=rf.Number, label=rf.Category(mask=True, embed=False), d_model=16)
     params = model.schema
 
     numeric = rf.where("type") == "number"
@@ -262,7 +262,7 @@ def test_node_predicates_reject_undeclared_configuration():
 
 @pytest.mark.parametrize("wrapped", [False, True])
 def test_select_rechecks_callable_state_without_retaining_it_for_mutations(wrapped):
-    model = rf.Model.xs(amount=rf.Number, memo=rf.Number, d_model=8)
+    model = rf.Model(preset="small", amount=rf.Number, memo=rf.Number, d_model=8)
     wanted = {"amount"}
     calls = 0
 
@@ -282,7 +282,7 @@ def test_select_rechecks_callable_state_without_retaining_it_for_mutations(wrapp
 
 
 def test_where_predicates_use_current_field_and_comparison_values():
-    model = rf.Model.xs(amount=rf.Number, label=rf.Category(topk=[2]), d_model=8)
+    model = rf.Model(preset="small", amount=rf.Number, label=rf.Category(topk=[2]), d_model=8)
     unnamed = rf.where("description").is_null()
     assert model.select(unnamed, include_root=False) == list(model.schema.requests.values())
     model.schema.requests["/amount"].description = "Transaction amount"
@@ -301,7 +301,8 @@ def test_where_predicates_use_current_field_and_comparison_values():
 
 
 def test_fixed_roles_reuse_an_immutable_projection_without_exposing_mutable_lists():
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         items=rf.Branch(length=2, value=rf.Number(mask=rf.Mask(rate=0.5, reconstruct=True))),
         label=rf.Boolean(mask=True),
         embed=True,
@@ -343,7 +344,7 @@ def test_fixed_roles_reuse_an_immutable_projection_without_exposing_mutable_list
 
 @pytest.mark.parametrize("failure", ["validation", "rebuild"])
 def test_failed_mutation_restores_fixed_roles_and_runtime_graph(monkeypatch, failure):
-    model = rf.Model.xs(amount=rf.Number, label=rf.Boolean(mask=True), d_model=8)
+    model = rf.Model(preset="small", amount=rf.Number, label=rf.Boolean(mask=True), d_model=8)
     roles = model.schema.roles
     nodes = model.nodes
 
@@ -365,7 +366,7 @@ def test_failed_mutation_restores_fixed_roles_and_runtime_graph(monkeypatch, fai
 
 
 def test_schema_select_returns_nodes_and_accepts_boolean_predicates():
-    model = rf.Model.xs(amount=rf.Number, memo=rf.Number(active=False), d_model=16)
+    model = rf.Model(preset="small", amount=rf.Number, memo=rf.Number(active=False), d_model=16)
     params = model.schema
 
     active = params.select(rf.where("active"), include_root=False)
@@ -384,7 +385,7 @@ def test_schema_select_returns_nodes_and_accepts_boolean_predicates():
 
 
 def test_model_update_can_deactivate_and_reactivate_leaf_nodes():
-    model = rf.Model.xs(amount=rf.Number, memo=rf.Number(active=False, mask=0.5, embed=True), d_model=16)
+    model = rf.Model(preset="small", amount=rf.Number, memo=rf.Number(active=False, mask=0.5, embed=True), d_model=16)
     params = model.schema
 
     assert "/memo" in params.requests
@@ -403,7 +404,7 @@ def test_model_update_can_deactivate_and_reactivate_leaf_nodes():
 
 
 def test_model_update_applies_validated_values_before_rebuilding_modules():
-    model = rf.Model.xs(label=rf.Category(topk=[2]), d_model=16)
+    model = rf.Model(preset="small", label=rf.Category(topk=[2]), d_model=16)
     address = "/label"
     before = model.nodes[address]
 
@@ -442,7 +443,7 @@ def test_model_update_disables_attention_without_removing_reduction() -> None:
 
 
 def test_model_update_uses_current_schema_after_a_direct_attribute_edit():
-    model = rf.Model.xs(amount=rf.Number, d_model=16)
+    model = rf.Model(preset="small", amount=rf.Number, d_model=16)
     predicate = rf.where("name") == "amount"
 
     assert model.select(predicate) == [model.schema.requests["/amount"]]
@@ -460,7 +461,7 @@ def test_model_update_uses_current_schema_after_a_direct_attribute_edit():
 
 
 def test_model_extend_appends_fields_under_one_selected_array_and_rebuilds_modules():
-    model = rf.Model.xs(transactions=rf.Branch(amount=rf.Number, length=4), d_model=16)
+    model = rf.Model(preset="small", transactions=rf.Branch(amount=rf.Number, length=4), d_model=16)
     params = model.schema
 
     model.extend(rf.where("address") == "/transactions", risk_score=rf.Number)
@@ -470,7 +471,7 @@ def test_model_extend_appends_fields_under_one_selected_array_and_rebuilds_modul
 
 
 def test_model_extend_appends_category_field_and_preserves_existing_vocabulary():
-    model = rf.Model.xs(label=rf.Category, d_model=16)
+    model = rf.Model(preset="small", label=rf.Category, d_model=16)
 
     label_vocab = model.nodes["/label"].embedder.vocab
     label_vocab.extend(["alpha", "beta"])
@@ -484,7 +485,7 @@ def test_model_extend_appends_category_field_and_preserves_existing_vocabulary()
 
 
 def test_model_extend_defaults_to_root_when_only_one_array_matches():
-    model = rf.Model.xs(amount=rf.Number, d_model=16)
+    model = rf.Model(preset="small", amount=rf.Number, d_model=16)
 
     model.extend(risk_score=rf.Number)
 
@@ -493,7 +494,7 @@ def test_model_extend_defaults_to_root_when_only_one_array_matches():
 
 
 def test_model_delete_removes_nodes_permanently_and_rebuilds_modules():
-    model = rf.Model.xs(amount=rf.Number, risk_score=rf.Number, d_model=16)
+    model = rf.Model(preset="small", amount=rf.Number, risk_score=rf.Number, d_model=16)
     params = model.schema
 
     model.delete(rf.where("name") == "risk_score")
@@ -503,14 +504,14 @@ def test_model_delete_removes_nodes_permanently_and_rebuilds_modules():
 
 
 def test_model_delete_rejects_removing_the_final_request():
-    model = rf.Model.xs(amount=rf.Number, d_model=16)
+    model = rf.Model(preset="small", amount=rf.Number, d_model=16)
 
     with pytest.raises(ValueError, match="every request"):
         model.delete(rf.where("name") == "amount")
 
 
 def test_model_reset_reinitializes_runtime_node_without_changing_schema():
-    model = rf.Model.xs(amount=rf.Number, d_model=16)
+    model = rf.Model(preset="small", amount=rf.Number, d_model=16)
     before = model.nodes["/amount"]
 
     model.reset(rf.where("name") == "amount")
@@ -520,7 +521,7 @@ def test_model_reset_reinitializes_runtime_node_without_changing_schema():
 
 
 def test_model_override_temporarily_updates_schema_and_rebuilds_modules():
-    model = rf.Model.xs(amount=rf.Number, d_model=16)
+    model = rf.Model(preset="small", amount=rf.Number, d_model=16)
     before = model.nodes["/amount"]
 
     with model.override(rf.where("name") == "amount", active=False):
@@ -531,7 +532,7 @@ def test_model_override_temporarily_updates_schema_and_rebuilds_modules():
 
 
 def test_model_override_mask_restores_original_policy():
-    model = rf.Model.xs(amount=rf.Number(mask=0.25), d_model=16)
+    model = rf.Model(preset="small", amount=rf.Number(mask=0.25), d_model=16)
     request = model.schema.requests["/amount"]
 
     with model.override(rf.where("name") == "amount", mask=True):
@@ -541,7 +542,7 @@ def test_model_override_mask_restores_original_policy():
 
 
 def test_model_mutations_are_blocked_inside_training_loop_lock():
-    model = rf.Model.xs(amount=rf.Number, d_model=16)
+    model = rf.Model(preset="small", amount=rf.Number, d_model=16)
     lock = rf.MutationLockCallback()
 
     lock.on_train_start(trainer=None, pl_module=model)

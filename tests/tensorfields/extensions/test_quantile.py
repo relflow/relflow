@@ -19,7 +19,7 @@ ADDRESS = rf.Address("amount")
 
 
 def model(**options) -> rf.Model:
-    return rf.Model.xs(d_model=8, batch_size=2, amount=rf.Quantile(**options))
+    return rf.Model(preset="small", d_model=8, batch_size=2, amount=rf.Quantile(**options))
 
 
 def values(*content: float | None) -> pa.Table:
@@ -61,7 +61,9 @@ def write(configured: rf.Model, predicted: Prediction) -> pa.StructArray:
 
 
 def test_quantile_defaults_and_schema_round_trip():
-    configured = rf.Model.xs(amount=rf.Quantile, target=rf.Quantile(compression=150, objective="huber", mask=True))
+    configured = rf.Model(
+        preset="small", amount=rf.Quantile, target=rf.Quantile(compression=150, objective="huber", mask=True)
+    )
     restored = rf.Schema.model_validate_json(configured.schema.model_dump_json(round_trip=True))
     request = restored.requests[ADDRESS]
 
@@ -154,7 +156,8 @@ def test_quantile_empty_constant_and_tail_coordinates():
 
 def test_quantile_repeated_null_and_empty_rows_keep_geometry():
     address = rf.Address("items", "amount")
-    configured = rf.Model.xs(
+    configured = rf.Model(
+        preset="small",
         d_model=8,
         items=rf.Branch(length=3, amount=rf.Quantile(mask=rf.Mask(reconstruct=True))),
     )
@@ -183,7 +186,7 @@ def test_quantile_observes_skipped_supervised_targets_once(owner):
     address = rf.Address("items", "amount")
     leaf = rf.Quantile(mask=owner == "leaf")
     branch = rf.Branch(length=3, mask=owner == "branch", amount=leaf)
-    configured = rf.Model.xs(d_model=8, mask=owner == "root", items=branch)
+    configured = rf.Model(preset="small", d_model=8, mask=owner == "root", items=branch)
     source = pa.Table.from_pylist([{"items": [{"amount": 2.0}, {"amount": None}, {"amount": 8.0}]}])
     field = configured.encode(source, strata=rf.Strata.train)[address]
 
@@ -374,7 +377,8 @@ def test_quantile_worker_encoding_does_not_mutate_live_distribution():
 @pytest.mark.integration
 def test_quantile_lightning_training_learns_only_consumed_values():
     torch.manual_seed(811)
-    configured = rf.Model.xs(
+    configured = rf.Model(
+        preset="small",
         d_model=16,
         batch_size=64,
         x=rf.Quantile,
@@ -458,7 +462,8 @@ def test_quantile_lightning_training_learns_only_consumed_values():
 @pytest.mark.parametrize("operation", ["restore", "rebuild"])
 def test_quantile_forward_reuses_encoded_inputs_after_restoring_resources(tmp_path: Path, operation):
     torch.manual_seed(811)
-    configured = rf.Model.xs(
+    configured = rf.Model(
+        preset="small",
         d_model=8,
         x=rf.Quantile,
         y=rf.Quantile(mask=True),

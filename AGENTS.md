@@ -65,11 +65,34 @@ model = rf.Model(
 
 ## Gotchas
 
+- `Branch` and `Model` subclasses may declare children as class attributes,
+  such as `amount = rf.Number` and `transactions = Transaction(length=64)`.
+  Use a bare branch class, such as `transactions = Transaction`, when no
+  placement options are needed; it is equivalent to `Transaction()`. Bare
+  branches also work in keyword schemas, `fields` mappings, and `extend`.
+  For classes with declared children, constructor arguments configure the
+  enclosing node exclusively; add or replace children through subclassing,
+  not constructor keywords or `fields`. A declared child named `length` or
+  `d_model` is separate from the corresponding constructor setting. Declarations
+  are consumed at class creation; inspect bound children through the schema.
+  Inherited children keep their order, replacements replace whole definitions,
+  and conflicting multiple bases require an explicit child redeclaration.
+  Resolved schemas, checkpoints, and YAML loading remain authoritative rather
+  than merging class declarations. Ordinary `Model(...)` and `Branch(...)`
+  keyword and mapping schemas remain supported.
 - Do not use a public `Struct(...)` constructor. Public examples should use `Model(...)` and `Branch(...)`.
+- Select named architecture defaults with `Model(preset="small", ...)`.
+  The bundled names are `small` and `medium`, from the frozen arena HPO
+  architectures; custom policies use
+  `rf.presets.register(Preset(...))`. Generated size methods and
+  `rf.presets.factory`, `with_preset`, and old size names are removed.
+  A child named `preset` belongs in `fields` or a class declaration.
 - `Model(...)` has no root-name option. `name=rf.Category` defines an ordinary
   child field at `/name`; neither `name="customer"` nor `root="customer"` names the model.
 - Branch and leaf names come from their parent; definitions have no `name` argument.
-  `Period` accepts positional calendar parts; other fields and branches use keyword options.
+  `Period` accepts positional calendar parts and `Enum` accepts positional
+  scalar labels (or a `values=(...)` tuple, never both). Other fields and
+  branches use keyword options.
   Their parent supplies names through keywords, such as
   `amount=rf.Number` or `events=rf.Branch(...)`. Use a `fields` mapping for
   generated schemas or child names that collide with parent configuration:
@@ -153,15 +176,15 @@ model = rf.Model(
   Zone-aware timestamps describe their own wall clock; strings carrying an offset
   are read as UTC. A `Vector` with a NaN or infinite element, and a float NaN label
   in `Category`, take the `other` state; a NaN `Set` member is dropped like a null.
-- `Text(store="dir")` keeps frozen-encoder vectors on disk, keyed by encoder
-  configuration and token row and shared by every split, run, and field with
-  that encoder; misses are encoded once and appended as shards, the
-  extension's callback flushes at epoch and phase ends, and
-  `embedder.warm(strings)` fills it ahead of training. A store that fits
-  `resident` MiB of accelerator memory (default a quarter of the device, up
-  to 2 GiB) is uploaded once per index version and answered on the device;
-  rows hash identically on numpy and torch. The in-process `cache` stays for
-  runs without a store.
+- `Text` caches automatically: workers send stable IDs; a bounded device
+  table and shared Rust Moka RAM cache retain hot entries, with SQLite as the
+  durable cold tier. `store` selects a local directory, `memory` budgets RAM
+  (default 64 MiB), and `resident` budgets device tables and replacement
+  workspace (CUDA default: one eighth of free memory, up to 512 MiB).
+  `cache=False` disables all tiers; `cache=N` additionally caps hot entries.
+  Disk storage grows with observed text; only hot state is memory bounded.
+  `embedder.warm(strings)` fills the cache ahead of training. Cache owners are
+  shared by a trainer's loader family; separate DDP ranks share disk, not RAM.
 - `rf.Jitter(add=..., multiply=..., normalize=...)` is a shared frozen
   configuration whose `apply(inputs, mask)` method owns the vectorized affine
   tensor operation. Consumers own training activation, eligible coordinates,
@@ -188,6 +211,14 @@ model = rf.Model(
 
 ## Data And Training
 
+`model.fit(datamodule, preset="small")` or `preset="medium"` selects the
+same policy's optional `FitDefaults` independently of its architecture. Explicit
+options win; an explicit optimizer replaces preset optimizer defaults, a
+supplied EMA callback replaces preset averaging, and `ema_decay=None` disables
+it. Preset fits default to eight epochs with early stopping and rollback off.
+An explicit epoch, step, or time budget replaces the epoch default. Fits never
+apply schema masks, jitter, or history policy from the source HPO recipe.
+
 Configure AdamW directly on `model.fit(...)`, such as
 `model.fit(datamodule, batch_size=128, learning_rate=1e-4, weight_decay=0.01, max_epochs=30)`.
 Omitted options use sensible defaults. Each fit starts a new optimizer run
@@ -196,7 +227,7 @@ Supply any scheduler for that run through `fit(scheduler=...)`. Keep
 `rf.adamw(...)` factories for custom optimizers and direct `lit.Trainer` setup;
 ordinary examples do not assign `model.optimizer` before calling `fit`.
 
-`Model(..., jacobian=True)` or a factory such as `Model.xs(..., jacobian=True)`
+`Model(..., jacobian=True)` or `Model(preset="small", jacobian=True, ...)`
 opts into TorchJD UPGrad for multiple reconstruction
 objectives and requires `relflow[torchjd]`. One weighted scalar per reconstruction
 address participates; Lightning retains automatic optimization. The session
@@ -268,9 +299,16 @@ retain Arrow tables and metadata, and HTTP serving retains Arrow IPC/JSON and
 version headers. Extension output list children must be named `element`.
 
 PyArrow Parquet cannot round-trip fixed-size lists below null containers.
-`rf.Writer` rejects those batches before writing; use Arrow IPC for sparse
+`rf.Writer` in its default Parquet mode rejects those batches before writing;
+use `rf.Writer(..., format="ipc")` for streaming sparse
 vector results. Scalar rich results and nonnull representation vectors retain
 normal Parquet support.
+
+The base install includes `relflow inspect`, `check`, `predict`, and
+`serve` (also `python -m relflow`). Architecture stays in model YAML; versioned
+run YAML configures data and execution. Prediction jobs use fresh output directories
+and `_SUCCESS` completion markers. `rf.inspect` and `rf.check` expose the same
+inspection and preflight contracts from Python. See `docs/guides/command-line.qmd`.
 
 ## Inference
 

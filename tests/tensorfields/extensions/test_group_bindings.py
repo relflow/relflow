@@ -15,7 +15,8 @@ N_GROUPS = 3
 
 def build() -> rf.Model:
     torch.manual_seed(0)
-    return rf.Model.xs(
+    return rf.Model(
+        preset="small",
         d_model=8,
         batch_size=2,
         attention=None,
@@ -135,7 +136,8 @@ def test_group_assignments_preserve_source_precision_near_tied_logits() -> None:
 
 
 def test_group_decoder_does_not_condition_identity_on_row_siblings() -> None:
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         merchant_id=rf.Group(
             n_groups=N_GROUPS,
@@ -166,7 +168,8 @@ def test_group_model_bindings_reject_missing_address(binding) -> None:
     ids=["vocabulary", "assignments"],
 )
 def test_group_model_bindings_reject_non_group_field(binding) -> None:
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         amount=rf.Number,
     )

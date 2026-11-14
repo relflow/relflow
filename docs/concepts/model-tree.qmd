@@ -21,7 +21,8 @@ which reads the three-transaction record shown there:
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     trxns=rf.Branch(
         length=32,
         overflow="tail",
@@ -73,7 +74,7 @@ all history items and lets each batch determine its width; see
 
 ## How declarations become a model
 
-`rf.Model.xs(...)` constructs a model from the tree you supply. Your
+`rf.Model(preset="small", ...)` constructs a model from the tree you supply. Your
 application chooses the child names passed as keywords. In the example
 above, `trxns`, `amount`, `merchant`, and `disputed` name parts of the payment
 record. The datatype definitions and their options specify how those parts
@@ -140,8 +141,8 @@ payment_fields = {
     "disputed": rf.Boolean(mask=True),
 }
 
-payment_model = rf.Model.xs(**payment_fields)
-payment_model_from_mapping = rf.Model.xs(fields=payment_fields)
+payment_model = rf.Model(preset="small", **payment_fields)
+payment_model_from_mapping = rf.Model(preset="small", fields=payment_fields)
 ```
 
 Python's `**payment_fields` passes the mapping's entries as keyword
@@ -156,6 +157,110 @@ meaning. Put a child whose name matches a setting in the `fields` mapping,
 as shown below. Child names must be nonempty and contain only letters,
 digits, underscores, or hyphens; mapping keys also support names that cannot
 be written as Python keywords. Names must be unique within each parent.
+
+### Define children in classes
+
+For reusable definitions, declare children in a `Branch` or `Model` subclass.
+The class body defines the children; constructor arguments configure the
+enclosing node. For example, this model predicts whether an account observation
+is fraudulent from its identifier and transaction history:
+
+```python
+import relflow as rf
+
+
+class Transaction(rf.Branch):
+    amount = rf.Number
+    merchant = rf.Category
+
+
+class FraudDetector(rf.Model):
+    account = rf.Hash
+    transactions = Transaction(length=64, overflow="tail")
+    fraudulent = rf.Boolean(mask=True)
+
+
+model = FraudDetector(preset="small")
+# Or configure the root explicitly:
+model = FraudDetector(d_model=64, n_layers=2, n_heads=4)
+```
+
+`Transaction` defines reusable children. `Transaction(length=64, overflow="tail")`
+creates a branch declaration with a collection cap and cropping policy. The
+parent's `transactions` attribute supplies its name and address, `/transactions`.
+Use a bare branch class when no placement options are needed, just as a bare
+tensorfield class such as `rf.Number` uses default options:
+
+```python
+class CustomerHistory(rf.Branch):
+    transactions = Transaction
+
+
+class CustomerModel(rf.Model):
+    history = CustomerHistory
+    fraudulent = rf.Boolean(mask=True)
+
+
+model = CustomerModel(preset="small")
+```
+
+`history = CustomerHistory` is equivalent to `history = CustomerHistory()`.
+Each placement still binds independent nodes. Default collection lengths remain
+unbounded; use `Transaction(length=64, overflow="tail")` to set a cap. Bare branch
+classes also work in ordinary constructor keywords, `fields` mappings, and
+`model.extend(...)`.
+
+Class declarations and constructor configuration have separate namespaces:
+
+```python
+class Measurements(rf.Branch):
+    length = rf.Number
+    description = rf.Category
+
+
+measurements = Measurements(length=32, description="Recent measurements")
+```
+
+Here, the numeric child is named `length`; the enclosing collection retains at
+most 32 records. The categorical child is named `description`; the constructor's
+description documents the branch. Declared children are consumed during class
+creation, so they do not replace configuration attributes or methods. Inspect
+`measurements.fields` or the constructed model's `schema` to access bound children.
+For example, a model child named `predict` leaves `model.predict(...)` callable.
+
+Subclasses inherit children in declaration order. Redeclaring a child replaces
+its whole definition; new children follow inherited children:
+
+```python
+class InternationalTransaction(Transaction):
+    merchant = rf.Category(cased=False)
+    currency = rf.Category
+```
+
+If multiple bases supply different definitions for the same child, redeclare
+that child explicitly in the subclass. Replacing an inherited child with an
+ordinary value or method is rejected. A static type checker may also flag
+replacements whose inferred Python types differ, such as replacing a bare
+tensorfield class with a configured instance. Annotate both declarations as
+`rf.TreeFieldInput` when they need a common static type. Declarations that collide
+with inherited configuration or method names may need a checker-specific
+suppression; Python type checkers do not model the declaration collection step.
+
+For a class with declared children, constructor keywords configure the enclosing
+node exclusively: adding or replacing children through keywords or a `fields`
+mapping is rejected. Use a subclass for structural variants. The existing
+`rf.Model(...)` and `rf.Branch(...)` forms remain available for schemas assembled
+from keywords or mappings.
+
+Each construction binds independent nodes and creates independent learned state.
+Reusing `Transaction` in two placements does not share weights. Class definitions
+and branch declarations allocate no neural parameters. Their resolved schemas
+contain ordinary branches, so checkpoints can be loaded with `rf.Model.load(...)`
+without importing the declaration classes. Use `FraudDetector.load(...)` when
+the subclass's Python methods are needed. An explicitly supplied resolved schema,
+including one loaded from a checkpoint or YAML template, is authoritative and
+is not merged with class declarations. Runtime schema mutations affect the model
+instance rather than its Python class.
 
 ### Inspect what was constructed
 
@@ -204,8 +309,10 @@ prefix. A field named `name` is an ordinary child, with address `/name`.
 Repeated data belongs in a child branch. A child branch reads a list even
 when `length=1`.
 
-Definitions take no positional arguments or `name` option. Use `fields` for
-generated schemas or a child name that collides with configuration:
+Names come from the parent rather than a `name` option. `Period` accepts
+positional calendar parts and `Enum` accepts positional scalar labels; other
+field and branch options use keywords. Use `fields` for generated schemas or
+a child name that collides with configuration:
 
 ```python
 transactions = rf.Branch(
@@ -220,9 +327,10 @@ names and nesting select source values.
 
 ## Choose a size
 
-`rf.Model.xs(...)`, `.sm(...)`, `.md(...)`, `.lg(...)`, and `.xl(...)` supply
-architecture defaults. Start with `xs` or `sm` to establish a working model,
-then compare larger sizes on validation data. Schema size, vocabularies, and
+`rf.Model(preset="small", ...)` supplies named architecture defaults.
+The bundled architectures are `small` and `medium`, derived from the frozen arena HPO recipes.
+Start with either preset and compare it on validation data; these names describe
+the original data regimes rather than an ascending model-size ladder. Schema size, vocabularies, and
 decoded fields also affect memory and compute.
 
 The presets leave collection lengths, overflow, queries, masking, datatype

@@ -45,3 +45,15 @@ evidence/runs/
 /.quarto/
 /_readthedocs/
 /docs/_quarto-readthedocs-*.yml
+
+# Local cache experiments and measurement receipts
+/prototypes/cache/benchmarks/
+/prototypes/cache/results/
+/prototypes/text-cache/
+/scripts/benchmark_text_cache.py
+/scripts/benchmarks/text-cache/
+/scripts/text_throughput.py
+/scripts/text_throughput_report.py
+/native/target/
+/native/python/relflow_native/native*.so
+/native/python/relflow_native/native*.pyd

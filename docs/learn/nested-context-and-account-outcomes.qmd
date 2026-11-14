@@ -91,7 +91,8 @@ of context improves the task.
 ```python
 import relflow as rf
 
-model = rf.Model.md(
+model = rf.Model(
+    preset="medium",
     account_age_days=rf.Number,
     trxns=rf.Branch(
         length=64,

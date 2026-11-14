@@ -57,7 +57,7 @@ def test_runtime_constructor_retains_custom_scheduler_support():
         def load_state_dict(self, state_dict):
             pass
 
-    model = rf.Model.xs(d_model=16, value=rf.Number(mask=True))
+    model = rf.Model(preset="small", d_model=16, value=rf.Number(mask=True))
     configured = rf.Model(
         model.schema,
         optimizer=rf.adamw(1e-3),

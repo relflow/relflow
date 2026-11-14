@@ -88,6 +88,7 @@ import numpy as np
 import polars as pl
 import pyarrow as pa
 import relflow as rf
+from relflow.presets.base import resolve
 from reporting import experiment, report
 
 BUDGET = 500
@@ -164,11 +165,23 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     for name, level in LEVELS.items():
         lit.seed_everything(seed, workers=True)
         jitter = rf.Jitter(add=level)
-        model = rf.Model.xs(
-            signal=rf.Number(jitter=jitter),
-            nuisance=rf.Vector(n_dim=8, jitter=jitter),
-            target=rf.Number(mask=True, objective="mse"),
+        # Freeze the experimental architecture independently of SDK preset changes.
+        control_preset = rf.presets.Preset(
+            name="xs",
+            d_model=64,
+            root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+            branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+            leaf=rf.presets.LeafDefaults(n_heads=2),
         )
+        model = rf.Model(
+            schema=resolve(
+                control_preset,
+                signal=rf.Number(jitter=jitter),
+                nuisance=rf.Vector(n_dim=8, jitter=jitter),
+                target=rf.Number(mask=True, objective="mse"),
+            )
+        )
+        model.preset = control_preset
         updates = fit(model, pa.Table.from_pylist(train), pa.Table.from_pylist(validate), seed, steps, accelerator)
         fitted = prediction(model, train)
         arm = {

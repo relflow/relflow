@@ -5,15 +5,20 @@ from __future__ import annotations
 import os
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import lightning.pytorch as lit
 import numpy as np
 import pyarrow as pa
+import pyarrow.ipc as ipc
 import pyarrow.parquet as pq
 from lightning.pytorch import callbacks
 
+from relflow.data.arrow import Retain
 from relflow.data.processors import Postprocessor, PostprocessorInput, apply
+
+if TYPE_CHECKING:
+    from relflow.architecture.root import Model
 
 
 def check_parquet(array: pa.Array | pa.ChunkedArray, address: str, valid: np.ndarray | None = None) -> None:
@@ -59,7 +64,7 @@ def check_parquet(array: pa.Array | pa.ChunkedArray, address: str, valid: np.nda
 
 
 class Writer(callbacks.BasePredictionWriter):
-    """Persist each rank's written prediction tables as one Arrow Parquet shard.
+    """Persist each rank's prediction tables as one Parquet or Arrow IPC file.
 
     ``Model.predict_step`` has already converted tensors into the canonical
     Arrow prediction envelope. Configured Polars postprocessors run in order,
@@ -78,18 +83,27 @@ class Writer(callbacks.BasePredictionWriter):
         path: os.PathLike[str] | str,
         postprocessor: PostprocessorInput = (),
         row_group_size: int = 65536,
+        *,
+        format: Literal["parquet", "ipc"] = "parquet",
     ) -> None:
         super().__init__(write_interval="batch")
         if isinstance(row_group_size, bool) or not isinstance(row_group_size, int) or row_group_size <= 0:
             raise ValueError(f"Writer row_group_size must be a positive integer, got {row_group_size!r}")
         self.path = Path(path)
+        if format not in ("parquet", "ipc"):
+            raise ValueError(f"Writer format must be 'parquet' or 'ipc', got {format!r}")
+        self.format = format
         self.postprocessors = Postprocessor.normalize(postprocessor)
         self.row_group_size = row_group_size
         self.schema: pa.Schema | None = None
-        self.writer: pq.ParquetWriter | None = None
+        self.writer: pq.ParquetWriter | ipc.RecordBatchFileWriter | None = None
+        self.sink: pa.NativeFile | None = None
         self.shard: Path | None = None
         self.pending: list[pa.Table] = []
         self.rows = 0
+        self.source_rows = 0
+        self.written_rows = 0
+        self.batches = 0
 
     # Keep the public ``output`` keyword; Lightning calls this hook positionally.
     def write_on_batch_end(  # pyrefly: ignore[bad-override-param-name]
@@ -103,32 +117,56 @@ class Writer(callbacks.BasePredictionWriter):
         dataloader_idx: int,
     ) -> None:
         """Stage the Arrow table returned by one prediction step."""
+        self.write(output, rank=trainer.global_rank)
 
+    def write(self, output: pa.Table, *, rank: int = 0) -> None:
+        """Append one canonical prediction table under the rank's locked schema."""
         try:
             if not isinstance(output, pa.Table):
                 raise TypeError(f"Writer requires predict_step to return a pyarrow.Table, got {type(output).__name__}")
 
             table = apply(output, self.postprocessors).replace_schema_metadata(output.schema.metadata)
-            for name in table.column_names:
-                check_parquet(table[name], f"/{name}")
+            if self.format == "parquet":
+                for name in table.column_names:
+                    check_parquet(table[name], f"/{name}")
 
             if self.writer is None:
                 self.path.mkdir(parents=True, exist_ok=True)
                 self.schema = table.schema
-                self.shard = self.path / f"rank-{trainer.global_rank}.parquet"
-                self.writer = pq.ParquetWriter(where=self.partial(self.shard), schema=table.schema)
+                suffix = "parquet" if self.format == "parquet" else "arrow"
+                self.shard = self.path / f"rank-{rank}.{suffix}"
+                if self.format == "parquet":
+                    self.writer = pq.ParquetWriter(where=self.partial(self.shard), schema=table.schema)
+                else:
+                    self.sink = pa.OSFile(str(self.partial(self.shard)), "wb")
+                    self.writer = ipc.new_file(self.sink, table.schema)
             elif self.schema is None or not table.schema.equals(self.schema, check_metadata=True):
                 raise ValueError(
                     f"prediction batch schema differs from the first batch; expected {self.schema}, got {table.schema}"
                 )
 
-            self.pending.append(table)
+            if table.num_rows:
+                self.pending.append(table)
             self.rows += table.num_rows
+            self.source_rows += output.num_rows
+            self.written_rows += table.num_rows
+            self.batches += 1
             if self.rows >= self.row_group_size:
                 self.flush(final=False)
         except BaseException:
             self.discard()
             raise
+
+    def finish(self, model: Model, schema: pa.Schema | None, *, retain: Retain = (), rank: int = 0) -> None:
+        """Finalize prediction, including a typed result when no batches were produced."""
+        from relflow.architecture.output import write
+
+        if not self.batches:
+            if schema is None:
+                raise RuntimeError("prediction produced no processed schema; no complete output was published")
+            source = pa.Table.from_batches([], schema=schema)
+            self.write(write(model, [], source=source, retain=retain), rank=rank)
+        self.close()
 
     @staticmethod
     def partial(shard: Path) -> Path:
@@ -145,7 +183,10 @@ class Writer(callbacks.BasePredictionWriter):
         table = pa.concat_tables(self.pending)
         rows = table.num_rows if final else table.num_rows - table.num_rows % self.row_group_size
         if rows:
-            self.writer.write_table(table.slice(0, rows), row_group_size=self.row_group_size)
+            if isinstance(self.writer, pq.ParquetWriter):
+                self.writer.write_table(table.slice(0, rows), row_group_size=self.row_group_size)
+            else:
+                self.writer.write_table(table.slice(0, rows), max_chunksize=self.row_group_size)
         remainder = table.slice(rows)
         self.pending = [remainder] if remainder.num_rows else []
         self.rows = remainder.num_rows
@@ -157,7 +198,7 @@ class Writer(callbacks.BasePredictionWriter):
             return
         try:
             self.flush(final=True)
-            self.writer.close()
+            self.release()
             assert self.shard is not None
             self.partial(self.shard).replace(self.shard)
         except BaseException:
@@ -168,16 +209,30 @@ class Writer(callbacks.BasePredictionWriter):
     def discard(self) -> None:
         """Drop the partial shard so a failed run leaves no complete-looking output."""
 
-        if self.writer is not None:
+        try:
+            self.release()
+        finally:
             try:
-                self.writer.close()
+                if self.shard is not None:
+                    self.partial(self.shard).unlink(missing_ok=True)
             finally:
-                assert self.shard is not None
-                self.partial(self.shard).unlink(missing_ok=True)
-        self.reset()
+                self.reset()
+                self.batches = 0
+                self.source_rows = 0
+                self.written_rows = 0
+
+    def release(self) -> None:
+        """Close the IPC file as well as its writer before rename or deletion."""
+        try:
+            if self.writer is not None:
+                self.writer.close()
+        finally:
+            if self.sink is not None:
+                self.sink.close()
 
     def reset(self) -> None:
         self.writer = None
+        self.sink = None
         self.schema = None
         self.shard = None
         self.pending = []

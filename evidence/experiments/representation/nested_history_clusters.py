@@ -174,6 +174,7 @@ import polars as pl
 import pyarrow as pa
 import relflow as rf
 import torch
+from relflow.presets.base import resolve
 from reporting import experiment, report
 
 BUDGET = 600
@@ -242,18 +243,31 @@ def condition(rows: list[dict], length: int, reverse: bool = False) -> list[dict
 
 def build() -> rf.Model:
     mask = rf.Mask(rate=0.35, reconstruct=True)
-    return rf.Model.xs(
-        embed=True,
-        transactions=rf.Branch(
-            length=CAPACITY,
-            attention=None,
-            reduction=rf.Mean(),
-            merchant=rf.Enum(values=MERCHANTS, p_unavailable=0.0, mask=mask),
-            amount=rf.Number(mask=mask),
-            interval_days=rf.Number(mask=mask),
-            terminal=rf.Enum(values=TERMINALS, p_unavailable=0.0),
-        ),
+    # Freeze the experimental architecture independently of SDK preset changes.
+    control_preset = rf.presets.Preset(
+        name="xs",
+        d_model=64,
+        root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        leaf=rf.presets.LeafDefaults(n_heads=2),
     )
+    model = rf.Model(
+        schema=resolve(
+            control_preset,
+            embed=True,
+            transactions=rf.Branch(
+                length=CAPACITY,
+                attention=None,
+                reduction=rf.Mean(),
+                merchant=rf.Enum(values=MERCHANTS, p_unavailable=0.0, mask=mask),
+                amount=rf.Number(mask=mask),
+                interval_days=rf.Number(mask=mask),
+                terminal=rf.Enum(values=TERMINALS, p_unavailable=0.0),
+            ),
+        )
+    )
+    model.preset = control_preset
+    return model
 
 
 def embedding(model: rf.Model, rows: list[dict], batch_size: int = 128) -> np.ndarray:

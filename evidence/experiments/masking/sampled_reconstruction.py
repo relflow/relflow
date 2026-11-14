@@ -116,6 +116,7 @@ import numpy as np
 import polars as pl
 import pyarrow as pa
 import relflow as rf
+from relflow.presets.base import resolve
 from reporting import experiment, report
 
 BUDGET = 400
@@ -128,18 +129,31 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
 
 
 def build() -> rf.Model:
-    return rf.Model.xs(
-        fields={
-            name: rf.Number(
-                objective="mse",
-                mask=(
-                    rf.Mask(rate=0.35, reconstruct=True),
-                    rf.Mask(query=f"hide_{name}", reconstruct=True),
-                ),
-            )
-            for name in ("x", "y")
-        },
+    # Freeze the experimental architecture independently of SDK preset changes.
+    control_preset = rf.presets.Preset(
+        name="xs",
+        d_model=64,
+        root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        leaf=rf.presets.LeafDefaults(n_heads=2),
     )
+    model = rf.Model(
+        schema=resolve(
+            control_preset,
+            fields={
+                name: rf.Number(
+                    objective="mse",
+                    mask=(
+                        rf.Mask(rate=0.35, reconstruct=True),
+                        rf.Mask(query=f"hide_{name}", reconstruct=True),
+                    ),
+                )
+                for name in ("x", "y")
+            },
+        )
+    )
+    model.preset = control_preset
+    return model
 
 
 def prediction(model: rf.Model, rows: list[dict], target: str) -> np.ndarray:

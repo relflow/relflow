@@ -1,6 +1,7 @@
 """Parents bind independent, named nodes from reusable field definitions."""
 
 import inspect
+from functools import partial
 from typing import Literal
 
 import pydantic
@@ -72,14 +73,14 @@ def test_extend_binds_reserved_names_and_keeps_rejected_mutations_atomic():
     assert field.name is None and field.parent is None
 
 
-@pytest.mark.parametrize("constructor", [rf.Model, rf.Model.xs])
+@pytest.mark.parametrize("constructor", [rf.Model, partial(rf.Model, preset="small")])
 def test_construction_policy_names_remain_available_as_children(constructor):
     model = constructor(
         d_model=8,
         n_layers=1,
         n_heads=2,
         defaults=rf.Number,
-        preset=rf.Number,
+        fields={"preset": rf.Number},
         items=rf.Branch(value=rf.Number),
     )
     model.extend(rf.where("address") == "/items", defaults=rf.Number, preset=rf.Number)

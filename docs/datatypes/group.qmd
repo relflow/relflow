@@ -12,7 +12,8 @@ prediction, as well as keeping a persistent merchant vocabulary.
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     amount=rf.Number,
     merchant=rf.Group(
         n_groups=12,

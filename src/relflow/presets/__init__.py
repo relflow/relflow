@@ -1,17 +1,16 @@
-"""Immutable model presets and their typed classmethod factory."""
+"""Immutable model presets and named application policies."""
 
-from relflow.presets.base import BranchDefaults, LeafDefaults, Preset
-from relflow.presets.builtins import LG, MD, SM, XL, XS
-from relflow.presets.construction import factory
+from relflow.presets.base import BranchDefaults, FitDefaults, LeafDefaults, Preset
+from relflow.presets.builtins import MEDIUM, SMALL
+from relflow.presets.registry import get, register
 
 __all__ = [
     "BranchDefaults",
     "LeafDefaults",
+    "FitDefaults",
     "Preset",
-    "XS",
-    "SM",
-    "MD",
-    "LG",
-    "XL",
-    "factory",
+    "SMALL",
+    "MEDIUM",
+    "get",
+    "register",
 ]

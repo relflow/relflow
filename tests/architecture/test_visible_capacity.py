@@ -25,7 +25,8 @@ def totals(model: rf.Model) -> list[float]:
 @pytest.mark.parametrize("reduction", [rf.Attention(), rf.Mean()], ids=["attention", "mean"])
 def test_extending_a_root_target_leaves_capacity_and_predictions_unchanged(reduction):
     torch.manual_seed(0)
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         batch_size=2,
         reduction=reduction,
@@ -35,13 +36,13 @@ def test_extending_a_root_target_leaves_capacity_and_predictions_unchanged(reduc
     )
     before = totals(model)
     encoder = model.nodes[ROOT].encoder
-    assert encoder.visible_width == 2
+    assert encoder.visible_width == 5
     capacity = encoder.pool.mass_capacity
 
     model.extend(rf.where("address") == str(ROOT), flag=rf.Boolean(mask=True))
 
     encoder = model.nodes[ROOT].encoder
-    assert encoder.visible_width == 2
+    assert encoder.visible_width == 5
     assert encoder.pool.mass_capacity == capacity
     assert not model.schema.requests[rf.Address("/flag")].embedded
     # The new target appends one absent slot, so predictions agree up to float reassociation.

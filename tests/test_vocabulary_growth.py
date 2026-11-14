@@ -23,7 +23,8 @@ REQUESTS = {"category": rf.Category, "set": rf.Set, "group": rf.Group}
 def build(kind, *, train_signal=False):
     options = {"p_unavailable": 0.0, "mask": rf.Mask(query="supervise", reconstruct=True)}
     request = rf.Group(n_groups=3, **options) if kind == "group" else REQUESTS[kind](**options)
-    return rf.Model.xs(
+    return rf.Model(
+        preset="small",
         d_model=8,
         attention=None,
         reduction=rf.Mean(),
@@ -371,7 +372,8 @@ def test_late_registered_category_subclass_uses_its_registered_bind_component():
                 module, field, observation, binding, address=address, strata=strata, resize=resize
             )
 
-        model = rf.Model.xs(
+        model = rf.Model(
+            preset="small",
             d_model=8,
             value=Request(p_unavailable=0.0, mask=True),
         )
@@ -729,7 +731,7 @@ def test_admitted_rows_stay_zero_until_a_training_batch_starts_them_distinct_and
 
     def build():
         lit.seed_everything(7)
-        return rf.Model.xs(d_model=8, group=rf.Category, y=rf.Number(mask=True))
+        return rf.Model(preset="small", d_model=8, group=rf.Category, y=rf.Number(mask=True))
 
     rows = pa.table({"group": ["A", "B", "C", "A"], "y": [1.0, 2.0, 3.0, 4.0]})
     # Admission with null targets touches the vocabulary alone; the target statistics are already set.

@@ -151,6 +151,7 @@ import polars as pl
 import pyarrow as pa
 import relflow as rf
 import torch
+from relflow.presets.base import resolve
 from reporting import experiment, report
 
 BUDGET = 400
@@ -180,17 +181,38 @@ def records(*, rows: int, seed: int, contaminated: bool = False) -> Iterator[dic
 def build(representation: str, task: str, objective: str = "mse") -> rf.Model:
     scalar = rf.Quantile if representation == "quantile" else rf.Number
     if task == "noisy":
-        model = rf.Model.xs(
-            group=rf.Enum(values=GROUPS, p_unavailable=0.0),
-            target=scalar(objective=objective, mask=True),
+        # Freeze the experimental architecture independently of SDK preset changes.
+        control_preset = rf.presets.Preset(
+            name="xs",
+            d_model=64,
+            root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+            branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+            leaf=rf.presets.LeafDefaults(n_heads=2),
         )
+        model = rf.Model(
+            schema=resolve(
+                control_preset,
+                group=rf.Enum(values=GROUPS, p_unavailable=0.0),
+                target=scalar(objective=objective, mask=True),
+            )
+        )
+        model.preset = control_preset
     else:
         target = (
             rf.Enum(values=("lower", "upper"), p_unavailable=0.0, mask=True)
             if task == "rank"
             else rf.Number(objective="mse", mask=True)
         )
-        model = rf.Model.xs(x=scalar, fields={task: target})
+        # Freeze the experimental architecture independently of SDK preset changes.
+        control_preset = rf.presets.Preset(
+            name="xs",
+            d_model=64,
+            root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+            branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+            leaf=rf.presets.LeafDefaults(n_heads=2),
+        )
+        model = rf.Model(schema=resolve(control_preset, x=scalar, fields={task: target}))
+        model.preset = control_preset
     return model
 
 

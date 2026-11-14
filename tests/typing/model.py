@@ -15,8 +15,6 @@ from relflow.structs.packages import Prediction
 
 
 class Classifier(rf.Model):
-    compact = rf.presets.factory(rf.presets.SM)
-
     def label(self) -> str:
         return "classifier"
 
@@ -37,13 +35,13 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
     assert_type(Classifier.load("model.ckpt"), Classifier)
     assert_type(Classifier.from_yaml("model.yaml"), Classifier)
     assert_type(rf.Model.from_yaml(Path("model.yaml"), d_model=32, optimizer=rf.adamw(1e-3)), rf.Model)
-    assert_type(Classifier.xs(amount=rf.Number, label=rf.Category(mask=True)), Classifier)
-    assert_type(Classifier.sm(amount=rf.Number, n_heads=2), Classifier)
-    assert_type(Classifier.md(amount=rf.Number, reduction=None), Classifier)
-    assert_type(Classifier.lg(amount=rf.Number, attention=None), Classifier)
-    assert_type(Classifier.xl(amount=rf.Number, dropout=None, optimizer=rf.adamw(1e-3)), Classifier)
-    assert_type(rf.Model.md(fields={"size": rf.Number}, scheduler=schedule), rf.Model)
-    assert_type(Classifier.compact(amount=rf.Number, n_layers=2), Classifier)
+    assert_type(Classifier(preset="small", amount=rf.Number, label=rf.Category(mask=True)), Classifier)
+    assert_type(Classifier(preset="small", amount=rf.Number, n_heads=2), Classifier)
+    assert_type(Classifier(preset="medium", amount=rf.Number, reduction=None), Classifier)
+    assert_type(Classifier(preset="medium", amount=rf.Number, attention=None), Classifier)
+    assert_type(Classifier(preset="medium", amount=rf.Number, dropout=None, optimizer=rf.adamw(1e-3)), Classifier)
+    assert_type(rf.Model(preset="medium", fields={"size": rf.Number}, scheduler=schedule), rf.Model)
+    assert_type(Classifier(preset="application-preset", amount=rf.Number, n_layers=2), Classifier)
     assert_type(model.track(("loss", "train"), loss), torch.Tensor)
     assert_type(model.track(("throughput", "train"), loss, on_step=True, on_epoch=False), torch.Tensor)
     assert_type(model.track(("loss", "train_epoch"), loss, on_step=False, on_epoch=True, logger=False), torch.Tensor)
@@ -67,6 +65,8 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
     assert_type(model.predict([{"amount": 1.0}]), pl.DataFrame)
     data = rf.ArrowDataModule(train=table, validate=table, test=table, predict=table)
     assert_type(model.fit(data, scheduler=schedule, log_every_n_steps=50), Classifier)
+    assert_type(model.fit(data, preset="small", ema_decay=None), Classifier)
+    assert_type(model.fit(data, preset="medium", ema_decay=0.99, max_epochs=12), Classifier)
     assert_type(
         model.fit(
             data,

@@ -21,7 +21,7 @@ VALUES = ("low", "medium", "high")
 
 
 def model(values=None, **options):
-    return rf.Model.xs(d_model=8, level=rf.Ordinal(values=values, **options))
+    return rf.Model(preset="small", d_model=8, level=rf.Ordinal(values=values, **options))
 
 
 def prediction(values):
@@ -131,7 +131,8 @@ def test_query_and_branch_cropping_preserve_record_holes_and_rank_values():
             {"events": [{"rating": None}]},
         ]
     )
-    configured = rf.Model.xs(
+    configured = rf.Model(
+        preset="small",
         d_model=8,
         events=rf.Branch(length=2, overflow="tail", level=rf.Ordinal(values=VALUES, query="rating", embed=True)),
     )
@@ -154,7 +155,7 @@ def test_native_declared_labels_survive_json_yaml_and_checkpoint_roundtrips(labe
     assert rf.Schema.model_validate_json(configured.schema.model_dump_json()).requests[ADDRESS].values == labels
     declaration["mask"] = True
     path = tmp_path / "ordinal.yaml"
-    path.write_text(yaml.safe_dump({"preset": "xs", "d_model": 8, "fields": {"level": declaration}}))
+    path.write_text(yaml.safe_dump({"preset": "small", "d_model": 8, "fields": {"level": declaration}}))
     restored = rf.Model.from_yaml(path)
     assert restored.schema.requests[ADDRESS].values == labels
     configured.encode(pa.table({"level": list(labels)}), strata="train")
@@ -265,7 +266,7 @@ def test_numeric_objective_penalizes_larger_rank_errors_and_propagates_gradient(
 @pytest.mark.parametrize("values", [None, VALUES], ids=["open-integer-ranks", "declared-labels"])
 def test_one_batch_training_and_validation_keep_native_rank_or_label_output(values):
     torch.manual_seed(91)
-    configured = rf.Model.xs(d_model=8, amount=rf.Number, level=rf.Ordinal(values=values, mask=True))
+    configured = rf.Model(preset="small", d_model=8, amount=rf.Number, level=rf.Ordinal(values=values, mask=True))
     train = pa.table(
         {"amount": [-3, -1, 1, 3], "level": [-3, -1, 1, 3] if values is None else ["low", "low", "high", "high"]}
     )

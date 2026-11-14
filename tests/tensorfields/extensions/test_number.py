@@ -80,7 +80,7 @@ def test_number_jitter_round_trips_through_schema_serialization():
 
 def test_number_jitter_round_trips_through_model_checkpoint(tmp_path: Path):
     configured = Jitter(add=1.5, multiply=0.25, normalize=False)
-    model = rf.Model.xs(amount=rf.Number(jitter=configured), d_model=8)
+    model = rf.Model(preset="small", amount=rf.Number(jitter=configured), d_model=8)
     pathname = tmp_path / "jitter.ckpt"
 
     model.save(pathname)
@@ -250,7 +250,7 @@ def test_number_jitter_is_configuration_not_checkpoint_state():
 
 
 def test_number_jitter_mutation_rebuilds_runtime_configuration():
-    model = rf.Model.xs(amount=rf.Number(jitter=rf.Jitter(add=0.1)), d_model=8)
+    model = rf.Model(preset="small", amount=rf.Number(jitter=rf.Jitter(add=0.1)), d_model=8)
     address = rf.Address("/", "amount")
 
     model.update(
@@ -306,7 +306,7 @@ def test_number_loss_does_not_mutate_counter():
 @pytest.mark.integration
 @pytest.mark.parametrize("batch_size", [1, 2, 3])
 def test_number_evaluation_metrics_count_valued_targets_across_unequal_batches(batch_size, tmp_path):
-    model = rf.Model.xs(d_model=8, target=rf.Number(mask=True))
+    model = rf.Model(preset="small", d_model=8, target=rf.Number(mask=True))
     decoder = model.nodes["/target"].decoder
     with torch.no_grad():
         decoder.regression.weight.zero_()
@@ -454,7 +454,7 @@ def test_number_constant_large_values_do_not_overflow_squared_sums():
 
 
 def test_number_observes_large_integers_in_float64():
-    configured = rf.Model.xs(amount=rf.Number, d_model=8, batch_size=2)
+    configured = rf.Model(preset="small", amount=rf.Number, d_model=8, batch_size=2)
     records = pa.table({"amount": [16_777_217, 16_777_219]})
     datamodule = rf.ArrowDataModule(configured, train=records, shuffle=False)
     encoded = next(iter(datamodule.train_dataloader()))
@@ -559,7 +559,7 @@ def test_number_write_emits_flat_arrow_content():
 
 
 def log_model(**options) -> rf.Model:
-    return rf.Model.xs(d_model=8, batch_size=2, amount=rf.Number(**options))
+    return rf.Model(preset="small", d_model=8, batch_size=2, amount=rf.Number(**options))
 
 
 def log_prediction(field, scaled: torch.Tensor) -> Prediction:
@@ -596,7 +596,7 @@ def test_number_values_stay_in_source_units_and_the_readout_learns_the_log_scale
 
 def test_number_mse_and_huber_train_in_source_units():
     assert rf.Number(objective="mse").log is False and rf.Number(objective="huber").log is False
-    model = rf.Model.xs(d_model=8, batch_size=2, amount=rf.Number(objective="mse", mask=True))
+    model = rf.Model(preset="small", d_model=8, batch_size=2, amount=rf.Number(objective="mse", mask=True))
     decoder = model.nodes[rf.Address("amount")].decoder
     assert decoder.log is False
     with torch.no_grad():
@@ -663,7 +663,7 @@ def test_number_embedder_and_readout_stay_wide_under_autocast():
 
 
 def test_number_observes_moments_for_both_scales_and_the_readout_scale():
-    model = rf.Model.xs(d_model=8, batch_size=2, amount=rf.Number)
+    model = rf.Model(preset="small", d_model=8, batch_size=2, amount=rf.Number)
     table = arrow_table([{"amount": 0.0}, {"amount": 99.0}, {"amount": -99.0}])
 
     model.encode(table, strata="train")
@@ -783,7 +783,7 @@ def test_number_nan_and_infinite_targets_are_not_regressed(monkeypatch):
 
 
 def test_number_observation_counts_nan_as_other_and_excludes_it_from_moments():
-    configured = rf.Model.xs(amount=rf.Number, d_model=8, batch_size=3)
+    configured = rf.Model(preset="small", amount=rf.Number, d_model=8, batch_size=3)
     records = pa.table({"amount": pa.array([1.0, float("nan"), 3.0])})
     datamodule = rf.ArrowDataModule(configured, train=records, shuffle=False)
     encoded = next(iter(datamodule.train_dataloader()))

@@ -8,11 +8,14 @@ from typing import Annotated, Any, Literal, Self, TypeAlias, cast
 
 import pydantic
 
+from relflow.structs import declaration
 from relflow.structs.enums import AttentionInput, AttentionMode, Overflow, OverflowInput
 from relflow.structs.reduction import Attention, ReductionConfig
 from relflow.structs.tree import Leaf, Mask, MaskInput, Node, Rate
 from relflow.tensorfields import extensions as _extensions  # noqa: F401
 from relflow.tensorfields.base import TENSORFIELDS
+
+__all__ = ["Branch", "Mask", "RequestTypes", "OMITTED"]
 
 RequestTypes: TypeAlias = Leaf
 
@@ -39,7 +42,11 @@ def bounds(branch: Branch) -> None:
         branch.overflow = Overflow.head
 
 
-class Branch(Node):
+class BranchMeta(declaration.Declarations, type(Node)):
+    """Collect branch children before Pydantic processes configuration fields."""
+
+
+class Branch(Node, metaclass=BranchMeta):
     """Repeated nested object group in a `relflow` schema.
 
     Parent keywords supply child names, such as ``amount=rf.Number``. Use a
@@ -62,6 +69,9 @@ class Branch(Node):
     of the reduction. ``ffnx`` multiplies this node's feed-forward hidden width
     and defaults to 8 independently of its parent.
     ``mask`` accepts the same policies as a leaf and applies to its descendants.
+    Subclasses may declare children in their class bodies; constructing those
+    subclasses configures the enclosing branch without replacing children.
+    A bare branch subclass uses its default options, just like a bare leaf class.
     """
 
     model_config = pydantic.ConfigDict(extra="forbid", validate_default=True)
@@ -75,12 +85,12 @@ class Branch(Node):
     reduction: ReductionConfig | None = pydantic.Field(default_factory=Attention)
     # The before-validator normalizes this public Boolean default to a tuple.
     mask: tuple[Mask, ...] = cast(tuple[Mask, ...], pydantic.Field(default=False))
-    fields: list[Self | pydantic.SerializeAsAny[pydantic.InstanceOf[Leaf]]] = pydantic.Field(default_factory=list)
+    fields: list[Branch | pydantic.SerializeAsAny[pydantic.InstanceOf[Leaf]]] = pydantic.Field(default_factory=list)
 
     def __init__(
         self,
         *,
-        fields: Mapping[str, Branch | Leaf | builtins.type[Leaf]] | None = None,
+        fields: Mapping[str, Branch | Leaf | builtins.type[Leaf] | builtins.type[Branch]] | None = None,
         query: str | None = None,
         description: str | None = None,
         embed: bool = False,
@@ -94,10 +104,11 @@ class Branch(Node):
         dropout: Rate | None = cast(Rate | None, OMITTED),
         mask: MaskInput = False,
         type: Literal["branch"] = "branch",
-        **children: Branch | Leaf | builtins.type[Leaf],
+        **children: Branch | Leaf | builtins.type[Leaf] | builtins.type[Branch],
     ) -> None:
         from relflow.structs.experiment import bind_fields
 
+        fields = declaration.fields(builtins.type(self), fields, children)
         data: dict[str, Any] = dict(
             fields=bind_fields(fields, children),
             query=query,
@@ -145,7 +156,7 @@ class Branch(Node):
             payload = dict(field)
             field_type = payload.get("type")
             if field_type == "branch":
-                fields.append(cls.model_validate(payload))
+                fields.append(Branch.model_validate(payload))
                 continue
             if not isinstance(field_type, str) or field_type not in TENSORFIELDS:
                 raise ValueError(f"unknown tensor field type: {field_type}")

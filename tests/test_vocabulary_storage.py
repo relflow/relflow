@@ -25,7 +25,7 @@ def build(kind):
             "category": rf.Category(mask=True, topk=[2, 10000]),
             "set": rf.Set(mask=True),
         }[kind]
-    return rf.Model.xs(d_model=8, x=rf.Number, label=field)
+    return rf.Model(preset="small", d_model=8, x=rf.Number, label=field)
 
 
 def source(kind, labels):

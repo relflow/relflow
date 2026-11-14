@@ -126,7 +126,7 @@ def test_sibling_fields_share_branch_geometry_without_sharing_leaf_state():
     ],
 )
 def test_union_leaf_uses_selected_child_validity(values):
-    model = rf.Model.xs(d_model=8, value=rf.Number)
+    model = rf.Model(preset="small", d_model=8, value=rf.Number)
     source = convert(pa.table({"value": values}))
 
     field = coalesce(source, schema=model.schema, strata=Strata.train).fields["/value"].pristine
@@ -156,7 +156,7 @@ def test_coalesce_rejects_modeled_field_missing_from_arrow_schema():
 
 
 def test_mask_spelling_is_ordinary_string_content():
-    model = rf.Model.xs(d_model=8, label=rf.Category(p_unavailable=0.0))
+    model = rf.Model(preset="small", d_model=8, label=rf.Category(p_unavailable=0.0))
     field = model.encode(table([{"label": "<MASK>"}]), strata=Strata.train)["/label"]
 
     assert field.state.tolist() == [[Tokens.valued.value]]
@@ -369,7 +369,7 @@ def test_coalesce_does_not_ingest_inactive_field_values():
 
 
 def test_predict_reconstruction_values_are_prepared_when_present():
-    model = rf.Model.xs(d_model=8, value=rf.Number, label=rf.Hash(mask=True))
+    model = rf.Model(preset="small", d_model=8, value=rf.Number, label=rf.Hash(mask=True))
     source = table([{"value": 1.0, "label": {"not": "hashable"}}])
 
     with pytest.raises(TypeError, match="extension 'hash'.*does not accept Arrow type struct"):
@@ -377,7 +377,7 @@ def test_predict_reconstruction_values_are_prepared_when_present():
 
 
 def test_query_only_branch_ignores_same_named_direct_source_value():
-    model = rf.Model.xs(d_model=8, synthetic=rf.Branch(value=rf.Number, query="payload.values", length=2))
+    model = rf.Model(preset="small", d_model=8, synthetic=rf.Branch(value=rf.Number, query="payload.values", length=2))
 
     encoded = model.encode(
         table(
@@ -425,7 +425,7 @@ def test_datetime_leaf_remains_arrow_backed():
 
 
 def test_dateparts_tensorfield_encodes_arrow_timestamp_end_to_end():
-    model = rf.Model.xs(d_model=8, created=rf.DateParts(dateparts=["day_of_year", "hour_of_day"]))
+    model = rf.Model(preset="small", d_model=8, created=rf.DateParts(dateparts=["day_of_year", "hour_of_day"]))
     encoded = model.encode(
         table([{"created": datetime.datetime(2025, 2, 3, 4, 5, 6)}]),
         strata=Strata.train,
@@ -446,7 +446,7 @@ def test_dateparts_tensorfield_encodes_arrow_timestamp_end_to_end():
     ],
 )
 def test_set_accepts_arrow_lists_and_scalar_labels(value, expected_vocabulary):
-    model = rf.Model.xs(d_model=8, labels=rf.Set(p_unavailable=0.0))
+    model = rf.Model(preset="small", d_model=8, labels=rf.Set(p_unavailable=0.0))
     field = model.encode(
         table([{"labels": value}]),
         strata=Strata.train,
@@ -459,7 +459,7 @@ def test_set_accepts_arrow_lists_and_scalar_labels(value, expected_vocabulary):
 
 @pytest.mark.parametrize("query", [None, "source"], ids=["direct", "query"])
 def test_set_treats_scalar_bytes_as_one_label(query):
-    model = rf.Model.xs(d_model=8, identity=rf.Set(query=query, p_unavailable=0.0))
+    model = rf.Model(preset="small", d_model=8, identity=rf.Set(query=query, p_unavailable=0.0))
     key = "source" if query is not None else "identity"
     field = model.encode(
         table([{key: b"AB"}, {key: b"AB"}]),

@@ -11,7 +11,7 @@ from relflow.structs.enums import Tokens
 
 
 def encode(definition, source):
-    model = rf.Model.xs(d_model=8, elapsed=definition)
+    model = rf.Model(preset="small", d_model=8, elapsed=definition)
     return model.encode(source)["/elapsed"]
 
 

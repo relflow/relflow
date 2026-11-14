@@ -67,13 +67,13 @@ def test_construction_keeps_jacobian_as_runtime_policy(tmp_path, entry, policy):
         schema = rf.Schema.from_tree(d_model=8, n_layers=1, n_heads=2, **fields)
         candidate = rf.Model(schema, jacobian=policy)
     elif entry == "preset":
-        candidate = rf.Model.xs(d_model=8, jacobian=policy, **fields)
+        candidate = rf.Model(preset="small", d_model=8, jacobian=policy, **fields)
     else:
         path = tmp_path / "model.yaml"
         path.write_text(
             dedent(
                 """
-                preset: xs
+                preset: small
                 d_model: 8
                 fields:
                   context:
@@ -94,11 +94,9 @@ def test_construction_keeps_jacobian_as_runtime_policy(tmp_path, entry, policy):
 
 
 @pytest.mark.parametrize("policy", [False, True])
-@pytest.mark.parametrize("preset", ["xs", "sm", "md", "lg", "xl"])
+@pytest.mark.parametrize("preset", ["small", "medium"])
 def test_preset_factories_forward_jacobian_without_persisting_it(preset, policy):
-    candidate = getattr(rf.Model, preset)(
-        d_model=8, n_layers=1, n_heads=2, jacobian=policy, first=rf.Boolean(mask=True)
-    )
+    candidate = rf.Model(preset=preset, d_model=8, n_layers=1, n_heads=2, jacobian=policy, first=rf.Boolean(mask=True))
 
     assert candidate.jacobian is policy
     assert "jacobian" not in candidate.preset.model_dump()
@@ -110,7 +108,7 @@ def test_preset_factories_forward_jacobian_without_persisting_it(preset, policy)
 @pytest.mark.parametrize("entry", ["yaml", "override"])
 def test_templates_reject_jacobian_training_flags(tmp_path, entry, policy):
     path = tmp_path / "model.yaml"
-    content = "preset: xs\nd_model: 8\nfields: {first: {type: boolean, mask: true}}\n"
+    content = "preset: small\nd_model: 8\nfields: {first: {type: boolean, mask: true}}\n"
     if entry == "yaml":
         content += f"jacobian: {str(policy).lower()}\n"
     path.write_text(content)
@@ -274,7 +272,8 @@ def test_weighted_schema_objectives_match_independent_full_jacobian(descent, mon
 def test_sparse_nested_objectives_preserve_geometry_and_log_the_raw_loss_sum(descent, monkeypatch):
     from torchjd.aggregation import UPGrad
 
-    candidate = rf.Model.xs(
+    candidate = rf.Model(
+        preset="small",
         d_model=8,
         dropout=0.0,
         context=rf.Number,
@@ -336,7 +335,8 @@ def test_sparse_nested_objectives_preserve_geometry_and_log_the_raw_loss_sum(des
 
 @pytest.mark.integration
 def test_training_grows_vocabulary_rows_without_stale_optimizer_geometry(descent, tmp_path):
-    candidate = rf.Model.xs(
+    candidate = rf.Model(
+        preset="small",
         d_model=8,
         dropout=0.0,
         batch_size=2,

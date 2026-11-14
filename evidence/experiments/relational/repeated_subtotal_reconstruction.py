@@ -119,6 +119,7 @@ import numpy as np
 import polars as pl
 import relflow as rf
 import torch
+from relflow.presets.base import resolve
 from reporting import experiment, report
 
 LENGTH = 5
@@ -165,16 +166,28 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
 @experiment("P030", seed=31)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
-    model = rf.Model.xs(
-        items=rf.Branch(
-            length=LENGTH,
-            overflow="error",
-            n_layers=2,
-            quantity=rf.Number,
-            unit_price=rf.Number,
-            subtotal=rf.Number(mask=True, objective="mse"),
-        ),
+    # Freeze the experimental architecture independently of SDK preset changes.
+    control_preset = rf.presets.Preset(
+        name="xs",
+        d_model=64,
+        root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        leaf=rf.presets.LeafDefaults(n_heads=2),
     )
+    model = rf.Model(
+        schema=resolve(
+            control_preset,
+            items=rf.Branch(
+                length=LENGTH,
+                overflow="error",
+                n_layers=2,
+                quantity=rf.Number,
+                unit_price=rf.Number,
+                subtotal=rf.Number(mask=True, objective="mse"),
+            ),
+        )
+    )
+    model.preset = control_preset
     data = rf.SyntheticDataModule(
         train=partial(records, rows=4096, seed=seed + 1),
         validate=partial(records, rows=1024, seed=seed + 2),

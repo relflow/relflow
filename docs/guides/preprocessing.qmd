@@ -74,7 +74,8 @@ timestamps in a consistent timezone and sort before this processor runs.
 Add the derived value to the transaction model:
 
 ```python
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     trxns=rf.Branch(
         length=32,
         overflow="tail",
@@ -203,7 +204,8 @@ parties:
 Define the model against this processed shape:
 
 ```python
-transfer_model = rf.Model.xs(
+transfer_model = rf.Model(
+    preset="small",
     parties=rf.Branch(
         length=2,
         overflow="error",

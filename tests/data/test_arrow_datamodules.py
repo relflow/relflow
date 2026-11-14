@@ -23,7 +23,7 @@ from relflow.structs.tree import Address
 
 
 def model(batch_size: int = 2) -> rf.Model:
-    return rf.Model.xs(d_model=8, batch_size=batch_size, id=rf.Number)
+    return rf.Model(preset="small", d_model=8, batch_size=batch_size, id=rf.Number)
 
 
 class Records(IterableDataset):
@@ -337,7 +337,7 @@ def test_distributed_ownership_is_independent_of_arrow_batch_boundaries():
 
 
 def test_arrow_dataset_uses_distributed_rank_and_world_size(monkeypatch: pytest.MonkeyPatch):
-    configured = rf.Model.xs(d_model=8, batch_size=2, id=rf.Category)
+    configured = rf.Model(preset="small", d_model=8, batch_size=2, id=rf.Category)
     module = rf.ArrowDataModule(
         model=configured,
         validate=pa.table({"id": ["a", "b", "c", "d", "e"]}),
@@ -732,7 +732,9 @@ def test_rebatch_combines_chunks_once_per_fill():
 
 
 def test_rate_masks_differ_between_batches_and_replay_across_loaders():
-    configured = rf.Model.xs(d_model=8, batch_size=8, amount=rf.Number(mask=rf.Mask(rate=0.5, reconstruct=True)))
+    configured = rf.Model(
+        preset="small", d_model=8, batch_size=8, amount=rf.Number(mask=rf.Mask(rate=0.5, reconstruct=True))
+    )
     table = pa.table({"amount": [float(value) for value in range(64)]})
 
     def patterns() -> list[list[bool]]:
@@ -785,7 +787,8 @@ def test_shipping_packs_a_batch_without_its_stream():
 @pytest.mark.integration
 @pytest.mark.parametrize("consolidated", [False, True])
 def test_shipping_shares_payload_and_observations_before_queue_serialization(consolidated):
-    configured = rf.Model.xs(
+    configured = rf.Model(
+        preset="small",
         d_model=8,
         batch_size=3,
         id=rf.Number,

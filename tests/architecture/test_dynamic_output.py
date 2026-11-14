@@ -19,7 +19,9 @@ def observations(events):
 
 
 def test_variable_targets_keep_types_offsets_and_stream_across_batch_widths(tmp_path):
-    model = rf.Model.xs(d_model=8, events=rf.Branch(amount=rf.Number, label=rf.Boolean(mask=True, embed=True))).eval()
+    model = rf.Model(
+        preset="small", d_model=8, events=rf.Branch(amount=rf.Number, label=rf.Boolean(mask=True, embed=True))
+    ).eval()
     values = [[], None, [None, {"amount": 2.0, "label": True}], [{"amount": float(i)} for i in range(5)]]
     batches = []
     for value in values:
@@ -53,8 +55,8 @@ def test_variable_targets_keep_types_offsets_and_stream_across_batch_widths(tmp_
 
 @pytest.mark.parametrize("length", [1, 4])
 def test_explicit_limits_keep_observed_output_lengths(length):
-    model = rf.Model.xs(
-        d_model=8, events=rf.Branch(length=length, amount=rf.Number, label=rf.Boolean(mask=True))
+    model = rf.Model(
+        preset="small", d_model=8, events=rf.Branch(length=length, amount=rf.Number, label=rf.Boolean(mask=True))
     ).eval()
     source = observations([[{"amount": 2.0}]])
 
@@ -66,7 +68,8 @@ def test_explicit_limits_keep_observed_output_lengths(length):
 
 
 def test_nested_variable_axes_and_pass_through_embeddings_preserve_structural_slots():
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         events=rf.Branch(
             embed=True,
@@ -107,7 +110,7 @@ def test_nested_variable_axes_and_pass_through_embeddings_preserve_structural_sl
 
 def test_checkpoint_keeps_symbolic_geometry_and_predictions(tmp_path):
     torch.manual_seed(103)
-    model = rf.Model.xs(d_model=8, events=rf.Branch(amount=rf.Number, label=rf.Boolean(mask=True))).eval()
+    model = rf.Model(preset="small", d_model=8, events=rf.Branch(amount=rf.Number, label=rf.Boolean(mask=True))).eval()
     source = observations([[{"amount": float(i)} for i in range(4)]])
     expected = pa.table(model.predict(source)).to_pylist()[0]["predictions"]["events"]
     checkpoint = tmp_path / "model.pt"
@@ -126,7 +129,7 @@ def test_checkpoint_keeps_symbolic_geometry_and_predictions(tmp_path):
 
 
 def test_pass_through_outputs_keep_intrinsic_slots_separate_from_item_coordinates():
-    model = rf.Model.xs(d_model=8, events=rf.Branch(reduction=None, embed=True, amount=rf.Number)).eval()
+    model = rf.Model(preset="small", d_model=8, events=rf.Branch(reduction=None, embed=True, amount=rf.Number)).eval()
     result = pa.table(model.predict(observations([[], None, [None]])))
     assert result.column_names == ["representations"]
     rows = result["representations"].to_pylist()
@@ -138,7 +141,8 @@ def test_unbounded_warning_names_active_paths_once_per_generation(monkeypatch):
 
     warnings = []
     monkeypatch.setattr(type(logger), "warning", lambda self, message, *args, **kwargs: warnings.append(message))
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         events=rf.Branch(items=rf.Branch(amount=rf.Number), answer=rf.Number(mask=True)),
         inactive=rf.Branch(amount=rf.Number(active=False)),
@@ -161,7 +165,9 @@ def test_unbounded_warning_names_active_paths_once_per_generation(monkeypatch):
 def test_third_party_tensorfields_follow_automatic_axes_without_shared_special_cases():
     extension, Request = build_extension()
     try:
-        model = rf.Model.xs(d_model=8, events=rf.Branch(value=Request, label=Request(mask=True, embed=True))).eval()
+        model = rf.Model(
+            preset="small", d_model=8, events=rf.Branch(value=Request, label=Request(mask=True, embed=True))
+        ).eval()
         source = pa.Table.from_pylist(
             [{"events": []}, {"events": [{"value": "one", "label": "yes"}]}, {"events": [{"value": "two"}] * 5}],
             schema=pa.schema([("events", pa.list_(pa.struct([("value", pa.string()), ("label", pa.string())])))]),
@@ -178,8 +184,10 @@ def test_third_party_tensorfields_follow_automatic_axes_without_shared_special_c
 
 
 def test_pass_through_representations_skip_null_items_but_keep_their_slots():
-    model = rf.Model.xs(
-        d_model=8, events=rf.Branch(reduction=None, embed=True, amount=rf.Number(embed=True), tag=rf.Hash)
+    model = rf.Model(
+        preset="small",
+        d_model=8,
+        events=rf.Branch(reduction=None, embed=True, amount=rf.Number(embed=True), tag=rf.Hash),
     ).eval()
     source = pa.Table.from_pylist([{"events": [{"amount": 1.0, "tag": "a"}, None, {"amount": 2.0, "tag": "b"}]}])
     rows = pa.table(model.predict(source))["representations"].to_pylist()[0]

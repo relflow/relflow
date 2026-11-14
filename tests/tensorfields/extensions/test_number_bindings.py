@@ -11,7 +11,8 @@ ADDRESS = rf.Address("/amount")
 
 
 def build_model(*, alpha: float | None = None) -> rf.Model:
-    return rf.Model.xs(
+    return rf.Model(
+        preset="small",
         d_model=8,
         attention=None,
         amount=rf.Number(alpha=alpha),
@@ -74,7 +75,8 @@ def test_number_normalization_rejects_invalid_model_and_address() -> None:
 
 
 def test_number_normalization_rejects_non_number_model_field() -> None:
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         category=rf.Category,
     )

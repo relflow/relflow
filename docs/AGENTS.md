@@ -128,9 +128,10 @@ teach them only on their later dedicated pages.
 
 ## Public examples
 
-Use `import relflow as rf`, `rf.Model(...)` or a size factory, and
+Use `import relflow as rf`, `rf.Model(...)` or `rf.Model(preset="small", ...)`, and
 `rf.Branch(...)`. Parent keywords name children; definitions have no `name`
-argument. `Period` accepts positional calendar parts; other fields and branches
+argument. `Period` accepts positional calendar parts and `Enum` accepts positional
+scalar labels or a `values=(...)` tuple, never both. Other fields and branches
 use keyword options. Use bare field classes for defaults. The model root is
 anonymous at `rf.Address()`; diagrams may label it `payment` or `account`.
 Use one argument per address component, such as

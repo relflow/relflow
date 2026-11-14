@@ -45,6 +45,7 @@ from relflow.data.ragged import RaggedField
 from relflow.data.sources import source
 from relflow.helpers.optimizers import adamw
 from relflow.inference.callback import Writer
+from relflow.inspection import check, inspect
 from relflow.structs.enums import (
     AttentionInput,
     AttentionMode,
@@ -221,6 +222,8 @@ __all__ = [
     "VocabularySyncCallback",
     "Writer",
     "adamw",
+    "check",
+    "inspect",
     "predicate",
     "postprocess",
     "preprocess",

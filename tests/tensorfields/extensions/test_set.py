@@ -303,7 +303,7 @@ def test_set_loss_does_not_mutate_counter():
 
 @pytest.mark.integration
 def test_set_float_nan_members_are_dropped_like_nulls(tmp_path):
-    model = rf.Model.xs(d_model=8, tags=rf.Set, label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, tags=rf.Set, label=rf.Boolean(mask=True))
     rows = pa.table(
         {"tags": pa.array([[1.0, float("nan")], [float("nan")], [2.0, None], []]), "label": [True, False, True, False]}
     )
@@ -334,7 +334,7 @@ def test_set_float_nan_members_are_dropped_like_nulls(tmp_path):
 @pytest.mark.integration
 def test_set_strip_and_cased_fold_look_alike_members(tmp_path):
     rows = pa.table({"tags": pa.array([["Foo", "bar "], [" foo"], ["BAR"]]), "label": [True, False, True]})
-    model = rf.Model.xs(d_model=8, tags=rf.Set(strip=True, cased=False), label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, tags=rf.Set(strip=True, cased=False), label=rf.Boolean(mask=True))
     data = rf.ArrowDataModule(model, train=rows, validate=rows, shuffle=False)
     model.fit(
         data,

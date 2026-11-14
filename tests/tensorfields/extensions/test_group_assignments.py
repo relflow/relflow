@@ -29,7 +29,8 @@ NON_INTEGER_ASSIGNMENTS = [
 
 def build_model(*, embed: bool = False) -> rf.Model:
     torch.manual_seed(0)
-    return rf.Model.xs(
+    return rf.Model(
+        preset="small",
         d_model=16,
         batch_size=4,
         embed=embed,
@@ -140,7 +141,8 @@ def test_assign_raises_for_unknown_address():
 
 def test_assign_raises_for_non_group_field():
     torch.manual_seed(0)
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=16,
         batch_size=4,
         amount=rf.Number,

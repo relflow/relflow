@@ -118,9 +118,9 @@ are rejected.
 | `n_linear` | `1` | Positive number of learned-query decoder pooling blocks. |
 | `decoder_position` | `None` | Automatic: off for scalar targets, on for repeated targets. A Boolean overrides it. |
 
-These are the ordinary constructor defaults. Model
-[size factories](../concepts/model-tree.qmd#choose-a-size) supply omitted decoder settings
-from their preset; explicit field options take precedence.
+These are the ordinary constructor defaults.
+[`Model(preset=...)`](../concepts/model-tree.qmd#choose-a-size) supplies omitted
+decoder settings from its preset; explicit field options take precedence.
 
 `mask=True` makes a supervised target.
 `embed=True` exports a representation; it does not create an objective.

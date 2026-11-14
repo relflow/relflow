@@ -101,7 +101,8 @@ separate application-supplied training and validation files in this shape:
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     account_age_days=rf.Number,
     trxns=rf.Branch(
         length=32,

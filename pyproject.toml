@@ -1,6 +1,6 @@
 [project]
 name = "relflow"
-version = "0.4.7"
+version = "0.5.0"
 description = "Relationship Flow: schema-first PyTorch models for hierarchical, nested, and sequence data"
 readme = "README.md"
 authors = [
@@ -22,7 +22,12 @@ dependencies = [
     "torch>=2.7.1",
     "torchmetrics>=1.9.0",
     "typing-extensions>=4.12",
+    "rich>=14.0.0",
+    "typer>=0.29.1,<0.30",
 ]
+
+[project.scripts]
+relflow = "relflow.cli:main"
 
 [project.optional-dependencies]
 torchjd = [
@@ -37,6 +42,7 @@ serving = [
 ]
 text = [
     "transformers>=4.55.0",
+    "moka-py>=0.5,<0.6",
 ]
 typing = [
     "pyarrow-stubs>=20.0.0.20260819",
@@ -62,6 +68,7 @@ dev = [
     "pyarrow-stubs>=20.0.0.20260819",
     "types-PyYAML>=6.0.12",
     "transformers>=4.55.0",
+    "moka-py>=0.5,<0.6",
     "duckdb>=1.5.0",
 ]
 
@@ -73,7 +80,7 @@ build-backend = "setuptools.build_meta"
 package-dir = { "" = "src" }
 
 [tool.setuptools.package-data]
-relflow = ["py.typed"]
+relflow = ["py.typed", "presets/provenance.json"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

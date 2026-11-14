@@ -11,7 +11,8 @@ dispute:
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     amount=rf.Number,
     risk_level=rf.Ordinal(values=("low", "medium", "high")),
     disputed=rf.Boolean(mask=True),
@@ -47,7 +48,8 @@ and case are not folded automatically.
 Without `values`, source integers are already ranks:
 
 ```python
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     review_stage=rf.Ordinal,
     amount=rf.Number,
     disputed=rf.Boolean(mask=True),
@@ -78,7 +80,8 @@ each rank.
 Add `mask=True` to predict an ordered value:
 
 ```python
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     amount=rf.Number,
     merchant=rf.Category,
     review_priority=rf.Ordinal(

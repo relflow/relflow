@@ -125,7 +125,8 @@ def test_hash_value_preserves_identifier_type_across_batches():
 
 
 def test_hash_value_is_consistent_across_arrow_integer_widths():
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         narrow=rf.Hash,
         wide=rf.Hash,
         d_model=8,
@@ -275,7 +276,7 @@ def test_hashable_hashes_are_stable_across_calls():
 
 @pytest.mark.parametrize("n_buckets", [2, 5, 16])
 def test_hashable_loss_bucket_boundaries_and_null_gradients(n_buckets, monkeypatch):
-    model = rf.Model.xs(d_model=8, id=rf.Hash(n_hashes=2, n_buckets=n_buckets, mask=True))
+    model = rf.Model(preset="small", d_model=8, id=rf.Hash(n_hashes=2, n_buckets=n_buckets, mask=True))
     field = model.encode(pa.table({"id": ["low", "negative", "zero", "high", None]}), strata="train")["/id"]
     raw = torch.tensor([-(2**63), -(2**62), 0, 2**63 - 1, 0], dtype=torch.int64)
     field.targets[TensorKey.content].copy_(raw[:, None, None].expand(-1, 1, 2))
@@ -307,7 +308,8 @@ def test_hashable_loss_bucket_boundaries_and_null_gradients(n_buckets, monkeypat
 
 
 def test_hashable_embedder_only_learns_state_embeddings():
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         items=rf.Branch(id=rf.Hash(n_hashes=4, n_bands=4, offset=2), length=2),
         d_model=8,
         batch_size=2,
@@ -321,7 +323,7 @@ def test_hashable_embedder_only_learns_state_embeddings():
 
 
 def test_hashable_embedder_forward_produces_finite_projections():
-    model = rf.Model.xs(items=rf.Branch(id=rf.Hash(n_hashes=4), length=3), d_model=8, batch_size=2)
+    model = rf.Model(preset="small", items=rf.Branch(id=rf.Hash(n_hashes=4), length=3), d_model=8, batch_size=2)
     inputs = model.encode(
         table(
             [
@@ -342,7 +344,8 @@ def test_hashable_training_loss_covers_state_and_content_heads():
     torch.manual_seed(0)
     n_hashes = 4
     n_buckets = 4
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         items=rf.Branch(id=rf.Hash(n_hashes=n_hashes, n_buckets=n_buckets, mask=rf.Mask(reconstruct=True)), length=3),
         d_model=8,
         batch_size=2,
@@ -372,7 +375,7 @@ def test_hashable_training_loss_covers_state_and_content_heads():
 @pytest.mark.parametrize("batch_size", [1, 2, 3])
 def test_hashable_evaluation_accuracy_counts_valued_targets_across_unequal_batches(batch_size, tmp_path):
     torch.manual_seed(0)
-    model = rf.Model.xs(d_model=8, id=rf.Hash(n_hashes=2, n_buckets=4, mask=True))
+    model = rf.Model(preset="small", d_model=8, id=rf.Hash(n_hashes=2, n_buckets=4, mask=True))
     rows = table([{"id": "alpha"}, {"id": "beta"}, {"id": None}])
     data = rf.ArrowDataModule(model, validate=rows)
     values = model.validate(
@@ -430,7 +433,8 @@ def test_hashable_embedder_uses_raw_sinusoidal_content_and_state_embeddings():
 
 
 def hashable_model(**kwargs) -> "rf.Model":
-    return rf.Model.xs(
+    return rf.Model(
+        preset="small",
         items=rf.Branch(id=rf.Hash(n_hashes=4, n_buckets=4, **kwargs), length=2),
         owner=rf.Hash(n_hashes=4, n_buckets=4, **kwargs),
         d_model=16,
@@ -536,7 +540,8 @@ def test_inference_uses_stable_unsalted_hashes(strata: Strata, monkeypatch: pyte
 
 
 def test_validation_and_prediction_preserve_identical_key_payload_context():
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         dropout=0.0,
         owner=rf.Hash(n_hashes=4),
         items=rf.Branch(length=4, id=rf.Hash(n_hashes=4), value=rf.Number, reduction=None),

@@ -1,4 +1,4 @@
-"""Size factories resolve defaults without replacing explicit schema intent."""
+"""Named presets resolve defaults without replacing explicit schema intent."""
 
 import inspect
 
@@ -10,19 +10,17 @@ from relflow.tensorfields.base import TENSORFIELDS
 from tests.architecture.test_extension_contract import build_extension
 
 PROFILES = [
-    ("xs", 64, 1, 1, 2, 1, 1),
-    ("sm", 128, 2, 1, 4, 2, 2),
-    ("md", 256, 3, 2, 8, 4, 4),
-    ("lg", 384, 4, 2, 8, 8, 4),
-    ("xl", 512, 6, 3, 8, 16, 8),
+    ("small", 128, 2, 1, 4, 2, 1, 4),
+    ("medium", 64, 2, 2, 8, 4, 1, 1),
 ]
 
 
-@pytest.mark.parametrize("name,width,root_depth,branch_depth,heads,root_outputs,branch_outputs", PROFILES)
+@pytest.mark.parametrize("name,width,root_depth,branch_depth,heads,ffnx,root_outputs,branch_outputs", PROFILES)
 def test_factories_apply_presets_to_root_nested_branches_and_leaves(
-    name, width, root_depth, branch_depth, heads, root_outputs, branch_outputs
+    name, width, root_depth, branch_depth, heads, ffnx, root_outputs, branch_outputs
 ):
-    model = getattr(rf.Model, name)(
+    model = rf.Model(
+        preset=name,
         d_model=16,
         amount=rf.Number,
         orders=rf.Branch(
@@ -48,13 +46,15 @@ def test_factories_apply_presets_to_root_nested_branches_and_leaves(
     assert model.schema.branches["/orders/items"].length == 2
     for address, branch in model.schema.branches.items():
         assert branch.n_layers == (root_depth if address == rf.Address() else branch_depth)
-        assert branch.n_heads == heads
+        assert branch.n_heads == (heads if address == rf.Address() else 4)
+        assert branch.ffnx == (ffnx if address == rf.Address() else 8)
         assert branch.attention == "mha"
         assert branch.dropout == 0.0
         assert branch.reduction == rf.Attention(n_outputs=root_outputs if address == rf.Address() else branch_outputs)
     for request in model.schema.requests.values():
         assert request.pooling == "query"
-        assert request.n_heads == heads
+        assert request.n_heads == 4
+        assert request.ffnx == 8
         assert request.n_linear == 1
         assert request.dropout == 0.0
         assert request.decoder_position is None
@@ -64,14 +64,10 @@ def test_factories_apply_presets_to_root_nested_branches_and_leaves(
     assert rf.Schema.model_validate(serialized).model_dump(mode="json") == serialized
 
 
-@pytest.mark.parametrize("name", [profile[0] for profile in PROFILES])
-def test_factories_are_typed_classmethods_with_discoverable_keyword_options(name):
-    factory = inspect.getattr_static(rf.Model, name)
-
-    assert isinstance(factory, classmethod)
-    parameters = inspect.signature(factory.__func__).parameters
-    assert parameters["cls"].kind is inspect.Parameter.POSITIONAL_ONLY
+def test_constructor_exposes_typed_preset_and_architecture_options():
+    parameters = inspect.signature(rf.Model).parameters
     for option in (
+        "preset",
         "d_model",
         "n_layers",
         "n_heads",
@@ -85,15 +81,19 @@ def test_factories_are_typed_classmethods_with_discoverable_keyword_options(name
     ):
         assert parameters[option].kind is inspect.Parameter.KEYWORD_ONLY
         assert parameters[option].annotation is not inspect.Parameter.empty
-    assert factory.__func__.__name__ == name
-    method = getattr(rf.Model, name)
-    assert method.__self__ is rf.Model
-    assert "cls" not in inspect.signature(method).parameters
-    assert inspect.signature(method).return_annotation is not inspect.Signature.empty
+    assert parameters["preset"].default is None
+
+
+def test_generated_preset_methods_and_factory_are_removed():
+    assert all(not hasattr(rf.Model, name) for name in ("xs", "sm", "md", "lg", "xl"))
+    assert all(not hasattr(rf.presets, name) for name in ("XS", "SM", "MD", "LG", "XL"))
+    assert not hasattr(rf.presets, "factory")
+    assert not hasattr(rf.Model, "with_preset")
 
 
 def test_explicit_old_defaults_and_none_survive_nested_binding():
-    model = rf.Model.xl(
+    model = rf.Model(
+        preset="medium",
         d_model=32,
         n_layers=1,
         n_heads=4,
@@ -138,7 +138,8 @@ def test_explicit_old_defaults_and_none_survive_nested_binding():
 
 @pytest.mark.parametrize("reduction", [rf.Attention(), rf.Attention(n_outputs=3, n_heads=2), rf.Mean(), None])
 def test_explicit_reduction_replaces_the_whole_profile(reduction):
-    model = rf.Model.md(
+    model = rf.Model(
+        preset="medium",
         d_model=32,
         reduction=reduction,
         events=rf.Branch(reduction=reduction, value=rf.Number),
@@ -149,7 +150,8 @@ def test_explicit_reduction_replaces_the_whole_profile(reduction):
 
 
 def test_root_and_branch_overrides_do_not_change_other_scopes():
-    model = rf.Model.md(
+    model = rf.Model(
+        preset="medium",
         d_model=32,
         n_layers=1,
         n_heads=2,
@@ -169,9 +171,9 @@ def test_root_and_branch_overrides_do_not_change_other_scopes():
     branch = model.schema.branches["/events"]
     assert (branch.n_layers, branch.n_heads, branch.dropout) == (1, 4, 0.2)
     nested = model.schema.branches["/events/items"]
-    assert (nested.n_layers, nested.n_heads, nested.attention, nested.dropout) == (2, 8, "mha", 0.0)
+    assert (nested.n_layers, nested.n_heads, nested.attention, nested.dropout) == (2, 4, "mha", 0.0)
     for request in model.schema.requests.values():
-        assert request.n_heads == 8
+        assert request.n_heads == 4
         assert request.dropout == 0.0
     label = model.schema.requests["/events/label"]
     assert label.pooling == "mean"
@@ -189,13 +191,13 @@ def test_reusing_definitions_does_not_capture_another_presets_defaults():
     original = events.model_dump(mode="json")
     supplied = [(node, node.model_fields_set.copy()) for node in (events, *events.descendants, value)]
 
-    small = rf.Model.xs(events=events)
-    large = rf.Model.md(d_model=32, events=events)
+    small = rf.Model(preset="small", events=events)
+    large = rf.Model(preset="medium", d_model=32, events=events)
 
-    assert small.schema.branches["/events"].n_heads == 2
-    assert large.schema.branches["/events"].n_heads == 8
-    assert small.schema.requests["/events/records/value"].n_heads == 2
-    assert large.schema.requests["/events/records/value"].n_heads == 8
+    assert small.schema.branches["/events"].reduction.n_outputs == 4
+    assert large.schema.branches["/events"].reduction.n_outputs == 1
+    assert small.schema.fields.ffnx == 2
+    assert large.schema.fields.ffnx == 4
     assert events.model_dump(mode="json") == original
     assert value.name is None
     assert value.parent is None
@@ -209,9 +211,9 @@ def test_factory_constructs_subclass_and_forwards_runtime_configuration():
 
     optimizer = rf.adamw(learning_rate=1e-3)
     scheduler = {"interval": "epoch"}
-    model = Specialized.xs(
-        fields={"length": rf.Number},
-        preset=rf.Number,
+    model = Specialized(
+        preset="small",
+        fields={"length": rf.Number, "preset": rf.Number},
         profile=rf.Number,
         cls=rf.Number,
         size=rf.Number,
@@ -233,7 +235,7 @@ def test_factory_rejects_an_already_resolved_schema(name):
     schema = rf.Schema.from_tree(d_model=8, n_layers=1, n_heads=2, value=rf.Number)
 
     with pytest.raises(TypeError, match=r"Model\(schema="):
-        getattr(rf.Model, name)(schema=schema)
+        rf.Model(preset=name, schema=schema)
 
 
 def test_ordinary_constructor_preserves_required_dimensions_and_no_policy():
@@ -251,14 +253,15 @@ def test_ordinary_constructor_preserves_required_dimensions_and_no_policy():
 
 def test_width_override_validates_nested_explicit_heads():
     with pytest.raises(ValueError, match=r"/events"):
-        rf.Model.xs(d_model=32, events=rf.Branch(n_heads=6, value=rf.Number))
+        rf.Model(preset="small", d_model=32, events=rf.Branch(n_heads=6, value=rf.Number))
 
 
 @pytest.mark.parametrize("name", [profile[0] for profile in PROFILES])
 def test_common_leaf_defaults_apply_to_late_registered_extensions(name):
     extension, Request = build_extension()
     try:
-        model = getattr(rf.Model, name)(
+        model = rf.Model(
+            preset=name,
             d_model=32,
             events=rf.Branch(value=Request(mask=True, family="bytes")),
         )
@@ -266,7 +269,7 @@ def test_common_leaf_defaults_apply_to_late_registered_extensions(name):
         request = model.schema.requests["/events/value"]
         assert isinstance(request, Request)
         assert request.family == "bytes"
-        assert request.n_heads == {"xs": 2, "sm": 4, "md": 8, "lg": 8, "xl": 8}[name]
+        assert request.n_heads == 4
         assert request.dropout == 0.0
         assert request.pooling == "query"
         assert request.mask == rf.Number(mask=True).mask
@@ -274,8 +277,10 @@ def test_common_leaf_defaults_apply_to_late_registered_extensions(name):
         TENSORFIELDS.pop(extension.name, None)
 
 
-def test_xs_predicts_nested_targets_without_padding_and_separate_root_embedding():
-    model = rf.Model.xs(embed=True, events=rf.Branch(length=2, value=rf.Number, answer=rf.Number(mask=True)))
+def test_small_predicts_nested_targets_without_padding_and_separate_root_embedding():
+    model = rf.Model(
+        preset="small", embed=True, events=rf.Branch(length=2, value=rf.Number, answer=rf.Number(mask=True))
+    )
     inputs = pa.Table.from_pylist([{"events": [{"value": 1.0}]}, {"events": [{"value": 2.0}, {"value": 3.0}]}])
 
     result = pa.table(model.predict(inputs))
@@ -283,7 +288,7 @@ def test_xs_predicts_nested_targets_without_padding_and_separate_root_embedding(
     assert result.num_rows == 2
     predictions = result["predictions"].combine_chunks()
     representations = result["representations"].combine_chunks().values
-    assert representations.field("embedding").type == pa.list_(pa.field("item", pa.float32()), 64)
+    assert representations.field("embedding").type == pa.list_(pa.field("item", pa.float32()), 128)
     assert representations.field("path").to_pylist() == [[], []]
     events = predictions.field("events")
     assert pa.types.is_large_list(events.type)

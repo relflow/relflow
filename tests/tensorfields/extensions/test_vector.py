@@ -252,7 +252,7 @@ def test_vector_loss_uses_selected_objective(objective: str, expected: float):
 @pytest.mark.integration
 @pytest.mark.parametrize("batch_size", [1, 2, 3])
 def test_vector_evaluation_metrics_count_valued_targets_across_unequal_batches(batch_size, tmp_path):
-    model = rf.Model.xs(d_model=8, target=rf.Vector(n_dim=2, mask=True))
+    model = rf.Model(preset="small", d_model=8, target=rf.Vector(n_dim=2, mask=True))
     decoder = model.nodes["/target"].decoder
     with torch.no_grad():
         decoder.regression.weight.zero_()
@@ -423,12 +423,12 @@ def test_vector_non_finite_elements_take_the_other_state_for_inputs_and_targets(
     rows = pa.table({"vec": pa.array([[1.0, 2.0], [float("nan"), 2.0], [1.0, float("inf")], None])})
     expected = [Tokens.valued, Tokens.other, Tokens.other, Tokens.null]
 
-    inputs = rf.Model.xs(d_model=8, vec=rf.Vector(n_dim=2), label=rf.Boolean(mask=True))
+    inputs = rf.Model(preset="small", d_model=8, vec=rf.Vector(n_dim=2), label=rf.Boolean(mask=True))
     field = inputs.encode(rows, strata="predict")[rf.Address("vec")]
     assert field.state.reshape(-1).tolist() == expected
     assert torch.isfinite(field.content).all() and field.content.reshape(4, 2)[1].tolist() == [0.0, 0.0]
 
-    targets = rf.Model.xs(d_model=8, vec=rf.Vector(n_dim=2, mask=True))
+    targets = rf.Model(preset="small", d_model=8, vec=rf.Vector(n_dim=2, mask=True))
     field = targets.encode(rows, strata="train")[rf.Address("vec")]
     assert field.targets[TensorKey.state].reshape(-1).tolist() == expected
     assert torch.isfinite(field.targets[TensorKey.content]).all()
@@ -437,7 +437,7 @@ def test_vector_non_finite_elements_take_the_other_state_for_inputs_and_targets(
 
 @pytest.mark.integration
 def test_vector_training_survives_a_non_finite_element(tmp_path):
-    model = rf.Model.xs(d_model=8, vec=rf.Vector(n_dim=2), label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, vec=rf.Vector(n_dim=2), label=rf.Boolean(mask=True))
     rows = pa.table(
         {
             "vec": pa.array([[1.0, 2.0], [float("nan"), 2.0], [3.0, float("-inf")], [0.5, 0.5]]),

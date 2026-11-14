@@ -25,7 +25,7 @@ from relflow.data.sources import Source, matches
 
 
 def model(batch_size=2):
-    return rf.Model.xs(id=rf.Number, d_model=8, batch_size=batch_size)
+    return rf.Model(preset="small", id=rf.Number, d_model=8, batch_size=batch_size)
 
 
 @rf.preprocess

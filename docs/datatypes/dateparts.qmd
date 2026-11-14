@@ -14,7 +14,8 @@ elapsed duration.
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     amount=rf.Number,
     merchant=rf.Category,
     booked_at=rf.Period("day_of_week", "hour_of_day"),

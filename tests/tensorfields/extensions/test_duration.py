@@ -28,7 +28,7 @@ def test_duration_uses_numbers_modeling_components_without_a_second_learner():
 
 @pytest.mark.parametrize("mask", [False, True])
 def test_duration_observes_computed_values_in_source_units_before_input_masking(mask):
-    model = rf.Model.xs(d_model=8, elapsed=rf.Duration(query=("start", "end"), mask=mask))
+    model = rf.Model(preset="small", d_model=8, elapsed=rf.Duration(query=("start", "end"), mask=mask))
     records = pa.table({"start": ["2026-01-01"] * 4, "end": ["2026-01-02T12:00:00", "2026-01-01", "2025-12-31", None]})
 
     field = model.encode(records, strata="train")["/elapsed"]
@@ -44,7 +44,7 @@ def test_duration_observes_computed_values_in_source_units_before_input_masking(
 
 @pytest.mark.parametrize(("endpoint", "expected"), [("start", 2.5), ("end", -2.5)])
 def test_duration_pairs_one_query_with_either_configured_endpoint(endpoint, expected):
-    model = rf.Model.xs(d_model=8, elapsed=rf.Duration(query="observed_at", **{endpoint: "2026-01-01"}))
+    model = rf.Model(preset="small", d_model=8, elapsed=rf.Duration(query="observed_at", **{endpoint: "2026-01-01"}))
 
     field = model.encode(pa.table({"observed_at": ["2026-01-03T12:00:00"]}))["/elapsed"]
 
@@ -52,7 +52,7 @@ def test_duration_pairs_one_query_with_either_configured_endpoint(endpoint, expe
 
 
 def test_duration_implicit_query_reads_the_same_named_source_with_a_static_endpoint():
-    model = rf.Model.xs(d_model=8, elapsed=rf.Duration(start="2026-01-01"))
+    model = rf.Model(preset="small", d_model=8, elapsed=rf.Duration(start="2026-01-01"))
 
     field = model.encode(pa.table({"elapsed": ["2026-01-02T12:00:00"]}))["/elapsed"]
 
@@ -60,7 +60,7 @@ def test_duration_implicit_query_reads_the_same_named_source_with_a_static_endpo
 
 
 def test_two_static_endpoints_preserve_the_batch_size_without_source_columns():
-    model = rf.Model.xs(d_model=8, elapsed=rf.Duration(start="2026-01-01", end="2026-01-04"))
+    model = rf.Model(preset="small", d_model=8, elapsed=rf.Duration(start="2026-01-01", end="2026-01-04"))
 
     field = model.encode(pa.table({"unrelated": [1, 2, 3]}))["/elapsed"]
 
@@ -98,7 +98,8 @@ def test_duration_static_endpoints_are_explicit_temporal_values(value):
 
 
 def test_duration_yaml_preserves_tuple_queries_units_and_configured_timestamps(tmp_path):
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         elapsed=rf.Duration(query=("start", "end"), granularity="hours"),
         since=rf.Duration(query="end", start=datetime(2026, 1, 1, tzinfo=timezone.utc)),
@@ -107,7 +108,7 @@ def test_duration_yaml_preserves_tuple_queries_units_and_configured_timestamps(t
     path.write_text(
         yaml.safe_dump(
             {
-                "preset": "xs",
+                "preset": "small",
                 "d_model": 8,
                 "fields": {
                     name: model.schema.requests[rf.Address(name)].model_dump(mode="json", exclude={"name"})
@@ -140,7 +141,8 @@ def test_duration_broadcasts_account_dates_after_transaction_cropping_without_lo
             {"account": {"created_at": None}, "transactions": [{"posted_at": "2026-01-03"}]},
         ]
     )
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         embed=True,
         transactions=rf.Branch(
@@ -161,7 +163,7 @@ def test_duration_broadcasts_account_dates_after_transaction_cropping_without_lo
 
 
 def test_duration_checkpoint_retains_source_configuration_and_numeric_statistics(tmp_path):
-    model = rf.Model.xs(d_model=8, elapsed=rf.Duration(start="2026-01-01", granularity="hours"))
+    model = rf.Model(preset="small", d_model=8, elapsed=rf.Duration(start="2026-01-01", granularity="hours"))
     records = pa.table({"elapsed": ["2026-01-02", "2026-01-04"]})
     model.encode(records, strata="train")
     checkpoint = tmp_path / "duration.ckpt"
@@ -183,7 +185,7 @@ def test_duration_can_train_and_predict_with_number_objectives(tmp_path):
             "end": ["2026-01-02", "2026-01-03", "2026-01-04", "2026-01-05"],
         }
     )
-    model = rf.Model.xs(d_model=8, input=rf.Number, elapsed=rf.Duration(query=("start", "end"), mask=True))
+    model = rf.Model(preset="small", d_model=8, input=rf.Number, elapsed=rf.Duration(query=("start", "end"), mask=True))
     data = rf.ArrowDataModule(
         train=records, validate=records, num_workers=0, persistent_workers=False, pin_memory=False
     )

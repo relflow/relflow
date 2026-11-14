@@ -18,7 +18,8 @@ uv add "relflow[text]"
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     amount=rf.Number,
     merchant=rf.Category,
     memo=rf.Text,
@@ -47,58 +48,93 @@ separate state. Tokenization pads and truncates at `max_length`.
 | `tokenizer_batch_size` | `4096` | Maximum strings materialized per tokenizer call. |
 | `encoder_batch_size` | `32` | Maximum flattened text values per frozen-encoder call. |
 | `encoder_pooling` | `"cls"` | `"cls"`, `"mean"`, or `"pooler"`; the last requires `pooler_output`. |
-| `cache` | `False` | Reuse pooled frozen-encoder outputs and token rows: `True` keeps every distinct embedding; a positive integer caps retained entries. |
-| `store` | `None` | Directory of persistent frozen-encoder vectors shared by every run, split, and field with the same encoder. |
-| `resident` | `None` | Accelerator memory in MiB a store may occupy for on-device lookups; `None` automatically budgets CUDA up to a quarter of total device memory, capped at 2 GiB; `0` keeps the store on the host. |
+| `cache` | `True` | Automatic tiered reuse; a positive integer also caps hot entries. `False` disables caching. |
+| `store` | `None` | Writable local cache directory; defaults to the platform cache directory. |
+| `resident` | `None` | Device table and replacement workspace budget in MiB. CUDA defaults to one eighth of free memory, capped at 512 MiB; other devices default to `0`. |
+| `memory` | `None` | Shared Rust RAM cache budget in MiB; defaults to 64. `0` answers through disk. |
 | `objective` | `"l2"` | Embedding reconstruction loss: `"l1"` or `"l2"`. |
 | `jitter` | `rf.Jitter()` | Training noise on the pooled frozen embedding before learned projection. |
 
 `cls` and `mean` require `last_hidden_state`. Text fields using the same model
 reuse its frozen encoder within the process. Right-padded values are grouped
 by length and cropped per encoder batch; left-padded values retain their full
-width. `max_length` still controls truncation and tensor storage.
+width. `max_length` controls truncation and the persisted token-row width;
+cached loader batches carry IDs regardless of that limit.
 
-## Repeated text
+## Automatic reuse
 
-Repeated descriptions can reuse frozen-encoder outputs across forward passes:
+The default `rf.Text` configuration reuses tokenizer results and pristine frozen
+embeddings across fields, splits, and runs. Loader workers send one integer ID
+per text slot. The trainer resolves these IDs through three tiers:
+
+1. A bounded device table retains frequently reused vectors. Resident hits
+   avoid transferring vectors from the host.
+2. A shared Rust Moka cache admits frequently observed entries to RAM. All
+   loader workers belonging to the trainer share this cache owner.
+3. A SQLite store retains token rows and frozen vectors on local disk.
+   Eviction from either hot tier leaves the disk entry available.
+
+A true miss runs the frozen encoder in the trainer on its configured device.
+The cache acknowledges a new vector after its disk transaction commits. Other
+clients of that owner wait for an in-progress fill and can retry it if the
+encoding client disconnects. Texts with identical token rows, including after
+truncation, share one canonical ID within their tokenizer configuration.
+Nulls and empty strings retain their distinct states.
+
+Memory use follows the hot budgets rather than the total number of distinct
+texts. SQLite keeps its private page cache at 4 MiB and does not map the
+entire database. Rust admission uses approximate frequency, so a scan of new
+text need not evict the descriptions repeatedly used by training. Device
+admission also considers frequency and recency. These policies choose useful
+entries; they do not guarantee an exact global ranking.
+
+The default needs no cache configuration. To choose a local disk and tighter
+hot budgets:
 
 ```python
-memo = rf.Text(cache=10_000)
+memo = rf.Text(store="embeddings/payment-memos", memory=32, resident=128)
 ```
 
-`cache=False` disables this reuse. `cache=True` retains every distinct tokenized
-input encountered; a positive integer retains at most that many entries.
-The bounded cache evicts the least frequently reused resident entry, breaking
-ties by least recent use. It favors frequent reuse rather than tracking a
-global ranking of every description ever seen. Texts that tokenize identically,
-including after truncation, can share an entry.
+`memory` bounds charged hot payload and entry overhead, rather than total
+process RSS. Python/Rust runtime overhead, active batches, the SQLite page
+cache, and the operating system's file cache are additional. Device tables
+share a budget across live encoder variants on that device, reserving space
+for replacement tables and index workspace. `cache=N` additionally limits
+hot entries; cold disk entries remain available. `cache=False` skips all
+cache tiers and tokenizes and encodes each batch directly.
 
-Entries are pristine pooled embeddings stored in CPU memory, separately for
-each text field in each process. Encoder device and precision distinguish
-entries. The same setting also keeps token rows in a separate least-recently-used
-cache: 4,096 rows for `True`, or at most the configured entries for a positive
-integer, bounded further by a 64 MiB payload limit and invalidated when tokenizer
-settings change. Duplicate strings within a batch are tokenized once either way.
-The trainable projection and training jitter still run on every forward pass, so
-caching preserves their gradients and fresh noise while avoiding repeated
-tokenizer and frozen-encoder work.
+The disk store grows with observed aliases, token rows, and vector variants;
+there is no automatic disk quota or pruning. Place it on storage sized for
+the workload. `RELFLOW_CACHE_DIR` changes the default directory for the
+application; otherwise relflow uses `XDG_CACHE_HOME`, `LOCALAPPDATA`, or
+`~/.cache`, under `relflow/artifacts-v1`. Use a local filesystem that supports
+SQLite locking. Existing NPY stores are left intact; this format creates a
+new `artifacts.sqlite3` and fills it as text is observed.
 
-Checkpoints retain the `cache` setting but omit cached embeddings and token
-rows; a loaded or copied model starts cold. Under DDP, each process builds its
-own caches. Use a finite cap when inputs contain many distinct descriptions:
-`cache=True` has no embedding limit and can keep growing in host memory.
-Loader workers also have separate token caches. At `max_length=128`, 4,096
-cached token rows use about 8 MiB for the two integer arrays, plus retained
-strings and Python overhead, per field and worker. Size the cap for the
-repeated text in each field; a disk store alone does not reuse tokenization.
+Text uses the shared tensorfield artifact cache. Its standard owner isolates
+Rust Moka and SQLite from encoder libraries. The optional `relflow-native` add-on
+uses the same storage format and accelerates transport and lookups without
+changing the Text schema. Other extensions can reuse the shared store with
+their own payload codecs and identities.
 
-## Persistent store
+One owner serves a trainer's loader family through authenticated loopback
+connections, including spawned workers. Independently started trainers and
+DDP ranks have separate RAM budgets and connections to the same disk store;
+RAM is not shared across machines. The owner exits when its parent releases
+it or exits. If it fails during a run, recreate the model and loaders to
+reopen the durable store. A writable cache directory and local loopback
+connections are required.
 
-Frozen encoder vectors can be reused across tasks, splits, and training
-runs when their encoder configuration and token rows match:
+Encoder weight contents and configuration, tokenizer vocabulary and settings,
+pooling, device type, and encoder precision distinguish entries. Trainable
+projections and training jitter run after lookup on every forward pass,
+preserving gradients and fresh noise. Checkpoints retain the request settings
+and learned weights, and omit cache contents, connections, and device tables.
+A loaded model can reuse compatible disk entries.
 
 ```python
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     amount=rf.Number,
     merchant=rf.Category,
     memo=rf.Text(store="embeddings/payment-memos", cache=4096),
@@ -106,35 +142,15 @@ model = rf.Model.xs(
 )
 ```
 
-The directory holds memory-mapped shards named by the encoder configuration,
-keyed by token row with the encoder device type and precision. Every split,
-run, and field that names the same directory and encoder reads the same
-vectors. Missing token rows are encoded and appended, with duplicates within
-a batch sharing an encoder result. New vectors wait in memory and are written
-as a new shard at the end of every epoch and phase,
-or after 65,536 new rows. Shards are added without rewriting existing ones.
-Lookups hash whole token rows and binary-search a sorted index, so a batch
-resolves without a Python loop over its rows. When the flushed store fits the
-`resident` budget, its index and vectors are uploaded to the device once per
-index version. Resident hits are answered there without a host round trip;
-larger stores answer from the host
-index over memory-mapped shards, which the page cache keeps in memory after
-first use. The automatic budget applies to CUDA; other devices use the host
-index unless given an explicit resident budget. With a store the in-process
-embedding `cache` is bypassed; the token-row cache still follows `cache`.
+This is a general reuse mechanism for frozen text encoders. Its throughput
+benefit depends on repeated text, the working set, storage speed, and worker
+cost. A mostly unique stream still performs tokenization, encoding, and disk
+writes. Measure the complete data loop when choosing worker counts and
+budgets; extra workers can cost more than they save once text is cached.
 
-Live fields and models share one process-local store object for the same
-directory and encoder. When its last owner is collected, the host index and
-resident views can be released; persisted shards remain available to later
-models. Phase callbacks and `warm` flush pending rows. Releasing a store does
-not flush it, so unflushed rows from direct forward calls may be recomputed.
+## Warming the cache
 
-The resident budget applies per store and process, rather than to all stores
-combined. Use a consistent `resident` setting for fields sharing a store.
-Reopening a live store with a different explicit budget updates that shared
-budget and releases its old device views; copies preserve the budget.
-
-To fill a store ahead of training, provide the application-supplied
+To fill the cache ahead of training, provide the application-supplied
 `memo_texts` as a string sequence or Arrow column:
 
 ```python
@@ -143,8 +159,8 @@ model.nodes[rf.Address("memo")].embedder.warm(memo_texts)
 
 Run the warmer on the device and under the autocast context training will
 use, since precision is part of the key. Nulls are skipped and repeated
-strings count once. The trainable projection and training jitter still run on
-every forward pass.
+strings count once. The return value counts newly persisted vectors.
+No explicit `store` setting is required.
 
 ## Learning and output
 

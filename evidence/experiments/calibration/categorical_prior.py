@@ -120,6 +120,7 @@ import numpy as np
 import polars as pl
 import pyarrow as pa
 import relflow as rf
+from relflow.presets.base import resolve
 from relflow.tensorfields.shared.resize import Resize
 from reporting import experiment, report
 
@@ -133,11 +134,23 @@ def records(*, rows: int, seed: int, novel: bool = False) -> Iterator[dict]:
 
 
 def build(size: int) -> rf.Model:
-    model = rf.Model.xs(
-        x=rf.Number,
-        entity=rf.Category(),
-        label=rf.Category(mask=True),
+    # Freeze the experimental architecture independently of SDK preset changes.
+    control_preset = rf.presets.Preset(
+        name="xs",
+        d_model=64,
+        root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        leaf=rf.presets.LeafDefaults(n_heads=2),
     )
+    model = rf.Model(
+        schema=resolve(
+            control_preset,
+            x=rf.Number,
+            entity=rf.Category(),
+            label=rf.Category(mask=True),
+        )
+    )
+    model.preset = control_preset
     # Experimental storage control only: allocation is not a schema option.
     node = model.nodes["/label"]
     resize = Resize()

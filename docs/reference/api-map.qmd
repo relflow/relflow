@@ -20,7 +20,8 @@ records include `disputed`; prediction requests can omit it.
 import polars as pl
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     amount=rf.Number,
     merchant=rf.Category,
     disputed=rf.Boolean(mask=True),
@@ -43,7 +44,7 @@ names for decoded results and a separate column for requested representations.
 
 | API | Purpose |
 | --- | --- |
-| `rf.Model.xs`, `.sm`, `.md`, `.lg`, `.xl` | Build from fields with capacity defaults for the root, child branches, and leaf decoders; explicit node settings take precedence. |
+| `rf.Model(preset=..., ...)` | Build from fields with named capacity defaults for the root, child branches, and leaf decoders; explicit node settings take precedence. |
 | `rf.Model(...)` | Build with explicit dimensions from named fields and branches, or accept an existing `rf.Schema`. |
 | `rf.Branch(...)` | Group repeated records, such as transactions, into a local context. |
 | `rf.Boolean`, `rf.Number`, `rf.Category` | Represent a dispute outcome, payment amount, or merchant label. |
@@ -94,7 +95,8 @@ For an unlabeled training objective followed by a labeled task, see
 | --- | --- |
 | `model.predict` | Return a Polars prediction DataFrame, with optional batch sizing for direct input or a prediction data module. |
 | `model.save`, `rf.Model.load` | Save and restore the schema and learned model state. |
-| `rf.Writer` | Write Lightning prediction batches to rank-partitioned Parquet files. |
+| `rf.Writer` | Stream Lightning prediction batches to Parquet or Arrow IPC files. |
+| `rf.inspect`, `rf.check` | Inspect template/checkpoint metadata and run explicit preflight checks. |
 | `rf.postprocess`, `rf.Postprocessor` | Transform decoded prediction frames before returning responses or persisting files. |
 | `rf.Deployment` | Serve models through the optional HTTP runtime. |
 
@@ -102,6 +104,8 @@ Serving types, including `rf.Accelerator`, `rf.JSONBackend`, and
 `rf.ModelSource`, require `relflow[serving]`. See
 [Prediction output](prediction-output.qmd),
 [Postprocessing](../guides/postprocessing.qmd), and [Serving](../guides/serving.qmd).
+The [command line](../guides/command-line.qmd) runs inspection, preflight,
+training, streaming prediction, and serving from a shell.
 
 ## Advanced schema operations
 
@@ -109,7 +113,7 @@ Serving types, including `rf.Accelerator`, `rf.JSONBackend`, and
 | --- | --- |
 | `rf.Address`, `rf.where`, `rf.predicate` | Address and select schema nodes, such as `rf.Address("trxns", "amount")`. |
 | `model.select`, `update`, `extend`, `delete`, `reset`, `override` | Inspect or evolve a trained schema; rebuilds retain compatible state, while reset reinitializes selected modules. |
-| `rf.presets.factory` | Bind an immutable preset configuration to a typed classmethod on a `Model` subclass. |
+| `rf.presets.register`, `rf.presets.get` | Register a custom policy under a unique name or retrieve a registered policy for model construction, fit, and YAML templates. |
 | `model.encode`, `model.forward`, `model.write` | Encode Polars frames into tensors, run Torch computation, and write results back to Polars; Arrow inputs remain supported. |
 
 See [Schema mutation](../guides/schema-mutation.qmd) and

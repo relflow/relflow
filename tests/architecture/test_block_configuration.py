@@ -13,8 +13,7 @@ from relflow.architecture.pool import CrossAttentionBlock, LearnedQueryCrossAtte
 
 
 def configured(*, preset: str | None = None, ffnx: int = 8) -> rf.Model:
-    constructor = rf.Model if preset is None else getattr(rf.Model, preset)
-    return constructor(
+    options = dict(
         d_model=8,
         n_layers=1,
         n_heads=2,
@@ -38,6 +37,7 @@ def configured(*, preset: str | None = None, ffnx: int = 8) -> rf.Model:
         ),
         target=rf.Number(mask=True, ffnx=5, objective="mse", pooling="query", n_heads=2, n_linear=1, dropout=0.0),
     )
+    return rf.Model(**options) if preset is None else rf.Model(preset=preset, **options)
 
 
 def observations() -> pa.Table:
@@ -126,7 +126,7 @@ fields:
     return path
 
 
-@pytest.mark.parametrize("preset", [None, "xs", "md"])
+@pytest.mark.parametrize("preset", [None, "small", "medium"])
 def test_python_yaml_and_presets_build_the_same_node_local_architecture(tmp_path, preset):
     python = configured(preset=preset, ffnx=6)
     yaml = rf.Model.from_yaml(template(tmp_path / "model.yaml", preset=preset, ffnx=6))
@@ -194,19 +194,21 @@ def test_node_defaults_are_independent_and_option_collisions_use_fields():
     assert model.schema.requests[rf.Address("events", "ffnx")].ffnx == 8
 
 
-def test_custom_preset_defaults_and_explicit_node_widths_remain_local():
-    values = rf.presets.XS.model_dump()
+def test_custom_preset_defaults_and_explicit_node_widths_remain_local(monkeypatch):
+    values = rf.presets.SMALL.model_dump()
+    values["name"] = "local-widths"
     values["root"]["ffnx"] = 4
     values["branch"]["ffnx"] = 3
     values["leaf"]["ffnx"] = 2
     profile = rf.presets.Preset.model_validate(values)
-    constructor = rf.presets.factory(profile).__get__(None, rf.Model)
+    monkeypatch.setattr("relflow.presets.registry.PRESETS", {})
+    rf.presets.register(profile)
     definition = rf.Branch(
         value=rf.Number,
         target=rf.Number(mask=True, ffnx=7),
         fixed=rf.Branch(ffnx=8, value=rf.Number(ffnx=8)),
     )
-    model = constructor(d_model=8, events=definition, target=rf.Number(mask=True))
+    model = rf.Model(preset=profile.name, d_model=8, events=definition, target=rf.Number(mask=True))
     assert definition.ffnx == 8 and "ffnx" not in definition.model_fields_set
     assert model.schema.fields.ffnx == 4
     assert model.schema.branches[rf.Address("events")].ffnx == 3
@@ -232,7 +234,7 @@ def test_invalid_width_mutation_preserves_schema_graph_and_weights(address):
 
 
 def test_checkpoint_restores_exact_weights_predictions_and_preset(tmp_path):
-    original = configured(preset="xs").eval()
+    original = configured(preset="small").eval()
     before = pa.table(original.predict(observations()))
     path = original.save(tmp_path / "model.ckpt")
     restored = rf.Model.load(path).eval()
@@ -246,7 +248,7 @@ def test_checkpoint_restores_exact_weights_predictions_and_preset(tmp_path):
 
 
 def test_extension_after_restore_uses_fixed_blocks_and_preserves_retained_weights(tmp_path):
-    original = configured(preset="xs")
+    original = configured(preset="small")
     restored = rf.Model.load(original.save(tmp_path / "before-growth.ckpt"))
     retained = {name: value.clone() for name, value in restored.state_dict().items()}
     restored.extend(

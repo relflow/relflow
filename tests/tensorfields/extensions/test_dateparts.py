@@ -20,7 +20,7 @@ ADDRESS = rf.Address("/", "created")
 
 def build(jitter: Jitter | dict[str, object] | None = None) -> rf.Model:
     options = {} if jitter is None else {"jitter": jitter}
-    return rf.Model.xs(created=rf.DateParts(dateparts=["day_of_week"], **options), d_model=8)
+    return rf.Model(preset="small", created=rf.DateParts(dateparts=["day_of_week"], **options), d_model=8)
 
 
 def test_dateparts_request_hydrates_jitter_from_a_mapping():
@@ -30,7 +30,7 @@ def test_dateparts_request_hydrates_jitter_from_a_mapping():
 
 
 def test_dateparts_content_loss_and_angle_exclude_null_targets(monkeypatch: pytest.MonkeyPatch):
-    model = rf.Model.xs(created=rf.DateParts(dateparts=["day_of_week"], mask=True), d_model=8)
+    model = rf.Model(preset="small", created=rf.DateParts(dateparts=["day_of_week"], mask=True), d_model=8)
     rows = pa.table({"created": pa.array([datetime(2024, 1, 1), None, datetime(2024, 1, 4)])})
     field = model.encode(rows, strata=Strata.train)[ADDRESS]
     target = field.targets[TensorKey.content]["day_of_week"].reshape(3, 2)
@@ -58,7 +58,7 @@ def test_dateparts_content_loss_and_angle_exclude_null_targets(monkeypatch: pyte
 @pytest.mark.integration
 @pytest.mark.parametrize("batch_size", [1, 2, 3])
 def test_dateparts_evaluation_angles_count_valued_targets_across_unequal_batches(batch_size, tmp_path):
-    model = rf.Model.xs(created=rf.DateParts(dateparts=["day_of_week"], mask=True), d_model=8)
+    model = rf.Model(preset="small", created=rf.DateParts(dateparts=["day_of_week"], mask=True), d_model=8)
     decoder = model.nodes[ADDRESS].decoder
     with torch.no_grad():
         # A constant readout on the unit circle: day 0 of the Sunday-based week.
@@ -137,7 +137,8 @@ def test_dateparts_jitters_its_only_continuous_boundary(
 
 def test_dateparts_jitters_unit_circle_inputs_without_mutating_targets(monkeypatch: pytest.MonkeyPatch):
     configured = Jitter(add=0.2)
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         created=rf.DateParts(
             dateparts=["day_of_week"],
             jitter=configured,
@@ -207,8 +208,11 @@ def test_dateparts_reads_zone_aware_timestamps_in_their_own_zone(zone: str, utc:
     # The same two local wall-clock times, 18:30 and 23:30 on Saturday 2024-03-09, as instants in each zone.
     instants = pa.array(np.array(utc, dtype="datetime64[s]")).cast(pa.timestamp("s", tz=zone))
     local = pa.array(np.array(["2024-03-09T18:30", "2024-03-09T23:30"], dtype="datetime64[s]"))
-    model = rf.Model.xs(
-        d_model=8, when=rf.DateParts(dateparts=["day_of_week", "hour_of_day"]), label=rf.Boolean(mask=True)
+    model = rf.Model(
+        preset="small",
+        d_model=8,
+        when=rf.DateParts(dateparts=["day_of_week", "hour_of_day"]),
+        label=rf.Boolean(mask=True),
     )
     aware = model.encode(pa.table({"when": instants}), strata="predict")
     naive = model.encode(pa.table({"when": local}), strata="predict")

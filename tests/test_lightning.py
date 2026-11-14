@@ -9,7 +9,8 @@ import relflow as rf
 
 
 def model(merchant=rf.Category):
-    return rf.Model.xs(
+    return rf.Model(
+        preset="small",
         d_model=8,
         amount=rf.Number,
         merchant=merchant,

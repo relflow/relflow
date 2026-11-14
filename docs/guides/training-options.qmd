@@ -48,6 +48,22 @@ unique directory under `default_root_dir/checkpoints`. Fitting restores the best
 model state, including schema, vocabularies, and normalizers, before returning
 the model. Read [Evaluation](../learn/evaluation.qmd) before choosing a monitor.
 
+## Select fit defaults
+
+Select a training recipe independently of the model's architecture:
+
+```python
+model.fit(datamodule, preset="small", learning_rate=1e-4)
+```
+
+The `small` and `medium` recipes supply AdamW settings, batch size, EMA,
+gradient clipping, and eight epochs. Explicit arguments win. The preset
+disables early stopping and rollback by default; enable them explicitly when
+validation-based selection is appropriate. Use `ema_decay=None` to disable
+averaging. An explicit epoch, step, or time budget replaces the default budget.
+Fit presets do not alter the schema, masks, jitter, or data splits. See the
+[complete defaults and provenance](../reference/model-presets.qmd#fit-presets).
+
 ## Report progress and validate
 
 `Model.track` uses Lightning's native logging: training metrics are logged only

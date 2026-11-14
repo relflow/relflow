@@ -6,7 +6,7 @@ import pydantic
 import pytest
 
 import relflow as rf
-from relflow.presets import LG, MD, SM, XL, XS, Preset
+from relflow.presets import MEDIUM, SMALL, Preset
 from relflow.presets.base import resolve
 from relflow.structs.experiment import bind_tree_field
 
@@ -14,11 +14,8 @@ from relflow.structs.experiment import bind_tree_field
 @pytest.mark.parametrize(
     ("preset", "width", "heads", "root_layers", "branch_layers", "root_outputs", "branch_outputs"),
     [
-        (XS, 64, 2, 1, 1, 1, 1),
-        (SM, 128, 4, 2, 1, 2, 2),
-        (MD, 256, 8, 3, 2, 4, 4),
-        (LG, 384, 8, 4, 2, 8, 4),
-        (XL, 512, 8, 6, 3, 16, 8),
+        (SMALL, 128, 4, 2, 1, 1, 4),
+        (MEDIUM, 64, 8, 2, 2, 1, 1),
     ],
 )
 def test_profiles_resolve_each_scope_at_every_depth(
@@ -35,13 +32,13 @@ def test_profiles_resolve_each_scope_at_every_depth(
     for address, branch in schema.branches.items():
         root = address == rf.Address()
         assert branch.n_layers == (root_layers if root else branch_layers)
-        assert branch.n_heads == heads
+        assert branch.n_heads == (heads if root else 4)
         assert branch.attention == "mha"
         assert branch.dropout == 0.0
         assert branch.reduction == rf.Attention(n_outputs=root_outputs if root else branch_outputs)
     for leaf in schema.requests.values():
         assert (leaf.n_heads, leaf.pooling, leaf.n_linear, leaf.dropout, leaf.decoder_position) == (
-            heads,
+            4,
             "query",
             1,
             0.0,
@@ -56,7 +53,7 @@ def test_profiles_resolve_each_scope_at_every_depth(
 @pytest.mark.parametrize("reduction", [None, rf.Mean(), rf.Attention()])
 def test_explicit_defaults_and_none_remain_local_atomic_overrides(reduction):
     schema = resolve(
-        XL,
+        MEDIUM,
         d_model=64,
         n_layers=1,
         n_heads=2,
@@ -83,11 +80,11 @@ def test_explicit_defaults_and_none_remain_local_atomic_overrides(reduction):
         assert branch.reduction == reduction
     assert schema.fields.n_heads == 2
     assert schema.branches[rf.Address("items")].n_heads == 4
-    assert schema.branches[rf.Address("implicit")].n_layers == 3
-    assert schema.branches[rf.Address("implicit")].n_heads == 8
+    assert schema.branches[rf.Address("implicit")].n_layers == 2
+    assert schema.branches[rf.Address("implicit")].n_heads == 4
     target = schema.requests[rf.Address("items", "target")]
     assert (target.n_heads, target.n_linear, target.dropout, target.decoder_position) == (4, 1, None, None)
-    assert schema.requests[rf.Address("items", "implicit")].n_heads == 8
+    assert schema.requests[rf.Address("items", "implicit")].n_heads == 4
 
 
 def test_reused_nested_definitions_remain_unresolved_and_independent():
@@ -95,15 +92,15 @@ def test_reused_nested_definitions_remain_unresolved_and_independent():
     definition = rf.Branch(length=3, child=rf.Branch(target=leaf))
     before = definition.model_dump()
     supplied = definition.model_fields_set.copy()
-    small = resolve(XS, first=definition, second=definition)
-    large = resolve(XL, first=definition)
+    small = resolve(SMALL, first=definition, second=definition)
+    large = resolve(MEDIUM, first=definition)
 
     assert definition.model_dump() == before
     assert definition.model_fields_set == supplied
     assert definition.name is None and definition.parent is None
     assert leaf.name is None and leaf.parent is None
-    assert small.branches[rf.Address("first", "child")].n_heads == 2
-    assert large.branches[rf.Address("first", "child")].n_heads == 8
+    assert small.branches[rf.Address("first", "child")].reduction.n_outputs == 4
+    assert large.branches[rf.Address("first", "child")].reduction.n_outputs == 1
     small.requests[rf.Address("first", "child", "target")].topk.append(3)
     assert small.requests[rf.Address("second", "child", "target")].topk == [2]
     assert large.requests[rf.Address("first", "child", "target")].topk == [2]
@@ -120,24 +117,24 @@ def test_late_extension_uses_common_profile_without_losing_extension_fields():
             scale: float = pydantic.Field(default=1.0, gt=0)
             fields: int = 7
 
-        schema = resolve(MD, custom=Request(scale=3, fields=9), items=rf.Branch(custom=Request))
+        schema = resolve(MEDIUM, custom=Request(scale=3, fields=9), items=rf.Branch(custom=Request))
         request = schema.requests[rf.Address("custom")]
         assert isinstance(request, Request)
-        assert (request.scale, request.fields, request.n_heads) == (3, 9, 8)
-        assert schema.requests[rf.Address("items", "custom")].n_heads == 8
+        assert (request.scale, request.fields, request.n_heads) == (3, 9, 4)
+        assert schema.requests[rf.Address("items", "custom")].n_heads == 4
         assert rf.Schema.model_validate_json(schema.model_dump_json()).model_dump() == schema.model_dump()
     finally:
         rf.TENSORFIELDS.pop("preset_extension", None)
 
 
 def test_profile_words_remain_available_as_ordinary_child_names():
-    schema = resolve(XS, preset=rf.Number, defaults=rf.Number, size=rf.Number, md=rf.Number)
+    schema = resolve(SMALL, preset=rf.Number, defaults=rf.Number, size=rf.Number, md=rf.Number)
     assert list(schema.requests) == [rf.Address("preset"), rf.Address("defaults"), rf.Address("size"), rf.Address("md")]
 
 
 def test_policy_snapshot_is_frozen_and_can_default_new_nodes_after_restore():
-    restored = Preset.model_validate_json(XL.model_dump_json())
-    assert restored == XL
+    restored = Preset.model_validate_json(MEDIUM.model_dump_json())
+    assert restored == MEDIUM
     with pytest.raises(pydantic.ValidationError, match="frozen"):
         restored.d_model = 64
     with pytest.raises(pydantic.ValidationError, match="frozen"):
@@ -146,15 +143,15 @@ def test_policy_snapshot_is_frozen_and_can_default_new_nodes_after_restore():
         restored.branch.reduction.n_outputs = 1
 
     definition = rf.Branch(value=rf.Number, child=rf.Branch(target=rf.Category(n_heads=4)))
-    live = bind_tree_field("added", definition, defaults=XL.defaults)
+    live = bind_tree_field("added", definition, defaults=MEDIUM.defaults)
     loaded = bind_tree_field("added", definition, defaults=restored.defaults)
     assert live.model_dump() == loaded.model_dump()
-    assert loaded.n_heads == 8
-    assert loaded.fields[0].n_heads == 8
+    assert loaded.n_heads == 4
+    assert loaded.fields[0].n_heads == 4
     assert loaded.fields[1].fields[0].n_heads == 4
 
 
-def test_preset_construction_and_growth_validate_each_bound_leaf_once():
+def test_preset_construction_and_growth_validate_each_bound_leaf_once(monkeypatch):
     visits = []
     allocations = []
 
@@ -175,17 +172,19 @@ def test_preset_construction_and_growth_validate_each_bound_leaf_once():
     definition = rf.Branch(child=rf.Branch(value=leaf))
     original = definition.model_dump()
     supplied = [(node, node.model_fields_set.copy()) for node in (definition, *definition.descendants, leaf)]
-    values = XS.model_dump()
+    values = SMALL.model_dump()
+    values["name"] = "traced-number"
     values["root"]["ffnx"] = 4
     values["branch"]["ffnx"] = 3
     values["leaf"]["ffnx"] = 2
     profile = Preset.model_validate(values)
-    constructor = rf.presets.factory(profile).__get__(None, rf.Model)
+    monkeypatch.setattr("relflow.presets.registry.PRESETS", {})
+    rf.presets.register(profile)
 
     visits.clear()
-    model = constructor(d_model=16, first=definition, second=definition, bare=TracedNumber)
+    model = rf.Model(preset=profile.name, d_model=16, first=definition, second=definition, bare=TracedNumber)
     assert len(visits) == 3
-    assert all(heads == 2 for _, heads in visits)
+    assert all(heads == 4 for _, heads in visits)
     assert allocations == [0, 1]
     first = model.schema.requests["/first/child/value"]
     second = model.schema.requests["/second/child/value"]
@@ -200,7 +199,7 @@ def test_preset_construction_and_growth_validate_each_bound_leaf_once():
     visits.clear()
     model.extend(rf.where("address") == "/", added=definition, bare_added=TracedNumber)
     assert len(visits) == 2
-    assert all(heads == 2 for _, heads in visits)
+    assert all(heads == 4 for _, heads in visits)
     assert allocations == [0, 1, 2]
     added = model.schema.requests["/added/child/value"]
     assert type(added) is TracedNumber
@@ -226,7 +225,7 @@ def test_preset_construction_and_growth_validate_each_bound_leaf_once():
 )
 def test_effective_attention_geometry_reports_address_and_values(options, address):
     with pytest.raises(ValueError) as error:
-        resolve(MD, **options)
+        resolve(MEDIUM, **options)
     message = str(error.value)
     assert repr(address) in message
     assert "d_model=" in message and "n_heads=" in message
@@ -235,7 +234,7 @@ def test_effective_attention_geometry_reports_address_and_values(options, addres
 
 def test_head_geometry_only_applies_to_actual_attention_modules():
     schema = resolve(
-        XS,
+        SMALL,
         d_model=1,
         attention=None,
         reduction=rf.Mean(),
@@ -245,16 +244,17 @@ def test_head_geometry_only_applies_to_actual_attention_modules():
     assert schema.d_model == 1
 
     scalar = resolve(
-        XS,
+        SMALL,
         d_model=2,
+        n_heads=2,
         attention=None,
         reduction=rf.Attention(position=False),
-        target=rf.Number(mask=True),
+        target=rf.Number(mask=True, n_heads=2),
     )
     assert scalar.d_model == 2
     with pytest.raises(ValueError, match="leaf '/items/target'.*at least 2 dimensions"):
         resolve(
-            XS,
+            SMALL,
             d_model=2,
             attention=None,
             reduction=rf.Mean(),

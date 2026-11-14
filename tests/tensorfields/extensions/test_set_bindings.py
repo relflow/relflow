@@ -11,7 +11,8 @@ ADDRESS = rf.Address("/tags")
 
 
 def build() -> rf.Model:
-    return rf.Model.xs(
+    return rf.Model(
+        preset="small",
         d_model=8,
         batch_size=2,
         attention=None,
@@ -78,7 +79,8 @@ def test_set_vocabulary_rejects_invalid_context_resource_and_source() -> None:
 
 
 def test_set_vocabulary_rejects_non_set_model_field() -> None:
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         amount=rf.Number,
     )

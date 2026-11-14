@@ -154,7 +154,7 @@ def launch_deployment(checkpoint: Path, port: int, log_path: Path) -> subprocess
 def deployment(tmp_path_factory):
     """Share an inference-only HTTP server; predictions do not learn vocabulary."""
     directory = tmp_path_factory.mktemp("deployment")
-    model = rf.Model.xs(d_model=8, label=rf.Category(embed=True))
+    model = rf.Model(preset="small", d_model=8, label=rf.Category(embed=True))
     model.encode(pa.table({"label": ["alpha", "beta"]}), strata="train")
     with torch.no_grad():
         # Admitted labels embed as unknown until trained; stand in for the training that separates them.

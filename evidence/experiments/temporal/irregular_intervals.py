@@ -103,6 +103,7 @@ import polars as pl
 import pyarrow as pa
 import relflow as rf
 import torch
+from relflow.presets.base import resolve
 from reporting import experiment, report
 
 BUDGET = 600
@@ -140,11 +141,24 @@ def position_only(rows: list[dict]) -> list[dict]:
 
 
 def build() -> rf.Model:
-    return rf.Model.xs(
-        observations=rf.Branch(length=4, reduction=None, elapsed=rf.Number, value=rf.Number),
-        forecast_at=rf.Number,
-        answer=rf.Number(mask=True, objective="mse"),
+    # Freeze the experimental architecture independently of SDK preset changes.
+    control_preset = rf.presets.Preset(
+        name="xs",
+        d_model=64,
+        root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        leaf=rf.presets.LeafDefaults(n_heads=2),
     )
+    model = rf.Model(
+        schema=resolve(
+            control_preset,
+            observations=rf.Branch(length=4, reduction=None, elapsed=rf.Number, value=rf.Number),
+            forecast_at=rf.Number,
+            answer=rf.Number(mask=True, objective="mse"),
+        )
+    )
+    model.preset = control_preset
+    return model
 
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:

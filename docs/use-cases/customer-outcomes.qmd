@@ -70,7 +70,8 @@ encoders and prediction output from this task schema:
 ```python
 import relflow as rf
 
-model = rf.Model.sm(
+model = rf.Model(
+    preset="small",
     customer_age=rf.Number,
     club_member_status=rf.Category,
     recent_purchases=rf.Branch(

@@ -7,7 +7,8 @@ import relflow as rf
 
 
 def test_prediction_envelope_includes_target_state_and_normalized_embedding() -> None:
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         embed=True,
         amount=rf.Number,
@@ -37,7 +38,7 @@ def test_prediction_envelope_includes_target_state_and_normalized_embedding() ->
 
 
 def test_embedding_only_leaf_emits_representations_without_predictions() -> None:
-    model = rf.Model.xs(d_model=8, merchant=rf.Category(embed=True))
+    model = rf.Model(preset="small", d_model=8, merchant=rf.Category(embed=True))
     model.encode(pa.table({"merchant": ["shop", "cafe"]}), strata="train")
 
     output = model.predict(pa.table({"merchant": ["shop"]}))
@@ -54,7 +55,7 @@ def test_embedding_only_leaf_emits_representations_without_predictions() -> None
 @pytest.mark.parametrize("empty", [False, True])
 @pytest.mark.parametrize("kind", ["arrow", "polars"])
 def test_model_write_returns_polars_with_the_same_prediction_contract(empty, kind) -> None:
-    model = rf.Model.xs(d_model=8, embed=True, amount=rf.Number, label=rf.Boolean(mask=True)).eval()
+    model = rf.Model(preset="small", d_model=8, embed=True, amount=rf.Number, label=rf.Boolean(mask=True)).eval()
     source = pa.table({"amount": [1.5], "id": [7]})
     if empty:
         source = source.slice(0, 0)
@@ -70,7 +71,7 @@ def test_model_write_returns_polars_with_the_same_prediction_contract(empty, kin
 
 
 def test_direct_prediction_returns_the_final_postprocessor_frame() -> None:
-    model = rf.Model.xs(d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
     outputs = []
     marker = object()
 

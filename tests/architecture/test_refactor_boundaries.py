@@ -15,7 +15,7 @@ from relflow.logging.config import CONTEXT
 
 
 def configured() -> rf.Model:
-    return rf.Model.xs(amount=rf.Number, label=rf.Category(mask=True), d_model=8)
+    return rf.Model(preset="small", amount=rf.Number, label=rf.Category(mask=True), d_model=8)
 
 
 @pytest.fixture

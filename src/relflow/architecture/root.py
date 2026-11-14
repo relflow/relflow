@@ -22,6 +22,7 @@ from torchmetrics import Metric as TorchMetric
 from relflow import presets
 from relflow._version import __version__
 from relflow.architecture import compiler, output, runtime, template, training
+from relflow.architecture.averaging import EMA
 from relflow.architecture.binding import bind
 from relflow.architecture.checkpoint import CheckpointState, RollbackCheckpoint
 from relflow.architecture.contracts import ContractScheduler
@@ -47,6 +48,8 @@ from relflow.data.processors import PostprocessorInput, PreprocessorInput, arrow
 from relflow.helpers.optimizers import adamw
 from relflow.logging import logger
 from relflow.logging.throughput import ThroughputLogger
+from relflow.presets.base import resolve
+from relflow.structs import declaration
 from relflow.structs.enums import AttentionInput, AttentionMode, Strata, StrataInput
 from relflow.structs.experiment import (
     NodeSelector,
@@ -107,12 +110,15 @@ __all__ = [
 _DEFAULT_REDUCTION = Attention()
 
 
-class Model(lit.LightningModule):
+class Model(lit.LightningModule, metaclass=declaration.Declarations):
     """Neural model generated from a `relflow` schema tree.
 
     `Model` owns the schema tree, tensorfield embedders, branch
     encoders, decoders, and convenience methods for prediction, checkpointing,
     schema display and mutation.
+
+    Subclasses may declare children in their class bodies. Their constructor
+    arguments configure the root; use subclassing to add or replace children.
 
     Example:
         ```python
@@ -134,6 +140,31 @@ class Model(lit.LightningModule):
     def __init__(
         self,
         *,
+        preset: str,
+        d_model: int = cast(int, OMITTED),
+        n_layers: int = cast(int, OMITTED),
+        n_heads: int = cast(int, OMITTED),
+        ffnx: int = cast(int, OMITTED),
+        batch_size: int = 1,
+        fields: Mapping[str, TreeFieldInput] | None = None,
+        query: str | None = None,
+        description: str | None = None,
+        embed: bool = False,
+        attention: AttentionInput = cast(AttentionInput, OMITTED),
+        reduction: ReductionConfig | None = cast(ReductionConfig | None, OMITTED),
+        dropout: Rate | None = cast(Rate | None, OMITTED),
+        mask: MaskInput = False,
+        optimizer: OptimizerConfig | None = None,
+        scheduler: SchedulerConfig | None = None,
+        jacobian: bool = False,
+        **field_kwargs: TreeFieldInput,
+    ) -> None: ...
+
+    @overload
+    def __init__(
+        self,
+        *,
+        preset: None = None,
         d_model: int,
         n_layers: int,
         n_heads: int,
@@ -158,6 +189,7 @@ class Model(lit.LightningModule):
         self,
         schema: Schema,
         *,
+        preset: None = None,
         batch_size: int = 1,
         optimizer: OptimizerConfig | None = None,
         scheduler: SchedulerConfig | None = None,
@@ -169,18 +201,19 @@ class Model(lit.LightningModule):
         self,
         schema: Schema | None = None,
         *,
-        d_model: int | None = None,
-        n_layers: int | None = None,
-        n_heads: int | None = None,
+        preset: str | None = None,
+        d_model: int = cast(int, OMITTED),
+        n_layers: int = cast(int, OMITTED),
+        n_heads: int = cast(int, OMITTED),
         ffnx: int = cast(int, OMITTED),
         batch_size: int = 1,
         fields: Mapping[str, TreeFieldInput] | None = None,
         query: str | None = None,
         description: str | None = None,
         embed: bool = False,
-        attention: AttentionInput = AttentionMode.mha,
-        reduction: ReductionConfig | None = _DEFAULT_REDUCTION,
-        dropout: Rate | None = None,
+        attention: AttentionInput = cast(AttentionInput, OMITTED),
+        reduction: ReductionConfig | None = cast(ReductionConfig | None, OMITTED),
+        dropout: Rate | None = cast(Rate | None, OMITTED),
         mask: MaskInput = False,
         optimizer: OptimizerConfig | None = None,
         scheduler: Any = None,  # Lightning validates custom schedulers at fit time.
@@ -189,7 +222,11 @@ class Model(lit.LightningModule):
     ) -> None:
         """Build a model from tree fields, or from an existing ``schema``.
 
-        Provide ``d_model``, ``n_layers``, and ``n_heads`` with tree fields.
+        Select named architecture defaults with ``preset="small"``, or provide
+        ``d_model``, ``n_layers``, and ``n_heads`` explicitly. Root options override
+        preset defaults at the root; branch and leaf options remain local.
+        Application policies use ``rf.presets.register(...)``. A child named
+        ``preset`` belongs in ``fields`` or a class declaration.
         Keyword field names bind their data keys; field classes such as
         ``rf.Number`` are instantiated with defaults. Child ``rf.Branch``
         nodes describe repeated objects; the anonymous root is a singleton
@@ -217,36 +254,53 @@ class Model(lit.LightningModule):
         A positional ``Schema`` or ``schema=...`` restores an existing
         architecture and cannot be combined with tree fields or dimensions.
         """
+        profile = None
         if schema is not None:
+            if preset is not None:
+                raise TypeError("schema cannot be combined with preset; use Model(schema=...) for a resolved schema")
             if ffnx is not OMITTED:
                 raise TypeError("schema cannot be combined with a root ffnx override")
             if fields is not None or field_kwargs or mask is not False:
                 raise TypeError("schema cannot be combined with tree fields")
-            if d_model is not None or n_layers is not None or n_heads is not None:
+            if any(value is not OMITTED for value in (d_model, n_layers, n_heads)):
                 raise TypeError("schema cannot be combined with d_model, n_layers, or n_heads")
-            if reduction is not _DEFAULT_REDUCTION:
+            if reduction is not OMITTED:
                 raise TypeError("schema cannot be combined with a root reduction")
         else:
-            required = {"d_model": d_model, "n_layers": n_layers, "n_heads": n_heads}
-            missing = [key for key, value in required.items() if value is None]
-            if missing:
-                names = ", ".join(missing)
-                raise TypeError(f"Model requires {names} when constructed from tree fields")
+            fields = declaration.fields(type(self), fields, field_kwargs)
+            if preset is None:
+                required = {"d_model": d_model, "n_layers": n_layers, "n_heads": n_heads}
+                missing = [key for key, value in required.items() if value is OMITTED]
+                if missing:
+                    names = ", ".join(missing)
+                    raise TypeError(
+                        f"Model requires {names} when constructed from tree fields; supply them or select preset=..."
+                    )
+            else:
+                profile = presets.get(preset)
 
-            schema = Schema.from_tree(
-                d_model=cast(int, d_model),
-                n_layers=cast(int, n_layers),
-                n_heads=cast(int, n_heads),
-                ffnx=8 if ffnx is OMITTED else ffnx,
-                fields=fields,
-                query=query,
-                description=description,
-                embed=embed,
-                attention=attention,
-                reduction=reduction,
-                dropout=dropout,
-                mask=mask,
-                **field_kwargs,
+            options: dict[str, Any] = {
+                name: value
+                for name, value in dict(
+                    d_model=d_model,
+                    n_layers=n_layers,
+                    n_heads=n_heads,
+                    ffnx=ffnx,
+                    fields=fields,
+                    query=query,
+                    description=description,
+                    embed=embed,
+                    attention=attention,
+                    reduction=reduction,
+                    dropout=dropout,
+                    mask=mask,
+                ).items()
+                if value is not OMITTED
+            }
+            schema = (
+                Schema.from_tree(**options, **field_kwargs)
+                if profile is None
+                else resolve(profile, **options, **field_kwargs)
             )
 
         super().__init__()
@@ -255,7 +309,7 @@ class Model(lit.LightningModule):
         # internal integer state-dict revision; preserve the existing artifact contract.
         self._version: str = __version__  # pyrefly: ignore[bad-override-mutable-attribute]
         self.schema: Schema = schema
-        self.preset: presets.Preset | None = None
+        self.preset: presets.Preset | None = profile
         self.batch_size = batch_size
         self.optimizer: OptimizerConfig | None
         self.scheduler: SchedulerConfig | None
@@ -283,24 +337,21 @@ class Model(lit.LightningModule):
             embeds=len(self.schema.embed),
         ).info("initialized Model module")
 
-    xs = presets.factory(presets.XS)
-    sm = presets.factory(presets.SM)
-    md = presets.factory(presets.MD)
-    lg = presets.factory(presets.LG)
-    xl = presets.factory(presets.XL)
-
     @classmethod
     def from_yaml(cls, pathname: str | Path, /, **overrides: Unpack[template.Options]) -> Self:
         """Construct a fresh model from a named YAML schema and its optional preset.
 
         Explicit root and runtime overrides replace file values. Fields and the
-        built-in preset name come from the file. Loading retains ordinary schema
+        registered preset name come from the file. Loading retains ordinary schema
         validation, registered datatype options, and subclass construction.
         """
         options, profile = template.read(pathname, overrides)
-        constructor = cls if profile is None else presets.factory(profile).__get__(None, cls)
+        runtime = {name: options.pop(name) for name in ("batch_size", "optimizer", "scheduler") if name in options}
         try:
-            return constructor(**options)
+            schema = Schema.from_tree(**options) if profile is None else resolve(profile, **options)
+            model = cls(schema=schema, **runtime)
+            model.preset = profile
+            return model
         except (TypeError, ValueError, BeartypeCallHintParamViolation) as error:
             raise ValueError(f"model template {pathname}: {error}") from error
 
@@ -636,6 +687,7 @@ class Model(lit.LightningModule):
         self,
         datamodule: lit.LightningDataModule,
         *,
+        preset: str | None = None,
         batch_size: int | None = None,
         optimizer: OptimizerConfig | None = None,
         scheduler: SchedulerConfig | None = None,
@@ -648,8 +700,9 @@ class Model(lit.LightningModule):
         decay_1d: bool | None = None,
         no_decay_name_fragments: tuple[str, ...] | None = None,
         callbacks: Sequence[Callback] | None = None,
-        early_stopping: bool | EarlyStopping = True,
-        rollback: bool | RollbackCheckpoint = True,
+        ema_decay: float | None = cast(float | None, OMITTED),
+        early_stopping: bool | EarlyStopping = cast(bool | EarlyStopping, OMITTED),
+        rollback: bool | RollbackCheckpoint = cast(bool | RollbackCheckpoint, OMITTED),
         monitor: str = "loss/validate",
         mode: Literal["min", "max"] = "min",
         patience: int = 10,
@@ -678,6 +731,13 @@ class Model(lit.LightningModule):
         Full training continuation requires ``ckpt_path``; another ordinary
         call starts a new run from the current model state.
 
+        ``preset="small"`` or ``preset="medium"`` selects named fit defaults
+        independently of the constructor's architecture preset. Explicit options
+        win. These recipes use eight epochs, EMA, and disabled early stopping and
+        rollback; an explicit time/step/epoch budget replaces the epoch default.
+        ``ema_decay=None`` disables preset averaging; a supplied EMA callback
+        replaces its default. Fit presets do not change the schema or data masks.
+
         Configure AdamW directly with ``learning_rate``, ``weight_decay``,
         ``betas``, ``eps``, and ``fused``. Defaults are 1e-3, 0.01,
         (0.9, 0.95), 1e-8, and True. Biases, one-dimensional parameters,
@@ -691,6 +751,29 @@ class Model(lit.LightningModule):
         options. Model-level configurations remain defaults for advanced use.
         """
         selected = optimizer if optimizer is not None else self.optimizer
+        recipe = None if preset is None else presets.get(preset).fit
+        if preset is not None and recipe is None:
+            raise ValueError(f"preset {preset!r} has no fit configuration; register a policy with FitDefaults")
+        configured_callbacks = list(callbacks or ())
+        averages = [callback for callback in configured_callbacks if isinstance(callback, EMA)]
+        if recipe is not None:
+            batch_size = recipe.batch_size if batch_size is None else batch_size
+            if selected is None:
+                learning_rate = recipe.learning_rate if learning_rate is None else learning_rate
+                weight_decay = recipe.weight_decay if weight_decay is None else weight_decay
+            if not any(name in trainer_options for name in ("max_epochs", "max_steps", "max_time")):
+                trainer_options["max_epochs"] = recipe.max_epochs
+            trainer_options.setdefault("gradient_clip_val", recipe.gradient_clip_val)
+        if ema_decay is OMITTED:
+            ema_decay = recipe.ema_decay if recipe is not None and not averages else None
+        elif averages and (ema_decay is None or any(callback.decay != ema_decay for callback in averages)):
+            raise ValueError("ema_decay conflicts with an EMA callback; configure averaging in one place")
+        if ema_decay is not None and not averages:
+            configured_callbacks.append(EMA(decay=ema_decay))
+        if early_stopping is OMITTED:
+            early_stopping = recipe.early_stopping if recipe is not None else True
+        if rollback is OMITTED:
+            rollback = recipe.rollback if recipe is not None else True
         adamw_options: dict[str, Any] = {
             name: value
             for name, value in {
@@ -713,7 +796,7 @@ class Model(lit.LightningModule):
         if learning_rate is not None and (not isfinite(learning_rate) or learning_rate <= 0):
             raise ValueError(f"learning_rate must be finite and positive, got {learning_rate!r}")
         configured = training.policies(
-            callbacks,
+            configured_callbacks,
             early_stopping=early_stopping,
             rollback=rollback,
             monitor=monitor,

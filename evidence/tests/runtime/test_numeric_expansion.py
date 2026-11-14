@@ -65,7 +65,8 @@ def test_visibility_oracle_integrates_hidden_values_instead_of_leaking_them():
         assert {key: value for key, value in left.items() if key != "hide_signal"} == {
             key: value for key, value in right.items() if key != "hide_signal"
         }
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="xs",
         group=rf.Enum(values=proof.GROUPS),
         signal=rf.Number(mask=rf.Mask(query="hide_signal", skip=True, dropout=False)),
         target=rf.Boolean(mask=True),

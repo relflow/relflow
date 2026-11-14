@@ -54,7 +54,7 @@ def fit_options(tmp_path):
 
 
 def test_track_logs_only_steps_and_keeps_training_loss_internal_with_accumulation(fit_options):
-    model = FixedLosses.xs(d_model=8, label=rf.Boolean(mask=True))
+    model = FixedLosses(preset="small", d_model=8, label=rf.Boolean(mask=True))
     rows = pa.table({"label": [True, False, True, False, True, False, True]})
     data = rf.ArrowDataModule(train=rows)
     logger = RecordingLogger()
@@ -79,7 +79,7 @@ def test_track_logs_only_steps_and_keeps_training_loss_internal_with_accumulatio
 
 
 def test_logging_interval_samples_steps_and_zero_keeps_training_loss_internal(fit_options):
-    model = FixedLosses.xs(d_model=8, label=rf.Boolean(mask=True))
+    model = FixedLosses(preset="small", d_model=8, label=rf.Boolean(mask=True))
     rows = pa.table({"label": [True, False] * 5})
     data = rf.ArrowDataModule(train=rows)
     logger = RecordingLogger()
@@ -105,7 +105,7 @@ def test_logging_interval_samples_steps_and_zero_keeps_training_loss_internal(fi
 
 
 def test_validation_keeps_its_metric_name_and_default_checkpoint_monitor(fit_options):
-    model = rf.Model.xs(d_model=8, label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, label=rf.Boolean(mask=True))
     rows = pa.table({"label": [True, False] * 3})
     data = rf.ArrowDataModule(train=rows, validate=rows)
     logger = RecordingLogger()
@@ -141,7 +141,7 @@ def test_validation_keeps_its_metric_name_and_default_checkpoint_monitor(fit_opt
 def test_vocabulary_fields_log_available_scores(fit_options, field, labels, has_content_scores):
     if field is rf.Group:
         field = rf.Group(n_groups=2, mask=True)
-    model = rf.Model.xs(d_model=8, batch_size=2, amount=rf.Number, label=field)
+    model = rf.Model(preset="small", d_model=8, batch_size=2, amount=rf.Number, label=field)
     rows = pa.table({"amount": [1.0, 2.0, 3.0, 4.0], "label": labels})
     data = rf.ArrowDataModule(train=rows, validate=rows, shuffle=False)
     logger = RecordingLogger()
@@ -181,7 +181,8 @@ def test_vocabulary_fields_log_available_scores(fit_options, field, labels, has_
 @pytest.mark.parametrize("native", [False, True], ids=["model-fit", "native-trainer"])
 @pytest.mark.parametrize("accumulate", [1, 2])
 def test_group_distribution_logs_only_at_training_batch_end(fit_options, monkeypatch, masked, native, accumulate):
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         batch_size=2,
         label=rf.Group(n_groups=3, mask=masked, p_unavailable=0.0),

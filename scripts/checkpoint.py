@@ -16,6 +16,7 @@ import polars as pl
 import torch
 
 import relflow as rf
+from relflow.presets.base import resolve
 
 
 def environment() -> dict[str, Any]:
@@ -99,21 +100,33 @@ def fit(model: rf.Model, inputs: pl.DataFrame, output: Path, *, checkpoint: Path
 
 def create(output: Path) -> None:
     output.mkdir(parents=True)
-    model = rf.Model.xs(
-        d_model=8,
-        embed=True,
-        amount=rf.Number,
-        merchant=rf.Category(p_unavailable=0),
-        risk=rf.Number(mask=True),
-        label=rf.Category(mask=True, p_unavailable=0, topk=[2]),
-        items=rf.Branch(
-            length=4,
-            embed=True,
-            sku=rf.Category(p_unavailable=0),
-            total=rf.Number(mask=True),
-            adjustments=rf.Branch(length=2, amount=rf.Number, estimate=rf.Number(mask=True)),
-        ),
+    # Freeze the experimental architecture independently of SDK preset changes.
+    control_preset = rf.presets.Preset(
+        name="xs",
+        d_model=64,
+        root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        leaf=rf.presets.LeafDefaults(n_heads=2),
     )
+    model = rf.Model(
+        schema=resolve(
+            control_preset,
+            d_model=8,
+            embed=True,
+            amount=rf.Number,
+            merchant=rf.Category(p_unavailable=0),
+            risk=rf.Number(mask=True),
+            label=rf.Category(mask=True, p_unavailable=0, topk=[2]),
+            items=rf.Branch(
+                length=4,
+                embed=True,
+                sku=rf.Category(p_unavailable=0),
+                total=rf.Number(mask=True),
+                adjustments=rf.Branch(length=2, amount=rf.Number, estimate=rf.Number(mask=True)),
+            ),
+        )
+    )
+    model.preset = control_preset
     collections = [
         None,
         [],

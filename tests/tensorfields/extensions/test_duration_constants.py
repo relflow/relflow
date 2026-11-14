@@ -15,14 +15,18 @@ def restore(definition, route, tmp_path):
     path = tmp_path / "duration.yaml"
     path.write_text(
         yaml.safe_dump(
-            {"preset": "xs", "d_model": 8, "fields": {"elapsed": definition.model_dump(mode="json", exclude={"name"})}}
+            {
+                "preset": "small",
+                "d_model": 8,
+                "fields": {"elapsed": definition.model_dump(mode="json", exclude={"name"})},
+            }
         )
     )
     return rf.Model.from_yaml(path).schema.requests["/elapsed"]
 
 
 def content(definition, source):
-    return rf.Model.xs(d_model=8, elapsed=definition).encode(source)["/elapsed"].content.item()
+    return rf.Model(preset="small", d_model=8, elapsed=definition).encode(source)["/elapsed"].content.item()
 
 
 @pytest.mark.parametrize("route", ["json", "yaml"])

@@ -1,43 +1,46 @@
-"""Initial immutable configurations for the five model sizes."""
+"""Architecture defaults from the frozen arena HPO recipes.
 
-from relflow.presets.base import BranchDefaults, LeafDefaults, Preset
+SMALL follows small-regularized-capacity (trial 33); MEDIUM follows
+medium-deep-context (trial 8), also used for large tasks. These describe data
+regimes, not an ascending parameter ladder. See provenance.json for the exact
+source configurations and hashes. Training recipes remain application-owned.
+"""
+
+from relflow.presets.base import BranchDefaults, FitDefaults, LeafDefaults, Preset
 from relflow.structs.reduction import Attention
 
-__all__ = ["XS", "SM", "MD", "LG", "XL"]
+__all__ = ["SMALL", "MEDIUM"]
 
 
-XS = Preset(
-    name="xs",
-    d_model=64,
-    root=BranchDefaults(n_layers=1, n_heads=2, reduction=Attention(n_outputs=1)),
-    branch=BranchDefaults(n_layers=1, n_heads=2, reduction=Attention(n_outputs=1)),
-    leaf=LeafDefaults(n_heads=2),
-)
-SM = Preset(
-    name="sm",
+SMALL = Preset(
+    name="small",
     d_model=128,
-    root=BranchDefaults(n_layers=2, n_heads=4, reduction=Attention(n_outputs=2)),
-    branch=BranchDefaults(n_layers=1, n_heads=4, reduction=Attention(n_outputs=2)),
-    leaf=LeafDefaults(n_heads=4),
+    root=BranchDefaults(n_layers=2, n_heads=4, ffnx=2, dropout=0.0, reduction=Attention()),
+    branch=BranchDefaults(n_layers=1, n_heads=4, ffnx=8, dropout=0.0, reduction=Attention(n_outputs=4)),
+    leaf=LeafDefaults(n_heads=4, ffnx=8, n_linear=1, dropout=0.0),
+    fit=FitDefaults(
+        batch_size=64,
+        learning_rate=0.0001504508367492947,
+        weight_decay=0.01,
+        max_epochs=8,
+        ema_decay=0.995,
+        gradient_clip_val=0.25,
+    ),
 )
-MD = Preset(
-    name="md",
-    d_model=256,
-    root=BranchDefaults(n_layers=3, n_heads=8, reduction=Attention(n_outputs=4)),
-    branch=BranchDefaults(n_layers=2, n_heads=8, reduction=Attention(n_outputs=4)),
-    leaf=LeafDefaults(n_heads=8),
-)
-LG = Preset(
-    name="lg",
-    d_model=384,
-    root=BranchDefaults(n_layers=4, n_heads=8, reduction=Attention(n_outputs=8)),
-    branch=BranchDefaults(n_layers=2, n_heads=8, reduction=Attention(n_outputs=4)),
-    leaf=LeafDefaults(n_heads=8),
-)
-XL = Preset(
-    name="xl",
-    d_model=512,
-    root=BranchDefaults(n_layers=6, n_heads=8, reduction=Attention(n_outputs=16)),
-    branch=BranchDefaults(n_layers=3, n_heads=8, reduction=Attention(n_outputs=8)),
-    leaf=LeafDefaults(n_heads=8),
+
+
+MEDIUM = Preset(
+    name="medium",
+    d_model=64,
+    root=BranchDefaults(n_layers=2, n_heads=8, ffnx=4, dropout=0.0, reduction=Attention()),
+    branch=BranchDefaults(n_layers=2, n_heads=4, ffnx=8, dropout=0.0, reduction=Attention(n_outputs=1)),
+    leaf=LeafDefaults(n_heads=4, ffnx=8, n_linear=1, dropout=0.0),
+    fit=FitDefaults(
+        batch_size=512,
+        learning_rate=0.00021681002964478338,
+        weight_decay=0.0,
+        max_epochs=8,
+        ema_decay=0.995,
+        gradient_clip_val=0.25,
+    ),
 )

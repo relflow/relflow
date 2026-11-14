@@ -156,6 +156,7 @@ import polars as pl
 import pyarrow as pa
 import relflow as rf
 import torch
+from relflow.presets.base import resolve
 from reporting import experiment, report
 
 BUDGET = 600
@@ -188,9 +189,21 @@ def build(*, context: bool = True) -> rf.Model:
     fields = {"query": rf.Number, "answer": rf.Number(mask=True, objective="mse")}
     if context:
         fields["examples"] = rf.Branch(length=4, reduction=None, x=rf.Number, y=rf.Number)
-    model = rf.Model.xs(
-        fields=fields,
+    # Freeze the experimental architecture independently of SDK preset changes.
+    control_preset = rf.presets.Preset(
+        name="xs",
+        d_model=64,
+        root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
+        leaf=rf.presets.LeafDefaults(n_heads=2),
     )
+    model = rf.Model(
+        schema=resolve(
+            control_preset,
+            fields=fields,
+        )
+    )
+    model.preset = control_preset
     return model
 
 

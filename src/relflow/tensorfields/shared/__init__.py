@@ -30,14 +30,18 @@ Rules for adding helpers here:
    Helper construction must be cheap and local. Creating a `Model` with a
    tensorfield must not start `multiprocessing.Manager`, shared memory, worker
    processes, network connections, or other process-global resources. Activate
-   multiprocessing only when a train dataloader actually needs worker-shared
-   mutable state, and return to local state when the fit loop ends.
+   multiprocessing for mutable learned state only when a train dataloader needs
+   worker sharing, and return that state to local storage when the fit loop ends.
+   An immutable derived-artifact cache may lazily start its local owner at first
+   access and share that owner with loader workers through the context protocol.
 
 5. Preserve inference and notebook ergonomics.
    Prediction, validation, docs, notebooks, and realtime serving should work
    without multiprocessing. Loaded or freshly constructed models should use
    local, frozen/read-optimized helper state unless a training loop explicitly
-   opts into shared mutable state.
+   opts into shared mutable state. Derived-artifact caches may retain a local
+   owner for safe read-through caching; cache contents are disposable and do not
+   become learned checkpoint state.
 
 6. Keep synchronization extension-owned.
    Batch admission belongs in the extension's `bind` component; loop-level
@@ -58,7 +62,7 @@ Rules for adding helpers here:
 9. Test the boundary, not only the behavior.
    Tests for helpers should assert that model construction does not activate
    multiprocessing, that train worker paths opt in when needed, that predict
-   paths remain local, and that downstream packages do not import concrete
+   paths avoid mutable learned-state sharing, and that downstream packages do not import concrete
    helper-specific functions.
 """
 
