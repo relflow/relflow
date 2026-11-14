@@ -757,3 +757,31 @@ def test_padding_rows_stay_zero_after_the_gap_embedding():
     _, seen = mixed_input([0.0, 1.0, 2.0, 3.0], grain=rf.Steps(), present=present)
     assert not seen[0, 1].any() and not seen[0, 3].any()
     assert seen[0, 0].any() and seen[0, 2].any()
+
+
+def test_contrastive_keeps_the_full_record_for_parent_and_decoders():
+    def build(contrastive):
+        return rf.Model.xs(
+            d_model=8,
+            dropout=0.0,
+            label=rf.Boolean(mask=True),
+            ett=rf.Branch.chronological(
+                length=8, reduction=rf.Mean(), x=rf.Number, y=rf.Number(mask=0.3), contrastive=contrastive
+            ),
+        )
+
+    with_views = build(rf.Contrastive(views=rf.Crops(width=4)))
+    plain = build(None)
+    assert with_views.state_dict().keys() == plain.state_dict().keys()
+    plain.load_state_dict(with_views.state_dict())
+    table = pa.Table.from_pylist([{"label": True, "ett": [{"x": float(i), "y": float(-i)} for i in range(8)]}])
+    left = {
+        p.address: p
+        for p in with_views(with_views.encode(table, strata="train", seed=3), strata=Strata.train)
+        if TensorKey.objective not in p.payload.keys()
+    }
+    right = {p.address: p for p in plain(plain.encode(table, strata="train", seed=3), strata=Strata.train)}
+    assert left.keys() == right.keys()
+    for address in left:
+        for key, value in right[address].payload.items(include_nested=True, leaves_only=True):
+            torch.testing.assert_close(left[address].payload[key], value, rtol=0, atol=0)

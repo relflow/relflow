@@ -1,5 +1,6 @@
 import typing
 
+import pyarrow as pa
 import pytest
 import torch
 
@@ -193,3 +194,10 @@ def test_row_readout_returns_its_memory_without_parameters():
     readout = RowReadout()
     assert readout(memory, present=torch.ones(2, 3, dtype=torch.bool)) is memory
     assert not list(readout.parameters())
+
+
+def test_steps_branch_encodes_a_batch_without_any_rows():
+    model = rf.Model.xs(d_model=8, embed=True, ett=rf.Branch.chronological(length=8, reduction=rf.Mean(), x=rf.Number))
+    ett = pa.list_(pa.struct([("x", pa.float64())]))
+    frame = pa.table({"ett": pa.array([[], None], type=ett)})
+    assert model.predict(frame).height == 2

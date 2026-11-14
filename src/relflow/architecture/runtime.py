@@ -287,6 +287,17 @@ def compute(
             processed[encoded.destination].append(encoded)
             outgoing[encoded.origin] = encoded
 
+            if encoded.objective is not None:
+                predictions.append(
+                    Prediction(
+                        address=encoded.origin,
+                        payload=TensorDict(
+                            {TensorKey.objective: encoded.objective}, batch_size=encoded.objective.shape[0]
+                        ),
+                        batch_size=encoded.objective.shape[0],
+                    )
+                )
+
             if address in plan.embeds:
                 positions, spans, slots = (
                     encoder.arrange(processed[address]) if address in plan.passthrough else (None, None, None)
