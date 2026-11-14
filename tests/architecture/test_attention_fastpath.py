@@ -388,3 +388,57 @@ def test_compiled_full_presence_falls_back_for_new_hooks_and_resumes():
         if handle is not None:
             handle.remove()
         torch._dynamo.reset()
+
+
+def test_mixer_forward_hook_sees_dense_input_with_partial_presence():
+    torch.manual_seed(131)
+    encoder = branch().eval()
+    values = torch.randn(3, 5, 32)
+    present = torch.ones(3, 5, dtype=torch.bool)
+    present[0, 3:] = False
+    observed = []
+    handle = encoder.encoder.register_forward_pre_hook(
+        lambda module, args, kwargs: observed.append(
+            tuple(kwargs["tokens"].shape if "tokens" in kwargs else args[0].shape)
+        ),
+        with_kwargs=True,
+    )
+    try:
+        with torch.no_grad():
+            encoder([parcel(values, present)])
+    finally:
+        handle.remove()
+    assert observed == [(3, 5, 32)]
+
+
+@pytest.mark.integration
+def test_compiled_region_falls_back_for_new_mixer_hook():
+    encoder = branch().eval()
+    executions = []
+
+    def backend(graph, inputs):
+        def execute(*args):
+            executions.append(graph)
+            return graph.forward(*args)
+
+        return execute
+
+    compiler.compile(encoder, encoders=True, pools=False, backend=backend, dynamic=None, options=None)
+    values = torch.randn(3, 5, 32)
+    present = torch.ones(3, 5, dtype=torch.bool)
+    observed = []
+    torch._dynamo.reset()
+    handle = None
+    try:
+        with torch.no_grad():
+            encoder([parcel(values, present)])
+            assert len(executions) == 1
+            handle = encoder.encoder.register_forward_pre_hook(
+                lambda module, args, kwargs: observed.append(None), with_kwargs=True
+            )
+            encoder([parcel(values, present)])
+            assert len(executions) == 1 and len(observed) == 1
+    finally:
+        if handle is not None:
+            handle.remove()
+        torch._dynamo.reset()
