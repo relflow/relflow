@@ -1,10 +1,13 @@
 from typing import ClassVar
+from unittest.mock import patch
 
 import pydantic
 import pytest
 
 import relflow as rf
+from relflow.structs.enums import Component
 from relflow.structs.tree import Address, Leaf, Mask, Node
+from relflow.tensorfields.base import TENSORFIELDS
 
 
 class AddressPayload(pydantic.BaseModel):
@@ -198,3 +201,13 @@ def test_a_request_without_stacked_rejects_a_tuple_query_at_bind():
     leaf = Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "query": ("a", "b")})
     with pytest.raises(ValueError, match="no derive component"):
         leaf.post_bind_validate()
+
+
+def test_request_declaring_stacked_and_derive_is_rejected_naming_the_address():
+    class Both(Leaf):
+        stacked: ClassVar[bool] = True
+
+    leaf = Both.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "query": ("a", "b")})
+    with patch.dict(TENSORFIELDS[leaf.type].components, {Component.derive: object()}):
+        with pytest.raises(ValueError, match=r"both stacked and a derive.*choose one"):
+            leaf.post_bind_validate()

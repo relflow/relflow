@@ -48,7 +48,9 @@ A request that reads several sources as channels of one value sets
 `stacked: ClassVar[bool] = True`. Its values then arrive as
 `fixed_size_list<N>` along a trailing channel axis, with a null element where a
 source is missing. A request without `stacked` and without a derive component
-rejects a tuple `query` at schema validation.
+rejects a tuple `query` at schema validation, and a request that declares both
+`stacked` and `Component.derive` is rejected too: choose one. A stacked field
+may be absent from prediction input when it is a reconstruction target.
 
 Request options inherit [shared leaf behavior](index.qmd#shared-leaf-options).
 Parents supply field names; constructors accept configuration only. Name

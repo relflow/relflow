@@ -318,17 +318,15 @@ class Leaf(Node):
             scope(expression)
         return self
 
-    def check_sources(self, sources: tuple[str, ...]) -> None:
+    def check_sources(self) -> None:
         """Reject an empty or repeated source list for a request that stacks channels.
-
-        Args:
-            sources: The tuple query of this leaf.
 
         Raises:
             ValueError: If no source is named, one source repeats, or one ascends to an ancestor branch.
         """
         from relflow.data.query import scope
 
+        sources = cast(tuple[str, ...], self.query)
         if not sources:
             raise ValueError(f"field '{self.address}' has an empty tuple query; name at least one source")
         repeated = next((text for index, text in enumerate(sources) if text in sources[:index]), None)
@@ -357,8 +355,13 @@ class Leaf(Node):
                 "derive component and its Request does not declare stacked = True; "
                 "register Component.derive, declare stacked, or use one query"
             )
+        if type(self).stacked and Component.derive in TENSORFIELDS[self.type].components:
+            raise ValueError(
+                f"field '{self.address}' extension '{self.type}' declares both stacked and a derive component; "
+                "choose one"
+            )
         if isinstance(self.query, tuple) and type(self).stacked:
-            self.check_sources(self.query)
+            self.check_sources()
         if self.query is None:
             return
         ancestors = sum(node.type == "branch" for node in self.path) - 1
