@@ -20,6 +20,8 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.Transformer().type == "transformer"
     assert relflow.Steps().type == "steps"
     assert relflow.Conv().n_blocks == 6
+    assert relflow.Forecast(horizon=1, targets=("ot",)).type == "forecast"
+    assert relflow.Spans(rate=0.1).type == "spans"
     assert relflow.Direction.bidirectional == "bidirectional"
     assert relflow.ArrowDataModule.__name__ == "ArrowDataModule"
     assert relflow.CustomDataModule.__name__ == "CustomDataModule"

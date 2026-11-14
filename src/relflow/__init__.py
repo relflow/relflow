@@ -69,6 +69,7 @@ from relflow.structs.experiment import (
     where,
 )
 from relflow.structs.grain import Coordinates, Steps
+from relflow.structs.masking import Forecast, Spans
 from relflow.structs.mixer import Conv, Transformer
 from relflow.structs.reduction import Attention, Mean, ReductionConfig
 from relflow.structs.structure import Branch, Mask
@@ -215,6 +216,8 @@ __all__ = [
     "SchedulerOptions",
     "SchemaField",
     "SyntheticDataModule",
+    "Forecast",
+    "Spans",
     "Steps",
     "Strata",
     "StrataInput",
