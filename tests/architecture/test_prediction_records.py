@@ -1,5 +1,6 @@
 """Public predictions preserve records while embeddings retain explicit coordinates."""
 
+import lightning.pytorch
 import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -214,3 +215,54 @@ def test_custom_output_rejects_noncanonical_list_names_at_planning():
             plan(model)
     finally:
         TENSORFIELDS.pop(extension.name, None)
+
+
+@pytest.mark.integration
+def test_forecast_model_trains_and_writes_horizon_rows():
+    lightning.pytorch.seed_everything(7, workers=True)
+    model = rf.Model.xs(
+        d_model=8,
+        batch_size=4,
+        events=rf.Branch(
+            length=4,
+            overflow="tail",
+            direction=rf.Direction.causal,
+            mask=rf.Mask(select=rf.Forecast(horizon=2, targets=("value",)), reconstruct=True),
+            value=rf.Number,
+            load=rf.Number,
+        ),
+    )
+    table = pa.table({"events": [[{"value": float(i + j), "load": float(i)} for i in range(9)] for j in range(8)]})
+    datamodule = rf.ArrowDataModule(
+        model=model, train=table, validate=table, num_workers=0, persistent_workers=False, pin_memory=False
+    )
+    model.fit(datamodule, max_epochs=1, limit_train_batches=1, limit_val_batches=1)
+    events = model.predict(table.slice(0, 2))["predictions"].struct.field("events").to_list()
+    assert [len(record) for record in events] == [6, 6]
+    assert [[row["value"]["inferred"] for row in record] for record in events] == [[False] * 4 + [True] * 2] * 2
+    assert all("load" not in row for record in events for row in record)
+
+
+def test_a_hidden_covariate_in_a_user_future_row_does_not_change_the_prediction():
+    lightning.pytorch.seed_everything(7, workers=True)
+    model = rf.Model.xs(
+        d_model=8,
+        batch_size=4,
+        events=rf.Branch(
+            length=4,
+            overflow="tail",
+            direction=rf.Direction.causal,
+            mask=rf.Mask(select=rf.Forecast(horizon=1, targets=("value",), known=("temperature",)), reconstruct=True),
+            value=rf.Number,
+            load=rf.Number,
+            temperature=rf.Number,
+        ),
+    )
+
+    def forecast(load: float, temperature: float) -> list:
+        past = [{"value": float(i), "load": float(i), "temperature": float(i)} for i in range(4)]
+        future = {"value": None, "load": load, "temperature": temperature}
+        return model.predict(pa.table({"events": [[*past, future]]}))["predictions"].to_list()
+
+    assert forecast(load=1.0, temperature=5.0) == forecast(load=-1e6, temperature=5.0)
+    assert forecast(load=1.0, temperature=5.0) != forecast(load=1.0, temperature=-1e6)
