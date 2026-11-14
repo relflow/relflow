@@ -7,10 +7,13 @@ import pytest
 import torch
 
 import relflow as rf
+from relflow.architecture.compiler import compile as compile_regions
+from relflow.architecture.convolution import ConvMixer
 from relflow.architecture.encoder import BranchEncoder
 from relflow.architecture.mutations import MutationLockCallback
 from relflow.architecture.packed import pack
 from relflow.architecture.pool import LearnedQueryCrossAttention
+from relflow.structs.enums import Direction
 
 
 @pytest.fixture
@@ -404,3 +407,11 @@ def test_descendant_hooks_added_after_warmup_run_eager_then_compilation_resumes(
         if handle is not None:
             handle.remove()
         torch._dynamo.reset()
+
+
+def test_compile_skips_branch_encoders_without_a_transformer_stack():
+    schema = rf.Schema.from_tree(d_model=16, n_layers=1, n_heads=4, value=rf.Number)
+    encoder = BranchEncoder(schema=schema, address="/")
+    encoder.encoder = ConvMixer(width=16, n_blocks=1, direction=Direction.bidirectional)
+    compile_regions(encoder, encoders=True, pools=False, backend="eager", dynamic=None, options=None)
+    assert "compute" not in encoder.__dict__
