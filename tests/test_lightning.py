@@ -196,3 +196,55 @@ def test_native_tuner_can_prepare_a_separate_training_run(tmp_path, bound):
     trainer.fit(configured, datamodule=datamodule)
     assert trainer.global_step == 1
     assert rf.Number.normalization(configured, "/amount")["count"] == 4
+
+
+@pytest.mark.integration
+def test_external_trainer_trains_validates_and_predicts_deterministically(tmp_path):
+    lit.seed_everything(0, workers=True)
+    configured = rf.Model.xs(
+        d_model=8,
+        label=rf.Category(mask=True),
+        ett=rf.Branch.chronological(
+            length=4,
+            direction=rf.Direction.bidirectional,
+            reduction=rf.Mean(),
+            x=rf.Number,
+            load=rf.Vector(n_dim=2),
+        ),
+    )
+    configured.optimizer = rf.adamw(learning_rate=1e-3, fused=None)
+    loads = ([1.0, float("nan")], [0.5, 0.25], [0.0, 1.0], [float("nan"), 2.0])
+    records = [
+        {"label": "a" if i % 2 else "b", "ett": [{"x": float(i + j), "load": loads[j]} for j in range(4)]}
+        for i in range(8)
+    ]
+    row = pa.struct([("x", pa.float64()), ("load", pa.list_(pa.float64(), 2))])  # dense fixed_size_list<2>
+    sample = pa.Table.from_pylist(records, schema=pa.schema([("label", pa.string()), ("ett", pa.list_(row))]))
+    datamodule = rf.ArrowDataModule(
+        train=sample,
+        validate=sample,
+        predict=sample,
+        shuffle=False,
+        num_workers=0,
+        persistent_workers=False,
+        pin_memory=False,
+    )
+    trainer = lit.Trainer(
+        accelerator="cpu",
+        devices=1,
+        precision="32-true",
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        num_sanity_val_steps=0,
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        default_root_dir=tmp_path,
+    )
+    trainer.fit(configured, datamodule=datamodule)
+    assert trainer.global_step == 1
+    assert "loss/validate" in trainer.validate(configured, datamodule=datamodule)[0]
+    first, second = (pa.concat_tables(trainer.predict(configured, datamodule=datamodule)) for _ in range(2))
+    assert first.equals(second)
