@@ -7,7 +7,8 @@ engine: markdown
 A time series is a [Branch](../datatypes/branch.qmd) whose rows have an order.
 `rf.Branch.chronological(...)` builds a plain `Branch` with settings that suit
 that order. Every setting also works on a plain `Branch`, and a saved model
-stores the result as an ordinary `Branch`.
+stores the result as an ordinary `Branch`. Each input record supplies a list of
+struct rows, oldest first; relflow does not sort, resample, or join those rows.
 
 ```python
 import relflow as rf
@@ -31,8 +32,9 @@ model = rf.Model.xs(
 | `direction` | `rf.Direction.bidirectional` | `rf.Direction.causal` |
 | `time_index`, `time_step`, `contrastive` | `None` | `None` |
 
-Each explicit argument replaces its default. The sections below explain what
-each option does.
+With `length=None`, either constructor keeps all rows and sets `overflow=None`;
+bound untrusted input separately. An explicit argument replaces its default.
+`length` caps rows, not model parameters or the length of every input record.
 
 ## Declare channels
 
@@ -40,14 +42,19 @@ Declare one `Number` per channel, or read all channels of a row as one
 `Vector`:
 
 ```python
-per_channel = rf.Branch.chronological(length=336, HUFL=rf.Number, HULL=rf.Number, OT=rf.Number)
-per_row = rf.Branch.chronological(length=336, load=rf.Vector(query=("HUFL", "HULL", "OT")))
+per_channel = rf.Branch.chronological(
+    length=336, HUFL=rf.Number, HULL=rf.Number, OT=rf.Number
+)
+per_row = rf.Branch.chronological(
+    length=336, load=rf.Vector(query=("HUFL", "HULL")), OT=rf.Number
+)
 ```
 
 Separate `Number` fields keep a normalizer, a decoder, and a mask for each
 channel, so a channel can be a target or a hidden input on its own. A `Vector`
 is one field with one shared width: it suits channels that always travel
-together, and a null in one source only marks that channel missing. See
+together, and a null in one source only marks that channel missing. In both
+examples, `OT` remains a separate leaf that can be forecast. See
 [Vector](../datatypes/vector.qmd#channels-from-several-sources).
 
 A branch reads each row as a struct. Dense `list<fixed_size_list<C>>` data has
@@ -87,15 +94,18 @@ ett = rf.Branch.chronological(
 )
 ```
 
-- `time_index` names a direct leaf child. It stays an ordinary field, so a
-  `Period` or a `Number` still embeds the same value.
+- `time_index` names a direct leaf child. Its raw Arrow values set positions;
+  its ordinary `Period` or `Number` embedding remains a separate input.
 - `time_step` is the unit of the positions: a `timedelta` for temporal columns,
-  a number for numeric ones. It sets positions only and does not resample.
-- Positions are relative to the first row of each record, may be real numbers,
-  and must not decrease. Sorting belongs in a
+  a number for numeric ones. Numeric times can omit it, using a unit of 1.
+  Neither setting changes the input values or resamples rows.
+- A row's position is its time minus the first row's time, divided by
+  `time_step`. Positions may be fractional or equal, but must not decrease.
+  Every present row needs a non-null, finite time. Sorting belongs in a
   [preprocessor](../guides/preprocessing.qmd).
-- A temporal `time_index` without `time_step` raises when the first batch is
-  encoded, because the schema does not see the column type.
+- Arrow timestamp, date, and duration columns need a `timedelta` time step;
+  a temporal `time_index` without one raises when a batch is encoded. A
+  `Period` can encode calendar cycles, but does not supply elapsed spacing.
 
 With `time_index`, each row token also receives a learned embedding of the time
 since the previous row, in `time_step` units, before any mixer; the first row
@@ -128,7 +138,7 @@ def gunpoint(path: str) -> pl.DataFrame:
     wide = pl.read_csv(path, separator="\t", has_header=False)
     steps = wide.columns[1:]
     return wide.select(
-        pl.col("column_1").cast(pl.String).alias("label"),
+        pl.col("column_0").cast(pl.String).alias("label"),
         pl.concat_list(
             *(pl.struct(pl.col(name).alias("value")) for name in steps)
         ).alias("signal"),
@@ -205,74 +215,108 @@ last_day = rf.Mask(select=rf.Forecast(horizon=24, targets=("OT",)), reconstruct=
 - `select` on a leaf raises; set it on a branch.
 - `Spans` hides about `rate` of the rows in runs of `length`, every child of a
   hidden row included, nested collections too. It applies in training only.
-  With `reconstruct=True` the hidden values become targets, which makes
-  masked-row pretraining.
+  `length=1` selects independent rows. With `reconstruct=True` its
+  reconstructable leaves become targets, which makes masked-row pretraining.
 - A branch holds at most one `Forecast`.
 
 See [Masking and reconstruction](masking-and-reconstruction.qmd).
 
 ## Forecast
 
-Past target values stay visible, so `OT` is an ordinary input child. Never write
-`OT=rf.Number(mask=True)` here: `mask=True` means `skip=True`, so `OT` would
-never be embedded.
+This example forecasts `OT` hourly and uses `promotion` as a schedule known
+before the forecast cutoff. Past target values stay visible, so `OT` is an
+ordinary input child. Never write `OT=rf.Number(mask=True)` here: `mask=True`
+means `skip=True`, so `OT` would never be embedded.
 
 ```python
-ett = rf.Branch.chronological(
-    length=336,
-    time_index="date",
-    time_step=datetime.timedelta(hours=1),
-    mask=rf.Mask(select=rf.Forecast(horizon=24, targets=("OT",)), reconstruct=True),
-    date=rf.Period("hour_of_day", "day_of_week"),
-    HUFL=rf.Number,
-    OT=rf.Number,
+from datetime import timedelta
+import relflow as rf
+
+model = rf.Model.xs(
+    ett=rf.Branch.chronological(
+        length=336,
+        time_index="date",
+        time_step=timedelta(hours=1),
+        mask=rf.Mask(
+            select=rf.Forecast(horizon=24, targets=("OT",), known=("promotion",)),
+            reconstruct=True,
+        ),
+        date=rf.Period("hour_of_day", "day_of_week"),
+        promotion=rf.Boolean,
+        HUFL=rf.Number,
+        OT=rf.Number,
+    ),
 )
 ```
 
 - `Forecast(horizon=k, targets=(...), known=(...))` hides every child except the
   `time_index` child and the `known` children in the last `k` rows, nested
-  branches included. Only the hidden `targets` become reconstruction targets;
-  other hidden children are inputs only.
+  branches included. Only `targets` become reconstruction targets; other
+  hidden children have no loss term.
 - `targets` and `known` name direct leaf children, never the `time_index` child,
   and must not overlap. Use `known` for covariates available in advance, such
   as calendar fields or planned prices.
 - The mask needs `reconstruct=True` and rejects `skip=True`. `Forecast` needs
   `direction=rf.Direction.causal`, and the `time_index` child must read a single
   member.
-- `length` is the context. Training, validation, and test read `length +
-  horizon` rows; prediction reads `length` rows.
+- `length` is the context cap. Training, validation, and test retain up to
+  `length + horizon` rows, then hide the last `horizon`; prediction retains up
+  to `length` observed rows before its future rows. Supply enough training
+  history to give the model the intended context.
 
 At prediction a future row is a trailing row in which every target child is
-null.
+null. For the model above, an application can supply records like this; the
+timestamps should be Arrow temporal values in the processed data:
+
+```yaml
+ett:
+  - date: "2026-05-28T10:00:00Z"
+    promotion: false
+    HUFL: 4.2
+    OT: 7.0
+  - date: "2026-05-28T11:00:00Z"
+    promotion: true
+    OT: null
+  - date: "2026-05-28T12:00:00Z"
+    promotion: false
+    OT: null
+```
+
+The first row is observed history; the final two are requested future hours.
+Their promotion values remain visible; `HUFL` is hidden whether supplied or
+omitted. A historical training record instead supplies the observed `OT` for
+the final `horizon` rows so the mask can learn to reconstruct it.
 
 - A record with any future row gets no automatic rows. More than `horizon`
   future rows raise.
 - Otherwise `k` rows are appended and fill only the `time_index` child. This
-  matches training only when `known` is empty, so a branch with `known`
-  covariates raises with the `known` names unless you supply future rows.
+  matches training only when `known` is empty. With `known` set, provide
+  future rows or prediction raises; there are no scheduled values to invent.
 - Non-known children in future rows are hidden whatever they hold.
 
-Supply future rows with the known values and null targets in a preprocessor:
+If an application provides `scheduled_rows` as a list of future row structs
+with dates, promotion flags, and null `OT` values, append them before encoding:
 
 ```python
+import polars as pl
+import relflow as rf
+
+
 @rf.preprocess
-def extend(frame: pl.DataFrame) -> pl.DataFrame:
-    future = pl.datetime_ranges(
-        pl.col("last_date") + pl.duration(hours=1),
-        pl.col("last_date") + pl.duration(hours=24),
-        interval="1h",
-    )
-    return frame.with_columns(
-        ett=pl.concat_list(
-            pl.col("ett"),
-            future.list.eval(pl.struct(date=pl.element(), OT=pl.lit(None, dtype=pl.Float64))),
-        )
-    )
+def append_future(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(ett=pl.concat_list("ett", "scheduled_rows")).drop("scheduled_rows")
+
+
+requests = pl.read_parquet("data/forecast-requests.parquet")
+predictions = model.predict(requests, preprocess=append_future)
 ```
 
-Here `frame` has a `last_date` column holding the final observed time of each record. A missing `known` column at prediction raises `MissingFieldError`. Predicted
-rows appear as ordinary rows of the branch list in the output, and each carries
-`inferred` in its leaf result.
+Keep each `scheduled_rows` list in timestamp order, at most `horizon` rows
+long. Give its structs the same child fields and compatible types as `ett`;
+set unknown inputs and targets to null. The application supplies the Parquet
+file and its schedule. A missing `known` column raises `MissingFieldError`; a
+null known value in a future row raises a value error. Predicted rows appear as
+ordinary rows of the branch list, with `inferred: true` on the `OT` result.
 
 ## Representations
 
