@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import typing
 
 import numpy as np
 import pyarrow as pa
@@ -8,8 +9,10 @@ import pytest
 
 import relflow as rf
 from relflow.data.datasets.arrow import convert
-from relflow.data.ragged import coalesce, referenced
+from relflow.data.ragged import Coalesced, coalesce, referenced
 from relflow.structs.enums import Strata, Tokens
+from relflow.structs.experiment import Schema
+from relflow.structs.masking import SelectorConfig
 from relflow.structs.tree import Address
 from tests.arrow import table
 
@@ -571,3 +574,162 @@ def test_selector_table_starts_with_the_coordinate_policy():
 
     assert isinstance(selectors[type(None)], CoordinateSelector)
     assert isinstance(selectors[type(None)], Selector)
+
+
+ITEM = pa.struct([("value", pa.float64()), ("load", pa.float64()), ("temperature", pa.float64())])
+
+
+def forecast_schema(
+    *, length: int = 8, horizon: int = 2, overflow: str = "tail", known: tuple[str, ...] = ("temperature",)
+) -> Schema:
+    forecast = rf.Forecast(horizon=horizon, targets=("value",), known=known)
+    branch = rf.Branch(
+        length=length,
+        overflow=overflow,
+        direction=rf.Direction.causal,
+        mask=rf.Mask(select=forecast, reconstruct=True),
+        value=rf.Number,
+        load=rf.Number,
+        temperature=rf.Number,
+    )
+    return Schema.from_tree(d_model=8, n_layers=1, n_heads=2, events=branch)
+
+
+def rows(count: int) -> list[dict[str, float]]:
+    return [{"value": float(i), "load": float(10 + i), "temperature": float(20 + i)} for i in range(count)]
+
+
+def inputs(resolved: Coalesced, address: str) -> np.ndarray:
+    projection = resolved.fields[address]
+    field, _ = projection.split(projection.pristine.values)
+    return field.dense.squeeze(axis=1)  # drop the singleton root axis
+
+
+def test_selector_table_covers_every_selector_setting():
+    from relflow.data.ragged import selectors
+
+    assert set(selectors) == {type(None), *typing.get_args(typing.get_args(SelectorConfig)[0])}
+
+
+@pytest.mark.parametrize("strata", [rf.Strata.train, rf.Strata.validate, rf.Strata.test])
+def test_forecast_hides_the_last_horizon_targets_of_short_empty_and_null_records(strata):
+    events = pa.array([rows(8), rows(1), [], None], type=pa.list_(ITEM))
+    resolved = coalesce(pa.table({"events": events}), forecast_schema(), strata, seed=3)
+    assert inputs(resolved, "/events/value").tolist() == [[0] * 6 + [3, 3], [3] + [2] * 7, [2] * 8, [2] * 8]
+    assert resolved.fields["/events/value"].trainable.reshape(4, 8).tolist() == [
+        [False] * 6 + [True] * 2,
+        [True] + [False] * 7,
+        [False] * 8,
+        [False] * 8,
+    ]
+
+
+@pytest.mark.parametrize("strata", [rf.Strata.train, rf.Strata.validate])
+def test_forecast_hides_unknown_covariates_and_keeps_known_ones_visible(strata):
+    source = pa.table({"events": pa.array([rows(8)], type=pa.list_(ITEM))})
+    resolved = coalesce(source, forecast_schema(), strata, seed=3)
+    assert inputs(resolved, "/events/load").tolist() == [[0] * 6 + [3, 3]]
+    assert inputs(resolved, "/events/temperature").tolist() == [[0] * 8]
+    assert resolved.fields["/events/temperature"].visible.reshape(1, 8).all()
+
+
+def test_hidden_covariates_carry_no_loss():
+    source = pa.table({"events": pa.array([rows(8)], type=pa.list_(ITEM))})
+    resolved = coalesce(source, forecast_schema(), rf.Strata.train, seed=3)
+    assert not resolved.fields["/events/load"].trainable.any()
+    assert not resolved.fields["/events/temperature"].trainable.any()
+    assert forecast_schema().objectives == ["/events/value"]
+
+
+def test_a_hidden_covariate_value_never_reaches_the_inputs():
+    def hidden_inputs(last_load: float) -> list:
+        records = rows(8)
+        records[-1] = {**records[-1], "load": last_load}
+        source = pa.table({"events": pa.array([records], type=pa.list_(ITEM))})
+        resolved = coalesce(source, forecast_schema(), rf.Strata.train, seed=3)
+        projection = resolved.fields["/events/load"]
+        field, _ = projection.split(projection.pristine.values)
+        return [field.values.to_pylist(), field.dense.tolist()]
+
+    assert hidden_inputs(17.0) == hidden_inputs(-1e6)
+
+
+def test_forecast_hides_nested_collections_of_hidden_rows():
+    branch = rf.Branch(
+        length=2,
+        direction=rf.Direction.causal,
+        mask=rf.Mask(select=rf.Forecast(horizon=1, targets=("value",)), reconstruct=True),
+        value=rf.Number,
+        tags=rf.Branch(length=2, name=rf.Category),
+    )
+    schema = Schema.from_tree(d_model=8, n_layers=1, n_heads=2, events=branch)
+    source = pa.table(
+        {
+            "events": [
+                [
+                    {"value": 1.0, "tags": [{"name": "a"}]},
+                    {"value": 2.0, "tags": [{"name": "b"}, {"name": "c"}]},
+                ]
+            ]
+        }
+    )
+    resolved = coalesce(source, schema, rf.Strata.train, seed=1)
+    assert inputs(resolved, "/events/value").tolist() == [[0, 3]]
+    assert inputs(resolved, "/events/tags/name")[0, 1].tolist() == [3, 3]
+    assert inputs(resolved, "/events/tags/name")[0, 0].tolist() == [0, 2]
+    assert not resolved.fields["/events/tags/name"].trainable.any()
+
+
+def test_spans_hide_every_child_of_a_hidden_row_including_nested_collections():
+    branch = rf.Branch(
+        length=50,
+        mask=rf.Mask(select=rf.Spans(rate=0.3, length=1), reconstruct=True),
+        value=rf.Number,
+        load=rf.Number,
+        tags=rf.Branch(length=1, name=rf.Category),
+    )
+    schema = Schema.from_tree(d_model=8, n_layers=1, n_heads=2, events=branch)
+    source = pa.table(
+        {"events": [[{"value": float(i), "load": 1.0, "tags": [{"name": "a"}]} for i in range(50)] for _ in range(20)]}
+    )
+    resolved = coalesce(source, schema, rf.Strata.train, seed=5)
+    hidden = inputs(resolved, "/events/value") == Tokens.masked
+    assert hidden.any()
+    assert np.array_equal(inputs(resolved, "/events/load") == Tokens.masked, hidden)
+    assert np.array_equal((inputs(resolved, "/events/tags/name") == Tokens.masked)[..., 0], hidden)
+    assert set(schema.objectives) == {"/events/value", "/events/load", "/events/tags/name"}
+
+
+def span_hidden(rate: float, length: int, *, strata=rf.Strata.train, seed=5, epoch=0, ordinal=0) -> np.ndarray:
+    branch = rf.Branch(
+        length=50, mask=rf.Mask(select=rf.Spans(rate=rate, length=length), reconstruct=True), value=rf.Number
+    )
+    schema = Schema.from_tree(d_model=8, n_layers=1, n_heads=2, events=branch)
+    source = pa.table({"events": [[{"value": float(i)} for i in range(50)] for _ in range(200)]})
+    resolved = coalesce(source, schema, strata, seed=seed, epoch=epoch, ordinal=ordinal)
+    return inputs(resolved, "/events/value") == rf.Tokens.masked
+
+
+def test_spans_hide_about_rate_of_rows_in_runs_near_length():
+    hidden = span_hidden(0.15, 5)
+    assert 0.13 < hidden.mean() < 0.17
+    edges = np.diff(np.pad(hidden.astype(np.int8), ((0, 0), (1, 1))), axis=1)
+    mean_run = hidden.sum() / (edges == 1).sum()
+    assert 4.5 < mean_run < 6.5
+
+
+def test_spans_of_length_one_hide_independent_rows():
+    hidden = span_hidden(0.3, 1)
+    assert abs(hidden.mean() - 0.3) < 0.02
+    assert abs((hidden[:, 1:] & hidden[:, :-1]).mean() - 0.09) < 0.02
+
+
+def test_spans_replay_for_a_seed_and_vary_by_epoch_and_ordinal():
+    assert np.array_equal(span_hidden(0.15, 5), span_hidden(0.15, 5))
+    assert not np.array_equal(span_hidden(0.15, 5), span_hidden(0.15, 5, epoch=1))
+    assert not np.array_equal(span_hidden(0.15, 5), span_hidden(0.15, 5, ordinal=1))
+
+
+@pytest.mark.parametrize("strata", [rf.Strata.validate, rf.Strata.test, rf.Strata.predict])
+def test_spans_are_training_only(strata):
+    assert not span_hidden(0.15, 5, strata=strata).any()
