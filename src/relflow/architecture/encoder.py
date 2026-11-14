@@ -267,17 +267,18 @@ class BranchEncoder(torch.nn.Module):
             case _:
                 raise ValueError(f"unsupported branch reduction: {branch.reduction}")
 
-    def forward(
-        self,
-        parcels: list[Parcel],
-        *,
-        geometry: TensorDict | None = None,
-        context: list[Parcel] | None = None,
-        sequenced: bool = False,
-    ) -> Parcel:
-        """Encode one branch; ``sequenced`` also routes its encoded sequence to the decoders beneath it."""
-        from relflow.architecture.compiler import canonical
+    def admit(self, parcels: list[Parcel]) -> list[Parcel]:
+        """Check that every parcel comes from a child and order them by field order.
 
+        Args:
+            parcels: Child parcels addressed to this branch.
+
+        Returns:
+            The parcels sorted by the declaration order of their origins.
+
+        Raises:
+            ValueError: If no parcel is given or one comes from a non-child address.
+        """
         if not parcels:
             raise ValueError(f"branch encoder '{self.origin}' requires at least one child parcel")
 
@@ -285,7 +286,21 @@ class BranchEncoder(torch.nn.Module):
         if unknown:
             origins = ", ".join(repr(str(origin)) for origin in unknown)
             raise ValueError(f"branch encoder '{self.origin}' received parcel(s) from non-child address(es): {origins}")
-        parcels = sorted(parcels, key=lambda parcel: self.child_order[parcel.origin])
+        return sorted(parcels, key=lambda parcel: self.child_order[parcel.origin])
+
+    def inform(
+        self, parcels: list[Parcel], *, context: list[Parcel] | None
+    ) -> tuple[list[Parcel], torch.Tensor | None]:
+        """Add the projected parent record to every token of every parcel.
+
+        Args:
+            parcels: Ordered child parcels.
+            context: Parcels of the parent fields, or ``None`` for no conditioning.
+
+        Returns:
+            The conditioned parcels and the ``(rows, d_model)`` projection, or the
+            unchanged parcels and ``None`` when nothing conditions this branch.
+        """
         conditioned: torch.Tensor | None = None
         if self.conditioning is not None and context:
             # The parent's record reaches every token before its fields are mixed,
@@ -307,6 +322,97 @@ class BranchEncoder(torch.nn.Module):
                 )
                 for parcel in parcels
             ]
+        return parcels, conditioned
+
+    def mix(self, selected: torch.Tensor, *, present: torch.Tensor, positions: torch.Tensor | None) -> torch.Tensor:
+        """Run the sequence layers over the rows that hold at least one token.
+
+        Args:
+            selected: Tokens of shape ``(rows, L, d_model)`` with padding zeroed.
+            present: Boolean token presence of shape ``(rows, L)``.
+            positions: Structural positions of shape ``(rows, L)``, or ``None`` when not positioned.
+
+        Returns:
+            Mixed tokens of shape ``(rows, L, d_model)``.
+        """
+        from relflow.architecture.compiler import canonical
+
+        prepared = bool(self.encoder) and not customized(self.encoder)
+        full = prepared and bool(present.all())
+        if prepared and not full:
+            values, packing = pack(selected, present, positions)
+            values = self.compute(values, present, packing=packing)
+            selected = unpack(
+                values,
+                packing,
+                selected,
+                present,
+                cast(Iterable[RotaryTransformerEncoderLayer], self.encoder),
+            )
+        else:
+            # FlashAttention uses a CUDA grid dimension for sequence batches.
+            unmasked = (
+                full
+                and selected.is_cuda
+                and selected.shape[0] <= SDPA_BATCH_MAX
+                and type(self) is BranchEncoder
+                and canonical(self, self.compute)
+            )
+            if positions is not None:
+                selected = self.compute(selected, None if unmasked else present, positions=positions)
+            else:
+                selected = self.compute(selected, None if unmasked else present)
+        return selected
+
+    def reduce(
+        self,
+        selected: torch.Tensor,
+        *,
+        present: torch.Tensor,
+        evidence: torch.Tensor,
+        context: torch.Tensor | None,
+        positions: torch.Tensor | None,
+        width: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Reduce mixed tokens to this branch summary, or keep the sequence without a reduction.
+
+        Args:
+            selected: Mixed tokens of shape ``(rows, L, d_model)``.
+            present: Boolean token presence of shape ``(rows, L)``.
+            evidence: Tokens before mixing, with padding zeroed, used for presence mass.
+            context: Parent projection of shape ``(rows, d_model)``, or ``None``.
+            positions: Structural positions of shape ``(rows, L)``, or ``None``.
+            width: Number of output tokens per row.
+
+        Returns:
+            The output tokens and their boolean presence.
+        """
+        if self.pool is None:
+            return selected, present
+        if isinstance(self.pool, LearnedQueryCrossAttention):
+            output = self.pool(
+                selected,
+                present=present,
+                context=None if context is None else context.unsqueeze(1).expand(-1, width, -1),
+                evidence=evidence,
+                memory_positions=positions,
+            )
+        else:
+            output = self.pool(selected, present=present)
+        return output, torch.ones((selected.shape[0], width), dtype=torch.bool, device=present.device)
+
+    def forward(
+        self,
+        parcels: list[Parcel],
+        *,
+        geometry: TensorDict | None = None,
+        context: list[Parcel] | None = None,
+        sequenced: bool = False,
+    ) -> Parcel:
+        """Encode one branch; ``sequenced`` also routes its encoded sequence to the decoders beneath it."""
+
+        parcels = self.admit(parcels)
+        parcels, conditioned = self.inform(parcels, context=context)
         parcels = self.contextualize(parcels)
         positions, spans, slots = sequence(parcels)
         positioned = any(parcel.positions is not None for parcel in parcels)
@@ -349,57 +455,17 @@ class BranchEncoder(torch.nn.Module):
                 None if conditioned is None else conditioned if complete else conditioned.index_select(0, indices)
             )
 
-            prepared = bool(self.encoder) and not customized(self.encoder)
-            full = prepared and bool(selected_present.all())
-            if prepared and not full:
-                values, packing = pack(selected, selected_present, selected_positions if positioned else None)
-                values = self.compute(values, selected_present, packing=packing)
-                selected = unpack(
-                    values,
-                    packing,
-                    selected,
-                    selected_present,
-                    cast(Iterable[RotaryTransformerEncoderLayer], self.encoder),
-                )
-            else:
-                # FlashAttention uses a CUDA grid dimension for sequence batches.
-                unmasked = (
-                    full
-                    and selected.is_cuda
-                    and selected.shape[0] <= SDPA_BATCH_MAX
-                    and type(self) is BranchEncoder
-                    and canonical(self, self.compute)
-                )
-                if positioned:
-                    selected = self.compute(
-                        selected, None if unmasked else selected_present, positions=selected_positions
-                    )
-                else:
-                    selected = self.compute(selected, None if unmasked else selected_present)
-
-            match self.reduction:
-                case None:
-                    selected_output = selected
-                    selected_output_present = selected_present
-                case _:
-                    assert self.pool is not None
-                    if isinstance(self.pool, LearnedQueryCrossAttention):
-                        selected_output = self.pool(
-                            selected,
-                            present=selected_present,
-                            context=None
-                            if selected_context is None
-                            else selected_context.unsqueeze(1).expand(-1, output_width, -1),
-                            evidence=evidence,
-                            memory_positions=selected_positions if positioned else None,
-                        )
-                    else:
-                        selected_output = self.pool(selected, present=selected_present)
-                    selected_output_present = torch.ones(
-                        (indices.numel(), output_width),
-                        dtype=torch.bool,
-                        device=present.device,
-                    )
+            selected = self.mix(
+                selected, present=selected_present, positions=selected_positions if positioned else None
+            )
+            selected_output, selected_output_present = self.reduce(
+                selected,
+                present=selected_present,
+                evidence=evidence,
+                context=selected_context,
+                positions=selected_positions if positioned else None,
+                width=output_width,
+            )
 
             complete = complete and (
                 selected_output.shape == shape
