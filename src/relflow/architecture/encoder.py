@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 def locate(parcel: Parcel, *, schema: Schema, geometry: TensorDict | None) -> Parcel:
     """Attach structural leaf coordinates independently of values and masking."""
     branch = cast("Branch", schema.requests[parcel.origin].parent)
-    capacity = branch.length
+    capacity = branch.capacity
     width = parcel.payload.shape[-2]
     shape = tuple(parcel.payload.shape[:-2])
     layout = cast("Geometry", geometry[branch.address]) if geometry is not None else None
@@ -210,7 +210,7 @@ class BranchEncoder(torch.nn.Module):
             for child in branch.fields
         ]
         child_width = row_width(branch.grain, widths)
-        self.input_width = None if branch.length is None or child_width is None else branch.length * child_width
+        self.input_width = None if branch.capacity is None or child_width is None else branch.capacity * child_width
         # Skipped targets occupy slots but never carry a present token, so the
         # count lanes normalize by embedded leaves only; adding a hidden target
         # then leaves every existing prediction in place.
@@ -219,8 +219,10 @@ class BranchEncoder(torch.nn.Module):
             for child in branch.fields
         ]
         visible_width = row_width(branch.grain, visible)
-        self.visible_width = None if branch.length is None or visible_width is None else branch.length * visible_width
-        self.parent_capacity = getattr(branch.parent, "length", 1)
+        self.visible_width = (
+            None if branch.capacity is None or visible_width is None else branch.capacity * visible_width
+        )
+        self.parent_capacity = getattr(branch.parent, "capacity", 1)
         self.child_order = {child.address: index for index, child in enumerate(branch.fields)}
         # A child branch reads its parent's own fields before encoding: one
         # projection of their mean reaches every token and every reduction

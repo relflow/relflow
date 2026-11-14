@@ -477,7 +477,7 @@ class Leaf(Node):
 
         for node in self.path:
             if node.type == "branch":
-                out.append(cast("Branch", node).length)
+                out.append(cast("Branch", node).capacity)
 
         return tuple(out)
 

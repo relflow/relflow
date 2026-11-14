@@ -6,6 +6,7 @@ import torch
 from tensordict import TensorDict
 
 import relflow as rf
+from relflow.architecture import runtime
 from relflow.architecture.contracts import (
     CONTRACT_SCOPES,
     ContractScheduler,
@@ -355,3 +356,21 @@ def test_contract_scope_cache_is_bounded_for_new_dataloaders() -> None:
         assert scheduler.should_check(model, inputs, strata=Strata.train, dataloader_idx=index)
 
     assert len(scheduler._counts) == CONTRACT_SCOPES
+
+
+def test_forward_accepts_forecast_extent_up_to_capacity():
+    model = rf.Model.xs(
+        d_model=8,
+        batch_size=4,
+        events=rf.Branch(
+            length=3,
+            direction=rf.Direction.causal,
+            mask=rf.Mask(select=rf.Forecast(horizon=2, targets=("value",)), reconstruct=True),
+            value=rf.Number,
+            load=rf.Number,
+        ),
+    )
+    table = pa.table({"events": [[{"value": float(i), "load": 1.0} for i in range(8)]]})
+    batch = model.encode(table, strata="train")
+    output = runtime.step(model, batch, 0, strata=rf.Strata.train)
+    assert output is not None and torch.isfinite(output["loss"])

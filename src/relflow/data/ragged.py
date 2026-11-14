@@ -458,6 +458,7 @@ def descend(
     source = compact(selected.values)
     chunks = source.chunks if isinstance(source, pa.ChunkedArray) else [source]
     retained: list[tuple[np.ndarray, pa.Array, np.ndarray, np.ndarray]] = []
+    cap = branch.capacity
     randomized = branch.overflow == Overflow.random and strata == Strata.train
     ranges = np.zeros(parent_size, dtype=np.int64) if randomized else None
     tail = branch.overflow == Overflow.tail or (branch.overflow == Overflow.random and not randomized)
@@ -472,15 +473,11 @@ def descend(
         collection_present[parent_placement] = available
         available = available & valid_list
         collection_valid[parent_placement] = available
-        if (
-            branch.length is not None
-            and branch.overflow == Overflow.error
-            and np.any(available & (lengths > branch.length))
-        ):
+        if cap is not None and branch.overflow == Overflow.error and np.any(available & (lengths > cap)):
             axis = len(layout.shape)
-            raise ValueError(f"branch overflow at dimension {axis} for {address}: capacity is {branch.length}")
+            raise ValueError(f"branch overflow at dimension {axis} for {address}: capacity is {cap}")
 
-        counts = np.where(available, lengths if branch.length is None else np.minimum(lengths, branch.length), 0)
+        counts = np.where(available, lengths if cap is None else np.minimum(lengths, cap), 0)
         retained_lengths[parent_placement] = counts
         starts = list_offsets[:-1] + (lengths - counts if tail else 0)
         if ranges is not None:

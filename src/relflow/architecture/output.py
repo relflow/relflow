@@ -21,6 +21,7 @@ from relflow.tensorfields.output import STATE, embedding, inferred, state, struc
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
+    from relflow.structs.structure import Branch
 
 __all__ = ["Layout", "OutputEntry", "OutputPlan", "Projection", "metadata", "plan", "projection", "write"]
 
@@ -302,7 +303,9 @@ def axes(module: Model, address: Address) -> tuple[int | None, ...]:
         return tuple(module.schema.requests[address].shape[1:])
     if address in module.schema.branches:
         lengths = tuple(
-            node.length for node in module.schema.branches[address].path if getattr(node, "type", None) == "branch"
+            cast("Branch", node).capacity
+            for node in module.schema.branches[address].path
+            if getattr(node, "type", None) == "branch"
         )
         structural = lengths[1:-1]
         outputs = module.schema.branch_outputs[address]
