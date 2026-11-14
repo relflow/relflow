@@ -5,6 +5,8 @@ import torch
 import torch.nn.functional as F
 
 from relflow.architecture.attention import RotaryMultiheadAttention
+from relflow.architecture.direction import rules
+from relflow.structs.enums import Direction
 
 
 def test_rotary_attention_rejects_kv_heads_that_do_not_divide_query_heads():
@@ -170,3 +172,36 @@ def test_normalized_heads_keep_projection_dtype_under_bfloat16_autocast():
     assert all(
         parameter.grad is not None and torch.isfinite(parameter.grad).all() for parameter in attention.parameters()
     )
+
+
+def test_dense_causal_attention_ignores_future_steps():
+    torch.manual_seed(0)
+    attention = RotaryMultiheadAttention(d_model=8, nhead=2, n_kv_heads=2, dropout=0.0).double()
+    x = torch.randn(2, 6, 8, dtype=torch.float64)
+    steps = torch.tensor([0, 0, 1, 1, 2, 2]).expand(2, 6)
+    allowed = rules[Direction.causal](steps=steps)
+    changed = x.clone()
+    changed[:, 4:] = torch.randn(2, 2, 8, dtype=torch.float64)
+    base = attention(x, x, x, allowed=allowed)
+    other = attention(changed, changed, changed, allowed=allowed)
+    torch.testing.assert_close(other[:, :4], base[:, :4], atol=1e-12, rtol=0)
+    assert not torch.allclose(other[:, 4:], base[:, 4:])
+
+
+def test_allowed_none_matches_today_bit_for_bit():
+    torch.manual_seed(0)
+    attention = RotaryMultiheadAttention(d_model=8, nhead=2, n_kv_heads=2, dropout=0.0)
+    x = torch.randn(2, 5, 8)
+    pad = torch.tensor([[False, False, True, False, False], [False, False, False, False, True]])
+    assert torch.equal(attention(x, x, x, key_padding_mask=pad), attention(x, x, x, key_padding_mask=pad, allowed=None))
+
+
+def test_causal_query_without_visible_key_returns_zero_not_nan():
+    torch.manual_seed(0)
+    attention = RotaryMultiheadAttention(d_model=8, nhead=2, n_kv_heads=2, dropout=0.0)
+    x = torch.randn(1, 4, 8, requires_grad=True)
+    pad = torch.tensor([[True, False, False, False]])
+    allowed = rules[Direction.causal](steps=torch.tensor([[0, 1, 1, 2]]))
+    output = attention(x, x, x, key_padding_mask=pad, allowed=allowed)
+    output.sum().backward()
+    assert torch.isfinite(output).all() and torch.isfinite(x.grad).all()

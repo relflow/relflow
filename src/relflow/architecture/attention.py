@@ -10,6 +10,17 @@ from relflow.architecture.packed import Packed, attend
 from relflow.architecture.rotary import RotaryEmbedding
 
 
+def visible(allowed: torch.Tensor, *, padding: torch.Tensor | None) -> torch.Tensor:
+    """Combine a ``(B, L, L)`` visibility mask with key padding ``(B, 1, 1, L)``.
+
+    A query with no visible key attends to itself: its zero-filled key keeps SDPA
+    finite and the caller erases the output of absent tokens.
+    """
+    mask = allowed.unsqueeze(1) if padding is None else allowed.unsqueeze(1) & padding
+    size = mask.shape[-1]
+    return mask | (~mask.any(dim=-1, keepdim=True) & torch.eye(size, dtype=torch.bool, device=mask.device))
+
+
 class RotaryMultiheadAttention(torch.nn.Module):
     """Project and attend dense sequences or preselected live tokens."""
 
@@ -73,6 +84,7 @@ class RotaryMultiheadAttention(torch.nn.Module):
         value: torch.Tensor,
         key_padding_mask: torch.Tensor | None = None,
         *,
+        allowed: torch.Tensor | None = None,
         packing: Packed | None = None,
         query_positions: torch.Tensor | None = None,
         key_positions: torch.Tensor | None = None,
@@ -106,6 +118,9 @@ class RotaryMultiheadAttention(torch.nn.Module):
             value = key if shared else value.masked_fill(padding, 0.0)
             attn_mask[:, 0] |= ~active
             attn_mask = attn_mask[:, None, None, :]
+
+        if allowed is not None:
+            attn_mask = visible(allowed, padding=attn_mask)
 
         q, k, v = self.project(query, key, value)
         q = self.rotate(q.transpose(1, 2), query_positions)

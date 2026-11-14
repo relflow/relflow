@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable
+from functools import partial
 from typing import TYPE_CHECKING, cast
 
 import torch
@@ -9,7 +10,7 @@ from tensordict import TensorDict
 
 from relflow.architecture.attention import RotaryMultiheadAttention
 from relflow.architecture.blocks import feed_forward, norm
-from relflow.architecture.direction import rules
+from relflow.architecture.direction import rules, stepped
 from relflow.architecture.grain import grains
 from relflow.architecture.mixers import TransformerMixer, mixers
 from relflow.architecture.packed import SDPA_BATCH_MAX, Packed, block, customized, pack, unpack
@@ -44,20 +45,13 @@ def locate(parcel: Parcel, *, schema: Schema, geometry: TensorDict | None) -> Pa
     return parcel
 
 
-def sequence(
-    parcels: list[Parcel], *, order: dict[Address, int] | None = None
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Number tokens item-major within each branch instance.
+def extents(parcels: list[Parcel]) -> tuple[int, list[torch.Tensor]]:
+    """Return the item count of a branch instance and the tokens each parcel holds per item.
 
-    Every item owns one contiguous block of positions holding its leaf tokens
-    and then each child branch's tokens, in field order, so same-item offsets
-    never depend on how many items a record holds. Storage stays field-major;
-    spans sum every parcel's instance span.
+    Raises:
+        ValueError: If a parcel holds a token count that is not a multiple of the items.
     """
-    if order is not None:
-        parcels = sorted(parcels, key=lambda parcel: order[parcel.origin])
     first = parcels[0]
-    device = first.payload.device
     shape = tuple(first.payload.shape[:-2])
     declared = next((parcel.widths for parcel in parcels if parcel.widths is not None), None)
     # Leaves hold one token per item, so the narrowest undeclared parcel sets the item count.
@@ -73,7 +67,51 @@ def sequence(
                 f"which is not a multiple of its {items} items"
             )
         else:
-            widths.append(torch.full((*shape, items), count // items if items else 0, dtype=torch.int64, device=device))
+            widths.append(
+                torch.full(
+                    (*shape, items), count // items if items else 0, dtype=torch.int64, device=first.payload.device
+                )
+            )
+    return items, widths
+
+
+def stepwise(parcels: list[Parcel], *, order: dict[Address, int] | None = None) -> torch.Tensor:
+    """Number each token by the row of its item, in the token order of ``sequence``.
+
+    Args:
+        parcels: Parcels of one branch instance grid.
+        order: Field order by origin, as for ``sequence``.
+
+    Returns:
+        An int64 tensor of shape ``(*instance dims, L)``.
+    """
+    if order is not None:
+        parcels = sorted(parcels, key=lambda parcel: order[parcel.origin])
+    _, widths = extents(parcels)
+    steps = []
+    for parcel, width in zip(parcels, widths, strict=True):
+        count = parcel.payload.shape[-2]
+        tokens = torch.arange(count, device=width.device).expand(*width.shape[:-1], count).contiguous()
+        steps.append(torch.searchsorted(width.cumsum(dim=-1).contiguous(), tokens, right=True))
+    return torch.cat(steps, dim=-1)
+
+
+def sequence(
+    parcels: list[Parcel], *, order: dict[Address, int] | None = None
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Number tokens item-major within each branch instance.
+
+    Every item owns one contiguous block of positions holding its leaf tokens
+    and then each child branch's tokens, in field order, so same-item offsets
+    never depend on how many items a record holds. Storage stays field-major;
+    spans sum every parcel's instance span.
+    """
+    if order is not None:
+        parcels = sorted(parcels, key=lambda parcel: order[parcel.origin])
+    first = parcels[0]
+    device = first.payload.device
+    shape = tuple(first.payload.shape[:-2])
+    items, widths = extents(parcels)
     stride = torch.stack(widths).sum(dim=0)
     start = stride.cumsum(dim=-1) - stride
     lead = torch.zeros_like(stride)
@@ -126,6 +164,7 @@ class RotaryTransformerEncoderLayer(torch.nn.Module):
         *,
         packing: Packed | None = None,
         positions: torch.Tensor | None = None,
+        allowed: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if packing is not None:
             return block(self, inputs, packing)
@@ -142,6 +181,7 @@ class RotaryTransformerEncoderLayer(torch.nn.Module):
             normed,
             normed,
             key_padding_mask=None if present is None else ~present,
+            allowed=allowed,
             query_positions=positions,
             key_positions=positions,
         )
@@ -232,6 +272,7 @@ class BranchEncoder(torch.nn.Module):
                 ffnx=branch.ffnx,
             )
 
+        self.stepped = stepped[branch.direction]
         self.grain = grains[type(branch.grain)](branch.grain, branch=branch, schema=schema)
 
         self.reduction = branch.reduction
@@ -303,13 +344,21 @@ class BranchEncoder(torch.nn.Module):
             ]
         return parcels, conditioned
 
-    def mix(self, selected: torch.Tensor, *, present: torch.Tensor, positions: torch.Tensor | None) -> torch.Tensor:
+    def mix(
+        self,
+        selected: torch.Tensor,
+        *,
+        present: torch.Tensor,
+        positions: torch.Tensor | None,
+        steps: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """Run the sequence layers over the rows that hold at least one token.
 
         Args:
             selected: Tokens of shape ``(rows, L, d_model)`` with padding zeroed.
             present: Boolean token presence of shape ``(rows, L)``.
             positions: Structural positions of shape ``(rows, L)``, or ``None`` when not positioned.
+            steps: Row index of each token, shape ``(rows, L)``, or ``None`` when the direction ignores steps.
 
         Returns:
             Mixed tokens of shape ``(rows, L, d_model)``.
@@ -322,9 +371,13 @@ class BranchEncoder(torch.nn.Module):
             and not customized([self.encoder], additional=(TransformerMixer,))
         )
         full = prepared and bool(present.all())
+        # Plain branches keep the exact compute call forms they had before steps existed.
+        compute = self.compute if steps is None else partial(self.compute, steps=steps)
         if prepared and not full:
-            values, packing = pack(selected, present, positions)
-            values = self.compute(values, present, packing=packing)
+            values, packing = pack(
+                selected, present, positions, steps=steps, rule=cast(TransformerMixer, self.encoder).rule
+            )
+            values = compute(values, present, packing=packing)
             selected = unpack(
                 values,
                 packing,
@@ -342,9 +395,9 @@ class BranchEncoder(torch.nn.Module):
                 and canonical(self, self.compute)
             )
             if positions is not None:
-                selected = self.compute(selected, None if unmasked else present, positions=positions)
+                selected = compute(selected, None if unmasked else present, positions=positions)
             else:
-                selected = self.compute(selected, None if unmasked else present)
+                selected = compute(selected, None if unmasked else present)
         return selected
 
     def reduce(
@@ -394,6 +447,7 @@ class BranchEncoder(torch.nn.Module):
         parcels, conditioned = self.inform(parcels, context=context)
         parcels = self.grain(self.contextualize(parcels))
         positions, spans, slots = sequence(parcels)
+        steps = stepwise(parcels) if self.stepped else None
         positioned = any(parcel.positions is not None for parcel in parcels)
         payloads = [parcel.payload for parcel in parcels]
         presence = [parcel.present for parcel in parcels]
@@ -414,6 +468,7 @@ class BranchEncoder(torch.nn.Module):
         if self.pool is not None:
             self.pool.observe(present)
         flat_positions = positions.reshape(rows, L)
+        flat_steps = None if steps is None else steps.reshape(rows, L)
         active = present.any(dim=1)
         indices = active.nonzero(as_tuple=False).reshape(-1)
 
@@ -428,6 +483,9 @@ class BranchEncoder(torch.nn.Module):
             selected = encoded if complete else encoded.index_select(0, indices)
             selected_present = present.index_select(0, indices)
             selected_positions = flat_positions if complete else flat_positions.index_select(0, indices)
+            selected_steps = (
+                None if flat_steps is None else flat_steps if complete else flat_steps.index_select(0, indices)
+            )
             selected = selected.masked_fill(~selected_present.unsqueeze(-1), 0.0)
             evidence = selected
             selected_context = (
@@ -435,7 +493,10 @@ class BranchEncoder(torch.nn.Module):
             )
 
             selected = self.mix(
-                selected, present=selected_present, positions=selected_positions if positioned else None
+                selected,
+                present=selected_present,
+                positions=selected_positions if positioned else None,
+                steps=selected_steps,
             )
             selected_output, selected_output_present = self.reduce(
                 selected,
@@ -580,12 +641,13 @@ class BranchEncoder(torch.nn.Module):
         *,
         packing: Packed | None = None,
         positions: torch.Tensor | None = None,
+        steps: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Encode prepared sequences; absent presence means every coordinate is live.
 
         Layers receive the branch's structural positions whenever it has them.
         """
-        return self.encoder(inputs, present=present, positions=positions, steps=None, packing=packing)
+        return self.encoder(inputs, present=present, positions=positions, steps=steps, packing=packing)
 
     def contextualize(self, parcels: list[Parcel]) -> list[Parcel]:
         """Mix each item's fields: its leaves and the summaries of its reduced child branches."""

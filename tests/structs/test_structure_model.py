@@ -332,7 +332,7 @@ def test_branch_sequence_settings_round_trip_when_changed():
 
 def test_branch_rejects_unknown_direction():
     with pytest.raises(pydantic.ValidationError, match="bidirectional"):
-        rf.Branch.model_validate({"type": "branch", "fields": [], "direction": "causal"})
+        rf.Branch.model_validate({"type": "branch", "fields": [], "direction": "sideways"})
 
 
 def test_child_named_items_is_still_a_child():

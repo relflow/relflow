@@ -8,10 +8,13 @@ attention edges; its random-number schedule follows the packed execution.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F
+
+from relflow.architecture.direction import Rule, bidirectional
 
 SDPA_BATCH_MAX = 65535
 
@@ -33,11 +36,18 @@ class Group:
 
 @dataclass(frozen=True)
 class Packed:
-    """Original token coordinates and attention groups shared by an encoder stack."""
+    """Original token coordinates and attention groups shared by an encoder stack.
+
+    ``steps`` gives the row of every live token and ``rule`` turns it into the
+    attention visibility of each equal-length group; without steps every token
+    sees every other.
+    """
 
     indices: torch.Tensor
     positions: torch.Tensor
     groups: tuple[Group, ...]
+    steps: torch.Tensor | None = None
+    rule: Rule = bidirectional
 
 
 def customized(layers: Iterable[torch.nn.Module], *, additional: tuple[type[torch.nn.Module], ...] = ()) -> bool:
@@ -76,7 +86,12 @@ def customized(layers: Iterable[torch.nn.Module], *, additional: tuple[type[torc
 
 
 def pack(
-    inputs: torch.Tensor, present: torch.Tensor, positions: torch.Tensor | None = None
+    inputs: torch.Tensor,
+    present: torch.Tensor,
+    positions: torch.Tensor | None = None,
+    *,
+    steps: torch.Tensor | None = None,
+    rule: Rule = bidirectional,
 ) -> tuple[torch.Tensor, Packed]:
     """Select live values once, retaining their original positions and row ownership."""
     if present.dtype != torch.bool or tuple(present.shape) != tuple(inputs.shape[:2]):
@@ -93,6 +108,7 @@ def pack(
         if capacity
         else indices
     )
+    live_steps = None if steps is None else steps.expand(batch, capacity).reshape(-1).index_select(0, indices)
     counts = present.sum(dim=1, dtype=torch.int64)
     # Rows sorted by length give every group one contiguous run of the sorted
     # token axis, so groups are slices of a single on-device index and the host
@@ -113,7 +129,17 @@ def pack(
         if length:
             groups.append(Group(rows, length, tokens[cursor : cursor + span]))
         cursor += span
-    return inputs.reshape(batch * capacity, width).index_select(0, indices), Packed(indices, positions, tuple(groups))
+    return inputs.reshape(batch * capacity, width).index_select(0, indices), Packed(
+        indices, positions, tuple(groups), steps=live_steps, rule=rule
+    )
+
+
+def visibility(packing: Packed, indices: torch.Tensor, *, rows: int, length: int) -> torch.Tensor | None:
+    """Attention mask ``(rows, 1, length, length)`` of one group, or ``None`` when every token sees all."""
+    if packing.steps is None:
+        return None
+    allowed = packing.rule(steps=packing.steps.index_select(0, indices).reshape(rows, length))
+    return None if allowed is None else allowed.unsqueeze(1)
 
 
 def attend(
@@ -149,7 +175,11 @@ def attend(
                 .reshape(rows, group.length, attention.n_kv_heads, attention.head_dim)
                 .transpose(1, 2)
             )
-            attended = F.scaled_dot_product_attention(
+            allowed = visibility(packing, indices, rows=rows, length=group.length)
+            sdpa = F.scaled_dot_product_attention
+            if allowed is not None:
+                sdpa = partial(sdpa, attn_mask=allowed)
+            attended = sdpa(
                 selected_q,
                 selected_k,
                 selected_v,

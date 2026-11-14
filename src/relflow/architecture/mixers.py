@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
+from functools import partial
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, NoReturn, Protocol, cast, override
 
@@ -84,19 +85,22 @@ class TransformerMixer(torch.nn.ModuleList):
             tokens: Tokens of shape ``(rows, L, d_model)``, or packed live tokens.
             present: Boolean presence of shape ``(rows, L)``, or ``None`` for all live.
             positions: Structural positions, or ``None`` when the branch has none.
-            steps: Row index of each token; unused by the bidirectional rule.
+            steps: Row index of each token, read by the direction rule; ``None`` for bidirectional.
             packing: Layout of packed live tokens, or ``None`` for dense input.
 
         Returns:
             Mixed tokens shaped like ``tokens``.
         """
+        allowed = None if packing is not None else self.rule(steps=steps)
         for layer in cast("Iterable[RotaryTransformerEncoderLayer]", self):
+            # Layers see the keyword only when it applies, so replaced layers keep their arity.
+            apply = layer if allowed is None else partial(layer, allowed=allowed)
             if packing is not None:
                 tokens = layer(tokens, present=present, packing=packing)
             elif positions is not None:
-                tokens = layer(tokens, present=present, positions=positions)
+                tokens = apply(tokens, present=present, positions=positions)
             else:
-                tokens = layer(tokens, present=present)
+                tokens = apply(tokens, present=present)
         return tokens
 
 
