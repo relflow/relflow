@@ -1,0 +1,36 @@
+---
+title: Modular modeling
+description: Extend relflow with your own data types and data sources, and build specialized models from the structure of your data.
+---
+
+relflow provides built-in support for standard data types. Each type is defined as a self-contained extension, with its own input contract and model components, and registered through a plugin system. The [data type reference](/data-types/) explains the individual types.
+
+The same registration system lets you define your own custom data types, either privately within your organization or as an open-source contribution to the relflow community. The [custom data type guide](/advanced/custom-data-types/) explains how to implement and register an extension.
+
+## Custom data sources
+
+Modularity also extends to data sources. Connect your own restartable readers, Arrow batch streams, or mapping datasets through [custom data modules](/advanced/custom-data-modules/). These sources supply observations to the same model and encoding pipeline.
+
+:::tip[Interested in contributing?]
+
+[Join our Discord](https://discord.gg/DVyZUkvTFA) and [read the contributing guide](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/CONTRIBUTING.md).
+
+:::
+
+## Specialized model architectures
+
+relflow models are competitive with tabular foundation models while using compact predictive networks. The schema creates components specialized for its field types and relationships. Attention is scoped to related records, with learned summaries passing context through the hierarchy.
+
+A [retained Amazon item-lifetime-value model](/benchmarks/relflow-parameters-2026-11-10.json) has **926,554 task-trained parameters**: about **0.42%** of the approximately **220 million parameters** in the [TabPFN-3.5 base checkpoint](/benchmarks/tabpfn-parameters-2026-11-10.json). Including its shared frozen text encoder, the relflow model has **23,640,282 parameters**.
+
+:::tip[Compare the models]
+
+Curious how relflow performs against tabular foundation models? [View the benchmarks](/benchmarks/) for predictive scores, model sizes, and the records behind the comparisons.
+
+:::
+
+## Integrated inference
+
+Because feature processing is integrated into relflow models, it stays part of the inference path you deploy and measure. The same trained model supports batch prediction and real-time serving.
+
+The [inference and deployment guide](/advanced/inference-and-deployment/) covers batch prediction jobs and the optional HTTP serving runtime.

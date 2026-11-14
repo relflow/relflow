@@ -6,7 +6,6 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
-import yaml
 
 import docs.publish as publishing
 
@@ -14,9 +13,8 @@ import docs.publish as publishing
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
     root = tmp_path / "checkout"
-    (root / "docs").mkdir(parents=True)
-    (root / "docs/_quarto.yml").write_text("website:\n  site-url: https://relflow.ai/\n")
-    (root / "docs/index.qmd").write_text("# relflow documentation\n")
+    (root / "docs/starlight").mkdir(parents=True)
+    (root / "docs/starlight/astro.config.mjs").write_text("export default {};\n")
     subprocess.run(["git", "init", "--quiet", str(root)], check=True)
     subprocess.run(["git", "add", "."], cwd=root, check=True)
     subprocess.run(
@@ -54,36 +52,35 @@ def environment(project: Path) -> dict[str, str]:
 
 @pytest.fixture
 def renderer(project: Path, monkeypatch: pytest.MonkeyPatch) -> list[dict]:
-    """Keep Git real while simulating Quarto's consumption of the generated profile."""
+    """Keep Git real while simulating the static Node build boundary."""
     execute = subprocess.run
     profiles = []
 
     def run(command, **options):
         if command[0] == "git":
             return execute(command, **options)
-        assert command[:2] in (["make", "check"], ["make", "render"])
-        if command[1] == "check":
-            assert list((project / "docs").glob("_quarto-readthedocs-*.yml")) == []
+        assert command in (["npm", "run", "check"], ["npm", "test"], ["npm", "run", "build"])
+        assert options["cwd"] == project / "docs/starlight"
+        if command[-1] != "build":
             return subprocess.CompletedProcess(command, 0)
-        profile = project / "docs" / f"_quarto-{options['env']['QUARTO_PROFILE']}.yml"
-        config = yaml.safe_load(profile.read_text())
+        config = options["env"]
         profiles.append(config)
-        site_url = config["website"]["site-url"]
-        revision = config["website"]["repo-branch"]
+        site_url = config["RELFLOW_DOCS_URL"]
+        revision = config["RELFLOW_DOCS_REVISION"]
         prefix = urlsplit(site_url).path
-        site = project / "docs/site"
+        site = project / "docs/starlight/dist"
         (site / "assets").mkdir(parents=True, exist_ok=True)
         (site / "assets/site.js").write_bytes(b"// static asset\n")
         (site / "assets/font.bin").write_bytes(b"\x00\xff\x80font payload")
         (site / "index.html").write_text(
-            (f'<link rel="canonical" href="{site_url}">' if config.get("canonical-url") else "")
+            f'<link rel="canonical" href="{site_url}">'
             + f'<script src="{prefix}assets/site.js"></script>'
-            + f'<a href="{site_url}guide.html#details">Guide</a>'
-            + f'<a href="https://github.com/relflow/relflow/blob/{revision}/docs/index.qmd">View source</a>'
+            + f'<a href="{site_url}guide/#details">Guide</a>'
+            + f'<a href="https://github.com/relflow/relflow/blob/{revision}/docs/starlight/src/content/docs/index.mdx">View source</a>'
         )
-        (site / "guide.html").write_text(
-            (f'<link rel="canonical" href="{site_url}guide.html">' if config.get("canonical-url") else "")
-            + '<h1 id="details">Guide</h1>'
+        (site / "guide").mkdir(exist_ok=True)
+        (site / "guide/index.html").write_text(
+            f'<link rel="canonical" href="{site_url}guide/">' + '<h1 id="details">Guide</h1>'
         )
         return subprocess.CompletedProcess(command, 0)
 
@@ -107,25 +104,24 @@ def test_publish_preserves_validated_payload_and_binds_urls_to_checkout(
     if output == "_readthedocs":
         environment["READTHEDOCS_OUTPUT"] = output
     original = environment.copy()
-    configuration = (project / "docs/_quarto.yml").read_bytes()
+    configuration = (project / "docs/starlight/astro.config.mjs").read_bytes()
     destination = publishing.publish(project, environ=environment)
-    source = project / "docs/site"
+    source = project / "docs/starlight/dist"
     assert {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()} == {
         path.relative_to(destination): path.read_bytes() for path in destination.rglob("*") if path.is_file()
     }
     assert f'href="{site_url.rstrip("/")}/"' in (destination / "index.html").read_text()
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=project, text=True).strip()
-    assert f"/blob/{revision}/docs/index.qmd" in (destination / "index.html").read_text()
-    assert renderer[0]["website"]["repo-branch"] == revision
-    assert (project / "docs/_quarto.yml").read_bytes() == configuration
+    assert f"/blob/{revision}/docs/starlight/src/content/docs/index.mdx" in (destination / "index.html").read_text()
+    assert renderer[0]["RELFLOW_DOCS_REVISION"] == revision
+    assert (project / "docs/starlight/astro.config.mjs").read_bytes() == configuration
     assert environment == original
-    assert list((project / "docs").glob("_quarto-readthedocs-*.yml")) == []
 
 
 def test_publish_uses_checkout_revision_when_service_does_not_supply_one(project, environment, renderer):
     revision = environment.pop("READTHEDOCS_GIT_COMMIT_HASH")
     publishing.publish(project, environ=environment)
-    assert renderer[0]["website"]["repo-branch"] == revision
+    assert renderer[0]["RELFLOW_DOCS_REVISION"] == revision
 
 
 @pytest.mark.parametrize("matching", [True, False])
@@ -155,7 +151,7 @@ def test_tag_build_consumes_only_its_release_asset_and_passes_it_to_every_build_
     execute = publishing.subprocess.run
 
     def run(command, **options):
-        if command[0] == "make":
+        if command[0] == "npm":
             calls.append(options["env"]["RELFLOW_EVIDENCE_PUBLICATION"])
         return execute(command, **options)
 
@@ -163,7 +159,7 @@ def test_tag_build_consumes_only_its_release_asset_and_passes_it_to_every_build_
     monkeypatch.setattr(publishing.subprocess, "run", run)
     if matching:
         publishing.publish(project, environ=environment)
-        assert calls == [str(selected), str(selected)]
+        assert calls == [str(selected)] * 3
     else:
         with pytest.raises(ValueError, match="tag's source revision"):
             publishing.publish(project, environ=environment)
@@ -260,19 +256,15 @@ def test_publish_rejects_a_source_path_even_when_it_resolves_outside_checkout(pr
     assert renderer == []
 
 
-@pytest.mark.parametrize("phase", ["check", "render"])
-def test_publish_does_not_copy_stale_output_and_cleans_profiles_after_build_failure(
-    project, environment, renderer, monkeypatch, phase
-):
-    site = project / "docs/site"
+@pytest.mark.parametrize("phase", ["check", "test", "build"])
+def test_publish_does_not_copy_stale_output_after_build_failure(project, environment, renderer, monkeypatch, phase):
+    site = project / "docs/starlight/dist"
     site.mkdir()
     (site / "old.html").write_text("Old unvalidated output")
     execute = publishing.subprocess.run
 
     def fail(command, **options):
-        if command[:2] == ["make", phase]:
-            if phase == "render":
-                assert list((project / "docs").glob("_quarto-readthedocs-*.yml"))
+        if command[0] == "npm" and command[-1] == phase:
             raise subprocess.CalledProcessError(1, command)
         return execute(command, **options)
 
@@ -280,7 +272,6 @@ def test_publish_does_not_copy_stale_output_and_cleans_profiles_after_build_fail
     with pytest.raises(subprocess.CalledProcessError):
         publishing.publish(project, environ=environment)
     assert not (Path(environment["READTHEDOCS_OUTPUT"]) / "html").exists()
-    assert list((project / "docs").glob("_quarto-readthedocs-*.yml")) == []
 
 
 @pytest.mark.parametrize(
@@ -288,6 +279,13 @@ def test_publish_does_not_copy_stale_output_and_cleans_profiles_after_build_fail
     [
         '<link rel="canonical" href="https://relflow.readthedocs.io/en/latest/"><script src="missing.js"></script>',
         '<link rel="canonical" href="https://relflow.readthedocs.io/">',
+        '<link rel="canonical" href="https://relflow.readthedocs.io/en/latest/wrong-page/">',
+        '<link rel="canonical" href="https://relflow.readthedocs.io/en/latest/">'
+        '<a href="guide/#missing">Absent fragment</a>',
+        '<link rel="canonical" href="https://relflow.readthedocs.io/en/latest/">'
+        '<a href="/quickstart/">Escaped version</a>',
+        '<link rel="canonical" href="https://relflow.readthedocs.io/en/latest/">'
+        '<a href="https://github.com/relflow/relflow/blob/main/docs/starlight/src/content/docs/index.mdx">Source</a>',
     ],
 )
 def test_publish_copies_nothing_when_rendered_assets_or_canonical_prefix_fail_validation(
@@ -297,15 +295,14 @@ def test_publish_copies_nothing_when_rendered_assets_or_canonical_prefix_fail_va
 
     def invalidate(command, **options):
         result = execute(command, **options)
-        if command[:2] == ["make", "render"]:
-            (project / "docs/site/index.html").write_text(invalid)
+        if command == ["npm", "run", "build"]:
+            (project / "docs/starlight/dist/index.html").write_text(invalid)
         return result
 
     monkeypatch.setattr(publishing.subprocess, "run", invalidate)
     with pytest.raises(ValueError, match="rendered site failed validation"):
         publishing.publish(project, environ=environment)
     assert not (Path(environment["READTHEDOCS_OUTPUT"]) / "html").exists()
-    assert list((project / "docs").glob("_quarto-readthedocs-*.yml")) == []
 
 
 def test_pr_preview_selects_reviewed_diagnostics_without_fetching_released_measurements(
@@ -319,7 +316,7 @@ def test_pr_preview_selects_reviewed_diagnostics_without_fetching_released_measu
     execute = publishing.subprocess.run
 
     def run(command, **options):
-        if command[0] == "make":
+        if command[0] == "npm":
             calls.append(options["env"]["RELFLOW_EVIDENCE_PUBLICATION"])
         return execute(command, **options)
 
@@ -330,4 +327,22 @@ def test_pr_preview_selects_reviewed_diagnostics_without_fetching_released_measu
     monkeypatch.setattr(publishing, "fetch", fetch)
     monkeypatch.setattr(publishing.subprocess, "run", run)
     publishing.publish(project, environ=environment)
-    assert calls == [str(selected), str(selected)]
+    assert calls == [str(selected)] * 3
+
+
+def test_read_only_check_validates_existing_output_without_fetching_or_building(
+    project, environment, renderer, monkeypatch
+):
+    publishing.publish(project, environ=environment)
+    monkeypatch.setenv("RELFLOW_DOCS_URL", environment["READTHEDOCS_CANONICAL_URL"])
+    monkeypatch.setenv("RELFLOW_DOCS_REVISION", environment["READTHEDOCS_GIT_COMMIT_HASH"])
+    monkeypatch.setattr(publishing, "ROOT", project)
+    monkeypatch.setattr("sys.argv", ["docs.publish", "--check", "--directory", str(project / "docs/starlight/dist")])
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Static validation must not fetch Evidence or rebuild the site")
+
+    monkeypatch.setattr(publishing, "ci", forbidden)
+    monkeypatch.setattr(publishing, "fetch", forbidden)
+    monkeypatch.setattr(publishing.subprocess, "run", forbidden)
+    publishing.main()

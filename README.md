@@ -60,7 +60,7 @@ Arrow IPC serving benchmark, a tiny, attention-free XS model processed
 **50.3 million rows with zero failed requests**, including client encoding,
 HTTPS, and response decoding. The setup and three measured passes are below.
 
-The [evidence catalog](https://www.relflow.ai/en/latest/evidence.html) adds **79 controlled
+The [evidence catalog](https://www.relflow.ai/en/latest/evidence/) adds **79 controlled
 learning experiments** with code, comparisons, seeds, and recorded results.
 Examples from the recorded 0.4.2 snapshot; each version's documentation uses
 the evidence assets frozen for that release:
@@ -69,9 +69,9 @@ the evidence assets frozen for that release:
 
 | Experiment | relflow result | Control |
 | --- | --- | --- |
-| [Match IDs absent from training](https://www.relflow.ai/en/latest/evidence/identity/unseen-identity-equality.html) | **0.9991 AUC** with `Hash` | 0.5000 with unknown `Category` labels |
-| [Recall a value by an unfamiliar ID](https://www.relflow.ai/en/latest/evidence/relational/hash-recall.html) | **0.100 normalized RMSE**, median of three seeds | 1.401 after corrupting the lookup IDs |
-| [Distinguish nulls from zero](https://www.relflow.ai/en/latest/evidence/state/null-versus-zero.html) | **100% accuracy** with value states preserved | 50% after filling nulls with zero |
+| [Match IDs absent from training](https://www.relflow.ai/en/latest/evidence/P021/) | **0.9991 AUC** with `Hash` | 0.5000 with unknown `Category` labels |
+| [Recall a value by an unfamiliar ID](https://www.relflow.ai/en/latest/evidence/P025/) | **0.100 normalized RMSE**, median of three seeds | 1.401 after corrupting the lookup IDs |
+| [Distinguish nulls from zero](https://www.relflow.ai/en/latest/evidence/P038/) | **100% accuracy** with value states preserved | 50% after filling nulls with zero |
 
 <!-- evidence-results:end -->
 
@@ -110,7 +110,8 @@ Requires Python 3.12 or newer:
 uv add relflow
 ```
 
-With pip, use `python -m pip install relflow`. Optional extras include
+With pip, use `python -m pip install relflow`.
+Optional extras include
 `relflow[text]` for Hugging Face text encoders and `relflow[serving]` for HTTP
 serving.
 
@@ -119,44 +120,42 @@ serving.
 Suppose you have historical payment records and want to decide which new
 payments deserve review just after booking. Each row contains `amount`,
 `merchant`, and whether a dispute was reported in the following 30 days.
-Declare the two inputs and that observed outcome:
+Declare the two inputs and that observed outcome in a reusable class:
 
 ```python
 import relflow as rf
 
-model = rf.Model(
-    preset="small",
-    amount=rf.Number,
-    merchant=rf.Category,
-    disputed=rf.Boolean(mask=True),
-)
+
+class PaymentModel(rf.Model):
+    amount = rf.Number
+    merchant = rf.Category
+    disputed = rf.Boolean(mask=True)
+
+
+if __name__ == "__main__":
+    model = PaymentModel(preset="small")
 ```
 
-Keyword names match the keys in your records: `amount=rf.Number` reads the
-`amount` column. Use a bare class for default options, or call it to configure
+Class attributes match the keys in your records: `amount = rf.Number` reads
+the `amount` column. This has the familiar shape of a Django or Pydantic data
+contract; relflow's declarations also determine the neural components to build.
+Use a bare field class for default options, or call it to configure
 the field. `mask=True` makes `disputed` a supervised target: its label trains
 the decoder but is never included in the inputs. Mark additional fields to
 train multiple targets in the same model.
 
-`small` supplies architecture defaults for the root, child branches, and field
-decoders. The [presets](https://www.relflow.ai/en/latest/reference/model-presets.html)
-provides `small` and `medium`, derived from the frozen arena HPO recipes. Select one with
-`rf.Model(preset="small", ...)` to create a fresh, untrained model from your declared schema.
-Override options such
-as `d_model`, `n_layers`, or `n_heads` when needed. Use `fields={...}` for
-generated schemas or field names that collide with configuration options.
+Importing the declarations defines the schema; the guarded constructor creates
+the neural model when the script runs. `PaymentModel(preset="small")` creates
+a fresh, untrained model. `small` supplies architecture defaults for the root,
+child branches, and field decoders. The bundled
+[presets](https://www.relflow.ai/en/latest/concepts/training/) are
+`small` and `medium`, derived from the frozen arena HPO recipes. Override
+constructor options such as `d_model`, `n_layers`, or `n_heads` when needed.
+Class declarations keep child names separate from those options. For generated
+schemas, the keyword and `fields={...}` mapping forms remain available.
 
 Training presets are selected independently with `model.fit(datamodule, preset="small")`.
 They supply optimizer, batch-size, EMA, and run-budget defaults; explicit fit arguments win.
-
-<p align="center">
-  <a href="https://www.relflow.ai/en/latest/learn/your-first-model.html">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://www.relflow.ai/en/latest/assets/diagrams/fig-first-payment-dark.svg" />
-      <img alt="A payment model combines Number amount and Category merchant inputs to predict the masked Boolean disputed target." src="https://www.relflow.ai/en/latest/assets/diagrams/fig-first-payment-light.svg" width="640" />
-    </picture>
-  </a>
-</p>
 
 ## Train and predict
 
@@ -164,6 +163,8 @@ Stream your application's Parquet datasets from disk or cloud storage, with
 one payment per row. Training
 and validation contain `amount`, `merchant`, and the known `disputed` label;
 request rows contain the inputs and a `payment_id` for joining results.
+The following blocks continue from `model`; keep runtime steps under the
+same execution guard in a script, or construct the model directly in a notebook.
 
 ```python
 data = rf.ArrowDataModule(
@@ -194,9 +195,9 @@ collecting the complete result in memory. File paths, globs, `rf.source(...)`,
 and restartable batch factories are also supported. Cloud paths such as
 `s3://your-data-bucket/payments/train/*.parquet` use the same interface.
 SQL queries and custom record generators connect through relflow's
-[data modules](https://www.relflow.ai/en/latest/guides/data-modules.html).
+[data modules](https://www.relflow.ai/en/latest/concepts/data-modules/).
 
-The included [command line](https://www.relflow.ai/en/latest/guides/command-line.html)
+The included [command line](https://www.relflow.ai/en/latest/advanced/command-line/)
 inspects models and runs prediction and serving workflows from a saved artifact:
 
 ```bash
@@ -243,22 +244,24 @@ to select the columns needed downstream.
 ## Add nested context
 
 To use an account's previous transactions alongside the current payment,
-include a `history` list of records in each observation and describe it with
-`rf.Branch(...)`:
+include a `history` list of records in each observation. Declare its fields
+in a reusable branch, then place that branch in the model:
 
 ```python
-history_model = rf.Model(
-    preset="small",
-    amount=rf.Number,
-    merchant=rf.Category,
-    history=rf.Branch(
-        length=32,
-        overflow="tail",
-        amount=rf.Number,
-        merchant=rf.Category,
-    ),
-    disputed=rf.Boolean(mask=True),
-)
+class Transaction(rf.Branch):
+    amount = rf.Number
+    merchant = rf.Category
+
+
+class HistoryPaymentModel(rf.Model):
+    amount = rf.Number
+    merchant = rf.Category
+    history = Transaction(length=32, overflow="tail")
+    disputed = rf.Boolean(mask=True)
+
+
+if __name__ == "__main__":
+    history_model = HistoryPaymentModel(preset="small")
 ```
 
 `history` reads the same-named collection, and its fields read each child
@@ -281,10 +284,10 @@ context while the exporting model stays fixed.
 
 A supervised model can also start from fresh initialization. Evaluate reuse
 on the intended downstream tasks and populations. See
-[Pretraining and fine-tuning](https://www.relflow.ai/en/latest/learn/pretraining-and-fine-tuning.html)
-and [Reusable representations](https://www.relflow.ai/en/latest/learn/reusable-representations.html).
+[Pretraining and fine-tuning](https://www.relflow.ai/en/latest/advanced/masking-and-pretraining/)
+and [Reusable representations](https://www.relflow.ai/en/latest/advanced/embeddings/).
 
-[Schema mutation](https://www.relflow.ai/en/latest/guides/schema-mutation.html) can add targets
+[Schema mutation](https://www.relflow.ai/en/latest/advanced/mutations/) can add targets
 or change the input tree while retaining compatible learned state. New or
 incompatible components initialize as the schema changes.
 
@@ -299,7 +302,7 @@ types and validated Pydantic options, then register its tensorization,
 embedder, decoder, loss, and output writer by `rf.Component` role. The shared
 engine handles nesting, masking, batching, and device transfer. Your datatype
 owns its semantics without adding special cases to the model or data loader.
-See [Custom tensorfields](https://www.relflow.ai/en/latest/datatypes/custom-tensorfields.html)
+See [Custom data types](https://www.relflow.ai/en/latest/advanced/custom-data-types/)
 for the full contract.
 
 ## Serve the trained model
@@ -321,22 +324,22 @@ uvicorn serve_payments:app --host 127.0.0.1 --port 8000
 
 The application chooses the hosting infrastructure and can attach shared
 preprocessors and postprocessors. Batch prediction and HTTP serving use the
-saved schema and learned state. See [Serving](https://www.relflow.ai/en/latest/guides/serving.html)
+saved schema and learned state. See [Serving](https://www.relflow.ai/en/latest/advanced/inference-and-deployment/#serve-the-trained-artifact)
 for requests, validation, and resource controls, and
-[Performance](https://www.relflow.ai/en/latest/guides/performance.html) for measuring throughput
+[Performance](https://www.relflow.ai/en/latest/advanced/inference-and-deployment/#tune-the-whole-request-path) for measuring throughput
 with the workload, record shape, hardware, and requested outputs stated.
 
 ## Learn more
 
-- [Your first model](https://www.relflow.ai/en/latest/learn/your-first-model.html)
-- [Use cases](https://www.relflow.ai/en/latest/use-cases/index.html)
-- [Pretraining and fine-tuning](https://www.relflow.ai/en/latest/learn/pretraining-and-fine-tuning.html)
-- [Reusable representations](https://www.relflow.ai/en/latest/learn/reusable-representations.html)
-- [Model structure and configuration](https://www.relflow.ai/en/latest/concepts/model-tree.html)
-- [Data types](https://www.relflow.ai/en/latest/datatypes/index.html)
-- [Arrow data loading](https://www.relflow.ai/en/latest/guides/data-modules.html)
-- [Streaming batch inference](https://www.relflow.ai/en/latest/guides/batch-inference.html)
-- [Prediction output](https://www.relflow.ai/en/latest/reference/prediction-output.html)
+- [Your first model](https://www.relflow.ai/en/latest/quickstart/)
+- [Example datasets](https://www.relflow.ai/en/latest/datasets/)
+- [Pretraining and fine-tuning](https://www.relflow.ai/en/latest/advanced/masking-and-pretraining/)
+- [Reusable representations](https://www.relflow.ai/en/latest/advanced/embeddings/)
+- [Model structure and configuration](https://www.relflow.ai/en/latest/concepts/models/)
+- [Data types](https://www.relflow.ai/en/latest/data-types/)
+- [Arrow data loading](https://www.relflow.ai/en/latest/concepts/data-modules/)
+- [Streaming batch inference](https://www.relflow.ai/en/latest/advanced/inference-and-deployment/#stream-a-prediction-job-to-files)
+- [Prediction output](https://www.relflow.ai/en/latest/concepts/predictions/)
 
 Tutorials and guides live in [docs/](docs/README.md); canonical learning
 experiments and recorded results live in [evidence/](evidence/README.md).

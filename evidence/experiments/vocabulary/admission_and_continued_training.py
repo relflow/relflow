@@ -93,7 +93,7 @@
 #
 # ### Training and controls
 #
-# The model uses the [xs preset](../../concepts/model-tree.qmd#choose-a-size).
+# The model uses the frozen Evidence control architecture; its settings are shown in the code.
 #
 # Use 300 initial and 400 continuation AdamW updates at learning rate 0.002,
 # one device, and no loader workers. Require 0.95 accuracy on the initial task,
@@ -122,7 +122,7 @@ import polars as pl
 import pyarrow as pa
 import relflow as rf
 import torch
-from relflow.presets.base import resolve
+from policies import CONTROL
 from reporting import experiment, report
 
 BUDGET = 300
@@ -141,23 +141,14 @@ def records(*, rows: int, seed: int, phase: str = "initial") -> Iterator[dict]:
         yield {"x": float(CENTERS[index] + deviation), "label": LABELS[index]}
 
 
+class Model(rf.Model):
+    x = rf.Number
+    label = rf.Category(p_unavailable=0.0, topk=[3], mask=True)
+
+
 def build() -> rf.Model:
-    # Freeze the experimental architecture independently of SDK preset changes.
-    control_preset = rf.presets.Preset(
-        name="xs",
-        d_model=64,
-        root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
-        branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
-        leaf=rf.presets.LeafDefaults(n_heads=2),
-    )
-    model = rf.Model(
-        schema=resolve(
-            control_preset,
-            x=rf.Number,
-            label=rf.Category(p_unavailable=0.0, topk=[3], mask=True),
-        )
-    )
-    model.preset = control_preset
+
+    model = Model(preset=CONTROL.name)
     return model
 
 

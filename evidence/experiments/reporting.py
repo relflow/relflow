@@ -70,8 +70,7 @@ def provenance(script: Path) -> dict[str, Any]:
 
     package = Path(relflow.__file__).resolve().parent
     files = [
-        (path.relative_to(ROOT).as_posix(), path)
-        for path in (script, Path(__file__), Path(__file__).with_name("source.py"))
+        (path.relative_to(ROOT).as_posix(), path) for path in (script, *sorted(Path(__file__).parent.glob("*.py")))
     ]
     files.extend(
         ("src/relflow/" + path.relative_to(package).as_posix(), path) for path in sorted(package.rglob("*.py"))

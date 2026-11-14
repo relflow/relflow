@@ -156,25 +156,20 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
+class Item(rf.Branch):
+    score = rf.Number
+    payload = rf.Number
+
+
+class PredictionModel(rf.Model):
+    items = Item(length=LENGTH, overflow="error", n_layers=2, n_heads=4, reduction=None)
+    answer = rf.Number(mask=True)
+
+
 @experiment("P023", seed=23)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
-    model = rf.Model(
-        d_model=48,
-        n_layers=1,
-        n_heads=4,
-        reduction=None,
-        items=rf.Branch(
-            length=LENGTH,
-            overflow="error",
-            n_layers=2,
-            n_heads=4,
-            reduction=None,
-            score=rf.Number,
-            payload=rf.Number,
-        ),
-        answer=rf.Number(mask=True),
-    )
+    model = PredictionModel(d_model=48, n_layers=1, n_heads=4, reduction=None)
     data = rf.SyntheticDataModule(
         train=partial(records, rows=4096, seed=seed + 1),
         validate=partial(records, rows=1024, seed=seed + 2),

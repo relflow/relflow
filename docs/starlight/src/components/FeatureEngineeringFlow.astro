@@ -1,0 +1,294 @@
+---
+interface Props {
+  id?: string;
+}
+
+const { id = 'feature-flow' } = Astro.props;
+const traditional = [
+  {
+    title: 'Handcraft features',
+    detail: 'Choose aggregates, time windows, and interactions. Build the feature table.',
+  },
+  {
+    title: 'Train and tune (HPO)',
+    detail: 'Search model settings alongside the feature-pipeline choices.',
+  },
+  {
+    title: 'Validate feature and model choices',
+    detail: 'Measure which combinations work. Select, revise, and try again.',
+  },
+];
+---
+
+<figure
+  class="feature-flow not-content"
+  id={id}
+  aria-label="Feature engineering and typed-schema workflows"
+>
+  <p class="ff-start"><strong>Same starting point</strong> Records and a prediction target</p>
+  <div class="ff-workflows">
+    <section class="ff-workflow" aria-labelledby={`${id}-traditional`}>
+      <header>
+        <p class="ff-eyebrow">Feature-engineered tabular ML</p>
+        <p class="ff-title" id={`${id}-traditional`}>A pipeline to design and revisit</p>
+      </header>
+      <div class="ff-path">
+        <svg class="ff-return" viewBox="0 0 32 100" preserveAspectRatio="none" aria-hidden="true">
+          <path d="M31 85H16Q6 85 6 75V25Q6 15 16 15H31M25 13L31 15L25 17"></path>
+        </svg>
+        <ol>
+          {
+            traditional.map((step) => (
+              <li class="ff-node">
+                <strong>{step.title}</strong>
+                <p>{step.detail}</p>
+              </li>
+            ))
+          }
+        </ol>
+      </div>
+      <p class="ff-feedback">
+        <span aria-hidden="true">↻</span> Revise features, retune, revalidate
+      </p>
+      <p class="ff-maintenance">Revisit the pipeline as the data or task changes.</p>
+    </section>
+    <section class="ff-workflow ff-relflow" aria-labelledby={`${id}-relflow`}>
+      <header>
+        <p class="ff-eyebrow">relflow</p>
+        <p class="ff-title" id={`${id}-relflow`}>A typed schema defines the model</p>
+      </header>
+      <div class="ff-path">
+        <ol>
+          <li class="ff-node ff-schema">
+            <strong>Declare a typed schema</strong>
+            <p>Describe the values, nested records, and targets.</p>
+          </li>
+          <li class="ff-node ff-model">
+            <strong>Train the model</strong>
+            <p>Integrated feature processing</p>
+            <div class="ff-joint">
+              <span>Learned features</span><span aria-hidden="true">→</span><span>Predictions</span>
+            </div>
+            <small>Learned together inside one model</small>
+          </li>
+        </ol>
+      </div>
+      <p class="ff-feedback">One model to train and deploy</p>
+      <p class="ff-maintenance">No separate feature-engineering pipeline.</p>
+    </section>
+  </div>
+  <p class="ff-test">
+    <strong>Both workflows</strong> Train and validate, tune model settings when useful, then test selected
+    models on held-out data.
+  </p>
+  <figcaption>
+    A typical feature-engineering workflow, compared with relflow’s schema-defined model. HPO means
+    hyperparameter optimization. See conventional{' '}
+    <a href="https://scikit-learn.org/stable/modules/compose.html">pipelines</a> and{' '}
+    <a href="https://scikit-learn.org/stable/modules/grid_search.html">parameter search</a>.
+  </figcaption>
+</figure>
+
+<style>
+  .feature-flow {
+    margin: var(--rf-section-gap) 0;
+    min-width: 0;
+    color: var(--rf-ink);
+    scroll-margin-top: 6rem;
+  }
+  .ff-start,
+  .ff-test {
+    margin: 0;
+    padding: var(--rf-panel-padding);
+    border: 1px solid var(--rf-border);
+    background: var(--rf-surface);
+    color: var(--rf-muted);
+    font-size: 0.78rem;
+    line-height: 1.6;
+    text-align: center;
+  }
+  .ff-start {
+    border-radius: 0.5rem 0.5rem 0 0;
+  }
+  .ff-test {
+    border-radius: 0 0 0.5rem 0.5rem;
+  }
+  .ff-start strong,
+  .ff-test strong {
+    color: var(--rf-ink);
+    margin-right: 0.4rem;
+  }
+  .ff-workflows {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-inline: 1px solid var(--rf-border);
+    background: var(--rf-card);
+  }
+  .ff-workflow {
+    display: grid;
+    grid-template-rows: auto 1fr auto auto;
+    min-width: 0;
+    padding: var(--rf-panel-padding);
+  }
+  .ff-workflow + .ff-workflow {
+    border-left: 1px solid var(--rf-border);
+  }
+  .ff-workflow header {
+    margin-bottom: 1rem;
+  }
+  .ff-eyebrow {
+    margin: 0 0 0.4rem;
+    color: var(--rf-muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  .ff-title {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 650;
+    line-height: 1.45;
+    letter-spacing: -0.02em;
+  }
+  .ff-path {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    padding-left: 1.5rem;
+  }
+  .ff-path ol {
+    display: grid;
+    grid-template-rows: repeat(3, minmax(6.5rem, 1fr));
+    gap: 1.5rem;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .ff-node {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+    min-height: 6.5rem;
+    padding: 0.75rem;
+    border: 1px solid var(--rf-border);
+    border-radius: 0.35rem;
+    background: var(--sl-color-bg);
+  }
+  .ff-node:not(:last-child)::after {
+    content: '↓';
+    position: absolute;
+    bottom: -1.45rem;
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--rf-muted);
+    font-size: 1rem;
+    line-height: 1.5rem;
+  }
+  .ff-node > strong {
+    font-size: 0.8rem;
+    line-height: 1.45;
+  }
+  .ff-node p {
+    margin: 0.4rem 0 0;
+    color: var(--rf-muted);
+    font-size: 0.73rem;
+    line-height: 1.55;
+  }
+  .ff-return {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 1.5rem;
+    height: 100%;
+    overflow: visible;
+    fill: none;
+    stroke: var(--rf-muted);
+    stroke-width: 1.25;
+  }
+  .ff-return path {
+    vector-effect: non-scaling-stroke;
+  }
+  .ff-relflow .ff-eyebrow,
+  .ff-relflow .ff-title {
+    color: var(--sl-color-text-accent);
+  }
+  .ff-relflow .ff-path {
+    align-items: center;
+    padding-left: 0;
+  }
+  .ff-relflow .ff-path ol {
+    grid-template-rows: auto auto;
+  }
+  .ff-relflow .ff-feedback,
+  .ff-relflow .ff-maintenance {
+    padding-left: 0;
+  }
+  .ff-schema,
+  .ff-model {
+    border-color: var(--sl-color-text-accent);
+  }
+  .ff-model {
+    border-style: dashed;
+  }
+  .ff-joint {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    margin-top: 0.6rem;
+    padding: 0.4rem;
+    border-radius: 0.2rem;
+    background: var(--rf-surface);
+    font-size: 0.7rem;
+    line-height: 1.5;
+  }
+  .ff-joint span[aria-hidden] {
+    color: var(--sl-color-text-accent);
+  }
+  .ff-model small {
+    margin-top: 0.4rem;
+    color: var(--rf-muted);
+    font-size: 0.65rem;
+    line-height: 1.5;
+    text-align: center;
+  }
+  .ff-feedback {
+    margin: 0.85rem 0 0;
+    padding-left: 1.5rem;
+    color: var(--rf-ink);
+    font-size: 0.73rem;
+    font-weight: 600;
+    line-height: 1.55;
+  }
+  .ff-feedback span {
+    margin-right: 0.15rem;
+  }
+  .ff-maintenance {
+    margin: 0.35rem 0 0;
+    padding-left: 1.5rem;
+    color: var(--rf-muted);
+    font-size: 0.7rem;
+    line-height: 1.55;
+  }
+  figcaption {
+    margin-top: 0.75rem;
+    color: var(--rf-muted);
+    font-size: 0.74rem;
+    line-height: 1.65;
+  }
+  figcaption a {
+    color: var(--sl-color-text-accent);
+  }
+  @media (max-width: 600px) {
+    .ff-workflows {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .ff-workflow + .ff-workflow {
+      border-left: 0;
+      border-top: 1px solid var(--rf-border);
+    }
+  }
+</style>

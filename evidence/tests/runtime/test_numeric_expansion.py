@@ -50,6 +50,8 @@ def test_zero_null_and_nan_have_three_different_arrow_observations():
 
 
 def test_visibility_oracle_integrates_hidden_values_instead_of_leaking_them():
+    from policies import CONTROL
+
     proof = load("experiments/calibration/evidence_availability.py")
     hidden = [{"group": "rare", "signal": float(value), "hide_signal": True} for value in (-1, 0, 1)]
     expected = proof.PROBABILITY[1].mean()
@@ -66,7 +68,7 @@ def test_visibility_oracle_integrates_hidden_values_instead_of_leaking_them():
             key: value for key, value in right.items() if key != "hide_signal"
         }
     model = rf.Model(
-        preset="xs",
+        preset=CONTROL.name,
         group=rf.Enum(values=proof.GROUPS),
         signal=rf.Number(mask=rf.Mask(query="hide_signal", skip=True, dropout=False)),
         target=rf.Boolean(mask=True),

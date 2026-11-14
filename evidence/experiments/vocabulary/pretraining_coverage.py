@@ -127,15 +127,13 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
         yield {"x": float(label), "code": LABELS[label], "hide": index % 2 == 0}
 
 
+class PredictionModel(rf.Model):
+    x = rf.Number
+    code = rf.Category(mask=rf.Mask(query="hide", reconstruct=True))
+
+
 def build() -> rf.Model:
-    model = rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
-        x=rf.Number,
-        code=rf.Category(mask=rf.Mask(query="hide", reconstruct=True)),
-    )
+    model = PredictionModel(d_model=32, n_layers=1, n_heads=4, dropout=0.0)
     return model
 
 

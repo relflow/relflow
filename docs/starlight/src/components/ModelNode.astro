@@ -1,0 +1,39 @@
+---
+import type { ModelNode } from '../data/model-explainer';
+
+interface Props {
+  node: ModelNode;
+  stages: Record<string, string>;
+}
+const { node, stages } = Astro.props;
+---
+
+<li
+  class:list={['me-node', { 'me-node-target': node.target }]}
+  data-model-stages={stages[node.path]}
+>
+  <button
+    type="button"
+    data-model-select={node.path}
+    aria-pressed="false"
+    disabled
+    title={node.description}
+  >
+    <span class="me-node-mark" aria-hidden="true"
+      >{node.kind === 'branch' ? '▱' : node.target ? '●' : '·'}</span
+    >
+    <span class="me-node-name">{node.name}</span>
+    <span class="me-node-type">{node.kind === 'branch' ? node.className : node.type}</span>
+    {node.target && <span class="me-node-role">Answer</span>}
+    {node.added && <span class="me-node-added">New label</span>}
+  </button>
+  {
+    node.children.length > 0 && (
+      <ul>
+        {node.children.map((child) => (
+          <Astro.self node={child} stages={stages} />
+        ))}
+      </ul>
+    )
+  }
+</li>

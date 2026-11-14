@@ -104,7 +104,7 @@
 #
 # ### Training and controls
 #
-# The model uses the [xs preset](../../concepts/model-tree.qmd#choose-a-size).
+# The model uses the frozen Evidence control architecture; its settings are shown in the code.
 #
 # Fit for 500 AdamW updates at learning rate 0.002. On the same test observations,
 # set each of the four branch-mask patterns deterministically. At least one
@@ -129,7 +129,7 @@ import numpy as np
 import polars as pl
 import pyarrow as pa
 import relflow as rf
-from relflow.presets.base import resolve
+from policies import CONTROL
 from reporting import experiment, report
 
 BUDGET = 500
@@ -153,28 +153,19 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
         }
 
 
+class View(rf.Branch):
+    reading = rf.Number
+    backup = rf.Number(mask=rf.Mask(query="hide_backup", skip=True, dropout=False))
+
+
+class Model(rf.Model):
+    views = View(length=2, mask=rf.Mask(query="hidden", skip=True, dropout=False))
+    target = rf.Number(mask=True, objective="mse")
+
+
 def build() -> rf.Model:
-    # Freeze the experimental architecture independently of SDK preset changes.
-    control_preset = rf.presets.Preset(
-        name="xs",
-        d_model=64,
-        root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
-        branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
-        leaf=rf.presets.LeafDefaults(n_heads=2),
-    )
-    model = rf.Model(
-        schema=resolve(
-            control_preset,
-            views=rf.Branch(
-                length=2,
-                mask=rf.Mask(query="hidden", skip=True, dropout=False),
-                reading=rf.Number,
-                backup=rf.Number(mask=rf.Mask(query="hide_backup", skip=True, dropout=False)),
-            ),
-            target=rf.Number(mask=True, objective="mse"),
-        )
-    )
-    model.preset = control_preset
+
+    model = Model(preset=CONTROL.name)
     return model
 
 

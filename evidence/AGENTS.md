@@ -10,6 +10,24 @@ baseline into Polars while retaining the candidate's native frame; do not
 coerce predictions back to Arrow for metric checks. IPC diagnostic artifacts
 remain a separate persistence boundary.
 
+Keep fixed field and branch contracts visible in experiment-owned `Model` and
+`Branch` classes. Put declarations at module scope when they do not depend on a
+local experimental arm; instantiate the neural model only during execution.
+Generated field mappings remain appropriate for parameterized schemas.
+
+`experiments/policies.py` is the narrow shared-configuration exception: its
+immutable `CONTROL` policy freezes the historical XS architecture under the
+internal name `evidence-control-v1`. It contains configuration and registration,
+not model factories, field definitions, generators, data, or training helpers.
+Every experiment retains its own root/branch overrides, masks, fit options,
+budgets, and checks. The policy has no fit recipe; never replace these protocols
+with a fit preset. Do not track changing SDK architecture defaults.
+The internal name replaces the previous `xs` policy metadata in new executions;
+historical records retain their original names, sources, and measurements.
+Runtime input identities and isolated worker views include this shared module.
+The reporter hashes all top-level shared runtime Python files without importing
+them. Static discovery and documentation builds must not import `policies.py`.
+
 From the repository root, `make check` validates static docs and evidence tooling.
 Runtime tests under evidence/tests/runtime are explicit and require a separately
 supplied RelFlow wheel; use `uv run --project docs --with /path/to/matching-relflow.whl`
@@ -27,13 +45,12 @@ explicit `--lane research` selection. IDs are global across both directories.
 Hosted execution keeps every core experiment; frontmatter cannot change a lane.
 Static docs and authoring checks cover both lanes without importing resources.
 
-The renderer adds visible behavioral criteria before the Example in generated
-pages, keeping the canonical scripts' authored prose and scientific code intact.
-Use structured groups and tables for nested metrics, with the full raw record
-in its own disclosure. Generated details use Measurements, Method, Reproduce,
-and Code tabs, with metric groups and provenance folded by default and a bounded
-source-code viewer. Preserve the canonical scripts and exact downloads.
-Use diagnostic plots alongside readouts and structured tables. Retain actual
+Starlight reads the declarations, authored comment cells, and selected publication
+through `docs/starlight/src/evidence/data.ts`. Keep visible behavioral criteria,
+structured nested metrics, the full raw record, reproduction details, provenance,
+and exact source downloads. Source commentary must remain distinct from measured
+checks. The site never generates a second Python page or executes diagram source.
+Preserve retained diagnostic plots alongside their readouts and tables. Retain actual
 paired predictions, scores, masks, coordinates, and other needed observations
 during the proof; do not limit figures to the latest released scalar metrics.
 Bind every measured figure to its exact source, full-budget record, and artifact

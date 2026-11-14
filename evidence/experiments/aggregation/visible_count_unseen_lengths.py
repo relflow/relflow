@@ -186,6 +186,16 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
+class Item(rf.Branch):
+    amount = rf.Number
+
+
+class PredictionModel(rf.Model):
+    items = Item(length=CAPACITY, attention=None, n_layers=2, reduction=rf.Mean())
+    item_count = rf.Number
+    total = rf.Number(mask=True, objective="mse")
+
+
 @experiment("P005", seed=3621)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
@@ -193,15 +203,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     train = list(random_records(rows=1024, seed=seed + 1))
     unseen = list(random_records(rows=512, seed=seed + 3, minimum=7, maximum=10))
     short = list(random_records(rows=256, seed=seed + 4, maximum=5))
-    model = rf.Model(
-        d_model=32,
-        n_layers=2,
-        n_heads=4,
-        reduction=rf.Attention(n_layers=2),
-        items=rf.Branch(length=CAPACITY, attention=None, n_layers=2, reduction=rf.Mean(), amount=rf.Number),
-        item_count=rf.Number,
-        total=rf.Number(mask=True, objective="mse"),
-    )
+    model = PredictionModel(d_model=32, n_layers=2, n_heads=4, reduction=rf.Attention(n_layers=2))
     datamodule = rf.SyntheticDataModule(
         train=lambda: random_records(rows=1024, seed=seed + 1),
         validate=lambda: random_records(rows=256, seed=seed + 2),

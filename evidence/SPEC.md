@@ -16,7 +16,24 @@ Each experiment is a self-contained annotated script under
 held-out evaluation, matched controls, measured metrics, and named Boolean
 checks. Preserve those semantics when changing packaging or presentation.
 Share reporting and CLI plumbing, not generators, datasets, or model helpers.
+The shared immutable architecture configuration in `experiments/policies.py`
+is a narrow exception. It may declare and register frozen preset values, but
+must not define model factories, fields, generators, data, or training routines.
+Fixed schemas belong in experiment-owned classes; generated mappings remain
+visible in the experiment that needs them. Declare static contracts at module
+scope and allocate neural models during execution.
 Never reuse a stable identifier for a different experiment.
+
+The internal `CONTROL` policy preserves the historical XS architecture,
+independently of the SDK's current public presets. It is registered as
+`evidence-control-v1`, with every architecture default explicit and no fit
+recipe. Its name deliberately replaces `xs` in new policy metadata; all other
+policy values, resolved schemas, seeded initial weights, and mutation defaults
+must remain equivalent. Experiment-specific overrides and fit arguments remain
+in their scripts. Internal policies must not change capacity merely because SDK
+defaults change. A declaration refactor requires schema and initialization
+equivalence checks, with generators, seeds, budgets, controls and checks retained.
+It never establishes a fresh learning result or relabels an archived record.
 
 Use independent training, validation, and test observations. Exclude target
 answers from inputs, control leakage, and test the declared generalization
@@ -195,17 +212,17 @@ output-reader update does not establish a fresh learning measurement.
 ## Documentation
 
 Author prose in `# %% [markdown]` comment cells and Python in `# %%` cells.
-The header declares `code-fold: true` and
-`execute: {enabled: false, eval: false}`. Use the Markdown engine, with no Jupyter
-or model dependency in the documentation build. Static discovery supplies
-`evidence-id` from the decorator when generating documentation. An explicitly
-supplied frontmatter ID must agree with the decorator.
+Static discovery supplies `evidence-id` from the decorator; an explicitly
+supplied frontmatter ID must agree with it. The Starlight adapter reads these
+cells as static source data. Existing diagram source and presentation annotations
+remain part of the retained script bytes; the website extracts authored captions
+without executing diagram code. No Jupyter or model dependency belongs in the
+documentation build.
 
-Each page asks one question and shows an Example, Comparison, and Result, with
-one YAML observation and a schema-faithful shared Typst tree. Generated pages
-show predeclared behavioral criteria before the Example, with recorded met/unmet
-statuses. The renderer injects the checks shortcode only into the generated
-page; canonical scripts keep their authored prose and unchanged scientific code.
+Each experiment asks one question and shows an Example, Comparison, and Result,
+with one YAML observation and a schema-faithful description of modeled records.
+The website shows predeclared behavioral criteria with recorded met/unmet
+statuses. Canonical scripts keep their authored prose and scientific code.
 Select one to three numerical readouts using explicit metric paths and formats.
 Explain the measured limit; AUC is not accuracy and learned arithmetic is not
 exact accounting.
@@ -240,9 +257,11 @@ observation checksums. See [diagnostics/README.md](diagnostics/README.md).
 Presentation changes never alter scientific budgets or checks or establish a
 fresh learning result.
 
-`evidence/render.py` generates ignored `docs/evidence/` pages from canonical
-scripts and the selected publication JSON. The checked-in `results.json` is an
-unchanged bootstrap snapshot for offline builds. Hosted release versions fetch
+`docs/starlight/src/evidence/data.ts` combines canonical declarations and the
+selected publication JSON for the website's `/evidence/Pxxx/` pages. No generated
+Python documentation pages are maintained. The checked-in `results.json` is an
+unchanged bootstrap snapshot for offline builds; Starlight retains its identical
+local copy at `docs/starlight/public/evidence/results.json`. Hosted release versions fetch
 their matching public asset with the same run's plots. Branch and PR builds select
 the newest exact-commit CI attempt and its candidate plots; pending or unavailable
 assets show an explicit status rather than older passing measurements. Every
@@ -262,6 +281,11 @@ retaining canonical sources and current measurements.
 The complete source snapshot retains its raw integrity hash. Separate runtime
 fingerprints bind each experiment and shared runtime files under `experiments/`;
 publication assets, documentation, and tests are outside this execution identity.
+Shared policy bytes participate in every task's execution-input identity and
+isolated worker view. Local records hash every top-level shared runtime Python
+file, including the policy module, without importing it during provenance
+collection. Static catalog discovery reads declarations without importing any
+experiment or shared model configuration.
 The installed wheel payload, dependency export, seed, budget, trusted executor,
 and actual resource/thread policy must also match before baseline reuse.
 

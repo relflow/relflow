@@ -131,16 +131,14 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
         yield {"tags": tags, "labels": None if tags is None else list(tags), "target": target}
 
 
+class PredictionModel(rf.Model):
+    tags = rf.Set(p_unavailable=0.0)
+    labels = rf.Set(p_unavailable=0.0, threshold=0.5, mask=True)
+    target = rf.Number(mask=True, objective="mse")
+
+
 def build() -> rf.Model:
-    return rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
-        tags=rf.Set(p_unavailable=0.0),
-        labels=rf.Set(p_unavailable=0.0, threshold=0.5, mask=True),
-        target=rf.Number(mask=True, objective="mse"),
-    )
+    return PredictionModel(d_model=32, n_layers=1, n_heads=4, dropout=0.0)
 
 
 def prediction(model: rf.Model, rows: list[dict]) -> tuple[np.ndarray, list[set[str]]]:

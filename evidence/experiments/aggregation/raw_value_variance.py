@@ -164,20 +164,22 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
+class Item(rf.Branch):
+    value = rf.Number
+
+
+class PredictionModel(rf.Model):
+    items = Item(length=ITEMS, n_layers=2, reduction=rf.Attention(n_layers=2))
+    variance = rf.Number(mask=True, objective="mse")
+
+
 @experiment("P007", seed=3504)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
     train = list(dispersion_records(rows=1280, seed=seed + 1))
     test = list(dispersion_records(rows=640, seed=seed + 3))
-    model = rf.Model(
-        d_model=32,
-        n_layers=2,
-        n_heads=4,
-        reduction=rf.Attention(n_layers=2),
-        items=rf.Branch(length=ITEMS, n_layers=2, reduction=rf.Attention(n_layers=2), value=rf.Number),
-        variance=rf.Number(mask=True, objective="mse"),
-    )
+    model = PredictionModel(d_model=32, n_layers=2, n_heads=4, reduction=rf.Attention(n_layers=2))
     datamodule = rf.SyntheticDataModule(
         train=lambda: dispersion_records(rows=1280, seed=seed + 1),
         validate=lambda: dispersion_records(rows=320, seed=seed + 2),

@@ -1,0 +1,19 @@
+---
+import AnchorHeading from '@astrojs/starlight/components/AnchorHeading.astro';
+import type { TypeExample } from '../data/type-example';
+import { checkSections } from '../datatypes/page';
+import TypeExamples from './TypeExamples.astro';
+
+interface Props {
+  id: string;
+  examples: TypeExample[];
+}
+
+const { id, examples } = Astro.props;
+const body = await Astro.slots.render('default');
+checkSections(body, id);
+---
+
+<AnchorHeading level={2} id="example">Example</AnchorHeading>
+<TypeExamples {id} {examples} />
+<Fragment set:html={body} />

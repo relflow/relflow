@@ -1,0 +1,89 @@
+---
+title: Hash
+description: Preserve identifier matching without learning a vocabulary for every identifier.
+---
+
+import DataTypePage from '../../../components/DataTypePage.astro';
+import { hashExamples } from '../../../data/examples/hash';
+
+Use `rf.Hash` for identifier relationships: whether an event refers to the
+same user, product, or account as another field. It represents identifiers
+without maintaining a learned vocabulary for every distinct value.
+
+<DataTypePage id="hash-examples" examples={hashExamples}>
+
+## Inputs
+
+Supply integer, string, or bytes identifiers, or nulls. Equal values need the
+same scalar family to match: integer `42` and string `"42"` are distinct.
+There is no vocabulary admission step for a new identifier.
+
+Training changes the hash salt for each encoded batch, shared across all Hash
+fields in that batch. Matching relationships remain available while the model
+cannot rely on one persistent fingerprint per training identity. Validation,
+test, and prediction use a stable, unsalted representation.
+
+Hashing gives a finite fingerprint, so distinct identifiers can collide.
+
+## Predictions
+
+Hash reconstruction learns fingerprint buckets; it does not recover an
+original user or product ID as a decoded prediction. Use an appropriate label
+target when your application needs to predict named identities.
+
+The examples use Hash fields as context and declare Boolean or Number targets
+for their public answers.
+
+## Options
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `n_hashes` | `1` | Number of independent hash lanes; must be positive. |
+| `n_bands` | `8` | Lower-frequency extent of the Fourier representation; must be positive. |
+| `offset` | `4` | Upper-frequency extent of the Fourier representation; must be positive. |
+| `n_buckets` | `4` | Number of reconstruction buckets per hash lane; must exceed one. |
+
+Use `n_hashes` to configure multiple hash lanes when the matching problem
+calls for more capacity:
+
+```python
+owner_id = rf.Hash(n_hashes=4)
+```
+
+Apply the same representation settings to fields intended for matching.
+`n_bands` and `offset` control the Fourier representation; `n_buckets` controls
+the bucket objectives used for reconstruction.
+
+## Request Methods
+
+This type has no type-specific request methods.
+
+## Footguns
+
+- **Expecting a learned profile for every ID.** Hash uses [batch-salted fingerprints](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/hashable.py#L65), with no persistent identity vocabulary. Use Category or Group when an identity should carry learned state. The retained [P021 check](/evidence/#P021) measures matching unseen IDs, rather than learning a profile for each one.
+- **Changing ID types between related fields.** Integer `42` and string `"42"` are different inputs, and different Hash settings can produce different representations. Normalize matching IDs to the same scalar family and configure matching fields consistently; inspect the [Hash encoding contract](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/hashable.py#L125).
+- **Assuming fingerprints are collision-free keys.** A finite hash representation can map distinct IDs together. Check matching quality on held-out IDs, including nonmatching pairs, and compare `n_hashes` settings when needed. The [representation options](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/hashable.py#L89) control a model input, not a uniqueness constraint.
+- **Treating model matching as an exact lookup.** The retained [P037 experiment](/evidence/#P037) reports worse transfer error after compressing the route between related records. Preserve the records your task needs and evaluate the resulting predictions; perform required exact joins in your preprocessor rather than relying on a predicted lookup.
+
+## Related types
+
+- [Group](/data-types/group/) learns persistent identity assignments to shared representations.
+
+- [Category](/data-types/category/) learns label-specific representations and can return learned labels as predictions.
+- [Enum](/data-types/enum/) predicts labels from a fixed declaration.
+
+Retain identifiers outside the schema
+when you only need to match output rows back to application records.
+
+For admission, unknown labels, and continued training, see
+[Online vocabulary](/advanced/online-vocabulary/).
+
+## Evidence
+
+The controlled experiment
+[Can it recognize matching IDs it has never seen?](/evidence/#P021)
+compares Hash with categorical and shuffled-label controls on that specific
+matching task. The library retains its recorded relflow 0.4.2 run at revision
+`7dec5e8`, rather than a measurement on your application.
+
+</DataTypePage>

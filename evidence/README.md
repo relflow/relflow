@@ -25,6 +25,40 @@ directory. Execution never edits the reviewed publication selection.
 
 ## Define an experiment
 
+Keep each experiment's typed data contract visible in its own `Model` and
+`Branch` classes. Module-level declarations allocate no neural weights; the
+experiment constructs the model when it runs. Programmatically generated field
+mappings remain useful when an arm changes the schema.
+
+Experiments that share the historical XS capacity use `CONTROL` from
+`experiments/policies.py`:
+
+```python
+import relflow as rf
+from policies import CONTROL
+
+
+class Model(rf.Model):
+    value = rf.Number
+    target = rf.Boolean(mask=True)
+
+
+# Inside the experiment's execution function:
+model = Model(preset=CONTROL.name)
+```
+
+This Evidence-owned policy is registered as `evidence-control-v1`. It freezes
+architecture defaults and supplies no training recipe. Each experiment still
+owns its field definitions, overrides, independent data splits, masks, optimizer,
+budget, controls, metrics and checks. Other experiments keep their explicitly
+declared capacities rather than adopting this policy for uniformity.
+See the [configuration contract](SPEC.md#experimental-contract).
+
+The extraction changes policy-name metadata from `xs` to the internal name;
+architecture and seeded initialization are checked separately. Source and runtime
+fingerprints change, so old measurements keep their original provenance.
+Historical results are never rewritten or presented as a fresh execution.
+
 The default **core** lane runs in required hosted CI. Additional studies with
 optional resources live in `research/<category>/`; they use the same experiment
 format and appear in the docs with a Research label. List or run that lane
@@ -187,12 +221,13 @@ keeps its evidence selection frozen. New measurements for publication require
 a new version. Report Releases do not replace the latest package Release.
 
 The checked-in `results.json` preserves the existing historical snapshot for
-offline builds. `evidence/render.py` combines it, or an explicitly selected
-publication JSON, with experiment definitions. Hosted docs read their matching
-public release asset after verifying its digest and source revision. Unreleased
-previews use the last released selection; before the first asset-based release
-they use the bootstrap snapshot. No model import, cloud account, or new API
-credential is required.
+offline builds. Starlight keeps an identical local copy and combines it, or the
+publication selected by `RELFLOW_EVIDENCE_PUBLICATION`, with canonical experiment
+declarations through `docs/starlight/src/evidence/data.ts`. Hosted release docs
+read their matching public release asset after verifying its digest and source
+revision. Branch and PR builds select the newest exact-commit CI attempt; pending
+assets remain pending rather than borrowing older measurements. No model import,
+cloud account, or new API credential is required.
 
 To execute another complete CI run without publishing a new selection:
 

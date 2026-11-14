@@ -180,20 +180,23 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray, target:
     return {"rmse": measured, "baseline_rmse": baseline_rmse, "nrmse": measured / baseline_rmse}
 
 
+class Item(rf.Branch):
+    contribution = rf.Number
+
+
+class PredictionModel(rf.Model):
+    items = Item(length=ITEMS, attention=None, reduction=rf.Mean())
+    mean_contribution = rf.Number(mask=True, objective="mse")
+    weighted_sum = rf.Number(mask=True, objective="mse")
+
+
 @experiment("P013", seed=3309)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
     train = list(repeated_contribution_records(rows=1024, seed=seed + 1))
     test = list(repeated_contribution_records(rows=512, seed=seed + 3))
-    model = rf.Model(
-        d_model=24,
-        n_layers=1,
-        n_heads=4,
-        items=rf.Branch(length=ITEMS, attention=None, reduction=rf.Mean(), contribution=rf.Number),
-        mean_contribution=rf.Number(mask=True, objective="mse"),
-        weighted_sum=rf.Number(mask=True, objective="mse"),
-    )
+    model = PredictionModel(d_model=24, n_layers=1, n_heads=4)
     datamodule = rf.SyntheticDataModule(
         train=lambda: repeated_contribution_records(rows=1024, seed=seed + 1),
         validate=lambda: repeated_contribution_records(rows=256, seed=seed + 2),

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import html
 import json
 import re
 from pathlib import Path
@@ -56,59 +55,3 @@ def load(root: Path) -> dict | None:
         return source.read_bytes()
 
     return validate(json.loads(path.read_text()), asset)
-
-
-def fragment(root: Path, identifier: str, run: dict | None, review: dict | None) -> str:
-    if review is None or identifier not in review["entries"]:
-        return ""
-    entry = review["entries"][identifier]
-    assets = root / "docs/assets/evidence-plots"
-    data = json.loads((assets / entry["data"]).read_text())
-    if data.get("record") != run:
-        return ""
-    base = "../../assets/evidence-plots/"
-    blocks = [
-        f'<section id="proof-diagnostics" class="evidence-diagnostics" data-observations="{base}{html.escape(entry["data"], quote=True)}">',
-        f"<h3>{html.escape(data['focus'])}</h3>",
-        f"<p>{html.escape(data['comparison'])}</p>",
-    ]
-    if run is None:
-        scope = "Generator illustration. No full learning result has been recorded for this optional study."
-    else:
-        scope = f"Full-budget diagnostic run · seed {run['seed']} · {run['accelerator']} · {run['started_at'][:10]}. "
-        scope += "These figures and the selected measurements come from the same captured execution. "
-        scope += {
-            "paired Evidence CI candidate": "This is the candidate role of the paired Evidence CI run.",
-            "candidate-only Evidence CI proof": ("This new proof has no directly comparable baseline measurement."),
-        }.get(data.get("scope"), "This is an unpaired visualization run.")
-    blocks.append('<p class="diagnostic-scope">' + html.escape(scope) + "</p>")
-    if run is None and data.get("requires"):
-        blocks.append("<p>To measure this study: " + html.escape("; ".join(data["requires"])) + ".</p>")
-    for figure in data["figures"]:
-        name = html.escape(figure["name"], quote=True)
-        alt = html.escape(figure.get("alt", data["focus"]), quote=True)
-        blocks.append(
-            f'<figure><div class="plot-canvas" tabindex="0" role="region" aria-label="Scrollable proof visualization">'
-            f'<img class="plot-light" src="{base}{name}-light.svg" alt="{alt}">'
-            f'<img class="plot-dark" src="{base}{name}-dark.svg" alt="{alt}"></div>'
-            f'<figcaption><span class="plot-scroll-note">Scroll sideways to see the full figure.</span>{html.escape(figure["caption"])} <a href="{base}{name}-light.svg">Download SVG</a></figcaption></figure>'
-        )
-    if data.get("interactive", {}).get("kind") in {"numeric", "classification", "fusion", "anomaly"}:
-        blocks.append('<div class="proof-explorer"></div>')
-    blocks.append('<p class="diagnostic-limit">' + html.escape(data["limit"]) + "</p>")
-    if run is not None:
-        run_id = data["capture_run"]
-        downloads = (
-            f'<p class="diagnostic-downloads"><a href="{base}{identifier}-record.json">Full run and checks</a> · '
-            f'<a href="{base}{html.escape(data["manifest"], quote=True)}">Observation manifest (gzip)</a> · '
-            f'<a href="{base}{identifier}-proof.py">Executed proof source</a> · '
-            f'<a href="{base}{entry["data"]}">Figure and example data</a>'
-        )
-        if (
-            data.get("scope") in {"paired Evidence CI candidate", "candidate-only Evidence CI proof"}
-            and run_id is not None
-        ):
-            downloads += f' · <a href="https://github.com/relflow/relflow/actions/runs/{html.escape(str(run_id), quote=True)}">CI observation bundles</a>'
-        blocks.append(downloads + "</p>")
-    blocks.append(f'</section>\n<script src="{base}controls.js" defer></script>')
-    return "\n".join(blocks) + "\n"

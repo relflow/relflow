@@ -144,19 +144,16 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
         }
 
 
+class Event(rf.Branch):
+    value = rf.Number(objective="mse", mask=rf.Mask(query="next", reconstruct=True))
+
+
+class PredictionModel(rf.Model):
+    events = Event(length=LENGTH, reduction=None, mask=rf.Mask(query="future", skip=True, dropout=False))
+
+
 def build() -> rf.Model:
-    return rf.Model(
-        d_model=32,
-        n_layers=2,
-        n_heads=4,
-        dropout=0.0,
-        events=rf.Branch(
-            length=LENGTH,
-            reduction=None,
-            mask=rf.Mask(query="future", skip=True, dropout=False),
-            value=rf.Number(objective="mse", mask=rf.Mask(query="next", reconstruct=True)),
-        ),
-    )
+    return PredictionModel(d_model=32, n_layers=2, n_heads=4, dropout=0.0)
 
 
 def prediction(model: rf.Model, rows: list[dict]) -> tuple[np.ndarray, np.ndarray]:

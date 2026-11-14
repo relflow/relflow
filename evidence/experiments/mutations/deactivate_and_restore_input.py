@@ -148,6 +148,12 @@ def equal(first, second) -> bool:
     return type(first) is type(second) and first == second
 
 
+class PredictionModel(rf.Model):
+    a = rf.Number
+    b = rf.Number
+    y = rf.Number(mask=True, objective="mse")
+
+
 @experiment("P049", seed=4901)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
@@ -162,15 +168,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     order = rng.permutation(len(test))
     shuffled = [{**row, "b": test[index]["b"]} for row, index in zip(test, order, strict=True)]
     changed = [{**row, "b": -row["b"]} for row in test]
-    model = rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
-        a=rf.Number,
-        b=rf.Number,
-        y=rf.Number(mask=True, objective="mse"),
-    )
+    model = PredictionModel(d_model=32, n_layers=1, n_heads=4, dropout=0.0)
     data = rf.SyntheticDataModule(
         train=partial(records, rows=2048, seed=seed + 1),
         validate=partial(records, rows=512, seed=seed + 2),

@@ -1,0 +1,623 @@
+---
+import { Code } from '@astrojs/starlight/components';
+import { stringify } from 'yaml';
+import type { ExampleValue, TypeExample } from '../data/type-example';
+import DataExplorer from './DataExplorer.astro';
+import ValueTree from './ValueTree.astro';
+import ExampleSelection from './ExampleSelection.astro';
+
+interface Props {
+  id: string;
+  examples: TypeExample[];
+}
+
+const { id, examples } = Astro.props;
+const yamlOptions = { indent: 2, lineWidth: 0 };
+
+function trainingRecord(inputs: ExampleValue, answers: ExampleValue): ExampleValue {
+  if (Array.isArray(inputs) && Array.isArray(answers)) {
+    if (inputs.length !== answers.length)
+      throw new Error('Example inputs and answers must retain the same record positions.');
+    return inputs.map((input, index) => trainingRecord(input, answers[index]));
+  }
+  if (
+    inputs &&
+    answers &&
+    typeof inputs === 'object' &&
+    typeof answers === 'object' &&
+    !Array.isArray(inputs) &&
+    !Array.isArray(answers)
+  ) {
+    return Object.fromEntries(
+      [...new Set([...Object.keys(inputs), ...Object.keys(answers)])].map((key) => [
+        key,
+        key in answers
+          ? key in inputs
+            ? trainingRecord(inputs[key], answers[key])
+            : answers[key]
+          : inputs[key],
+      ]),
+    );
+  }
+  return answers;
+}
+---
+
+<section
+  id={id}
+  class="type-showcase not-content"
+  aria-label="Explore model examples"
+  data-type-showcase
+>
+  <ExampleSelection
+    choices={examples.map((example) => ({ id: example.id, panel: `${id}-${example.id}` }))}
+  />
+  <div class="example-picker" role="group" aria-label="Choose an example">
+    {
+      examples.map((example, index) => (
+        <button
+          type="button"
+          data-example-select={index}
+          aria-controls={`${id}-${example.id}`}
+          aria-pressed={index === 0 ? 'true' : 'false'}
+        >
+          <span class="example-number" aria-hidden="true">
+            {String(index + 1).padStart(2, '0')}
+          </span>
+          <span class="example-choice">
+            <>
+              <span class="example-label">{example.label}</span>
+              <span class="example-summary">{example.summary}</span>
+            </>
+          </span>
+        </button>
+      ))
+    }
+  </div>
+  <p class="example-instructions">
+    Choose a scenario. Hover, focus, or tap dotted terms for notes; matching field names light up
+    together.
+  </p>
+  <p
+    class="visually-hidden"
+    role="status"
+    aria-live="polite"
+    aria-atomic="true"
+    data-example-status
+  >
+  </p>
+  {
+    examples.map((example, index) => (
+      <article
+        id={`${id}-${example.id}`}
+        class="type-example"
+        aria-labelledby={`${id}-${example.id}-title`}
+        data-type-example
+      >
+        <header class="example-heading">
+          <div class="example-eyebrow">
+            <>
+              <span>Example {String(index + 1).padStart(2, '0')}</span>
+              <span class="illustration-label">Illustrative</span>
+              <a href={`#${id}-${example.id}`} aria-label={`Link to example: ${example.label}`}>
+                Link
+              </a>
+            </>
+          </div>
+          <h3 id={`${id}-${example.id}-title`}>{example.title}</h3>
+          <p>{example.description}</p>
+        </header>
+        <div class="example-workspace">
+          <section class="dataset-pane" aria-label="Dataset">
+            <div class="pane-heading">
+              <>
+                <h4>Dataset</h4>
+                <span>Known context and historical answers</span>
+              </>
+            </div>
+            <DataExplorer
+              id={`${id}-${example.id}-data`}
+              dataset={example.dataset}
+              headingLevel={5}
+            />
+          </section>
+          <section class="schema-pane" aria-label="Model schema">
+            <div class="pane-heading">
+              <>
+                <h4>Schema</h4>
+                <span>Python</span>
+              </>
+            </div>
+            <Code code={example.schema} lang="python" meta='contract="schema"' />
+          </section>
+          <details class="records-pane">
+            <summary>Inspect the exact records · YAML</summary>
+            <div class="contract-panes">
+              <section class="contract-pane" aria-label="Known inputs">
+                <div class="pane-heading">
+                  <>
+                    <h4>Known inputs</h4>
+                    <span>Available when predicting</span>
+                  </>
+                </div>
+                <Code
+                  code={stringify(example.inputs, yamlOptions)}
+                  lang="yaml"
+                  meta='contract="inputs"'
+                  wrap
+                  preserveIndent={false}
+                  hangingIndent={2}
+                />
+              </section>
+              <section class="contract-pane answers-pane" aria-label="Training answer">
+                <div class="pane-heading">
+                  <>
+                    <h4>Training answer</h4>
+                    <span>Hidden from model inputs</span>
+                  </>
+                </div>
+                <Code
+                  code={stringify(example.answers, yamlOptions)}
+                  lang="yaml"
+                  meta='contract="answers"'
+                  wrap
+                  preserveIndent={false}
+                  hangingIndent={2}
+                />
+                {example.answerNote && <p class="output-note">{example.answerNote}</p>}
+                <details class="training-record">
+                  <summary>See the complete training record</summary>
+                  <p>
+                    Training records combine the known inputs and answer data. The schema derives
+                    and masks its targets before learning from the remaining context.
+                  </p>
+                  <Code
+                    code={stringify(trainingRecord(example.inputs, example.answers), yamlOptions)}
+                    lang="yaml"
+                    meta='contract="training"'
+                    wrap
+                    preserveIndent={false}
+                    hangingIndent={2}
+                  />
+                </details>
+              </section>
+            </div>
+          </details>
+        </div>
+        <section class="contract-pane result-pane" aria-label="Prediction result">
+          <div class="pane-heading">
+            <>
+              <h4>Prediction result</h4>
+              <span>
+                One row from <code>model.predict(...)</code>
+              </span>
+            </>
+          </div>
+          <ValueTree
+            id={`${id}-${example.id}-result`}
+            value={example.output}
+            inputs={example.inputs}
+            predictions
+          />
+          <p class="output-note">{example.outputNote} Values are rounded for readability.</p>
+        </section>
+        <footer class="example-footer">
+          <>
+            <p>{example.takeaway}</p>
+            <span>
+              Values and predictions are illustrative.{' '}
+              <a href="/quickstart/">Run a complete example →</a>
+            </span>
+          </>
+        </footer>
+      </article>
+    ))
+  }
+</section>
+
+<script>
+  for (const root of document.querySelectorAll<HTMLElement>('[data-type-showcase]')) {
+    const buttons = [...root.querySelectorAll<HTMLButtonElement>('[data-example-select]')];
+    const examples = [...root.querySelectorAll<HTMLElement>('[data-type-example]')];
+    const status = root.querySelector<HTMLElement>('[data-example-status]')!;
+    let selected = 0;
+
+    function highlight(target: Element | null) {
+      const example = examples[selected];
+      const note = target?.closest<HTMLElement>('[data-contract-field]');
+      const focused = document.activeElement?.closest<HTMLElement>('[data-contract-field]');
+      const field =
+        note && example.contains(note)
+          ? note.dataset.contractField
+          : focused && example.contains(focused)
+            ? focused.dataset.contractField
+            : undefined;
+      for (const element of example.querySelectorAll<HTMLElement>('[data-contract-field]')) {
+        element.toggleAttribute(
+          'data-field-active',
+          !!field && element.dataset.contractField === field,
+        );
+      }
+    }
+
+    function select(index: number, announce = true) {
+      if (index !== selected) {
+        document.dispatchEvent(new Event('code-notes:close'));
+        if (examples[selected].contains(document.activeElement))
+          buttons[index].focus({ preventScroll: true });
+        for (const element of examples[selected].querySelectorAll('[data-field-active]'))
+          element.removeAttribute('data-field-active');
+      }
+      selected = index;
+      examples.forEach((example, position) => {
+        example.inert = position !== index;
+        example.setAttribute('aria-hidden', String(position !== index));
+        buttons[position].setAttribute('aria-pressed', String(position === index));
+      });
+      if (announce)
+        status.textContent = `${buttons[index].querySelector('.example-label')!.textContent} example selected.`;
+    }
+
+    buttons.forEach((button, index) => {
+      button.addEventListener('click', () => select(index));
+      button.addEventListener('keydown', (event) => {
+        if (event.altKey || event.ctrlKey || event.metaKey) return;
+        const destinations: Record<string, number> = {
+          ArrowLeft: (index + buttons.length - 1) % buttons.length,
+          ArrowRight: (index + 1) % buttons.length,
+          Home: 0,
+          End: buttons.length - 1,
+        };
+        if (!(event.key in destinations)) return;
+        event.preventDefault();
+        const destination = destinations[event.key];
+        select(destination);
+        buttons[destination].focus({ preventScroll: true });
+      });
+    });
+    root.addEventListener('pointerover', (event) =>
+      highlight(event.target instanceof Element ? event.target : null),
+    );
+    root.addEventListener('pointerleave', () => highlight(null));
+    root.addEventListener('focusin', (event) =>
+      highlight(event.target instanceof Element ? event.target : null),
+    );
+    root.addEventListener('focusout', () => queueMicrotask(() => highlight(null)));
+
+    function followHash() {
+      let target;
+      try {
+        target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+      } catch {
+        return;
+      }
+      const index = examples.findIndex((example) => target && example.contains(target));
+      if (index !== -1) select(index, false);
+    }
+    select(0, false);
+    followHash();
+    root.dataset.ready = '';
+    window.addEventListener('hashchange', followHash);
+  }
+</script>
+
+<style>
+  .type-showcase {
+    margin-block: var(--rf-section-gap);
+    min-width: 0;
+  }
+  .example-picker {
+    display: none;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--rf-picker-gap);
+  }
+  [data-prepared] .example-picker {
+    display: grid;
+    visibility: hidden;
+  }
+  [data-ready] .example-picker {
+    display: grid;
+    visibility: visible;
+  }
+  .example-picker button {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    min-width: 0;
+    padding: var(--rf-picker-padding);
+    border: 1px solid var(--rf-border);
+    border-radius: 0.4rem;
+    background: var(--sl-color-bg);
+    color: var(--sl-color-text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .example-picker button:hover {
+    background: var(--rf-surface);
+    border-color: var(--sl-color-text-accent);
+  }
+  .example-picker button[aria-pressed='true'] {
+    border-color: var(--sl-color-text-accent);
+    background: var(--sl-color-accent-low);
+    box-shadow: inset 0 0 0 1px var(--sl-color-text-accent);
+  }
+  .example-picker button:focus-visible {
+    outline: 2px solid var(--sl-color-text-accent);
+    outline-offset: 3px;
+  }
+  .example-number {
+    color: var(--rf-muted);
+    font: 0.72rem/1.65 var(--sl-font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .example-choice,
+  .example-label,
+  .example-summary {
+    display: block;
+    min-width: 0;
+  }
+  .example-label {
+    font-size: 0.82rem;
+    font-weight: 650;
+    line-height: 1.5;
+  }
+  .example-summary {
+    margin-top: 0.25rem;
+    color: var(--rf-muted);
+    font-size: 0.7rem;
+    line-height: 1.5;
+  }
+  .example-instructions {
+    color: var(--rf-muted);
+    font-size: 0.75rem;
+    line-height: 1.6;
+    margin: 0.7rem 0 1rem;
+  }
+  .type-example {
+    border: 1px solid var(--rf-border);
+    border-radius: 0.5rem;
+    margin-block: 1rem;
+    overflow: clip;
+    scroll-margin-top: 6rem;
+  }
+  [data-prepared] .type-example,
+  [data-ready] .type-example {
+    margin: 0;
+  }
+  [data-ready] .type-example[aria-hidden='true'] {
+    display: none;
+  }
+  .example-heading {
+    padding: var(--rf-panel-padding);
+  }
+  .example-eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: var(--rf-muted);
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  .illustration-label {
+    color: var(--sl-color-text-accent);
+    background: var(--sl-color-accent-low);
+    border-radius: 1rem;
+    padding: 0.15rem 0.5rem;
+  }
+  .example-eyebrow a {
+    margin-left: auto;
+    color: var(--rf-muted);
+    text-decoration: none;
+    text-underline-offset: 0.2em;
+  }
+  .example-eyebrow a:hover {
+    color: var(--sl-color-text-accent);
+    text-decoration: underline;
+  }
+  .example-heading h3 {
+    margin: 0.6rem 0 0.45rem;
+    color: var(--rf-ink);
+    font-size: 1.2rem;
+    line-height: 1.35;
+    letter-spacing: -0.025em;
+  }
+  .example-heading p {
+    color: var(--rf-muted);
+    font-size: 0.85rem;
+    line-height: 1.65;
+    margin: 0;
+  }
+  .example-workspace {
+    border-top: 1px solid var(--rf-border);
+  }
+  .schema-pane,
+  .contract-panes,
+  .contract-pane {
+    min-width: 0;
+  }
+  .dataset-pane {
+    padding: var(--rf-panel-padding);
+    min-width: 0;
+  }
+  .schema-pane {
+    padding: var(--rf-panel-padding);
+    background: var(--rf-card);
+    border-top: 1px solid var(--rf-border);
+  }
+  .records-pane {
+    border-top: 1px solid var(--rf-border);
+    padding: var(--rf-panel-padding);
+  }
+  .records-pane > summary {
+    font-size: 0.78rem;
+  }
+  .contract-panes {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+  .records-pane .contract-pane {
+    padding-inline: 0;
+  }
+  .pane-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.25rem 0.55rem;
+    margin-bottom: 0.65rem;
+  }
+  .pane-heading h4 {
+    margin: 0;
+    color: var(--rf-ink);
+    font-size: 0.8rem;
+    font-weight: 650;
+    line-height: 1.5;
+  }
+  .pane-heading > span {
+    color: var(--rf-muted);
+    font-size: 0.65rem;
+    line-height: 1.5;
+  }
+  .contract-pane {
+    padding: var(--rf-panel-padding);
+    border-bottom: 1px solid var(--rf-border);
+  }
+  .contract-pane:last-child {
+    border: 0;
+  }
+  .type-showcase :global(.expressive-code) {
+    margin: 0;
+    --ec-codeFontSize: 0.78rem;
+    --ec-codeLineHeight: 1.65;
+  }
+  .type-showcase :global(.expressive-code .frame) {
+    box-shadow: none;
+  }
+  .type-showcase :global(.expressive-code pre) {
+    border: 0;
+    background: transparent;
+  }
+  .schema-pane :global(.expressive-code pre) {
+    padding: 0;
+  }
+  .contract-pane :global(.expressive-code pre) {
+    padding: 0.65rem;
+    background: var(--rf-card);
+    border-radius: 0.25rem;
+  }
+  .type-showcase :global(.rf-code-note[data-field-active]) {
+    background: var(--sl-color-accent-low);
+    box-shadow: inset 0 -2px var(--sl-color-text-accent);
+  }
+  .type-showcase [data-contract-field][data-field-active] {
+    background: var(--sl-color-accent-low);
+    border-radius: 0.25rem;
+  }
+  .training-record {
+    margin-top: 0.75rem;
+    color: var(--rf-muted);
+    font-size: 0.72rem;
+    line-height: 1.6;
+  }
+  summary {
+    cursor: pointer;
+    color: var(--sl-color-text-accent);
+    font-size: 0.72rem;
+  }
+  details p {
+    margin: 0.6rem 0;
+  }
+  .result-pane {
+    border-top: 1px solid var(--rf-border);
+    border-bottom: 0;
+    padding: var(--rf-panel-padding);
+  }
+  .result-pane .pane-heading {
+    margin-bottom: 0.85rem;
+  }
+  .pane-heading code {
+    font-family: var(--sl-font-mono);
+    font-size: inherit;
+  }
+  .output-note {
+    color: var(--rf-muted);
+    font-size: 0.72rem;
+    line-height: 1.65;
+    margin: 0.7rem 0 0;
+  }
+  .example-footer {
+    border-top: 1px solid var(--rf-border);
+    padding: var(--rf-panel-padding);
+  }
+  .example-footer p {
+    color: var(--rf-ink);
+    font-size: 0.8rem;
+    line-height: 1.65;
+    margin: 0 0 0.45rem;
+  }
+  .example-footer > span {
+    display: block;
+    color: var(--rf-muted);
+    font-size: 0.68rem;
+    line-height: 1.6;
+  }
+  .example-footer a {
+    color: var(--sl-color-text-accent);
+    text-underline-offset: 0.2em;
+  }
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  @media (max-width: 70rem) {
+    .contract-panes {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .type-showcase :global(.expressive-code) {
+      --ec-codeFontSize: 0.78rem;
+    }
+  }
+  @media (max-width: 450px) {
+    .example-picker button {
+      display: block;
+    }
+    .example-number {
+      display: block;
+      margin-bottom: 0.25rem;
+    }
+    .example-label {
+      font-size: 0.72rem;
+    }
+    .example-summary {
+      font-size: 0.63rem;
+    }
+    .example-heading h3 {
+      font-size: 1.08rem;
+    }
+    .example-heading p {
+      font-size: 0.8rem;
+    }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    [data-ready] .type-example[aria-hidden='false'] .example-heading {
+      animation: reveal 0.16s ease-out;
+    }
+    @keyframes reveal {
+      from {
+        opacity: 0.4;
+        transform: translateY(3px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+  }
+</style>

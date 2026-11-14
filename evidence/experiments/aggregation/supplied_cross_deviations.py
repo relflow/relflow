@@ -189,20 +189,22 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
 
 
+class Item(rf.Branch):
+    cross_deviation = rf.Number
+
+
+class PredictionModel(rf.Model):
+    items = Item(length=ITEMS, n_layers=2, attention=None, reduction=rf.Mean())
+    covariance = rf.Number(mask=True, objective="mse")
+
+
 @experiment("P008", seed=3513)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
     train = list(covariance_sufficient_records(rows=768, seed=seed + 1))
     test = list(covariance_sufficient_records(rows=384, seed=seed + 3))
-    model = rf.Model(
-        d_model=32,
-        n_layers=2,
-        n_heads=4,
-        reduction=rf.Attention(n_layers=2),
-        items=rf.Branch(length=ITEMS, n_layers=2, attention=None, reduction=rf.Mean(), cross_deviation=rf.Number),
-        covariance=rf.Number(mask=True, objective="mse"),
-    )
+    model = PredictionModel(d_model=32, n_layers=2, n_heads=4, reduction=rf.Attention(n_layers=2))
     datamodule = rf.SyntheticDataModule(
         train=lambda: covariance_sufficient_records(rows=768, seed=seed + 1),
         validate=lambda: covariance_sufficient_records(rows=192, seed=seed + 2),

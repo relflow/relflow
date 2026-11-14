@@ -150,15 +150,13 @@ def records(*, rows: int, seed: int, common_first: bool = False) -> Iterator[dic
         yield observations[index]
 
 
+class PredictionModel(rf.Model):
+    code = rf.Category(p_unavailable=0.0)
+    target = rf.Number(mask=True, objective="mse")
+
+
 def build() -> rf.Model:
-    return rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
-        code=rf.Category(p_unavailable=0.0),
-        target=rf.Number(mask=True, objective="mse"),
-    )
+    return PredictionModel(d_model=32, n_layers=1, n_heads=4, dropout=0.0)
 
 
 def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:

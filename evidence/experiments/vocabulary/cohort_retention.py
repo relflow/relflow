@@ -135,16 +135,14 @@ def records(rows: int, seed: int, cohort: str):
         yield {"cohort": cohort, "x": float(x), "answer": float((2.0, -2.0, 1.5)[index] * x + (-1.0, 1.0, 0.0)[index])}
 
 
+class PredictionModel(rf.Model):
+    cohort = rf.Enum(values=COHORTS)
+    x = rf.Number
+    answer = rf.Number(mask=True, objective="mse")
+
+
 def build() -> rf.Model:
-    return rf.Model(
-        d_model=16,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
-        cohort=rf.Enum(values=COHORTS),
-        x=rf.Number,
-        answer=rf.Number(mask=True, objective="mse"),
-    )
+    return PredictionModel(d_model=16, n_layers=1, n_heads=4, dropout=0.0)
 
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:

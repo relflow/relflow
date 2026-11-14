@@ -211,27 +211,24 @@ def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict
     return {"rmse": measured, "baseline_rmse": baseline_rmse, "nrmse": measured / baseline_rmse}
 
 
+class Item(rf.Branch):
+    group = rf.Category(p_unavailable=0.0)
+    contribution = rf.Number
+
+
+class PredictionModel(rf.Model):
+    items = Item(length=ITEMS, n_layers=2, reduction=None)
+    selected_group = rf.Category(p_unavailable=0.0)
+    answer = rf.Number(mask=True, objective="mse")
+
+
 @experiment("P011", seed=3600)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     # Split seeds are independent; rerunning a generator reproduces the same records.
     train = list(records(bags=384, seed=seed + 1))
     test = list(records(bags=192, seed=seed + 3))
-    model = rf.Model(
-        d_model=48,
-        n_layers=2,
-        n_heads=4,
-        reduction=rf.Attention(n_outputs=ITEMS, n_layers=2),
-        items=rf.Branch(
-            length=ITEMS,
-            n_layers=2,
-            reduction=None,
-            group=rf.Category(p_unavailable=0.0),
-            contribution=rf.Number,
-        ),
-        selected_group=rf.Category(p_unavailable=0.0),
-        answer=rf.Number(mask=True, objective="mse"),
-    )
+    model = PredictionModel(d_model=48, n_layers=2, n_heads=4, reduction=rf.Attention(n_outputs=ITEMS, n_layers=2))
     datamodule = rf.SyntheticDataModule(
         train=lambda: records(bags=384, seed=seed + 1),
         validate=lambda: records(bags=96, seed=seed + 2),

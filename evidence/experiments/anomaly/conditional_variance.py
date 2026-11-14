@@ -106,16 +106,14 @@ def records(rows: int, seed: int):
         yield {"group": name, "x": float(x), "answer": float(2 * x + (-2.0, 2.0)[group] + SIGMA[name] * z)}
 
 
+class PredictionModel(rf.Model):
+    group = rf.Enum(values=GROUPS)
+    x = rf.Number
+    answer = rf.Number(mask=True, objective="mse")
+
+
 def build() -> rf.Model:
-    return rf.Model(
-        d_model=16,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
-        group=rf.Enum(values=GROUPS),
-        x=rf.Number,
-        answer=rf.Number(mask=True, objective="mse"),
-    )
+    return PredictionModel(d_model=16, n_layers=1, n_heads=4, dropout=0.0)
 
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:

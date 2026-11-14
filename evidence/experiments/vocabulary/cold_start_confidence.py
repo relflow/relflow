@@ -131,15 +131,12 @@ def records(*, rows: int, seed: int, novel: bool = False) -> Iterator[dict]:
 
 
 def build(unavailable: float) -> rf.Model:
-    model = rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
-        x=rf.Number,
-        entity=rf.Category(p_unavailable=unavailable),
-        label=rf.Category(mask=True),
-    )
+    class PredictionModel(rf.Model):
+        x = rf.Number
+        entity = rf.Category(p_unavailable=unavailable)
+        label = rf.Category(mask=True)
+
+    model = PredictionModel(d_model=32, n_layers=1, n_heads=4, dropout=0.0)
     return model
 
 

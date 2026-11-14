@@ -1,0 +1,254 @@
+---
+import { Code } from '@astrojs/starlight/components';
+import type { CaseId } from '../data/concepts/types';
+import { explainerByCase } from '../data/model-explainer';
+import { flatten } from '../model-explainer/schema';
+import { explain } from '../model-explainer/explanation';
+import { codePlan } from '../model-explainer/code.mjs';
+import ModelNode from './ModelNode.astro';
+import '../model-explainer/style.css';
+
+interface Props {
+  caseId: CaseId;
+  id: string;
+}
+const { caseId, id } = Astro.props;
+const model = explainerByCase[caseId];
+const full = model.stages.at(-1)!;
+const nodes = flatten(full.nodes);
+const stages = Object.fromEntries(
+  nodes.map((node) => [
+    node.path,
+    model.stages
+      .filter((stage) => stage.lines[node.path])
+      .map((stage) => stage.id)
+      .join(' '),
+  ]),
+);
+const plan = codePlan(model.stages);
+const overview = explain(undefined, full, model.modelClass);
+const payload = {
+  stages: model.stages.map((stage) => ({
+    id: stage.id,
+    paths: ['/', ...flatten(stage.nodes).map((node) => node.path)],
+  })),
+  explanations: Object.fromEntries([
+    ['/', overview],
+    ...nodes.map((node) => [node.path, explain(node, full, model.modelClass)]),
+  ]),
+};
+const inputTypes = [
+  ...new Set(
+    nodes.filter((node) => node.kind === 'field' && !node.target).map((node) => node.type),
+  ),
+];
+const source = JSON.stringify(payload)
+  .replaceAll('<', '\\u003c')
+  .replaceAll('>', '\\u003e')
+  .replaceAll('&', '\\u0026');
+---
+
+<div id={id} class="model-explainer not-content" data-model-explainer>
+  <script is:inline>
+    (() => {
+      const root = document.currentScript?.parentElement;
+      if (root) {
+        root.dataset.modelPrepared = '';
+        root.dataset.modelStage = 'start';
+      }
+    })();
+  </script>
+  <div class="me-heading">
+    <span class="me-eyebrow">The schema shapes the model</span><span class="me-caption"
+      >Construction sketch</span
+    >
+  </div>
+  <div class="me-steps" role="group" aria-label="Grow this model schema">
+    {
+      model.stages.map((stage, index) => (
+        <button
+          type="button"
+          data-model-step={stage.id}
+          aria-pressed={stage.id === 'start' ? 'true' : 'false'}
+          disabled
+        >
+          <>
+            <span aria-hidden="true">0{index + 1}</span>
+            <strong>{stage.label}</strong>
+          </>
+        </button>
+      ))
+    }
+  </div>
+  {
+    model.stages.map((stage) => {
+      const fields = flatten(stage.nodes);
+      const inputs = fields.filter((node) => node.kind === 'field' && !node.target).length;
+      const branches = fields.filter((node) => node.kind === 'branch').length;
+      const targets = fields.filter((node) => node.target).length;
+      return (
+        <div class="me-stage-info" data-model-stage-info={stage.id}>
+          <>
+            <h5>{stage.title}</h5>
+            <p>{stage.description}</p>
+          </>
+          <div class="me-flow" aria-label="Simplified construction flow">
+            <div class="me-flow-input">
+              <>
+                <span>Input fields</span>
+                <strong>{inputs}</strong>
+                <small>typed declarations</small>
+              </>
+            </div>
+            <span class="me-arrow" aria-hidden="true">
+              →
+            </span>
+            <div class="me-flow-context">
+              <>
+                <span>Record context</span>
+                <strong>{branches + 1}</strong>
+                <small>
+                  {branches ? `root + ${branches} collections` : 'one root observation'}
+                </small>
+              </>
+            </div>
+            <span class="me-arrow" aria-hidden="true">
+              →
+            </span>
+            <div class="me-flow-target">
+              <>
+                <span>Answers to learn</span>
+                <strong>{targets}</strong>
+                <small>decoder objectives</small>
+              </>
+            </div>
+          </div>
+          {stage.labelRequirement && (
+            <p class="me-label-requirement">
+              <strong>Training labels</strong> {stage.labelRequirement}
+            </p>
+          )}
+        </div>
+      );
+    })
+  }
+  <p class="me-instructions">
+    Choose a field, a collection, or an answer to see what its declaration contributes.
+  </p>
+  <div class="me-workspace">
+    <section id={`${id}-schema`} class="me-map" aria-label="Schema declarations">
+      <h5>Your schema</h5>
+      <button class="me-root" type="button" data-model-select="/" aria-pressed="true" disabled
+        ><span>{model.modelClass}</span><small>Model · one observation</small></button
+      >
+      <ul class="me-tree">{full.nodes.map((node) => <ModelNode node={node} stages={stages} />)}</ul>
+    </section>
+    <section id={`${id}-selected`} class="me-insight" aria-labelledby={`${id}-selected-title`}>
+      <button type="button" class="me-back" data-model-back aria-controls={`${id}-schema`}
+        >← Back to schema</button
+      >
+      <div class="me-selected-heading">
+        <span data-model-kind>Model</span><code data-model-path>/</code>
+      </div>
+      <h5 id={`${id}-selected-title`} data-model-name tabindex="-1">{overview.name}</h5>
+      <code class="me-declaration" data-model-declaration>{overview.declaration}</code>
+      <p class="me-description" data-model-description>{overview.description}</p>
+      <dl>
+        <div>
+          <dt>Representation</dt><dd data-model-representation>{overview.representation}</dd>
+        </div>
+        <div><dt>Context</dt><dd data-model-context>{overview.context}</dd></div>
+        <div><dt>Learning</dt><dd data-model-learning>{overview.learning}</dd></div>
+        <div><dt>Prediction output</dt><dd data-model-output>{overview.output}</dd></div>
+      </dl>
+      <div class="me-output-address" data-model-address-wrap>
+        <span>Output location after fitting</span><code data-model-address>{overview.address}</code>
+      </div>
+      <p class="me-requirement" data-model-requirement hidden></p>
+      <a class="me-reference" href={overview.reference} data-model-reference>Open the reference →</a
+      >
+    </section>
+  </div>
+  <p class="me-status" role="status" aria-live="polite" aria-atomic="true" data-model-status></p>
+  <details class="me-source">
+    <summary
+      >Inspect the Python class schema <span data-model-copy-hint>· current step</span></summary
+    >
+    <p>
+      Class declarations describe the contract. The guarded constructor creates an untrained model;
+      fitting learns from matching historical records.
+    </p>
+    <Code
+      code={full.schema}
+      lang="python"
+      meta={`contract="schema" model-lines='${JSON.stringify(plan)}'`}
+    />
+    <p class="me-code-help">
+      Select a declaration line to inspect it. Dotted terms keep the standard code notes. Copying
+      copies the complete schema for the selected step.
+    </p>
+  </details>
+  <noscript>
+    <p>
+      Inspect the complete schema above. Input representations learn through the target objectives;
+      <code>mask=True</code> keeps each answer out of input context.
+    </p>
+    <details class="me-type-reference">
+      <summary>How the input types are represented</summary>
+      <dl>
+        {
+          inputTypes.map((type) => {
+            const node = nodes.find((node) => node.type === type && !node.target)!;
+            const item = explain(node, full, model.modelClass);
+            return (
+              <div>
+                <dt>
+                  <a href={item.reference}>{type}</a>
+                </dt>
+                <dd>{item.representation}</dd>
+              </div>
+            );
+          })
+        }
+      </dl>
+    </details>
+    <details class="me-field-reference">
+      <summary>Read every field explanation</summary><dl>
+        {
+          nodes.map((node) => {
+            const item = explain(node, full, model.modelClass);
+            return (
+              <div>
+                <>
+                  <dt>
+                    {node.path} · {node.kind === 'branch' ? node.className : node.type}
+                    {node.target ? ' · Answer' : ''}
+                  </dt>
+                  <dd>
+                    {item.description}{' '}
+                    {node.kind === 'branch'
+                      ? item.context
+                      : node.target
+                        ? `${item.learning} ${item.output}`
+                        : `Input in ${node.path.slice(0, node.path.lastIndexOf('/')) || '/'} context.`}{' '}
+                    {item.address && <code>{item.address}</code>}
+                  </dd>
+                </>
+              </div>
+            );
+          })
+        }
+      </dl>
+    </details>
+  </noscript>
+  <p class="me-footnote">
+    Each step declares a different learning contract. Fit a model on the corresponding labels before
+    predicting. This sketch explains construction; it contains no executed predictions or
+    performance measurements.
+  </p>
+  <script type="application/json" data-model-data set:html={source} />
+</div>
+
+<script>
+  import '../model-explainer/client';
+</script>

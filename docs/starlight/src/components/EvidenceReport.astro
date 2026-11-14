@@ -1,0 +1,717 @@
+---
+import { Code, Tabs, TabItem } from '@astrojs/starlight/components';
+import type { EvidenceEntry } from '../evidence/data';
+import { evidenceEntries, selection } from '../evidence/data';
+import { experimentURL, formatValue, recordDate, status } from '../evidence/presentation';
+import EvidenceMetrics from './EvidenceMetrics.astro';
+import EvidenceProse from './EvidenceProse.astro';
+import JsonRecord from './JsonRecord.astro';
+
+interface Props {
+  entry: EvidenceEntry;
+}
+const { entry } = Astro.props;
+const run = entry.result;
+const state = status(entry);
+const checks = Object.entries(run?.checks || {});
+const met = checks.filter(([, passed]) => passed).length;
+const hasSource = entry.sourceMatches && !!entry.source;
+const position = evidenceEntries.findIndex((item) => item.id === entry.id);
+const previous = evidenceEntries[position - 1];
+const next = evidenceEntries[position + 1];
+const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl python evidence/experiments/run.py${entry.lane === 'research' ? ' --lane research' : ''} ${entry.id}`;
+---
+
+<article
+  class="evidence-report not-content"
+  data-evidence-report={entry.id}
+  data-evidence-outcome={state.id}
+>
+  <header class="report-heading">
+    <a class="back-link" href={`/evidence/#${entry.id}`}>← All experiments</a>
+    <div class="report-labels">
+      <span class="experiment-id">{entry.id}</span>
+      <span>{entry.family}</span>
+      {entry.lane === 'research' && <span>Research study</span>}
+      {entry.archived && <span>Archived experiment</span>}
+      <span class="run-status" data-outcome={state.id}>{state.label}</span>
+    </div>
+    <p class="report-description">{entry.description}</p>
+    {
+      entry.archived && (
+        <p class="scope-note">
+          This experiment belongs to the recorded source revision and is outside the current
+          experiment catalog. Its original measurements and exact source remain available here.
+        </p>
+      )
+    }
+    {
+      run ? (
+        <p class="record-context">
+          <span>
+            Recorded <time datetime={run.started_at}>{recordDate(run.started_at)} UTC</time>
+          </span>
+          {run.provenance.packages?.relflow && (
+            <span>relflow {run.provenance.packages.relflow}</span>
+          )}
+          {selection.mode === 'snapshot' && <span>Archived snapshot</span>}
+          <>
+            <span>{run.mode} run</span>
+            <span>{run.accelerator.toUpperCase()}</span>
+          </>
+          <span>Seed {run.seed}</span>
+        </p>
+      ) : (
+        <p class="record-context">
+          The selected CI publication contains no measurement for this experiment.
+        </p>
+      )
+    }
+    {
+      typeof selection.report.status === 'string' && (
+        <p class="scope-note">{selection.report.status}</p>
+      )
+    }
+  </header>
+
+  {
+    entry.requirements.length > 0 && (
+      <div class="requirements">
+        <strong>Required resources</strong>
+        <ul>
+          {entry.requirements.map((requirement) => (
+            <li>{requirement}</li>
+          ))}
+        </ul>
+      </div>
+    )
+  }
+
+  <section class="checks-section" aria-labelledby="checks-title">
+    <h2 id="checks-title">Behavioral checks</h2>
+    {
+      run ? (
+        <>
+          <p class="checks-summary" data-check-count>
+            <strong>
+              {met} of {checks.length}
+            </strong>{' '}
+            recorded checks met.
+          </p>
+          {run.mode !== 'full' && (
+            <p class="scope-note">
+              This limited run does not establish a full-budget learning result.
+            </p>
+          )}
+          {typeof run.error === 'string' && <pre class="execution-error">{run.error}</pre>}
+          {checks.length > 0 && (
+            <details class="check-disclosure" open={met !== checks.length}>
+              <summary>Inspect every criterion</summary>
+              <div class="checks-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">Criterion</th>
+                      <th scope="col">Selected run</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {checks.map(([name, passed]) => (
+                      <tr data-check-name={name}>
+                        <th scope="row">{name}</th>
+                        <td data-check-outcome={passed ? 'met' : 'not_met'}>
+                          {passed ? 'Met' : 'Not met'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          )}
+        </>
+      ) : (
+        <p>
+          No check outcomes are recorded in this selection. The source describes the proposed task
+          and controls.
+        </p>
+      )
+    }
+  </section>
+
+  {
+    hasSource ? (
+      <>
+        {entry.sections.intro && <EvidenceProse text={entry.sections.intro} />}
+        <section aria-labelledby="example-title">
+          <div class="section-heading">
+            <>
+              <h2 id="example-title">Example</h2>
+              <span>Illustrative record</span>
+            </>
+          </div>
+          <EvidenceProse text={entry.sections.example} />
+          {entry.diagram.alt && (
+            <details class="structure-note">
+              <summary>Record structure from the source diagram</summary>
+              <p>{entry.diagram.alt}</p>
+            </details>
+          )}
+        </section>
+        <section aria-labelledby="comparison-title">
+          <h2 id="comparison-title">Comparison</h2>
+          <EvidenceProse text={entry.sections.comparison} />
+        </section>
+      </>
+    ) : (
+      <p class="scope-note">
+        The exact source for this selected execution is not available in this checkout.{' '}
+        <a href={entry.sourceUrl}>Inspect the recorded source revision ↗</a> for its task and
+        method.
+      </p>
+    )
+  }
+
+  <section aria-labelledby="result-title">
+    <h2 id="result-title">Recorded result</h2>
+    {
+      run ? (
+        <>
+          <p>
+            These values come from the selected CI record. Checks describe the criteria for this
+            particular experiment.
+          </p>
+          {entry.readouts.length > 0 && (
+            <dl class="readouts">
+              {entry.readouts.map((readout) => (
+                <div data-readout-path={readout.metric.join('.')}>
+                  <dt>{readout.label}</dt>
+                  <dd data-raw-value={JSON.stringify(readout.value)}>
+                    {formatValue(readout.value, readout.format)}
+                  </dd>
+                  <span>
+                    {readout.format === 'auc'
+                      ? 'AUC'
+                      : readout.format === 'error'
+                        ? 'Error ratio'
+                        : readout.format === 'percent'
+                          ? 'Percentage'
+                          : 'Recorded value'}
+                  </span>
+                </div>
+              ))}
+            </dl>
+          )}
+          {entry.readouts.some((item) => item.format === 'auc') && (
+            <p class="scope-note">
+              AUC measures ranking: 0.5 is chance and 1 is perfect separation. It is not the
+              percentage of correct answers.
+            </p>
+          )}
+          {entry.readouts.some((item) => item.format === 'error') && (
+            <p class="scope-note">
+              Error ratios retain their recorded scale. The method specifies the reference and error
+              calculation; lower values indicate lower error.
+            </p>
+          )}
+        </>
+      ) : (
+        <p>
+          No result is claimed for this experiment in the selected publication. Proposed criteria
+          and examples do not substitute for a measured run.
+        </p>
+      )
+    }
+  </section>
+
+  <section class="report-details" aria-labelledby="details-title">
+    <h2 id="details-title">Inspect this experiment</h2>
+    <Tabs>
+      <TabItem label="Measurements">
+        {
+          run ? (
+            <>
+              <p class="detail-intro">
+                Expand a group to inspect its complete recorded measurements. Captions retain the
+                metric path.
+              </p>
+              <EvidenceMetrics value={run.metrics} />
+              <details class="raw-record">
+                <summary>Complete CI record · JSON</summary>
+                <p>
+                  This includes every measurement, check, execution setting, and provenance field.
+                </p>
+                <div class="bounded-code" data-pagefind-ignore>
+                  <JsonRecord value={run} label="Complete CI record" />
+                </div>
+              </details>
+              <p class="detail-links">
+                <>
+                  <a href={`/evidence/records/${entry.id}.json`}>Download this record ↓</a>
+                  <a href="/evidence/selected.json">Selected CI publication ↓</a>
+                </>
+              </p>
+            </>
+          ) : (
+            <p class="detail-intro">No measurements are present in the selected CI publication.</p>
+          )
+        }
+      </TabItem>
+      <TabItem label="Method">
+        {hasSource && <EvidenceProse text={entry.sections.method} />}
+        {
+          hasSource && entry.sections.result && (
+            <details class="source-commentary">
+              <summary>Authored interpretation from the source</summary>
+              <p class="scope-note">
+                This is source commentary at <code>{entry.sourceRevision.slice(0, 7)}</code>. The
+                current outcome and measurements above are calculated from the selected CI record.
+              </p>
+              <EvidenceProse text={entry.sections.result} />
+            </details>
+          )
+        }
+        {
+          run && (
+            <>
+              <h3>Execution settings</h3>
+              <dl class="execution-settings">
+                <div>
+                  <>
+                    <dt>Seed</dt>
+                    <dd>{run.seed}</dd>
+                  </>
+                </div>
+                <div>
+                  <>
+                    <dt>Run mode</dt>
+                    <dd>{run.mode}</dd>
+                  </>
+                </div>
+                <div>
+                  <>
+                    <dt>Duration</dt>
+                    <dd>{run.duration_seconds} seconds</dd>
+                  </>
+                </div>
+                <div>
+                  <>
+                    <dt>Threads</dt>
+                    <dd>{run.threads}</dd>
+                  </>
+                </div>
+              </dl>
+              <details class="provenance">
+                <summary>Complete measured provenance</summary>
+                <EvidenceMetrics value={run.provenance} path="provenance" />
+              </details>
+            </>
+          )
+        }
+      </TabItem>
+      <TabItem label="Reproduce">
+        <p class="detail-intro">
+          Use a checkout of the <a
+            href={`https://github.com/relflow/relflow/tree/${entry.sourceRevision}`}
+            >source revision shown for this experiment</a
+          > and a matching relflow wheel. The source owns the full budget, seed, data generation, model
+          settings, and controls.
+        </p>
+        {
+          run && (
+            <p>
+              Match the wheel and runtime recorded under{' '}
+              <strong>Method → Complete measured provenance</strong>. A current development wheel
+              may have a different API.
+            </p>
+          )
+        }
+        {
+          entry.lane === 'research' && (
+            <p>
+              This optional research study requires the resources listed above and an explicit
+              research-lane selection.
+            </p>
+          )
+        }
+        {
+          entry.archived ? (
+            <p class="scope-note">
+              Restore the recorded checkout and its matching runtime before reproducing this
+              archived proof. Its ID is unavailable in the current runner catalog.{' '}
+              <a href={`/evidence/sources/${entry.id}.py`} download>
+                Download the exact recorded script ↓
+              </a>
+            </p>
+          ) : (
+            <>
+              <>
+                <Code code={reproduce} lang="bash" wrap />
+                <p class="scope-note">
+                  The command is an instruction, not a run performed by this website. A capped smoke
+                  run does not establish a learning result.
+                </p>
+              </>
+            </>
+          )
+        }
+        <p class="detail-links">
+          <a href={entry.sourceUrl}>Source at its recorded revision ↗</a><a
+            href="/evidence/selected.json">Inspect the selected publication ↓</a
+          >
+        </p>
+      </TabItem>
+      <TabItem label="Code">
+        {
+          hasSource ? (
+            <>
+              <p class="detail-intro">
+                {run
+                  ? 'The computational code from the selected execution’s source.'
+                  : 'The declared experiment code; no selected execution is available.'}{' '}
+                Its API and names belong to that source revision.
+              </p>
+              <div class="bounded-code" data-pagefind-ignore>
+                <Code code={entry.code} lang="python" />
+              </div>
+              <p class="detail-links">
+                <>
+                  <a href={`/evidence/sources/${entry.id}.py`}>Download the exact source file ↓</a>
+                  <a href={entry.sourceUrl}>View source revision ↗</a>
+                </>
+              </p>
+              <p class="source-digest">
+                Source SHA-256: <code>{entry.sourceSha256}</code>
+              </p>
+            </>
+          ) : (
+            <p>
+              The source is not available locally.{' '}
+              <a href={entry.sourceUrl}>View its recorded revision ↗</a>.
+            </p>
+          )
+        }
+      </TabItem>
+    </Tabs>
+  </section>
+
+  <footer class="report-footer">
+    <p>
+      Recorded outcomes and measurements come from the selected CI publication. <a
+        href="/evidence/selected.json">Inspect that publication</a
+      >{
+        selection.report.github_run?.html_url && (
+          <>
+            {' '}
+            or <a href={selection.report.github_run.html_url}>open its CI run ↗</a>
+          </>
+        )
+      }.
+    </p>
+    <nav aria-label="More experiments">
+      {
+        previous && (
+          <a href={experimentURL(previous.id)}>
+            <span>Previous · {previous.id}</span>
+            {previous.title}
+          </a>
+        )
+      }
+      {
+        next && (
+          <a href={experimentURL(next.id)}>
+            <span>Next · {next.id}</span>
+            {next.title}
+          </a>
+        )
+      }
+    </nav>
+  </footer>
+</article>
+
+<style>
+  .evidence-report {
+    min-width: 0;
+    font-size: 0.92rem;
+    line-height: 1.8;
+  }
+  .evidence-report a {
+    color: var(--sl-color-text-accent);
+    text-underline-offset: 0.2em;
+  }
+  .back-link {
+    font-size: 0.8rem;
+    text-decoration: none;
+  }
+  .report-labels {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.4rem 0.9rem;
+    margin-block: 1rem 0.75rem;
+    color: var(--rf-muted);
+    font-size: 0.74rem;
+  }
+  .experiment-id {
+    font-family: var(--sl-font-mono);
+    color: var(--sl-color-text-accent);
+  }
+  .run-status {
+    margin-left: auto;
+    font-weight: 650;
+    color: var(--rf-ink);
+  }
+  .run-status[data-outcome='met'] {
+    color: var(--sl-color-text-accent);
+  }
+  .run-status:is([data-outcome='not_met'], [data-outcome='error']) {
+    text-decoration: underline;
+    text-decoration-color: #c28d42;
+    text-underline-offset: 0.3em;
+  }
+  .report-description {
+    margin: 0;
+    color: var(--rf-ink);
+    font-size: 1rem;
+    line-height: 1.75;
+  }
+  .record-context {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 1rem;
+    margin-block: 0.85rem 1.5rem;
+    color: var(--rf-muted);
+    font-size: 0.75rem;
+  }
+  .evidence-report > section {
+    margin-block: 2rem;
+    min-width: 0;
+  }
+  h2 {
+    margin: 0 0 0.8rem;
+    color: var(--rf-ink);
+    font-size: 1.4rem;
+    line-height: 1.4;
+    letter-spacing: -0.025em;
+    scroll-margin-top: 6rem;
+  }
+  h3 {
+    font-size: 1.05rem;
+    margin-block: 1.5rem 0.6rem;
+    color: var(--rf-ink);
+  }
+  .section-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.35rem 0.8rem;
+    margin-bottom: 0.65rem;
+  }
+  .section-heading h2 {
+    margin: 0;
+  }
+  .section-heading > span {
+    color: var(--rf-muted);
+    font-size: 0.72rem;
+  }
+  .checks-section {
+    border-block: 1px solid var(--rf-border);
+    padding-block: 1.2rem;
+  }
+  .checks-summary {
+    margin: 0 0 0.6rem;
+  }
+  .checks-summary strong {
+    color: var(--rf-ink);
+    font-variant-numeric: tabular-nums;
+  }
+  details {
+    font-size: 0.84rem;
+    min-width: 0;
+  }
+  summary {
+    cursor: pointer;
+    color: var(--sl-color-text-accent);
+  }
+  summary:focus-visible {
+    outline: 2px solid var(--sl-color-text-accent);
+    outline-offset: 3px;
+  }
+  .checks-table {
+    overflow-x: auto;
+    margin-top: 0.85rem;
+  }
+  .checks-table table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.8rem;
+    line-height: 1.65;
+  }
+  .checks-table th,
+  .checks-table td {
+    border: 1px solid var(--rf-border);
+    padding: 0.65rem 0.75rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  .checks-table tbody th {
+    font-weight: 400;
+  }
+  .checks-table td {
+    white-space: nowrap;
+  }
+  [data-check-outcome='met'] {
+    color: var(--sl-color-text-accent);
+  }
+  [data-check-outcome='not_met'] {
+    font-weight: 700;
+    color: var(--rf-ink);
+  }
+  .scope-note {
+    color: var(--rf-muted);
+    font-size: 0.78rem;
+    line-height: 1.7;
+  }
+  .requirements {
+    border-left: 2px solid var(--sl-color-text-accent);
+    padding: 0.65rem 1rem;
+    font-size: 0.8rem;
+  }
+  .requirements ul {
+    margin: 0.3rem 0;
+    padding-left: 1.25rem;
+  }
+  .structure-note {
+    margin-top: 0.8rem;
+    color: var(--rf-muted);
+  }
+  .structure-note p {
+    margin-block: 0.65rem;
+  }
+  .readouts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: 0.75rem;
+    margin-block: 1rem;
+  }
+  .readouts > div {
+    border: 1px solid var(--rf-border);
+    border-radius: 0.35rem;
+    padding: var(--rf-panel-padding);
+    min-width: 0;
+    background: var(--rf-card);
+  }
+  .readouts dt {
+    color: var(--rf-muted);
+    font-size: 0.76rem;
+    line-height: 1.5;
+  }
+  .readouts dd {
+    margin: 0.35rem 0 0;
+    color: var(--rf-ink);
+    font-size: 1.3rem;
+    line-height: 1.5;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }
+  .readouts span {
+    color: var(--rf-muted);
+    font-size: 0.68rem;
+  }
+  .detail-intro {
+    color: var(--rf-muted);
+    font-size: 0.84rem;
+    line-height: 1.75;
+    margin-block: 0.8rem 1rem;
+  }
+  .raw-record,
+  .source-commentary,
+  .provenance {
+    border-top: 1px solid var(--rf-border);
+    padding-top: 0.8rem;
+    margin-top: 1.1rem;
+  }
+  .raw-record > p {
+    color: var(--rf-muted);
+    font-size: 0.8rem;
+  }
+  .detail-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.2rem;
+    margin-block: 1rem;
+    font-size: 0.8rem;
+  }
+  .bounded-code {
+    max-width: 100%;
+    min-width: 0;
+    margin-top: 1rem;
+  }
+  .bounded-code :global(pre) {
+    max-height: 28rem;
+    overflow: auto;
+  }
+  .source-digest {
+    color: var(--rf-muted);
+    font-size: 0.68rem;
+    overflow-wrap: anywhere;
+  }
+  .source-digest code {
+    font-family: var(--sl-font-mono);
+  }
+  .execution-settings {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.8rem 1.25rem;
+    font-size: 0.8rem;
+  }
+  .execution-settings dt {
+    color: var(--rf-muted);
+  }
+  .execution-settings dd {
+    margin: 0.2rem 0 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .execution-error {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 0.8rem;
+  }
+  .report-footer {
+    border-top: 1px solid var(--rf-border);
+    margin-top: 2.25rem;
+    padding-top: 1rem;
+    color: var(--rf-muted);
+    font-size: 0.76rem;
+    line-height: 1.75;
+  }
+  .report-footer > p {
+    margin: 0 0 1.25rem;
+  }
+  .report-footer nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+  }
+  .report-footer nav a {
+    text-decoration: none;
+  }
+  .report-footer nav span {
+    display: block;
+    color: var(--rf-muted);
+    font-size: 0.68rem;
+    margin-bottom: 0.3rem;
+  }
+  @media (max-width: 450px) {
+    .run-status {
+      margin-left: 0;
+    }
+    .readouts {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .report-footer nav {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+</style>

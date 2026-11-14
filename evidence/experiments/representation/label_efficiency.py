@@ -158,16 +158,13 @@ def records(rows: int, seed: int):
 
 def build() -> rf.Model:
     mask = rf.Mask(rate=0.35, reconstruct=True)
-    return rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
-        embed=True,
-        first=rf.Enum(values=CODES, mask=mask),
-        second=rf.Enum(values=CODES, mask=mask),
-        geometry=rf.Vector(n_dim=16, mask=mask),
-    )
+
+    class PredictionModel(rf.Model):
+        first = rf.Enum(values=CODES, mask=mask)
+        second = rf.Enum(values=CODES, mask=mask)
+        geometry = rf.Vector(n_dim=16, mask=mask)
+
+    return PredictionModel(d_model=32, n_layers=1, n_heads=4, dropout=0.0, embed=True)
 
 
 def features(model: rf.Model, rows: list[dict]) -> torch.Tensor:

@@ -1,0 +1,25 @@
+---
+import '../concepts/picker.css';
+
+interface Props {
+  choices: { id: string; panel: string; label: string; summary: string }[];
+}
+
+const { choices } = Astro.props;
+---
+
+<div class="case-picker" role="group" aria-label="Choose a prediction task">
+  {
+    choices.map((choice, index) => (
+      <button
+        type="button"
+        data-case-select={choice.id}
+        aria-controls={choice.panel}
+        aria-pressed={index === 0}
+      >
+        <span class="case-label">{choice.label}</span>
+        <span class="case-structure">{choice.summary}</span>
+      </button>
+    ))
+  }
+</div>

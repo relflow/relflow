@@ -1,0 +1,219 @@
+---
+import { formatValue, magnitudes, percent, type ValueNodeData } from '../values/tree';
+
+interface Props {
+  node: ValueNodeData;
+}
+const { node } = Astro.props;
+const view = node.view;
+const bars = view?.kind === 'vector' ? magnitudes(view.values) : [];
+---
+
+<li
+  id={node.id}
+  class:list={['vt-node', `vt-node-${node.kind}`]}
+  data-value-node={node.kind}
+  data-value-name={node.name}
+>
+  {
+    node.kind === 'record' || node.kind === 'list' ? (
+      <details class="vt-branch" open>
+        <summary class="vt-branch-heading" data-contract-field={node.field}>
+          <span class="vt-name">{node.name}</span>
+          <span class="vt-shape">
+            {node.kind === 'list'
+              ? `${node.children.length} ${node.children.length === 1 ? 'item' : 'items'}`
+              : `${node.children.length} ${node.children.length === 1 ? 'field' : 'fields'}`}
+          </span>
+          {node.context && <span class="vt-context">{node.context}</span>}
+        </summary>
+        {node.children.length ? (
+          <ul class="vt-children">
+            {node.children.map((child) => (
+              <Astro.self node={child} />
+            ))}
+          </ul>
+        ) : (
+          <p class="vt-empty">{node.kind === 'list' ? 'Empty list []' : 'Empty record {}'}</p>
+        )}
+      </details>
+    ) : node.kind === 'prediction' ? (
+      <details class="vt-branch vt-prediction" open>
+        <summary class="vt-prediction-heading" data-contract-field={node.field}>
+          <>
+            <span class="vt-name">{node.name}</span>
+            <span class="vt-prediction-tag">Prediction</span>
+          </>
+        </summary>
+        <div class="vt-result">
+          {view?.kind === 'scalar' && (
+            <div class="vt-scalar">
+              <strong
+                class:list={[
+                  'vt-result-value',
+                  {
+                    'vt-result-string': typeof view.value === 'string',
+                    'vt-null': view.value === null,
+                  },
+                ]}
+              >
+                {formatValue(view.value)}
+              </strong>
+              <span class="vt-value-caption">Returned value</span>
+            </div>
+          )}
+
+          {view?.kind === 'probability' && (
+            <div class="vt-probability">
+              <div class="vt-probability-heading">
+                <strong class="vt-result-value">{percent(view.probability)}</strong>
+                <span class="vt-value-caption">Probability of true</span>
+              </div>
+              <div
+                class="vt-meter"
+                role="meter"
+                aria-label={`${node.name}: probability of true`}
+                aria-valuemin={0}
+                aria-valuemax={1}
+                aria-valuenow={view.probability}
+                aria-valuetext={percent(view.probability)}
+              >
+                <span style={`width: ${view.probability * 100}%`} />
+              </div>
+              <div class="vt-meter-scale" aria-hidden="true">
+                <span>0%</span>
+                <span>100%</span>
+              </div>
+            </div>
+          )}
+
+          {view?.kind === 'category' && (
+            <div class="vt-category">
+              <div class="vt-chosen">
+                <strong class="vt-result-value vt-result-string">{formatValue(view.value)}</strong>
+                <span class="vt-chosen-probability">
+                  {percent(view.probability)} <span>label probability</span>
+                </span>
+              </div>
+              {view.candidates.length > 0 && (
+                <div class="vt-candidates">
+                  <p class="vt-chart-title">Returned alternatives</p>
+                  <ul class="vt-probability-list">
+                    {view.candidates.map((candidate) => (
+                      <li class="vt-probability-item">
+                        <div class="vt-candidate-label">
+                          <span class="vt-label-value">{formatValue(candidate.value)}</span>
+                          <span class="vt-probability-value">{percent(candidate.probability)}</span>
+                        </div>
+                        <div
+                          class="vt-meter vt-meter-small"
+                          role="meter"
+                          aria-label={`${node.name}: ${formatValue(candidate.value)}`}
+                          aria-valuemin={0}
+                          aria-valuemax={1}
+                          aria-valuenow={candidate.probability}
+                          aria-valuetext={percent(candidate.probability)}
+                        >
+                          <span style={`width: ${candidate.probability * 100}%`} />
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          {view?.kind === 'memberships' && (
+            <div class="vt-memberships">
+              <p class="vt-chart-title">Returned labels</p>
+              <ul class="vt-probability-list">
+                {view.candidates.map((candidate) => (
+                  <li class="vt-probability-item">
+                    <div class="vt-candidate-label">
+                      <span class="vt-label-value">{formatValue(candidate.value)}</span>
+                      <span class="vt-probability-value">{percent(candidate.probability)}</span>
+                    </div>
+                    <div
+                      class="vt-meter vt-meter-small"
+                      role="meter"
+                      aria-label={`${node.name}: membership of ${formatValue(candidate.value)}`}
+                      aria-valuemin={0}
+                      aria-valuemax={1}
+                      aria-valuenow={candidate.probability}
+                      aria-valuetext={percent(candidate.probability)}
+                    >
+                      <span style={`width: ${candidate.probability * 100}%`} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <p class="vt-chart-note">
+                Each label has its own probability; these values do not need to sum to 100%.
+              </p>
+            </div>
+          )}
+
+          {view?.kind === 'vector' && (
+            <div class="vt-vector">
+              <p class="vt-chart-title">Coordinates</p>
+              <ul class="vt-coordinates">
+                {view.values.map((value, index) => (
+                  <li>
+                    <span class="vt-coordinate-index">[{index}]</span>
+                    <strong class="vt-coordinate-value">{formatValue(value)}</strong>
+                    <span class="vt-coordinate-track" aria-hidden="true">
+                      <span style={`width: ${bars[index]}%`} />
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p class="vt-chart-note">
+                Bar lengths compare absolute coordinate magnitudes within this vector.
+              </p>
+            </div>
+          )}
+
+          {view?.kind === 'empty' && (
+            <div class="vt-empty-result">
+              <span class="vt-empty-symbol" aria-hidden="true">
+                []
+              </span>
+              <span>No values returned</span>
+            </div>
+          )}
+          {view?.kind === 'structured' && (
+            <p class="vt-structured-note">
+              Structured result. Expand the returned fields to inspect every value.
+            </p>
+          )}
+
+          <details class="vt-returned">
+            <summary>
+              Returned fields <span>state, content, and metadata</span>
+            </summary>
+            <ul class="vt-children vt-raw-fields">
+              {(node.returned || []).map((child) => (
+                <Astro.self node={child} />
+              ))}
+            </ul>
+          </details>
+        </div>
+      </details>
+    ) : (
+      <div class="vt-value-row" data-contract-field={node.field}>
+        <>
+          <span class="vt-name">{node.name}</span>
+          <span
+            class:list={[
+              'vt-plain-value',
+              `vt-plain-${node.value === null ? 'null' : typeof node.value}`,
+            ]}
+          >
+            {formatValue(node.value ?? null)}
+          </span>
+        </>
+      </div>
+    )
+  }
+</li>

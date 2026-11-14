@@ -1,0 +1,53 @@
+---
+import DefaultSidebar from '@astrojs/starlight/components/Sidebar.astro';
+import type { StarlightRouteData } from '@astrojs/starlight/route-data';
+import { getCollection } from 'astro:content';
+import '../sidebar/summaries.css';
+
+type Entry = StarlightRouteData['sidebar'][number];
+const pages = await getCollection('docs');
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const descriptions = new Map<string, string>(
+  pages.map(({ id, data }) => {
+    const description = data.description?.trim();
+    if (!description) throw new Error(`Page ${id} needs a description for its sidebar summary.`);
+    const path = id === 'index' ? '' : `${id}/`;
+    return [`${base}/${path}`, description] as const;
+  }),
+);
+
+function summarize(entries: Entry[]): Entry[] {
+  return entries.map((entry) => {
+    if (entry.type === 'group') return { ...entry, entries: summarize(entry.entries) };
+    const description = descriptions.get(new URL(entry.href, Astro.url).pathname);
+    if (!description) return entry;
+    const inEvidence =
+      new URL(entry.href, Astro.url).pathname === `${base}/evidence/` &&
+      Astro.url.pathname.startsWith(`${base}/evidence/`) &&
+      !entry.isCurrent;
+    return {
+      ...entry,
+      attrs: {
+        ...entry.attrs,
+        'data-sidebar-summary': description,
+        'data-sidebar-label': entry.label,
+        title: description,
+        ...(inEvidence ? { 'aria-current': 'location' as const } : {}),
+      },
+    };
+  });
+}
+
+Astro.locals.starlightRoute.sidebar = summarize(Astro.locals.starlightRoute.sidebar);
+---
+
+<DefaultSidebar />
+<div id="rf-sidebar-tooltip" class="rf-code-tooltip rf-sidebar-tooltip" role="tooltip" hidden>
+  <strong class="rf-code-tooltip__title" data-summary-title></strong>
+  <p class="rf-code-tooltip__text" data-summary-text></p>
+</div>
+
+<script>
+  import '../sidebar/summaries';
+  import '../code/notes-client';
+</script>

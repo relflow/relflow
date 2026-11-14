@@ -142,16 +142,14 @@ def records(*, rows: int, seed: int, cohort: int = 0) -> Iterator[dict]:
         }
 
 
+class PredictionModel(rf.Model):
+    entity = rf.Category(p_unavailable=0.2)
+    context = rf.Category(p_unavailable=0.0)
+    label = rf.Category(p_unavailable=0.0, mask=rf.Mask(query="hide", reconstruct=True))
+
+
 def build() -> rf.Model:
-    model = rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
-        entity=rf.Category(p_unavailable=0.2),
-        context=rf.Category(p_unavailable=0.0),
-        label=rf.Category(p_unavailable=0.0, mask=rf.Mask(query="hide", reconstruct=True)),
-    )
+    model = PredictionModel(d_model=32, n_layers=1, n_heads=4, dropout=0.0)
     return model
 
 

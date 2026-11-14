@@ -1,0 +1,18 @@
+---
+import prepare from '../concepts/prepare.mjs?raw';
+
+interface Props {
+  choices: { id: string; panel: string }[];
+  persistent?: boolean;
+}
+
+const { choices, persistent = false } = Astro.props;
+---
+
+<!-- Run before the picker and panels parse, independently of deferred modules. -->
+<script
+  is:inline
+  data-choices={JSON.stringify(choices.map(({ id, panel }) => ({ id, panel })))}
+  data-persistent={persistent ? '' : undefined}
+  set:html={prepare}
+/>

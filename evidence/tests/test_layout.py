@@ -22,7 +22,7 @@ def test_registered_proofs_have_unique_standalone_scripts() -> None:
     assert all(count == 1 for count in paths.values()), "each proof ID must own one experiment script"
     expected = {ROOT / path for path in paths}
     actual = set(PROOFS.rglob("*.py")) | set((ROOT / "research").rglob("*.py"))
-    actual -= {PROOFS / name for name in ("reporting.py", "run.py", "source.py", "render.py")}
+    actual -= {PROOFS / name for name in ("policies.py", "reporting.py", "run.py", "source.py", "render.py")}
     assert actual == expected, f"proof scripts and results registry disagree: {actual ^ expected}"
     assert not list(PROOFS.rglob("test_*.py")), "learning experiments belong in standalone scripts"
     pages = Counter(entry["page"] for entry in entries.values())
@@ -77,9 +77,26 @@ def test_experiments_keep_generation_and_modeling_in_their_own_script() -> None:
             or name == "proofs"
         ]
         assert not forbidden, f"{path}: keep the experiment self-contained: {forbidden}"
+        model_classes = {
+            node.name
+            for node in ast.walk(module)
+            if isinstance(node, ast.ClassDef)
+            and any(
+                isinstance(base, ast.Attribute)
+                and isinstance(base.value, ast.Name)
+                and base.value.id in relflow_names
+                and base.attr == "Model"
+                for base in node.bases
+            )
+        }
         constructors = set()
         for node in ast.walk(module):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Name) and node.func.id in model_classes:
+                constructors.add("Model")
+                continue
+            if not isinstance(node.func, ast.Attribute):
                 continue
             constructor = node.func
             if (
@@ -112,6 +129,11 @@ def test_experiments_keep_explicit_training_protocols_on_model_fit() -> None:
         path = ROOT / entry["script"]
         module = ast.parse(path.read_text(), filename=str(path))
         calls = [node for node in ast.walk(module) if isinstance(node, ast.Call)]
+        model_classes = {
+            node.name
+            for node in ast.walk(module)
+            if isinstance(node, ast.ClassDef) and any(ast.unparse(base) == "rf.Model" for base in node.bases)
+        }
         assert not any(ast.unparse(call.func) == "lit.Trainer" for call in calls), path
         fits = [call for call in calls if ast.unparse(call.func) == "model.fit"]
         assert len(fits) == 1, path
@@ -132,7 +154,7 @@ def test_experiments_keep_explicit_training_protocols_on_model_fit() -> None:
             ), path
         assert ("optimizer" in options) != ("learning_rate" in options), path
         for call in calls:
-            if ast.unparse(call.func) in {"rf.Model", "resolve"}:
+            if ast.unparse(call.func) in {"rf.Model", "resolve", *model_classes}:
                 assert all(keyword.arg not in {"optimizer", "batch_size"} for keyword in call.keywords), path
             if ast.unparse(call.func) == "rf.Group":
                 options = {keyword.arg: keyword.value for keyword in call.keywords}

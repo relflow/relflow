@@ -158,13 +158,12 @@ def fit(
 ) -> rf.Model:
     """Train on the selected calendar coordinates with the remaining schema fixed."""
     lit.seed_everything(seed, workers=True)
-    model = rf.Model(
-        d_model=64,
-        n_layers=3,
-        n_heads=4,
-        observed_at=rf.DateParts(dateparts=list(dateparts)),
-        target=rf.Category(mask=True, p_unavailable=0.0),
-    )
+
+    class PredictionModel(rf.Model):
+        observed_at = rf.DateParts(dateparts=list(dateparts))
+        target = rf.Category(mask=True, p_unavailable=0.0)
+
+    model = PredictionModel(d_model=64, n_layers=3, n_heads=4)
     data = rf.SyntheticDataModule(train=train, validate=validate, seed=seed)
     model.fit(
         data,

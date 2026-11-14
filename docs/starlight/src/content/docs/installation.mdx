@@ -1,0 +1,55 @@
+---
+title: Installation
+description: Install relflow with uv or pip, choose optional dependencies, and check your Python environment.
+---
+
+relflow requires Python 3.12 or newer. Install the core package to build and train models, then add optional dependencies for the capabilities you need.
+
+## Install
+
+With [uv installed](https://docs.astral.sh/uv/getting-started/installation/), add relflow to your Python project:
+
+```sh
+uv add relflow
+```
+
+<details>
+<summary>Using pip?</summary>
+
+Install relflow in your Python environment:
+
+```sh
+python -m pip install relflow
+```
+
+For the version check below, run `relflow --version` in the environment where you installed relflow.
+
+</details>
+
+## Optional dependencies
+
+The core installation is sufficient for the [repeat-purchase tutorial](/quickstart/). Add extras for the capabilities you need:
+
+| Extra | Enables |
+| --- | --- |
+| `text` | [Text fields](/data-types/text/) backed by Hugging Face encoders. |
+| `serving` | [HTTP serving](/advanced/inference-and-deployment/). Ordinary batch prediction uses the core package. |
+| `duckdb` | DuckDB data sources through `rf.DuckDBDataModule`. |
+| `torchjd` | [UPGrad for multiple objectives](/advanced/masking-and-pretraining/) with `jacobian=True`. Requires PyTorch 2.9 or newer. |
+| `typing` | Type stubs for PyArrow and PyYAML. |
+
+List one or more extras in brackets. For example, to add text encoders and HTTP serving:
+
+```sh
+uv add "relflow[text,serving]"
+```
+
+With pip, use `python -m pip install` with the same quoted requirement.
+
+## Check the installation
+
+```sh
+uv run relflow --version
+```
+
+This prints the installed package version. Continue with [Train your first model](/quickstart/) to fit a model, save it, and predict for new customers.

@@ -147,6 +147,29 @@ def test_worker_inputs_exclude_unbound_files_and_preserve_shared_data(tmp_path):
     assert data.read_bytes() == b"\x00training input"
 
 
+def test_internal_policy_is_bound_and_copied_without_host_execution(tmp_path):
+    suite = tmp_path / "suite"
+    script = source(suite)
+    policy = suite / "experiments/policies.py"
+    policy.write_text("raise RuntimeError('runtime policy imported on host')\n")
+    manifest = plan(
+        run_id="policy", candidate={}, baseline={}, evidence_sha="source", executor_sha="trusted", root=suite
+    )
+    inputs = runtime_inputs(suite)
+    assert inputs["experiments/policies.py"]["sha256"] == runtime.digest(policy)
+    task = manifest["tasks"][0]
+    view = runtime.isolate(suite, tmp_path / "inputs", task, inputs, {script.relative_to(suite).as_posix()})
+    assert (view / "experiments/policies.py").read_bytes() == policy.read_bytes()
+
+    policy.write_text("raise RuntimeError('different frozen architecture')\n")
+    changed = plan(
+        run_id="policy", candidate={}, baseline={}, evidence_sha="source", executor_sha="trusted", root=suite
+    )
+    assert task["inputs_sha256"] != changed["tasks"][0]["inputs_sha256"]
+    with pytest.raises(ValueError, match="Execution input changed"):
+        runtime.isolate(suite, tmp_path / "changed", task, inputs, {task["script"]})
+
+
 @pytest.mark.parametrize("change", ["bytes", "mode", "symlink"])
 def test_worker_rejects_input_changes_after_planning(tmp_path, change):
     suite = tmp_path / "suite"

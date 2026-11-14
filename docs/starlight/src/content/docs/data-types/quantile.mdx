@@ -1,0 +1,111 @@
+---
+title: Quantile
+description: Represent a numeric scalar by its position within the training distribution.
+---
+
+import DataTypePage from '../../../components/DataTypePage.astro';
+import { quantileExamples } from '../../../data/examples/quantile';
+
+Use `rf.Quantile` when relative position in a numeric distribution is useful.
+The field learns an approximate training distribution and represents each
+value by its percentile within it.
+
+<DataTypePage id="quantile-examples" examples={quantileExamples}>
+
+## Inputs
+
+Percentile distance follows the distribution rather than the original units.
+A small change in milliseconds can span many percentiles in a dense region;
+a large change can span fewer in a sparse tail.
+
+Supply integer or floating-point scalars. Nulls retain their null state. NaN
+and infinite values take the `other` state and do not enter the distribution.
+
+The distribution updates from pristine values consumed during training,
+including supervised target values. Validation, test, and prediction use the
+frozen distribution. The learned distribution is saved with the model.
+
+## Predictions
+
+`mask=True` makes a Quantile field a supervised target. Its rich result contains
+`state`, a scalar `content` in the original units, and `inferred`. In the
+processing example, `predictions.duration_ms.content` is a duration in
+milliseconds. No percentile coordinate is exposed in that result. See
+[Choose your predictions](/predictions/) for the full prediction-row contract.
+
+Quantile describes how the field represents numbers internally. It does not
+return a set of requested quantiles or a prediction interval. A target inside
+a branch gets one scalar result per retained record, aligned with that record.
+
+The inverse transform stays within the learned distribution's support. A
+Quantile target therefore cannot predict beyond its learned minimum or maximum.
+Choose Number when predicting outside the observed range is part of your task.
+
+## Options
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `compression` | `100` | Control distribution-summary resolution; larger values retain more detail. Minimum: `10`. |
+| `n_bands` | `8` | Set the number of Fourier bands used to represent percentile coordinates. |
+| `objective` | `"mae"` | Choose `"mae"`, `"mse"`, or `"huber"` loss in percentile coordinates. |
+
+Changing the objective changes the penalty in percentile space. Reported numeric
+error metrics still use the original units. Quantile has no `jitter` option.
+
+## Request Methods
+
+Inspect the training distribution of a Quantile field.
+
+| Method | Returns | Purpose |
+| --- | --- | --- |
+| `normalization(source, address)` | Dictionary snapshot | Inspect the field's learned distribution summary. |
+
+For a trained processing-job model held in `model`:
+
+```python
+distribution: dict[str, float | int | None] = rf.Quantile.normalization(
+    model, "/payload_mb"
+)
+```
+
+The returned dictionary contains `count`, `compression`, `minimum`, `median`,
+and `maximum`. The three distribution readouts are in the source units; they
+are `None` before the field has observed finite training values. The method
+also accepts `model.interprocess_encoding_context` as its source. Inspecting
+the snapshot does not update the distribution.
+
+## Footguns
+
+- **Expecting out-of-range inputs to retain their differences.** In P068's
+  bounded-range task, different values beyond the same training tail collapsed
+  to one percentile and one prediction. Check new values against the learned
+  minimum and maximum; consider Number when their magnitudes must remain
+  distinguishable.
+  [P068: input-tail saturation](/evidence/#P068)
+- **Using a Quantile target for required extrapolation.** Its inverse transform
+  stays inside the learned target range. P068's met checks confirm that boundary,
+  including large errors on shifted targets. Number removes this output bound;
+  evaluate its extrapolation on the ranges your application requires.
+  [P068: bounded target support](/evidence/#P068)
+- **Choosing `objective="mse"` as if it minimized source-unit squared error.**
+  Quantile penalizes percentile errors. P077's noisy-target comparison found
+  different learned answers for percentile MSE and source-unit MSE. Use Number
+  with MSE when that source-unit objective is what you need.
+  [P077: objective-dependent answers](/evidence/#P077)
+- **Reading `content` as a percentile or uncertainty interval.** It is a single
+  value converted back to the training label's units. Read dollars as dollars,
+  and evaluate interval coverage separately if your application needs it.
+  [P067: source-unit readout and scope](/evidence/#P067)
+
+## Related types
+
+- [Number](/data-types/number/) preserves magnitude through raw and signed-log representations and supports predictions beyond observed values.
+- [Vector](/data-types/vector/) represents a fixed-width numeric collection.
+
+## Evidence
+
+The selected historical publication includes [P067: returning source-unit predictions](/evidence/#P067)
+and [P068: behavior beyond the learned range](/evidence/#P068). Their controls,
+measured results, and original execution revisions remain available.
+
+</DataTypePage>

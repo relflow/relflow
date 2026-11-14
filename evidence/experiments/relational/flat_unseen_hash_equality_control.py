@@ -152,17 +152,16 @@ def probabilities(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["predictions"]["equal"]["content"]["probability"] for row in output])
 
 
+class PredictionModel(rf.Model):
+    left_id = rf.Hash(n_hashes=4, n_bands=8)
+    right_id = rf.Hash(n_hashes=4, n_bands=8)
+    equal = rf.Boolean(mask=True)
+
+
 @experiment("P029", seed=3701)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
-    model = rf.Model(
-        d_model=48,
-        n_layers=2,
-        n_heads=4,
-        left_id=rf.Hash(n_hashes=4, n_bands=8),
-        right_id=rf.Hash(n_hashes=4, n_bands=8),
-        equal=rf.Boolean(mask=True),
-    )
+    model = PredictionModel(d_model=48, n_layers=2, n_heads=4)
     # Restart the training RNG independently of parameter initialization.
     lit.seed_everything(seed, workers=True)
     data = rf.SyntheticDataModule(

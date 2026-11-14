@@ -1,0 +1,119 @@
+---
+title: Period
+description: Encode recurring calendar context such as weekday, month, and hour.
+---
+
+import DataTypePage from '../../../components/DataTypePage.astro';
+import { periodExamples } from '../../../data/examples/period';
+
+Use `rf.Period` for recurring calendar patterns. Select the parts of a date or
+timestamp that could help the model: an hour within a day, a weekday within a
+week, or a month within a year.
+
+<DataTypePage id="period-examples" examples={periodExamples}>
+
+## Inputs
+
+Pass one or more unique part names as positional arguments. An explicit
+selection is required.
+
+| Calendar cycle | Available parts |
+| --- | --- |
+| Year | `day_of_year`, `week_of_year`, `month_of_year` |
+| Month | `day_of_month`, `week_of_month` |
+| Week | `day_of_week` |
+| Day | `hour_of_day` |
+| Hour and minute | `minute_of_hour`, `second_of_minute` |
+
+Each selected part becomes a sine/cosine pair. This represents the cycle's
+wraparound, such as the transition from the final hour of a day to the first.
+The field only provides the selected calendar information; add any additional
+context your task requires.
+
+Inputs may be Python dates, datetimes, or timestamp strings. Use `pattern` when
+strings have a specific format:
+
+```python
+received_at = rf.Period("day_of_week", pattern="%d/%m/%Y")
+```
+
+Nulls retain a separate state. Invalid date values raise an error; parse or
+clean inconsistent source formats before passing them to the model.
+
+For Arrow timestamps with a time zone, calendar parts describe local wall-clock
+time in that zone. Strings containing an offset are normalized to UTC when
+parsed. Prepare timestamps in the intended zone before modeling local-hour
+patterns.
+
+For elapsed time, age, or recency, use [Duration](/data-types/duration/) to derive
+the difference between two explicit timestamps. Use [Number](/data-types/number/)
+when your source already contains that elapsed value. Period does not encode an
+absolute year or the amount of time between two timestamps.
+
+## Predictions
+
+The examples use Period as calendar input and predict other fields. Their
+complete output rows contain the Number or Boolean targets, each with its own
+`state`, `content`, and `inferred`. An input timestamp is not copied into
+`predictions`. Use input retention when the application needs it alongside
+the result; see [Choose your predictions](/predictions/).
+
+Period can participate in reconstruction objectives through masking. This
+trains calendar-part representations; it does not decode a new datetime into
+prediction output. Set `embed=True` to export the field's learned embedding
+under `representations`. For a prediction such as “days until the next visit,”
+use a numeric target. For dated forecasts, supply the dates to score and put
+the predicted value beside each date, as in the forecast-slot example.
+
+## Options
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| Positional calendar parts | Required | Select one or more unique calendar parts. |
+| `pattern` | `None` | Parse timestamp strings using a specified format. |
+| `jitter` | `rf.Jitter()` | Perturb calendar coordinate pairs during training while preserving reconstruction targets. |
+| `embed` | `False` | Export the learned field representation. |
+
+## Request Methods
+
+This type has no type-specific request methods.
+
+## Footguns
+
+- **Expecting `day_of_year` to retain the weekday.** P045 balanced all seven
+  weekday answers for each visible day number across separate year ranges; the
+  day-only model stayed near one-in-seven accuracy. Select `day_of_week` when
+  that distinction matters. The richer control supplied the weekday directly;
+  it did not learn a missing-year algorithm.
+  [P045: calendar-coordinate ambiguity](/evidence/#P045)
+- **Extending non-leap results to leap-day boundaries.** P044's month task used
+  only non-leap years. P043 then paired February 29 and March 1 at the same
+  day-of-year coordinate, where day number alone gave 50% accuracy. Supply the
+  needed calendar parts and include leap boundaries in your evaluation.
+  [P044: non-leap scope](/evidence/#P044),
+  [P043: day-60 collisions](/evidence/#P043)
+- **Using recurring coordinates as elapsed time.** Dates weeks apart can have
+  identical weekday and hour coordinates. Use Duration with an explicit cutoff,
+  or an upstream Number, when age or recency matters.
+  [Selected-part representation](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/dateparts.py#L252-L266)
+- **Assuming offset-bearing strings preserve their local hour.** Such strings
+  are parsed as UTC, while a typed Arrow timestamp with a zone supplies that
+  zone's wall clock. Prepare a consistent intended zone for training and
+  prediction before relying on local-hour patterns.
+  [Timezone input contract](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/dateparts.py#L203-L232)
+
+## Related types
+
+- [Number](/data-types/number/) represents elapsed time, age, or recency in a chosen unit.
+- [Duration](/data-types/duration/) derives elapsed time from timestamp endpoints.
+- [Category](/data-types/category/) represents named calendar or business labels that your application supplies.
+
+## Evidence
+
+The selected historical publication includes [P042: combining weekday and hour](/evidence/#P042)
+and [P045: what day-of-year alone leaves unknown](/evidence/#P045). Their controls
+show why selecting the available calendar context matters within those tasks.
+The [P093 irregular-interval experiment](/evidence/#P093) has no selected
+measurement in that publication.
+
+</DataTypePage>

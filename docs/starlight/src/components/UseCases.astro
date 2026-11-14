@@ -1,0 +1,133 @@
+---
+import { Code } from '@astrojs/starlight/components';
+import cases from '../data/use-cases.json';
+import ExampleSelection from './ExampleSelection.astro';
+import CasePicker from './CasePicker.astro';
+
+const choices = cases.map((item) => ({
+  id: item.id,
+  panel: `case-${item.id}`,
+  label: item.label,
+  summary: item.structure,
+}));
+---
+
+<section class="use-cases not-content" aria-labelledby="use-cases-title" data-use-cases>
+  <ExampleSelection choices={choices} persistent />
+  <header class="cases-intro">
+    <h2 id="use-cases-title">What can you build with relflow?</h2>
+    <p>
+      Choose a use case to see how a typed schema describes the available information, related
+      records, and prediction targets.
+    </p>
+    <p class="code-help">Dotted settings have notes: hover, focus, or tap to read them.</p>
+  </header>
+  <CasePicker choices={choices} />
+  <p class="sr-only" role="status" aria-live="polite" aria-atomic="true" data-case-status></p>
+  <div class="case-examples">
+    {
+      cases.map((item) => (
+        <section
+          id={`case-${item.id}`}
+          class="case-example"
+          aria-labelledby={`case-${item.id}-title`}
+          data-case={item.id}
+        >
+          <div class="case-heading">
+            <h3 id={`case-${item.id}-title`}>{item.title}</h3>
+            <p>{item.description}</p>
+          </div>
+          <Code code={item.code} lang="python" />
+        </section>
+      ))
+    }
+  </div>
+  <p class="cases-next">
+    Each schema defines an untrained model. <a href="/quickstart/"
+      >Follow a complete training example →</a
+    >, <a href="/datasets/">explore the example datasets →</a>, or <a href="/concepts/models/"
+      >follow this use case through Core Concepts →</a
+    >.
+  </p>
+</section>
+
+<script>
+  import '../concepts/selection';
+</script>
+
+<style>
+  .use-cases {
+    margin-block: var(--rf-section-gap);
+    min-width: 0;
+  }
+  .cases-intro h2 {
+    font-size: 1.55rem;
+    line-height: 1.25;
+    letter-spacing: -0.03em;
+    margin: 0 0 0.7rem;
+  }
+  .cases-intro p {
+    color: var(--rf-muted);
+    font-size: 0.95rem;
+    line-height: 1.7;
+    margin: 0;
+  }
+  .cases-intro .code-help {
+    font-size: 0.78rem;
+    margin-top: 0.5rem;
+  }
+  .case-examples {
+    min-width: 0;
+  }
+  .case-example {
+    min-width: 0;
+    margin-block: 1.5rem;
+    scroll-margin-top: 6rem;
+  }
+  .case-heading {
+    margin-bottom: 1rem;
+  }
+  .case-heading h3 {
+    font-size: 1.12rem;
+    line-height: 1.4;
+    letter-spacing: -0.015em;
+    margin: 0 0 0.5rem;
+  }
+  .case-heading p {
+    color: var(--rf-muted);
+    font-size: 0.85rem;
+    line-height: 1.7;
+    margin: 0;
+  }
+  .case-example :global(.expressive-code) {
+    max-width: 100%;
+    margin: 0;
+  }
+  .case-example :global(pre) {
+    scrollbar-width: thin;
+  }
+  [data-prepared] .case-example,
+  [data-ready] .case-example {
+    margin: 0;
+  }
+  [data-ready] .case-example[aria-hidden='true'] {
+    display: none;
+  }
+  .cases-next {
+    margin: 1rem 0 0;
+    color: var(--rf-muted);
+    font-size: 0.85rem;
+    line-height: 1.7;
+  }
+  .cases-next a {
+    color: var(--sl-color-text-accent);
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+</style>

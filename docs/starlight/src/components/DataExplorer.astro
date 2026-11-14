@@ -1,0 +1,164 @@
+---
+import { layout, type Dataset } from '../datasets/types';
+import '../datasets/erd.css';
+
+interface Props {
+  /** Unique on the page, even when the same dataset is shown more than once. */
+  id: string;
+  dataset: Dataset;
+  headingLevel?: 3 | 4 | 5 | 6;
+}
+
+const { id, dataset, headingLevel = 3 } = Astro.props;
+if (!id || /\s/.test(id))
+  throw new Error('DataExplorer needs a page-unique id without whitespace.');
+const Heading = `h${headingLevel}` as 'h3' | 'h4' | 'h5' | 'h6';
+const levels = layout(dataset);
+const columns = dataset.entities.flatMap((entity) => entity.columns);
+const roles = {
+  key: ['PK', 'Primary key'],
+  reference: ['FK', 'Foreign key'],
+  target: ['●', 'Prediction target'],
+  training: ['T', 'Training-only source'],
+  collection: ['↳', 'Record collection'],
+  record: ['↳', 'Nested record'],
+} as const;
+---
+
+<div class="data-explorer not-content" data-data-explorer>
+  <p class="dataset-observation"><strong>One observation</strong> {dataset.observation}</p>
+  <figure class="erd-figure" data-erd>
+    <figcaption class="erd-legend">
+      {
+        Object.entries(roles)
+          .filter(([role]) => columns.some((column) => column.role === role))
+          .map(([role, [symbol, label]]) => (
+            <span>
+              <b class:list={{ 'erd-target-key': role === 'target' }}>{symbol}</b> {label}
+            </span>
+          ))
+      }
+      <span class="erd-column-help">Column descriptions: hover, focus, or tap</span>
+      <span class="erd-scroll-hint" data-erd-scroll-hint hidden>Scroll for more records →</span>
+    </figcaption>
+    <div class="erd-scroll" tabindex="0" role="region" aria-label={`${dataset.label} data diagram`}>
+      <div class="erd-canvas">
+        <svg class="erd-edges" aria-hidden="true" focusable="false">
+          {
+            dataset.relations.map((relation) => (
+              <g
+                data-edge-from={relation.from}
+                data-edge-to={relation.to}
+                data-edge-from-column={relation.fromColumn}
+                data-edge-to-column={relation.toColumn}
+                data-edge-cardinality={relation.cardinality || 'many'}
+              >
+                <>
+                  <path class="erd-edge-line" />
+                  <path class="erd-edge-one" />
+                  <path class="erd-edge-many" />
+                </>
+              </g>
+            ))
+          }
+        </svg>
+        <div class="erd-layout">
+          {
+            levels.map((level, depth) => (
+              <div class="erd-level" style={`--erd-level: ${depth}`}>
+                {level.map((entity) => (
+                  <section
+                    class="erd-entity"
+                    data-entity={entity.id}
+                    aria-labelledby={`${id}-entity-${dataset.entities.indexOf(entity)}-title`}
+                  >
+                    <header>
+                      <Heading id={`${id}-entity-${dataset.entities.indexOf(entity)}-title`}>
+                        {entity.name}
+                      </Heading>
+                      <p>{entity.description}</p>
+                    </header>
+                    <ul class="erd-columns" aria-label={`${entity.name} columns`}>
+                      {entity.columns.map((column, index) => {
+                        const columnId = `${id}-entity-${dataset.entities.indexOf(entity)}-column-${index}`;
+                        const [symbol, role] = column.role
+                          ? roles[column.role]
+                          : ['', 'Known input'];
+                        return (
+                          <li>
+                            <button
+                              type="button"
+                              class="erd-column"
+                              data-column={column.name}
+                              data-column-name={`${entity.name}.${column.name}`}
+                              data-column-type={column.type}
+                              data-column-role={role}
+                              data-column-note={column.description}
+                              data-contract-field={column.name}
+                              data-role={column.role}
+                              aria-describedby={`${columnId}-description`}
+                              title={column.description}
+                            >
+                              <span class="erd-column-label">
+                                <span class="erd-role" aria-hidden="true">
+                                  {symbol}
+                                </span>
+                                <span class="erd-column-name">{column.name}</span>
+                              </span>
+                              <span class="erd-column-type">{column.type}</span>
+                              <span class="erd-sr-only">{role}</span>
+                            </button>
+                            <span id={`${columnId}-description`} class="erd-sr-only">
+                              {column.description}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                ))}
+              </div>
+            ))
+          }
+        </div>
+      </div>
+    </div>
+    {
+      dataset.relations.length > 0 && (
+        <div class="erd-relationships" aria-label="Relationships">
+          {dataset.relations.map((relation) => {
+            const parent = dataset.entities.find((item) => item.id === relation.from)!;
+            const child = dataset.entities.find((item) => item.id === relation.to)!;
+            return (
+              <p>
+                <span>
+                  {parent.name}{' '}
+                  <b
+                    aria-label={
+                      relation.cardinality === 'one' ? 'one to one' : 'one to zero or many'
+                    }
+                  >
+                    1 → {relation.cardinality === 'one' ? '1' : '0…n'}
+                  </b>{' '}
+                  {child.name}
+                </span>
+                <span>{relation.description}</span>
+              </p>
+            );
+          })}
+        </div>
+      )
+    }
+  </figure>
+  <div id={`${id}-tooltip`} class="erd-tooltip" data-erd-tooltip role="tooltip" hidden>
+    <p class="erd-tooltip-name" data-note-name></p><p class="erd-tooltip-meta" data-note-meta></p><p
+      class="erd-tooltip-description"
+      data-note-description
+    >
+    </p>
+  </div>
+</div>
+
+<script>
+  import '../datasets/erd';
+</script>

@@ -78,14 +78,6 @@ jobs:
             ${{ runner.temp }}/evidence-publication/SHA256SUMS
           if-no-files-found: ignore
           retention-days: 30
-      - name: Attach the rendered release review site
-        uses: actions/upload-artifact@v4
-        with:
-          name: documentation-site-attempt-${{ github.run_attempt }}
-          path: docs/site
-          if-no-files-found: ignore
-          retention-days: 7
-
   preview:
     if: >-
       (github.event_name == 'workflow_dispatch' && inputs.preview) ||

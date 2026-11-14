@@ -1,0 +1,17 @@
+---
+const { editUrl } = Astro.locals.starlightRoute;
+---
+
+{editUrl && <a href={editUrl}>View source →</a>}
+
+<style>
+  a {
+    color: var(--rf-muted);
+    font-size: 0.8rem;
+    text-decoration: none;
+  }
+  a:hover {
+    color: var(--sl-color-text-accent);
+    text-decoration: underline;
+  }
+</style>

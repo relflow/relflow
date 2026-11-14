@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "kind": "serving_measurement",
+  "started_at_utc": "2026-10-06T15:25:55.468348+00:00",
+  "completed_at_utc": "2026-10-06T15:26:39.019184+00:00",
+  "sources": [
+    {
+      "artifact": "test-xs-20261006/final-results.json",
+      "sha256": "b5d6ac86894590b405db3a81bcaa843963cc9827f84682fd97faeed1026862f1"
+    },
+    {
+      "artifact": "test-xs-20261006/summary.json",
+      "sha256": "19489157e3ba3cd971509f425ea69bb5a540335116e9ed3cdfa0bab6838b2658"
+    },
+    {
+      "artifact": "test-xs-20261006/final-deployment.json",
+      "sha256": "5ba35cec48736a52bfebcc87c8b742be127ab840c82a8b949af001aa59469e67"
+    }
+  ],
+  "source_code_sha256": {
+    "brands/tiny_client.py": "f1a65ecd6ece3b79ae10fe79b4304ebce099260cad35ca155b87bf4aac240a36",
+    "brands/tiny_deployment.py": "7cab5262cb45d361be5cf22ab74ea0578ab3d0c91891ec279b40c0cd2bb9e897",
+    "brands/tiny_model.py": "b7e2ca85e17b233f9e3899933412f90b90545556e7c7b12ca139aa04d4098c0f"
+  },
+  "data": "seeded independent Gaussian float32 numbers and random Booleans; fixed-size four-item lists",
+  "timing_boundary": "Arrow validation, IPC encoding, pooled HTTPS request/response, Arrow decoding; input table generated once",
+  "model": {
+    "preset": "xs",
+    "parameters": 3142,
+    "attention_modules": 0,
+    "trained": false,
+    "accelerator": "cuda:0",
+    "max_batch_size": 131072,
+    "torch_threads": 1,
+    "http_response_compression": "gzip level 1",
+    "gpu": "NVIDIA A10G",
+    "pooling": "mean"
+  },
+  "resources": {
+    "replicas": 1,
+    "gpu": "NVIDIA A10G",
+    "gpus": 1,
+    "requested_cpus": 2,
+    "requested_host_memory_gib": 8
+  },
+  "passes": [
+    {
+      "batch_size": 131072,
+      "compression": "zstd",
+      "encode_per_request": true,
+      "concurrency": 4,
+      "requests": 128,
+      "successful_requests": 128,
+      "failed_requests": 0,
+      "errors": [],
+      "request_bytes": 2004528,
+      "wall_seconds": 14.2212,
+      "rows_per_second": 1179732.0,
+      "requests_per_second": 9.0,
+      "p50_ms": 375.0,
+      "p95_ms": 923.3
+    },
+    {
+      "batch_size": 131072,
+      "compression": "zstd",
+      "encode_per_request": true,
+      "concurrency": 4,
+      "requests": 128,
+      "successful_requests": 128,
+      "failed_requests": 0,
+      "errors": [],
+      "request_bytes": 2004528,
+      "wall_seconds": 13.5875,
+      "rows_per_second": 1234751.6,
+      "requests_per_second": 9.42,
+      "p50_ms": 391.5,
+      "p95_ms": 611.9
+    },
+    {
+      "batch_size": 131072,
+      "compression": "zstd",
+      "encode_per_request": true,
+      "concurrency": 4,
+      "requests": 128,
+      "successful_requests": 128,
+      "failed_requests": 0,
+      "errors": [],
+      "request_bytes": 2004528,
+      "wall_seconds": 14.9451,
+      "rows_per_second": 1122590.4,
+      "requests_per_second": 8.56,
+      "p50_ms": 444.8,
+      "p95_ms": 749.2
+    }
+  ],
+  "summary": {
+    "median_rows_per_second": 1179732.0,
+    "successful_requests": 384,
+    "failed_requests": 0,
+    "prediction_rows": 50331648
+  },
+  "scope": "Synthetic serving throughput for an untrained attention-free XS model. Large-batch request latency is not a single-record latency measurement. This record does not measure predictive quality."
+}

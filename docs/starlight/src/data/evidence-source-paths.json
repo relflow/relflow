@@ -1,0 +1,397 @@
+{
+  "026c13a3c6d750042e5c0c25261975412fe03bf2ab3442ac035739da7c665eab": {
+    "id": "P034",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/relational/supplied_peer_mean_control.py"
+  },
+  "029876d15b7d66838ac493917c60e0f50f4be60041f6d32eaf193db65269323d": {
+    "id": "P023",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/relational/pass_through_number_payload.py"
+  },
+  "0308ae6e8a66b13698c3e3f4a079124d67231d15bf2f4425b19f828609439997": {
+    "id": "P050",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/mutations/delete_input_and_adapt.py"
+  },
+  "0713a64fb406474776a20fc30e5faf891d3767343f2e6c3db3ae20474bac7e55": {
+    "id": "P030",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/relational/repeated_subtotal_reconstruction.py"
+  },
+  "079736f3246b5bafbaf291280b3aeaacb925a1a7b58531424735acf34a117fce": {
+    "id": "P049",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/mutations/deactivate_and_restore_input.py"
+  },
+  "0af2f82d10281c2bee49aed823974b2633e35f3de5b4013069925e6de86a02ba": {
+    "id": "P002",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/aggregation/attention_sum_unseen_lengths.py"
+  },
+  "0ce14da95068b1f0dbd035c465b6f41a2a42b43e333188b644766851bbed6428": {
+    "id": "P028",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/relational/direct_sibling_hash_overlap.py"
+  },
+  "0e24fd56165a262f1ddf86c77fc298998e075f235e822f0a62985636a8cf9aea": {
+    "id": "P024",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/relational/aligned_position_control.py"
+  },
+  "0e29856934e4b693baf4b3216870bf3d8bb48e3136c7f1fad4c8be6ef8af3075": {
+    "id": "P029",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/relational/flat_unseen_hash_equality_control.py"
+  },
+  "16cedd4f3f6a272e73849066b2fd1f5a83d716c522d3c974977158d8d7210f22": {
+    "id": "P006",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/aggregation/aligned_pair_covariance.py"
+  },
+  "19594a5fb1d8b3c37351e567af32e5a017b604453ea42053a00c62a8eb873d80": {
+    "id": "P016",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/aggregation/variable_cardinality_weighted_mean.py"
+  },
+  "1bbed063cf3dbe0a7355afe6f2ba6c13e19645825cc127e9f460aae4011ef3bf": {
+    "id": "P062",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/vocabulary/pretraining_coverage.py"
+  },
+  "23fef8fd7a84459694e64f8658e115e902e055c64604661bcf4fa2f45146f76b": {
+    "id": "P008",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/aggregation/supplied_cross_deviations.py"
+  },
+  "2694171c298d6a8f7f3573d7b0b96a681b4b91b1805bcafb33aa684dd6ab2c5c": {
+    "id": "P058",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/vocabulary/unknown_set_members.py"
+  },
+  "2df35ddba5f09d1362bef64708584188a4c953f51c48dd19d42c68a99b231cfa": {
+    "id": "P046",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/mutations/neutral_edits_preserve_learning.py"
+  },
+  "2fdc1389ba515631df3a3a5e4640b2c95cfcd61213dcf948153da6ce9ddadc13": {
+    "id": "P037",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/relational/hash_identity.py"
+  },
+  "35edb25b8a29ab8dc444569b362227e5c737af313407373c36550ef4909750fb": {
+    "id": "P014",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/aggregation/raw_value_weight_sum.py"
+  },
+  "39c29d1f97383cee217f0b139ed23886a787d123b8f19d81b4e73122ed814768": {
+    "id": "P001",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/aggregation/attention_sum_in_range.py"
+  },
+  "3b2fecc52f553a239fbcc0d20b22af9af02b00c35a8433330d55de6438b51fc2": {
+    "id": "P073",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/representation/reconstruction_transfer.py"
+  },
+  "3ee44e4d2b83d10b012d8438f5eb8d1b33928e4c3aebab11efb55b973967ed2c": {
+    "id": "P066",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/vocabulary/rolling_input_admission.py"
+  },
+  "3f588ae53da2e02f6ec0d99c8fdf0ecf98b7cd2824eb32aff14f9e22792a44f4": {
+    "id": "P036",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/relational/category_identity.py"
+  },
+  "42dcd98250690b5993dd04fcf4b07eb8b95de746770a8293a6d8b3816caeeb10": {
+    "id": "P065",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/vocabulary/cluster_pretraining_coverage.py"
+  },
+  "46582a7257c1ccb1743e6813d4eed7f5a6fb471b226e74d43faba38a9ba0bc7a": {
+    "id": "P009",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/aggregation/supplied_squared_deviations.py"
+  },
+  "498129f2bdb5cdf9509e5ff1f7d750ab0297eb71aaccfbcbe6ef2618e939221e": {
+    "id": "P076",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/anomaly/contextual_consistency.py"
+  },
+  "49856d0d7968f6465237bcebae1c995cfd7772a34a155ce47e11fdac20d98775": {
+    "id": "P077",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/quantile/representation_tradeoffs.py"
+  },
+  "4cfeddca8e0d7bbc84a8f608ea644501296ea80f76e9f0c2c867befab8ddb457": {
+    "id": "P063",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/vocabulary/set_reconstruction_coverage.py"
+  },
+  "4d02ebd746de5608dc7227a86d658de16be5adecd779edc9dd5067ada544ee07": {
+    "id": "P052",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/masking/query_reconstruction.py"
+  },
+  "4fea121461e8a252b1319905995a652726d33fe9aa0aa7e98827173163fd740d": {
+    "id": "P019",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/cluster/plain_input_is_dormant.py"
+  },
+  "5d16666beeb56e941170df51ea4ea3d17869b8d226ff30c86e59fbc62111450c": {
+    "id": "P038",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/state/null_versus_zero.py"
+  },
+  "6387000011f8699f49becef64161bd6f0c5a1e7ac662525a0dea76f2d3e35c44": {
+    "id": "P079",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/representation/number_lanes.py"
+  },
+  "6613ce84cc4aea68831ae23f46ed239178419bbb19847c66ff9b4f414ada041c": {
+    "id": "P051",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/masking/sampled_reconstruction.py"
+  },
+  "68862244db94bc228570e7e702b27f727a0bb4ada76c6b821a0a5576688d4311": {
+    "id": "P047",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/mutations/extend_prediction_target.py"
+  },
+  "69083338b2e89fc5b6b4f3c52c1faea13486e0ef2997f20435cee22bcf038f53": {
+    "id": "P068",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/quantile/clipped_extrapolation.py"
+  },
+  "6a73b67e5766564c4923718a5f2951e3402fc194ff551af99567b95f6b2f10ab": {
+    "id": "P022",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/relational/attention_number_payload.py"
+  },
+  "6c555e828a7d39137e2e5181dcb95914ed1f338f31df783702e20d4f2bd3f3ea": {
+    "id": "P032",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/relational/grouped_peer_deviation.py"
+  },
+  "6d2bfcbb1314cbd9a4318580dc8d7205f3cbfaa50441a5876257d4f3a23a0521": {
+    "id": "P003",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/aggregation/mean_duplicate_invariance.py"
+  },
+  "7b44131aa2a90acedd72923b4140d901367899c46e4578286e6ab41c7ae016ca": {
+    "id": "P074",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/representation/incomplete_evidence.py"
+  },
+  "7c17e00b4d227e72e930bea916f1b917af7c47f2c9076f2f025aa289b5e28305": {
+    "id": "P056",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/vocabulary/unknown_target_coverage.py"
+  },
+  "7f96d10b794fe483bcd75d6ab60d0dbb9ac17b0b1e0428b0646e5e8f11e6d460": {
+    "id": "P021",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/identity/unseen_identity_equality.py"
+  },
+  "814383bc9712b35b9b040f5a2ae417acd4692e87e92b90afaf75e1f31fc40bab": {
+    "id": "P039",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/structure/attention_learns_fixed_width_sum.py"
+  },
+  "82ec243f90fb89c2feab0c0fd57d344943f3d7ac4c9e2f479b1530b060813423": {
+    "id": "P053",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/masking/branch_ablation.py"
+  },
+  "82f3b2aa3d386ba26f6cfdd0c7e98166b8ea874f24f6cc0a1bc421af3abc9db9": {
+    "id": "P048",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/mutations/reset_prediction_target.py"
+  },
+  "82fd9d4ff27752465b60392bd37f8ec659ec5cd9362084fb25a5efcdd58cefc0": {
+    "id": "P017",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/calibration/signal_vs_noise.py"
+  },
+  "869d55e69500042a4a0df3c7e253aeb13a09a7d43fdda8e41f8ef98c5a417ea2": {
+    "id": "P020",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/cluster/reconstructing_category_labels.py"
+  },
+  "881b2cc92c2c3a21e5baad626796206b9d779131c4cc8d0d791d45eaabcc5203": {
+    "id": "P072",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/composition/context_examples.py"
+  },
+  "89b3c1d44fdc3d077b83d0cf4eee86f092e549bf914729d00a78e7515bda388a": {
+    "id": "P026",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/relational/filtered_mean.py"
+  },
+  "89d63c29a93ff3bdd63de6f5d56a33a221aeec75a04e751b2a270f4f97f7f5fb": {
+    "id": "P044",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/temporal/month_from_day_of_year.py"
+  },
+  "8acdfb72e6f5a245bd349d028473dcc948e0465bd8621a46d4a991288e14c506": {
+    "id": "P071",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/composition/held_out_requests.py"
+  },
+  "8b2541432be0273f6c12fc4c8a07f0ab9f0899de829f8e1e22f3d9031f545762": {
+    "id": "P031",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/relational/fixed_length.py"
+  },
+  "8badd5cf04f7d08b9e91fc56c82db71e2531874303283d8a15ae17900fe76cb2": {
+    "id": "P059",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/vocabulary/admission_and_continued_training.py"
+  },
+  "8bd6f0632a6e0b912a655acc0f1d97014298b32aee702611f4d6dc156b965b1f": {
+    "id": "P010",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/aggregation/selected_group_raw_weighted_sum.py"
+  },
+  "91b605884556ebc95523a4934c52e386f7796ba4d76778070fa9466cb35eeacb": {
+    "id": "P043",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/temporal/leap_boundary_requires_context.py"
+  },
+  "9449733ba7578793ce393fbb48de5e191b7a1861a82fecf962eb35e00149ac3a": {
+    "id": "P055",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/vocabulary/unknown_input_fallback.py"
+  },
+  "981489e1ca7a826e72105e9fe18064d3e360425cab15119cbb71d971eba84f15": {
+    "id": "P060",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/calibration/categorical_prior.py"
+  },
+  "98bdba9fac6f605cb1446e2e2f69c260f4906d411d381edf929de17d715c3b36": {
+    "id": "P035",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/relational/ungrouped_peer_deviation.py"
+  },
+  "995cc2bea820bfe5fd014cb1f8c16f7b0a0c3f34578de20e404d2b5d4568cf55": {
+    "id": "P013",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/aggregation/mean_keeps_contribution_count.py"
+  },
+  "9a6be480bdf81e835f7475a5525d3eca11321e62a7ad677c962b77e66e8cf05c": {
+    "id": "P070",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/enum/declared_without_examples.py"
+  },
+  "9c3d0bae8fd1250be15e104e3cf147e5a2e42fa31de19696141557a3cd548e60": {
+    "id": "P075",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/relational/retrieval_capacity.py"
+  },
+  "9dea09daa598658783f26fbb0b19b2e88ad3791186a56d0223a91af597fc39c8": {
+    "id": "P040",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/structure/attention_preserves_nested_cardinality.py"
+  },
+  "b16030b54ff9a87131da1a0189ad3b3a723c8290ebadb8701a0195a3dc9407a1": {
+    "id": "P067",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/quantile/rank_regression.py"
+  },
+  "b772eb90df5a24432cf56b6a0dde1b56ed8d5bc62a6772c3c588ee75b5d66c9a": {
+    "id": "P011",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/aggregation/selected_group_supplied_contribution_sum.py"
+  },
+  "b97ae0a19e5c0838f91ec690379609a47e16198705e203e470a9556118ff0364": {
+    "id": "P041",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/structure/mean_keeps_cardinality.py"
+  },
+  "bb863e83b1efcba4d2539d5c19790100ce6b23f1dfc5b6e6d4e0e453e0dc12cf": {
+    "id": "P064",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/vocabulary/set_unavailable_fallback.py"
+  },
+  "bbe902dd0ba0d399714768982204f6272de1ea5e1b566024d1e6098a9b5769f8": {
+    "id": "P057",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/vocabulary/capacity_admission_order.py"
+  },
+  "c0483fb99266a4b111e1bec0328119f8b5d9fea4c9d301ac0d8f8118d5838947": {
+    "id": "P007",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/aggregation/raw_value_variance.py"
+  },
+  "c1641936131ec6d196aa6d74ba909b06832cf176a5871baefcfdfbeb5ea6d456": {
+    "id": "P042",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/temporal/business_window_requires_composition.py"
+  },
+  "c62a138ba2da30e6945ff81519f8bd21a6fa6956be6fc7752f475a6c555c2dfa": {
+    "id": "P069",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/enum/fixed_class_learning.py"
+  },
+  "c90529abf0f55b60a515ece633ae62dd945af83bc27c1a6abd0b202946524506": {
+    "id": "P027",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/relational/group_operation_composition.py"
+  },
+  "cb9e0e7162cf645bd120d51261b0d3b639265fbcd40481e4bab3b94114270dc1": {
+    "id": "P025",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/relational/hash_recall.py"
+  },
+  "cc03aa7f85f2acdc01299ccb7885b88232e076e9b34d374d796af1b11bb99813": {
+    "id": "P078",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/cluster/regime_recovery.py"
+  },
+  "cf537133cf207c4f36c08b05806eaf9928cf82fd49399b9c4e7a28e884fe4823": {
+    "id": "P004",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/aggregation/visible_count_sum.py"
+  },
+  "d272015c8f24e16400de36426ac86dced6798ce7d18f9d95b9f05f2867d320b7": {
+    "id": "P015",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/aggregation/supplied_contribution_sum.py"
+  },
+  "d33c4a7c39865c1b02e0992bf4c899fb73db0da07f75d28730489b99be7b87a8": {
+    "id": "P061",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/vocabulary/cold_start_confidence.py"
+  },
+  "d5cabdabb294076e6cb3259308723e127db30127830761010514d695f4b75252": {
+    "id": "P012",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/aggregation/requested_rank_values.py"
+  },
+  "d5e7c3f77f43b42d0eec1b482dc85945d5223b240854f8c594513f584d2538bc": {
+    "id": "P054",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/masking/prefix_generation.py"
+  },
+  "e067e89812b40a600d05c2a76c9e7cab2e4b1d343fb78d203cf89be043507219": {
+    "id": "P033",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/relational/single_query_preserves_group_membership.py"
+  },
+  "e39402b123957c1b9ee4ad3e08f2ba34a4dd0eb5b1add8e9e4f24c2612698072": {
+    "id": "P005",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/aggregation/visible_count_unseen_lengths.py"
+  },
+  "e5cace928253a84425e5b896803d613bce733320ffed0d04bd9fb8f9a4aceb2b": {
+    "id": "P018",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/cluster/hidden_regression_regimes.py"
+  },
+  "f0a8d614a51720e7b76d1809ad054338fe549d846b50c9f6939903cf959397c9": {
+    "id": "P045",
+    "lane": "core",
+    "sourcePath": "evidence/experiments/temporal/weekday_requires_year_context.py"
+  }
+}

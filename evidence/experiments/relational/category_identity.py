@@ -165,26 +165,20 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     # Fit both routes from the same seed and data, changing only reduction.
     for route, reduction in (("compressed", rf.Attention()), ("preserved", None)):
         lit.seed_everything(seed, workers=True)
-        model = rf.Model(
-            d_model=64,
-            n_layers=2,
-            n_heads=4,
-            reduction=reduction,
-            source=rf.Branch(
-                length=PAIR_COUNT,
-                n_layers=2,
-                reduction=reduction,
-                entity_id=rf.Category(p_unavailable=0.0),
-                value=rf.Number,
-            ),
-            target=rf.Branch(
-                length=PAIR_COUNT,
-                n_layers=2,
-                reduction=reduction,
-                entity_id=rf.Category(p_unavailable=0.0),
-                value=rf.Number(mask=True, objective="mse"),
-            ),
-        )
+
+        class SourceRecord(rf.Branch):
+            entity_id = rf.Category(p_unavailable=0.0)
+            value = rf.Number
+
+        class TargetRecord(rf.Branch):
+            entity_id = rf.Category(p_unavailable=0.0)
+            value = rf.Number(mask=True, objective="mse")
+
+        class PredictionModel(rf.Model):
+            source = SourceRecord(length=PAIR_COUNT, n_layers=2, reduction=reduction)
+            target = TargetRecord(length=PAIR_COUNT, n_layers=2, reduction=reduction)
+
+        model = PredictionModel(d_model=64, n_layers=2, n_heads=4, reduction=reduction)
         data = rf.SyntheticDataModule(
             train=partial(records, rows=2048, seed=seed + 1, namespace="train"),
             validate=partial(records, rows=512, seed=seed + 2, namespace="validate"),

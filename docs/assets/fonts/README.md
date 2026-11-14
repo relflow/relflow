@@ -5,5 +5,6 @@
 It matches the Libertinus Serif Semibold face used by the banner.
 
 The font is distributed under the SIL Open Font License in [OFL.txt](OFL.txt).
-The docs serve it locally through `assets/stylesheets/branding.css`, so the
-wordmark does not depend on an installed font or an external font service.
+The Starlight branding renderer uses this font to regenerate the outlined SVG
+wordmark. Documentation builds consume the prepared SVGs and require no browser
+font download or external font service.

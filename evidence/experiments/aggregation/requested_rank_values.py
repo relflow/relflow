@@ -263,21 +263,23 @@ def overall_score(*, train: list[dict], test: list[dict], predicted: np.ndarray)
     return {"rmse": measured_rmse, "baseline_rmse": baseline_rmse, "nrmse": measured_rmse / baseline_rmse}
 
 
+class Item(rf.Branch):
+    value = rf.Number
+
+
+class PredictionModel(rf.Model):
+    items = Item(length=LENGTH, overflow="error", n_layers=3, n_heads=4, reduction=None)
+    rank = rf.Category(p_unavailable=0.0)
+    answer = rf.Number(mask=True, objective="mse")
+
+
 @experiment("P012", seed=3700)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     train = list(records(bags=1024, seed=seed + 1))
     validate = list(records(bags=192, seed=seed + 2))
     test = list(records(bags=384, seed=seed + 3))
-    model = rf.Model(
-        d_model=64,
-        n_layers=3,
-        n_heads=4,
-        reduction=None,
-        items=rf.Branch(length=LENGTH, overflow="error", n_layers=3, n_heads=4, reduction=None, value=rf.Number),
-        rank=rf.Category(p_unavailable=0.0),
-        answer=rf.Number(mask=True, objective="mse"),
-    )
+    model = PredictionModel(d_model=64, n_layers=3, n_heads=4, reduction=None)
     datamodule = rf.SyntheticDataModule(
         train=lambda: records(bags=1024, seed=seed + 1),
         validate=lambda: records(bags=192, seed=seed + 2),

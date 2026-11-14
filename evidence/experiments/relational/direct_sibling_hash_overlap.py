@@ -223,18 +223,24 @@ def probabilities(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["predictions"]["has_overlap"]["content"]["probability"] for row in output])
 
 
+class LeftRecord(rf.Branch):
+    entity_id = rf.Hash(n_hashes=4, n_bands=8)
+
+
+class RightRecord(rf.Branch):
+    entity_id = rf.Hash(n_hashes=4, n_bands=8)
+
+
+class PredictionModel(rf.Model):
+    left = LeftRecord(length=MAX_LENGTH, n_layers=1, reduction=None)
+    right = RightRecord(length=MAX_LENGTH, n_layers=1, reduction=None)
+    has_overlap = rf.Boolean(mask=True)
+
+
 @experiment("P028", seed=3711)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
-    model = rf.Model(
-        d_model=48,
-        n_layers=3,
-        n_heads=4,
-        reduction=None,
-        left=rf.Branch(length=MAX_LENGTH, n_layers=1, reduction=None, entity_id=rf.Hash(n_hashes=4, n_bands=8)),
-        right=rf.Branch(length=MAX_LENGTH, n_layers=1, reduction=None, entity_id=rf.Hash(n_hashes=4, n_bands=8)),
-        has_overlap=rf.Boolean(mask=True),
-    )
+    model = PredictionModel(d_model=48, n_layers=3, n_heads=4, reduction=None)
     # Restart the training RNG independently of parameter initialization.
     lit.seed_everything(seed, workers=True)
     data = rf.SyntheticDataModule(

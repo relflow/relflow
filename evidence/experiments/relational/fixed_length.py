@@ -204,18 +204,20 @@ def permute_items(rows: list[dict], seed: int) -> list[dict]:
     return result
 
 
+class Item(rf.Branch):
+    value = rf.Number
+
+
+class PredictionModel(rf.Model):
+    items = Item(length=8, n_layers=2, reduction=rf.Attention(n_layers=2))
+    answer = rf.Number(mask=True, objective="mse")
+    operation = rf.Category(p_unavailable=0.0)
+
+
 @experiment("P031", seed=15)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
-    model = rf.Model(
-        d_model=64,
-        n_layers=2,
-        n_heads=4,
-        reduction=rf.Attention(n_layers=2),
-        items=rf.Branch(length=8, n_layers=2, reduction=rf.Attention(n_layers=2), value=rf.Number),
-        answer=rf.Number(mask=True, objective="mse"),
-        operation=rf.Category(p_unavailable=0.0),
-    )
+    model = PredictionModel(d_model=64, n_layers=2, n_heads=4, reduction=rf.Attention(n_layers=2))
     data = rf.SyntheticDataModule(
         train=partial(records, bags=768, length=8, seed=seed + 135),
         validate=partial(records, bags=96, length=8, seed=seed + 136),

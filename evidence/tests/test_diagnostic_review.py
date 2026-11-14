@@ -12,7 +12,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import pytest
 
 from evidence.diagnostics import review as reviewing
-from evidence.diagnostics.review import fragment, load, prepare
+from evidence.diagnostics.review import load, prepare
 from evidence.experiments.source import fingerprint, registry
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -73,55 +73,6 @@ def test_authored_views_cover_both_catalog_lanes():
     assert {key for key, spec in specs.items() if spec["mode"] == "research"} == {
         key for key, entry in catalog.items() if entry["lane"] == "research"
     }
-
-
-def test_figures_require_the_identical_selected_record_and_keep_unmet_checks(project):
-    review = load(project)
-    run = json.loads((project / "docs/assets/evidence-plots/P001.json").read_text())["record"]
-    assert run["outcome"] == "not_met" and not all(run["checks"].values())
-    markup = fragment(project, "P001", run, review)
-    assert "unpaired visualization run" in markup
-    assert "P001-record.json" in markup
-    assert "CI observation bundles" not in markup
-    altered = deepcopy(run)
-    altered["seed"] += 1
-    assert fragment(project, "P001", altered, review) == ""
-    assert fragment(project, "P001", None, review) == ""
-
-
-def test_paired_figures_link_to_the_recorded_ci_run(project):
-    path = project / "docs/assets/evidence-plots/P001.json"
-    data = json.loads(path.read_text())
-    data["scope"] = "paired Evidence CI candidate"
-    path.write_text(json.dumps(data))
-    review = json.loads((path.parent / "review.json").read_text())
-    markup = fragment(project, "P001", data["record"], review)
-    assert "https://github.com/relflow/relflow/actions/runs/1" in markup
-    assert "paired Evidence CI run" in markup
-
-
-def test_introduced_figure_explains_its_candidate_only_scope(project):
-    path = project / "docs/assets/evidence-plots/P001.json"
-    data = json.loads(path.read_text())
-    data["scope"] = "candidate-only Evidence CI proof"
-    path.write_text(json.dumps(data))
-    review = json.loads((path.parent / "review.json").read_text())
-    markup = fragment(project, "P001", data["record"], review)
-    assert "no directly comparable baseline measurement" in markup
-    assert "https://github.com/relflow/relflow/actions/runs/1" in markup
-
-
-def test_illustrations_do_not_gain_a_learning_claim(project):
-    assets = project / "docs/assets/evidence-plots"
-    data = json.loads((assets / "P001.json").read_text())
-    data["record"] = None
-    (assets / "P001.json").write_text(json.dumps(data))
-    review = json.loads((assets / "review.json").read_text())
-    review["entries"]["P001"]["assets"]["P001.json"] = hashlib.sha256((assets / "P001.json").read_bytes()).hexdigest()
-    (assets / "review.json").write_text(json.dumps(review))
-    markup = fragment(project, "P001", None, load(project))
-    assert "Generator illustration" in markup and "No full learning result" in markup
-    assert "-record.json" not in markup
 
 
 @pytest.mark.parametrize("change", ["figure", "data", "missing", "unsafe"])

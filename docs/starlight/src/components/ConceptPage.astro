@@ -1,0 +1,369 @@
+---
+import { Code } from '@astrojs/starlight/components';
+import { scenarios } from '../data/concepts/scenarios';
+import type { Concept } from '../data/concepts/types';
+import DataExplorer from './DataExplorer.astro';
+import ValueTree from './ValueTree.astro';
+import ExampleSelection from './ExampleSelection.astro';
+import CasePicker from './CasePicker.astro';
+import ModelExplainer from './ModelExplainer.astro';
+import { explainerByCase } from '../data/model-explainer';
+
+interface Props {
+  concept: Concept;
+}
+const { concept } = Astro.props;
+const choices = scenarios.map((scenario) => ({
+  id: scenario.id,
+  panel: `${concept.id}-${scenario.id}`,
+  label: scenario.label,
+  summary: scenario.structure,
+}));
+const examples = scenarios.map((scenario) => ({
+  scenario,
+  example: concept.examples.find((example) => example.caseId === scenario.id),
+}));
+if (
+  concept.examples.length !== scenarios.length ||
+  new Set(concept.examples.map((example) => example.caseId)).size !== scenarios.length ||
+  examples.some(({ example }) => !example)
+) {
+  throw new Error(
+    `${concept.id}: each Core Concepts page must contain exactly one example for each original use case.`,
+  );
+}
+---
+
+<div class="concept-page">
+  {concept.intro.map((paragraph) => <p>{paragraph}</p>)}
+
+  <section
+    class="concept-showcase not-content"
+    aria-label="Explore this concept by use case"
+    data-use-cases
+  >
+    <ExampleSelection choices={choices} persistent />
+    <div class="picker-intro">
+      <h2>Explore a use case</h2>
+      <p>Choose the problem you know. Your choice follows you through these guides.</p>
+    </div>
+    <CasePicker choices={choices} />
+    <p class="case-instructions">
+      Examples are static illustrations. Dotted code terms have notes on hover, keyboard focus, or
+      tap.
+    </p>
+    <p class="sr-only" role="status" aria-live="polite" aria-atomic="true" data-case-status></p>
+
+    {
+      examples.map(({ scenario, example: item }) => {
+        const example = item!;
+        const hasModel = example.blocks.some((block) => block.kind === 'model');
+        const includesSchema =
+          hasModel || example.blocks.some((block) => block.code === scenario.schema);
+        return (
+          <article
+            id={`${concept.id}-${scenario.id}`}
+            class="concept-example"
+            data-case={scenario.id}
+            aria-labelledby={`${concept.id}-${scenario.id}-title`}
+          >
+            <header class="example-heading">
+              <div class="example-labels">
+                <>
+                  <span>{scenario.label}</span>
+                  <a
+                    data-case-permalink
+                    href={`?case=${scenario.id}#${concept.id}-${scenario.id}`}
+                    aria-label={`Link to ${scenario.label} example`}
+                  >
+                    Link to example
+                  </a>
+                </>
+              </div>
+              <h3 id={`${concept.id}-${scenario.id}-title`}>{example.title}</h3>
+              <p>{example.description}</p>
+            </header>
+            <div class="example-blocks">
+              {!hasModel && (
+                <section class="concept-block" aria-label="Dataset for this use case">
+                  <h4>Dataset for this use case</h4>
+                  <DataExplorer
+                    id={`${concept.id}-${scenario.id}-data`}
+                    dataset={scenario.dataset}
+                    headingLevel={5}
+                  />
+                </section>
+              )}
+              {example.blocks.map((block, index) => (
+                <section class="concept-block" aria-label={block.label}>
+                  <h4>{block.label}</h4>
+                  {block.kind === 'model' ? (
+                    <>
+                      <ModelExplainer
+                        id={`${concept.id}-${scenario.id}-build`}
+                        caseId={block.caseId}
+                      />
+                      <section
+                        class="model-dataset"
+                        aria-label="Dataset for the complete walkthrough"
+                      >
+                        <h5>Dataset for the complete walkthrough</h5>
+                        <DataExplorer
+                          id={`${concept.id}-${scenario.id}-data`}
+                          dataset={explainerByCase[block.caseId].dataset}
+                          headingLevel={6}
+                        />
+                      </section>
+                    </>
+                  ) : block.kind === 'prediction' ? (
+                    <ValueTree
+                      id={`${concept.id}-${scenario.id}-result-${index}`}
+                      value={block.value}
+                      inputs={block.inputs}
+                      predictions
+                    />
+                  ) : block.records ? (
+                    <details class="concept-records">
+                      <summary>Inspect the exact records · YAML</summary>
+                      <Code
+                        code={block.code}
+                        lang={block.lang}
+                        wrap
+                        preserveIndent={false}
+                        hangingIndent={2}
+                      />
+                    </details>
+                  ) : (
+                    <Code
+                      code={block.code}
+                      lang={block.lang}
+                      wrap={block.lang === 'yaml'}
+                      preserveIndent={block.lang === 'python'}
+                      hangingIndent={2}
+                    />
+                  )}
+                  {block.note && <p class="block-note">{block.note}</p>}
+                </section>
+              ))}
+            </div>
+            <footer class="example-takeaway">
+              <p>{example.takeaway}</p>
+              <p>
+                <a href={`/datasets/?case=${scenario.id}`}>
+                  Explore this dataset’s entities and columns →
+                </a>
+              </p>
+              {!includesSchema && (
+                <details class="schema-source">
+                  <summary>See the complete class schema</summary>
+                  <p>The focused snippets above build on this use case’s schema.</p>
+                  <Code code={scenario.schema} lang="python" />
+                </details>
+              )}
+            </footer>
+          </article>
+        );
+      })
+    }
+  </section>
+
+  <section class="concept-principles" aria-labelledby={`${concept.id}-principles`}>
+    <h2 id={`${concept.id}-principles`}>How it fits together</h2>
+    {
+      concept.principles.map((principle) => (
+        <section>
+          <>
+            <h3>{principle.title}</h3>
+            <p>{principle.text}</p>
+          </>
+        </section>
+      ))
+    }
+  </section>
+  <p class="concept-takeaway">{concept.takeaway}</p>
+  <nav class="concept-links" aria-label="Related explanations and reference">
+    {concept.links.map((link) => <a href={link.href}>{link.label} →</a>)}
+  </nav>
+</div>
+
+<script>
+  import '../concepts/selection';
+</script>
+
+<style>
+  .concept-page {
+    min-width: 0;
+  }
+  .model-dataset {
+    border-top: 1px solid var(--rf-border);
+    margin-top: var(--rf-section-gap);
+    padding-top: var(--rf-panel-padding);
+  }
+  .model-dataset > h5 {
+    margin: 0 0 0.75rem;
+    font-size: 0.8rem;
+    color: var(--rf-ink);
+  }
+  .concept-showcase {
+    min-width: 0;
+    margin-block: var(--rf-section-gap);
+  }
+  .picker-intro h2 {
+    margin: 0 0 0.45rem;
+    color: var(--rf-ink);
+    font-size: 1.25rem;
+    line-height: 1.4;
+    letter-spacing: -0.025em;
+  }
+  .picker-intro > p {
+    margin: 0;
+    color: var(--rf-muted);
+    font-size: 0.85rem;
+    line-height: 1.7;
+  }
+  .case-instructions {
+    margin: 0.6rem 0 1rem;
+    color: var(--rf-muted);
+    font-size: 0.72rem;
+    line-height: 1.65;
+  }
+  .concept-example {
+    min-width: 0;
+    border: 1px solid var(--rf-border);
+    border-radius: 0.4rem;
+    margin-block: 1.25rem;
+    scroll-margin-top: 6rem;
+  }
+  [data-prepared] .concept-example,
+  [data-ready] .concept-example {
+    margin: 0;
+  }
+  [data-ready] .concept-example[aria-hidden='true'] {
+    display: none;
+  }
+  .example-heading {
+    padding: var(--rf-panel-padding);
+  }
+  .example-labels {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.4rem 1rem;
+    color: var(--rf-muted);
+    font-size: 0.7rem;
+    line-height: 1.6;
+  }
+  .example-labels a {
+    color: var(--sl-color-text-accent);
+    text-decoration: none;
+  }
+  .example-labels a:hover {
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+  .example-heading h3 {
+    margin: 0.6rem 0 0.5rem;
+    color: var(--rf-ink);
+    font-size: 1.15rem;
+    line-height: 1.4;
+    letter-spacing: -0.02em;
+  }
+  .example-heading p {
+    margin: 0;
+    color: var(--rf-muted);
+    font-size: 0.85rem;
+    line-height: 1.75;
+  }
+  .example-blocks {
+    min-width: 0;
+  }
+  .concept-block {
+    border-top: 1px solid var(--rf-border);
+    padding: var(--rf-panel-padding);
+    min-width: 0;
+  }
+  .concept-block h4 {
+    margin: 0 0 0.75rem;
+    color: var(--rf-ink);
+    font-size: 0.8rem;
+    line-height: 1.6;
+  }
+  .concept-block :global(.expressive-code) {
+    margin: 0;
+    max-width: 100%;
+    --ec-codeFontSize: 0.79rem;
+  }
+  .concept-records {
+    color: var(--sl-color-text-accent);
+    font-size: 0.76rem;
+  }
+  .concept-records summary {
+    cursor: pointer;
+  }
+  .concept-records :global(.expressive-code) {
+    margin-top: 0.8rem;
+  }
+  .block-note {
+    margin: 0.7rem 0 0;
+    color: var(--rf-muted);
+    font-size: 0.75rem;
+    line-height: 1.7;
+  }
+  .example-takeaway {
+    border-top: 1px solid var(--rf-border);
+    padding: var(--rf-panel-padding);
+    font-size: 0.82rem;
+    line-height: 1.75;
+  }
+  .example-takeaway > p {
+    margin: 0;
+    color: var(--rf-ink);
+  }
+  .schema-source {
+    margin-top: 0.8rem;
+    font-size: 0.76rem;
+    color: var(--rf-muted);
+  }
+  .schema-source summary {
+    cursor: pointer;
+    color: var(--sl-color-text-accent);
+  }
+  .schema-source :global(.expressive-code) {
+    margin-top: 0.75rem;
+    --ec-codeFontSize: 0.79rem;
+  }
+  .schema-source > p {
+    margin: 0.75rem 0;
+  }
+  .concept-principles > section {
+    margin-block: 1.4rem;
+  }
+  .concept-principles h3 {
+    font-size: 1.15rem;
+  }
+  .concept-takeaway {
+    border-left: 2px solid var(--sl-color-text-accent);
+    padding-left: 1rem;
+    margin-block: 1.75rem;
+  }
+  .concept-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+    margin-block: 1.5rem;
+    font-size: 0.85rem;
+  }
+  .concept-links a {
+    color: var(--sl-color-text-accent);
+    text-underline-offset: 0.2em;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+</style>

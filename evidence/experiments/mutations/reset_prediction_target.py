@@ -239,6 +239,13 @@ def fit(model: rf.Model, *, seed: int, split: int, budget: int, accelerator: str
     }
 
 
+class PredictionModel(rf.Model):
+    a = rf.Number
+    b = rf.Number
+    u = rf.Number(mask=True, objective="mse")
+    v = rf.Number(mask=True, objective="mse")
+
+
 @experiment("P048", seed=4801)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     source_budget = 512 if steps is None else min(steps, 512)
@@ -248,16 +255,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     test = list(records(rows=1024, seed=seed + 3))
     means = {name: float(np.mean([row[name] for row in training])) for name in TARGETS}
     scales = {name: float(np.std([row[name] for row in training])) for name in TARGETS}
-    source = rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
-        a=rf.Number,
-        b=rf.Number,
-        u=rf.Number(mask=True, objective="mse"),
-        v=rf.Number(mask=True, objective="mse"),
-    )
+    source = PredictionModel(d_model=32, n_layers=1, n_heads=4, dropout=0.0)
     source_fit = fit(source, seed=seed, split=seed + 1, budget=source_budget, accelerator=accelerator)
     reference = prediction(source, test)
     initial = scores(test, reference, means)

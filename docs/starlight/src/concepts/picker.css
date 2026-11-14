@@ -1,0 +1,86 @@
+[data-use-cases] .case-picker {
+  display: none;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--rf-picker-gap);
+  margin-block: 1rem;
+}
+[data-use-cases][data-prepared] .case-picker {
+  display: grid;
+  visibility: hidden;
+}
+[data-use-cases][data-ready] .case-picker {
+  display: grid;
+  visibility: visible;
+}
+[data-use-cases] .case-picker button {
+  min-width: 0;
+  padding: var(--rf-picker-padding);
+  border: 1px solid var(--rf-border);
+  border-radius: 0.35rem;
+  background: var(--sl-color-bg);
+  color: var(--sl-color-text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+[data-use-cases] .case-picker button:hover {
+  border-color: var(--sl-color-text-accent);
+  background: var(--rf-surface);
+}
+[data-use-cases] .case-picker button[aria-pressed='true'] {
+  border-color: var(--sl-color-text-accent);
+  background: var(--sl-color-accent-low);
+  box-shadow: inset 0 0 0 1px var(--sl-color-text-accent);
+}
+[data-use-cases] .case-picker button:focus-visible {
+  outline: 2px solid var(--sl-color-text-accent);
+  outline-offset: 3px;
+}
+[data-use-cases] .case-label,
+[data-use-cases] .case-structure {
+  display: block;
+}
+[data-use-cases] .case-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.5;
+}
+[data-use-cases] .case-structure {
+  margin-top: 0.25rem;
+  color: var(--rf-muted);
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+.use-cases .case-picker button,
+.concept-showcase .case-picker button {
+  -webkit-tap-highlight-color: transparent;
+}
+.use-cases .case-label {
+  font-size: 0.83rem;
+  line-height: 1.4;
+}
+.use-cases .case-structure {
+  margin-top: 0.35rem;
+  font-size: 0.7rem;
+}
+.dataset-explorer .case-picker {
+  margin-top: 0;
+  margin-bottom: 0.8rem;
+}
+@media (max-width: 600px) {
+  [data-use-cases] .case-picker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  [data-use-cases] .case-label {
+    font-size: 0.75rem;
+  }
+  [data-use-cases] .case-structure {
+    font-size: 0.65rem;
+  }
+  .use-cases .case-label {
+    font-size: 0.78rem;
+  }
+  .use-cases .case-structure {
+    font-size: 0.68rem;
+  }
+}

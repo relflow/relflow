@@ -62,8 +62,8 @@ The installed-wheel import job uses required dependencies only, with no developm
 or package extras. It verifies training, checkpoint reload, and prediction without
 Matplotlib, reproduces the upstream incomplete-namespace failure, then installs
 Matplotlib 3.10.7 and checks modeling plus TorchMetrics plotting. See
-[installation troubleshooting](docs/guides/installation-troubleshooting.qmd) for
-the diagnosis and environment remedy tracked in issue 67.
+[issue 67](https://github.com/relflow/relflow/issues/67) for the diagnosis and
+environment remedy.
 
 The Tests workflow runs the complete suite on Linux with Python 3.12, 3.13,
 and 3.14, plus macOS ARM and Windows with Python 3.12. It installs a wheel
@@ -174,24 +174,29 @@ User documentation and branding assets live in [docs/](docs/README.md).
 Canonical learning experiments, runtime tests, and recorded results live in
 [evidence/](evidence/README.md). Coordinate those changes with public API changes
 in the same branch. Follow the [documentation agent guide](docs/AGENTS.md) for
-writing and diagrams, and the [evidence protocol](evidence/SPEC.md) for learning
-experiments. Static documentation tests live in `docs/tests/`; package runtime
-and architectural tests remain in `tests/`.
+writing and interactive components, and the [evidence protocol](evidence/SPEC.md)
+for learning experiments. Starlight tests live in `docs/starlight/tests/`, static
+publisher tests in `docs/tests/`, and Evidence protocol tests in `evidence/tests/`.
+Package runtime and architectural tests remain in `tests/`.
 
 The documentation environment is isolated from the package environment. Run
 these commands from the repository root:
 
 ```bash
-uv sync --project docs --locked
+make prepare
 make check
 make check-docs
 make dev
 ```
 
-`make check` validates static examples, links, and evidence reporting;
-`make check-docs` also renders and validates the full site. `make dev` previews
-it at `http://127.0.0.1:4200`. The build uses pinned Quarto and never imports
-RelFlow or executes models. Library checks do not build the site or run learning
+Use Node 24 and Python 3.12 or newer. `make check` validates formatting, types,
+component contracts, and static publisher/Evidence tooling; `make check-docs`
+builds Starlight and checks links, canonical URLs, and page/bundle budgets.
+`make dev` previews the site at
+`http://127.0.0.1:4300`. Install Chromium with
+`cd docs/starlight && npx playwright install chromium`, then run
+`make check-browser` from the repository root for browser checks.
+Site builds never import relflow or execute models. Library checks do not build the site or run learning
 experiments; explicit evidence execution requires the intended RelFlow wheel.
 
 Read the Docs builds hosted versions and pull request previews using the root

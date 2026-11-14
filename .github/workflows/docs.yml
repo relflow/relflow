@@ -13,29 +13,54 @@ concurrency:
 
 jobs:
   build:
-    name: Validate and render static documentation
+    name: Validate documentation
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    timeout-minutes: 15
+    env:
+      ASTRO_TELEMETRY_DISABLED: '1'
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
       - uses: astral-sh/setup-uv@v5
         with:
+          python-version: '3.12'
           enable-cache: true
           cache-dependency-glob: docs/uv.lock
-      - name: Install documentation tools
-        run: uv sync --locked --project docs
-      - name: Check sources and evidence publication
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: docs/starlight/package-lock.json
+      - name: Install locked documentation tools
+        run: make prepare
+      - name: Check documentation and Evidence contracts
         run: make check
-      - name: Render and validate every page
-        run: make check-docs
-      - name: Upload review artifact
+      - name: Install Chromium for browser checks
+        working-directory: docs/starlight
+        run: npx playwright install --with-deps chromium
+      - name: Build and check the site in browsers
+        run: make check-browser
+      - name: Upload documentation review artifact
         uses: actions/upload-artifact@v4
         with:
           name: documentation-site-attempt-${{ github.run_attempt }}
-          path: docs/site
+          path: docs/starlight/dist
           if-no-files-found: error
+          retention-days: 7
+      - name: Upload browser failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: starlight-browser-attempt-${{ github.run_attempt }}
+          path: |
+            docs/starlight/playwright-report
+            docs/starlight/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Upload performance budget report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: starlight-performance-attempt-${{ github.run_attempt }}
+          path: docs/starlight/performance-report
+          if-no-files-found: ignore
           retention-days: 7

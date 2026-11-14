@@ -35,8 +35,10 @@ The plots job uploads `evidence-plots-attempt-<n>` for 90 days. Raw per-task Arr
 observations are separate `evidence-observations-shard-<i>-attempt-<n>` artifacts
 retained for 14 days, outside the report size limit. The public bundle includes
 reviewed light/dark SVGs, example data, exact records and proof sources, and
-compressed observation manifests. Only authored CSS/JavaScript are tracked in
-`docs/assets/evidence-plots/`; generated files and ZIPs stay outside Git.
+compressed observation manifests. Generated files and ZIPs stay outside Git.
+The trusted publication reader stages verified bundles under
+`docs/assets/evidence-plots/`; this is a download location rather than an authored
+website asset directory.
 
 After CI completes, the privileged publication workflow runs a frozen verifier,
 authenticates the original internal CI attempt and helper/executor pins, and

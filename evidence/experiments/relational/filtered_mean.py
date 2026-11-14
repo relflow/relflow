@@ -197,25 +197,22 @@ def corrupt_labels(rows: list[dict], seed: int) -> list[dict]:
     return result
 
 
+class Item(rf.Branch):
+    value = rf.Number
+    group = rf.Category(p_unavailable=0.0)
+
+
+class PredictionModel(rf.Model):
+    items = Item(length=6, n_layers=2, reduction=rf.Attention(n_layers=2))
+    answer = rf.Number(mask=True, objective="mse")
+    operation = rf.Category(p_unavailable=0.0)
+    selected_group = rf.Category(p_unavailable=0.0)
+
+
 @experiment("P026", seed=16)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
-    model = rf.Model(
-        d_model=64,
-        n_layers=2,
-        n_heads=4,
-        reduction=rf.Attention(n_layers=2),
-        items=rf.Branch(
-            length=6,
-            n_layers=2,
-            reduction=rf.Attention(n_layers=2),
-            value=rf.Number,
-            group=rf.Category(p_unavailable=0.0),
-        ),
-        answer=rf.Number(mask=True, objective="mse"),
-        operation=rf.Category(p_unavailable=0.0),
-        selected_group=rf.Category(p_unavailable=0.0),
-    )
+    model = PredictionModel(d_model=64, n_layers=2, n_heads=4, reduction=rf.Attention(n_layers=2))
     data = rf.SyntheticDataModule(
         train=partial(records, bags=512, items_per_group=2, seed=seed + 147),
         validate=partial(records, bags=64, items_per_group=2, seed=seed + 148),

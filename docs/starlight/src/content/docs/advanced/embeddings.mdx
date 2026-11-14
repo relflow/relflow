@@ -1,0 +1,52 @@
+---
+title: Embeddings
+description: Export learned context, identify nested representation records, and preserve model identity in downstream vector workflows.
+---
+
+import ConceptPage from '../../../components/ConceptPage.astro';
+import { embeddings } from '../../../data/advanced/embeddings';
+
+<ConceptPage concept={embeddings} />
+
+## Read the output coordinates
+
+Each outer prediction-table row contains a list of representation records.
+The list can include several nodes and several intrinsic outputs per node.
+
+| Field | Meaning |
+| --- | --- |
+| `path` | Schema path segments. The anonymous root is `[]`. |
+| `parents` | Ordinals of retained repeated ancestors, from outermost to innermost. These locate a context within this observation. |
+| `output_index` | The intrinsic output position of the requested node, including multiple reduction outputs or pass-through tokens. |
+| `embedding` | The complete fixed-width vector for this node. The output contract requires the model’s common `schema.d_model` width. |
+
+Keep these coordinates with the application’s observation identifier. When
+inference crops a history, offsets describe the retained structure; recover
+business identities from retained source values rather than treating a bare
+ordinal as a permanent record identifier.
+
+The representation struct has these four fields. It does not use the rich
+target result’s `state`, `content`, and `inferred` contract. Every exported
+embedding must match the model’s common vector width, including when only one
+address is requested. The writer validates that width; inspect the resolved
+output schema when changing node dimensions.
+
+## Choose a storage format that preserves the result
+
+Use Arrow IPC when sparse nested results include fixed-size vectors under null
+containers. The Parquet writer rejects unsupported fixed-size-list layouts
+before writing, because PyArrow cannot faithfully round-trip those combinations.
+Set `rf.Writer(..., format="ipc")` to stream the same canonical prediction
+contract into per-rank Arrow files without collecting the job's output.
+Scalar rich results and nonnull representation vectors can still use supported
+Parquet paths. See [inference and deployment](/advanced/inference-and-deployment/)
+for streaming output ownership.
+
+## Source and contract checks
+
+The [output schema and coordinate writer](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/architecture/output.py#L354)
+define the representation contract. The
+[embedding output tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/architecture/test_arrow_runtime.py#L444)
+cover root outputs, multiple reductions, pass-through tokens, and nested parent
+coordinates. These are API checks; they do not measure retrieval or downstream
+model quality.

@@ -159,6 +159,19 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
+class Transaction(rf.Branch):
+    amount = rf.Number
+
+
+class Session(rf.Branch):
+    transactions = Transaction(length=4, reduction=rf.Attention())
+
+
+class PredictionModel(rf.Model):
+    sessions = Session(length=3, reduction=rf.Attention())
+    largest_session_total = rf.Number(mask=True, objective="mse")
+
+
 @experiment("P040", seed=2601)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
@@ -170,18 +183,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     if not all(flattened[index] == flattened[index + 1] for index in range(0, len(flattened), 2)):
         raise ValueError("regrouping pairs must contain identical flattened values")
 
-    model = rf.Model(
-        d_model=24,
-        n_layers=1,
-        n_heads=4,
-        reduction=rf.Attention(),
-        sessions=rf.Branch(
-            length=3,
-            reduction=rf.Attention(),
-            transactions=rf.Branch(length=4, reduction=rf.Attention(), amount=rf.Number),
-        ),
-        largest_session_total=rf.Number(mask=True, objective="mse"),
-    )
+    model = PredictionModel(d_model=24, n_layers=1, n_heads=4, reduction=rf.Attention())
     data = rf.SyntheticDataModule(train=train, validate=validate, seed=seed)
     model.fit(
         data,

@@ -1,0 +1,92 @@
+---
+import { Code } from '@astrojs/starlight/components';
+import { stringify } from 'yaml';
+import { datasets } from '../data/datasets';
+import { scenarios } from '../data/concepts/scenarios';
+import DataExplorer from './DataExplorer.astro';
+import ExampleSelection from './ExampleSelection.astro';
+import CasePicker from './CasePicker.astro';
+import '../datasets/erd.css';
+
+const choices = scenarios.map((scenario) => ({
+  id: scenario.id,
+  panel: `dataset-${scenario.id}`,
+  label: scenario.label,
+  summary: scenario.structure,
+}));
+---
+
+<section class="dataset-explorer not-content" data-use-cases aria-label="Explore example datasets">
+  <ExampleSelection choices={choices} persistent />
+  <CasePicker choices={choices} />
+  <p class="erd-interaction-help">Hover, focus, or tap a column to read its description.</p>
+  <p class="erd-sr-only" role="status" aria-live="polite" aria-atomic="true" data-case-status></p>
+
+  {
+    datasets.map((dataset) => {
+      const scenario = scenarios.find((item) => item.id === dataset.id)!;
+      return (
+        <article
+          id={`dataset-${dataset.id}`}
+          class="dataset-example"
+          data-case={dataset.id}
+          aria-labelledby={`dataset-${dataset.id}-title`}
+        >
+          <header class="dataset-heading">
+            <div class="dataset-eyebrow">
+              <>
+                <span>Hypothetical dataset</span>
+                <a
+                  data-case-permalink
+                  href={`?case=${dataset.id}#dataset-${dataset.id}`}
+                  aria-label={`Link to ${dataset.label} dataset`}
+                >
+                  Link to dataset
+                </a>
+              </>
+            </div>
+            <h2 id={`dataset-${dataset.id}-title`}>{dataset.label}</h2>
+            <p>{dataset.description}</p>
+          </header>
+
+          <DataExplorer id={`dataset-${dataset.id}-data`} dataset={dataset} />
+
+          <div class="dataset-mapping">
+            <h3>From related records to a model observation</h3>
+            <p>
+              Your data preparation groups the related rows into the collections in the schema. The
+              diagram’s join keys are illustrative source columns; they are not extra required model
+              fields. Training adds the marked answers; prediction requests leave them out.
+            </p>
+            <details>
+              <summary>See the nested prediction input</summary>
+              <Code
+                code={stringify(scenario.inputs, { lineWidth: 72 }).trimEnd()}
+                lang="yaml"
+                wrap
+              />
+            </details>
+            <details>
+              <summary>See the matching class schema</summary>
+              <Code code={scenario.schema} lang="python" />
+            </details>
+            <nav aria-label={`${dataset.label} modeling guides`}>
+              <>
+                <a href={`/concepts/branches/?case=${dataset.id}`}>
+                  How branches use these records →
+                </a>
+                <a href={`/concepts/targets/?case=${dataset.id}`}>
+                  How targets become predictions →
+                </a>
+              </>
+            </nav>
+          </div>
+        </article>
+      );
+    })
+  }
+</section>
+
+<script>
+  import '../concepts/selection';
+</script>

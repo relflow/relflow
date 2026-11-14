@@ -122,15 +122,13 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
         yield {"x": 0.0, "labels": [name for name, present in (("red", red), ("blue", blue)) if present]}
 
 
+class PredictionModel(rf.Model):
+    x = rf.Number
+    labels = rf.Set(p_unavailable=1.0, mask=True)
+
+
 def build(size: int) -> rf.Model:
-    model = rf.Model(
-        d_model=16,
-        n_layers=1,
-        n_heads=2,
-        dropout=0.0,
-        x=rf.Number,
-        labels=rf.Set(p_unavailable=1.0, mask=True),
-    )
+    model = PredictionModel(d_model=16, n_layers=1, n_heads=2, dropout=0.0)
     # Experimental storage control only: allocation is not a schema option.
     node = model.nodes["/labels"]
     resize = Resize()

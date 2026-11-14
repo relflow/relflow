@@ -1,0 +1,72 @@
+---
+title: Choose your predictions
+description: Predict categories, numbers, and several outcomes within the same structured record.
+---
+
+The target is the answer you want the model to learn. Its field type describes
+what kind of answer to return; its position describes where that answer belongs.
+
+## A probability or a value
+
+```python
+returns_in_30d = rf.Boolean(mask=True)
+```
+
+This learns a Boolean outcome, with a probability in the prediction result.
+For a numeric outcome, use a numeric field:
+
+```python
+spend_next_30d = rf.Number(mask=True)
+```
+
+Training data needs the corresponding known answer. Changing the target changes
+the learning problem; adding an output does not give a trained model knowledge
+of that answer without further training.
+
+## Several answers in one model
+
+```python
+class Customer(rf.Model):
+    days_since_signup = rf.Number
+    orders = Order(length=32, overflow="tail")
+    returns_in_30d = rf.Boolean(mask=True)
+    spend_next_30d = rf.Number(mask=True)
+```
+
+One model can learn return probability and future spending from shared context.
+Both answers are hidden from its inputs. Evaluate each objective, since sharing
+context does not guarantee that every task improves.
+
+## Answers inside a collection
+
+Suppose the question changes to whether each submitted item will be returned:
+
+```python
+class Item(rf.Branch):
+    product = rf.Category
+    price = rf.Number
+    returned = rf.Boolean(mask=True)
+
+
+class OrderReview(rf.Model):
+    customer_age_days = rf.Number
+    items = Item(length=64, overflow="error")
+    order_needs_review = rf.Boolean(mask=True)
+```
+
+The model has an order-level answer and an answer for each supplied item.
+Predictions stay aligned with those items. It does not generate an arbitrary
+new list of products.
+
+This is useful when the information and the decisions belong at different
+levels: a conversation and its messages, an account and its transactions, or
+a claim and its invoices.
+
+## Decide what the score will do
+
+A model score can rank a queue, support a decision, or feed another system.
+The application owns the policy around it. Define the label and the way the
+score will be used before choosing a metric or deployment threshold.
+
+[Train the purchase example](/quickstart/) to follow one target from its known
+training labels through to prediction output.

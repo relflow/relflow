@@ -153,14 +153,13 @@ def records(*, rows: int, seed: int, namespace: str, shuffle_targets: bool = Fal
 def fit(*, identity: Literal["hash", "category"], seed: int, steps: int | None, accelerator: str) -> rf.Model:
     """Train one representation on the same identity pairs."""
     lit.seed_everything(seed, workers=True)
-    model = rf.Model(
-        d_model=48,
-        n_layers=2,
-        n_heads=4,
-        left_id=rf.Hash(n_hashes=4) if identity == "hash" else rf.Category(p_unavailable=0.0),
-        right_id=rf.Hash(n_hashes=4) if identity == "hash" else rf.Category(p_unavailable=0.0),
-        equal=rf.Boolean(mask=True),
-    )
+
+    class PredictionModel(rf.Model):
+        left_id = rf.Hash(n_hashes=4) if identity == "hash" else rf.Category(p_unavailable=0.0)
+        right_id = rf.Hash(n_hashes=4) if identity == "hash" else rf.Category(p_unavailable=0.0)
+        equal = rf.Boolean(mask=True)
+
+    model = PredictionModel(d_model=48, n_layers=2, n_heads=4)
     data = rf.SyntheticDataModule(
         train=partial(records, rows=4096, seed=seed + 1, namespace="train"),
         validate=partial(records, rows=1024, seed=seed + 2, namespace="validate"),

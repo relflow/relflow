@@ -1,0 +1,415 @@
+---
+import { apiSections } from '../data/api-map';
+
+const total = apiSections.reduce((sum, section) => sum + section.entries.length, 0);
+const workflow = [
+  { section: 'schema', title: 'Define the model', names: 'Model · Branch · Mask' },
+  { section: 'data', title: 'Supply records', names: 'ArrowDataModule · preprocess' },
+  { section: 'training', title: 'Learn from examples', names: 'fit · validate · test' },
+  { section: 'prediction', title: 'Use the trained model', names: 'predict · save · load' },
+];
+
+function entryId(name: string) {
+  return `api-${name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-$/, '')}`;
+}
+---
+
+<div class="api-map not-content" data-api-map>
+  <nav class="api-workflow" aria-label="Modeling workflow">
+    {
+      workflow.map((step, index) => (
+        <a href={`#api-${step.section}`} data-api-step={step.section}>
+          <span class="step-number" aria-hidden="true">
+            0{index + 1}
+          </span>
+          <strong>{step.title}</strong>
+          <span class="step-names">{step.names}</span>
+        </a>
+      ))
+    }
+  </nav>
+
+  <div class="api-controls">
+    <label
+      >Find an API
+      <input
+        type="search"
+        data-api-search
+        placeholder="Try predict, vocabulary, or checkpoint"
+        autocomplete="off"
+        spellcheck="false"
+        aria-controls="api-results"
+      />
+    </label>
+    <label
+      >Section
+      <select data-api-section aria-controls="api-results">
+        <option value="">All sections</option>
+        {apiSections.map((section) => <option value={section.id}>{section.title}</option>)}
+      </select>
+    </label>
+    <button type="button" data-api-reset disabled>Reset</button>
+  </div>
+
+  <p class="api-count" role="status" aria-live="polite" aria-atomic="true" data-api-count>
+    Showing {total} of {total} API entries.
+  </p>
+  <div class="api-empty" data-api-empty hidden>
+    <p>No APIs match these filters. Try a shorter name or choose another section.</p>
+  </div>
+
+  <div id="api-results">
+    {
+      apiSections.map((section) => (
+        <section
+          id={`api-${section.id}`}
+          data-api-group={section.id}
+          aria-labelledby={`api-${section.id}-title`}
+        >
+          <header class="api-section-heading">
+            <h2 id={`api-${section.id}-title`}>{section.title}</h2>
+            <span data-api-section-count>{section.entries.length} entries</span>
+          </header>
+          <p class="api-section-description">{section.description}</p>
+          <ul class="api-entries">
+            {section.entries.map((entry) => (
+              <li
+                id={entryId(entry.name)}
+                data-api-entry
+                data-search={`${entry.name} ${entry.description} ${section.title} ${entry.kind || ''} ${entry.extra || ''}`.toLowerCase()}
+              >
+                <div class="api-symbol">
+                  <h3>
+                    <a href={`#${entryId(entry.name)}`}>
+                      <code>{entry.name}</code>
+                    </a>
+                  </h3>
+                  <div class="api-labels">
+                    {entry.kind && <span>{entry.kind}</span>}
+                    {entry.extra && <span class="api-extra">{entry.extra}</span>}
+                  </div>
+                </div>
+                <div class="api-purpose">
+                  <p>{entry.description}</p>
+                  <div class="api-entry-links">
+                    {entry.guide && <a href={entry.guide}>Guide</a>}
+                    <a href={entry.source} aria-label={`Source for ${entry.name}`}>
+                      Source ↗
+                    </a>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))
+    }
+  </div>
+</div>
+
+<script>
+  for (const root of document.querySelectorAll<HTMLElement>('[data-api-map]')) {
+    const search = root.querySelector<HTMLInputElement>('[data-api-search]')!;
+    const section = root.querySelector<HTMLSelectElement>('[data-api-section]')!;
+    const reset = root.querySelector<HTMLButtonElement>('[data-api-reset]')!;
+    const count = root.querySelector<HTMLElement>('[data-api-count]')!;
+    const empty = root.querySelector<HTMLElement>('[data-api-empty]')!;
+    const groups = [...root.querySelectorAll<HTMLElement>('[data-api-group]')];
+    const entries = [...root.querySelectorAll<HTMLElement>('[data-api-entry]')];
+    const targets = [...groups, ...entries];
+    const params = new URL(location.href).searchParams;
+    search.value = params.get('q') || '';
+    section.value = params.get('section') || '';
+    if (section.selectedIndex < 0) section.value = '';
+
+    function filter(updateURL = true) {
+      const words = search.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      let visible = 0;
+      for (const group of groups) {
+        let matches = 0;
+        for (const entry of group.querySelectorAll<HTMLElement>('[data-api-entry]')) {
+          const match =
+            (!section.value || section.value === group.dataset.apiGroup) &&
+            words.every((word) => entry.dataset.search!.includes(word));
+          entry.hidden = !match;
+          if (match) matches++;
+        }
+        group.hidden = matches === 0;
+        group.querySelector<HTMLElement>('[data-api-section-count]')!.textContent =
+          `${matches} ${matches === 1 ? 'entry' : 'entries'}`;
+        visible += matches;
+      }
+      count.textContent = `Showing ${visible} of ${entries.length} API entries.`;
+      empty.hidden = visible !== 0;
+      reset.disabled = !search.value && !section.value;
+      if (updateURL) {
+        const url = new URL(location.href);
+        if (search.value) url.searchParams.set('q', search.value);
+        else url.searchParams.delete('q');
+        if (section.value) url.searchParams.set('section', section.value);
+        else url.searchParams.delete('section');
+        const target = targets.find((element) => `#${element.id}` === url.hash);
+        if (target?.hidden || target?.closest('[hidden]')) url.hash = '';
+        history.replaceState(null, '', url);
+      }
+    }
+
+    function revealHash() {
+      const target = targets.find((element) => `#${element.id}` === location.hash);
+      if (!target) return;
+      if (target.hidden || target.closest('[hidden]')) {
+        search.value = '';
+        section.value = '';
+        filter();
+      }
+      requestAnimationFrame(() => target.scrollIntoView({ block: 'start' }));
+    }
+
+    search.addEventListener('input', () => filter());
+    section.addEventListener('change', () => filter());
+    reset.addEventListener('click', () => {
+      search.value = '';
+      section.value = '';
+      filter();
+      search.focus();
+    });
+    for (const step of root.querySelectorAll<HTMLAnchorElement>('[data-api-step]')) {
+      step.addEventListener('click', (event) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+          return;
+        search.value = '';
+        section.value = step.dataset.apiStep!;
+        filter();
+      });
+    }
+    window.addEventListener('hashchange', revealHash);
+    filter(false);
+    root.dataset.ready = '';
+    revealHash();
+  }
+</script>
+
+<style>
+  .api-map {
+    margin-block: var(--rf-section-gap);
+    min-width: 0;
+  }
+  .api-workflow {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.65rem;
+  }
+  .api-workflow a {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: var(--rf-panel-padding);
+    border: 1px solid var(--rf-border);
+    border-radius: 0.35rem;
+    color: var(--rf-ink);
+    text-decoration: none;
+  }
+  .api-workflow a:hover {
+    border-color: var(--sl-color-text-accent);
+    background: var(--rf-card);
+  }
+  .step-number {
+    color: var(--sl-color-text-accent);
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .api-workflow strong {
+    font-size: 0.87rem;
+    line-height: 1.5;
+  }
+  .step-names {
+    color: var(--rf-muted);
+    font-size: 0.72rem;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+  }
+  .api-controls {
+    display: none;
+    grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 0.75rem;
+    margin-block: 1.75rem 1rem;
+  }
+  [data-ready] .api-controls {
+    display: grid;
+  }
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    min-width: 0;
+  }
+  input,
+  select,
+  button {
+    box-sizing: border-box;
+    min-width: 0;
+    padding: 0.65rem;
+    border: 1px solid var(--rf-border);
+    border-radius: 0.35rem;
+    background: var(--sl-color-bg);
+    color: var(--sl-color-text);
+    font: inherit;
+    font-size: 0.84rem;
+    line-height: 1.5;
+  }
+  input,
+  select {
+    width: 100%;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:hover:enabled {
+    border-color: var(--sl-color-text-accent);
+    color: var(--sl-color-text-accent);
+  }
+  button:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+  :is(a, input, select, button):focus-visible {
+    outline: 2px solid var(--sl-color-text-accent);
+    outline-offset: 3px;
+  }
+  .api-count {
+    margin-block: 1rem;
+    color: var(--rf-muted);
+    font-size: 0.8rem;
+  }
+  .api-empty {
+    border: 1px dashed var(--rf-border);
+    border-radius: 0.35rem;
+    padding: var(--rf-panel-padding);
+    color: var(--rf-muted);
+    font-size: 0.9rem;
+  }
+  .api-empty p {
+    margin: 0;
+  }
+  [data-api-group] {
+    margin-block: 2.25rem;
+    scroll-margin-top: 6rem;
+  }
+  .api-section-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  h2 {
+    margin: 0;
+    color: var(--rf-ink);
+    font-size: 1.35rem;
+    letter-spacing: -0.025em;
+  }
+  .api-section-heading > span {
+    color: var(--rf-muted);
+    font-size: 0.75rem;
+    white-space: nowrap;
+  }
+  .api-section-description {
+    margin: 0.5rem 0 1rem;
+    color: var(--rf-muted);
+    font-size: 0.9rem;
+    line-height: 1.7;
+  }
+  .api-entries {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  [data-api-entry] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+    gap: 0.5rem 1.25rem;
+    padding-block: 1rem;
+    border-top: 1px solid var(--rf-border);
+    scroll-margin-top: 6rem;
+  }
+  h3 {
+    margin: 0;
+    font-size: 0.84rem;
+    line-height: 1.6;
+    letter-spacing: 0;
+    font-weight: 600;
+  }
+  h3 a {
+    color: var(--rf-ink);
+    text-decoration: none;
+  }
+  h3 a:hover {
+    color: var(--sl-color-text-accent);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+  code {
+    background: none;
+    padding: 0;
+    font-family: var(--sl-font-mono);
+    font-size: inherit;
+    overflow-wrap: anywhere;
+  }
+  .api-labels {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.35rem 0.75rem;
+    margin-top: 0.35rem;
+    color: var(--rf-muted);
+    font-size: 0.7rem;
+  }
+  .api-extra {
+    color: var(--sl-color-text-accent);
+  }
+  .api-purpose p {
+    margin: 0;
+    font-size: 0.87rem;
+    line-height: 1.7;
+  }
+  .api-entry-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 0.4rem;
+    font-size: 0.75rem;
+  }
+  .api-entry-links a {
+    color: var(--sl-color-text-accent);
+    text-decoration: none;
+  }
+  .api-entry-links a:hover {
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+  [hidden] {
+    display: none !important;
+  }
+  @media (max-width: 700px) {
+    .api-workflow {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .api-controls {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+    .api-controls label:first-child {
+      grid-column: 1 / -1;
+    }
+    [data-api-entry] {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .api-labels {
+      display: inline-flex;
+    }
+  }
+</style>

@@ -219,25 +219,22 @@ def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     return np.asarray([row["predictions"]["answer"]["content"] for row in output])
 
 
+class Item(rf.Branch):
+    value = rf.Number
+    group = rf.Category(p_unavailable=0.0)
+
+
+class PredictionModel(rf.Model):
+    items = Item(length=12, n_layers=2, reduction=None)
+    answer = rf.Number(mask=True, objective="mse")
+    operation = rf.Category(p_unavailable=0.0)
+    selected_group = rf.Category(p_unavailable=0.0)
+
+
 @experiment("P027", seed=16)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
-    model = rf.Model(
-        d_model=64,
-        n_layers=2,
-        n_heads=4,
-        reduction=rf.Attention(n_outputs=12, n_layers=2),
-        items=rf.Branch(
-            length=12,
-            n_layers=2,
-            reduction=None,
-            value=rf.Number,
-            group=rf.Category(p_unavailable=0.0),
-        ),
-        answer=rf.Number(mask=True, objective="mse"),
-        operation=rf.Category(p_unavailable=0.0),
-        selected_group=rf.Category(p_unavailable=0.0),
-    )
+    model = PredictionModel(d_model=64, n_layers=2, n_heads=4, reduction=rf.Attention(n_outputs=12, n_layers=2))
     data = rf.SyntheticDataModule(
         train=partial(records, bags=512, items_per_group=4, seed=seed + 144),
         validate=partial(records, bags=64, items_per_group=4, seed=seed + 145),

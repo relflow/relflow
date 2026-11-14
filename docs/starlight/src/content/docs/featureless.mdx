@@ -1,0 +1,37 @@
+---
+title: Featureless modeling
+description: Learn predictive features from typed values and related records without a separate aggregation table.
+---
+
+import DataExplorer from '../../components/DataExplorer.astro';
+import FeatureEngineeringFlow from '../../components/FeatureEngineeringFlow.astro';
+import { repeatPurchase } from '../../data/observations';
+
+Traditional ML approaches often rely on expert feature engineering and preprocessing to contextualize individual observations within a larger population. This work can extend development by months or years and add complexity and ongoing costs in production.
+
+<FeatureEngineeringFlow />
+
+relflow was built to model data as it exists, through two design choices:
+
+1. Its data contract starts with raw data, using online vocabularies and normalizers to contextualize observations within the training population.
+2. Its model architecture mirrors the structure and relationships in the data.
+
+## Fully integrated feature pipelines
+
+By internalizing feature processing pipelines as integrated model components, relflow supports the machine learning lifecycle in enterprise applications. This provides:
+
+- A cleaner boundary between data ingestion pipelines and the predictive model itself.
+- Consistent model-owned feature processing during training and inference, using the same learned vocabularies and normalizers.
+- Access to training category counts and numeric statistics for comparison with inference data, helping identify distribution changes.
+
+## Dynamic model architecture
+
+Dynamic model architecture allows relflow to model typed, arbitrarily nested data. By integrating parent-child relationships directly into model design, relflow allows the logical relationships between data points to be learned by the model.
+
+## Example
+
+For a repeat-purchase prediction, each observation contains a customer’s details and their previous orders. Every order retains its amount, category, and age.
+
+The model learns from the values within each order and the relationships across the history.
+
+<DataExplorer id="featureless-purchase-data" dataset={repeatPurchase} />

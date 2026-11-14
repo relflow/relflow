@@ -145,6 +145,15 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
     return float(np.sqrt(np.mean(np.square(actual - predicted))))
 
 
+class Transaction(rf.Branch):
+    amount = rf.Number
+
+
+class PredictionModel(rf.Model):
+    transactions = Transaction(length=6, n_layers=2, reduction=rf.Attention(n_layers=2))
+    global_total = rf.Number(mask=True, objective="mse")
+
+
 @experiment("P039", seed=2600)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
@@ -152,19 +161,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     train = partial(records, rows=512, seed=data_seed + 11)
     validate = partial(records, rows=128, seed=data_seed + 22)
     test = list(records(rows=256, seed=data_seed + 33))
-    model = rf.Model(
-        d_model=32,
-        n_layers=2,
-        n_heads=4,
-        reduction=rf.Attention(n_layers=2),
-        transactions=rf.Branch(
-            length=6,
-            n_layers=2,
-            reduction=rf.Attention(n_layers=2),
-            amount=rf.Number,
-        ),
-        global_total=rf.Number(mask=True, objective="mse"),
-    )
+    model = PredictionModel(d_model=32, n_layers=2, n_heads=4, reduction=rf.Attention(n_layers=2))
     data = rf.SyntheticDataModule(train=train, validate=validate, seed=seed)
     model.fit(
         data,

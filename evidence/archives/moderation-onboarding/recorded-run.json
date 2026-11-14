@@ -1,0 +1,131 @@
+{
+  "seed": 42,
+  "smoke": false,
+  "relflow_version": "0.5.0",
+  "python_version": "3.12.10",
+  "torch_version": "2.12.0",
+  "lightning_version": "2.6.4",
+  "pyarrow_version": "24.0.0",
+  "transformers_version": "5.9.0",
+  "text_model": "google/bert_uncased_L-2_H-128_A-2",
+  "architecture_preset": "small",
+  "declaration": "ModerationModel",
+  "threads": 1,
+  "training_rows": 2048,
+  "validation_rows": 512,
+  "training": {
+    "batch_size": 128,
+    "learning_rate": 0.001,
+    "accelerator": "cpu",
+    "devices": 1,
+    "precision": "32-true",
+    "max_epochs": 4,
+    "logger": false,
+    "enable_progress_bar": false,
+    "enable_model_summary": false,
+    "num_sanity_val_steps": 0,
+    "deterministic": true
+  },
+  "initial_epochs": 8,
+  "extension_epochs": 4,
+  "sha256": {
+    "moderation.py": "f4b78d1415b743d2bc8139fb9ec4ae6c728d842761a5de3e13ebddd22733c993",
+    "train.parquet": "63e1b7f5c14d1474e0f1be64f51cf8e34b4be9f232606b94210f8011c7e810a8",
+    "validation.parquet": "c1434b57771066bb818194bf147b2d758ccf573bb9df38dea691d7844bdb0d70",
+    "requests.parquet": "cb4eab525f26602c772ab2765e19d41648fb91eff7e8ac7e7eb3861830adc781"
+  },
+  "initial_predictions": [
+    {
+      "account_id": "account-0000",
+      "account_review_probability": 0.9976,
+      "messages": [
+        {
+          "message_id": "message-0000-0",
+          "review_probability": 0.9985
+        },
+        {
+          "message_id": "message-0000-1",
+          "review_probability": 0.0034
+        }
+      ]
+    },
+    {
+      "account_id": "account-established",
+      "account_review_probability": 0.0022,
+      "messages": [
+        {
+          "message_id": "message-established",
+          "review_probability": 0.0016
+        }
+      ]
+    },
+    {
+      "account_id": "account-new",
+      "account_review_probability": 0.0046,
+      "messages": [
+        {
+          "message_id": "message-new",
+          "review_probability": 0.9949
+        }
+      ]
+    },
+    {
+      "account_id": "account-empty",
+      "account_review_probability": 0.0112,
+      "messages": []
+    }
+  ],
+  "extended_predictions": [
+    {
+      "account_id": "account-0000",
+      "account_review_probability": 0.9981,
+      "messages": [
+        {
+          "message_id": "message-0000-0",
+          "review_probability": 0.9992,
+          "estimated_review_seconds": 107.7
+        },
+        {
+          "message_id": "message-0000-1",
+          "review_probability": 0.001,
+          "estimated_review_seconds": 16.6
+        }
+      ]
+    },
+    {
+      "account_id": "account-established",
+      "account_review_probability": 0.0009,
+      "messages": [
+        {
+          "message_id": "message-established",
+          "review_probability": 0.0004,
+          "estimated_review_seconds": 14.6
+        }
+      ]
+    },
+    {
+      "account_id": "account-new",
+      "account_review_probability": 0.0013,
+      "messages": [
+        {
+          "message_id": "message-new",
+          "review_probability": 0.9914,
+          "estimated_review_seconds": 99.6
+        }
+      ]
+    },
+    {
+      "account_id": "account-empty",
+      "account_review_probability": 0.0015,
+      "messages": []
+    }
+  ],
+  "scope": "Executed synthetic workflow demonstration, not a real-world moderation benchmark or comparative performance result.",
+  "runtime_source": {
+    "revision": "dc64b85d75a85b3cef8ceada1869ee512f2fbe65",
+    "package_resolution": "Built this revision as a wheel and installed it into a task-owned target directory; runtime module and metadata both verified as 0.5.0.",
+    "wheel": "relflow-0.5.0-py3-none-any.whl",
+    "wheel_sha256": "a6de81b454efd69145fa8fd1511beb612fa41d4bcef26402a9bdcdc4a5b706bf",
+    "text_assets": "Previously cached default encoder; HF_HUB_OFFLINE=1"
+  }
+}

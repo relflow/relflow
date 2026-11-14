@@ -1,0 +1,100 @@
+---
+title: Vector
+description: Use fixed-width numeric coordinates as inputs or prediction targets.
+---
+
+import DataTypePage from '../../../components/DataTypePage.astro';
+import { vectorExamples } from '../../../data/examples/vector';
+
+Use `rf.Vector` when a field already contains a fixed-width numeric vector:
+a precomputed embedding, a sensor signature, or a set of coordinates with a
+consistent meaning and order.
+
+<DataTypePage id="vector-examples" examples={vectorExamples}>
+
+## Inputs
+
+`n_dim` is required and must be positive. Every valued vector has that width;
+the meaning of coordinate positions should remain consistent across records.
+
+Values are stored as float32. Vector does not fit a normalizer, so prepare
+coordinate scales appropriate for your source representation. A whole vector
+may be null, but its individual elements must be non-null numbers. Wrong
+lengths and null elements raise errors. A vector containing NaN or infinity
+takes the `other` state.
+
+## Predictions
+
+A Vector can be an input or a supervised target. With `mask=True`, supply known
+target vectors during training and omit them from prediction requests. Its
+rich result contains `state`, a `content` array of exactly `n_dim` coordinates,
+and `inferred`. In the position example, `predictions.next_position_m.content`
+contains x, y, and z in metres. It is one vector result with one state
+distribution, rather than a separate rich result for each coordinate.
+
+A vector target inside a branch gets one fixed-width array per retained
+record. The stock example has a variable list of products, each with a
+three-coordinate sales vector and a separate Boolean target. These fields
+retain their own output contracts. See [Choose your predictions](/predictions/).
+
+The writer fills coordinates with zeros when the most likely predicted state
+is not `valued`. Read the surrounding state probabilities when interpreting
+those coordinates; zeros alone do not identify missingness.
+
+Direct prediction returns a Polars DataFrame; vector coordinates remain
+fixed-width arrays inside its nested results. The Arrow writer uses fixed-size
+lists for those coordinates. PyArrow Parquet cannot round-trip fixed-size lists
+below null containers; use Arrow IPC when writing sparse vector results.
+relflow's writer rejects affected Parquet batches before writing them.
+
+## Options
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `n_dim` | Required | Set the positive, fixed number of coordinates. |
+| `objective` | `"l2"` | Use mean squared error (`"l2"`) or mean absolute error (`"l1"`) across coordinates. |
+| `jitter` | `rf.Jitter()` | Configure training-only noise in the supplied coordinate units while preserving target vectors. |
+
+Neither objective normalizes the coordinates or changes their units.
+
+## Request Methods
+
+This type has no type-specific request methods.
+
+## Footguns
+
+These limits follow the input, output, and storage contracts.
+
+- **Passing a variable-width or partially missing vector.** Wrong widths and
+  null coordinates raise errors. A NaN or infinite coordinate makes the whole
+  vector `other`. Validate width and finiteness; use a branch for collections
+  whose length varies.
+  [Vector input validation](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/vector.py#L121-L145)
+- **Expecting automatic coordinate normalization.** Vector uses supplied scales
+  and averages coordinate errors; large errors in one coordinate can dominate
+  the objective. Prepare suitable scales, or use named Number fields when each
+  measurement needs its own normalization.
+  [Vector representation and objectives](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/vector.py#L42-L63)
+- **Treating zero coordinates as proof of a real measurement.** The writer also
+  fills content with zeros when the most likely state is not `valued`. Read
+  the state probabilities alongside the coordinates.
+  [Non-valued output test](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_vector.py#L276-L308)
+- **Choosing Parquet for sparse vector results.** Fixed-size lists below null
+  containers cannot round-trip through PyArrow Parquet, so the writer rejects
+  those batches. Use Arrow IPC for that output.
+  [Sparse-output rejection test](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/inference/test_callback.py#L258-L274)
+
+## Related types
+
+- [Number](/data-types/number/) represents individually named numeric measurements with learned normalization.
+- [Text](/data-types/text/) encodes strings with a frozen text encoder.
+- [Define one example](/data/) explains collections of related records. Use a branch when the collection's length varies.
+
+## Evidence
+
+The current learning library has no dedicated Vector experiment. The
+[Vector datatype tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_vector.py)
+cover dimensionality, reconstruction objectives, numeric validity, and Arrow
+output. These are API checks rather than measured application-quality results.
+
+</DataTypePage>

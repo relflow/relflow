@@ -161,24 +161,21 @@ def normalized_rmse(model: rf.Model, records: list[dict]) -> float:
     return float(np.sqrt(np.mean(np.square(np.asarray(predicted) - actual)) / np.mean(np.square(actual))))
 
 
+class MemoryRecord(rf.Branch):
+    entity_id = rf.Hash(n_hashes=4, n_bands=8)
+    role = rf.Category(p_unavailable=0.0)
+    is_query = rf.Boolean
+    value = rf.Number(mask=rf.Mask(query="is_query", dropout=False, reconstruct=True), objective="mse")
+
+
+class PredictionModel(rf.Model):
+    memory = MemoryRecord(length=2 * PAIR_COUNT, n_layers=2, reduction=rf.Attention())
+
+
 @experiment("P024", seed=17)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
-    model = rf.Model(
-        d_model=64,
-        n_layers=2,
-        n_heads=4,
-        reduction=rf.Attention(),
-        memory=rf.Branch(
-            length=2 * PAIR_COUNT,
-            n_layers=2,
-            reduction=rf.Attention(),
-            entity_id=rf.Hash(n_hashes=4, n_bands=8),
-            role=rf.Category(p_unavailable=0.0),
-            is_query=rf.Boolean,
-            value=rf.Number(mask=rf.Mask(query="is_query", dropout=False, reconstruct=True), objective="mse"),
-        ),
-    )
+    model = PredictionModel(d_model=64, n_layers=2, n_heads=4, reduction=rf.Attention())
     data = rf.SyntheticDataModule(
         train=partial(records, rows=2048, seed=seed + 1, namespace="train"),
         validate=partial(records, rows=512, seed=seed + 2, namespace="validate"),

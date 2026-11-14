@@ -1,7 +1,7 @@
 [project]
 name = "relflow-docs"
 version = "0.1.0"
-description = "Static documentation tooling for relflow"
+description = "Static documentation publishing and Evidence verification for relflow"
 requires-python = ">=3.12"
 dependencies = ["pyyaml==6.0.3"]
 
@@ -19,7 +19,7 @@ markers = ["integration: explicit runtime, worker, distributed, or accelerator c
 
 [tool.ruff]
 line-length = 120
-extend-exclude = ["docs/_extensions", "docs/evidence", "docs/site", "**/evidence/runs/**"]
+extend-exclude = ["**/evidence/runs/**"]
 lint.extend-select = ["I"]
 
 [tool.ruff.lint.isort]

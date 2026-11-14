@@ -53,8 +53,8 @@ def publication(tmp_path):
         target = root / entry["script"]
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
-    for helper in ("source.py", "reporting.py", "run.py"):
-        shutil.copy2(ROOT / "experiments" / helper, root / "experiments" / helper)
+    for helper in sorted((ROOT / "experiments").glob("*.py")):
+        shutil.copy2(helper, root / "experiments" / helper.name)
     shutil.copy2(ROOT / "results.json", root / "results.json")
     return root
 
@@ -77,6 +77,20 @@ def test_selection_preserves_candidate_and_github_provenance(reports, publicatio
         selected = path.read_bytes()
         assert selected == source
         assert fingerprint(selected.decode()) == fingerprint(source.decode())
+
+
+@pytest.mark.parametrize("fault", ["changed", "missing"])
+def test_selection_rejects_changed_shared_policy_before_writing(reports, publication, fault):
+    selection = publication / "results.json"
+    original = selection.read_bytes()
+    policy = publication / "experiments/policies.py"
+    if fault == "changed":
+        policy.write_text(policy.read_text() + "\nCHANGED_POLICY = True\n")
+    else:
+        policy.unlink()
+    with pytest.raises(ValueError, match="runtime inputs differ"):
+        select(reports, root=publication)
+    assert selection.read_bytes() == original
 
 
 @pytest.mark.parametrize("fault", ["missing", "error", "provenance", "regression", "smoke", "partial"])
@@ -190,7 +204,8 @@ def test_selection_refreshes_readme_from_candidate_metrics_with_exact_boundaries
     assert "**98.77% accuracy**" in content
     assert "49.32% after filling nulls with zero" in content
     assert content.count("| [") == 3
-    assert "https://www.relflow.ai/en/latest/evidence/identity/unseen-identity-equality.html" in content
+    for identifier in ("P021", "P025", "P038"):
+        assert f"https://www.relflow.ai/en/latest/evidence/{identifier}/" in content
 
 
 def test_readme_reads_current_selection_instead_of_an_old_report(reports, publication, readme_target):

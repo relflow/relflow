@@ -1,0 +1,111 @@
+---
+title: Enum
+description: Declare the complete set of allowed scalar labels in your schema.
+---
+
+import DataTypePage from '../../../components/DataTypePage.astro';
+import { enumExamples } from '../../../data/examples/enum';
+
+Use `rf.Enum` when the allowed labels are part of the data contract:
+workflow states, priority levels, or a fixed set of outcomes. Declare those
+labels positionally.
+
+<DataTypePage id="enum-examples" examples={enumExamples}>
+
+## Inputs
+
+Every non-null value must match a declared label. Unknown labels raise an
+error during training, validation, test, and prediction. Nulls retain their
+separate state; do not put `None` in the label declaration.
+
+Declare a nonempty collection of unique labels of one scalar type: string,
+integer, finite float, Boolean, or bytes. Declaration order fixes the class
+IDs. `Enum` is a classifier: names such as `"low"`, `"medium"`, and `"high"`
+do not automatically give it an ordinal distance.
+
+## Predictions
+
+A decoded target returns `content.value`, `content.probability`, and optional
+ranked candidates in `content.topk`. Written labels are strings. Every declared
+class is eligible for output, including classes absent from the training data;
+eligibility alone does not establish useful predictions for those classes.
+
+## Options
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| Positional labels | Required | Declare the nonempty, fixed vocabulary, or unpack it with `rf.Enum(*labels)`. |
+| `mask` | `False` | Set `mask=True` to hide the field from inputs and learn it as a supervised target. |
+| `topk` | `None` | Request ranked candidates and top-k metrics, such as `topk=[2]`. Values must be integers greater than one. |
+| `strip` | `False` | Trim surrounding whitespace from declared and incoming string labels. |
+| `cased` | `True` | Set `cased=False` to lowercase declared and incoming string labels. |
+| `p_unavailable` | `0.01` | Hide known input label content at this rate during training; reconstruction targets stay intact. |
+
+Unpack a reusable label declaration with `rf.Enum(*labels)`, as the service-code
+example shows. `topk=[3]` adds up to three ranked candidates and top-3 accuracy metrics.
+`strip=True` and `cased=False` fold both the declared string labels and incoming
+values. Folded labels must remain unique, and predictions use their folded form.
+Input label augmentation uses `p_unavailable`, which defaults to `0.01`.
+
+## Request Methods
+
+Use the field's absolute schema address to inspect its declared classes and
+observed training exposure. For a trained ticket model from the first example:
+
+| Method | Returns | Purpose |
+| --- | --- | --- |
+| `vocabulary(source, address)` | A tuple of declared labels | Read the fixed class list in declaration order, including labels not yet observed. |
+| `counts(model, address)` | A dictionary mapping every declared label to an integer | Inspect observed training exposure for each class, excluding the internal prior. |
+
+```python
+labels: tuple[str, ...] = rf.Enum.vocabulary(model, "/destination")
+counts: dict[str, int] = rf.Enum.counts(model, "/destination")
+```
+
+`vocabulary` accepts a model or its `interprocess_encoding_context`; `counts`
+requires the model. Unobserved classes remain in the returned dictionary with
+zero counts. Labels retain their scalar types and configured string folding.
+Both methods return snapshots. Counts reflect accumulated training exposure,
+rather than a count of distinct tickets or a prediction confidence.
+
+## Footguns
+
+- **Counting a declared class as a trained class.** Inspect exposure counts
+  and evaluate every class you need to predict. Recorded 0.4.2
+  [P070](/evidence/#P070) kept a withheld class eligible for output, but
+  useful predictions for that class required its later training examples.
+- **Using a closed declaration for labels that arrive unannounced.** An
+  undeclared non-null label raises an error even when masked. Validate source
+  contracts before fitting or serving; choose Category for a growing vocabulary.
+  The [undeclared-value test](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_enum.py#L167)
+  covers every execution stage.
+- **Expecting priority names to impose rank distances.** Enum trains a
+  classifier, so declaring `"low"`, `"normal"`, and `"high"` does not make
+  a two-level error cost twice a one-level error. Choose
+  [Ordinal](/data-types/ordinal/) when numeric rank distance is your intended
+  learning objective.
+- **Joining decoded numeric labels as integers.** Enum writes its selected
+  label and candidates as strings, including integer declarations. Normalize
+  application join keys to the output type; the
+  [prediction writer](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/enum.py#L501)
+  performs that conversion explicitly.
+
+## Related types
+
+- [Ordinal](/data-types/ordinal/) gives declared labels an explicit numeric order.
+
+- [Category](/data-types/category/) discovers and grows its vocabulary during training.
+- [Boolean](/data-types/boolean/) represents a true-or-false outcome.
+- [Set](/data-types/set/) predicts several labels that can apply together.
+
+For admission, unknown labels, and continued training, see
+[Online vocabulary](/advanced/online-vocabulary/).
+
+## Evidence
+
+The controlled experiments on [learning declared classes](/evidence/#P069)
+and [declaring a class before seeing examples](/evidence/#P070) distinguish
+fixed output support from learned behavior. The library retains their recorded
+relflow 0.4.2 runs at revision `7dec5e8`, rather than measurements on your application.
+
+</DataTypePage>

@@ -102,7 +102,7 @@ import polars as pl
 import pyarrow as pa
 import relflow as rf
 import torch
-from relflow.presets.base import resolve
+from policies import CONTROL
 from reporting import experiment, report
 
 BUDGET = 600
@@ -138,34 +138,26 @@ def records(*, rows: int, seed: int, shifted: bool = False) -> Iterator[dict]:
             yield {"days": days, "answer": max(totals)}
 
 
+class Transaction(rf.Branch):
+    amount = rf.Number
+
+
+class Session(rf.Branch):
+    transactions = Transaction(length=None, overflow=None, reduction=rf.Attention())
+
+
+class Day(rf.Branch):
+    sessions = Session(length=None, overflow=None, reduction=rf.Attention())
+
+
+class Model(rf.Model):
+    days = Day(length=None, overflow=None, reduction=rf.Attention())
+    answer = rf.Number(mask=True, objective="mse")
+
+
 def build() -> rf.Model:
-    # Freeze the experimental architecture independently of SDK preset changes.
-    control_preset = rf.presets.Preset(
-        name="xs",
-        d_model=64,
-        root=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
-        branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
-        leaf=rf.presets.LeafDefaults(n_heads=2),
-    )
-    model = rf.Model(
-        schema=resolve(
-            control_preset,
-            reduction=rf.Attention(),
-            days=rf.Branch(
-                length=None,
-                overflow=None,
-                reduction=rf.Attention(),
-                sessions=rf.Branch(
-                    length=None,
-                    overflow=None,
-                    reduction=rf.Attention(),
-                    transactions=rf.Branch(length=None, overflow=None, reduction=rf.Attention(), amount=rf.Number),
-                ),
-            ),
-            answer=rf.Number(mask=True, objective="mse"),
-        )
-    )
-    model.preset = control_preset
+
+    model = Model(preset=CONTROL.name, reduction=rf.Attention())
     return model
 
 
