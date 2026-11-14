@@ -16,6 +16,8 @@ fn serve(
     stop: &AtomicBool,
     owner: u64,
 ) -> Result<()> {
+    // Windows accepts inherit the listener's nonblocking mode; frames use blocking I/O.
+    stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(Duration::from_secs(30)))?;
     let mut token = [0; 32];
     stream.read_exact(&mut token)?;
@@ -118,4 +120,53 @@ pub fn run(path: &Path, memory: u64, capacity: u64) -> Result<()> {
         let _ = thread.join();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepted_nonblocking_stream_waits_for_the_complete_handshake() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let store = Store::open(&directory.path().join("cache.sqlite3"), 4096, 0)?;
+        let listener = TcpListener::bind(("127.0.0.1", 0))?;
+        let mut client = TcpStream::connect(listener.local_addr()?)?;
+        let (stream, _) = listener.accept()?;
+        // Windows inherits the listener's mode; force it here on every platform.
+        stream.set_nonblocking(true)?;
+        let auth = [17; 32];
+        let stop = AtomicBool::new(false);
+        thread::scope(|scope| -> Result<()> {
+            let worker = scope.spawn(|| serve(stream, &store, &auth, &stop, 1));
+            let result = (|| -> Result<()> {
+                client.set_read_timeout(Some(Duration::from_millis(100)))?;
+                client.write_all(&auth[..16])?;
+                let mut byte = [0];
+                ensure!(
+                    matches!(client.read(&mut byte), Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)),
+                    "owner must wait for the rest of the capability"
+                );
+                client.set_read_timeout(Some(Duration::from_secs(10)))?;
+                client.write_all(&auth[16..])?;
+                client.write_all(&PROTOCOL.to_le_bytes())?;
+                let mut version = [0; 4];
+                client.read_exact(&mut version)?;
+                ensure!(
+                    u32::from_le_bytes(version) == PROTOCOL,
+                    "invalid protocol reply"
+                );
+                for _ in 0..2 {
+                    let reply = super::super::wire::call(&mut client, 5, b"{}", b"")?;
+                    let stats: serde_json::Value = serde_json::from_slice(&reply)?;
+                    ensure!(stats["backend"] == "rust", "invalid statistics reply");
+                }
+                Ok(())
+            })();
+            drop(client);
+            let served = worker.join().expect("owner thread panicked");
+            result?;
+            served
+        })
+    }
 }
