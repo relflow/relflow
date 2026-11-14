@@ -605,6 +605,60 @@ def test_timeline_gives_all_tokens_of_a_row_its_time():
     assert result.tolist() == [[0.0, 0.0, 2.5, 2.5]]
 
 
+def test_timeline_uses_zero_for_padding_steps_outside_time_geometry():
+    result = timeline(
+        structural=torch.tensor([[0, 1, 2]]),
+        steps=torch.tensor([[0, 1, 2]]),
+        times=torch.tensor([[4.0, 7.0]], dtype=torch.float64),
+    )
+    assert result.tolist() == [[4.0, 7.0, 0.0]]
+
+
+def test_contrastive_scatter_accepts_mixed_precision_mixer_output():
+    class BFloatMixer(torch.nn.Module):
+        def forward(self, inputs: torch.Tensor, **kwargs: object) -> torch.Tensor:
+            return inputs.to(torch.bfloat16)
+
+    schema = rf.Schema.from_tree(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        ett=rf.Branch(length=4, x=rf.Number, contrastive=rf.Contrastive(views=rf.Crops(width=2))),
+    )
+    encoder = BranchEncoder(schema=schema, address="/ett")
+    encoder.encoder = BFloatMixer()
+    tokens = torch.randn(2, 4, 8)
+    present = torch.ones(2, 4, dtype=torch.bool)
+    steps = torch.arange(4).expand(2, -1)
+    shares = encoder.contrast(
+        tokens,
+        present=present,
+        positions=None,
+        steps=steps,
+        views=torch.tensor([[0, 1], [0, 1]]),
+        extent=4,
+    )
+    assert shares is not None and shares.dtype == tokens.dtype and torch.isfinite(shares).all()
+
+
+def test_contrastive_credit_accepts_mixed_precision_shares():
+    schema = rf.Schema.from_tree(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        ett=rf.Branch(length=4, x=rf.Number, contrastive=rf.Contrastive(views=rf.Crops(width=2))),
+    )
+    encoder = BranchEncoder(schema=schema, address="/ett")
+    shares = encoder.credit(
+        torch.ones(1, dtype=torch.bfloat16),
+        indices=torch.tensor([1]),
+        rows=2,
+        like=torch.zeros(2),
+        views=True,
+    )
+    assert shares is not None and shares.dtype == torch.float32 and shares.tolist() == [0.0, 1.0]
+
+
 def timed_run(times, *, geometry=True):
     torch.manual_seed(0)
     schema = rf.Schema.from_tree(

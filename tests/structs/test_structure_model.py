@@ -480,6 +480,7 @@ def checked(mask: rf.Mask) -> rf.Branch:
     return rf.Branch(
         length=3,
         direction=CAUSAL,
+        overflow="tail",
         mask=mask,
         time_index="ts",
         time_step=1.0,
@@ -493,6 +494,18 @@ def checked(mask: rf.Mask) -> rf.Branch:
 def test_forecast_with_bidirectional_direction_is_rejected():
     with pytest.raises(ValueError, match=r"branch.*Forecast.*direction=bidirectional.*Direction\.causal"):
         rf.Branch(length=3, mask=FORECAST, value=rf.Number)
+
+
+@pytest.mark.parametrize("overflow", [None, "head"])
+def test_forecast_with_head_overflow_is_rejected(overflow):
+    with pytest.raises(ValueError, match=r"branch.*Forecast.*head.*overflow=.tail."):
+        rf.Branch(length=3, direction=CAUSAL, overflow=overflow, mask=FORECAST, value=rf.Number)
+
+
+@pytest.mark.parametrize("overflow", ["tail", "random", "error"])
+def test_forecast_keeps_compatible_explicit_overflow_policies(overflow):
+    branch = rf.Branch(length=3, direction=CAUSAL, overflow=overflow, mask=FORECAST, value=rf.Number)
+    assert branch.overflow == Overflow(overflow)
 
 
 def test_chronological_forecast_with_bidirectional_direction_is_rejected():
@@ -544,6 +557,7 @@ def test_forecast_time_index_child_must_read_one_member():
         rf.Branch(
             length=3,
             direction=CAUSAL,
+            overflow="tail",
             mask=FORECAST,
             time_index="ts",
             time_step=1.0,
@@ -553,7 +567,7 @@ def test_forecast_time_index_child_must_read_one_member():
 
 
 def test_capacity_adds_the_forecast_horizon_to_the_length():
-    forecasting = rf.Branch(length=3, direction=CAUSAL, mask=FORECAST, value=rf.Number)
+    forecasting = rf.Branch(length=3, direction=CAUSAL, overflow="tail", mask=FORECAST, value=rf.Number)
     assert forecasting.capacity == 5
     assert forecasting.forecast == FORECAST.select
     assert rf.Branch(direction=CAUSAL, mask=FORECAST, value=rf.Number).capacity is None
@@ -566,7 +580,7 @@ def test_forecast_branch_round_trips_through_yaml_schema():
         d_model=8,
         n_layers=1,
         n_heads=2,
-        events=rf.Branch(length=3, direction=CAUSAL, mask=FORECAST, value=rf.Number),
+        events=rf.Branch(length=3, direction=CAUSAL, overflow="tail", mask=FORECAST, value=rf.Number),
     )
     restored = rf.Schema.model_validate_json(schema.model_dump_json())
     assert restored.branches["/events"].mask == (FORECAST,)

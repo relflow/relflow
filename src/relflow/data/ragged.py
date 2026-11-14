@@ -476,7 +476,8 @@ def descend(
         collection_valid[parent_placement] = available
         if cap is not None and branch.overflow == Overflow.error and np.any(available & (lengths > cap)):
             axis = len(layout.shape)
-            raise ValueError(f"branch overflow at dimension {axis} for {address}: capacity is {cap}")
+            message = f"branch overflow at dimension {axis} for {address}: capacity is {cap}"
+            raise ValueError(message)
 
         counts = np.where(available, lengths if cap is None else np.minimum(lengths, cap), 0)
         retained_lengths[parent_placement] = counts
@@ -743,24 +744,23 @@ class CoordinateSelector:
     ) -> np.ndarray:
         address = node.address
         chosen = eligible(layout, mask, address=address)
-        if mask.rate is not None:
-            rate = float(mask.rate)
-            if rate <= 0.0:
-                chosen = np.zeros_like(chosen)
-            elif rate < 1.0:
-                threshold = np.uint64(int(rate * np.iinfo(np.uint64).max))
-                chosen &= (
-                    scores(
-                        layout,
-                        address=address,
-                        mask=mask,
-                        seed=seed,
-                        epoch=epoch,
-                        ordinal=ordinal,
-                        strata=strata,
-                    )
-                    <= threshold
+        rate = 1.0 if mask.rate is None else float(mask.rate)
+        if rate <= 0.0:
+            chosen = np.zeros_like(chosen)
+        elif rate < 1.0:
+            threshold = np.uint64(int(rate * np.iinfo(np.uint64).max))
+            chosen &= (
+                scores(
+                    layout,
+                    address=address,
+                    mask=mask,
+                    seed=seed,
+                    epoch=epoch,
+                    ordinal=ordinal,
+                    strata=strata,
                 )
+                <= threshold
+            )
 
         dense = np.zeros(math.prod(layout.shape), dtype=bool)
         dense[layout.placement] = chosen
@@ -952,7 +952,8 @@ def moments(layout: Layout, branch: Branch, *, ancestors: tuple[Layout, ...]) ->
     where = f"branch '{branch.address}' time_index '{branch.time_index}'"
     expressions = queries(child)
     if len(expressions) != 1:
-        raise ValueError(f"{where} must read one value per row; give the time leaf a single query, got {child.query!r}")
+        message = f"{where} must read one value per row; give the time leaf a single query, got {child.query!r}"
+        raise ValueError(message)
     selected = source(layout, expressions[0], ancestors=ancestors, address=child.address)
     present = (
         boolean(selected.present) if selected.present.type == pa.bool_() else boolean(pc.is_valid(selected.present))
@@ -960,7 +961,8 @@ def moments(layout: Layout, branch: Branch, *, ancestors: tuple[Layout, ...]) ->
     valued = present & valid(selected.values)
     missing = int(present.sum() - valued.sum())
     if missing:
-        raise ValueError(f"{where} is null in {missing} present row(s); fill or drop them in an rf.Preprocessor")
+        message = f"{where} is null in {missing} present row(s); fill or drop them in an rf.Preprocessor"
+        raise ValueError(message)
     return positions(
         selected.values,
         valued=valued,
@@ -991,6 +993,32 @@ def observations(layout: Layout, *, branch: Branch, ancestors: tuple[Layout, ...
     return observed
 
 
+def check_known_future(
+    layout: Layout,
+    *,
+    branch: Branch,
+    ancestors: tuple[Layout, ...],
+    future: np.ndarray,
+) -> None:
+    """Reject future rows whose declared known covariates are null."""
+    if not future.any():
+        return
+    positions = layout.placement[future]
+    children = {cast(Leaf, child).name: cast(Leaf, child) for child in branch.fields if isinstance(child, Leaf)}
+    for name in cast(Forecast, branch.forecast).known:
+        field = pristine(layout, children[name], ancestors=ancestors)
+        missing = field.state.to_numpy(zero_copy_only=False)[positions] == Tokens.null.value
+        if not missing.any():
+            continue
+        index = int(np.flatnonzero(missing)[0])
+        record, slot = divmod(int(positions[index]), layout.shape[-1])
+        message = (
+            f"branch '{branch.address}' record {record} has a null known covariate '{name}' in future row {slot}; "
+            "supply its value"
+        )
+        raise ValueError(message)
+
+
 def extend(layout: Layout, *, branch: Branch, strata: Strata, ancestors: tuple[Layout, ...]) -> Layout:
     """Add the forecast rows a Forecast branch predicts, at prediction only.
 
@@ -1019,6 +1047,7 @@ def extend(layout: Layout, *, branch: Branch, strata: Strata, ancestors: tuple[L
         extent=extent,
         observed=observations(layout, branch=branch, ancestors=ancestors),
     )
+    check_known_future(layout, branch=branch, ancestors=ancestors, future=future)
     counts = np.bincount(parent[future], minlength=parents)
     if (counts > horizon).any():
         index = int(np.flatnonzero(counts > horizon)[0])

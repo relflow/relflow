@@ -365,6 +365,7 @@ def test_forward_accepts_forecast_extent_up_to_capacity():
         events=rf.Branch(
             length=3,
             direction=rf.Direction.causal,
+            overflow="tail",
             mask=rf.Mask(select=rf.Forecast(horizon=2, targets=("value",)), reconstruct=True),
             value=rf.Number,
             load=rf.Number,

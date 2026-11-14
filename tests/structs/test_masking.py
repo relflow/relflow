@@ -49,6 +49,7 @@ def owner(mask: rf.Mask) -> rf.Branch:
         events=rf.Branch(
             length=3,
             direction=rf.Direction.causal,
+            overflow="tail",
             time_index="ts",
             time_step=1.0,
             mask=mask,

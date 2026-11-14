@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import enum
 from typing import Annotated, Literal, TypeAlias
 
 import pydantic
@@ -19,6 +20,11 @@ class Coordinates(pydantic.BaseModel):
     type: Literal["coordinates"] = "coordinates"
 
 
+class Pooling(enum.StrEnum):
+    query = "query"
+    mean = "mean"
+
+
 class Steps(pydantic.BaseModel):
     """Pool every row of a branch into one sequence token.
 
@@ -32,7 +38,7 @@ class Steps(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(extra="forbid", frozen=True)
 
     type: Literal["steps"] = "steps"
-    pooling: Literal["query", "mean"] = "query"
+    pooling: Pooling = Pooling.query
 
 
 GrainConfig: TypeAlias = Annotated[
@@ -44,5 +50,6 @@ GrainConfig: TypeAlias = Annotated[
 __all__ = [
     "Coordinates",
     "GrainConfig",
+    "Pooling",
     "Steps",
 ]
