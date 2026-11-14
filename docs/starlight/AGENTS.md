@@ -20,7 +20,10 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   explicit page/asset budgets; `performance-report/budgets.json` records the
   result. Keep these build-only parsers out of browser imports. Browser tests
   protect first-paint selection geometry, deferred diagram setup, and delegation.
-- Use `npm run preview` for the production build at `http://127.0.0.1:4300`.
+- Use `npm run dev` at `http://127.0.0.1:4300` for page-by-page content review
+  with live reload. Keep iterations local; do not push preview commits or trigger
+  Read the Docs builds unless the user requests publication. Use `npm run preview`
+  when checking the production build. Content iteration does not run Evidence CI.
 - Author documentation in `src/content/docs/` as Markdown or MDX. Keep reusable
   presentation in Astro components. Use ordinary fenced code blocks or the
   Starlight `Code` component. Do not execute examples during site builds.
@@ -81,6 +84,10 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   `src/datasets/` owns shared layout, measured SVG connectors, and column notes.
   Keep instance IDs unique, tooltips independent, both themes, keyboard/touch use,
   Escape, no-JavaScript descriptions, and shared use-case selection working.
+- Use `Tree.astro` for conceptual hierarchies, with `label`, optional `detail`,
+  and nested `children` on each node. `src/tree/tree.css` owns shared connectors,
+  spacing, and native disclosure styling for schema and value trees. Keep rich
+  prediction interpretation and charts in `ValueTree` and `ValueNode`.
 - Every Core Concepts page supports all six original homepage use cases. The
   shared scenario records live in `src/data/concepts/scenarios.ts` and reuse the
   canonical homepage schemas. Each concept owns six focused examples in
@@ -89,6 +96,15 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   concepts and the homepage, with explicit `?case=` links taking precedence over
   saved preferences. Keep keyboard selection, code notes, natural panel heights,
   native navigation, and readable examples without JavaScript.
+- `DataFlow.astro` follows the six canonical observations through connected,
+  expandable stages. `src/data/concepts/data-flow.ts` owns the authored views;
+  `src/data-flow/types.ts` owns prediction/training stage order. Keep the four
+  common stages, the prediction output path, and the loss/backward/update path
+  distinct. Historical answers align with their supplied records and remain
+  hidden from input embedding. Reuse existing prediction illustrations; tensors,
+  gradients, and loss values stay schematic. Preserve native disclosures,
+  stage deep links, case/mode navigation, exact code copying, and both paths
+  without JavaScript. Keep fixture data out of client bundles.
 - The Model trees page uses `ModelExplainer.astro` and `src/data/model-explainer.ts`
   to derive three steps from all six canonical schemas: one answer, added
   context, and another answer. Keep additional targets' historical-label

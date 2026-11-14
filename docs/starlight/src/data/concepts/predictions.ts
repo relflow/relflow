@@ -1,6 +1,6 @@
-import { prediction, type ExampleValue } from '../type-example';
+import { prediction, type ExampleValue } from '../type-example.ts';
 import type { Concept } from './types';
-import { scenarios } from './scenarios';
+import { scenarios } from './scenarios.ts';
 
 const examples: Record<(typeof scenarios)[number]['id'], {
   title: string; description: string; output: Record<string, ExampleValue>; takeaway: string;

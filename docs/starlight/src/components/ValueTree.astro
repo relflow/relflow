@@ -2,6 +2,7 @@
 import type { ExampleValue } from '../data/type-example';
 import { tree } from '../values/tree';
 import ValueNode from './ValueNode.astro';
+import '../tree/tree.css';
 import '../values/tree.css';
 
 interface Props {
@@ -23,7 +24,7 @@ const root = tree(value, { id, predictions, inputs });
 const nodes = root.kind === 'record' ? root.children : [root];
 ---
 
-<section class="value-tree not-content" data-value-tree aria-label={label}>
+<section class="tree value-tree not-content" data-value-tree aria-label={label}>
   <header class="vt-toolbar">
     <p>{predictions ? 'One prediction row' : 'Structured values'}</p>
     <div data-tree-tools hidden>
@@ -34,7 +35,7 @@ const nodes = root.kind === 'record' ? root.children : [root];
     </div>
   </header>
   <p class="vt-sr-only" role="status" aria-live="polite" data-tree-status></p>
-  <ul class="vt-tree">{nodes.map((node) => <ValueNode node={node} />)}</ul>
+  <ul class="tree-list">{nodes.map((node) => <ValueNode node={node} />)}</ul>
   <script
     type="application/json"
     data-tree-source

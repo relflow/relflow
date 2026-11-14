@@ -1,0 +1,195 @@
+---
+import { Code } from '@astrojs/starlight/components';
+import Tree from './Tree.astro';
+import type { TreeNode } from '../tree/types';
+
+interface Props {
+  id?: string;
+}
+
+const { id = 'branch-shapes' } = Astro.props;
+const collection = `import relflow as rf
+
+
+class Reading(rf.Branch):
+    """One numeric reading."""
+
+    value = rf.Number
+
+
+class ReadingModel(rf.Model):
+    """An observation with numeric readings."""
+
+    readings = Reading`;
+
+const nested = `import relflow as rf
+
+
+class Reading(rf.Branch):
+    """One numeric reading."""
+
+    value = rf.Number
+
+
+class ReadingGroup(rf.Branch):
+    """One group of numeric readings."""
+
+    readings = Reading
+
+
+class GroupedReadings(rf.Model):
+    """An observation with groups of readings."""
+
+    groups = ReadingGroup`;
+
+const mixed = `import relflow as rf
+
+
+class Reading(rf.Branch):
+    """One reading and its category."""
+
+    value = rf.Number
+    category = rf.Category
+
+
+class ReadingModel(rf.Model):
+    """A baseline and its related readings."""
+
+    baseline = rf.Number
+    readings = Reading`;
+
+const examples = [
+  {
+    id: 'collection',
+    title: 'One collection',
+    shape: 'Model<Branch<Number>>',
+    schema: collection,
+    nodes: [
+      {
+        label: 'ReadingModel',
+        detail: 'Model · one observation',
+        children: [
+          {
+            label: 'readings',
+            detail: 'Branch · repeated records',
+            children: [{ label: 'value', detail: 'Number' }],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'nested',
+    title: 'Nested collections',
+    shape: 'Model<Branch<Branch<Number>>>',
+    schema: nested,
+    nodes: [
+      {
+        label: 'GroupedReadings',
+        detail: 'Model · one observation',
+        children: [
+          {
+            label: 'groups',
+            detail: 'Branch · repeated records',
+            children: [
+              {
+                label: 'readings',
+                detail: 'Branch · repeated records',
+                children: [{ label: 'value', detail: 'Number' }],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'mixed',
+    title: 'Root values and a collection',
+    shape: 'Model<Number, Branch<Number, Category>>',
+    schema: mixed,
+    nodes: [
+      {
+        label: 'ReadingModel',
+        detail: 'Model · one observation',
+        children: [
+          { label: 'baseline', detail: 'Number' },
+          {
+            label: 'readings',
+            detail: 'Branch · repeated records',
+            children: [
+              { label: 'value', detail: 'Number' },
+              { label: 'category', detail: 'Category' },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+] satisfies { id: string; title: string; shape: string; schema: string; nodes: TreeNode[] }[];
+---
+
+<div class="branch-shapes not-content">
+  {
+    examples.map((example) => (
+      <figure aria-labelledby={`${id}-${example.id}`}>
+        <figcaption>
+          <h3 id={`${id}-${example.id}`}>{example.title}</h3>
+          <code>{example.shape}</code>
+        </figcaption>
+        <div class="bs-diagram">
+          <Tree label={`${example.title}: schema structure`} nodes={example.nodes} />
+        </div>
+        <div class="bs-code">
+          <Code code={example.schema} lang="python" />
+        </div>
+      </figure>
+    ))
+  }
+</div>
+
+<style>
+  .branch-shapes {
+    display: grid;
+    gap: var(--rf-section-gap);
+    min-width: 0;
+    margin-block: var(--rf-section-gap);
+  }
+  figure {
+    min-width: 0;
+    margin: 0;
+    border: 1px solid var(--rf-border);
+    border-radius: 0.5rem;
+    background: var(--rf-card);
+  }
+  figcaption {
+    padding: var(--rf-panel-padding);
+    border-bottom: 1px solid var(--rf-border);
+  }
+  h3 {
+    margin: 0 0 0.5rem;
+    color: var(--rf-ink);
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+  figcaption > code {
+    color: var(--rf-muted);
+    font-size: 0.8rem;
+    line-height: 1.6;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .bs-diagram,
+  .bs-code {
+    min-width: 0;
+    padding: var(--rf-panel-padding);
+  }
+  .bs-code {
+    border-top: 1px solid var(--rf-border);
+  }
+  .bs-code :global(.expressive-code) {
+    min-width: 0;
+    max-width: 100%;
+    margin: 0;
+  }
+</style>

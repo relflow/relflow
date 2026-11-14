@@ -1,0 +1,18 @@
+---
+import type { TreeNode as Node } from '../tree/types';
+import TreeNode from './TreeNode.astro';
+import '../tree/tree.css';
+
+interface Props {
+  label: string;
+  nodes: readonly Node[];
+}
+
+const { label, nodes } = Astro.props;
+---
+
+<div class="tree not-content" role="group" aria-label={label} data-tree>
+  <ul class="tree-list" role="list">
+    {nodes.map((node) => <TreeNode node={node} />)}
+  </ul>
+</div>

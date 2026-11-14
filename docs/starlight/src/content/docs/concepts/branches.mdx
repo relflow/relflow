@@ -1,9 +1,43 @@
 ---
-title: Branches and context
-description: Keep related records together and understand how their context reaches prediction targets.
+title: Context branches
+description: Organize related records into collections, nest them within one another, and choose how much context the model retains.
 ---
 
 import ConceptPage from '../../../components/ConceptPage.astro';
+import BranchShapes from '../../../components/BranchShapes.astro';
 import { branches } from '../../../data/concepts/branches';
+
+relflow models support multiple collections of related records, including
+collections nested inside other records. These collections are represented by
+branches. Each record keeps its own fields and nested branches together.
+
+A branch can describe:
+
+- An account with multiple users, each with their own characteristics and history.
+- A customer with multiple billing statements, each with its own balance and credit report.
+- A device with diagnostic logs containing telemetry from its recent history.
+- A medical study with patients, each with multiple routine check-ins.
+- A financial ticker with separate histories of earnings calls and market prices.
+
+## Collections and nesting
+
+A model can contain one collection, collections within collections, or several
+branches alongside individual values. The class declarations preserve these
+relationships in the model's structure.
+
+<BranchShapes />
+
+## Context length
+
+A branch's `length` controls how many records it retains from each supplied
+collection. For example, `length=32` keeps at most 32 records for each parent.
+For histories supplied oldest to newest, `overflow="tail"` keeps the latest
+records. Use `overflow="error"` to reject collections that exceed the cap.
+
+Omitting `length` retains the full supplied collection. Choose a cap when you
+need to bound the context and memory used by each observation.
+
+Length counts records. A time window, such as the last 30 days, comes from the
+records selected by your data source or [preprocessor](/concepts/data-modules/).
 
 <ConceptPage concept={branches} />

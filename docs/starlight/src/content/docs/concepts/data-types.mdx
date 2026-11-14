@@ -1,9 +1,56 @@
 ---
-title: Data types
-description: Choose field meanings that guide representations, objectives, and decoded outputs.
+title: Leaf types
+description: Understand how typed leaves bind to source data, represent values, and define prediction and learning behavior.
 ---
 
 import ConceptPage from '../../../components/ConceptPage.astro';
 import { dataTypes } from '../../../data/concepts/data-types';
+
+Values enter a relflow model through the leaves of its tree. Each leaf has a
+data type that defines how those values are read and represented. For supported
+targets, the type defines its learning objective and any returned prediction.
+
+relflow provides built-in types for numbers, labels, text, sets, vectors, and
+other values. A leaf can represent a collection such as a set or vector;
+[branches](/concepts/branches/) organize collections of related records.
+
+## Binding data to leaves
+
+By default, a leaf reads the key with its name from the enclosing record.
+A `balance` leaf inside an `accounts` branch reads `balance` from each account.
+The branch reads the collection named `accounts` from its parent record.
+
+For a different source structure, supply an explicit `query`. A path such as
+`query="statement.balance"` selects the balance within that account's statement.
+The path is relative to the enclosing record; the leaf keeps its declared name
+in the model schema.
+
+Your data source or [preprocessor](/concepts/data-modules/) prepares the records,
+including any joins, filters, sorting, and application-specific derived values.
+The schema describes how the resulting values bind to model fields.
+
+## What a leaf type provides
+
+| Part | Role |
+| --- | --- |
+| **Parameters** | Declare the field's type, configuration, source query, and input or target role. Find public options and extension contracts in the [API map](/api-map/). |
+| **Embedder** | Represents input values as vectors that the model can combine with context from related fields and records. |
+| **Decoder and writer** | Turn model context into the type's supported predictions and write their corresponding output fields. A Boolean target returns a probability; a Number target returns a numeric estimate. |
+| **Loss** | Measures the difference between a reconstruction and its known training answer, using the objective defined by the type. |
+
+Declaring a type describes how to handle a value. Configure `mask=True` to make
+a field a supervised target. Each type's reference page describes its supported
+objectives and returned outputs.
+
+## Extend the built-in types
+
+Leaf types are registered as self-contained plugins. Each extension defines its
+data contract and the representations, objectives, and outputs it supports.
+You can define your own types for use within your organization or contribute
+them to the open-source library.
+
+[Custom data types](/advanced/custom-data-types/) explains the registration
+protocol. The [data type reference](/data-types/) covers accepted inputs,
+returned outputs, options, and limitations for the built-in types.
 
 <ConceptPage concept={dataTypes} />

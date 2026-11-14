@@ -25,6 +25,8 @@ npm run preview
 ```
 
 Open `http://127.0.0.1:4300`. Use `npm run dev` for live authoring.
+Keep page-by-page content review on this local server with live reload;
+Read the Docs preview builds are separate publication work.
 Set `ASTRO_TELEMETRY_DISABLED=1` in restricted build environments.
 `package-lock.json` pins the dependencies.
 
@@ -50,6 +52,12 @@ highlighted schema for all three steps; copying derives from those same source
 lines. Its page budget allows about 20% headroom over the current 466 KiB HTML,
 65 KiB gzip, and 4,100 elements. Shared JavaScript and stylesheet limits remain
 unchanged.
+
+Data Flow renders the six cases and both paths as static content, with one
+stage expanded after enhancement. Its page budget allows about 20% headroom
+over the initial 585 KiB HTML, 66 KiB gzip, and 9,019 elements. Its controller
+imports only the small stage-path definitions; schemas, datasets, and prediction
+fixtures stay out of the browser bundle. Shared JavaScript/CSS budgets still apply.
 
 Browser regressions delay enhancement modules until after first paint to check
 picker geometry and layout stability. They also verify delegated interaction
@@ -103,6 +111,7 @@ styles. Descriptions also provide native title hints without JavaScript.
 | `/predictions/` | Which answers should my model learn? |
 | `/data-types/` | Which representation fits each value? |
 | `/concepts/models/` | How do the core ideas fit my use case? |
+| `/concepts/data-flow/` | How do source records become predictions or training updates? |
 | `/advanced/` | How do I extend, scale, adapt, and deploy the modeling workflow? |
 | `/api-map/` | Which class, method, or extension contract handles this job? |
 | `/benchmarks/` | How does it compare on published tasks? |
@@ -123,7 +132,9 @@ the repeated teaching patterns; their typed inputs own the relevant contracts.
 | --- | --- | --- |
 | Learn one datatype | `DataTypePage` | A stable example ID, three `TypeExample` records, and the seven reference sections as Markdown. |
 | Follow a concept across use cases | `ConceptPage` | A `Concept` with six focused examples, principles, and related guides. |
+| Follow records through the pipeline | `DataFlow` | The six canonical cases, typed stage views, and prediction/training paths in `src/data/concepts/data-flow.ts`. |
 | Understand supplied records | `DataExplorer` | A page-unique ID and a `Dataset` with explicit entities, columns, and relationships. |
+| Explain a hierarchy | `Tree` | An accessible label and nodes with `label`, optional `detail`, and nested `children`. |
 | Read nested predictions | `ValueTree` | The complete result row, known inputs, and the `predictions` flag. |
 | Inspect how a schema shapes a model | `ModelExplainer` | A page-unique ID and one of the six canonical case IDs. |
 | Show source code with contextual help | Markdown fences or Starlight `Code` | Unmodified source, language, and an optional contract annotation. |
@@ -160,7 +171,7 @@ records provide the measured predictive comparisons.
 
 ### Core Concepts
 
-The eight concept pages each include all six homepage use cases. Choose a case
+The Core Concepts pages each include all six homepage use cases. Choose a case
 once and follow it through schemas, data types, branches, masking, data modules,
 training, regularization, and predictions. Mutations and embeddings live in
 Advanced Usage and also support all six cases. The selector remembers the
@@ -265,7 +276,22 @@ Descriptions are authored deliberately, independent of example values, so an
 empty list, null value, or short fixture cannot silently redefine the dataset.
 Keep measured Evidence in its existing result views.
 
-### Visualize nested values and predictions
+### Visualize hierarchies, values, and predictions
+
+`Tree.astro` renders conceptual hierarchies such as model collections and nesting.
+Its nodes use `label`, optional `detail`, and optional `children`; `TreeNode.astro`
+renders them recursively with native disclosures. `BranchShapes.astro` uses this
+component for all three schema shapes, keeping their Python code examples beside
+the diagrams. The connector lines, spacing, and disclosure styles live in
+`src/tree/tree.css` and are also used by the value and prediction trees.
+
+```mdx
+<Tree label="Schema structure" nodes={[
+  { label: 'readings', detail: 'Branch · repeated records', children: [
+    { label: 'value', detail: 'Number' },
+  ] },
+]} />
+```
 
 `ValueTree.astro` is the reusable view for nested values. Pass a page-unique `id`
 and `value`. Enable `predictions` for a complete prediction row; rich views apply
@@ -289,7 +315,7 @@ copies the unchanged complete row as JSON. Native disclosures work without
 JavaScript and all controls support the keyboard.
 
 `src/values/tree.ts` owns the display projection; `ValueNode.astro` renders it
-recursively and `src/values/tree.css` owns the shared styles. All 39 type examples
+recursively and `src/values/tree.css` owns prediction-specific styles. All 39 type examples
 and the six Core Concepts prediction examples use this view. Results remain
 static illustrations with their existing values and notes; no model executes
 during rendering. Source inputs and training answers remain inspectable YAML.

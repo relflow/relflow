@@ -1,0 +1,124 @@
+---
+import { Code } from '@astrojs/starlight/components';
+import { stringify } from 'yaml';
+import { flowPaths, type FlowStage } from '../data-flow/types';
+import type { CaseId } from '../data/concepts/types';
+import DataExplorer from './DataExplorer.astro';
+import Tree from './Tree.astro';
+import ValueTree from './ValueTree.astro';
+
+interface Props {
+  caseId: CaseId;
+  stage: FlowStage;
+  stages: readonly FlowStage[];
+  number: number;
+}
+
+const { caseId, stage, stages, number } = Astro.props;
+const id = `flow-${caseId}-${stage.id}`;
+const modeNames = { predict: 'Prediction', train: 'Training' };
+const code = stage.code || [];
+const codeModes = [
+  ...new Set(code.flatMap((item) => (item.mode ? [item.mode] : ['predict', 'train']))),
+].join(' ');
+const nextLabels = (['predict', 'train'] as const).flatMap((mode) => {
+  const path = flowPaths[mode];
+  const position = path.indexOf(stage.id);
+  if (position < 0) return [];
+  const following = path[position + 1] || 'load';
+  return [
+    {
+      mode,
+      label:
+        position === path.length - 1
+          ? mode === 'train'
+            ? 'Next batch'
+            : 'Back to data'
+          : `Next: ${stages.find((item) => item.id === following)!.title}`,
+    },
+  ];
+});
+---
+
+<details class="df-stage" id={id} data-flow-stage={stage.id} open>
+  <summary>
+    <span class="df-number"><span class="df-sr-only">Step </span>{number}</span>
+    <span class="df-stage-heading">
+      <strong>{stage.title}</strong>
+      <span class="df-summary">{stage.summary}</span>
+    </span>
+    {stage.optional && <span class="df-badge">Optional</span>}
+    <span class="df-chevron" aria-hidden="true">⌄</span>
+  </summary>
+  <div class="df-stage-body">
+    <p class="df-description">{stage.description}</p>
+    <div class="df-views">
+      {
+        stage.views.map((view, index) => (
+          <section
+            class="df-view"
+            data-flow-view-kind={view.kind}
+            data-flow-view-mode={view.mode}
+            aria-labelledby={`${id}-view-${index}-title`}
+          >
+            <h5 id={`${id}-view-${index}-title`}>
+              {view.mode && <span class="df-view-mode">{modeNames[view.mode]} · </span>}
+              {view.label}
+            </h5>
+            {view.kind === 'dataset' ? (
+              <DataExplorer id={`${id}-view-${index}`} dataset={view.dataset} headingLevel={6} />
+            ) : view.kind === 'records' ? (
+              <Code
+                code={stringify(view.value, { indent: 2, lineWidth: 0 })}
+                lang="yaml"
+                wrap
+                preserveIndent={false}
+                hangingIndent={2}
+              />
+            ) : view.kind === 'tree' ? (
+              <Tree label={view.label} nodes={view.nodes} />
+            ) : view.kind === 'prediction' ? (
+              <ValueTree
+                id={`${id}-view-${index}`}
+                value={view.value}
+                inputs={view.inputs}
+                predictions
+                label={view.label}
+              />
+            ) : (
+              <p>{view.text}</p>
+            )}
+          </section>
+        ))
+      }
+    </div>
+    {stage.note && <p class="df-note">{stage.note}</p>}
+    {
+      code.length > 0 && (
+        <details class="df-code" data-flow-code-modes={codeModes}>
+          <summary>Code and configuration</summary>
+          {code.map((item, index) => (
+            <section data-flow-view-mode={item.mode} aria-labelledby={`${id}-code-${index}-title`}>
+              <h5 id={`${id}-code-${index}-title`}>
+                {item.mode && <span class="df-view-mode">{modeNames[item.mode]} · </span>}
+                {item.label}
+              </h5>
+              <Code code={item.source} lang="python" />
+            </section>
+          ))}
+        </details>
+      )
+    }
+    <nav
+      class="df-stage-controls"
+      data-flow-stage-controls
+      aria-label={`${stage.title} navigation`}
+      hidden
+    >
+      <button type="button" data-flow-previous disabled={number === 1}>Previous stage</button>
+      <button type="button" data-flow-next>
+        {nextLabels.map((next) => <span data-flow-next-mode={next.mode}>{next.label}</span>)}
+      </button>
+    </nav>
+  </div>
+</details>

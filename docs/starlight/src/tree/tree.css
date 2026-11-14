@@ -1,0 +1,148 @@
+.tree-list,
+.tree-children {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tree {
+  min-width: 0;
+  color: var(--sl-color-text);
+  font-family: var(--sl-font);
+}
+.tree-node {
+  --tree-anchor: 0.8rem;
+  --tree-gap: 0.3rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+}
+.tree-node-value {
+  --tree-anchor: 0.67rem;
+}
+.tree-node + .tree-node {
+  margin-top: var(--tree-gap);
+}
+.tree-branch {
+  min-width: 0;
+}
+.tree-branch > summary {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.5rem;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0.2rem 0.5rem 0.2rem 1.25rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  list-style: none;
+  color: var(--rf-ink);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.tree-branch > summary::-webkit-details-marker {
+  display: none;
+}
+.tree-branch > summary::before {
+  position: absolute;
+  left: 0.3rem;
+  top: calc(var(--tree-anchor) - 0.22rem);
+  width: 0;
+  height: 0;
+  border-top: 0.22rem solid transparent;
+  border-bottom: 0.22rem solid transparent;
+  border-left: 0.3rem solid var(--rf-muted);
+  content: '';
+  transform-origin: 0.1rem center;
+}
+.tree-branch[open] > summary::before {
+  transform: rotate(90deg);
+}
+.tree-branch > summary:hover {
+  background: var(--rf-surface);
+}
+.tree-branch > summary:focus-visible {
+  outline: 2px solid var(--sl-color-text-accent);
+  outline-offset: 2px;
+}
+.tree-name {
+  min-width: 0;
+  font-family: var(--sl-font-mono);
+  font-size: 0.76rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.tree-detail {
+  color: var(--rf-muted);
+  font-size: 0.65rem;
+  font-weight: 400;
+  white-space: nowrap;
+}
+.tree-context {
+  flex-basis: 100%;
+  color: var(--rf-muted);
+  font-size: 0.71rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.tree-children {
+  --tree-indent: 0.55rem;
+  margin: 0.1rem 0 0 0.25rem;
+  padding: 0 0 0 var(--tree-indent);
+}
+.tree-children > .tree-node {
+  position: relative;
+}
+/* Each child owns its gutter segment; the last stops at its first-line elbow. */
+.tree-children > .tree-node::before {
+  position: absolute;
+  top: calc(-1 * var(--tree-gap));
+  bottom: 0;
+  left: calc(-1 * var(--tree-indent));
+  border-left: 1px solid var(--rf-border);
+  content: '';
+}
+.tree-children > .tree-node:first-child::before {
+  top: 0;
+}
+.tree-children > .tree-node:last-child::before {
+  bottom: auto;
+  height: calc(var(--tree-gap) + var(--tree-anchor));
+}
+.tree-children > .tree-node:only-child::before {
+  height: var(--tree-anchor);
+}
+.tree-children > .tree-node::after {
+  position: absolute;
+  top: var(--tree-anchor);
+  left: calc(-1 * var(--tree-indent));
+  width: var(--tree-indent);
+  border-top: 1px solid var(--rf-border);
+  content: '';
+}
+.tree-empty {
+  margin: 0.3rem 0 0.5rem 1.3rem;
+  color: var(--rf-muted);
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+}
+.tree-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.1rem 0.5rem;
+  min-width: 0;
+  padding: 0.12rem 0.3rem 0.12rem 0.2rem;
+  border-radius: 0.25rem;
+  font-size: 0.73rem;
+  line-height: 1.5;
+}
+@media (max-width: 600px) {
+  .tree-name {
+    font-size: 0.7rem;
+  }
+  .tree-context {
+    font-size: 0.65rem;
+  }
+}
