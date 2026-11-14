@@ -23,8 +23,8 @@ class Transformer(pydantic.BaseModel):
 class Conv(pydantic.BaseModel):
     """Mix the sequence tokens of a branch with ``n_blocks`` dilated convolution blocks.
 
-    A relflow version that does not build this mixer rejects it when the model
-    is built.
+    Blocks are causal when the branch ``direction`` is causal. The mixer
+    requires ``grain=Steps()``, so every token stands for one row.
     """
 
     model_config = pydantic.ConfigDict(extra="forbid", frozen=True)

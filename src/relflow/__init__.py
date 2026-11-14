@@ -68,8 +68,8 @@ from relflow.structs.experiment import (
     predicate,
     where,
 )
-from relflow.structs.grain import Coordinates
-from relflow.structs.mixer import Transformer
+from relflow.structs.grain import Coordinates, Steps
+from relflow.structs.mixer import Conv, Transformer
 from relflow.structs.reduction import Attention, Mean, ReductionConfig
 from relflow.structs.structure import Branch, Mask
 from relflow.structs.tree import Address, Leaf, MaskInput
@@ -161,6 +161,7 @@ __all__ = [
     "Category",
     "Component",
     "Context",
+    "Conv",
     "Coordinates",
     "CustomDataModule",
     "Direction",
@@ -214,6 +215,7 @@ __all__ = [
     "SchedulerOptions",
     "SchemaField",
     "SyntheticDataModule",
+    "Steps",
     "Strata",
     "StrataInput",
     "StratumConfig",

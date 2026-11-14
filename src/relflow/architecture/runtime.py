@@ -16,7 +16,7 @@ from tensordict import TensorDict
 from relflow.architecture import output
 from relflow.architecture.binding import bind
 from relflow.architecture.contracts import sanitize
-from relflow.architecture.encoder import BranchEncoder, locate, sequence
+from relflow.architecture.encoder import BranchEncoder, locate
 from relflow.architecture.node import NodeModule
 from relflow.architecture.output import OutputPlan
 from relflow.data.arrow import Encoded, Retain, mappings
@@ -274,9 +274,7 @@ def compute(
 
             if address in plan.embeds:
                 positions, spans, slots = (
-                    sequence(processed[address], order=encoder.child_order)
-                    if encoder.reduction is None
-                    else (None, None, None)
+                    encoder.arrange(processed[address]) if encoder.reduction is None else (None, None, None)
                 )
                 predictions.append(
                     Prediction(

@@ -53,7 +53,7 @@ names for decoded results and a separate column for requested representations.
 | `rf.Hash`, `rf.Quantile`, `rf.Text`, `rf.Vector`, `rf.Group` | Represent identifier equality, numeric percentiles, text, supplied vectors, or learned label groups. |
 | `rf.Series` | Represent a multichannel run of ordered steps as context or a forecast target. |
 | `rf.Attention`, `rf.Mean` | Choose branch reduction; `reduction=None` preserves routed tokens. |
-| `rf.Coordinates`, `rf.Transformer`, `rf.Direction` | Choose the branch sequence grain, mixer and direction; the defaults reproduce the standard encoder. |
+| `rf.Coordinates`, `rf.Steps`, `rf.Transformer`, `rf.Conv`, `rf.Direction` | Choose the branch sequence grain, mixer and direction; the defaults reproduce the standard encoder. |
 | `rf.Mask`, `rf.Jitter` | Configure visibility/objectives and continuous input perturbation. |
 
 See [Datatypes](../datatypes/index.qmd),
