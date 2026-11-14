@@ -3,11 +3,13 @@ from unittest.mock import patch
 import pyarrow as pa
 import pytest
 import torch
+from tensordict import TensorDict
 
 import relflow as rf
-from relflow.architecture.encoder import BranchEncoder, stepwise
+from relflow.architecture.encoder import BranchEncoder, stepwise, timeline
 from relflow.architecture.pool import MeanPool
 from relflow.architecture.root import Model
+from relflow.data.arrow import Geometry
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel
 
@@ -587,3 +589,67 @@ def test_plain_branch_calls_compute_without_steps():
         ]
     )
     assert calls == [{}]
+
+
+def test_timeline_without_times_returns_structural_positions_unchanged():
+    structural = torch.tensor([[0, 1, 2, 3]])
+    assert timeline(structural=structural, steps=torch.tensor([[0, 0, 1, 1]]), times=None) is structural
+
+
+def test_timeline_gives_all_tokens_of_a_row_its_time():
+    result = timeline(
+        structural=torch.tensor([[0, 1, 2, 3]]),
+        steps=torch.tensor([[0, 0, 1, 1]]),
+        times=torch.tensor([[0.0, 2.5]], dtype=torch.float64),
+    )
+    assert result.tolist() == [[0.0, 0.0, 2.5, 2.5]]
+
+
+def timed_run(times, *, geometry=True):
+    torch.manual_seed(0)
+    schema = rf.Schema.from_tree(
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+        ett=rf.Branch(length=3, time_index="ts", reduction=None, ts=rf.Number, value=rf.Number),
+    )
+    encoder = BranchEncoder(schema=schema, address="/ett").eval()
+    generator = torch.Generator().manual_seed(1)
+
+    def parcel(name):
+        return Parcel(
+            origin=f"/ett/{name}",
+            destination="/ett",
+            payload=torch.randn(1, 1, 3, 16, generator=generator),
+            present=torch.ones(1, 1, 3, dtype=torch.bool),
+            batch_size=1,
+        )
+
+    root = Geometry(
+        lengths=torch.ones(1, dtype=torch.int64),
+        present=torch.ones(1, dtype=torch.bool),
+        valid=torch.ones(1, dtype=torch.bool),
+        slots=torch.ones(1, 1, dtype=torch.bool),
+        batch_size=[1],
+    )
+    branch = Geometry(
+        lengths=torch.full((1, 1), 3),
+        present=torch.ones(1, 1, dtype=torch.bool),
+        valid=torch.ones(1, 1, dtype=torch.bool),
+        slots=torch.ones(1, 1, 3, dtype=torch.bool),
+        times=torch.tensor([[times]], dtype=torch.float64),
+        batch_size=[1],
+    )
+    inputs = TensorDict({"/": root, "/ett": branch}, batch_size=[1]) if geometry else None
+    return encoder([parcel("ts"), parcel("value")], geometry=inputs)
+
+
+def test_time_spacing_changes_encoding_but_not_routed_positions():
+    even, uneven = timed_run([0.0, 1.0, 2.0]), timed_run([0.0, 5.0, 6.0])
+    assert not torch.allclose(even.payload, uneven.payload)
+    assert torch.equal(even.positions, uneven.positions) and even.positions.dtype == torch.int64
+
+
+def test_timed_branch_without_geometry_times_raises():
+    with pytest.raises(ValueError, match="branch '/ett' sets time_index='ts' but the batch geometry has no times"):
+        timed_run([0.0, 1.0, 2.0], geometry=False)
