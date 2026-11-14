@@ -1,12 +1,15 @@
+from datetime import timedelta
 from typing import Literal
 
 import pydantic
 import pytest
+import yaml
 
 import relflow as rf
 from relflow.structs.enums import Overflow
 from relflow.structs.experiment import Schema
 from relflow.structs.grain import Steps
+from relflow.structs.mixer import Conv
 from relflow.structs.structure import Branch
 from relflow.tensorfields.extensions.category import Request as Category
 
@@ -335,3 +338,54 @@ def test_branch_rejects_unknown_direction():
 def test_child_named_items_is_still_a_child():
     branch = rf.Branch(items=rf.Branch(value=rf.Number))
     assert [child.name for child in branch.fields] == ["items"]
+
+
+def test_time_index_must_name_a_child_leaf():
+    with pytest.raises(ValueError, match="time_index='when'.*no child named 'when'"):
+        rf.Branch(length=4, time_index="when", ts=rf.Number, value=rf.Number)
+
+
+def test_time_index_cannot_name_a_child_branch():
+    with pytest.raises(ValueError, match="time_index='ts'.*must name a leaf"):
+        rf.Branch(length=4, time_index="ts", ts=rf.Branch(length=2, x=rf.Number), value=rf.Number)
+
+
+def test_time_step_requires_time_index():
+    with pytest.raises(ValueError, match="time_step.*requires time_index"):
+        rf.Branch(length=4, time_step=2.0, value=rf.Number)
+
+
+@pytest.mark.parametrize("step", [0.0, -1.0, timedelta(0), timedelta(seconds=-1)])
+def test_time_step_must_be_positive(step):
+    with pytest.raises(ValueError, match="time_step must be positive"):
+        rf.Branch(length=4, time_index="ts", time_step=step, ts=rf.Number)
+
+
+def test_steps_rejects_unreduced_child_branch():
+    with pytest.raises(ValueError, match="child branch 'parts'.*needs a reduction"):
+        rf.Branch(length=4, grain=Steps(), parts=rf.Branch(length=2, reduction=None, x=rf.Number))
+
+
+def test_conv_requires_steps():
+    with pytest.raises(ValueError, match="mixer=Conv.*requires grain=Steps"):
+        rf.Branch(length=4, mixer=Conv(), value=rf.Number)
+
+
+def test_plain_branch_dumps_without_time_settings():
+    branch = rf.Branch(length=4, ts=rf.Number, value=rf.Number)
+    for mode in ("python", "json"):
+        assert {"time_index", "time_step"}.isdisjoint(branch.model_dump(mode=mode))
+
+
+def test_child_named_time_is_still_a_child():
+    branch = rf.Branch(time=rf.Number, value=rf.Number)
+    assert [child.name for child in branch.fields] == ["time", "value"]
+
+
+@pytest.mark.parametrize("step", [3600.0, timedelta(hours=1)])
+def test_time_settings_round_trip_through_yaml(step):
+    branch = rf.Branch(length=4, time_index="ts", time_step=step, ts=rf.Number, value=rf.Number)
+    restored = rf.Branch.model_validate(yaml.safe_load(yaml.safe_dump(branch.model_dump(mode="json"))))
+    assert restored.time_index == "ts"
+    assert restored.time_step == step
+    assert type(restored.time_step) is type(step)

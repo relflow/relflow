@@ -6,6 +6,7 @@ import torch
 import relflow as rf
 from relflow.architecture.encoder import BranchEncoder, RotaryTransformerEncoderLayer
 from relflow.architecture.mixers import TransformerMixer, mixers
+from relflow.structs.grain import Steps
 from relflow.structs.mixer import Conv, MixerConfig
 
 
@@ -37,7 +38,7 @@ def test_mixer_none_disables_sequence_mixing_but_keeps_coordinate_attention():
 
 def test_conv_mixer_is_rejected_at_build_until_implemented():
     with pytest.raises(ValueError, match=r"branch '/events' sets mixer=Conv"):
-        rf.Model(d_model=8, n_layers=1, n_heads=2, events=rf.Branch(mixer=Conv(), a=rf.Number))
+        rf.Model(d_model=8, n_layers=1, n_heads=2, events=rf.Branch(grain=Steps(), mixer=Conv(), a=rf.Number))
 
 
 def test_transformer_mixer_matches_layer_by_layer_application():
