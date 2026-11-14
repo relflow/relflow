@@ -5,8 +5,9 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
+import polars as pl
+import polars.testing
 import pyarrow as pa
-import pyarrow.parquet as pq
 import pydantic
 import pytest
 import torch
@@ -697,12 +698,12 @@ def test_predict_inside_branch_with_null_items_round_trips_parquet(tmp_path):
     )
     rows = pa.table({"items": [[{"future": [[1.0, 2.0]], "x": 1.0}, None], None]})
     table = model.predict(rows)
-    pq.write_table(table, tmp_path / "p.parquet")
-    assert pq.read_table(tmp_path / "p.parquet").equals(table)
+    table.write_parquet(tmp_path / "p.parquet")
+    polars.testing.assert_frame_equal(pl.read_parquet(tmp_path / "p.parquet"), table)
 
 
-def values_of(table: pa.Table, *path: str) -> list:
-    return table.to_pylist()[0]["predictions"][path[0]][path[1]] if len(path) == 2 else None
+def values_of(table: pl.DataFrame, *path: str) -> list:
+    return table.to_dicts()[0]["predictions"][path[0]][path[1]] if len(path) == 2 else None
 
 
 def test_classification_with_series_input():
@@ -716,14 +717,14 @@ def test_classification_with_series_input():
 def test_embed_output_width():
     model = rf.Model.xs(d_model=8, signal=rf.Series(channels=1, embed=True), label=rf.Boolean(mask=True))
     table = model.predict(pa.table({"signal": [[1.0, 2.0], [3.0]], "label": [True, False]}))
-    embedding = table.to_pylist()[0]["representations"][0]["embedding"]
+    embedding = table.to_dicts()[0]["representations"][0]["embedding"]
     assert len(embedding) == 8
 
 
 def test_predict_without_target_column_outputs_horizon_steps():
     model = rf.Model.xs(d_model=8, history=rf.Series(channels=1), future=rf.Series(channels=2, horizon=3, mask=True))
     table = model.predict(pa.table({"history": [[1.0, 2.0], [3.0]]}))
-    for row in table.to_pylist():
+    for row in table.to_dicts():
         content = row["predictions"]["future"]["content"]
         assert len(content) == 3 and all(len(step) == 2 for step in content)
 
@@ -859,12 +860,12 @@ def test_predict_writes_named_steps_and_round_trips_parquet(tmp_path):
     seed_everything(SEED, workers=True)
     model = named_forecast_model(channels=("temp", "hum"), horizon=3)
     table = model.predict(pa.table({"history": [[1.0, 2.0], [3.0]]}))
-    for row in table.to_pylist():
+    for row in table.to_dicts():
         content = row["predictions"]["future"]["content"]
         assert len(content) == 3 and all(list(step) == ["temp", "hum"] for step in content)
     path = tmp_path / "out.parquet"
-    pq.write_table(table, path)
-    assert pq.read_table(path).equals(table)
+    table.write_parquet(path)
+    polars.testing.assert_frame_equal(pl.read_parquet(path), table)
 
 
 def test_fixed_size_outer_list_of_structs_matches_list_of_lists():
@@ -890,7 +891,7 @@ def test_predict_reads_struct_shapes(column):
         future=rf.Series(channels=2, horizon=3, mask=True),
     )
     table = model.predict(pa.table({"history": column}))
-    content = table.to_pylist()[0]["predictions"]["future"]["content"]
+    content = table.to_dicts()[0]["predictions"]["future"]["content"]
     assert len(content) == 3 and all(len(step) == 2 for step in content)
 
 
@@ -909,5 +910,6 @@ def test_predict_int_channels_writes_list_of_lists(column):
         future=rf.Series(channels=2, horizon=3, mask=True),
     )
     table = model.predict(pa.table({"history": column}))
-    content = table["predictions"].type.field("future").type.field("content")
-    assert content.type == pa.list_(pa.field("element", pa.list_(pa.field("element", pa.float64()))))
+    future = {field.name: field.dtype for field in table.schema["predictions"].fields}["future"]
+    content = {field.name: field.dtype for field in future.fields}["content"]
+    assert content == pl.List(pl.List(pl.Float64))
