@@ -221,6 +221,44 @@ such as `model.optimizer = rf.adamw(learning_rate=1e-3)`. Use Trainer directly
 when a Lightning tool needs it; the model methods accept its execution options
 for ordinary loops.
 
+## Training with your own Lightning Trainer {#own-trainer}
+
+`rf.Model` is a `LightningModule` and `rf.ArrowDataModule` is a
+`LightningDataModule`, so a plain `lit.Trainer` runs them. Set the optimizer
+yourself, because only `model.fit` creates one:
+
+```python
+import lightning.pytorch as lit
+import relflow as rf
+
+model.optimizer = rf.adamw(learning_rate=1e-3)
+datamodule = rf.ArrowDataModule(
+    train="payments/history/train.parquet",
+    validate="payments/history/validation.parquet",
+    predict="payments/history/predict.parquet",
+)
+trainer = lit.Trainer(max_epochs=30, accelerator="auto")
+trainer.fit(model, datamodule=datamodule)
+trainer.validate(model, datamodule=datamodule)
+predictions = trainer.predict(model, datamodule=datamodule)
+```
+
+Training logs the validation loss as `loss/validate`; monitor it from your own
+callbacks. Prediction is deterministic: two `trainer.predict` runs on the same
+data return equal tables, and each batch is an Arrow table.
+
+`model.fit` adds these defaults, none of which a plain Trainer has:
+
+- AdamW configured from the `fit` options, a fresh optimizer for every call.
+- Early stopping and a rollback checkpoint that monitor `loss/validate`, so the
+  best model is restored at the end.
+- `bf16-mixed` precision where the device supports it.
+- `logger=False`, `enable_model_summary=False`, and `log_every_n_steps=50`.
+- `max_epochs=50` when no epoch, step, or time limit is given.
+- Batch size, scheduler, and data module binding from its arguments.
+
+Add the callbacks you need to your own Trainer.
+
 ## Local distributed training
 
 For CPU distributed training on one Mac, if Gloo aborts with

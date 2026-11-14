@@ -34,7 +34,10 @@ next_week:
 The record shows three days of history and two forecast days; real records carry
 the full `length` and `horizon`. Every step in the history is known at the
 decision time. Use [Number](number.qmd) for a single value per record and
-[Branch](branch.qmd) when each step has fields of different types.
+[Branch](branch.qmd) when each step has fields of different types. A `Series`
+can also sit inside each row of a
+[chronological branch](../concepts/chronological-branches.qmd), where it adds
+one token to that row.
 
 ## Input and options
 

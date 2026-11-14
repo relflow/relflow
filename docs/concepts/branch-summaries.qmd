@@ -49,6 +49,11 @@ These choices concern reduction. A mean reduction can still follow a learned
 branch encoder. Configure the branch's attention separately; see the
 [Branch reference](../datatypes/branch.qmd#reduce-branch-memory).
 
+A branch with `grain=rf.Steps()` and `reduction=None` keeps one vector per row.
+With `embed=True` it writes one representation per row, with `parents` ending in
+the row ordinal and `output_index` `0`; `rf.Coordinates()` keeps one per token.
+See [Chronological branches](chronological-branches.qmd#representations).
+
 Learned attention starts with trainable query vectors. A query supplies learned
 weights for combining the branch's present token vectors into a summary.
 Multiple outputs provide multiple learned views of the same history; their

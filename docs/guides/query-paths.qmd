@@ -159,6 +159,9 @@ def wrap(frame: pl.DataFrame) -> pl.DataFrame:
     return frame.with_columns(pl.col("ett").list.eval(step))
 ```
 
+See [Chronological branches](../concepts/chronological-branches.qmd#declare-channels)
+for the branch options that suit ordered rows.
+
 ## Structural absence
 
 | Source condition | Result |

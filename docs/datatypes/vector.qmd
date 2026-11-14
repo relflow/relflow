@@ -55,7 +55,9 @@ makes only that channel missing: the encoder sees which channels are missing,
 and the loss skips them. A vector with no finite channel is `other`, and a
 vector whose sources are all null is `null`. A single source keeps the rule
 above: a null element is an error, and a NaN element makes the vector `other`.
-See [queries](../guides/query-paths.qmd#several-sources).
+See [queries](../guides/query-paths.qmd#several-sources). Inside a
+[chronological branch](../concepts/chronological-branches.qmd#declare-channels),
+one `Vector` per row reads all channels of the row.
 
 | Option | Default | Meaning |
 | --- | --- | --- |

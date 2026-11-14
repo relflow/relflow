@@ -259,6 +259,21 @@ reconstruction selections accumulate independently. A child policy cannot
 restore an input hidden by an ancestor. Duplicate policies are normalized
 away.
 
+## Hide whole rows
+
+A branch mask can pick rows with `select` instead of a `query` or a `rate`; a
+`Mask` cannot combine them:
+
+```python
+rf.Mask(select=rf.Forecast(horizon=24, targets=("OT",)), reconstruct=True)
+rf.Mask(select=rf.Spans(rate=0.15, length=8), reconstruct=True)
+```
+
+`Forecast` hides every child except the `time_index` child and its `known`
+children in the last rows of each record, and predicts its `targets`. `Spans`
+hides runs of whole rows, every child included, in training only. See
+[Chronological branches](chronological-branches.qmd#mask-whole-rows).
+
 ## Targets during training and prediction
 
 Fitting needs observed target values. Explicit nulls can contribute value-state

@@ -190,6 +190,12 @@ These are the direct `rf.Branch` defaults. A
 | `n_heads` | `4` | Positive, even encoder head count and fallback for Attention reduction. Active attention requires heads to divide `d_model` with at least two dimensions per head. |
 | `ffnx` | `8` | Positive integer feed-forward multiplier for this branch's encoders and learned reduction. See [model-tree configuration](../concepts/model-tree.qmd#configure-the-context). |
 | `reduction` | `rf.Attention()` | What encoded memory reaches the parent. |
+| `grain` | `rf.Coordinates()` | What one sequence token stands for: every leaf coordinate, or `rf.Steps()` for one token per row. |
+| `mixer` | `rf.Transformer()` | Sequence mixer: `rf.Transformer()`, `rf.Conv()` (requires `grain=rf.Steps()`), or `None`. |
+| `direction` | `rf.Direction.bidirectional` | Which steps a token sees; `rf.Direction.causal` hides later steps. Child branches only. |
+| `time_index` | `None` | Name of a leaf child that positions each row in time. |
+| `time_step` | `None` | Unit of the `time_index` positions; requires `time_index`. |
+| `contrastive` | `None` | Training objective on two crops of each record: `rf.Contrastive(...)`. |
 | `dropout` | `None` | Optional encoder dropout in `[0, 1)` and reduction fallback. |
 | `mask` | `False` | Visibility and reconstruction policy applied atomically to active descendants. |
 | `embed` | `False` | Export this branch's contextual embedding. |
@@ -197,6 +203,17 @@ These are the direct `rf.Branch` defaults. A
 
 Branch settings are local. Model settings configure the generated singleton
 root; they do not replace every child branch's defaults.
+
+`rf.Branch.chronological(...)` returns a plain `Branch` with `overflow="tail"`,
+`grain=rf.Steps()`, `mixer=rf.Conv()`, and `direction=rf.Direction.causal` for
+ordered rows. See [Chronological branches](../concepts/chronological-branches.qmd)
+for the options above. `grain`, `mixer`, `direction`, `time_index`,
+`time_step`, and `contrastive` are options, so a child with one of these names
+goes in `fields`:
+
+```python
+rf.Branch(direction=rf.Direction.causal, fields={"direction": rf.Category})
+```
 
 ## Attention and reduction {#reduce-branch-memory}
 
