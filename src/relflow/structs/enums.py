@@ -91,6 +91,12 @@ class Overflow(enum.StrEnum):
     error = "error"
 
 
+class Direction(enum.StrEnum):
+    """Which steps of a branch sequence one token may see."""
+
+    bidirectional = "bidirectional"
+
+
 AttentionInput: TypeAlias = AttentionMode | Literal["mha", "gqa", "mqa"] | None
 OverflowInput: TypeAlias = Overflow | Literal["head", "tail", "random", "error"]
 StrataInput: TypeAlias = Strata | Literal["train", "validate", "test", "predict"]

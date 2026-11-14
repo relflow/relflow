@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import builtins
 from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Annotated, Any, Literal, Self, TypeAlias, cast
 
 import pydantic
 
-from relflow.structs.enums import AttentionInput, AttentionMode, Overflow, OverflowInput
+from relflow.structs.enums import AttentionInput, AttentionMode, Direction, Overflow, OverflowInput
+from relflow.structs.grain import Coordinates, GrainConfig
+from relflow.structs.mixer import MixerConfig, Transformer
 from relflow.structs.reduction import Attention, ReductionConfig
 from relflow.structs.tree import Leaf, Mask, MaskInput, Node, Rate
 from relflow.tensorfields import extensions as _extensions  # noqa: F401
@@ -17,6 +20,12 @@ from relflow.tensorfields.base import TENSORFIELDS
 RequestTypes: TypeAlias = Leaf
 
 OMITTED = object()
+
+# Options left at these values are omitted from dumps, so a plain branch keeps
+# the schema, YAML and checkpoint text it had before the options existed.
+IMPLICIT: Mapping[str, object] = MappingProxyType(
+    {"grain": Coordinates(), "mixer": Transformer(), "direction": Direction.bidirectional}
+)
 
 
 def bounds(branch: Branch) -> None:
@@ -60,7 +69,10 @@ class Branch(Node):
 
     ``attention=None`` disables coordinate and sequence attention independently
     of the reduction. ``ffnx`` multiplies this node's feed-forward hidden width
-    and defaults to 8 independently of its parent.
+    and defaults to 8 independently of its parent. ``grain`` chooses what one
+    sequence token stands for, ``mixer`` chooses the sequence mixer (``None``
+    disables sequence mixing while keeping coordinate attention), and
+    ``direction`` sets which steps a token may see.
     ``mask`` accepts the same policies as a leaf and applies to its descendants.
     """
 
@@ -73,6 +85,9 @@ class Branch(Node):
     overflow: Overflow | None = None
     n_layers: Annotated[int, pydantic.Field(gt=0, default=1)] = 1
     reduction: ReductionConfig | None = pydantic.Field(default_factory=Attention)
+    grain: GrainConfig = pydantic.Field(default_factory=Coordinates)
+    mixer: MixerConfig | None = pydantic.Field(default_factory=Transformer)
+    direction: Direction = Direction.bidirectional
     # The before-validator normalizes this public Boolean default to a tuple.
     mask: tuple[Mask, ...] = cast(tuple[Mask, ...], pydantic.Field(default=False))
     fields: list[Self | pydantic.SerializeAsAny[pydantic.InstanceOf[Leaf]]] = pydantic.Field(default_factory=list)
@@ -91,6 +106,9 @@ class Branch(Node):
         n_heads: int = cast(int, OMITTED),
         ffnx: int = cast(int, OMITTED),
         reduction: ReductionConfig | None = cast(ReductionConfig | None, OMITTED),
+        grain: GrainConfig = cast(GrainConfig, OMITTED),
+        mixer: MixerConfig | None = cast(MixerConfig | None, OMITTED),
+        direction: Direction = cast(Direction, OMITTED),
         dropout: Rate | None = cast(Rate | None, OMITTED),
         mask: MaskInput = False,
         type: Literal["branch"] = "branch",
@@ -110,6 +128,9 @@ class Branch(Node):
             n_heads=n_heads,
             ffnx=ffnx,
             reduction=reduction,
+            grain=grain,
+            mixer=mixer,
+            direction=direction,
             dropout=dropout,
             mask=mask,
             type=type,
@@ -117,6 +138,13 @@ class Branch(Node):
         # Pydantic owns ordinary defaults; omitted options remain available for
         # a model preset to fill without replacing explicit defaults or None.
         super().__init__(**{name: value for name, value in data.items() if value is not OMITTED})
+
+    @pydantic.model_serializer(mode="wrap")
+    def serialize_options(self, handler: pydantic.SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Dump the branch without options that still hold their implicit value."""
+        payload = handler(self)
+        implicit = {name for name, value in IMPLICIT.items() if getattr(self, name) == value}
+        return {key: value for key, value in payload.items() if key not in implicit}
 
     @pydantic.field_validator("mask", mode="before")
     @classmethod

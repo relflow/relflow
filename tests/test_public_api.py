@@ -16,6 +16,9 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.AttentionMode.mha == "mha"
     assert relflow.Mean().type == "mean"
     assert relflow.ReductionConfig is not None
+    assert relflow.Coordinates().type == "coordinates"
+    assert relflow.Transformer().type == "transformer"
+    assert relflow.Direction.bidirectional == "bidirectional"
     assert relflow.ArrowDataModule.__name__ == "ArrowDataModule"
     assert relflow.CustomDataModule.__name__ == "CustomDataModule"
     assert relflow.DuckDBDataModule.__name__ == "DuckDBDataModule"
