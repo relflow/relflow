@@ -1,4 +1,5 @@
 from datetime import timedelta
+from textwrap import dedent
 from typing import Literal
 
 import pydantic
@@ -389,3 +390,79 @@ def test_time_settings_round_trip_through_yaml(step):
     assert restored.time_index == "ts"
     assert restored.time_step == step
     assert type(restored.time_step) is type(step)
+
+
+def test_chronological_fills_defaults():
+    branch = rf.Branch.chronological(length=336, value=rf.Number)
+    assert type(branch) is rf.Branch
+    assert branch.overflow == Overflow.tail
+    assert branch.grain == rf.Steps() and branch.mixer == rf.Conv() and branch.direction == rf.Direction.causal
+    assert branch.time_index is None and branch.time_step is None
+
+
+def test_chronological_unbounded_keeps_overflow_none():
+    assert rf.Branch.chronological(value=rf.Number).overflow is None
+
+
+def test_explicit_arguments_override_defaults():
+    branch = rf.Branch.chronological(
+        length=8, overflow="head", mixer=None, direction=rf.Direction.bidirectional, value=rf.Number
+    )
+    assert branch.overflow == Overflow.head and branch.mixer is None
+    assert branch.direction == rf.Direction.bidirectional
+
+
+def test_chronological_with_transformer_and_coordinates_is_allowed():
+    rf.Branch.chronological(length=8, grain=rf.Coordinates(), mixer=rf.Transformer(), value=rf.Number)
+
+
+def test_chronological_rejects_missing_time_index_child():
+    with pytest.raises(ValueError, match="no child named 'ts'"):
+        rf.Branch.chronological(length=8, time_index="ts", value=rf.Number)
+
+
+def test_chronological_rejects_conv_with_coordinates():
+    with pytest.raises(ValueError, match="requires grain=Steps"):
+        rf.Branch.chronological(length=8, grain=rf.Coordinates(), value=rf.Number)
+
+
+def test_chronological_loads_from_model_yaml_as_a_plain_branch(tmp_path):
+    model = rf.Model(
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+        ett=rf.Branch.chronological(
+            length=8, time_index="ts", time_step=3600.0, ts=rf.Number, value=rf.Number(mask=True)
+        ),
+    )
+    path = tmp_path / "model.yaml"
+    path.write_text(
+        dedent(
+            """
+            d_model: 16
+            n_layers: 1
+            n_heads: 4
+            fields:
+              ett:
+                type: branch
+                length: 8
+                overflow: tail
+                grain: {type: steps}
+                mixer: {type: conv}
+                direction: causal
+                time_index: ts
+                time_step: 3600.0
+                fields:
+                  ts: {type: number}
+                  value: {type: number, mask: true}
+            """
+        )
+    )
+    loaded = rf.Model.from_yaml(path)
+    assert loaded.schema.branches["/ett"].model_dump() == model.schema.branches["/ett"].model_dump()
+    assert type(loaded.schema.branches["/ett"]) is rf.Branch
+    assert "chronological" not in yaml.safe_dump(model.schema.model_dump(mode="json"))
+
+
+def test_chronological_docstring_warns_about_classification():
+    assert "direction=rf.Direction.bidirectional" in rf.Branch.chronological.__doc__
