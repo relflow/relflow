@@ -10,6 +10,7 @@ from tensordict import TensorDict
 from relflow.architecture.attention import RotaryMultiheadAttention
 from relflow.architecture.blocks import feed_forward, norm
 from relflow.architecture.direction import rules
+from relflow.architecture.grain import grains
 from relflow.architecture.mixers import TransformerMixer, mixers
 from relflow.architecture.packed import SDPA_BATCH_MAX, Packed, block, customized, pack, unpack
 from relflow.architecture.reducers import Reducer, reducers
@@ -231,6 +232,8 @@ class BranchEncoder(torch.nn.Module):
                 ffnx=branch.ffnx,
             )
 
+        self.grain = grains[type(branch.grain)](branch.grain, branch=branch, schema=schema)
+
         self.reduction = branch.reduction
         # An unbounded visible width leaves the lanes to the capacity observed while training.
         capacity = None if self.visible_width is None else max(1, self.visible_width)
@@ -387,7 +390,7 @@ class BranchEncoder(torch.nn.Module):
 
         parcels = self.admit(parcels)
         parcels, conditioned = self.inform(parcels, context=context)
-        parcels = self.contextualize(parcels)
+        parcels = self.grain(self.contextualize(parcels))
         positions, spans, slots = sequence(parcels)
         positioned = any(parcel.positions is not None for parcel in parcels)
         payloads = [parcel.payload for parcel in parcels]
