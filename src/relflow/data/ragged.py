@@ -6,9 +6,11 @@ import hashlib
 import json
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import cache
-from typing import TYPE_CHECKING, Any, cast
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 import numpy as np
 import pyarrow as pa
@@ -622,16 +624,6 @@ def pristine(layout: Layout, request: Leaf, *, ancestors: tuple[Layout, ...]) ->
     )
 
 
-def active(mask: Mask, strata: Strata) -> bool:
-    """Return whether one normalized policy applies in a stratum."""
-
-    if strata == Strata.train:
-        return True
-    if bool(mask.dropout):
-        return False
-    return strata != Strata.predict or mask.rate is None
-
-
 def eligible(layout: Layout, mask: Mask, *, address: Address) -> np.ndarray:
     """Resolve one policy query against its owner's retained records."""
 
@@ -692,41 +684,78 @@ def scores(
     return random.integers(0, np.iinfo(np.uint64).max, len(layout.records), dtype=np.uint64)
 
 
-def select(
-    layout: Layout,
-    mask: Mask,
-    *,
-    address: Address,
-    seed: int,
-    epoch: int,
-    ordinal: int,
-    strata: Strata,
-) -> np.ndarray:
-    """Resolve one literal, query-backed, or uniformly sampled policy."""
+@runtime_checkable
+class Selector(Protocol):
+    """Choose the owner coordinates one mask policy selects."""
 
-    chosen = eligible(layout, mask, address=address)
-    if mask.rate is not None:
-        rate = float(mask.rate)
-        if rate <= 0.0:
-            chosen = np.zeros_like(chosen)
-        elif rate < 1.0:
-            threshold = np.uint64(int(rate * np.iinfo(np.uint64).max))
-            chosen &= (
-                scores(
-                    layout,
-                    address=address,
-                    mask=mask,
-                    seed=seed,
-                    epoch=epoch,
-                    ordinal=ordinal,
-                    strata=strata,
+    def active(self, mask: Mask, *, strata: Strata) -> bool:
+        """Return whether the policy applies in a stratum."""
+        ...
+
+    def __call__(
+        self,
+        layout: Layout,
+        mask: Mask,
+        *,
+        node: Any,
+        seed: int,
+        epoch: int,
+        ordinal: int,
+        strata: Strata,
+    ) -> np.ndarray:
+        """Return a dense Boolean selection of size ``prod(layout.shape)``."""
+        ...
+
+
+@dataclass(frozen=True, kw_only=True)
+class CoordinateSelector:
+    """Select literal, query-backed, or uniformly sampled coordinates."""
+
+    def active(self, mask: Mask, *, strata: Strata) -> bool:
+        if strata == Strata.train:
+            return True
+        if bool(mask.dropout):
+            return False
+        return strata != Strata.predict or mask.rate is None
+
+    def __call__(
+        self,
+        layout: Layout,
+        mask: Mask,
+        *,
+        node: Any,
+        seed: int,
+        epoch: int,
+        ordinal: int,
+        strata: Strata,
+    ) -> np.ndarray:
+        address = node.address
+        chosen = eligible(layout, mask, address=address)
+        if mask.rate is not None:
+            rate = float(mask.rate)
+            if rate <= 0.0:
+                chosen = np.zeros_like(chosen)
+            elif rate < 1.0:
+                threshold = np.uint64(int(rate * np.iinfo(np.uint64).max))
+                chosen &= (
+                    scores(
+                        layout,
+                        address=address,
+                        mask=mask,
+                        seed=seed,
+                        epoch=epoch,
+                        ordinal=ordinal,
+                        strata=strata,
+                    )
+                    <= threshold
                 )
-                <= threshold
-            )
 
-    dense = np.zeros(math.prod(layout.shape), dtype=bool)
-    dense[layout.placement] = chosen
-    return dense
+        dense = np.zeros(math.prod(layout.shape), dtype=bool)
+        dense[layout.placement] = chosen
+        return dense
+
+
+selectors: Mapping[type, Selector] = MappingProxyType({type(None): CoordinateSelector()})
 
 
 def resolve(
@@ -743,10 +772,10 @@ def resolve(
     return tuple(
         Decision(
             mask=mask,
-            selected=select(
+            selected=selectors[type(mask.select)](
                 layout,
                 mask,
-                address=node.address,
+                node=node,
                 seed=seed,
                 epoch=epoch,
                 ordinal=ordinal,
@@ -755,7 +784,7 @@ def resolve(
             shape=layout.shape,
         )
         for mask in node.mask
-        if active(mask, strata)
+        if selectors[type(mask.select)].active(mask, strata=strata)
     )
 
 
@@ -945,4 +974,4 @@ def coalesce(
     return Coalesced(fields=fields, layouts=layouts, times=times)
 
 
-__all__ = ["Coalesced", "Projection", "RaggedField"]
+__all__ = ["Coalesced", "CoordinateSelector", "Projection", "RaggedField", "Selector", "selectors"]

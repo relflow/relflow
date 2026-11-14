@@ -564,3 +564,10 @@ def test_branch_rows_must_be_structs_not_fixed_size_lists():
     rows = pa.table({"ett": pa.array([[[1.0, 2.0]]], type=pa.list_(pa.list_(pa.float64(), 2)))})
     with pytest.raises(ValueError, match=r"'/ett/load'.*expected a struct, got fixed_size_list"):
         model.encode(rows, strata="predict")
+
+
+def test_selector_table_starts_with_the_coordinate_policy():
+    from relflow.data.ragged import CoordinateSelector, Selector, selectors
+
+    assert isinstance(selectors[type(None)], CoordinateSelector)
+    assert isinstance(selectors[type(None)], Selector)
