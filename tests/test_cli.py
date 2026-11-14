@@ -23,9 +23,11 @@ import torch
 import yaml
 
 import relflow as rf
-from relflow.cli import main, parser, settings, train
+import relflow.cli.workflows as workflows
+from relflow.cli import main
 from relflow.cli.config import Run, read
 from relflow.cli.jobs import Job
+from relflow.cli.workflows import train
 
 
 @pytest.fixture
@@ -167,10 +169,17 @@ def test_run_paths_resolve_against_configuration(inputs, monkeypatch, tmp_path):
     assert read(config).data["train"] == str(data)
 
 
-def test_explicit_flags_override_run_options_and_paths(inputs):
+def test_explicit_flags_override_run_options_and_paths(inputs, monkeypatch, capsys):
     model, data, config = inputs
-    arguments = vars(
-        parser().parse_args(
+    captured = {}
+
+    def execute(arguments, run, pathname, checkpoint):
+        captured.update(run=run, pathname=pathname, checkpoint=checkpoint)
+        return {"command": "train", "status": "success"}
+
+    monkeypatch.setattr(workflows, "execute", execute)
+    assert (
+        main(
             [
                 "train",
                 str(model),
@@ -182,15 +191,18 @@ def test_explicit_flags_override_run_options_and_paths(inputs):
                 str(data),
                 "--output",
                 "unused",
+                "--json",
             ]
         )
+        == 0
     )
-    run, pathname, checkpoint = settings(arguments)
+    run, pathname, checkpoint = captured["run"], captured["pathname"], captured["checkpoint"]
     assert run.fit.batch_size == 7
     assert run.fit.max_epochs == 1
     assert run.data["train"] == str(data)
     assert pathname == str(model)
     assert checkpoint is None
+    assert json.loads(capsys.readouterr().out)["status"] == "success"
 
 
 def test_check_reports_invalid_training_selection_before_execution(inputs, capsys, tmp_path):

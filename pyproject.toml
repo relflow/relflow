@@ -23,6 +23,7 @@ dependencies = [
     "torchmetrics>=1.9.0",
     "typing-extensions>=4.12",
     "rich>=14.0.0",
+    "typer>=0.25.1,<1",
 ]
 
 [project.scripts]

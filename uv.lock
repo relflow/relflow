@@ -1848,6 +1848,7 @@ dependencies = [
     { name = "tensordict" },
     { name = "torch" },
     { name = "torchmetrics" },
+    { name = "typer" },
     { name = "typing-extensions" },
 ]
 
@@ -1914,6 +1915,7 @@ requires-dist = [
     { name = "torchjd", extras = ["quadprog-projector"], marker = "extra == 'torchjd'", specifier = ">=0.18,<0.19" },
     { name = "torchmetrics", specifier = ">=1.9.0" },
     { name = "transformers", marker = "extra == 'text'", specifier = ">=4.55.0" },
+    { name = "typer", specifier = ">=0.25.1,<1" },
     { name = "types-pyyaml", marker = "extra == 'typing'", specifier = ">=6.0.12" },
     { name = "typing-extensions", specifier = ">=4.12" },
     { name = "uvicorn", marker = "extra == 'serving'", specifier = ">=0.38.0" },

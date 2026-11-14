@@ -19,6 +19,11 @@ relflow --help
 relflow train --help
 ```
 
+Typer generates command help, validates typed options, and provides shell
+completion. Preview completion for your current shell with
+`relflow --show-completion`; use `relflow --install-completion` when you want
+to install it. Typer detects the current shell for these commands.
+
 ## Describe the model
 
 Suppose each row describes one payment. The inputs are its amount and merchant;
@@ -229,7 +234,8 @@ the existing output boundary.
 Human-readable reports use Rich model trees, preflight tables, and job
 summaries. Interactive terminals show a status spinner on stderr while a job
 runs; redirected stderr has no live animation. Rich detects terminal color
-support and respects `NO_COLOR`. Commands and flags are parsed by `argparse`.
+support and respects `NO_COLOR`. Typer handles commands, flags, generated help,
+and shell completion.
 
 `--json` emits one versioned JSON object to stdout for inspection, preflight,
 and finished jobs. Progress, application prints, backend logs, and debug

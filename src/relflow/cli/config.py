@@ -17,6 +17,9 @@ __all__ = ["Run", "read", "processor", "location"]
 
 Positive = Annotated[int, Field(gt=0)]
 Nonnegative = Annotated[int, Field(ge=0)]
+Stage = Literal["train", "validate", "test", "predict"]
+Format = Literal["parquet", "ipc"]
+Level = Literal["critical", "error", "warning", "info", "debug", "trace"]
 
 
 class Options(BaseModel):
@@ -55,7 +58,7 @@ class Predict(Options):
     batch_size: Positive = 256
     accelerator: str = "auto"
     precision: str | int | None = None
-    format: Literal["parquet", "ipc"] = "parquet"
+    format: Format = "parquet"
     retain: list[str] = Field(default_factory=list)
     row_group_size: Positive = 65536
 
@@ -68,7 +71,7 @@ class Serve(Options):
     batch_timeout: Annotated[float, Field(ge=0)] | None = None
     max_queue_size: Positive | None = None
     retain: list[str] | None = None
-    log_level: Literal["critical", "error", "warning", "info", "debug", "trace"] | None = None
+    log_level: Level | None = None
 
 
 class Run(Options):
@@ -77,7 +80,7 @@ class Run(Options):
     imports: list[str] = Field(default_factory=list)
     preprocessor: str | None = None
     postprocessor: str | None = None
-    data: dict[Literal["train", "validate", "test", "predict"], str | list[str]] = Field(default_factory=dict)
+    data: dict[Stage, str | list[str]] = Field(default_factory=dict)
     loader: LoaderOptions = Field(default_factory=LoaderOptions)
     fit: Fit = Field(default_factory=Fit)
     predict: Predict = Field(default_factory=Predict)
