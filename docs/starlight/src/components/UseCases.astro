@@ -19,10 +19,9 @@ const choices = examples.map((item) => ({
 }));
 ---
 
-<section class="use-cases not-content" aria-labelledby="use-cases-title" data-use-cases>
+<section class="use-cases not-content" aria-label="Example use cases" data-use-cases>
   <ExampleSelection choices={choices} persistent />
   <header class="cases-intro">
-    <h2 id="use-cases-title">What can you build with relflow?</h2>
     <p>Choose a use case to explore its records, relationships, and prediction targets.</p>
   </header>
   <CasePicker choices={choices} />
@@ -60,12 +59,6 @@ const choices = examples.map((item) => ({
   .use-cases {
     margin-block: var(--rf-section-gap);
     min-width: 0;
-  }
-  .cases-intro h2 {
-    font-size: 1.55rem;
-    line-height: 1.25;
-    letter-spacing: -0.03em;
-    margin: 0 0 0.7rem;
   }
   .cases-intro p {
     color: var(--rf-muted);

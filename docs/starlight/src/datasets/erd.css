@@ -186,7 +186,7 @@
   border: 0;
   padding: 0.4rem 0.6rem;
   text-align: left;
-  cursor: help;
+  cursor: pointer;
   background: none;
   color: var(--sl-color-text);
   font-family: var(--sl-font-mono);

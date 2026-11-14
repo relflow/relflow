@@ -90,6 +90,12 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   and nested `children` on each node. `src/tree/tree.css` owns shared connectors,
   spacing, and native disclosure styling for schema and value trees. Keep rich
   prediction interpretation and charts in `ValueTree` and `ValueNode`.
+- Featureless Modeling uses `FeatureEngineeringFlow` for horizontal workflow
+  lanes. Keep the steps left-to-right on narrow screens with local scrolling.
+  `FeaturelessExamples` pairs the six canonical source ERDs with model diagrams;
+  source-only join keys belong in the ERD, while the model follows the declared
+  fields, branches, and targets. Preserve the Google Doc's page copy and use its
+  visual notes as implementation instructions.
 - Every Core Concepts page supports all six original homepage use cases. The
   shared scenario records live in `src/data/concepts/scenarios.ts` and reuse the
   canonical homepage schemas. Each concept owns six focused examples in

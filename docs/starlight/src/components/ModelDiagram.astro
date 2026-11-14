@@ -1,0 +1,49 @@
+---
+import { parseSchema, type ModelNode } from '../model-explainer/schema';
+import type { TreeNode } from '../tree/types';
+import Tree from './Tree.astro';
+
+interface Props {
+  schema: string;
+}
+
+const { schema } = Astro.props;
+const model = parseSchema(schema);
+
+function describe(node: ModelNode): TreeNode {
+  return {
+    label: node.name,
+    detail:
+      node.kind === 'branch'
+        ? `${node.className} · Collection`
+        : `${node.type} · ${node.target ? 'Prediction target' : 'Input'}`,
+    ...(node.children.length ? { children: node.children.map(describe) } : {}),
+  };
+}
+
+const nodes: TreeNode[] = [
+  {
+    label: model.modelClass,
+    detail: 'Model',
+    children: model.nodes.map(describe),
+  },
+];
+---
+
+<figure class="model-diagram not-content" aria-label={`${model.modelClass} model structure`}>
+  <Tree label={`${model.modelClass} fields and branches`} nodes={nodes} />
+</figure>
+
+<style>
+  .model-diagram {
+    min-width: 0;
+    margin: 0;
+    padding: var(--rf-panel-padding);
+    border: 1px solid var(--rf-border);
+    border-radius: 0.5rem;
+    background: var(--rf-card);
+  }
+  .model-diagram :global(.tree-detail) {
+    white-space: normal;
+  }
+</style>

@@ -3,22 +3,21 @@ title: Featureless modeling
 description: Learn predictive features from typed values and related records without a separate aggregation table.
 ---
 
-import DataExplorer from '../../components/DataExplorer.astro';
 import FeatureEngineeringFlow from '../../components/FeatureEngineeringFlow.astro';
-import { repeatPurchase } from '../../data/observations';
+import FeaturelessExamples from '../../components/FeaturelessExamples.astro';
 
-Traditional ML approaches often rely on expert feature engineering and preprocessing to contextualize individual observations within a larger population. This work can extend development by months or years and add complexity and ongoing costs in production.
+Traditional ML models, and all of our competitors in the space of relational learning, rely on expert feature engineering and even learned pre-processors to contextualize how one data sample exists in relation to a studied population. Such approaches, while effective, can exacerbate the lifecycle of a predictive modeling project by several months, even years–and add significant complexity and overhead costs to production implementations of said ML models.
 
 <FeatureEngineeringFlow />
 
-relflow was built to model data as it exists, through two design choices:
+In contrast to this, we built relflow to model data exactly as it exists. We approached this in two key ways:
 
-1. Its data contract starts with raw data, using online vocabularies and normalizers to contextualize observations within the training population.
-2. Its model architecture mirrors the structure and relationships in the data.
+1. relflow models begin their data contract with the raw data, and rely on online vocabularies and normalizers to contextualize how each observation of data exists in relation to a studied population.
+2. We build dynamic model architecture in order to naturally mirror the structure which exists among relational data.
 
 ## Fully integrated feature pipelines
 
-By internalizing feature processing pipelines as integrated model components, relflow supports the machine learning lifecycle in enterprise applications. This provides:
+By internalizing feature processing pipelines as integrated model components, relflow natively supports the full machine learning lifecycle in enterprise applications. This provides:
 
 - A cleaner boundary between data ingestion pipelines and the predictive model itself.
 - Consistent model-owned feature processing during training and inference, using the same learned vocabularies and normalizers.
@@ -26,12 +25,8 @@ By internalizing feature processing pipelines as integrated model components, re
 
 ## Dynamic model architecture
 
-Dynamic model architecture allows relflow to model typed, arbitrarily nested data. By integrating parent-child relationships directly into model design, relflow allows the logical relationships between data points to be learned by the model.
+Dynamic model architecture allows us to build models well suited for arbitrarily nested or typed data. By integrating parent-child relationships directly into model design, we allow for the logical relationships between data points to be best presented to the model.
 
 ## Example
 
-For a repeat-purchase prediction, each observation contains a customer’s details and their previous orders. Every order retains its amount, category, and age.
-
-The model learns from the values within each order and the relationships across the history.
-
-<DataExplorer id="featureless-purchase-data" dataset={repeatPurchase} />
+<FeaturelessExamples />

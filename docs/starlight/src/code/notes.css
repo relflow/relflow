@@ -4,7 +4,7 @@
   text-decoration-color: var(--rf-muted);
   text-decoration-thickness: 1px;
   text-underline-offset: 0.22em;
-  cursor: help;
+  cursor: pointer;
   border-radius: 0.1rem;
 }
 
