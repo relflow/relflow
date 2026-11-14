@@ -8,8 +8,10 @@ a file-backed prediction job, or start the HTTP runtime. The model artifact and
 source preparation are the same ones used by the Python API. Train the model
 through Python, then save it for prediction or serving.
 
-These examples use the fitted `customer.rf` artifact from the
-[purchase quickstart](/quickstart/) and application-prepared request files.
+These examples assume a trained model saved as `customer.rf` and
+application-prepared request files matching its schema. Examples that retain
+`customer_id` require that column in the source. Substitute your own artifact,
+paths, and application key as needed.
 The package also exposes the commands through `python -m relflow`.
 
 ```bash

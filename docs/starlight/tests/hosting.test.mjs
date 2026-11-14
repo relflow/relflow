@@ -19,13 +19,13 @@ test('version routes preserve queries, fragments, external URLs, and already sco
 
 test('hosted HTML rewrites actual attributes, including no-JS and template content, without touching code', () => {
   const source = `<!doctype html><html><head><script>const example = '<a href="/unchanged/">';</script></head><body>
-<a href='/quickstart/?a=1&amp;b=2#train'>Guide</a><img src="/_astro/logo.svg">
+<a href='/installation/?a=1&amp;b=2#install'>Guide</a><img src="/_astro/logo.svg">
 <noscript><a href="/data-types/number/">Number</a></noscript>
 <template><a href="/evidence/">Proofs</a></template>
 <pre><code>&lt;a href="/literal/"&gt;</code></pre>
 <a href="/en/latest/concepts/models/">Already scoped</a></body></html>`;
   const result = scopeHTML(source, '/en/latest/');
-  assert.match(result, /href="\/en\/latest\/quickstart\/\?a=1&amp;b=2#train"/);
+  assert.match(result, /href="\/en\/latest\/installation\/\?a=1&amp;b=2#install"/);
   assert.match(result, /src="\/en\/latest\/_astro\/logo.svg"/);
   assert.match(result, /<noscript><a href="\/en\/latest\/data-types\/number\/">/);
   assert.match(result, /<template><a href="\/en\/latest\/evidence\/">/);

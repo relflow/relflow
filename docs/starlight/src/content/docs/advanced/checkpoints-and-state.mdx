@@ -37,7 +37,8 @@ from either the shell or Python.
 
 ## Save and load the current model
 
-After fitting the quickstart's model:
+Save an already fitted `model`. This example uses a customer model with a
+future-purchase target and an application-prepared request file:
 
 ```python
 from pathlib import Path
@@ -104,9 +105,10 @@ full interrupted-run resume.
 
 ## Save a full optimization checkpoint
 
-Configure a full checkpoint callback when starting the run. This example uses
-the [quickstart's Customer class](/examples/repeat-purchase/repeat_purchase.py)
-and application-prepared data files. Keep `repeat_purchase.py` beside the script.
+Configure a full checkpoint callback when starting the run. This example imports
+`Customer` from the [standalone Python example](/examples/repeat-purchase/repeat_purchase.py).
+Keep `repeat_purchase.py` beside the script. Prepare the Parquet files at the
+paths shown below with matching inputs and historical `returns_in_30d` labels.
 
 ```python
 from lightning.pytorch.callbacks import ModelCheckpoint

@@ -135,7 +135,7 @@ model.fit(data, batch_size=128, max_epochs=20)`,
   links: [
     { label: 'Build a custom data module', href: '/advanced/custom-data-modules/' },
     { label: 'Define an observation and its cutoff', href: '/data/' },
-    { label: 'Follow a complete training workflow', href: '/quickstart/' },
+    { label: 'Follow training and learned state', href: '/concepts/training/' },
     { label: 'Find data modules, sources, and preprocessors', href: '/api-map/' },
     { label: 'Inspect experimental data and controls', href: '/evidence/' },
   ],

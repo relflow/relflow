@@ -98,7 +98,6 @@ styles. Descriptions also provide native title hints without JavaScript.
 | `/featureless/` | How does relflow learn from records without a separate feature engineering pipeline? |
 | `/modular/` | How do custom data types, data sources, and specialized model components fit together? |
 | `/installation/` | How do I install relflow and the optional capabilities I need? |
-| `/quickstart/` | How do I train and use a first model? |
 | `/data/` | What is one example in my application? |
 | `/datasets/` | How do the example datasets, entities, and columns fit together? |
 | `/predictions/` | Which answers should my model learn? |
@@ -157,8 +156,7 @@ The homepage's six use cases live in `src/data/use-cases.json` and render throug
 consistent. All six choices remain visible; the selected schema uses its natural
 height, without reserving space for longer examples.
 Examples show the API's range of data structures and target types. Benchmark
-records provide the measured predictive comparisons. The purchase quickstart
-remains the complete training path.
+records provide the measured predictive comparisons.
 
 ### Core Concepts
 
@@ -262,7 +260,7 @@ prediction target. Column focus and hover share field highlighting with code.
 
 Core Concepts reuses the nested observation contracts in
 `src/data/observations.ts`, with original field meanings and no source-only join
-keys. The quickstart and introductory data page use the same component.
+keys. The introductory data page uses the same component.
 Descriptions are authored deliberately, independent of example values, so an
 empty list, null value, or short fixture cannot silently redefine the dataset.
 Keep measured Evidence in its existing result views.

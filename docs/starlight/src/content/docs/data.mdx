@@ -84,8 +84,8 @@ values from the input and defines a supervised objective. Prediction requests
 omit them entirely.
 
 Identifiers used only for matching results to your application can be retained
-without making them model inputs. In the quickstart, `customer_id` is outside
-the model schema and is selected with `retain=("customer_id",)`.
+without making them model inputs. For example, keep `customer_id` outside
+the model schema and select it with `retain=("customer_id",)` when predicting.
 
 ## Evaluate the decision, including its costs
 
@@ -93,13 +93,10 @@ Choose a split that represents deployment. A time-based split is useful when
 the task predicts later events. Take care with overlapping outcome windows
 and repeated entities across splits.
 
-The quickstart uses separately generated fictional customers for validation.
-A production time split needs actual cutoffs and completed outcome windows.
-
 Compare predictive quality against a sensible baseline and the cost of the
 decisions made from the scores. A good ranking metric does not by itself
 choose the threshold or establish calibrated probabilities.
 
-The [quickstart](/quickstart/) gives you a runnable workflow. The
+The [model schemas](/concepts/models/) show how to describe these observations. The
 [benchmarks](/benchmarks/) and [controlled experiments](/evidence/) show two
 different kinds of supporting evidence.

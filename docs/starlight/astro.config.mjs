@@ -47,7 +47,6 @@ export default defineConfig({
             { label: 'Featureless modeling', slug: 'featureless' },
             { label: 'Modular modeling', slug: 'modular' },
             { label: 'Installation', slug: 'installation' },
-            { label: 'Train your first model', slug: 'quickstart' },
           ],
         },
         {

@@ -14,11 +14,11 @@ It covers the built-in Arrow-backed modules with eager, unsharded DDP.
 
 ## Start with an explicit launch configuration
 
-Use the `Customer` schema from the
-[repeat-purchase quickstart](/quickstart/), and prepare the same nested
-observations as sharded Parquet files. Save its
-[repeat_purchase.py](/examples/repeat-purchase/repeat_purchase.py) beside this
-script so the schema can be imported without running its training command.
+Use the `Customer` class from the
+[standalone Python example](/examples/repeat-purchase/repeat_purchase.py).
+Save `repeat_purchase.py` beside this script so the schema can be imported
+without running its training command. Prepare sharded Parquet files at the
+paths below with matching nested inputs and historical `returns_in_30d` labels.
 
 ```python
 import relflow as rf
@@ -55,7 +55,7 @@ if __name__ == "__main__":
 
 This example requires two available CUDA devices. File shards must be visible
 to every consuming rank, and the training and validation records must match the
-quickstart's schema. The explicit precision setting makes the execution choice
+declared `Customer` schema. The explicit precision setting makes the execution choice
 clear; it is not an accuracy or throughput recommendation.
 
 `fit` forwards these Trainer options to Lightning. When hardware options are

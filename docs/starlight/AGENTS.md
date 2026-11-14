@@ -97,8 +97,11 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   one highlighted `Code` block, with exact selected-step copying. Preserve
   complete schemas and readable no-JavaScript explanations. The explainer is
   static and executes no model or training code; it creates no learning evidence.
-- Use the purchase quickstart for the complete training workflow. Explain what
-  goes in, what the model learns, and what comes out before architecture details.
+- Follow the current shared [Google Doc](https://docs.google.com/document/d/1q04H63KEJnykRBGzkKQo86DohyOmMO-4OThlyrFn4ig/edit)
+  page by page. Refresh it before starting the next page and keep content review
+  incremental. Do not fill unwritten sections with new tutorials; the purchase
+  quickstart was deliberately removed. Explain inputs, learning, and outputs
+  before architecture details.
 - Advanced Usage owns custom data modules/types, online vocabulary, mutations,
   embeddings, distributed data, checkpoints and state, masking/pretraining, and
   inference/deployment. Keep basic predictions in Core Concepts. Mutations and

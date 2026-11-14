@@ -155,7 +155,6 @@ resumed.fit(
     { label: 'Resume checkpoints and version learned state', href: '/advanced/checkpoints-and-state/' },
     { label: 'Scale training and streaming', href: '/advanced/distributed-data/' },
     { label: 'Manage an online vocabulary', href: '/advanced/online-vocabulary/' },
-    { label: 'Run the complete purchase training example', href: '/quickstart/' },
     { label: 'Inspect training, persistence, and mutation APIs', href: '/api-map/' },
     { label: 'Read prediction types and nested output', href: '/predictions/' },
     { label: 'Review measured protocols and their limits', href: '/evidence/' },

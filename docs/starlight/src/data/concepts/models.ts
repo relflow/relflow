@@ -77,7 +77,7 @@ export const models: Concept = {
   links: [
     { label: 'Describe repeated records with branches', href: '/concepts/branches/' },
     { label: 'Choose field representations', href: '/concepts/data-types/' },
-    { label: 'Train a complete first model', href: '/quickstart/' },
+    { label: 'Follow training and learned state', href: '/concepts/training/' },
     { label: 'Find model constructors and methods', href: '/api-map/' },
   ],
 };

@@ -331,7 +331,7 @@ with the workload, record shape, hardware, and requested outputs stated.
 
 ## Learn more
 
-- [Your first model](https://www.relflow.ai/en/latest/quickstart/)
+- [Installation](https://www.relflow.ai/en/latest/installation/)
 - [Example datasets](https://www.relflow.ai/en/latest/datasets/)
 - [Pretraining and fine-tuning](https://www.relflow.ai/en/latest/advanced/masking-and-pretraining/)
 - [Reusable representations](https://www.relflow.ai/en/latest/advanced/embeddings/)

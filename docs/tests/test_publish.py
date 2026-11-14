@@ -283,7 +283,7 @@ def test_publish_does_not_copy_stale_output_after_build_failure(project, environ
         '<link rel="canonical" href="https://relflow.readthedocs.io/en/latest/">'
         '<a href="guide/#missing">Absent fragment</a>',
         '<link rel="canonical" href="https://relflow.readthedocs.io/en/latest/">'
-        '<a href="/quickstart/">Escaped version</a>',
+        '<a href="/installation/">Escaped version</a>',
         '<link rel="canonical" href="https://relflow.readthedocs.io/en/latest/">'
         '<a href="https://github.com/relflow/relflow/blob/main/docs/starlight/src/content/docs/index.mdx">Source</a>',
     ],

@@ -12,9 +12,10 @@ data module can read prepared sources in batches and write each batch without
 collecting the job’s outputs. The optional HTTP runtime exposes the same
 prediction contract through JSON and Arrow IPC.
 
-All examples assume a fitted model. The `customer.rf` artifact is the model
-saved by the [purchase quickstart](/quickstart/); input files below are prepared
-by the application and omit the future purchase label.
+All examples assume an existing fitted model saved as `customer.rf`. The
+customer-specific examples use the record shape below and predict
+`returns_in_30d`. Supply application-prepared request files without that future
+label; substitute your own artifact and matching inputs for another model.
 
 <DataExplorer id="inference-purchase-data" dataset={repeatPurchase} />
 
@@ -161,7 +162,7 @@ Install the optional [`relflow[serving]` extra](/installation/#optional-dependen
 application. `rf.Deployment`, `rf.Accelerator`, and `rf.JSONBackend` are lazy
 exports that require that extra; ordinary batch inference does not load it.
 
-This server accepts the quickstart’s nested request shape. The explicit request
+This server accepts the nested customer request shape shown above. The explicit request
 signature constrains the supplied history before it reaches the model. The
 model’s schema still owns the field types and target contract.
 

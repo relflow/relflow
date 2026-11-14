@@ -45,7 +45,7 @@ export function validate(value: unknown): asserts value is Budgets {
       /[?#]/.test(page.route)
     )
       throw new Error(
-        'Performance page budgets require local directory routes such as /quickstart/.',
+        'Performance page budgets require local directory routes such as /installation/.',
       );
     if (routes.has(page.route))
       throw new Error(`Performance page budget ${page.route} is duplicated.`);

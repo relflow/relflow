@@ -37,7 +37,7 @@ export const apiSections: ApiSection[] = [
         "name": "rf.Model",
         "description": "Construct an untrained neural model from a reusable class schema, named fields, or a resolved schema.",
         "source": source('architecture/root.py', 113),
-        "guide": "/quickstart/",
+        "guide": "/concepts/models/",
         "kind": "class"
       },
       {
@@ -326,7 +326,7 @@ export const apiSections: ApiSection[] = [
         "name": "model.fit",
         "description": "Train the current model; select fit defaults or optimizer settings and use ckpt_path for full training-state resume.",
         "source": source('architecture/root.py', 686),
-        "guide": "/quickstart/",
+        "guide": "/concepts/training/",
         "kind": "method"
       },
       {
