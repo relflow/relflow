@@ -6,12 +6,14 @@ import functools
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Annotated, Any, ClassVar, Literal, Self, TypeAlias, TypeVar, cast
 
 import pydantic
 from anytree import LevelOrderGroupIter, PreOrderIter
 
 from relflow.structs.enums import AttentionInput, AttentionMode, Component, Overflow, Strata
+from relflow.structs.grain import Coordinates, GrainConfig, Steps
 from relflow.structs.reduction import Attention, ReductionConfig
 from relflow.structs.selectors import (
     NodeAttribute,
@@ -50,6 +52,35 @@ class Roles:
     objectives: tuple[Address, ...]
     decodes: tuple[Address, ...]
     embed: tuple[Address, ...]
+
+
+def coordinate_width(widths: list[int | None]) -> int | None:
+    """Sum the child widths of one row, or ``None`` when any depends on the observed collections."""
+    return None if any(width is None for width in widths) else sum(cast(list[int], widths))
+
+
+def step_width(widths: list[int | None]) -> int | None:
+    """Return one token for a row that holds any token, else none."""
+    return int(any(width != 0 for width in widths))
+
+
+# Tokens a row of a branch contributes, by grain; the encoder reads the same table so widths never disagree.
+row_widths: Mapping[type, Callable[[list[int | None]], int | None]] = MappingProxyType(
+    {Coordinates: coordinate_width, Steps: step_width}
+)
+
+
+def row_width(grain: GrainConfig, widths: list[int | None]) -> int | None:
+    """Count the tokens one row of a branch contributes.
+
+    Args:
+        grain: The grain setting of the branch.
+        widths: Token width of each child of the branch.
+
+    Returns:
+        The tokens per row, or ``None`` when it depends on the observed collections.
+    """
+    return row_widths[type(grain)](widths)
 
 
 def bind_tree_field(name: str, value: TreeFieldInput, *, defaults: Defaults | None = None) -> SchemaField:
@@ -271,11 +302,8 @@ class Schema(Node):
                 if not any(width != 0 for width in widths):
                     outputs[address] = 0
                 elif branch.reduction is None:
-                    outputs[address] = (
-                        None
-                        if branch.length is None or any(width is None for width in widths)
-                        else branch.length * sum(cast(int, width) for width in widths)
-                    )
+                    per_row = row_width(branch.grain, widths)
+                    outputs[address] = None if branch.length is None or per_row is None else branch.length * per_row
                 elif isinstance(branch.reduction, Attention):
                     outputs[address] = branch.reduction.n_outputs
                 else:
@@ -293,11 +321,8 @@ class Schema(Node):
             parts = [
                 int(child.active) if isinstance(child, Leaf) else outputs[child.address] for child in branch.fields
             ]
-            widths[address] = (
-                None
-                if branch.length is None or any(part is None for part in parts)
-                else branch.length * sum(cast(int, part) for part in parts)
-            )
+            per_row = row_width(branch.grain, parts)
+            widths[address] = None if branch.length is None or per_row is None else branch.length * per_row
         return widths
 
     def overflows(self, address: Address) -> tuple[Overflow | None, ...]:

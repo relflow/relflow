@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from functools import partial
+from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
 
 import torch
@@ -11,10 +12,12 @@ from tensordict import TensorDict
 from relflow.architecture.attention import RotaryMultiheadAttention
 from relflow.architecture.blocks import feed_forward, norm
 from relflow.architecture.direction import rules, stepped
-from relflow.architecture.grain import grains
+from relflow.architecture.grain import extents, grains, rows
 from relflow.architecture.mixers import TransformerMixer, mixers
 from relflow.architecture.packed import SDPA_BATCH_MAX, Packed, block, customized, pack, unpack
 from relflow.architecture.reducers import Reducer, reducers
+from relflow.structs.experiment import row_width
+from relflow.structs.grain import Coordinates, Steps
 from relflow.structs.packages import Parcel
 from relflow.structs.tree import Address, Leaf, Node
 
@@ -43,36 +46,6 @@ def locate(parcel: Parcel, *, schema: Schema, geometry: TensorDict | None) -> Pa
     # Geometry slots exclude null item records, so no routed token stands for a missing item.
     parcel.slots = layout.slots if layout is not None else torch.ones_like(parcel.present, dtype=torch.bool)
     return parcel
-
-
-def extents(parcels: list[Parcel]) -> tuple[int, list[torch.Tensor]]:
-    """Return the item count of a branch instance and the tokens each parcel holds per item.
-
-    Raises:
-        ValueError: If a parcel holds a token count that is not a multiple of the items.
-    """
-    first = parcels[0]
-    shape = tuple(first.payload.shape[:-2])
-    declared = next((parcel.widths for parcel in parcels if parcel.widths is not None), None)
-    # Leaves hold one token per item, so the narrowest undeclared parcel sets the item count.
-    items = declared.shape[-1] if declared is not None else min(parcel.payload.shape[-2] for parcel in parcels)
-    widths: list[torch.Tensor] = []
-    for parcel in parcels:
-        count = parcel.payload.shape[-2]
-        if parcel.widths is not None:
-            widths.append(parcel.widths)
-        elif items and count % items:
-            raise ValueError(
-                f"parcel from '{parcel.origin}' holds {count} tokens per instance of '{parcel.destination}', "
-                f"which is not a multiple of its {items} items"
-            )
-        else:
-            widths.append(
-                torch.full(
-                    (*shape, items), count // items if items else 0, dtype=torch.int64, device=first.payload.device
-                )
-            )
-    return items, widths
 
 
 def stepwise(parcels: list[Parcel], *, order: dict[Address, int] | None = None) -> torch.Tensor:
@@ -145,6 +118,11 @@ def sequence(
         spans = spans + (count if parcel.spans is None else parcel.spans)
         lead = lead + width
     return torch.cat(positions, dim=-1), spans, torch.cat(slots, dim=-1)
+
+
+arrangements: Mapping[type, Callable[[list[Parcel]], tuple[torch.Tensor, torch.Tensor, torch.Tensor]]] = (
+    MappingProxyType({Coordinates: sequence, Steps: rows})
+)
 
 
 class RotaryTransformerEncoderLayer(torch.nn.Module):
@@ -230,7 +208,7 @@ class BranchEncoder(torch.nn.Module):
             int(child.active) if isinstance(child, Leaf) else schema.branch_outputs[child.address]
             for child in branch.fields
         ]
-        child_width = None if any(width is None for width in widths) else sum(cast(list[int], widths))
+        child_width = row_width(branch.grain, widths)
         self.input_width = None if branch.length is None or child_width is None else branch.length * child_width
         # Skipped targets occupy slots but never carry a present token, so the
         # count lanes normalize by embedded leaves only; adding a hidden target
@@ -239,7 +217,7 @@ class BranchEncoder(torch.nn.Module):
             int(child.embedded) if isinstance(child, Leaf) else schema.branch_outputs[child.address]
             for child in branch.fields
         ]
-        visible_width = None if any(width is None for width in visible) else sum(cast(list[int], visible))
+        visible_width = row_width(branch.grain, visible)
         self.visible_width = None if branch.length is None or visible_width is None else branch.length * visible_width
         self.parent_capacity = getattr(branch.parent, "length", 1)
         self.child_order = {child.address: index for index, child in enumerate(branch.fields)}
@@ -292,6 +270,7 @@ class BranchEncoder(torch.nn.Module):
         self.timed = branch.time_index is not None
         self.stepped = stepped[branch.direction] or self.timed
         self.grain = grains[type(branch.grain)](branch.grain, branch=branch, schema=schema)
+        self.arrangement = arrangements[type(branch.grain)]
 
         self.reduction = branch.reduction
         # An unbounded visible width leaves the lanes to the capacity observed while training.
@@ -587,6 +566,18 @@ class BranchEncoder(torch.nn.Module):
             destination=self.origin,
         )
         return summary
+
+    def arrange(self, parcels: list[Parcel]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Number the tokens of this branch the way its grain sequences them.
+
+        Args:
+            parcels: The child parcels addressed to this branch.
+
+        Returns:
+            Positions, spans and slots of the sequence tokens, one per row under ``Steps``.
+        """
+        ordered = sorted(parcels, key=lambda parcel: self.child_order[parcel.origin])
+        return self.arrangement(ordered)
 
     def clock(self, geometry: TensorDict | None) -> torch.Tensor | None:
         """Return the time of every row slot of this branch, or ``None`` without ``time_index``.

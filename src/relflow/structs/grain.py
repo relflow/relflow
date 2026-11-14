@@ -23,8 +23,10 @@ class Steps(pydantic.BaseModel):
     """Pool every row of a branch into one sequence token.
 
     ``pooling`` chooses how the coordinates of a row combine: ``"query"`` uses
-    a learned query and ``"mean"`` averages them. A relflow version that does
-    not build this grain rejects it when the model is built.
+    a learned query and ``"mean"`` averages them. The branch sequence then
+    holds one token per row, so a branch of ``length`` rows with
+    ``reduction=None`` is ``length`` tokens wide however many leaves it has.
+    Every leaf decoder under the branch reads the token of its own row.
     """
 
     model_config = pydantic.ConfigDict(extra="forbid", frozen=True)
