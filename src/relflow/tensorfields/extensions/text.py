@@ -38,6 +38,7 @@ from relflow.tensorfields.base import (
     TensorInput,
 )
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
+from relflow.tensorfields.shared.distributions import text as profile
 from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
@@ -1171,3 +1172,6 @@ def loss(
     decoder.metrics.record(module, strata, *errors(predicted, observed))
 
     return loss
+
+
+text.register(Component.profile, profile)

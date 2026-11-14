@@ -8,6 +8,7 @@ import pydantic
 from anytree import NodeMixin
 from pydantic_core import CoreSchema
 
+from relflow.structs.drift import Drift
 from relflow.structs.enums import Overflow
 
 if TYPE_CHECKING:
@@ -120,6 +121,7 @@ class FieldOptions(TypedDict, total=False):
     active: bool
     query: str | tuple[str, ...] | None
     nullable: bool
+    drift: Drift | bool
     pooling: Literal["query", "mean"]
     decoder_position: bool | None
     weight: float
@@ -272,6 +274,7 @@ class Leaf(Node):
         type: str
     query: str | tuple[str, ...] | None = None
     nullable: bool = True
+    drift: Drift | None = pydantic.Field(default_factory=Drift)
     pooling: Literal["query", "mean"] = "query"
     decoder_position: pydantic.StrictBool | None = None
     weight: Annotated[float, pydantic.Field(gt=0.0, default=1.0)] = 1.0
@@ -283,6 +286,15 @@ class Leaf(Node):
         if "name" in data:
             raise TypeError("tensorfield names come from the parent; use field_name=Tensorfield(...)")
         super().__init__(**data)
+
+    @pydantic.field_validator("drift", mode="before")
+    @classmethod
+    def check_drift(cls, value: Any) -> Any:
+        if value is True:
+            return Drift()
+        if value is False:
+            return None
+        return value
 
     @pydantic.field_validator("mask", mode="before")
     @classmethod

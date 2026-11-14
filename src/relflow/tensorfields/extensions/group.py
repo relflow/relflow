@@ -42,6 +42,7 @@ from relflow.tensorfields.base import (
 )
 from relflow.tensorfields.output import array, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
+from relflow.tensorfields.shared.distributions import categorical
 from relflow.tensorfields.shared.resize import Resize
 from relflow.tensorfields.shared.rows import Embedding
 from relflow.tensorfields.shared.vocabulary import (
@@ -106,6 +107,9 @@ group: Extension = Extension(
 _OVERRIDE_LOCK: str = "group assignment overrides"
 
 Assignment = int
+
+
+group.register(Component.profile, categorical)
 
 
 @group.register(Component.Request)

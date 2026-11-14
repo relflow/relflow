@@ -10,6 +10,7 @@ import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
 
 from relflow.architecture.graph import ModelGraph
+from relflow.distributions import Distributions
 from relflow.logging import logger
 from relflow.presets import Preset
 from relflow.structs.experiment import Schema
@@ -68,6 +69,8 @@ class CheckpointState:
     @staticmethod
     def dump(module: "Model", checkpoint: dict[str, Any]) -> None:
         """Add RelFlow metadata to an otherwise framework-owned checkpoint mapping."""
+        checkpoint["drift"] = module.drift
+        checkpoint["distributions"] = module.distributions.state_dict()
         checkpoint["version"] = module.version
         checkpoint["schema"] = module.schema.model_dump(mode="json")
         checkpoint["batch_size"] = module.batch_size
@@ -82,6 +85,8 @@ class CheckpointState:
         policy = checkpoint.get("preset")
         preset = None if policy is None else Preset.model_validate(policy)
         object.__setattr__(module, "_version", saved)
+        module.drift = checkpoint.get("drift", False)
+        module.distributions = Distributions.from_state(checkpoint.get("distributions", {}))
         module.preset = preset
 
     @staticmethod
@@ -115,6 +120,8 @@ class CheckpointState:
         previous_example = module.example_input_array
         previous_preset = module.preset
         previous_version = module.version
+        previous_distributions = module.distributions
+        previous_drift = module.drift
         try:
             module.schema = Schema.model_validate(checkpoint["schema"])
             module.batch_size = checkpoint["batch_size"]
@@ -129,6 +136,8 @@ class CheckpointState:
             module.nodes = previous_nodes
             module.example_input_array = previous_example
             module.preset = previous_preset
+            module.distributions = previous_distributions
+            module.drift = previous_drift
             object.__setattr__(module, "_version", previous_version)
             module.train(was_training)
             raise

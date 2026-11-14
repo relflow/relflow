@@ -31,6 +31,7 @@ from relflow.tensorfields.base import (
 )
 from relflow.tensorfields.output import array, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
+from relflow.tensorfields.shared.distributions import numeric as profile
 from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
@@ -699,3 +700,6 @@ def output(module: Model, address: Address) -> pa.StructType:
 def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
     content = array(cast(torch.Tensor, prediction.payload[TensorKey.content]), pa.float64())
     return struct({TensorKey.content.name: content}, datatype)
+
+
+number.register(Component.profile, profile)

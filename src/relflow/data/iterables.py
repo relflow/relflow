@@ -15,10 +15,11 @@ from tensordict import TensorDict
 from relflow.data.arrow import Encoded, Geometry, Retain
 from relflow.data.datasets.base import EncodedInput, InterprocessEncodingContext
 from relflow.data.ragged import Layout, RaggedField, coalesce
+from relflow.distributions import Distribution
 from relflow.structs.enums import Component, Strata, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.tree import Address, Node
-from relflow.tensorfields.base import TENSORFIELDS, BatchContext, Context, TensorFieldBase
+from relflow.tensorfields.base import TENSORFIELDS, BatchContext, Context, Profile, TensorFieldBase
 
 
 def geometry(layouts: Mapping[Address, Layout], *, rows: int) -> TensorDict:
@@ -61,10 +62,12 @@ def encode(
     epoch: int = 0,
     retain: Retain = (),
     ordinal: int = 0,
+    drift: bool = False,
 ) -> Encoded:
     out: dict[Address, TensorFieldBase] = {}
     observations: dict[Address, TensorDict] = {}
     bindings: dict[Address, object] = {}
+    profiles: dict[Address, Mapping[str, Distribution]] = {}
 
     salt = batch_salt(seed, epoch=epoch, ordinal=ordinal) if strata == Strata.train else 0
 
@@ -82,6 +85,12 @@ def encode(
             )
 
         values = pa.nulls(0) if projection.vacant else extension.prepare(pristine.values, address=address)
+        profiling = drift and request.drift is not None and (strata != Strata.predict or request.embedded)
+        canonical = (
+            replace(pristine, values=values)
+            if values is not pristine.values and (strata == Strata.train or profiling)
+            else pristine
+        )
         state = interprocess_encoding_context.get(address)
         if isinstance(state, BatchContext):
             if Component.bind not in extension.components:
@@ -89,7 +98,6 @@ def encode(
             state, bindings[address] = state.batch(values)
         observation = None
         if strata == Strata.train:
-            canonical = replace(pristine, values=values)
             observation = extension.observe(
                 field=canonical,
                 address=address,
@@ -133,9 +141,31 @@ def encode(
             ),
         )
 
+        if profiling:
+            states = pristine.state.to_numpy(zero_copy_only=False)
+            states = states[states != Tokens.padded.value]
+            features = {"state": Distribution.categorical(states, bins=len(Tokens))}
+            profiler = extension.components.get(Component.profile)
+            if profiler is not None:
+                custom = cast(Profile, profiler)(canonical, request=request)
+                if not isinstance(custom, Mapping) or any(
+                    not isinstance(feature, Distribution) for feature in custom.values()
+                ):
+                    raise TypeError(
+                        f"extension '{extension.name}' profiler at '{address}' must return a mapping of Distribution features"
+                    )
+                if "state" in custom:
+                    raise ValueError(
+                        f"extension '{extension.name}' profiler at '{address}' cannot replace the structural state feature"
+                    )
+                features.update(custom)
+            profiles[address] = features
+
     inputs = TensorDict(source=cast(Any, out), batch_size=[batch.num_rows])
     inputs[Address()] = geometry(coalesced.layouts, rows=batch.num_rows)
-    return Encoded(tensors=inputs, source=batch, retain=retain, observations=observations, bindings=bindings)
+    return Encoded(
+        tensors=inputs, source=batch, retain=retain, observations=observations, bindings=bindings, profiles=profiles
+    )
 
 
 def mock(schema: Schema, batch_size: int) -> EncodedInput:

@@ -9,6 +9,44 @@ from evidence.diagnostics.plots import COLORS, axes_pair
 
 
 def illustrate(identifier: str):
+    if identifier in {"P101", "P102", "P103", "P104", "P105", "P113"}:
+        designs = {
+            "P101": "Numeric location +4, spread ×8, and bimodal shape changes.\nA paired correlation flip preserves both marginal populations.",
+            "P102": "Label and Boolean frequencies, Set members and size, vector scale,\ncalendar parts, and null rates within repeated records.",
+            "P103": "Identical values at monitored, tolerant, and excluded fields.\nCompare warning policies, cleared windows, and restored checkpoints.",
+            "P104": "Enum label frequencies, folded-label controls, and null rates.\nUndeclared-label rejection is checked separately.",
+            "P105": "Hash label frequencies, novel identities, and null rates.\nFixed monitoring buckets are independent of training salts.",
+            "P113": "Group label frequencies, novel identities, and null rates.\nEvaluation must preserve vocabulary and assignment probabilities.",
+        }
+        fig, ax = plt.subplots(figsize=(10, 4.5), layout="constrained")
+        ax.set(xlim=(0, 1), ylim=(0, 1))
+        ax.axis("off")
+        for x, width, text in [
+            (0.03, 0.30, "Training inputs\nReference profile"),
+            (0.56, 0.41, "Independent held-out inputs\nValidation · Test · Prediction"),
+        ]:
+            ax.add_patch(plt.Rectangle((x, 0.52), width, 0.25, fill=False, ec=COLORS[0], lw=1.8))
+            ax.text(x + width / 2, 0.645, text, ha="center", va="center", fontsize=11)
+        ax.annotate(
+            "Compare",
+            xy=(0.55, 0.645),
+            xytext=(0.35, 0.645),
+            ha="left",
+            va="center",
+            arrowprops={"arrowstyle": "->", "color": COLORS[2]},
+        )
+        ax.text(0.5, 0.34, designs[identifier], ha="center", va="center", fontsize=11)
+        ax.text(
+            0.5, 0.09, "Generator design only · No measured warnings or model predictions", ha="center", fontsize=10
+        )
+        ax.set_title(f"{identifier} · Input distribution study design")
+        return (
+            fig,
+            "Generator and comparison design illustration. Training establishes the reference; independent "
+            "validation, test, and prediction streams supply quiet controls and declared interventions. "
+            "This illustration contains no measured drift warnings or learning result. A matching monitoring "
+            "wheel and a full-budget record are required to evaluate the study's checks.",
+        )
     if identifier == "P091":
         fig, ax = plt.subplots(figsize=(9, 4.2), layout="constrained")
         ax.set(xlim=(0, 1), ylim=(0, 1))

@@ -23,6 +23,10 @@ The examples continue the
 [transaction model](../learn/add-transaction-history.qmd). Its `payment_id`
 column remains a source column without becoming a model field.
 
+[Input distributions](input-distributions.qmd) explains the field metadata and
+opt-in monitoring and configurable warnings when validation, test, or prediction populations differ
+from training.
+
 | Where the data lives | Interface |
 | --- | --- |
 | Files on disk or cloud storage | `rf.ArrowDataModule` with paths, globs, or `rf.source(...)` |

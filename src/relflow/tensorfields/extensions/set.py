@@ -27,6 +27,7 @@ from relflow.tensorfields.base import (
 )
 from relflow.tensorfields.output import array, labels, struct, variable
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
+from relflow.tensorfields.shared.distributions import sets as profile
 from relflow.tensorfields.shared.reconstruction import Metrics, Scores, Totals
 from relflow.tensorfields.shared.resize import SILENT_LOGIT
 from relflow.tensorfields.shared.rows import Embedding, Linear
@@ -606,3 +607,6 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
         {TensorKey.content.name: variable(candidates, counts, datatype=datatype.field(TensorKey.content.name).type)},
         datatype,
     )
+
+
+sets.register(Component.profile, profile)

@@ -19,6 +19,7 @@ from tensordict import TensorDict, tensorclass
 
 from relflow.data.arrow import variants
 from relflow.data.ragged import RaggedField
+from relflow.distributions import Distribution
 from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
@@ -571,3 +572,17 @@ def loss(
         loss += torch.stack(losses).mean()
 
     return loss
+
+
+@dateparts.register(Component.profile)
+def profile(field: RaggedField, *, request: RequestBase) -> dict[str, Distribution]:
+    request = cast(Request, request)
+    if not len(field.values):
+        return {}
+    dates = parse(field.values, request.pattern).to_numpy(zero_copy_only=False).astype("datetime64[s]")
+    features: dict[str, Distribution] = {}
+    for part in request.dateparts:
+        sine, cosine = part(dates)
+        features[f"{part.name}.sin"] = Distribution.numeric(pa.array(sine))
+        features[f"{part.name}.cos"] = Distribution.numeric(pa.array(cosine))
+    return features

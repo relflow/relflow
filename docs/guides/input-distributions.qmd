@@ -1,0 +1,175 @@
+---
+title: Input distributions
+description: "Inspect field distributions across training, validation, test, and prediction, and configure drift warnings."
+---
+
+A different validation or prediction population can be intentional: customers,
+markets, and calendar periods change. relflow records bounded input distribution
+metadata and warns about large differences from training. The warning identifies
+what changed; the application decides whether that change is expected.
+
+## Enable monitoring
+
+Monitoring is **off by default**. Set `drift=True` on `Model` or any model preset
+such as `Model.xs` to enable it for that model. When disabled, encoding skips
+profile construction and the model skips drift comparisons for every field,
+even if a field declares a custom `Drift` policy.
+
+After opting in, set a field's `drift` policy to change its tolerance, or use
+`drift=False` to exclude that field:
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    drift=True,
+    amount=rf.Number(drift=rf.Drift(threshold=0.3, min_samples=256)),
+    merchant=rf.Category,
+    payment_id=rf.Hash(drift=False),
+    disputed=rf.Boolean(mask=True),
+)
+```
+
+The same `drift: true` option is accepted in a YAML model template. You can also
+set `model.drift = True` before using an existing model. Select the setting before
+creating data loaders; loaders capture it for their encoding workers. Disabling
+`model.drift` stops model-side updates and comparisons while retaining existing
+profiles. Recreate loaders to change their worker-side profiling policy.
+
+Training supplies the reference. Validation, test, and prediction supply separate
+comparison profiles. Inputs are observed after preprocessing, explicit queries,
+and collection cropping, before masking or jitter. Padding is excluded. Profiles
+include targets during training, validation, and testing. Prediction omits
+fields that are never embedded, such as the supervised `disputed` target above;
+missing answers are expected there.
+
+The same monitoring applies to direct `model.encode(...)`, direct
+`model.predict(...)`, and Arrow data module batches consumed by model loops.
+Workers carry bounded summaries to the model; they do not update the metadata
+or learned resources. Raw tensor-only forward calls have no pristine input
+metadata and do not contribute profiles. Lightning sanity checks are excluded.
+
+## Inspect metadata
+
+After consuming inputs, obtain JSON-compatible metadata:
+
+```python
+metadata = model.distributions.summary()
+training_amount = metadata["/amount"]["train"]["value"]
+# Keys: count, quantiles. Quantiles represent minimum, 25%, median, 75%, maximum.
+```
+
+The metadata lives on the model independently of its learned normalizers and
+vocabularies. Evaluation cannot update the training reference or train the
+model. Checkpoints retain the model-wide `drift` setting, distribution profiles, and
+warning suppression. Older checkpoints that lack the setting load with
+monitoring disabled. Schema changes discard profiles
+whose field or ancestor configuration changed. This diagnostic metadata does
+not appear in prediction output tables.
+
+Profiles accumulate across batches and calls, including repeated epochs. A new
+comparison window can retain the training reference:
+
+```python
+model.distributions.clear(strata="predict")
+model.distributions.clear(address="/merchant", strata="validate")
+```
+
+Call `model.distributions.clear()` to start over, including the training
+reference. Clearing a reference or comparison also rearms the relevant warnings.
+Within a window, each field, comparison stratum, and feature logs at most once.
+
+Profiles include every consumed batch. Comparisons run when the relevant profile
+changes: an evaluation update checks its own stratum, while a training update
+checks all available comparison strata against the new reference. This avoids
+rechecking unchanged populations without reducing observation counts or delaying
+eligible warnings. Exclude unneeded fields with `drift=False` to reduce profiling
+work; changing a warning threshold does not reduce profile construction cost.
+
+## What is measured
+
+| Field | Features |
+|---|---|
+| Every active field after model opt-in | Structural value/null/other state frequencies, excluding padding |
+| `Number`, `Quantile` | Finite source-value distribution; separate finite, NaN, positive-infinity, and negative-infinity frequencies |
+| `Duration`, `Ordinal` | Numeric profiles of derived elapsed values or ranks, after their source queries and declarations are applied |
+| `Boolean` | False/true frequencies |
+| `Category`, `Enum`, `Group`, `Hash` | Label frequencies in 128 fixed identity buckets |
+| `Set` | Deduplicated member frequencies and set size, after label folding and dropping null/NaN members |
+| `Text` | Character length, without running its encoder |
+| `Vector` | Component mean, vector norm, and finite-vector frequency |
+| `Period` / `DateParts` | Sine and cosine distributions of each configured calendar part |
+
+Label folding follows `strip` and `cased` options. Identity buckets retain no
+raw labels and never grow a vocabulary. Hash field profiling uses fixed identity
+buckets independently of its training salts. Bucket metadata records the Polars
+version that defines its hash encoding; a changed encoding discards the affected
+feature profiles and starts collecting a new reference. Numeric features use bounded
+merging digests, without retaining observation history. State frequencies
+refer to the Arrow structural states; extension-specific nonfinite features
+separately describe numerical validity.
+
+## How warnings work
+
+The numeric distance approximates the largest difference between the two
+cumulative distributions, so it can detect location, spread, and shape changes.
+Categorical distance is total variation over the fixed histogram. Both distances
+range from zero to one. A feature must have at least `min_samples` observations
+in both training and comparison before it can warn; finite numeric observations
+and set members have their own counts.
+
+A warning requires a distance larger than `threshold` plus an allowance for
+finite sample noise. The allowance grows with occupied categorical buckets and
+shrinks as counts increase. Logs include the field address, feature, stratum,
+reference and observed counts, distance, threshold, allowance, and rank. The
+threshold is a diagnostic tolerance, not a significance level or a guaranteed
+false-positive rate. Increase it when that field's population is expected to
+change, or disable that field's monitor.
+
+These are marginal diagnostics. They can miss changes to relationships among
+fields, label collisions in identity buckets, semantic text changes, vector
+changes that preserve mean and norm, and rare events. Cumulative windows can
+hide recent changes; clear the comparison profile for a fresh window. Profiles
+under distributed execution are **rank-local**, with no extra collectives or
+global distribution claim. Their reference counts describe observed exposures,
+not necessarily unique source rows. Warning suppression persists until cleared,
+even when a subsequent change affects the same feature.
+
+## Custom tensorfields
+
+An extension can register `rf.Component.profile` with a callable accepting a
+pristine `rf.RaggedField` and keyword `request`. Return a mapping from stable
+feature names to `rf.Distribution` objects. For example, a numeric custom field
+can expose a source-value distribution:
+
+```python
+@extension.register(rf.Component.profile)
+def profile(field, *, request):
+    return {"value": rf.Distribution.numeric(field.values)}
+```
+
+Use `rf.Distribution.categorical(indices, bins=N)` for a fixed histogram, where
+`indices` is a one-dimensional NumPy integer array in `[0, N)`. The extension
+owns feature meaning and preprocessing; the shared path merges and compares
+summaries. The feature name `state` is reserved for structural profiling.
+Extensions without this component still receive structural state monitoring.
+
+
+## Controlled research studies
+
+The optional studies [Numeric shifts](../evidence/distributions/numeric-shifts.py),
+[Typed shifts](../evidence/distributions/typed-shifts.py), and
+[Policies and checkpoints](../evidence/distributions/policies-and-checkpoints.py)
+predeclare three-seed detection checks and quiet controls for the unreleased
+monitoring wheel. Local lab records are separate from published measurements;
+these studies do not replace the complete paired core gate.
+
+
+The [Enum](../evidence/distributions/enum-shifts.py),
+[Hash](../evidence/distributions/hash-shifts.py), and
+[Group](../evidence/distributions/group-shifts.py) studies extend detection
+and quiet-control checks across validation, test, and prediction. They also
+check incremental batch accumulation, minimum sample counts, and warning
+suppression. Enum checks undeclared-label rejection, Hash separates profiling
+from training salts, and Group checks that evaluation leaves its vocabulary
+and learned assignments unchanged.

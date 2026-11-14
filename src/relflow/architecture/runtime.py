@@ -471,6 +471,7 @@ def step(
         batch = bind(module, batch, strata)
     inputs = batch.tensors if isinstance(batch, Encoded) else batch
     if isinstance(batch, Encoded):
+        profile(module, batch, strata)
         learn(module, batch.observations, strata=strata)
     if strata == Strata.predict and not isinstance(batch, Encoded):
         raise TypeError("prediction batches must retain their Arrow source")
@@ -535,10 +536,24 @@ def prepare(
         schema=module.schema,
         strata=strata,
         interprocess_encoding_context=module.interprocess_encoding_context,
+        drift=module.drift,
         seed=seed,
         epoch=epoch,
     )
+    profile(module, encoded, strata)
     return bind(module, encoded, strata)
+
+
+def profile(module: Model, batch: Encoded, strata: Strata) -> None:
+    """Commit worker summaries once at the model boundary, excluding sanity checks."""
+    if not module.drift or getattr(getattr(module, "_trainer", None), "sanity_checking", False):
+        return
+    module.distributions.update(
+        batch.profiles,
+        strata=strata,
+        policies={address: request.drift for address, request in module.schema.active_requests.items()},
+        rank=getattr(getattr(module, "_trainer", None), "global_rank", 0),
+    )
 
 
 def learn(
