@@ -3,10 +3,15 @@
 The files record what relflow computed before the branch encoder was split into
 stages. Rerun this script only when a change is meant to alter plain-branch
 behavior: ``uv run python -m tests.architecture.golden.regenerate``.
+
+The fixtures record the platform and torch version that produced them. Other
+platforms (CI on Linux and Windows) or torch versions compare with tolerances
+of 1e-5 and 1e-6, so bit-identity is proven only on the recording platform.
 """
 
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import polars as pl
@@ -18,7 +23,7 @@ import relflow as rf
 from tests.architecture.test_golden import FIXTURES, batches, platform_key
 
 
-def atomic(path: Path, write) -> None:
+def atomic(path: Path, write: Callable[[Path], object]) -> None:
     """Write through a temporary file so a crash never leaves a half-written fixture.
 
     Args:

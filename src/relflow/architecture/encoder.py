@@ -316,7 +316,11 @@ class BranchEncoder(torch.nn.Module):
         """
         from relflow.architecture.compiler import canonical
 
-        prepared = type(self.encoder) is TransformerMixer and bool(self.encoder) and not customized(self.encoder)
+        prepared = (
+            type(self.encoder) is TransformerMixer
+            and bool(self.encoder)
+            and not customized([self.encoder], additional=(TransformerMixer,))
+        )
         full = prepared and bool(present.all())
         if prepared and not full:
             values, packing = pack(selected, present, positions)
@@ -332,7 +336,6 @@ class BranchEncoder(torch.nn.Module):
             # FlashAttention uses a CUDA grid dimension for sequence batches.
             unmasked = (
                 full
-                and type(self.encoder) is TransformerMixer
                 and selected.is_cuda
                 and selected.shape[0] <= SDPA_BATCH_MAX
                 and type(self) is BranchEncoder
@@ -387,7 +390,6 @@ class BranchEncoder(torch.nn.Module):
         sequenced: bool = False,
     ) -> Parcel:
         """Encode one branch; ``sequenced`` also routes its encoded sequence to the decoders beneath it."""
-
         parcels = self.admit(parcels)
         parcels, conditioned = self.inform(parcels, context=context)
         parcels = self.grain(self.contextualize(parcels))
