@@ -1,9 +1,10 @@
 import typing
 
-import pytest
 import torch
 
 import relflow as rf
+from relflow.architecture.convolution import ConvMixer
+from relflow.architecture.direction import rules
 from relflow.architecture.encoder import BranchEncoder, RotaryTransformerEncoderLayer
 from relflow.architecture.mixers import TransformerMixer, mixers
 from relflow.structs.grain import Steps
@@ -36,9 +37,17 @@ def test_mixer_none_disables_sequence_mixing_but_keeps_coordinate_attention():
     assert len(encoder.encoder) == 0 and encoder.coordinate_encoder is not None
 
 
-def test_conv_mixer_is_rejected_at_build_until_implemented():
-    with pytest.raises(ValueError, match=r"branch '/events' sets mixer=Conv"):
-        rf.Model(d_model=8, n_layers=1, n_heads=2, events=rf.Branch(grain=Steps(), mixer=Conv(), a=rf.Number))
+def test_conv_setting_builds_a_conv_mixer_with_the_branch_direction():
+    schema = rf.Schema.from_tree(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        events=rf.Branch(length=4, grain=Steps(), mixer=Conv(n_blocks=2), direction=rf.Direction.causal, a=rf.Number),
+    )
+    branch = schema.branches["/events"]
+    built = mixers[Conv](branch.mixer, branch=branch, schema=schema, dropout=0.0, rule=rules[branch.direction])
+    assert type(built) is ConvMixer and len(built.blocks) == 2
+    assert all(block.direction is rf.Direction.causal for block in built.blocks)
 
 
 def test_transformer_mixer_matches_layer_by_layer_application():

@@ -133,7 +133,12 @@ def compile(
     for module in model.modules():
         if not (
             # Only a non-empty transformer stack is compiled; other mixers stay eager.
-            (encoders and type(module) is BranchEncoder and len(module.encoder))
+            (
+                encoders
+                and type(module) is BranchEncoder
+                and type(module.encoder) is TransformerMixer
+                and len(module.encoder)
+            )
             or (pools and type(module) is LearnedQueryCrossAttention)
         ):
             continue

@@ -14,13 +14,14 @@ from lightning.pytorch import seed_everything
 from tensordict import TensorDict
 
 import relflow as rf
+from relflow.architecture.convolution import Block
 from relflow.data.ragged import coalesce
-from relflow.structs.enums import Metric, Overflow, Strata, TensorKey, Tokens
+from relflow.structs.enums import Direction, Metric, Overflow, Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
 from relflow.structs.tree import Address
 from relflow.tensorfields.base import TENSORFIELDS, Context
-from relflow.tensorfields.extensions.series import Block, Decoder, Embedder, TensorField, encode, loss, write
+from relflow.tensorfields.extensions.series import Decoder, Embedder, TensorField, encode, loss, write
 from relflow.tensorfields.extensions.series import output as output_type
 from relflow.tensorfields.extensions.series import series as extension
 from relflow.tensorfields.shared.jitter import Jitter
@@ -277,7 +278,7 @@ def embed(rows: list, *, n_dim: int = 1, datatype: pa.DataType | None = None, **
 def test_block_keeps_shape_and_zeroes_unobserved_steps():
     seed_everything(SEED, workers=True)
     observed = torch.tensor([[True, True, False, False, True]] * 2)
-    out = Block(width=8, dilation=2)(randn(2, 5, 8), observed=observed)
+    out = Block(width=8, dilation=2, direction=Direction.bidirectional)(randn(2, 5, 8), observed=observed)
     assert out.shape == (2, 5, 8)
     assert not out[:, 2:4].any()
 

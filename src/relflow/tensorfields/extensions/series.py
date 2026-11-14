@@ -17,8 +17,9 @@ from beartype import beartype
 from pydantic import StrictInt
 from tensordict import TensorDict, tensorclass
 
+from relflow.architecture.convolution import Block
 from relflow.data.ragged import RaggedField
-from relflow.structs.enums import Component, Metric, Overflow, Strata, TensorKey, Tokens
+from relflow.structs.enums import Component, Direction, Metric, Overflow, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, FieldOptions
 from relflow.tensorfields.base import (
@@ -453,29 +454,6 @@ def observe(
     return TensorDict({TensorKey.content: moments(observed, width=request.n_dim)}, batch_size=[])
 
 
-class Block(torch.nn.Module):
-    """Pre-norm residual block of two dilated convolutions over observed steps.
-
-    Unobserved steps are zero on entry to every convolution, so a series
-    embeds the same whatever the batch pads it with.
-    """
-
-    def __init__(self, *, width: int, dilation: int):
-        super().__init__()
-        self.norm = torch.nn.RMSNorm(width)
-        self.first = torch.nn.Conv1d(width, width, kernel_size=3, padding=dilation, dilation=dilation)
-        self.second = torch.nn.Conv1d(width, width, kernel_size=3, padding=dilation, dilation=dilation)
-        self.activation = torch.nn.GELU(approximate="tanh")
-
-    def forward(self, x: torch.Tensor, *, observed: torch.Tensor) -> torch.Tensor:
-        """Apply the block to ``x`` of shape ``(batch, steps, width)`` with its ``observed`` step mask."""
-        gone = ~observed.unsqueeze(-1)
-        hidden = self.activation(self.norm(x)).transpose(1, 2)
-        hidden = self.activation(self.first(hidden).transpose(1, 2)).masked_fill(gone, 0.0)
-        hidden = self.second(hidden.transpose(1, 2)).transpose(1, 2)
-        return (x + hidden).masked_fill(gone, 0.0)
-
-
 @series.register(Component.Embedder)
 class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
@@ -502,7 +480,10 @@ class Embedder(EmbedderBase):
         self.normalizer = GlobalOnlineNormalizer(width=request.n_dim)
         self.projection = torch.nn.Linear(in_features=request.n_dim, out_features=schema.d_model)
         self.blocks = torch.nn.ModuleList(
-            [Block(width=schema.d_model, dilation=2**depth) for depth in range(request.n_blocks)]
+            [
+                Block(width=schema.d_model, dilation=2**depth, direction=Direction.bidirectional)
+                for depth in range(request.n_blocks)
+            ]
         )
         self.embeddings = torch.nn.Embedding(num_embeddings=len(Tokens), embedding_dim=schema.d_model)
 

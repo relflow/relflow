@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Mapping
 from functools import partial
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, NoReturn, Protocol, cast, override
+from typing import TYPE_CHECKING, Any, Protocol, cast, override
 
 import torch
 
+from relflow.architecture.convolution import ConvMixer
 from relflow.architecture.direction import Rule, bidirectional
 from relflow.architecture.packed import Packed
 from relflow.structs.mixer import Conv, Transformer
@@ -22,17 +23,9 @@ if TYPE_CHECKING:
 class Mixer(Protocol):
     """Mix the tokens of every branch sequence.
 
-    A mixer is a stack of layers: the compiler reads its length and packing
-    iterates over its layers.
+    Transformer stacks are the one mixer the compiler and packing know by type;
+    every other mixer only has to be called.
     """
-
-    def __len__(self) -> int:
-        """Number of layers in the stack."""
-        ...
-
-    def __iter__(self) -> Iterator[torch.nn.Module]:
-        """Iterate over the layers in order."""
-        ...
 
     def __call__(
         self,
@@ -151,26 +144,22 @@ def idle(mixer: None, *, branch: Branch, schema: Schema, dropout: float, rule: R
     return TransformerMixer(rule=rule)
 
 
-def pending(mixer: Conv, *, branch: Branch, schema: Schema, dropout: float, rule: Rule) -> NoReturn:
-    """Reject a mixer this relflow version does not build.
+def conv(mixer: Conv, *, branch: Branch, schema: Schema, dropout: float, rule: Rule) -> ConvMixer:
+    """Build the dilated convolution mixer of a branch that holds one token per row.
 
     Args:
-        mixer: The unsupported setting.
-        branch: Branch that owns the sequence.
+        mixer: The convolution setting.
+        branch: Branch that owns the sequence; its direction sets the padding.
         schema: Schema that owns the branch.
-        dropout: Dropout inherited from the branch.
-        rule: Direction rule of the branch.
+        dropout: Unused; the convolution has no dropout.
+        rule: Unused; the convolution pads by direction instead of masking.
 
-    Raises:
-        ValueError: Always, naming the branch and the supported mixers.
+    Returns:
+        A convolution mixer of ``mixer.n_blocks`` blocks.
     """
-    message = (
-        f"branch '{branch.address}' sets mixer={mixer!r}, which this relflow version does not build yet; "
-        "use rf.Transformer() or mixer=None"
-    )
-    raise ValueError(message)
+    return ConvMixer(width=schema.d_model, n_blocks=mixer.n_blocks, direction=branch.direction)
 
 
-mixers: Mapping[type, MixerBuilder[Any]] = MappingProxyType({Transformer: transformer, Conv: pending, type(None): idle})
+mixers: Mapping[type, MixerBuilder[Any]] = MappingProxyType({Transformer: transformer, Conv: conv, type(None): idle})
 
-__all__ = ["Mixer", "MixerBuilder", "TransformerMixer", "idle", "mixers", "pending", "transformer"]
+__all__ = ["Mixer", "MixerBuilder", "TransformerMixer", "conv", "idle", "mixers", "transformer"]
