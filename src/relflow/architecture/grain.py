@@ -171,7 +171,8 @@ class StepStage(torch.nn.Module):
         tokens = torch.cat(payloads, dim=-2)
         present = torch.cat(presence, dim=-1)
         count = math.prod(shape) * items
-        pooled = self.pool(tokens.reshape(count, -1, channels), present=present.reshape(count, -1))
+        width = tokens.shape[-2]
+        pooled = self.pool(tokens.reshape(count, width, channels), present=present.reshape(count, width))
         positions, spans, slots = rows(parcels)
         return [
             Parcel(

@@ -12,7 +12,8 @@ class Parcel(TensorClass):
     stand for real records. ``widths`` count the positions each destination
     item owns in this parcel; leaves omit it and own one position per item.
     A reduced branch routes its summary upward and keeps its encoded
-    ``sequence`` beside it for the decoders beneath it.
+    ``sequence`` beside it for the decoders beneath it. ``objective`` holds the
+    per-instance shares of a branch objective, shaped like the instance grid.
     """
 
     payload: torch.Tensor
@@ -24,6 +25,7 @@ class Parcel(TensorClass):
     slots: torch.Tensor | None = None
     widths: torch.Tensor | None = None
     sequence: "Parcel | None" = None
+    objective: torch.Tensor | None = None
 
 
 # @jaxtyped(typechecker=beartype)

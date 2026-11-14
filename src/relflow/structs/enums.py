@@ -54,6 +54,7 @@ class TensorKey(enum.StrEnum):
     topk = "topk"
     embedding = "embedding"
     inferred = "inferred"
+    objective = "objective"
 
 
 class Metric(enum.StrEnum):

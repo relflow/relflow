@@ -6,9 +6,13 @@ from functools import partial
 from typing import TYPE_CHECKING, cast
 
 import torch
+from anytree import PreOrderIter
+from tensordict import TensorDict
 
+from relflow.data.arrow import Geometry
 from relflow.data.datasets.base import EncodedInput
-from relflow.structs.enums import Strata
+from relflow.structs.contrastive import Contrastive
+from relflow.structs.enums import Metric, Strata, TensorKey
 from relflow.structs.packages import Prediction
 from relflow.structs.tree import Address
 from relflow.tensorfields.base import TENSORFIELDS, TensorFieldBase
@@ -16,7 +20,7 @@ from relflow.tensorfields.base import TENSORFIELDS, TensorFieldBase
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
 
-__all__ = ["Evaluate", "Objective", "Select", "objectives", "reconstruction"]
+__all__ = ["Evaluate", "Objective", "Select", "contrast", "objectives", "reconstruction"]
 
 type Select = Callable[[EncodedInput, Strata], torch.Tensor]
 type Evaluate = Callable[..., torch.Tensor]
@@ -72,6 +76,39 @@ def reconstruction(module: "Model", *, address: Address) -> Objective:
     )
 
 
+def holds(inputs: EncodedInput, strata: Strata, *, address: Address) -> torch.Tensor:
+    """Report whether a branch has records and trains its crops in this batch."""
+    geometry = cast(Geometry, cast(TensorDict, inputs[Address()])[address])
+    return geometry.slots.any() & (geometry.views is not None)
+
+
+def divergence(
+    *, module: "Model", prediction: Prediction, inputs: EncodedInput, strata: Strata, address: Address
+) -> torch.Tensor:
+    """Sum the per-record shares of a branch objective and log the loss at the branch."""
+    shares = cast(torch.Tensor, prediction.payload[TensorKey.objective])
+    return cast(torch.Tensor, module.track((address, strata, Metric.loss), value=shares.sum()))
+
+
+def contrast(module: "Model", *, address: Address) -> Objective:
+    """Build the contrastive objective of a branch.
+
+    Args:
+        module: Model that owns the schema.
+        address: Branch address.
+
+    Returns:
+        The weighted branch objective.
+    """
+    settings = cast(Contrastive, module.schema.branches[address].contrastive)
+    return Objective(
+        address=address,
+        weight=settings.weight,
+        select=partial(holds, address=address),
+        evaluate=partial(divergence, address=address),
+    )
+
+
 def objectives(module: "Model") -> tuple[Objective, ...]:
     """Build every objective of a model in schema order.
 
@@ -79,6 +116,13 @@ def objectives(module: "Model") -> tuple[Objective, ...]:
         module: Model that owns the schema.
 
     Returns:
-        Weighted objectives in pre-order.
+        Weighted leaf and branch objectives in pre-order of the schema.
     """
-    return tuple(reconstruction(module, address=address) for address in module.schema.objectives)
+    leaves = (reconstruction(module, address=address) for address in module.schema.objectives)
+    branches = (
+        contrast(module, address=address)
+        for address, branch in module.schema.branches.items()
+        if branch.contrastive is not None
+    )
+    order = {Address(str(node.address)): index for index, node in enumerate(PreOrderIter(module.schema.fields))}
+    return tuple(sorted((*leaves, *branches), key=lambda entry: order[entry.address]))
