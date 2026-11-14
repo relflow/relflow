@@ -22,7 +22,9 @@ class Geometry(TensorClass):
     Lengths and collection validity use the parent grid. ``slots`` adds the
     resolved branch axis and marks its non-null object records. ``times`` holds
     the float64 time position of every slot, relative to the first row of its
-    instance, and is ``None`` for a branch without ``time_index``.
+    instance, and is ``None`` for a branch without ``time_index``. ``views``
+    holds the first row of the two contrastive crops of every instance, as int64
+    of shape ``(*parent shape, 2)``, and is ``None`` outside contrastive training.
     """
 
     lengths: torch.Tensor
@@ -30,6 +32,7 @@ class Geometry(TensorClass):
     valid: torch.Tensor
     slots: torch.Tensor
     times: torch.Tensor | None = None
+    views: torch.Tensor | None = None
 
 
 def retention(names: Retain, *, context: str = "retain") -> Retain:
