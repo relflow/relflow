@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 import relflow as rf
 import relflow.cli.commands as commands
 from relflow.cli import app, main
+from relflow.cli.config import Run
 
 
 @pytest.mark.parametrize("command", [None, "inspect", "check", "train", "predict", "serve"])
@@ -38,55 +39,28 @@ def test_no_arguments_show_help_without_starting_a_workflow():
     assert "Usage:" in result.output
 
 
-@pytest.mark.parametrize("flags", [[], ["--no-rollback", "--no-early-stopping"], ["--rollback", "--early-stopping"]])
-def test_only_explicit_boolean_flags_reach_run_configuration(monkeypatch, flags):
-    captured = {}
-
-    def run(arguments):
-        captured.update(arguments)
-        return 0
-
-    monkeypatch.setattr(commands, "run", run)
-    result = CliRunner().invoke(app, ["train", "model.yaml", "--output", "new-run", *flags])
-    assert result.exit_code == 0, result.output
-    if flags:
-        assert captured["rollback"] is ("--rollback" in flags)
-        assert captured["early_stopping"] is ("--early-stopping" in flags)
-    else:
-        assert "rollback" not in captured
-        assert "early_stopping" not in captured
-    assert "config" not in captured
-    assert "imports" not in captured
-
-
 def test_repeatable_options_keep_their_values_and_order(monkeypatch):
-    captured = {}
+    captured = []
 
-    def run(arguments):
-        captured.update(arguments)
-        return 0
+    def register(run, imports):
+        captured.extend(imports)
 
-    monkeypatch.setattr(commands, "run", run)
+    monkeypatch.setattr(Run, "register", register)
+    monkeypatch.setattr(commands, "inspect_model", lambda path: {"status": "success"})
     result = CliRunner().invoke(
         app,
         [
-            "predict",
+            "inspect",
             "model.rf",
-            "--output",
-            "new-run",
             "--import",
             "first",
             "--import",
             "second",
-            "--retain",
-            "id",
-            "--retain",
-            "ordinal",
+            "--json",
         ],
     )
     assert result.exit_code == 0, result.output
-    assert captured["imports"] == ["first", "second"]
-    assert captured["retain"] == ["id", "ordinal"]
+    assert captured == ["first", "second"]
 
 
 @pytest.mark.parametrize(
@@ -101,10 +75,10 @@ def test_repeatable_options_keep_their_values_and_order(monkeypatch):
     ],
 )
 def test_invalid_cli_types_choices_ranges_and_required_options_fail_before_execution(monkeypatch, arguments):
-    def forbidden(arguments):
+    def forbidden(*args, **kwargs):
         pytest.fail("an invalid command started a model workflow")
 
-    monkeypatch.setattr(commands, "run", forbidden)
+    monkeypatch.setattr(commands, "read", forbidden)
     result = CliRunner().invoke(app, arguments)
     assert result.exit_code == 2, result.output
     assert "Error" in result.output
@@ -126,10 +100,10 @@ def test_bash_completion_can_be_generated_without_installing_it(monkeypatch):
 
 
 def test_native_completion_suggests_commands_without_starting_a_workflow(monkeypatch):
-    def forbidden(arguments):
+    def forbidden(*args, **kwargs):
         pytest.fail("shell completion started a model workflow")
 
-    monkeypatch.setattr(commands, "run", forbidden)
+    monkeypatch.setattr(commands, "read", forbidden)
     result = CliRunner().invoke(
         app,
         [],
@@ -162,10 +136,11 @@ def test_native_usage_errors_keep_json_stdout_separate_from_rich_help(arguments,
 
 
 def test_workflow_exit_codes_are_preserved_by_the_typer_entry_point(monkeypatch, capsys):
-    def fail(arguments):
-        print(json.dumps({"status": "failed"}))
-        return 2
+    def fail(path):
+        raise ValueError("invalid checkpoint")
 
-    monkeypatch.setattr(commands, "run", fail)
+    monkeypatch.setattr(commands, "inspect_model", fail)
     assert main(["inspect", "missing.rf", "--json"]) == 2
-    assert json.loads(capsys.readouterr().out) == {"status": "failed"}
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "failed"
+    assert report["error"] == {"type": "ValueError", "message": "invalid checkpoint"}

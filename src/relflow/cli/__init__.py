@@ -3,20 +3,29 @@
 import json
 import sys
 
+from click import ClickException, UsageError
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
+
 from relflow.cli.commands import app
 
 __all__ = ["app", "main"]
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Preserve programmatic exit codes while Typer owns parsing and help."""
+    """Return an exit code; Typer dispatches commands and owns argument parsing."""
     arguments = sys.argv[1:] if argv is None else argv
-    invocation: dict[str, bool] = {}
     try:
-        app(args=arguments, prog_name="relflow", obj=invocation)
-    except SystemExit as error:
-        code = error.code if isinstance(error.code, int) else 1
-        if code == 2 and not invocation.get("executed") and "--json" in arguments:
+        return app(args=arguments, prog_name="relflow", standalone_mode=False) or 0
+    except ClickException as error:
+        console = Console(stderr=True, markup=False, highlight=False)
+        if isinstance(error, UsageError) and error.ctx is not None:
+            console.print(Text(error.ctx.get_usage()))
+        console.print(Panel(Text(error.format_message()), title="Error", border_style="red"))
+        # A usage error can precede parsing --json; stop at the literal-argument delimiter.
+        options = arguments[: arguments.index("--")] if "--" in arguments else arguments
+        if "--json" in options:
             print(
                 json.dumps(
                     {
@@ -25,10 +34,9 @@ def main(argv: list[str] | None = None) -> int:
                         "status": "failed",
                         "error": {
                             "type": "UsageError",
-                            "message": "Invalid command-line arguments; see stderr for usage details.",
+                            "message": error.format_message(),
                         },
                     }
                 )
             )
-        return code
-    return 0
+        return error.exit_code

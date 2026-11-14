@@ -24,6 +24,7 @@ dependencies = [
     "typing-extensions>=4.12",
     "rich>=14.0.0",
     "typer>=0.25.1,<1",
+    "click>=8.2,<9",
 ]
 
 [project.scripts]

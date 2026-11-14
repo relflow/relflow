@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Generator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 import torch
@@ -19,6 +19,9 @@ from relflow.data.sources import Source, source
 from relflow.presets.base import Preset, resolve
 from relflow.structs.enums import Strata
 from relflow.structs.experiment import Schema
+
+if TYPE_CHECKING:
+    from relflow.architecture.root import Model
 
 __all__ = ["check", "inspect"]
 
@@ -40,33 +43,29 @@ class Artifact:
         if path.suffix.lower() in (".yaml", ".yml"):
             options, profile = template.read(path, {})
             batch_size = options.pop("batch_size", 1)
+            if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size < 1:
+                raise ValueError(f"model {path}: batch_size must be a positive integer, got {batch_size!r}")
             schema = Schema.from_tree(**options) if profile is None else resolve(profile, **options)
             state = None
             version = __version__
         else:
-            state = torch.load(path, map_location="cpu", weights_only=False)
-            if not isinstance(state, dict):
-                raise ValueError(f"checkpoint {path}: expected a checkpoint mapping")
-            CheckpointState.require(state)
+            state = CheckpointState.read(path)
             schema = Schema.model_validate(state["schema"])
             profile = None if state.get("preset") is None else Preset.model_validate(state["preset"])
             batch_size, version = state["batch_size"], state["version"]
-            if not isinstance(state["state_dict"], dict):
-                raise ValueError(f"checkpoint {path}: state_dict must be a mapping")
-        if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size < 1:
-            raise ValueError(f"model {path}: batch_size must be a positive integer, got {batch_size!r}")
-        if not isinstance(version, str):
-            raise ValueError(f"model {path}: producing version must be a string")
         return cls(path, schema, profile, batch_size, version, state)
 
-    def build(self):
+    @property
+    def resumable(self) -> bool:
+        return self.state is not None and "optimizer_states" in self.state and "loops" in self.state
+
+    def build(self) -> Model:
         from relflow.architecture.root import Model
 
+        if self.state is not None:
+            return CheckpointState.build(Model, self.state)
         model = Model(schema=self.schema, batch_size=self.batch_size)
         model.preset = self.preset
-        if self.state is not None:
-            CheckpointState.restore_metadata(model, self.state)
-            model.load_state_dict(self.state["state_dict"])
         return model
 
     def report(self) -> dict[str, Any]:
@@ -94,7 +93,7 @@ class Artifact:
             "representations": list(map(str, self.schema.embed)),
             "stored_tensors": len(tensors),
             "stored_tensor_bytes": sum(value.numel() * value.element_size() for value in tensors),
-            "resumable": self.state is not None and "optimizer_states" in self.state and "loops" in self.state,
+            "resumable": self.resumable,
         }
 
 

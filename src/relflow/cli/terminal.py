@@ -1,18 +1,61 @@
-"""Human-readable CLI reports using Rich's standard terminal renderables."""
+"""CLI output, diagnostics, and Rich report rendering."""
 
 from __future__ import annotations
 
+import json as jsonlib
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext, redirect_stdout
 from typing import Any
 
+import typer
+import yaml
 from rich.console import Console
 from rich.filesize import decimal
 from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
+from relflow.logging import configure
 from relflow.structs.tree import Address
 
-__all__ = ["render"]
+__all__ = ["report", "render"]
+
+
+@contextmanager
+def report(command: str, *, json: bool = False, debug: bool = False) -> Iterator[dict[str, Any]]:
+    """Keep backend output on stderr and emit one terminal result per command."""
+    result: dict[str, Any] = {"schema_version": 1, "command": command, "status": "running"}
+    console = Console(markup=False, highlight=False)
+    errors = Console(stderr=True, markup=False, highlight=False)
+    configure(level="debug" if debug else "warning", output=sys.stderr)
+    activity = (
+        errors.status(Text(f"Running {command}…"))
+        if errors.is_terminal and not json and command != "serve"
+        else nullcontext()
+    )
+    try:
+        with activity, redirect_stdout(sys.stderr):
+            yield result
+    except (Exception, KeyboardInterrupt) as error:
+        # Job has already recorded failures that occurred after output reservation.
+        recorded = result["status"] == "failed"
+        result.update(status="failed", error={"type": type(error).__name__, "message": str(error)})
+        if json:
+            print(jsonlib.dumps(result, allow_nan=False))
+        errors.print(Text.assemble((f"relflow {command}: ", "bold red"), str(error) or "interrupted"))
+        if debug:
+            errors.print_exception(show_locals=False)
+        if isinstance(error, KeyboardInterrupt):
+            raise typer.Exit(130) from error
+        invalid = isinstance(
+            error, (ValueError, TypeError, FileNotFoundError, FileExistsError, ImportError, yaml.YAMLError)
+        )
+        raise typer.Exit(2 if invalid and not recorded else 1) from error
+    if json:
+        print(jsonlib.dumps(result, allow_nan=False))
+    else:
+        render(result, console)
 
 
 def model_tree(definition: dict[str, Any], parents: tuple[str, ...], report: dict[str, Any]) -> Tree:

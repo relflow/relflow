@@ -42,6 +42,40 @@ def test_writer_persists_the_written_arrow_table(tmp_path):
     assert writer.writer is None
 
 
+@pytest.mark.parametrize("format", ["parquet", "ipc"])
+def test_finish_publishes_a_typed_empty_prediction(tmp_path, format):
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, amount=rf.Number, label=rf.Boolean(mask=True))
+    schema = pa.schema([("id", pa.string()), ("amount", pa.float64())])
+    writer = rf.Writer(tmp_path, format=format)
+    writer.finish(model, schema, retain=("id",))
+    path = tmp_path / ("rank-0.parquet" if format == "parquet" else "rank-0.arrow")
+    restored = pq.read_table(path) if format == "parquet" else ipc.open_file(path).read_all()
+    assert restored.num_rows == 0
+    assert restored.column_names == ["inputs", "predictions"]
+    assert restored.schema.field("inputs").type == pa.struct([("id", pa.string())])
+    assert restored.schema.metadata is not None
+    assert writer.source_rows == writer.written_rows == 0
+    assert not list(tmp_path.glob("*.partial"))
+
+
+def test_finish_requires_a_schema_for_an_empty_prediction(tmp_path):
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, label=rf.Boolean(mask=True))
+    writer = rf.Writer(tmp_path, format="ipc")
+    with pytest.raises(RuntimeError, match="no processed schema"):
+        writer.finish(model, None)
+    assert not list(tmp_path.iterdir())
+
+
+def test_finish_does_not_replace_an_already_published_shard(tmp_path):
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, label=rf.Boolean(mask=True))
+    writer = rf.Writer(tmp_path)
+    output = pa.table({"value": [1]})
+    writer.write(output)
+    writer.close()
+    writer.finish(model, None)
+    assert pq.read_table(tmp_path / "rank-0.parquet").equals(output)
+
+
 def test_ipc_writer_streams_sparse_vectors_and_structural_holes(tmp_path):
     vector = pa.list_(pa.field("element", pa.float32()), 2)
     item = pa.struct([("embedding", vector)])

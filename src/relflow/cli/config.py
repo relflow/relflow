@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import importlib
+import json
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal, Self, TypeVar
 from urllib.parse import urlsplit
 
 import yaml
@@ -13,17 +15,23 @@ from pydantic import BaseModel, ConfigDict, Field
 from relflow.architecture.template import Loader
 from relflow.data.processors import Postprocessor, Preprocessor
 
-__all__ = ["Run", "read", "processor", "location"]
+__all__ = ["Run", "read", "restore", "processor", "location"]
 
 Positive = Annotated[int, Field(gt=0)]
 Nonnegative = Annotated[int, Field(ge=0)]
 Stage = Literal["train", "validate", "test", "predict"]
 Format = Literal["parquet", "ipc"]
 Level = Literal["critical", "error", "warning", "info", "debug", "trace"]
+P = TypeVar("P", Preprocessor, Postprocessor)
 
 
 class Options(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+
+    def override(self, **values: object) -> Self:
+        """Validate explicit overrides; an omitted option preserves the file value."""
+        supplied = {name: value for name, value in values.items() if value is not None}
+        return type(self).model_validate(self.model_dump() | supplied)
 
 
 class LoaderOptions(Options):
@@ -86,6 +94,12 @@ class Run(Options):
     predict: Predict = Field(default_factory=Predict)
     serve: Serve = Field(default_factory=Serve)
 
+    def register(self, imports: Sequence[str] | None = None) -> None:
+        """Import application modules before resolving registered model declarations."""
+        self.imports.extend(imports or ())
+        for module in self.imports:
+            importlib.import_module(module)
+
     def check_training(self) -> None:
         """Check whether the configured selection policy can observe its monitor."""
         if self.fit.monitor == "loss/validate" and (self.fit.early_stopping or self.fit.rollback):
@@ -108,10 +122,11 @@ def location(value: str, base: Path) -> str:
     return value if "://" in value else str((base / Path(value).expanduser()).resolve())
 
 
-def read(pathname: str | Path | None) -> Run:
+def read(pathname: Path | None) -> Run:
+    """Read settings and resolve data paths relative to the run file."""
     if pathname is None:
         return Run()
-    path = Path(pathname).resolve()
+    path = pathname.resolve()
     payload = yaml.load(path.read_text(encoding="utf-8"), Loader=Loader)
     if not isinstance(payload, dict):
         raise ValueError(f"run configuration {path}: expected one mapping")
@@ -127,10 +142,22 @@ def read(pathname: str | Path | None) -> Run:
     return run
 
 
-def processor(reference: str | None, kind: type[Preprocessor] | type[Postprocessor]) -> Any:
+def restore(directory: Path) -> tuple[Run, Path]:
+    """Recover the configuration and last checkpoint of a recorded CLI run."""
+    directory = directory.resolve()
+    resolved = yaml.load((directory / "resolved.yaml").read_text(encoding="utf-8"), Loader=Loader)
+    report = json.loads((directory / "report.json").read_text(encoding="utf-8"))
+    checkpoint = report.get("last_checkpoint")
+    if not isinstance(checkpoint, str) or not Path(checkpoint).is_file():
+        raise ValueError(f"run {directory}: no full last checkpoint is available to resume")
+    run = Run.model_validate(resolved["run"])
+    return run, Path(checkpoint)
+
+
+def processor(reference: str | None, kind: type[P]) -> P | None:
     """Resolve an application-owned, already configured processor object."""
     if reference is None:
-        return ()
+        return None
     module, separator, name = reference.partition(":")
     if not separator or not module or not name:
         raise ValueError(f"processor {reference!r}: expected an installed module:object reference")

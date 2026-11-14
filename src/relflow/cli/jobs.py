@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from importlib.metadata import version
@@ -13,16 +14,9 @@ from typing import Any, Literal
 import yaml
 
 from relflow.data.sources import Source
+from relflow.structs.enums import Strata
 
-__all__ = ["ExecutionError", "Job", "digest", "manifest"]
-
-
-class ExecutionError(RuntimeError):
-    """An already-reserved job failed and retained its terminal receipt."""
-
-    def __init__(self, report: dict[str, Any]):
-        self.report = report
-        super().__init__(report["error"]["message"])
+__all__ = ["Job", "digest", "snapshot"]
 
 
 def digest(path: str | Path) -> str:
@@ -33,16 +27,16 @@ def digest(path: str | Path) -> str:
     return checksum.hexdigest()
 
 
-def manifest(sources: dict) -> dict[str, Any]:
+def snapshot(sources: Mapping[Strata, Source]) -> dict[str, Any]:
+    """Freeze the files used by each split and describe that exact selection."""
     result = {}
     for split, selected in sources.items():
-        if not isinstance(selected, Source):
-            continue
-        snapshot = selected.manifest or selected.discover()
-        selected.manifest = snapshot
+        if selected.manifest is None:
+            selected.manifest = selected.discover()
+        manifest = selected.manifest
         result[str(split)] = {
-            "schema": str(snapshot.schema),
-            "files": [{"path": item.path, "size": item.size, "modified": item.modified} for item in snapshot.files],
+            "schema": str(manifest.schema),
+            "files": [{"path": item.path, "size": item.size, "modified": item.modified} for item in manifest.files],
             "identity": "file metadata; content not hashed",
         }
     return result
@@ -75,14 +69,14 @@ class Job:
     def __enter__(self) -> Job:
         self.path.mkdir(parents=True, exist_ok=False)
         self.metadata.mkdir(exist_ok=True)
-        self.report = {
-            "schema_version": 1,
-            "command": self.command,
-            "status": "running",
-            "output": str(self.path),
-            "started_at": datetime.now(timezone.utc).isoformat(),
-            "versions": {name: version(name) for name in ("relflow", "torch", "lightning", "pyarrow", "polars")},
-        }
+        self.report.update(
+            schema_version=1,
+            command=self.command,
+            status="running",
+            output=str(self.path),
+            started_at=datetime.now(timezone.utc).isoformat(),
+            versions={name: version(name) for name in ("relflow", "torch", "lightning", "pyarrow", "polars")},
+        )
         self.write("resolved.yaml", self.configuration)
         self.write("report.json", self.report)
         return self
@@ -92,8 +86,6 @@ class Job:
             self.report.update(status="failed", error={"type": type(error).__name__, "message": str(error)})
             self.report["finished_at"] = datetime.now(timezone.utc).isoformat()
             self.write("report.json", self.report)
-            if isinstance(error, Exception):
-                raise ExecutionError(self.report) from error
         return False
 
     def complete(self, **fields: Any) -> dict[str, Any]:

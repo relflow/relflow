@@ -1,15 +1,29 @@
-"""Typed command declarations, generated help, and native shell completion."""
+"""Shell workflows over relflow's model and file APIs."""
 
 from __future__ import annotations
 
+import math
+import os
 from pathlib import Path
 from typing import Annotated
 
+import lightning.pytorch as lit
+import torch
 import typer
+from lightning.pytorch.callbacks import ModelCheckpoint
 
 from relflow._version import __version__
-from relflow.cli.config import Format, Level, Stage
-from relflow.cli.workflows import run
+from relflow.cli.config import Format, Level, Stage, location, processor, read, restore
+from relflow.cli.jobs import Job, digest, snapshot
+from relflow.cli.terminal import report
+from relflow.data.datasets.arrow import ArrowDataModule
+from relflow.data.processors import Postprocessor, Preprocessor
+from relflow.data.sources import source
+from relflow.inference.callback import Writer
+from relflow.inspection import Artifact
+from relflow.inspection import check as check_model
+from relflow.inspection import inspect as inspect_model
+from relflow.structs.enums import Strata
 
 __all__ = ["app"]
 
@@ -38,40 +52,17 @@ Retain = Annotated[list[str] | None, typer.Option(help="Retain a processed input
 
 @app.callback(invoke_without_command=True)
 def root(
-    context: typer.Context,
     version: Annotated[
         bool, typer.Option("--version", is_eager=True, help="Show the installed relflow version.")
     ] = False,
 ) -> None:
-    if context.resilient_parsing:
-        return
     if version:
         typer.echo(f"relflow {__version__}")
         raise typer.Exit()
-    if context.invoked_subcommand is None:
-        typer.echo(context.get_help())
-        raise typer.Exit(2)
-
-
-def dispatch(context: typer.Context) -> None:
-    """Only explicit CLI parameters override run files, including false flags."""
-    context.ensure_object(dict)["executed"] = True
-    arguments = {}
-    for name, value in context.params.items():
-        source = context.get_parameter_source(name)
-        if source is not None and source.name == "COMMANDLINE":
-            if isinstance(value, tuple):
-                value = list(value)
-            elif isinstance(value, Path):
-                value = str(value)
-            arguments[name] = value
-    arguments["command"] = context.info_name
-    raise typer.Exit(run(arguments))
 
 
 @app.command()
 def inspect(
-    context: typer.Context,
     model: Model,
     config: Config = None,
     imports: Imports = None,
@@ -79,12 +70,14 @@ def inspect(
     debug: Debug = False,
 ) -> None:
     """Inspect a model's schema and CPU checkpoint metadata without building its graph."""
-    dispatch(context)
+    with report("inspect", json=json, debug=debug) as result:
+        run = read(config)
+        run.register(imports)
+        result.update(inspect_model(model))
 
 
 @app.command()
 def check(
-    context: typer.Context,
     model: Model,
     config: Config = None,
     imports: Imports = None,
@@ -96,12 +89,29 @@ def check(
     debug: Debug = False,
 ) -> None:
     """Check declarations and sources, optionally executing sampled tensorization."""
-    dispatch(context)
+    with report("check", json=json, debug=debug) as result:
+        if sample is not None and not execute:
+            raise ValueError("--sample requires --execute; sampled checks can initialize encoders and stores")
+        run = read(config)
+        if input is not None:
+            run.data = {stage: location(input, Path.cwd())}
+        elif config is not None and "train" in run.data:
+            run.check_training()
+        run.register(imports)
+        result.update(
+            check_model(
+                model,
+                data={str(split): value for split, value in run.data.items()},
+                execute=execute,
+                sample=128 if sample is None else sample,
+                preprocessor=processor(run.preprocessor, Preprocessor),
+                seed=run.seed,
+            )
+        )
 
 
 @app.command()
 def train(
-    context: typer.Context,
     output: Output,
     model: Annotated[Path | None, typer.Argument(help="Architecture YAML or a learned artifact.")] = None,
     config: Config = None,
@@ -125,12 +135,130 @@ def train(
     debug: Debug = False,
 ) -> None:
     """Train from a template, adapt an artifact, or resume a full checkpoint."""
-    dispatch(context)
+    with report("train", json=json, debug=debug) as result:
+        checkpoint = None
+        if resume is not None:
+            replacements = (
+                model,
+                config,
+                imports,
+                train,
+                validate,
+                batch_size,
+                accelerator,
+                precision,
+                learning_rate,
+                weight_decay,
+                max_steps,
+                early_stopping,
+                rollback,
+                monitor,
+                patience,
+                seed,
+            )
+            if any(value is not None for value in replacements):
+                raise ValueError("resume cannot replace its model, data, or runtime settings")
+            run, model = restore(resume)
+            checkpoint = model
+        else:
+            if model is None:
+                raise ValueError("train requires a model template or artifact, or --resume RUN_DIRECTORY")
+            run = read(config)
+        run.fit = run.fit.override(
+            batch_size=batch_size,
+            accelerator=accelerator,
+            precision=precision,
+            learning_rate=learning_rate,
+            weight_decay=weight_decay,
+            max_epochs=max_epochs,
+            max_steps=max_steps,
+            early_stopping=early_stopping,
+            rollback=rollback,
+            monitor=monitor,
+            patience=patience,
+        )
+        if seed is not None:
+            run.seed = seed
+        if train is not None:
+            run.data["train"] = location(train, Path.cwd())
+        if validate is not None:
+            run.data["validate"] = location(validate, Path.cwd())
+        run.check_training()
+        if "train" not in run.data:
+            raise ValueError("train requires data.train in --config or an explicit --train")
+        run.register(imports)
+        sources = {
+            Strata.normalize(split): source(value)
+            for split, value in run.data.items()
+            if split in ("train", "validate")
+        }
+        files = snapshot(sources)
+        data = ArrowDataModule(
+            train=sources[Strata.train],
+            validate=sources.get(Strata.validate),
+            **run.loader.model_dump(),
+            seed=run.seed,
+            preprocessor=processor(run.preprocessor, Preprocessor),
+        )
+        artifact = Artifact.read(model)
+        if checkpoint is not None and not artifact.resumable:
+            raise ValueError(f"checkpoint {checkpoint}: resume requires optimizer and loop state")
+        configuration = {
+            "model": str(artifact.path),
+            "model_sha256": digest(artifact.path),
+            "run": run.model_dump(mode="json"),
+        }
+        with Job(output.resolve(), "train", configuration, result) as job:
+            job.write("sources.json", files)
+            result.update(
+                seed=run.seed, model_source=str(artifact.path), model_source_sha256=configuration["model_sha256"]
+            )
+            lit.seed_everything(run.seed, workers=True)
+            instance = artifact.build()
+            callbacks = (
+                []
+                if run.fit.rollback
+                else [ModelCheckpoint(dirpath=job.path / "checkpoints", save_last=True, save_top_k=0)]
+            )
+            result["last_checkpoint"] = str(job.path / "checkpoints" / "last.ckpt")
+            job.write("report.json", result)
+            instance.fit(
+                data,
+                **run.fit.model_dump(exclude_none=True),
+                devices=1,
+                enable_progress_bar=False,
+                checkpoint_dir=job.path / "checkpoints",
+                ckpt_path=checkpoint,
+                callbacks=callbacks,
+                default_root_dir=str(job.path),
+            )
+            trainer = instance.trainer
+            if trainer.interrupted:
+                raise KeyboardInterrupt
+            instance.save(job.path / "model.rf")
+            metrics = {}
+            for name, value in trainer.callback_metrics.items():
+                if isinstance(value, torch.Tensor) and value.numel() == 1:
+                    number = value.item()
+                    metrics[name] = number if math.isfinite(number) else None
+            checkpoints = [item for item in trainer.checkpoint_callbacks if isinstance(item, ModelCheckpoint)]
+            job.complete(
+                model=str(job.path / "model.rf"),
+                model_sha256=digest(job.path / "model.rf"),
+                last_checkpoint=next((item.last_model_path for item in checkpoints if item.last_model_path), None),
+                best_checkpoint=next((item.best_model_path for item in checkpoints if item.best_model_path), None),
+                parent_checkpoint=None if checkpoint is None else str(checkpoint),
+                global_step=trainer.global_step,
+                epoch=trainer.current_epoch,
+                metrics=metrics,
+                accelerator=type(trainer.accelerator).__name__,
+                precision=trainer.precision,
+                devices=1,
+            )
 
 
 @app.command()
 def predict(
-    context: typer.Context,
     model: Model,
     output: Output,
     config: Config = None,
@@ -145,12 +273,75 @@ def predict(
     debug: Debug = False,
 ) -> None:
     """Stream file-backed predictions without collecting the full result in memory."""
-    dispatch(context)
+    with report("predict", json=json, debug=debug) as result:
+        run = read(config)
+        run.predict = run.predict.override(
+            batch_size=batch_size,
+            accelerator=accelerator,
+            precision=precision,
+            retain=retain,
+            format=format,
+        )
+        if input is not None:
+            run.data["predict"] = location(input, Path.cwd())
+        if "predict" not in run.data:
+            raise ValueError("predict requires data.predict in --config or an explicit --input")
+        run.register(imports)
+        selected = source(run.data["predict"])
+        files = snapshot({Strata.predict: selected})
+        artifact = Artifact.read(model)
+        if artifact.state is None:
+            raise ValueError(f"predict requires a learned checkpoint, got template {model}")
+        options = run.predict
+        data = ArrowDataModule(
+            predict=selected,
+            **run.loader.model_dump(),
+            seed=run.seed,
+            preprocessor=processor(run.preprocessor, Preprocessor),
+            retain=tuple(options.retain),
+        )
+        postprocess = processor(run.postprocessor, Postprocessor)
+        configuration = {
+            "model": str(artifact.path),
+            "model_sha256": digest(artifact.path),
+            "run": run.model_dump(mode="json"),
+        }
+        with Job(output.resolve(), "predict", configuration, result) as job:
+            job.write("sources.json", files)
+            result.update(
+                seed=run.seed, model_source=str(artifact.path), model_source_sha256=configuration["model_sha256"]
+            )
+            lit.seed_everything(run.seed, workers=True)
+            instance = artifact.build()
+            writer = Writer(
+                job.path, format=options.format, postprocessor=postprocess, row_group_size=options.row_group_size
+            )
+            execution = options.model_dump(include={"accelerator", "precision"}, exclude_none=True)
+            instance.predict(
+                datamodule=data,
+                batch_size=options.batch_size,
+                **execution,
+                devices=1,
+                enable_progress_bar=False,
+                callbacks=[writer],
+                return_predictions=False,
+            )
+            if instance.trainer.interrupted:
+                raise KeyboardInterrupt
+            writer.finish(instance, data.schemas[Strata.predict].processed, retain=tuple(options.retain))
+            job.complete(
+                processed_rows=writer.source_rows,
+                written_rows=writer.written_rows,
+                format=options.format,
+                shards=[{"path": str(path), "size": path.stat().st_size} for path in sorted(job.path.glob("rank-*.*"))],
+                accelerator=type(instance.trainer.accelerator).__name__,
+                precision=instance.trainer.precision,
+                devices=1,
+            )
 
 
 @app.command()
 def serve(
-    context: typer.Context,
     model: Model,
     config: Config = None,
     imports: Imports = None,
@@ -166,4 +357,29 @@ def serve(
     debug: Debug = False,
 ) -> None:
     """Start the optional HTTP runtime for a saved model."""
-    dispatch(context)
+    with report("serve", json=json, debug=debug) as result:
+        run = read(config)
+        run.serve = run.serve.override(
+            host=host,
+            port=port,
+            accelerator=accelerator,
+            retain=retain,
+            max_batch_size=max_batch_size,
+            batch_timeout=batch_timeout,
+            max_queue_size=max_queue_size,
+            log_level=log_level,
+        )
+        if model.suffix.lower() in (".yaml", ".yml"):
+            raise ValueError(f"serve requires a learned checkpoint, got template {model}")
+        run.register(imports)
+        from relflow.inference import Deployment
+
+        options = run.serve.model_dump(exclude_none=True)
+        options.setdefault("host", os.environ.get("RELFLOW_HOST", "127.0.0.1"))
+        if run.serve.retain is not None:
+            options["retain"] = tuple(run.serve.retain)
+        deployment = Deployment(checkpoint=model.resolve(), workers=1, **options)
+        deployment.preprocess(processor(run.preprocessor, Preprocessor))
+        deployment.postprocess(processor(run.postprocessor, Postprocessor))
+        deployment.serve()
+        result["status"] = "success"

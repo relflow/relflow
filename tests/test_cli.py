@@ -23,11 +23,10 @@ import torch
 import yaml
 
 import relflow as rf
-import relflow.cli.workflows as workflows
+import relflow.cli.commands as commands
 from relflow.cli import main
 from relflow.cli.config import Run, read
 from relflow.cli.jobs import Job
-from relflow.cli.workflows import train
 
 
 @pytest.fixture
@@ -169,15 +168,32 @@ def test_run_paths_resolve_against_configuration(inputs, monkeypatch, tmp_path):
     assert read(config).data["train"] == str(data)
 
 
-def test_explicit_flags_override_run_options_and_paths(inputs, monkeypatch, capsys):
+@pytest.fixture
+def training(monkeypatch):
+    trainer = SimpleNamespace(
+        options={},
+        interrupted=False,
+        callback_metrics={},
+        checkpoint_callbacks=[],
+        global_step=0,
+        current_epoch=0,
+        accelerator=None,
+        precision="32-true",
+    )
+
+    def fit(model, data, **options):
+        trainer.options = options
+        trainer.data = data
+        return model
+
+    monkeypatch.setattr(rf.Model, "fit", fit)
+    monkeypatch.setattr(rf.Model, "trainer", property(lambda model: trainer))
+    return trainer
+
+
+def test_explicit_flags_override_run_options_and_paths(inputs, training, tmp_path, capsys):
     model, data, config = inputs
-    captured = {}
-
-    def execute(arguments, run, pathname, checkpoint):
-        captured.update(run=run, pathname=pathname, checkpoint=checkpoint)
-        return {"command": "train", "status": "success"}
-
-    monkeypatch.setattr(workflows, "execute", execute)
+    output = tmp_path / "run"
     assert (
         main(
             [
@@ -190,18 +206,98 @@ def test_explicit_flags_override_run_options_and_paths(inputs, monkeypatch, caps
                 "--train",
                 str(data),
                 "--output",
-                "unused",
+                str(output),
                 "--json",
             ]
         )
         == 0
     )
-    run, pathname, checkpoint = captured["run"], captured["pathname"], captured["checkpoint"]
-    assert run.fit.batch_size == 7
-    assert run.fit.max_epochs == 1
-    assert run.data["train"] == str(data)
-    assert pathname == str(model)
-    assert checkpoint is None
+    assert training.options["batch_size"] == 7
+    assert training.options["max_epochs"] == 1
+    assert training.options["ckpt_path"] is None
+    resolved = yaml.safe_load((output / "resolved.yaml").read_text())
+    assert resolved["run"]["data"]["train"] == str(data)
+    assert resolved["model"] == str(model)
+    assert json.loads(capsys.readouterr().out)["status"] == "success"
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+@pytest.mark.parametrize("flags", [[], ["--no-rollback", "--no-early-stopping"], ["--rollback", "--early-stopping"]])
+def test_training_flags_preserve_or_override_run_policy(inputs, training, tmp_path, capsys, flags, enabled):
+    model, _, config = inputs
+    payload = yaml.safe_load(config.read_text())
+    payload["fit"].update(rollback=enabled, early_stopping=enabled)
+    config.write_text(yaml.safe_dump(payload))
+    assert (
+        main(["train", str(model), "--config", str(config), "--output", str(tmp_path / "run"), *flags, "--json"]) == 0
+    )
+    expected = "--rollback" in flags if flags else enabled
+    assert training.options["rollback"] is expected
+    assert training.options["early_stopping"] is expected
+    assert json.loads(capsys.readouterr().out)["status"] == "success"
+
+
+def test_inspection_does_not_resolve_unused_processors(inputs, tmp_path, capsys):
+    model, _, config = inputs
+    payload = yaml.safe_load(config.read_text())
+    payload.update(preprocessor="unavailable_application:prepare", postprocessor="unavailable_application:write")
+    config.write_text(yaml.safe_dump(payload))
+    assert main(["inspect", str(model), "--config", str(config), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["objectives"] == ["/events/label"]
+
+
+def test_training_does_not_resolve_an_unused_postprocessor(inputs, training, tmp_path, capsys):
+    model, _, config = inputs
+    payload = yaml.safe_load(config.read_text())
+    payload["postprocessor"] = "unavailable_application:write"
+    config.write_text(yaml.safe_dump(payload))
+    assert main(["train", str(model), "--config", str(config), "--output", str(tmp_path / "run"), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "success"
+
+
+def test_invalid_training_options_do_not_import_application_modules(inputs, tmp_path, capsys):
+    model, _, config = inputs
+    payload = yaml.safe_load(config.read_text())
+    payload["imports"] = ["unavailable_application"]
+    config.write_text(yaml.safe_dump(payload))
+    assert (
+        main(
+            [
+                "train",
+                str(model),
+                "--config",
+                str(config),
+                "--learning-rate",
+                "0",
+                "--output",
+                str(tmp_path / "run"),
+                "--json",
+            ]
+        )
+        == 2
+    )
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert error["type"] == "ValidationError"
+    assert "learning_rate" in error["message"]
+
+
+def test_serving_passes_the_checkpoint_to_the_runtime_without_preloading(inputs, tmp_path, monkeypatch, capsys):
+    model, _, _ = inputs
+    checkpoint = tmp_path / "model.rf"
+    rf.Model.from_yaml(model).save(checkpoint)
+    served = []
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("CLI loaded a checkpoint that belongs to the serving runtime")
+
+    def serve(deployment):
+        served.append((deployment.checkpoint, deployment.host))
+
+    monkeypatch.setattr(commands.Artifact, "read", forbidden)
+    monkeypatch.setattr(rf.Deployment, "serve", serve)
+    monkeypatch.delenv("RELFLOW_HOST", raising=False)
+    assert main(["serve", str(checkpoint), "--json"]) == 0
+    assert served == [(checkpoint, "127.0.0.1")]
     assert json.loads(capsys.readouterr().out)["status"] == "success"
 
 
@@ -316,21 +412,15 @@ def test_job_failure_preserves_receipt_and_has_no_success_marker(tmp_path):
             pass
 
 
-def test_trainer_interrupt_never_publishes_a_successful_model(tmp_path):
-    class Interrupted:
-        trainer = SimpleNamespace(interrupted=True)
-
-        def fit(self, *args, **kwargs):
-            pass
-
-        def save(self, *args):
-            pytest.fail("an interrupted fit published an inference artifact")
-
+def test_trainer_interrupt_never_publishes_a_successful_model(inputs, training, tmp_path, capsys):
+    model, _, config = inputs
+    training.interrupted = True
     output = tmp_path / "interrupted"
-    with pytest.raises(KeyboardInterrupt):
-        with Job(output, "train", {}) as job:
-            train(Interrupted(), SimpleNamespace(), Run(), job, None)
-    assert json.loads((output / "report.json").read_text())["status"] == "failed"
+    assert main(["train", str(model), "--config", str(config), "--output", str(output), "--json"]) == 130
+    receipt = json.loads((output / "report.json").read_text())
+    assert receipt["status"] == "failed"
+    assert json.loads(capsys.readouterr().out) == receipt
+    assert not (output / "model.rf").exists()
     assert not (output / "_SUCCESS").exists()
 
 
