@@ -653,3 +653,107 @@ def test_time_spacing_changes_encoding_but_not_routed_positions():
 def test_timed_branch_without_geometry_times_raises():
     with pytest.raises(ValueError, match="branch '/ett' sets time_index='ts' but the batch geometry has no times"):
         timed_run([0.0, 1.0, 2.0], geometry=False)
+
+
+def test_plain_branch_builds_no_gap_embedding_and_keeps_its_state_dict():
+    schema = rf.Schema.from_tree(d_model=16, n_layers=1, n_heads=4, ett=rf.Branch(length=3, value=rf.Number))
+    encoder = BranchEncoder(schema=schema, address="/ett")
+    assert encoder.elapsed is None
+    assert not any(key.startswith("elapsed") for key in encoder.state_dict())
+
+
+def mixed_input(times, *, grain, present=None, elapsed=True):
+    """Run a timed branch and return what its mixer received, with the gap embedding on or off."""
+    torch.manual_seed(0)
+    length = len(times)
+    schema = rf.Schema.from_tree(
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+        ett=rf.Branch(
+            length=length,
+            time_index="ts",
+            grain=grain,
+            mixer=rf.Conv(n_blocks=1) if isinstance(grain, rf.Steps) else rf.Transformer(),
+            direction=rf.Direction.causal if isinstance(grain, rf.Steps) else rf.Direction.bidirectional,
+            reduction=None,
+            ts=rf.Number,
+            value=rf.Number,
+            other=rf.Number,
+        ),
+    )
+    encoder = BranchEncoder(schema=schema, address="/ett").eval()
+    if not elapsed:
+        encoder.elapsed = None
+    seen = []
+    encoder.encoder.register_forward_pre_hook(lambda module, args, kwargs: seen.append(args[0]), with_kwargs=True)
+    generator = torch.Generator().manual_seed(1)
+    flags = torch.ones(length, dtype=torch.bool) if present is None else present
+
+    def parcel(name):
+        return Parcel(
+            origin=f"/ett/{name}",
+            destination="/ett",
+            payload=torch.randn(1, 1, length, 16, generator=generator),
+            present=flags.clone().reshape(1, 1, length),
+            positions=torch.arange(length).expand(1, 1, length),
+            spans=torch.full((1, 1), length),
+            slots=torch.ones(1, 1, length, dtype=torch.bool),
+            batch_size=1,
+        )
+
+    root = Geometry(
+        lengths=torch.ones(1, dtype=torch.int64),
+        present=torch.ones(1, dtype=torch.bool),
+        valid=torch.ones(1, dtype=torch.bool),
+        slots=torch.ones(1, 1, dtype=torch.bool),
+        batch_size=[1],
+    )
+    branch = Geometry(
+        lengths=torch.full((1, 1), length),
+        present=torch.ones(1, 1, dtype=torch.bool),
+        valid=torch.ones(1, 1, dtype=torch.bool),
+        slots=torch.ones(1, 1, length, dtype=torch.bool),
+        times=torch.tensor([[times]], dtype=torch.float64),
+        batch_size=[1],
+    )
+    inputs = TensorDict({"/": root, "/ett": branch}, batch_size=[1])
+    encoder([parcel("ts"), parcel("value"), parcel("other")][:3], geometry=inputs)
+    return encoder, seen[0]
+
+
+def test_conv_output_changes_when_only_gaps_change():
+    even, uneven = (mixed_input(times, grain=rf.Steps())[1] for times in ([0.0, 1.0, 2.0, 3.0], [0.0, 1.0, 5.0, 6.0]))
+    assert not torch.allclose(even, uneven)
+    plain = [
+        mixed_input(times, grain=rf.Steps(), elapsed=False)[1] for times in ([0.0, 1.0, 2.0, 3.0], [0.0, 1.0, 5.0, 6.0])
+    ]
+    torch.testing.assert_close(plain[0], plain[1], rtol=0, atol=0)
+
+
+def test_regular_gaps_add_one_shared_vector_after_the_first_row():
+    encoder, with_gaps = mixed_input([0.0, 1.0, 2.0, 3.0], grain=rf.Steps())
+    without = mixed_input([0.0, 1.0, 2.0, 3.0], grain=rf.Steps(), elapsed=False)[1]
+    offset = with_gaps - without
+    first, regular = encoder.elapsed(torch.tensor([0.0, 1.0], dtype=torch.float64))
+    torch.testing.assert_close(offset[0, 0], first)
+    for row in (1, 2, 3):
+        torch.testing.assert_close(offset[0, row], regular)
+
+
+def test_coordinates_grain_gives_every_token_of_a_row_its_gap():
+    times = [0.0, 1.0, 4.0]
+    encoder, with_gaps = mixed_input(times, grain=rf.Coordinates())
+    without = mixed_input(times, grain=rf.Coordinates(), elapsed=False)[1]
+    # Storage is field-major: three fields of three rows each.
+    tokens = (with_gaps - without).reshape(3, 3, 16)
+    expected = encoder.elapsed(torch.tensor([0.0, 1.0, 3.0], dtype=torch.float64))
+    for field in range(3):
+        torch.testing.assert_close(tokens[field], expected)
+
+
+def test_padding_rows_stay_zero_after_the_gap_embedding():
+    present = torch.tensor([True, False, True, False])
+    _, seen = mixed_input([0.0, 1.0, 2.0, 3.0], grain=rf.Steps(), present=present)
+    assert not seen[0, 1].any() and not seen[0, 3].any()
+    assert seen[0, 0].any() and seen[0, 2].any()
