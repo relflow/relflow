@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+import datetime
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Annotated, Any, Literal, Self, TypeAlias, cast
@@ -11,8 +12,8 @@ import pydantic
 
 from relflow.structs import declaration
 from relflow.structs.enums import AttentionInput, AttentionMode, Direction, Overflow, OverflowInput
-from relflow.structs.grain import Coordinates, GrainConfig
-from relflow.structs.mixer import MixerConfig, Transformer
+from relflow.structs.grain import Coordinates, GrainConfig, Steps
+from relflow.structs.mixer import Conv, MixerConfig, Transformer
 from relflow.structs.reduction import Attention, ReductionConfig
 from relflow.structs.tree import Leaf, Mask, MaskInput, Node, Rate
 from relflow.tensorfields import extensions as _extensions  # noqa: F401
@@ -27,7 +28,13 @@ OMITTED = object()
 # Options left at these values are omitted from dumps, so a plain branch keeps
 # the schema, YAML and checkpoint text it had before the options existed.
 IMPLICIT: Mapping[str, object] = MappingProxyType(
-    {"grain": Coordinates(), "mixer": Transformer(), "direction": Direction.bidirectional}
+    {
+        "grain": Coordinates(),
+        "mixer": Transformer(),
+        "direction": Direction.bidirectional,
+        "time_index": None,
+        "time_step": None,
+    }
 )
 
 
@@ -79,7 +86,11 @@ class Branch(Node, metaclass=BranchMeta):
     and defaults to 8 independently of its parent. ``grain`` chooses what one
     sequence token stands for, ``mixer`` chooses the sequence mixer (``None``
     disables sequence mixing while keeping coordinate attention), and
-    ``direction`` sets which steps a token may see.
+    ``direction`` sets which steps a token may see. ``time_index`` names a
+    child leaf whose values give each row a position in time, relative to the
+    first row of its record and non-decreasing; ``time_step`` is the unit of
+    those positions. They set attention positions and a learned gap embedding;
+    they do not resample rows.
     ``mask`` accepts the same policies as a leaf and applies to its descendants.
     Subclasses may declare children in their class bodies; constructing those
     subclasses configures the enclosing branch without replacing children.
@@ -98,6 +109,8 @@ class Branch(Node, metaclass=BranchMeta):
     grain: GrainConfig = pydantic.Field(default_factory=Coordinates)
     mixer: MixerConfig | None = pydantic.Field(default_factory=Transformer)
     direction: Direction = Direction.bidirectional
+    time_index: str | None = None
+    time_step: float | datetime.timedelta | None = None
     # The before-validator normalizes this public Boolean default to a tuple.
     mask: tuple[Mask, ...] = cast(tuple[Mask, ...], pydantic.Field(default=False))
     fields: list[Branch | pydantic.SerializeAsAny[pydantic.InstanceOf[Leaf]]] = pydantic.Field(default_factory=list)
@@ -119,6 +132,8 @@ class Branch(Node, metaclass=BranchMeta):
         grain: GrainConfig = cast(GrainConfig, OMITTED),
         mixer: MixerConfig | None = cast(MixerConfig | None, OMITTED),
         direction: Direction = cast(Direction, OMITTED),
+        time_index: str | None = cast(str | None, OMITTED),
+        time_step: float | datetime.timedelta | None = cast(float | datetime.timedelta | None, OMITTED),
         dropout: Rate | None = cast(Rate | None, OMITTED),
         mask: MaskInput = False,
         type: Literal["branch"] = "branch",
@@ -142,6 +157,8 @@ class Branch(Node, metaclass=BranchMeta):
             grain=grain,
             mixer=mixer,
             direction=direction,
+            time_index=time_index,
+            time_step=time_step,
             dropout=dropout,
             mask=mask,
             type=type,
@@ -205,6 +222,60 @@ class Branch(Node, metaclass=BranchMeta):
 
             compile(self.query)
         return self
+
+    @pydantic.model_validator(mode="after")
+    def check_time_index(self) -> Self:
+        if self.time_index is None:
+            return self
+        child = next((field for field in self.fields if field.name == self.time_index), None)
+        where = f"branch '{self.address or self.name}'"
+        if child is None:
+            raise ValueError(
+                f"{where} sets time_index={self.time_index!r}, but has no child named {self.time_index!r}; "
+                "name an existing child leaf or add one"
+            )
+        if isinstance(child, Branch):
+            raise ValueError(
+                f"{where} sets time_index={self.time_index!r}, which must name a leaf, not a child branch; "
+                "name a leaf child holding the time of each row"
+            )
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def check_time_step(self) -> Self:
+        if self.time_step is None:
+            return self
+        where = f"branch '{self.address or self.name}'"
+        if self.time_index is None:
+            raise ValueError(
+                f"{where} sets time_step={self.time_step!r}, which requires time_index; name the time child"
+            )
+        step = self.time_step
+        seconds = step.total_seconds() if isinstance(step, datetime.timedelta) else step
+        if seconds <= 0:
+            raise ValueError(f"{where} time_step must be positive, got {self.time_step!r}")
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def check_steps(self) -> Self:
+        if not isinstance(self.grain, Steps):
+            return self
+        unreduced = next((f for f in self.fields if isinstance(f, Branch) and f.reduction is None), None)
+        if unreduced is None:
+            return self
+        raise ValueError(
+            f"branch '{self.address or self.name}' sets grain=Steps(), so rows pool to one token, but child branch "
+            f"'{unreduced.name}' needs a reduction; set reduction=rf.Attention() or rf.Mean() on it"
+        )
+
+    @pydantic.model_validator(mode="after")
+    def check_conv(self) -> Self:
+        if not isinstance(self.mixer, Conv) or isinstance(self.grain, Steps):
+            return self
+        raise ValueError(
+            f"branch '{self.address or self.name}' sets mixer=Conv(), which convolves over rows and "
+            "requires grain=Steps(); set grain=rf.Steps() or mixer=rf.Transformer()"
+        )
 
     def model_post_init(self, __context: object) -> None:
         for field in self.fields:
