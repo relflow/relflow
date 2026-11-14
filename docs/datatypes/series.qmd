@@ -178,8 +178,9 @@ model width. See [shared leaf options](index.qmd#shared-leaf-options).
 In [prediction output](../reference/prediction-output.qmd), `content` is a list
 of `horizon` steps. With a single query, each step is a list of float64
 values; with a tuple query, each step is a struct with one float64 member per
-query text, in tuple order. The writer emits
-exactly `horizon` steps per coordinate. Parquet round-trips these lists,
+query text, in tuple order. A forecast target does not need its source
+columns at prediction time: when they are absent, the series is still
+predicted. The writer emits exactly `horizon` steps per coordinate. Parquet round-trips these lists,
 including inside a `Branch` with null items. As with other decoded fields, read
 the shared `state` and `inferred` members to learn whether a series was
 reconstructed.
