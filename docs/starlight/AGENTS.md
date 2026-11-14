@@ -89,7 +89,7 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   concepts and the homepage, with explicit `?case=` links taking precedence over
   saved preferences. Keep keyboard selection, code notes, natural panel heights,
   native navigation, and readable examples without JavaScript.
-- The Models page uses `ModelExplainer.astro` and `src/data/model-explainer.ts`
+- The Model trees page uses `ModelExplainer.astro` and `src/data/model-explainer.ts`
   to derive three steps from all six canonical schemas: one answer, added
   context, and another answer. Keep additional targets' historical-label
   requirements explicit and their dataset columns aligned. Validate projections

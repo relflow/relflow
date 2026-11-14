@@ -1,9 +1,24 @@
 ---
-title: Models and schemas
-description: Explore how typed fields, branches, and targets become model representations, context, learning objectives, and prediction outputs.
+title: Model trees
+description: Understand how nested branches and typed leaves organize data and context within a relflow model.
 ---
 
 import ConceptPage from '../../../components/ConceptPage.astro';
 import { models } from '../../../data/concepts/models';
+
+relflow models are neural architectures organized as trees of nested branches and
+typed leaves. The tree follows the structure of your data: a conversation with
+messages, an asset with sensor readings, or a policy with claims and invoices.
+
+- The **root** represents one complete observation.
+- **[Branches](/concepts/branches/)** organize collections of related records.
+  Each branch can contain its own leaves and nested branches.
+- **[Leaves](/concepts/data-types/)** describe individual fields and their data
+  types, such as numbers, categories, text, sets, or vectors.
+
+You declare this tree with Python classes: `rf.Model` for the root, `rf.Branch`
+for related records, and data types for the leaves. The declarations define
+the model's structure; training learns how to represent the values and combine
+their context.
 
 <ConceptPage concept={models} />

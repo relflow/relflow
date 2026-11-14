@@ -44,7 +44,7 @@ assets, and count inert template contents. The report is saved to
 build estimates, not measurements of hosting compression. Revise a budget
 deliberately when justified by content changes and browser measurements.
 
-The Models page has a larger HTML budget for six interactive construction
+The Model trees page has a larger HTML budget for six interactive construction
 walkthroughs and their complete no-JavaScript references. Each case reuses one
 highlighted schema for all three steps; copying derives from those same source
 lines. Its page budget allows about 20% headroom over the current 466 KiB HTML,
