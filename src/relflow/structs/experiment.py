@@ -308,7 +308,7 @@ class Schema(Node):
                     outputs[address] = 0
                 elif branch.reduction is None:
                     per_row = row_width(branch.grain, widths)
-                    outputs[address] = None if branch.length is None or per_row is None else branch.length * per_row
+                    outputs[address] = None if branch.capacity is None or per_row is None else branch.capacity * per_row
                 elif isinstance(branch.reduction, Attention):
                     outputs[address] = branch.reduction.n_outputs
                 else:
@@ -327,7 +327,7 @@ class Schema(Node):
                 int(child.active) if isinstance(child, Leaf) else outputs[child.address] for child in branch.fields
             ]
             per_row = row_width(branch.grain, parts)
-            widths[address] = None if branch.length is None or per_row is None else branch.length * per_row
+            widths[address] = None if branch.capacity is None or per_row is None else branch.capacity * per_row
         return widths
 
     def overflows(self, address: Address) -> tuple[Overflow | None, ...]:

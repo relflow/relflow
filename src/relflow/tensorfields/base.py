@@ -319,8 +319,8 @@ class DecoderBase(torch.nn.Module):
             if isinstance(node, Leaf):
                 self.memory_coordinates[origin] = (
                     tuple(node.address for node in path[:-1]),
-                    tuple(node.length for node in path[:-1]),
-                    path[-1].length,
+                    tuple(node.capacity for node in path[:-1]),
+                    path[-1].capacity,
                 )
                 continue
             outer = path[:-2]
@@ -330,10 +330,10 @@ class DecoderBase(torch.nn.Module):
             ):
                 capacity = width
                 if len(path) > 1:
-                    capacity = None if path[-2].length is None or capacity is None else path[-2].length * capacity
+                    capacity = None if path[-2].capacity is None or capacity is None else path[-2].capacity * capacity
                 table[origin] = (
                     tuple(node.address for node in outer),
-                    tuple(node.length for node in outer),
+                    tuple(node.capacity for node in outer),
                     capacity,
                 )
 
@@ -370,7 +370,9 @@ class DecoderBase(torch.nn.Module):
                 return math.prod(cast(tuple[int, ...], shape)) == n_context
 
             branch = schema.branches[context_address]
-            lengths = tuple(node.length for node in branch.path if getattr(node, "type", None) == "branch")
+            lengths = tuple(
+                cast("Branch", node).capacity for node in branch.path if getattr(node, "type", None) == "branch"
+            )
             output = schema.branch_outputs[context_address]
             if any(dimension is None for dimension in (*self.shape, *lengths, output)):
                 axes = tuple(node.address for node in branch.path if getattr(node, "type", None) == "branch")

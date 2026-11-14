@@ -733,3 +733,37 @@ def test_spans_replay_for_a_seed_and_vary_by_epoch_and_ordinal():
 @pytest.mark.parametrize("strata", [rf.Strata.validate, rf.Strata.test, rf.Strata.predict])
 def test_spans_are_training_only(strata):
     assert not span_hidden(0.15, 5, strata=strata).any()
+
+
+@pytest.mark.parametrize("strata", [rf.Strata.train, rf.Strata.validate, rf.Strata.test])
+def test_forecast_crop_keeps_length_plus_horizon_rows(strata):
+    source = pa.table({"events": pa.array([rows(8)], type=pa.list_(ITEM))})
+    resolved = coalesce(source, forecast_schema(length=3), strata, seed=3)
+    assert resolved.layouts["/events"].lengths.tolist() == [[5]]
+    assert resolved.fields["/events/value"].pristine.values.to_pylist() == [3.0, 4.0, 5.0, 6.0, 7.0]
+
+
+def test_forecast_overflow_error_uses_capacity():
+    def source(count: int) -> pa.Table:
+        return pa.table({"events": pa.array([rows(count)], type=pa.list_(ITEM))})
+
+    coalesce(source(5), forecast_schema(length=3, overflow="error"), rf.Strata.train)
+    with pytest.raises(ValueError, match="capacity is 5"):
+        coalesce(source(6), forecast_schema(length=3, overflow="error"), rf.Strata.train)
+
+
+def test_reduction_free_forecast_branch_width_uses_capacity():
+    schema = Schema.from_tree(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        events=rf.Branch(
+            length=3,
+            reduction=None,
+            direction=rf.Direction.causal,
+            mask=rf.Mask(select=rf.Forecast(horizon=2, targets=("value",)), reconstruct=True),
+            value=rf.Number,
+        ),
+    )
+    assert schema.branch_widths["/events"] == 5
+    assert schema.requests["/events/value"].shape == (1, 5)

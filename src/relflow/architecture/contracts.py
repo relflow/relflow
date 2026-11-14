@@ -302,10 +302,10 @@ def require_geometry(module: "Model", inputs: TensorDict) -> dict[Address, tuple
                 f"got {tuple(geometry.slots.shape)}"
             )
         extent = geometry.slots.shape[-1]
-        if (address == Address() and extent != 1) or (branch.length is not None and extent > branch.length):
+        if (address == Address() and extent != 1) or (branch.capacity is not None and extent > branch.capacity):
             raise ForwardContractError(
                 f"forward branch geometry '{address}' extent must be "
-                f"{'one' if address == Address() else f'at most {branch.length}'}, got {extent}"
+                f"{'one' if address == Address() else f'at most {branch.capacity}'}, got {extent}"
             )
         module_device = getattr(module, "device", None)
         if len(devices) != 1 or (
