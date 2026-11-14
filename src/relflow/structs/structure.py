@@ -67,17 +67,21 @@ def check_forecast_children(
     children = {field.name: field for field in branch.fields}
     repeated = sorted({name for name in names if names.count(name) > 1})
     if repeated:
-        raise ValueError(f"{where} Forecast {plural} name {repeated} more than once; list each {singular} child once")
+        message = f"{where} Forecast {plural} name {repeated} more than once; list each {singular} child once"
+        raise ValueError(message)
     for name in names:
         if name not in children:
-            raise ValueError(
+            message = (
                 f"{where} Forecast {singular} '{name}' is not a child of the branch; "
                 f"name direct leaf children such as {sorted(str(child) for child in children)}"
             )
+            raise ValueError(message)
         if name in taken:
-            raise ValueError(f"{where} Forecast {singular} '{name}' {taken[name]}")
+            message = f"{where} Forecast {singular} '{name}' {taken[name]}"
+            raise ValueError(message)
         if not isinstance(children[name], Leaf):
-            raise ValueError(f"{where} Forecast {singular} '{name}' is a branch; {remedy}")
+            message = f"{where} Forecast {singular} '{name}' is a branch; {remedy}"
+            raise ValueError(message)
 
 
 def check_contrastive(branch: Branch) -> None:
@@ -94,10 +98,11 @@ def check_contrastive(branch: Branch) -> None:
     unreduced = next((f for f in branch.fields if isinstance(f, Branch) and f.reduction is None), None)
     if unreduced is None:
         return
-    raise ValueError(
+    message = (
         f"branch '{branch.address}' contrastive views need a fixed width per row, but child "
         f"'{unreduced.address}' has reduction=None; set a reduction on that child or remove contrastive"
     )
+    raise ValueError(message)
 
 
 def bounds(branch: Branch) -> None:
@@ -106,17 +111,18 @@ def bounds(branch: Branch) -> None:
     if branch.length is not None and (
         not isinstance(branch.length, int) or isinstance(branch.length, bool) or branch.length < 1
     ):
-        raise ValueError(
+        message = (
             f"branch '{branch.address or branch.name}' length must be a positive integer or None, got {branch.length!r}"
         )
-    if branch.length is None:
-        if branch.overflow is not None:
-            location = f" '{branch.address or branch.name}'" if branch.address or branch.name else ""
-            raise ValueError(
-                f"unbounded branch{location} cannot configure overflow={branch.overflow!r}; "
-                "set a finite length or remove the overflow policy"
-            )
-    elif branch.overflow is None:
+        raise ValueError(message)
+    if branch.length is None and branch.overflow is not None:
+        location = f" '{branch.address or branch.name}'" if branch.address or branch.name else ""
+        message = (
+            f"unbounded branch{location} cannot configure overflow={branch.overflow!r}; "
+            "set a finite length or remove the overflow policy"
+        )
+        raise ValueError(message)
+    if branch.length is not None and branch.overflow is None:
         branch.overflow = Overflow.head
 
 
@@ -348,15 +354,17 @@ class Branch(Node, metaclass=BranchMeta):
         child = next((field for field in self.fields if field.name == self.time_index), None)
         where = f"branch '{self.address or self.name}'"
         if child is None:
-            raise ValueError(
+            message = (
                 f"{where} sets time_index={self.time_index!r}, but has no child named {self.time_index!r}; "
                 "name an existing child leaf or add one"
             )
+            raise ValueError(message)
         if isinstance(child, Branch):
-            raise ValueError(
+            message = (
                 f"{where} sets time_index={self.time_index!r}, which must name a leaf, not a child branch; "
                 "name a leaf child holding the time of each row"
             )
+            raise ValueError(message)
         return self
 
     @pydantic.model_validator(mode="after")
@@ -365,13 +373,13 @@ class Branch(Node, metaclass=BranchMeta):
             return self
         where = f"branch '{self.address or self.name}'"
         if self.time_index is None:
-            raise ValueError(
-                f"{where} sets time_step={self.time_step!r}, which requires time_index; name the time child"
-            )
+            message = f"{where} sets time_step={self.time_step!r}, which requires time_index; name the time child"
+            raise ValueError(message)
         step = self.time_step
         seconds = step.total_seconds() if isinstance(step, datetime.timedelta) else step
         if seconds <= 0:
-            raise ValueError(f"{where} time_step must be positive, got {self.time_step!r}")
+            message = f"{where} time_step must be positive, got {self.time_step!r}"
+            raise ValueError(message)
         return self
 
     @pydantic.model_validator(mode="after")
@@ -381,12 +389,21 @@ class Branch(Node, metaclass=BranchMeta):
             return self
         where = f"branch '{self.address or self.name}'"
         if len(forecasts) > 1:
-            raise ValueError(f"{where} has {len(forecasts)} Forecast masks; use at most one Forecast per branch")
+            message = f"{where} has {len(forecasts)} Forecast masks; use at most one Forecast per branch"
+            raise ValueError(message)
         if self.direction == Direction.bidirectional:
-            raise ValueError(
+            message = (
                 f"{where} uses Mask(select=Forecast(...)) with direction=bidirectional, which lets rows see "
                 "the future they predict; set direction=rf.Direction.causal"
             )
+            raise ValueError(message)
+        if self.overflow == Overflow.head:
+            message = (
+                f"{where} uses Mask(select=Forecast(...)) with overflow='head', which can exclude the latest "
+                'context and anchor future slots to an earlier row; set overflow="tail" or "error", '
+                "or use Branch.chronological"
+            )
+            raise ValueError(message)
         forecast = forecasts[0]
         check_forecast_children(
             self,
@@ -425,10 +442,11 @@ class Branch(Node, metaclass=BranchMeta):
         steps = compile(query).steps if isinstance(query, str) else ()
         if len(steps) == 1 and isinstance(steps[0], Member):
             return self
-        raise ValueError(
+        message = (
             f"{where} time_index child '{self.time_index}' must read a single member for Forecast slots, "
             f"got query {query!r}; derive the time column in a Preprocessor"
         )
+        raise ValueError(message)
 
     @pydantic.model_validator(mode="after")
     def check_steps(self) -> Self:
@@ -437,19 +455,21 @@ class Branch(Node, metaclass=BranchMeta):
         unreduced = next((f for f in self.fields if isinstance(f, Branch) and f.reduction is None), None)
         if unreduced is None:
             return self
-        raise ValueError(
+        message = (
             f"branch '{self.address or self.name}' sets grain=Steps(), so rows pool to one token, but child branch "
             f"'{unreduced.name}' needs a reduction; set reduction=rf.Attention() or rf.Mean() on it"
         )
+        raise ValueError(message)
 
     @pydantic.model_validator(mode="after")
     def check_conv(self) -> Self:
         if not isinstance(self.mixer, Conv) or isinstance(self.grain, Steps):
             return self
-        raise ValueError(
+        message = (
             f"branch '{self.address or self.name}' sets mixer=Conv(), which convolves over rows and "
             "requires grain=Steps(); set grain=rf.Steps() or mixer=rf.Transformer()"
         )
+        raise ValueError(message)
 
     def model_post_init(self, __context: object) -> None:
         for field in self.fields:

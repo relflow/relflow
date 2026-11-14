@@ -82,7 +82,8 @@ def trailing(placement: np.ndarray, *, extent: int, observed: np.ndarray) -> np.
     if not len(placement):
         return np.empty(0, dtype=bool)
     rank, total = ranks(placement, extent=extent)
-    _, first, counts = np.unique(placement // extent, return_index=True, return_counts=True)
+    first = np.flatnonzero(rank == 0)
+    counts = total[first]
     latest = np.repeat(np.maximum.reduceat(np.where(observed, rank, -1), first), counts)
     return (latest >= 0) & (rank > latest)
 

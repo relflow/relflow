@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import dataclass
 from functools import cache
-from typing import Generic, TypeAlias, TypeGuard, TypeVar, cast
+from typing import Generic, Protocol, TypeAlias, TypeGuard, TypeVar, cast
 
 import numpy as np
 import pyarrow as pa
@@ -15,6 +15,14 @@ import pyarrow.compute as pc
 Atom: TypeAlias = str | int | bool
 ListType: TypeAlias = pa.ListType | pa.LargeListType | pa.FixedSizeListType
 Array = TypeVar("Array", bound=pa.Array | pa.ChunkedArray, covariant=True)
+
+
+class FixedSizeListFactory(Protocol):
+    def __call__(self, values: pa.Array, list_size: int, *, mask: pa.Array) -> pa.FixedSizeListArray: ...
+
+
+class VariableListFactory(Protocol):
+    def __call__(self, offsets: pa.Array, values: pa.Array, *, mask: pa.Array) -> pa.Array: ...
 
 
 class MissingFieldError(ValueError):
@@ -614,24 +622,27 @@ def leaves(values: list[pa.Array], *, expressions: tuple[str, ...], address: str
         schemas = [pa.schema([pa.field("value", datatype)]) for datatype in types]
         common = pa.unify_schemas(schemas, promote_options="permissive").field("value").type
     except pa.ArrowException as error:
-        raise ValueError(
+        message = (
             f"tuple query {expressions!r} at {address!r} cannot stack source types {types}; "
             "cast them to one type in a preprocessor"
-        ) from error
+        )
+        raise ValueError(message) from error
     try:
         converted = [pc.cast(item, common, safe=True) for item in values]
     except pa.ArrowException as error:
-        raise ValueError(
+        message = (
             f"tuple query {expressions!r} at {address!r} cannot convert source types {types} to {common} "
             "without losing precision; integers beyond ±2^53 do not fit float64, so cast them in a preprocessor"
-        ) from error
+        )
+        raise ValueError(message) from error
 
     rows, width = len(values[0]), len(values)
     order = (np.arange(rows)[:, None] + rows * np.arange(width)[None, :]).ravel()
     child = pc.take(pa.concat_arrays(converted), pa.array(order, type=pa.int64()))
     any_valid = np.any([pc.is_valid(item).to_numpy(zero_copy_only=False) for item in values], axis=0)
     # Arrow accepts an explicit mask; pyarrow-stubs omits it.
-    return pa.FixedSizeListArray.from_arrays(child, width, mask=pa.array(~any_valid, type=pa.bool_()))  # pyrefly: ignore[no-matching-overload]
+    factory = cast(FixedSizeListFactory, pa.FixedSizeListArray.from_arrays)
+    return factory(child, width, mask=pa.array(~any_valid, type=pa.bool_()))
 
 
 def lists(values: list[pa.Array], *, expressions: tuple[str, ...], address: str | None) -> pa.Array:
@@ -659,10 +670,11 @@ def lists(values: list[pa.Array], *, expressions: tuple[str, ...], address: str 
     mismatch = valid & (lengths != reference[None, :])
     if mismatch.any():
         first = int(np.flatnonzero(mismatch.any(axis=0))[0])
-        raise ValueError(
+        message = (
             f"tuple query {expressions!r} at {address!r} selects lists of different lengths at record {first}: "
             f"{lengths[:, first].tolist()}; every source must select the same rows. Pad or trim them in a preprocessor"
         )
+        raise ValueError(message)
 
     total = int(reference.sum())
     starts = np.cumsum(reference) - reference
@@ -676,10 +688,13 @@ def lists(values: list[pa.Array], *, expressions: tuple[str, ...], address: str 
 
     large = any(pa.types.is_large_list(item.type) for item in values)
     boundaries = pa.array(np.append(starts, total), type=pa.int64() if large else pa.int32())
-    container = pa.LargeListArray if large else pa.ListArray
     mask = pa.array(np.asarray(~valid.any(axis=0), dtype=bool))
     # Arrow accepts an explicit mask; pyarrow-stubs omits it.
-    return container.from_arrays(boundaries, inner, mask=mask)  # pyrefly: ignore[no-matching-overload]
+    factory = cast(
+        VariableListFactory,
+        pa.LargeListArray.from_arrays if large else pa.ListArray.from_arrays,
+    )
+    return factory(boundaries, inner, mask=mask)
 
 
 def channels(values: list[pa.Array], *, expressions: tuple[str, ...], address: str | None) -> pa.Array:

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Protocol, override
 import torch
 
 from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool
-from relflow.structs.grain import Coordinates, Steps
+from relflow.structs.grain import Coordinates, Pooling, Steps
 from relflow.structs.packages import Parcel
 
 if TYPE_CHECKING:
@@ -81,10 +81,11 @@ def extents(parcels: list[Parcel]) -> tuple[int, list[torch.Tensor]]:
         if parcel.widths is not None:
             widths.append(parcel.widths)
         elif items and count % items:
-            raise ValueError(
+            message = (
                 f"parcel from '{parcel.origin}' holds {count} tokens per instance of '{parcel.destination}', "
                 f"which is not a multiple of its {items} items"
             )
+            raise ValueError(message)
         else:
             widths.append(
                 torch.full(
@@ -121,9 +122,9 @@ def rows(parcels: list[Parcel]) -> tuple[torch.Tensor, torch.Tensor, torch.Tenso
     return positions, spans, slots
 
 
-pools: Mapping[str, Callable[..., torch.nn.Module]] = MappingProxyType(
+pools: Mapping[Pooling, Callable[..., torch.nn.Module]] = MappingProxyType(
     {
-        "query": lambda *, branch, schema: LearnedQueryCrossAttention(
+        Pooling.query: lambda *, branch, schema: LearnedQueryCrossAttention(
             n_context=1,
             d_model=schema.d_model,
             nhead=branch.n_heads,
@@ -131,7 +132,7 @@ pools: Mapping[str, Callable[..., torch.nn.Module]] = MappingProxyType(
             position=False,
             ffnx=branch.ffnx,
         ),
-        "mean": lambda *, branch, schema: MeanPool(n_context=1),
+        Pooling.mean: lambda *, branch, schema: MeanPool(n_context=1),
     }
 )
 

@@ -44,6 +44,12 @@ def test_numeric_time_step_divides_positions():
     assert times(table([[10.0, 12.0, 15.0]]), configured(step=2.0)).tolist() == [[[0.0, 1.0, 2.5]]]
 
 
+@pytest.mark.parametrize("value", [np.nan, np.inf, -np.inf])
+def test_non_finite_numeric_time_values_are_rejected(value):
+    with pytest.raises(ValueError, match=r"branch '/ett' time_index 'ts'.*finite"):
+        times(table([[0.0, value]]), configured())
+
+
 def test_equal_times_are_allowed():
     assert times(table([[5.0, 5.0, 6.0]]), configured()).tolist() == [[[0.0, 0.0, 1.0]]]
 
@@ -97,6 +103,14 @@ def test_epoch_seconds_stay_exact_in_float32():
     source = pa.table({"ett": pa.array([[{"ts": s, "value": 1.0} for s in column.to_pylist()]], type=pa.list_(item))})
     positions = torch.from_numpy(times(source, configured(step=datetime.timedelta(seconds=1)))).to(torch.float32)
     assert positions.tolist() == [[[0.0, 1.0, 2.0]]]
+
+
+@pytest.mark.parametrize("datatype", [pa.int64(), pa.uint64()])
+def test_large_integer_numeric_times_keep_small_differences(datatype):
+    start = 2**53
+    assert times(table([[start, start + 1, start + 2]], datatype=datatype), configured()).tolist() == [
+        [[0.0, 1.0, 2.0]]
+    ]
 
 
 def test_date_and_duration_columns_read_as_seconds():

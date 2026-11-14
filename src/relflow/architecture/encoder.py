@@ -81,11 +81,16 @@ def timeline(*, structural: torch.Tensor, steps: torch.Tensor, times: torch.Tens
         times: Float time of every row slot, any shape that flattens to ``(rows, T)``, or ``None``.
 
     Returns:
-        ``structural`` itself without times, else float positions of shape ``(rows, L)``.
+        ``structural`` itself without times, else float positions of shape ``(rows, L)``;
+        steps outside the time geometry receive zero.
     """
     if times is None:
         return structural
-    return times.reshape(steps.shape[0], -1).gather(1, steps)
+    rows = times.reshape(steps.shape[0], -1)
+    if rows.shape[-1] == 0:
+        return rows.new_zeros(steps.shape)
+    valid = (steps >= 0) & (steps < rows.shape[-1])
+    return rows.gather(1, steps.clamp(min=0, max=rows.shape[-1] - 1)).masked_fill(~valid, 0.0)
 
 
 def sequence(
@@ -455,7 +460,7 @@ class BranchEncoder(torch.nn.Module):
                 steps=cut.steps.index_select(0, indices),
                 packing=None,
             )
-            mixed = mixed.index_copy(0, indices, chosen.masked_fill(~live.unsqueeze(-1), 0.0))
+            mixed = mixed.index_copy(0, indices, chosen.masked_fill(~live.unsqueeze(-1), 0.0).to(dtype=mixed.dtype))
         elif torch.is_grad_enabled():
             mixed = mixed + sum(parameter.sum() * 0.0 for parameter in self.parameters())
         first, second, aligned = pairs(mixed, views=cut)
@@ -482,7 +487,7 @@ class BranchEncoder(torch.nn.Module):
             return None
         spread = like.new_zeros(rows)
         if shares is not None:
-            return spread.index_copy(0, indices, shares)
+            return spread.index_copy(0, indices, shares.to(dtype=spread.dtype))
         if torch.is_grad_enabled():
             return spread + sum(parameter.sum() * 0.0 for parameter in self.parameters())
         return spread

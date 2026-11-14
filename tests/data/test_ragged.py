@@ -660,6 +660,7 @@ def test_forecast_hides_nested_collections_of_hidden_rows():
     branch = rf.Branch(
         length=2,
         direction=rf.Direction.causal,
+        overflow="tail",
         mask=rf.Mask(select=rf.Forecast(horizon=1, targets=("value",)), reconstruct=True),
         value=rf.Number,
         tags=rf.Branch(length=2, name=rf.Category),
@@ -763,6 +764,7 @@ def test_reduction_free_forecast_branch_width_uses_capacity():
             length=3,
             reduction=None,
             direction=rf.Direction.causal,
+            overflow="tail",
             mask=rf.Mask(select=rf.Forecast(horizon=2, targets=("value",)), reconstruct=True),
             value=rf.Number,
         ),
@@ -837,6 +839,13 @@ def test_user_future_rows_keep_known_covariates_and_hide_the_others():
     assert inputs(resolved, "/events/load").tolist() == [[0, 0, 0, 3]]
     assert resolved.fields["/events/value"].inferred.reshape(1, 4).tolist() == [[False, False, False, True]]
     assert not resolved.fields["/events/load"].inferred.any()
+
+
+def test_user_future_rows_must_supply_known_covariates():
+    future = [{"value": None, "load": 1.0, "temperature": None}]
+    records = pa.array([rows(6) + future], type=pa.list_(ITEM))
+    with pytest.raises(ValueError, match=r"branch '/events'.*null known covariate 'temperature'.*future row"):
+        predicted(records, known=("temperature",))
 
 
 def test_a_trailing_row_with_an_observed_target_is_context():

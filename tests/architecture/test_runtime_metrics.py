@@ -65,6 +65,7 @@ def test_rank_without_forecast_targets_still_emits_the_anchored_loss(monkeypatch
         events=rf.Branch(
             length=3,
             direction=rf.Direction.causal,
+            overflow="tail",
             mask=rf.Mask(select=rf.Forecast(horizon=1, targets=("value",)), reconstruct=True),
             value=rf.Number,
             load=rf.Number,

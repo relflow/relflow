@@ -565,6 +565,7 @@ def test_forecast_objectives_are_its_targets_and_spans_objectives_are_every_leaf
             events=rf.Branch(
                 length=3,
                 direction=rf.Direction.causal,
+                overflow="tail",
                 mask=mask,
                 value=rf.Number,
                 load=rf.Number,

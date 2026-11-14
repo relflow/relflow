@@ -426,18 +426,19 @@ class Leaf(Node):
 
         sources = cast(tuple[str, ...], self.query)
         if not sources:
-            raise ValueError(f"field '{self.address}' has an empty tuple query; name at least one source")
+            message = f"field '{self.address}' has an empty tuple query; name at least one source"
+            raise ValueError(message)
         repeated = next((text for index, text in enumerate(sources) if text in sources[:index]), None)
         if repeated is not None:
-            raise ValueError(
-                f"field '{self.address}' query tuple {sources!r} repeats {repeated!r}; name each source once"
-            )
+            message = f"field '{self.address}' query tuple {sources!r} repeats {repeated!r}; name each source once"
+            raise ValueError(message)
         ascending = next((text for text in sources if scope(text)[0]), None)
         if ascending is not None:
-            raise ValueError(
+            message = (
                 f"field '{self.address}' stacks source {ascending!r} from an ancestor branch; "
                 "stacked sources must read the owner branch rows"
             )
+            raise ValueError(message)
 
     def post_bind_validate(self) -> None:
         """Check scoped sources and derived-input capability against the live registry."""
@@ -448,16 +449,18 @@ class Leaf(Node):
         if isinstance(self.query, tuple) and not (
             Component.derive in TENSORFIELDS[self.type].components or type(self).stacked
         ):
-            raise ValueError(
+            message = (
                 f"field '{self.address}' has multiple source queries but extension '{self.type}' has no "
                 "derive component and its Request does not declare stacked = True; "
                 "register Component.derive, declare stacked, or use one query"
             )
+            raise ValueError(message)
         if type(self).stacked and Component.derive in TENSORFIELDS[self.type].components:
-            raise ValueError(
+            message = (
                 f"field '{self.address}' extension '{self.type}' declares both stacked and a derive component; "
                 "choose one"
             )
+            raise ValueError(message)
         if isinstance(self.query, tuple) and type(self).stacked:
             self.check_sources()
         if self.query is None:
@@ -466,10 +469,11 @@ class Leaf(Node):
         for expression in (self.query,) if isinstance(self.query, str) else self.query:
             depth, _ = scope(expression)
             if depth > ancestors:
-                raise ValueError(
+                message = (
                     f"source query {expression!r} at '{self.address}' ascends {depth} owner branches, "
                     f"but only {ancestors} ancestor branches exist; keep the source within the model root"
                 )
+                raise ValueError(message)
 
     @functools.cached_property
     def shape(self) -> tuple[int | None, ...]:

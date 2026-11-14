@@ -70,7 +70,7 @@ from relflow.structs.experiment import (
     predicate,
     where,
 )
-from relflow.structs.grain import Coordinates, Steps
+from relflow.structs.grain import Coordinates, Pooling, Steps
 from relflow.structs.masking import Forecast, Spans
 from relflow.structs.mixer import Conv, Transformer
 from relflow.structs.reduction import Attention, Mean, ReductionConfig
@@ -166,6 +166,7 @@ __all__ = [
     "Context",
     "Conv",
     "Coordinates",
+    "Pooling",
     "CustomDataModule",
     "Contrastive",
     "Crops",

@@ -33,7 +33,9 @@ FAMILIES: tuple[Family, ...] = (
     ),
     (pa.types.is_date32, pa.int32(), lambda kind: 86400.0),
     (pa.types.is_date64, pa.int64(), lambda kind: 1e-3),
-    (lambda kind: pa.types.is_integer(kind) or pa.types.is_floating(kind), pa.float64(), lambda kind: None),
+    (pa.types.is_signed_integer, pa.int64(), lambda kind: None),
+    (pa.types.is_unsigned_integer, pa.uint64(), lambda kind: None),
+    (pa.types.is_floating, pa.float64(), lambda kind: None),
 )
 
 
@@ -45,8 +47,8 @@ def ticks(values: Values, *, address: str) -> tuple[np.ndarray, float | None]:
         address: str of the time leaf, for error messages.
 
     Returns:
-        Raw ticks (int64 for temporal types, float64 for numeric) and seconds per
-        tick, which is ``None`` for numeric columns.
+        Integer ticks for temporal and integer columns, float64 ticks for floating
+        columns, and seconds per tick for temporal columns.
 
     Raises:
         TypeError: If the Arrow type is not numeric, timestamp, date or duration.
@@ -54,9 +56,10 @@ def ticks(values: Values, *, address: str) -> tuple[np.ndarray, float | None]:
 
     family = next((family for family in FAMILIES if family[0](values.type)), None)
     if family is None:
-        raise TypeError(
+        message = (
             f"time leaf '{address}' has Arrow type {values.type}; use a numeric, timestamp, date or duration column"
         )
+        raise TypeError(message)
     _, target, seconds = family
     # The compute stubs also admit scalars; an array in gives an array out.
     lowered = cast(Values, pc.fill_null(pc.cast(values, target), pa.scalar(0, type=target)))
@@ -71,14 +74,16 @@ def divisor(*, kind: pa.DataType, seconds: float | None, step: float | datetime.
     if isinstance(step, datetime.timedelta) and seconds is not None:
         return step.total_seconds() / seconds
     if isinstance(step, datetime.timedelta):
-        raise ValueError(
+        message = (
             f"{where} has numeric Arrow type {kind} but time_step={step!r}; set time_step=<number> or leave it unset"
         )
+        raise ValueError(message)
     if seconds is not None:
-        raise ValueError(
+        message = (
             f"{where} has Arrow type {kind}, which counts elapsed time; "
             "set time_step=timedelta(...) to the spacing of one position"
         )
+        raise ValueError(message)
     return 1.0 if step is None else float(step)
 
 
@@ -118,25 +123,32 @@ def positions(
 
     raw, seconds = ticks(values, address=where)
     scale = divisor(kind=values.type, seconds=seconds, step=step, where=where)
+    nonfinite = valued & ~np.isfinite(raw)
+    if nonfinite.any():
+        count = int(nonfinite.sum())
+        message = f"{where} has {count} non-finite time value(s); replace them or drop those rows in an rf.Preprocessor"
+        raise ValueError(message)
     dense = np.zeros(size, dtype=raw.dtype)
     live = np.zeros(size, dtype=bool)
     dense[placement[valued]] = raw[valued]
     live[placement[valued]] = True
     dense, live = dense.reshape(-1, shape[-1]), live.reshape(-1, shape[-1])
 
-    # Subtract in tick dtype so nanosecond epochs keep their precision.
+    # Compare and subtract in tick dtype so large integer values keep their precision.
     first = live.argmax(axis=-1)[:, None]
-    relative = np.where(live, dense - np.take_along_axis(dense, first, axis=-1), 0)
-    lowest = np.iinfo(relative.dtype).min if relative.dtype.kind == "i" else -np.inf
-    running = np.maximum.accumulate(np.where(live, relative, lowest), axis=-1)
-    decreases = live[:, 1:] & (relative[:, 1:] < running[:, :-1])
+    lowest = np.iinfo(dense.dtype).min if dense.dtype.kind in "iu" else -np.inf
+    running = np.maximum.accumulate(np.where(live, dense, lowest), axis=-1)
+    decreases = live[:, 1:] & (dense[:, 1:] < running[:, :-1])
     if decreases.any():
         instance = int(np.flatnonzero(decreases.any(axis=-1))[0])
         row = int(np.flatnonzero(decreases[instance])[0]) + 1
-        raise ValueError(
+        message = (
             f"{where} decreases in record {instance} at row {row}; "
             "sort the rows by time within each record in an rf.Preprocessor"
         )
+        raise ValueError(message)
+    relative = np.zeros_like(dense)
+    np.subtract(dense, np.take_along_axis(dense, first, axis=-1), out=relative, where=live)
     return (relative / scale).reshape(shape)
 
 
