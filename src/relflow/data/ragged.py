@@ -6,7 +6,7 @@ import hashlib
 import json
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cache
 from typing import TYPE_CHECKING, Any, cast
 
@@ -15,6 +15,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from relflow.data.arrow import variants
+from relflow.data.chronology import positions
 from relflow.data.query import Literal, Member, MissingFieldError, compile, listed, parts, query, scope, stack
 from relflow.data.query import Projection as SourceProjection
 from relflow.logging.config import logger
@@ -305,10 +306,14 @@ class Projection:
 
 @dataclass(frozen=True, slots=True)
 class Coalesced:
-    """Policy-resolved fields and their shared, pristine branch layouts."""
+    """Policy-resolved fields, their shared pristine branch layouts and row times.
+
+    ``times`` holds float64 row positions for every branch that names a ``time_index``.
+    """
 
     fields: dict[Address, Projection]
     layouts: dict[Address, Layout]
+    times: dict[Address, np.ndarray] = field(default_factory=dict)
 
 
 def head(expression: str) -> str:
@@ -833,6 +838,32 @@ def project(
     )
 
 
+def moments(layout: Layout, branch: Branch, *, ancestors: tuple[Layout, ...]) -> np.ndarray:
+    """Read the ``time_index`` child of a branch as row positions in ``time_step`` units."""
+
+    child = cast(Leaf, next(field for field in branch.fields if field.name == branch.time_index))
+    where = f"branch '{branch.address}' time_index '{branch.time_index}'"
+    expressions = queries(child)
+    if len(expressions) != 1:
+        raise ValueError(f"{where} must read one value per row; give the time leaf a single query, got {child.query!r}")
+    selected = source(layout, expressions[0], ancestors=ancestors, address=child.address)
+    present = (
+        boolean(selected.present) if selected.present.type == pa.bool_() else boolean(pc.is_valid(selected.present))
+    )
+    valued = present & valid(selected.values)
+    missing = int(present.sum() - valued.sum())
+    if missing:
+        raise ValueError(f"{where} is null in {missing} present row(s); fill or drop them in an rf.Preprocessor")
+    return positions(
+        selected.values,
+        valued=valued,
+        placement=layout.placement,
+        shape=layout.shape,
+        step=branch.time_step,
+        where=where,
+    )
+
+
 def coalesce(
     values: pa.Table,
     schema: Schema,
@@ -866,6 +897,7 @@ def coalesce(
 
     fields: dict[Address, Projection] = {}
     layouts: dict[Address, Layout] = {}
+    times: dict[Address, np.ndarray] = {}
 
     def visit(
         branch: Branch,
@@ -874,6 +906,8 @@ def coalesce(
         ancestors: tuple[Layout, ...],
     ) -> None:
         layouts[branch.address] = layout
+        if branch.time_index is not None:
+            times[branch.address] = moments(layout, branch, ancestors=ancestors)
         for child in branch.fields:
             if getattr(child, "type", None) == "branch":
                 child = cast("Branch", child)
@@ -908,7 +942,7 @@ def coalesce(
     decisions = resolve(layout, schema.fields, seed=seed, epoch=epoch, ordinal=ordinal, strata=strata)
     visit(schema.fields, layout, decisions, ())
 
-    return Coalesced(fields=fields, layouts=layouts)
+    return Coalesced(fields=fields, layouts=layouts, times=times)
 
 
 __all__ = ["Coalesced", "Projection", "RaggedField"]
