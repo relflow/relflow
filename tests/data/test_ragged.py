@@ -8,8 +8,9 @@ import pytest
 
 import relflow as rf
 from relflow.data.datasets.arrow import convert
-from relflow.data.ragged import coalesce
+from relflow.data.ragged import coalesce, referenced
 from relflow.structs.enums import Strata, Tokens
+from relflow.structs.tree import Address
 from tests.arrow import table
 
 
@@ -541,3 +542,25 @@ def test_rate_masks_vary_by_batch_ordinal_and_reproduce():
     assert replay.fields["/amount"].trainable.tolist() == patterns[1]
     with pytest.raises(ValueError, match="ordinal"):
         coalesce(table, schema, Strata.train, ordinal=-1)
+
+
+def test_referenced_keeps_the_head_of_every_tuple_source():
+    schema = rf.Schema.from_tree(d_model=8, n_layers=1, n_heads=4, load=rf.Vector(query=("ett.HUFL", "meta.OT")))
+    assert referenced(schema.fields) == {"ett", "meta"}
+
+
+def test_tuple_query_leaf_projects_stacked_channels_with_validity_per_channel():
+    schema = rf.Schema.from_tree(d_model=8, n_layers=1, n_heads=4, ett=rf.Branch(load=rf.Vector(query=("HUFL", "OT"))))
+    rows = pa.Table.from_pylist(
+        [{"ett": [{"HUFL": 1.0, "OT": 2.0}, {"HUFL": None, "OT": 3.0}, {"HUFL": None, "OT": None}]}]
+    )
+    field = coalesce(rows, schema=schema, strata=Strata.predict).fields[Address("/ett/load")].pristine
+    assert field.values.to_pylist() == [[1.0, 2.0], [None, 3.0]]
+    assert field.dense.reshape(-1).tolist() == [Tokens.valued, Tokens.valued, Tokens.null]
+
+
+def test_branch_rows_must_be_structs_not_fixed_size_lists():
+    model = rf.Model.xs(d_model=8, ett=rf.Branch(load=rf.Vector(n_dim=2)), y=rf.Number(mask=True))
+    rows = pa.table({"ett": pa.array([[[1.0, 2.0]]], type=pa.list_(pa.list_(pa.float64(), 2)))})
+    with pytest.raises(ValueError, match=r"'/ett/load'.*expected a struct, got fixed_size_list"):
+        model.encode(rows, strata="predict")

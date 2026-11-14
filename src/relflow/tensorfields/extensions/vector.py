@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum
 import math
 from dataclasses import InitVar
-from typing import TYPE_CHECKING, Annotated, Literal, Unpack, cast
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Unpack, cast
 
 import numpy as np
 import pyarrow as pa
@@ -27,6 +27,7 @@ from relflow.tensorfields.base import (
     TensorInput,
 )
 from relflow.tensorfields.output import array, fixed, struct
+from relflow.tensorfields.shared.channels import width
 from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
@@ -60,20 +61,28 @@ class Request(RequestBase):
     training-only noise in the supplied coordinate units and preserves targets.
     ``objective`` selects mean ``"l1"`` or ``"l2"`` reconstruction loss across
     coordinates. ``mask=True`` makes the vector a supervised target.
-    Predictions contain a reconstructed vector of the same width.
+    Predictions contain a reconstructed vector of the same width. A tuple
+    ``query`` reads one source per element as the channels of the vector, and
+    ``n_dim`` follows from its length.
     """
 
     type: Literal["vector"] = "vector"
+    stacked: ClassVar[bool] = True
     n_dim: Annotated[int, pydantic.Field(gt=0)]
     jitter: Jitter = pydantic.Field(default_factory=Jitter)
     objective: Objective = Objective.l2
+
+    @pydantic.model_validator(mode="before")
+    @classmethod
+    def check_n_dim(cls, data: Any) -> Any:
+        return width(data)
 
     if TYPE_CHECKING:
 
         def __init__(
             self,
             *,
-            n_dim: int,
+            n_dim: int = ...,
             jitter: Jitter = ...,
             objective: Objective | Literal["l1", "l2"] = Objective.l2,
             type: Literal["vector"] = "vector",

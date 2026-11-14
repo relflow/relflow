@@ -325,14 +325,22 @@ class Leaf(Node):
             sources: The tuple query of this leaf.
 
         Raises:
-            ValueError: If no source is named or one source repeats.
+            ValueError: If no source is named, one source repeats, or one ascends to an ancestor branch.
         """
+        from relflow.data.query import scope
+
         if not sources:
             raise ValueError(f"field '{self.address}' has an empty tuple query; name at least one source")
         repeated = next((text for index, text in enumerate(sources) if text in sources[:index]), None)
         if repeated is not None:
             raise ValueError(
                 f"field '{self.address}' query tuple {sources!r} repeats {repeated!r}; name each source once"
+            )
+        ascending = next((text for text in sources if scope(text)[0]), None)
+        if ascending is not None:
+            raise ValueError(
+                f"field '{self.address}' stacks source {ascending!r} from an ancestor branch; "
+                "stacked sources must read the owner branch rows"
             )
 
     def post_bind_validate(self) -> None:

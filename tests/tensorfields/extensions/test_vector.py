@@ -4,6 +4,8 @@ import pyarrow as pa
 import pydantic
 import pytest
 import torch
+import yaml
+from lightning.pytorch import seed_everything
 from tensordict import TensorDict
 
 import relflow as rf
@@ -462,3 +464,19 @@ def test_vector_training_survives_a_non_finite_element(tmp_path):
         default_root_dir=tmp_path,
     )
     assert all(torch.isfinite(parameter).all() for parameter in model.parameters())
+
+
+def test_vector_declares_stacked_and_takes_n_dim_from_a_tuple_query():
+    assert rf.Vector.stacked is True
+    assert rf.Vector(query=("HUFL", "HULL", "OT")).n_dim == 3
+
+
+def test_vector_tuple_query_round_trips_yaml_and_checkpoint(tmp_path):
+    seed_everything(0, workers=True)
+    model = rf.Model.xs(d_model=8, load=rf.Vector(query=("a", "b")))
+    path = tmp_path / "schema.yaml"
+    path.write_text(yaml.safe_dump(model.schema.model_dump(mode="json")), encoding="utf-8")
+    reloaded = Schema.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+    assert (reloaded.requests["/load"].query, reloaded.requests["/load"].n_dim) == (("a", "b"), 2)
+    loaded = rf.Model.load(model.save(tmp_path / "model.ckpt"))
+    assert loaded.schema.requests["/load"].query == ("a", "b")
