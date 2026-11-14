@@ -10,9 +10,8 @@ from tensordict import TensorDict
 from relflow.architecture.attention import RotaryMultiheadAttention
 from relflow.architecture.blocks import feed_forward, norm
 from relflow.architecture.packed import SDPA_BATCH_MAX, Packed, block, customized, pack, unpack
-from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool, Pool
+from relflow.architecture.reducers import Reducer, reducers
 from relflow.structs.packages import Parcel
-from relflow.structs.reduction import Attention, Mean
 from relflow.structs.tree import Address, Leaf, Node
 
 if TYPE_CHECKING:
@@ -244,28 +243,14 @@ class BranchEncoder(torch.nn.Module):
         self.reduction = branch.reduction
         # An unbounded visible width leaves the lanes to the capacity observed while training.
         capacity = None if self.visible_width is None else max(1, self.visible_width)
-        match branch.reduction:
-            case None:
-                self.n_outputs: int | None = None
-                self.pool: Pool | None = None
-            case Mean():
-                self.n_outputs = 1
-                self.pool = MeanPool(n_context=1, d_model=schema.d_model, mass_capacity=capacity)
-            case Attention():
-                self.n_outputs = branch.reduction.n_outputs
-                self.pool = LearnedQueryCrossAttention(
-                    n_context=branch.reduction.n_outputs,
-                    d_model=schema.d_model,
-                    nhead=branch.reduction.n_heads or branch.n_heads,
-                    dropout=float(branch.reduction.dropout if branch.reduction.dropout is not None else dropout),
-                    n_linear=branch.reduction.n_layers,
-                    position=branch.reduction.position,
-                    mass_capacity=capacity,
-                    mass=True,
-                    ffnx=branch.ffnx,
-                )
-            case _:
-                raise ValueError(f"unsupported branch reduction: {branch.reduction}")
+        self.pool: Reducer | None = (
+            None
+            if branch.reduction is None
+            else reducers[type(branch.reduction)](
+                branch.reduction, branch=branch, schema=schema, capacity=capacity, dropout=dropout
+            )
+        )
+        self.n_outputs: int | None = None if self.pool is None else self.pool.n_context
 
     def admit(self, parcels: list[Parcel]) -> list[Parcel]:
         """Check that every parcel comes from a child and order them by field order.
@@ -389,16 +374,13 @@ class BranchEncoder(torch.nn.Module):
         """
         if self.pool is None:
             return selected, present
-        if isinstance(self.pool, LearnedQueryCrossAttention):
-            output = self.pool(
-                selected,
-                present=present,
-                context=None if context is None else context.unsqueeze(1).expand(-1, width, -1),
-                evidence=evidence,
-                memory_positions=positions,
-            )
-        else:
-            output = self.pool(selected, present=present)
+        output = self.pool(
+            selected,
+            present=present,
+            context=None if context is None else context.unsqueeze(1).expand(-1, width, -1),
+            evidence=evidence,
+            memory_positions=positions,
+        )
         return output, torch.ones((selected.shape[0], width), dtype=torch.bool, device=present.device)
 
     def forward(
@@ -432,7 +414,7 @@ class BranchEncoder(torch.nn.Module):
         rows = N * math.prod(dims)
         encoded: torch.Tensor = concatenated.reshape(rows, L, C)
         present = present.reshape(rows, L)
-        if isinstance(self.pool, Pool):
+        if self.pool is not None:
             self.pool.observe(present)
         flat_positions = positions.reshape(rows, L)
         active = present.any(dim=1)

@@ -13,6 +13,9 @@ class ReusableOutput(torch.nn.Module):
         self.register_buffer("value", torch.zeros(shape))
         self.calls = 0
 
+    def observe(self, present):
+        pass
+
     def forward(self, *args, **kwargs):
         self.calls += 1
         self.value.add_(1)
