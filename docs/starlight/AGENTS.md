@@ -92,9 +92,11 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   prediction interpretation and charts in `ValueTree` and `ValueNode`.
 - Featureless Modeling uses `FeatureEngineeringFlow` for horizontal workflow
   lanes. Keep the steps left-to-right on narrow screens with local scrolling.
-  `FeaturelessExamples` pairs the six canonical source ERDs with model diagrams;
-  source-only join keys belong in the ERD, while the model follows the declared
-  fields, branches, and targets. Preserve the Google Doc's page copy and use its
+  `FeaturelessExamples` switches between the six canonical source ERDs and model
+  ERDs in one viewer using `ErdToggle` and the same `DataExplorer` presentation.
+  Keep the Data ERD / Model ERD control usable with the keyboard and without JavaScript.
+  Source-only join keys stay on the data side; model ERDs show the declared
+  fields, types, branches, and targets. Preserve the Google Doc's page copy and use its
   visual notes as implementation instructions.
 - Every Core Concepts page supports all six original homepage use cases. The
   shared scenario records live in `src/data/concepts/scenarios.ts` and reuse the

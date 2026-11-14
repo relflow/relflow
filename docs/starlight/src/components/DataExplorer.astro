@@ -7,9 +7,10 @@ interface Props {
   id: string;
   dataset: Dataset;
   headingLevel?: 3 | 4 | 5 | 6;
+  showObservation?: boolean;
 }
 
-const { id, dataset, headingLevel = 3 } = Astro.props;
+const { id, dataset, headingLevel = 3, showObservation = true } = Astro.props;
 if (!id || /\s/.test(id))
   throw new Error('DataExplorer needs a page-unique id without whitespace.');
 const Heading = `h${headingLevel}` as 'h3' | 'h4' | 'h5' | 'h6';
@@ -26,7 +27,13 @@ const roles = {
 ---
 
 <div class="data-explorer not-content" data-data-explorer>
-  <p class="dataset-observation"><strong>One observation</strong> {dataset.observation}</p>
+  {
+    showObservation && (
+      <p class="dataset-observation">
+        <strong>One observation</strong> {dataset.observation}
+      </p>
+    )
+  }
   <figure class="erd-figure" data-erd>
     <figcaption class="erd-legend">
       {

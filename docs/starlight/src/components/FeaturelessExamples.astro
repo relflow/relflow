@@ -5,6 +5,7 @@ import CasePicker from './CasePicker.astro';
 import DataExplorer from './DataExplorer.astro';
 import ExampleSelection from './ExampleSelection.astro';
 import ModelDiagram from './ModelDiagram.astro';
+import ErdToggle from './ErdToggle.astro';
 
 const examples = cases.map((item) => {
   const dataset = datasets.find((dataset) => dataset.id === item.id);
@@ -37,23 +38,16 @@ const choices = examples.map((item) => ({
         data-case={item.id}
       >
         <h3 id={`featureless-${item.id}-title`}>{item.label}</h3>
-        <div class="example-mapping">
-          <section aria-labelledby={`featureless-${item.id}-data-title`}>
-            <h4 id={`featureless-${item.id}-data-title`}>Your data</h4>
-            <DataExplorer
-              id={`featureless-${item.id}-data`}
-              dataset={item.dataset}
-              headingLevel={5}
-            />
-          </section>
-          <span class="mapping-arrow" aria-hidden="true">
-            →
-          </span>
-          <section aria-labelledby={`featureless-${item.id}-model-title`}>
-            <h4 id={`featureless-${item.id}-model-title`}>Model</h4>
-            <ModelDiagram schema={item.code} />
-          </section>
-        </div>
+        <ErdToggle id={`featureless-${item.id}`}>
+          <DataExplorer
+            slot="data"
+            id={`featureless-${item.id}-data`}
+            dataset={item.dataset}
+            headingLevel={4}
+            showObservation={false}
+          />
+          <ModelDiagram slot="model" id={`featureless-${item.id}-model`} schema={item.code} />
+        </ErdToggle>
       </article>
     ))
   }
@@ -66,7 +60,6 @@ const choices = examples.map((item) => ({
 <style>
   .featureless-examples {
     min-width: 0;
-    container-type: inline-size;
   }
   .featureless-example {
     min-width: 0;
@@ -87,30 +80,6 @@ const choices = examples.map((item) => ({
     line-height: 1.4;
     letter-spacing: -0.015em;
   }
-  .example-mapping {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--rf-picker-gap);
-    align-items: start;
-    min-width: 0;
-  }
-  .example-mapping > section {
-    min-width: 0;
-  }
-  .example-mapping h4 {
-    margin: 0 0 0.75rem;
-    color: var(--rf-ink);
-    font-size: 0.8rem;
-    line-height: 1.5;
-  }
-  .mapping-arrow {
-    justify-self: center;
-    align-self: center;
-    color: var(--sl-color-text-accent);
-    font-size: 1.5rem;
-    line-height: 1;
-    transform: rotate(90deg);
-  }
   .sr-only {
     position: absolute;
     width: 1px;
@@ -118,13 +87,5 @@ const choices = examples.map((item) => ({
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
-  }
-  @container (min-width: 40rem) {
-    .example-mapping {
-      grid-template-columns: minmax(0, 1fr) 1.5rem minmax(0, 1fr);
-    }
-    .mapping-arrow {
-      transform: none;
-    }
   }
 </style>

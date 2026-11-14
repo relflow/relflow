@@ -140,7 +140,8 @@ the repeated teaching patterns; their typed inputs own the relevant contracts.
 | Follow records through the pipeline | `DataFlow` | The six canonical cases, typed stage views, and prediction/training paths in `src/data/concepts/data-flow.ts`. |
 | Understand supplied records | `DataExplorer` | A page-unique ID and a `Dataset` with explicit entities, columns, and relationships. |
 | Compare source records with model structure | `FeaturelessExamples` | The six canonical source datasets and their shared model schemas. |
-| View model structure without code | `ModelDiagram` | A canonical class schema, rendered through the shared tree component. |
+| Flip between Data ERD and Model ERD | `ErdToggle` | A page-unique ID and `data` / `model` slots sharing one diagram viewer. |
+| Compare model and data structure | `ModelDiagram` | A page-unique ID and canonical class schema, rendered as an ERD through `DataExplorer`. |
 | Explain a hierarchy | `Tree` | An accessible label and nodes with `label`, optional `detail`, and nested `children`. |
 | Read nested predictions | `ValueTree` | The complete result row, known inputs, and the `predictions` flag. |
 | Inspect how a schema shapes a model | `ModelExplainer` | A page-unique ID and one of the six canonical case IDs. |
