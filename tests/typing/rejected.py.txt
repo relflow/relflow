@@ -25,7 +25,7 @@ rf.Enum(("yes", "no"))  # rejected
 rf.Enum("yes", values=("no",))  # rejected
 rf.Enum(None)  # rejected
 rf.Enum(values=("yes", "no"), size=16)  # rejected
-rf.Vector()  # rejected
+rf.Vector(n_dim="eight")  # rejected
 rf.Group()  # rejected
 rf.Group(n_groups=(1, 2, 3))  # rejected
 rf.Group(n_groups="four")  # rejected
