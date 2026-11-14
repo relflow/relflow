@@ -96,6 +96,22 @@ def stepwise(parcels: list[Parcel], *, order: dict[Address, int] | None = None) 
     return torch.cat(steps, dim=-1)
 
 
+def timeline(*, structural: torch.Tensor, steps: torch.Tensor, times: torch.Tensor | None) -> torch.Tensor:
+    """Give every token the time position of its row, or keep the structural positions.
+
+    Args:
+        structural: Item-major integer positions of shape ``(rows, L)``.
+        steps: Row index of every token, shape ``(rows, L)``.
+        times: Float time of every row slot, any shape that flattens to ``(rows, T)``, or ``None``.
+
+    Returns:
+        ``structural`` itself without times, else float positions of shape ``(rows, L)``.
+    """
+    if times is None:
+        return structural
+    return times.reshape(steps.shape[0], -1).gather(1, steps)
+
+
 def sequence(
     parcels: list[Parcel], *, order: dict[Address, int] | None = None
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -272,7 +288,9 @@ class BranchEncoder(torch.nn.Module):
                 ffnx=branch.ffnx,
             )
 
-        self.stepped = stepped[branch.direction]
+        self.time_index = branch.time_index
+        self.timed = branch.time_index is not None
+        self.stepped = stepped[branch.direction] or self.timed
         self.grain = grains[type(branch.grain)](branch.grain, branch=branch, schema=schema)
 
         self.reduction = branch.reduction
@@ -448,7 +466,7 @@ class BranchEncoder(torch.nn.Module):
         parcels = self.grain(self.contextualize(parcels))
         positions, spans, slots = sequence(parcels)
         steps = stepwise(parcels) if self.stepped else None
-        positioned = any(parcel.positions is not None for parcel in parcels)
+        positioned = self.timed or any(parcel.positions is not None for parcel in parcels)
         payloads = [parcel.payload for parcel in parcels]
         presence = [parcel.present for parcel in parcels]
         for parcel in parcels:
@@ -467,8 +485,10 @@ class BranchEncoder(torch.nn.Module):
         present = present.reshape(rows, L)
         if self.pool is not None:
             self.pool.observe(present)
-        flat_positions = positions.reshape(rows, L)
         flat_steps = None if steps is None else steps.reshape(rows, L)
+        flat_positions = positions.reshape(rows, L)
+        if flat_steps is not None:
+            flat_positions = timeline(structural=flat_positions, steps=flat_steps, times=self.clock(geometry))
         active = present.any(dim=1)
         indices = active.nonzero(as_tuple=False).reshape(-1)
 
@@ -567,6 +587,24 @@ class BranchEncoder(torch.nn.Module):
             destination=self.origin,
         )
         return summary
+
+    def clock(self, geometry: TensorDict | None) -> torch.Tensor | None:
+        """Return the time of every row slot of this branch, or ``None`` without ``time_index``.
+
+        Raises:
+            ValueError: If the branch sets ``time_index`` but the batch geometry carries no times.
+        """
+        if not self.timed:
+            return None
+        entry = None if geometry is None else geometry.get(self.origin, None)
+        times = getattr(entry, "times", None)
+        if times is None:
+            message = (
+                f"branch '{self.origin}' sets time_index={self.time_index!r} but the batch geometry has no times; "
+                "encode batches with model.encode or an rf data module so geometry carries them"
+            )
+            raise ValueError(message)
+        return times
 
     def route(
         self,
