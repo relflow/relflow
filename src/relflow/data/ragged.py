@@ -21,7 +21,7 @@ from relflow.data.arrow import variants
 from relflow.data.chronology import positions
 from relflow.data.query import Literal, Member, MissingFieldError, compile, listed, parts, query, scope, stack
 from relflow.data.query import Projection as SourceProjection
-from relflow.data.rows import last, runs
+from relflow.data.rows import advance, last, ranks, runs, trailing
 from relflow.logging.config import logger
 from relflow.structs.enums import Component, Overflow, Strata, Tokens
 from relflow.structs.masking import Forecast, Spans
@@ -141,6 +141,7 @@ class Layout:
     lengths: np.ndarray
     present: np.ndarray
     valid: np.ndarray
+    future: np.ndarray | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -787,6 +788,10 @@ class ForecastSelector:
     ) -> np.ndarray:
         dense = np.zeros(math.prod(layout.shape), dtype=bool)
         if strata == Strata.predict:
+            if layout.future is None:
+                message = f"branch '{node.address}' reached prediction without future rows; extend its layout first"
+                raise ValueError(message)
+            dense[layout.placement] = layout.future
             return dense
         forecast = cast(Forecast, mask.select)
         dense[layout.placement] = last(layout.placement, extent=layout.shape[-1], count=forecast.horizon)
@@ -966,6 +971,115 @@ def moments(layout: Layout, branch: Branch, *, ancestors: tuple[Layout, ...]) ->
     )
 
 
+def observations(layout: Layout, *, branch: Branch, ancestors: tuple[Layout, ...]) -> np.ndarray:
+    """Mark the records of a Forecast branch where some target child holds a value.
+
+    Covariates and the ``time_index`` child are never read, so a row whose targets are
+    all null is unobserved however many covariates it carries.
+    """
+
+    forecast = cast(Forecast, branch.forecast)
+    observed = np.zeros(len(layout.placement), dtype=bool)
+    for child in branch.fields:
+        if child.name not in forecast.targets:
+            continue
+        try:
+            field = pristine(layout, cast(Leaf, child), ancestors=ancestors)
+        except MissingFieldError:
+            continue
+        observed |= field.state.to_numpy(zero_copy_only=False)[layout.placement] == Tokens.valued.value
+    return observed
+
+
+def extend(layout: Layout, *, branch: Branch, strata: Strata, ancestors: tuple[Layout, ...]) -> Layout:
+    """Add the forecast rows a Forecast branch predicts, at prediction only.
+
+    A future row is a trailing row whose targets are all null. A record with future
+    rows keeps at most ``length`` context rows before them; any other non-empty record
+    keeps its last ``length`` rows and gains ``horizon`` slots that carry only the
+    ``time_index`` value.
+
+    Raises:
+        ValueError: A record has more future rows than the horizon, or needs slots
+            while the Forecast declares known covariates.
+    """
+
+    forecast = branch.forecast
+    if strata != Strata.predict or forecast is None:
+        return layout
+    extent = layout.shape[-1]
+    if not len(layout.placement):
+        return dataclasses.replace(layout, future=np.zeros(0, dtype=bool))
+
+    horizon = forecast.horizon
+    parents = math.prod(layout.shape[:-1])
+    parent, slot = np.divmod(layout.placement, extent)
+    future = trailing(
+        layout.placement,
+        extent=extent,
+        observed=observations(layout, branch=branch, ancestors=ancestors),
+    )
+    counts = np.bincount(parent[future], minlength=parents)
+    if (counts > horizon).any():
+        index = int(np.flatnonzero(counts > horizon)[0])
+        raise ValueError(
+            f"branch '{branch.address}' record {index} has {counts[index]} trailing future rows with every "
+            f"Forecast target null, more than Forecast horizon {horizon}; supply at most {horizon} future rows "
+            "or raise the horizon"
+        )
+
+    lengths = layout.lengths.reshape(-1)
+    first = lengths.copy()
+    np.minimum.at(first, parent[future], slot[future])
+    cut = np.zeros(parents, dtype=np.int64) if branch.length is None else np.maximum(first - branch.length, 0)
+    kept = slot >= cut[parent]
+    added = np.where((counts == 0) & (np.bincount(parent, minlength=parents) > 0), horizon, 0)
+    if forecast.known and added.any():
+        index = int(np.flatnonzero(added)[0])
+        raise ValueError(
+            f"branch '{branch.address}' record {index} has no future rows, but Forecast declares known "
+            f"covariates {list(forecast.known)}; automatic slots cannot carry them, so append up to {horizon} "
+            f"future rows with null targets that carry {list(forecast.known)}"
+        )
+
+    new_lengths = lengths - cut + added
+    new_extent = int(new_lengths.max(initial=0))
+    kept_placement = parent[kept] * new_extent + slot[kept] - cut[parent[kept]]
+    slot_parent = np.repeat(np.arange(parents), added)
+    offset = np.arange(len(slot_parent)) - np.repeat(np.cumsum(added) - added, added)
+    slot_placement = slot_parent * new_extent + (lengths - cut)[slot_parent] + offset
+
+    records = layout.records.combine_chunks() if isinstance(layout.records, pa.ChunkedArray) else layout.records
+    rank, total = ranks(layout.placement, extent=extent)
+    tail = np.zeros(parents, dtype=np.int64)
+    tail[parent[rank == total - 1]] = np.flatnonzero(rank == total - 1)
+    columns = {field.name: pa.nulls(len(slot_parent), type=field.type) for field in records.type}
+    if branch.time_index is not None:
+        time_child = cast(Leaf, next(child for child in branch.fields if child.name == branch.time_index))
+        # The branch schema guarantees a single member, so the slot writes the time column it reads.
+        read = compile(time_child.query).steps[0] if isinstance(time_child.query, str) else None
+        name = read.name if isinstance(read, Member) else time_child.name
+        columns[name] = advance(
+            pc.take(pc.struct_field(records, name), pa.array(tail[slot_parent], type=pa.int64())),
+            steps=offset + 1,
+            step=branch.time_step,
+        )
+    slots = pa.StructArray.from_arrays([columns[field.name] for field in records.type], fields=list(records.type))
+
+    placement = np.concatenate((kept_placement, slot_placement))
+    order = np.argsort(placement, kind="stable")
+    combined = pa.concat_arrays([pc.filter(records, pa.array(kept)), slots])
+    return Layout(
+        records=pc.take(combined, pa.array(order, type=pa.int64())),
+        placement=placement[order],
+        shape=(*layout.shape[:-1], new_extent),
+        lengths=new_lengths.reshape(layout.lengths.shape),
+        present=layout.present,
+        valid=layout.valid,
+        future=np.concatenate((future[kept], np.ones(len(slot_placement), dtype=bool)))[order],
+    )
+
+
 def coalesce(
     values: pa.Table,
     schema: Schema,
@@ -1015,8 +1129,11 @@ def coalesce(
                 child = cast("Branch", child)
                 active = descendants.get(child.address, [])
                 if active:
-                    child_layout = descend(
-                        layout, child, active[0], strata=strata, seed=seed, epoch=epoch, ordinal=ordinal
+                    child_layout = extend(
+                        descend(layout, child, active[0], strata=strata, seed=seed, epoch=epoch, ordinal=ordinal),
+                        branch=child,
+                        strata=strata,
+                        ancestors=(*ancestors, layout),
                     )
                     decisions = resolve(
                         child_layout,

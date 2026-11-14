@@ -5,10 +5,12 @@ import typing
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 import pytest
 
 import relflow as rf
 from relflow.data.datasets.arrow import convert
+from relflow.data.query import MissingFieldError
 from relflow.data.ragged import Coalesced, coalesce, referenced
 from relflow.structs.enums import Strata, Tokens
 from relflow.structs.experiment import Schema
@@ -767,3 +769,102 @@ def test_reduction_free_forecast_branch_width_uses_capacity():
     )
     assert schema.branch_widths["/events"] == 5
     assert schema.requests["/events/value"].shape == (1, 5)
+
+
+TIMED = pa.struct(
+    [("ts", pa.float64()), ("value", pa.float64()), ("load", pa.float64()), ("temperature", pa.float64())]
+)
+
+
+def predicted(records: pa.Array, *, timed: bool = False, known: tuple[str, ...] = ()) -> Coalesced:
+    options = {"time_index": "ts", "time_step": 0.5, "ts": rf.Number} if timed else {}
+    forecast = rf.Forecast(horizon=2, targets=("value",), known=known)
+    branch = rf.Branch(
+        length=3,
+        overflow="tail",
+        direction=rf.Direction.causal,
+        mask=rf.Mask(select=forecast, reconstruct=True),
+        value=rf.Number,
+        load=rf.Number,
+        temperature=rf.Number,
+        **options,
+    )
+    schema = Schema.from_tree(d_model=8, n_layers=1, n_heads=2, events=branch)
+    return coalesce(pa.table({"events": records}), schema, rf.Strata.predict)
+
+
+def test_prediction_appends_horizon_slots_after_length_context_rows():
+    records = pa.array([rows(8), rows(1), [], None], type=pa.list_(ITEM))
+    resolved = predicted(records)
+    layout = resolved.layouts["/events"]
+    assert layout.lengths.tolist() == [[5], [3], [0], [0]]
+    assert layout.valid.tolist() == [[True], [True], [True], [False]]
+    assert layout.future.tolist() == [False, False, False, True, True, False, True, True]
+    value = resolved.fields["/events/value"]
+    assert value.inferred.reshape(4, 5).tolist()[0] == [False, False, False, True, True]
+    assert value.pristine.values.to_pylist() == [5.0, 6.0, 7.0, 0.0]
+    assert not resolved.fields["/events/load"].inferred.any()
+
+
+def test_slots_fill_only_the_time_index_child_and_hide_the_rest():
+    records = pa.array(
+        [[{"ts": float(i), "value": float(i), "load": 1.0, "temperature": 2.0} for i in range(8)]],
+        type=pa.list_(TIMED),
+    )
+    resolved = predicted(records, timed=True)
+    slots = resolved.layouts["/events"].records
+    assert pc.struct_field(slots, "ts").to_pylist() == [5.0, 6.0, 7.0, 7.5, 8.0]
+    assert pc.struct_field(slots, "load").to_pylist() == [1.0, 1.0, 1.0, None, None]
+    assert pc.struct_field(slots, "value").to_pylist() == [5.0, 6.0, 7.0, None, None]
+    assert resolved.times["/events"].reshape(1, 5).tolist() == [[0.0, 2.0, 4.0, 5.0, 6.0]]
+    assert resolved.fields["/events/ts"].visible.reshape(1, 5).all()
+    assert inputs(resolved, "/events/load").tolist() == [[0, 0, 0, 3, 3]]
+
+
+def test_slots_are_rejected_when_forecast_declares_known_covariates():
+    with pytest.raises(ValueError, match=r"branch '/events'.*no future rows.*known covariates \['temperature'\]"):
+        predicted(pa.array([rows(8)], type=pa.list_(ITEM)), known=("temperature",))
+
+
+def test_user_future_rows_keep_known_covariates_and_hide_the_others():
+    future = [{"value": None, "load": 99.0, "temperature": 30.0}]
+    records = pa.array([rows(6) + future], type=pa.list_(ITEM))
+    resolved = predicted(records, known=("temperature",))
+    layout = resolved.layouts["/events"]
+    assert layout.lengths.tolist() == [[4]]
+    assert layout.future.tolist() == [False, False, False, True]
+    assert inputs(resolved, "/events/temperature").tolist() == [[0, 0, 0, 0]]
+    assert inputs(resolved, "/events/load").tolist() == [[0, 0, 0, 3]]
+    assert resolved.fields["/events/value"].inferred.reshape(1, 4).tolist() == [[False, False, False, True]]
+    assert not resolved.fields["/events/load"].inferred.any()
+
+
+def test_a_trailing_row_with_an_observed_target_is_context():
+    records = pa.array([rows(4) + [{"value": 4.0, "load": None, "temperature": None}]], type=pa.list_(ITEM))
+    layout = predicted(records).layouts["/events"]
+    assert layout.lengths.tolist() == [[5]]
+    assert layout.future.tolist() == [False] * 3 + [True] * 2
+
+
+def test_more_user_future_rows_than_horizon_raises():
+    records = pa.array([rows(1) + [{"value": None, "load": 1.0, "temperature": 1.0}] * 3], type=pa.list_(ITEM))
+    with pytest.raises(ValueError, match="3 trailing future rows.*Forecast horizon 2"):
+        predicted(records)
+
+
+def test_records_without_observed_targets_or_target_columns_get_slots():
+    nulls = pa.array([[{"value": None, "load": 1.0, "temperature": 1.0}] * 4], type=pa.list_(ITEM))
+    assert predicted(nulls).layouts["/events"].lengths.tolist() == [[5]]
+    covariates = pa.struct([("ts", pa.float64()), ("load", pa.float64()), ("temperature", pa.float64())])
+    records = pa.array(
+        [[{"ts": float(i), "load": 1.0, "temperature": 1.0} for i in range(4)]], type=pa.list_(covariates)
+    )
+    resolved = predicted(records, timed=True)
+    assert resolved.layouts["/events"].lengths.tolist() == [[5]]
+    assert resolved.fields["/events/value"].inferred.reshape(1, 5).tolist() == [[False] * 3 + [True] * 2]
+
+
+def test_missing_covariate_column_still_raises_at_prediction():
+    records = pa.array([[{"value": 1.0}]], type=pa.list_(pa.struct([("value", pa.float64())])))
+    with pytest.raises(MissingFieldError):
+        predicted(records)
