@@ -1,0 +1,35 @@
+d_model: 8
+n_layers: 1
+n_heads: 2
+embed: true
+fields:
+  amount: {type: number}
+  merchant: {type: category}
+  label: {type: category, mask: true}
+  events:
+    type: branch
+    length: 4
+    overflow: tail
+    attention: gqa
+    embed: true
+    fields:
+      kind: {type: category}
+      value: {type: number, mask: true}
+      lines:
+        type: branch
+        length: 3
+        reduction: {type: mean}
+        fields:
+          sku: {type: category}
+          quantity: {type: number}
+  history:
+    type: branch
+    reduction: null
+    fields:
+      price: {type: number}
+  notes:
+    type: branch
+    length: 2
+    attention: null
+    fields:
+      score: {type: number}
