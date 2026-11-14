@@ -188,7 +188,7 @@ test('column and code notes coordinate hover, focus, tap, and Escape', async ({
 test('code explanations distinguish fit settings and JSON decoding from model construction', async ({
   page,
 }) => {
-  await page.goto('/concepts/training/?case=churn');
+  await page.goto('/advanced/training/?case=churn');
   const example = page.locator('[data-case="churn"]');
   const fitLine = example.locator('.ec-line').filter({ hasText: /fit\(data, preset=/ });
   await expect(fitLine.locator('.rf-code-note').filter({ hasText: 'preset' })).toHaveAttribute(
@@ -210,8 +210,8 @@ test('diagram overflow hints update after the canvas stops shrinking', async ({
   isMobile,
 }) => {
   test.skip(isMobile, 'Exercise the desktop-to-mobile resize path in desktop contexts.');
-  await page.goto('/datasets/?case=churn');
-  const diagram = page.locator('[data-case="churn"] [data-erd]');
+  await page.goto('/featureless/?case=churn');
+  const diagram = page.locator('[data-case="churn"] .erd-data [data-erd]');
   for (const width of [1440, 900, 800, 700, 650, 635, 620, 601, 600, 599, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     await expect

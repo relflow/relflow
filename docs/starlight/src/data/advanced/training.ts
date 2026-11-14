@@ -1,11 +1,11 @@
-import { scenarios } from './scenarios';
-import type { CaseId, Concept } from './types';
+import { scenarios } from '../concepts/scenarios';
+import type { CaseId, Concept } from '../concepts/types';
 
 const learning: Record<CaseId, { title: string; description: string; fit: string; inspect: string; stateNote: string; takeaway: string }> = {
   tickets: {
     title: 'Fit the ticket tasks and keep the learned field state',
     description: 'Constructing TicketModel selects the architecture. Fitting teaches its escalation and resolution objectives from the available conversation, while learning field state from training data.',
-    fit: 'model.fit(data, batch_size=128, learning_rate=1e-3, max_epochs=20)',
+    fit: 'model.fit(data, preset="small")',
     inspect: `products = rf.Category.vocabulary(model, "/product")
 duration_statistics = rf.Number.normalization(model, "/hours_to_resolve")`,
     stateNote: 'The product vocabulary and the hidden duration target’s numeric statistics are learned state. The resolution statistics use historical labels without embedding those labels as context.',
@@ -23,7 +23,7 @@ usage_statistics = rf.Number.normalization(model, "/monthly_usage/minutes")`,
   demand: {
     title: 'Learn separate numeric state for history and horizon targets',
     description: 'Historical sales provide context, while units on each supplied horizon week provide supervision. Fitting updates one network across these observation rows and target positions.',
-    fit: 'model.fit(data, batch_size=128, learning_rate=1e-3, max_epochs=20)',
+    fit: 'model.fit(data, preset="small")',
     inspect: `history_statistics = rf.Number.normalization(model, "/history/units_sold")
 target_statistics = rf.Number.normalization(model, "/horizon/units_sold")`,
     stateNote: 'The two units_sold fields have different addresses and their own statistics. A shared leaf name does not merge their training state.',
@@ -32,7 +32,7 @@ target_statistics = rf.Number.normalization(model, "/horizon/units_sold")`,
   credit: {
     title: 'Evaluate a trained risk model on held-out applications',
     description: 'The default label supplies supervision; account and inquiry histories supply context. Fitting can select a model with validation data, and test measures its behavior on a separate application population.',
-    fit: 'model.fit(data, batch_size=128, learning_rate=1e-3, max_epochs=20)',
+    fit: 'model.fit(data, preset="small")',
     inspect: `account_types = rf.Category.vocabulary(model, "/accounts/account_type")
 amount_statistics = rf.Number.normalization(model, "/requested_amount")`,
     stateNote: 'Inspect the training categories and requested-amount scale. A saved model restores this state; constructing CreditModel again would create a new network and fresh field state.',
@@ -41,7 +41,7 @@ amount_statistics = rf.Number.normalization(model, "/requested_amount")`,
   maintenance: {
     title: 'Train from asset snapshots, then reuse the learned encodings',
     description: 'Learning updates the network and field-owned resources from training snapshots. Validation and test evaluate failure risk using the state learned from those snapshots.',
-    fit: 'model.fit(data, batch_size=128, learning_rate=1e-3, max_epochs=20)',
+    fit: 'model.fit(data, preset="small")',
     inspect: `vibration_statistics = rf.Number.normalization(model, "/sensor_readings/vibration")
 known_parts = rf.Set.vocabulary(model, "/work_orders/parts_replaced")`,
     stateNote: 'Numeric normalization and the parts vocabulary travel with the weights. An empty observed parts set remains different from a missing work-order collection.',
@@ -50,7 +50,7 @@ known_parts = rf.Set.vocabulary(model, "/work_orders/parts_replaced")`,
   claims: {
     title: 'Train and evaluate payout and fraud at claim depth',
     description: 'Each supplied claim has two hidden objectives. Both train with policy and invoice context, while retaining their own answer types and evaluation meaning.',
-    fit: 'model.fit(data, batch_size=128, learning_rate=1e-3, max_epochs=20)',
+    fit: 'model.fit(data, preset="small")',
     inspect: `causes = rf.Category.vocabulary(model, "/claims/cause")
 payout_statistics = rf.Number.normalization(model, "/claims/paid_amount")`,
     stateNote: 'The payout statistics summarize the claim-level training labels. Hash provider identifiers do not build a persistent provider vocabulary.',
@@ -141,7 +141,6 @@ resume_data = rf.ArrowDataModule(
 )
 resumed.fit(
     resume_data,
-    batch_size=128,
     max_epochs=30,
     ckpt_path=checkpoint,
 )`,
@@ -156,7 +155,7 @@ resumed.fit(
     { label: 'Scale training and streaming', href: '/advanced/distributed-data/' },
     { label: 'Manage an online vocabulary', href: '/advanced/online-vocabulary/' },
     { label: 'Inspect training, persistence, and mutation APIs', href: '/api-map/' },
-    { label: 'Read prediction types and nested output', href: '/predictions/' },
+    { label: 'Read prediction types and nested output', href: '/concepts/runtime/' },
     { label: 'Review measured protocols and their limits', href: '/evidence/' },
   ],
 };

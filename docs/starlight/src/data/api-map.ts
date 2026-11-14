@@ -44,7 +44,7 @@ export const apiSections: ApiSection[] = [
         "name": "rf.Branch",
         "description": "Declare a collection of related records, with its own context settings and optional retained-length limit.",
         "source": source('structs/structure.py', 49),
-        "guide": "/data/",
+        "guide": "/concepts/branches/",
         "kind": "class"
       },
       {
@@ -63,7 +63,7 @@ export const apiSections: ApiSection[] = [
         "name": "rf.Mask",
         "description": "Select coordinates to hide, drop, or reconstruct, including query-selected and sampled targets.",
         "source": source('structs/tree.py', 19),
-        "guide": "/predictions/",
+        "guide": "/concepts/targets/",
         "kind": "configuration"
       },
       {
@@ -88,18 +88,21 @@ export const apiSections: ApiSection[] = [
         "name": "rf.presets",
         "description": "Access named architecture policies, optional fit defaults, and the custom-policy registry.",
         "source": source('presets/__init__.py', 1),
+        "guide": "/concepts/runtime/",
         "kind": "module"
       },
       {
         "name": "rf.presets.SMALL",
         "description": "Use the bundled small policy as a registered architecture or fit recipe.",
         "source": source('presets/builtins.py', 15),
+        "guide": "/concepts/runtime/",
         "kind": "preset"
       },
       {
         "name": "rf.presets.MEDIUM",
         "description": "Use the bundled medium policy as a registered architecture or fit recipe.",
         "source": source('presets/builtins.py', 32),
+        "guide": "/concepts/runtime/",
         "kind": "preset"
       },
       {
@@ -247,7 +250,7 @@ export const apiSections: ApiSection[] = [
         "name": "rf.ArrowDataModule",
         "description": "Load named splits from Arrow tables, batches, datasets, files, or restartable Arrow factories.",
         "source": source('data/datasets/arrow.py', 691),
-        "guide": "/data/",
+        "guide": "/advanced/data-modules/",
         "kind": "class"
       },
       {
@@ -285,7 +288,7 @@ export const apiSections: ApiSection[] = [
         "name": "rf.preprocess",
         "description": "Decorate an eager Polars transform that prepares source observations before structural queries and encoding.",
         "source": source('data/processors.py', 398),
-        "guide": "/data/",
+        "guide": "/advanced/data-modules/",
         "kind": "decorator"
       },
       {
@@ -326,19 +329,21 @@ export const apiSections: ApiSection[] = [
         "name": "model.fit",
         "description": "Train the current model; select fit defaults or optimizer settings and use ckpt_path for full training-state resume.",
         "source": source('architecture/root.py', 686),
-        "guide": "/concepts/training/",
+        "guide": "/concepts/runtime/",
         "kind": "method"
       },
       {
         "name": "model.validate",
         "description": "Evaluate the validation split and return aggregate metric dictionaries.",
         "source": source('architecture/root.py', 840),
+        "guide": "/concepts/runtime/",
         "kind": "method"
       },
       {
         "name": "model.test",
         "description": "Evaluate the test split and return aggregate metric dictionaries.",
         "source": source('architecture/root.py', 867),
+        "guide": "/concepts/runtime/",
         "kind": "method"
       },
       {
@@ -388,7 +393,7 @@ export const apiSections: ApiSection[] = [
         "name": "model.predict",
         "description": "Return an eager Polars DataFrame of named prediction results, or stream through callbacks with return_predictions=False.",
         "source": source('architecture/root.py', 1005),
-        "guide": "/predictions/",
+        "guide": "/concepts/runtime/",
         "kind": "method"
       },
       {

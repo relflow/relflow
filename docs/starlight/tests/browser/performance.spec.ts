@@ -26,7 +26,11 @@ async function geometry(root: Locator) {
 for (const item of [
   { route: '/?case=claims', root: '[data-use-cases]', panel: 'case-claims' },
   { route: '/concepts/models/?case=churn', root: '[data-use-cases]', panel: 'models-churn' },
-  { route: '/datasets/?case=maintenance', root: '[data-use-cases]', panel: 'dataset-maintenance' },
+  {
+    route: '/featureless/?case=maintenance',
+    root: '[data-use-cases]',
+    panel: 'featureless-maintenance',
+  },
   {
     route: '/data-types/boolean/#boolean-examples-items',
     root: '[data-type-showcase]',

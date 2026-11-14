@@ -1,5 +1,5 @@
-import type { Concept } from './types';
-import { scenarios } from './scenarios';
+import type { Concept } from '../concepts/types';
+import { scenarios } from '../concepts/scenarios';
 
 const examples: Record<(typeof scenarios)[number]['id'], Omit<Concept['examples'][number], 'caseId'>> = {
   tickets: {

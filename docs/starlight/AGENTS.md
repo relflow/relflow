@@ -21,7 +21,9 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   result. Keep these build-only parsers out of browser imports. Browser tests
   protect first-paint selection geometry, deferred diagram setup, and delegation.
 - Use `npm run dev` at `http://127.0.0.1:4300` for page-by-page content review
-  with live reload. Keep iterations local; do not push preview commits or trigger
+  with live reload. After changing `astro.config.mjs` or the sidebar configuration,
+  restart the running server with `npm run dev -- --force --background` so the
+  preview loads the new configuration. Keep iterations local; do not push preview commits or trigger
   Read the Docs builds unless the user requests publication. Use `npm run preview`
   when checking the production build. Content iteration does not run Evidence CI.
 - Author documentation in `src/content/docs/` as Markdown or MDX. Keep reusable
@@ -50,6 +52,9 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   its options; vary only accent and keyword colors. The lab remains a preview.
 - Keep the page table of contents disabled globally. Do not add an "On this
   page" sidebar or mobile menu on individual pages.
+  Advanced Usage is collapsed by default in the sidebar. The former Use your
+  data pages are removed; link to Core Concepts and the Featureless Modeling
+  ERD examples instead. Keep the individual leaf type reference pages.
 - Sidebar summaries use every page's frontmatter description. The Sidebar
   override wraps the native Starlight component, preserving navigation, group
   state, scroll restoration, and the mobile footer. Hover and focus reveal a
@@ -102,7 +107,14 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   Source-only join keys stay on the data side; model ERDs show the declared
   fields, types, branches, and targets. Preserve the Google Doc's page copy and use its
   visual notes as implementation instructions.
-- Every Core Concepts page supports all six original homepage use cases. The
+- Core Concepts contains exactly Model trees, Context branches, Leaf types,
+  Data flow, Targets and masking, and Runtime. Runtime owns the basic
+  `fit`/`validate`/`test`/`predict` workflow and prediction outputs. Start its
+  examples with named constructor and fit presets rather than individual
+  optimizer, architecture, batch-size, or training-budget settings. Architecture
+  and fit presets are independent; `small` and `medium` are alternative recipes,
+  not an ascending model-size ladder.
+  Every Core Concepts page supports all six original homepage use cases. The
   shared scenario records live in `src/data/concepts/scenarios.ts` and reuse the
   canonical homepage schemas. Each concept owns six focused examples in
   `src/data/concepts/<topic>.ts`. Keep shared field names, labels, nesting, and
@@ -110,6 +122,11 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   concepts and the homepage, with explicit `?case=` links taking precedence over
   saved preferences. Keep keyboard selection, code notes, natural panel heights,
   native navigation, and readable examples without JavaScript.
+- Refer to relflow field representations as leaf types in reader-facing prose.
+  The Leaf Types reference follows the shared document's Continuous data,
+  Discrete data, Calendar data, Multimodal data, and Other data groups. Keep
+  extension guidance visible under Other data; list implemented leaf types and
+  retain their actual API names and source paths.
 - `DataFlow.astro` follows the six canonical observations through connected,
   expandable stages. `src/data/concepts/data-flow.ts` owns the authored views;
   `src/data-flow/types.ts` owns prediction/training stage order. Keep the four
@@ -136,7 +153,8 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   Do not fill unwritten sections with new tutorials; the purchase quickstart was
   deliberately removed. Explain inputs,
   learning, and outputs before architecture details.
-- Advanced Usage owns custom data modules/types, online vocabulary, mutations,
+- Advanced Usage owns data modules and preprocessing, training and learned state,
+  regularization, custom data modules/types, online vocabulary, mutations,
   embeddings, distributed data, checkpoints and state, masking/pretraining, and
   inference/deployment. Keep basic predictions in Core Concepts. Mutations and
   embeddings retain the six-case selector through `ConceptPage.astro`, with
@@ -159,7 +177,7 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   Delegate trigger events rather than binding handlers per token. Initialize
   diagrams near the viewport, pause hidden/offscreen resize work, and batch
   geometry reads separately from SVG writes.
-- Every individual data type page follows one contract: a short introduction,
+- Every individual leaf type page follows one contract: a short introduction,
   then `Example`, `Inputs`, `Predictions`, `Options`, `Request Methods`,
   `Footguns`, `Related types`, and `Evidence`, in that exact order. Options tables use
   `Option`, `Default`, and `Purpose` columns. Examples use class schemas with
@@ -189,7 +207,7 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   Keep all choices visible and panel heights natural.
   Schema, known inputs, hidden training answers, and results switch together.
   Six-case views use the shared `CasePicker` and `ExampleSelection` primitives;
-  preserve the separate six-case persistence and datatype-scenario controllers.
+  preserve the separate six-case persistence and leaf-type scenario controllers.
   Each `TypeExample` owns a required `dataset` matching its input and answer
   source fields. Show the explorer first, the model schema next, exact source
   records in a disclosure, and complete prediction output below.
@@ -216,7 +234,7 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   may supply timestamp sources from which target values are derived; explain
   that transformation in `answerNote` rather than inventing numeric source data.
   Ordinal uses keyword `values=(...)` and writes native labels or integer ranks.
-- The datatype reference, schemas, and workflow contracts follow the public
+- The leaf type reference, schemas, and workflow contracts follow the public
   source at `a1d0be3e373cf6c183e4926f1bfcbef845f2f883` on stage/0.5.0
   (13 canonical types).
   Compare source exports, registered extensions, pages, examples, and navigation

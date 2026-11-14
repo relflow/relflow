@@ -13,11 +13,11 @@ messages, an asset with sensor readings, or a policy with claims and invoices.
 - The **root** represents one complete observation.
 - **[Branches](/concepts/branches/)** organize collections of related records.
   Each branch can contain its own leaves and nested branches.
-- **[Leaves](/concepts/data-types/)** describe individual fields and their data
+- **[Leaves](/concepts/data-types/)** describe individual fields and their leaf
   types, such as numbers, categories, text, sets, or vectors.
 
 You declare this tree with Python classes: `rf.Model` for the root, `rf.Branch`
-for related records, and data types for the leaves. The declarations define
+for related records, and leaf types for the values. The declarations define
 the model's structure; training learns how to represent the values and combine
 their context.
 

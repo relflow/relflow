@@ -10,7 +10,7 @@ import UseCases from '../../components/UseCases.astro';
 </div>
 
 - **[Featureless](/featureless/):** Learn features from typed values and nested records inside the model, without a separate feature engineering pipeline.
-- **[Modular](/modular/):** Compose models from fields and branches. Extend them with your own custom data types and connect to your own [custom data sources](/advanced/custom-data-modules/).
+- **[Modular](/modular/):** Compose models from fields and branches. Extend them with your own custom leaf types and connect to your own [custom data sources](/advanced/custom-data-modules/).
 - **[Scalable](/advanced/distributed-data/):** Stream massive datasets through batched training and inference.
 - **[Deployable](/advanced/inference-and-deployment/):** Use the trained model for batch predictions and real-time serving.
 - **[SOTA](/benchmarks/):** On the nine published RelArena tasks with over one million training observations, relflow beats TabPFN-3 on nine and TabPFN-3.5 on six.
@@ -31,8 +31,8 @@ relflow was built as open-source software and will always be free.
 
 <ol class="learning-path">
   <li><a href="/installation/">Install relflow.</a> Add the package to your Python project.</li>
-  <li><a href="/data/">Define your own examples.</a> Decide what one observation contains and which information belongs in its history.</li>
-  <li><a href="/predictions/">Choose your predictions.</a> Learn a probability, a value, or several answers at different levels of a record.</li>
+  <li><a href="/concepts/models/">Define your model.</a> Describe its typed fields and collections of related records.</li>
+  <li><a href="/concepts/targets/">Choose your predictions.</a> Learn a probability, a value, or several answers at different levels of a record.</li>
 </ol>
 
 Want to inspect the underlying capabilities? The [learning experiment library](/evidence/)

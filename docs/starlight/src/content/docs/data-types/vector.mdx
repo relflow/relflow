@@ -35,7 +35,7 @@ distribution, rather than a separate rich result for each coordinate.
 A vector target inside a branch gets one fixed-width array per retained
 record. The stock example has a variable list of products, each with a
 three-coordinate sales vector and a separate Boolean target. These fields
-retain their own output contracts. See [Choose your predictions](/predictions/).
+retain their own output contracts. See [Runtime](/concepts/runtime/).
 
 The writer fills coordinates with zeros when the most likely predicted state
 is not `valued`. Read the surrounding state probabilities when interpreting
@@ -88,12 +88,12 @@ These limits follow the input, output, and storage contracts.
 
 - [Number](/data-types/number/) represents individually named numeric measurements with learned normalization.
 - [Text](/data-types/text/) encodes strings with a frozen text encoder.
-- [Define one example](/data/) explains collections of related records. Use a branch when the collection's length varies.
+- [Context branches](/concepts/branches/) explains collections of related records. Use a branch when the collection's length varies.
 
 ## Evidence
 
 The current learning library has no dedicated Vector experiment. The
-[Vector datatype tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_vector.py)
+[Vector leaf type tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_vector.py)
 cover dimensionality, reconstruction objectives, numeric validity, and Arrow
 output. These are API checks rather than measured application-quality results.
 

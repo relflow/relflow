@@ -1,61 +1,6 @@
-.dataset-explorer {
-  min-width: 0;
-  margin-block: var(--rf-section-gap);
-}
-.dataset-explorer button:focus-visible,
 .erd-scroll:focus-visible {
   outline: 2px solid var(--sl-color-text-accent);
   outline-offset: 3px;
-}
-.erd-interaction-help {
-  margin: 0 0 1.5rem;
-  color: var(--rf-muted);
-  font-size: 0.76rem;
-}
-.dataset-example {
-  min-width: 0;
-  margin-block: 2rem;
-  scroll-margin-top: 6rem;
-}
-.dataset-explorer[data-prepared] .dataset-example,
-.dataset-explorer[data-ready] .dataset-example {
-  margin: 0;
-}
-.dataset-explorer[data-ready] .dataset-example[aria-hidden='true'] {
-  display: none;
-}
-.dataset-heading {
-  margin-block: 1.5rem;
-}
-.dataset-eyebrow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-  font-size: 0.7rem;
-  line-height: 1.5;
-  color: var(--rf-muted);
-}
-.dataset-eyebrow a {
-  color: var(--sl-color-text-accent);
-  text-decoration: none;
-}
-.dataset-eyebrow a:hover {
-  text-decoration: underline;
-}
-.dataset-heading h2 {
-  margin: 0.5rem 0;
-  font-size: 1.5rem;
-  line-height: 1.35;
-  letter-spacing: -0.03em;
-  color: var(--rf-ink);
-}
-.dataset-heading p {
-  margin: 0.5rem 0 0;
-  font-size: 0.87rem;
-  line-height: 1.75;
-  color: var(--rf-muted);
 }
 .data-explorer {
   min-width: 0;
@@ -277,47 +222,6 @@
   color: var(--sl-color-text-accent);
   margin-inline: 0.3rem;
   white-space: nowrap;
-}
-.dataset-mapping {
-  margin-top: 1.6rem;
-}
-.dataset-mapping h3 {
-  margin: 0 0 0.6rem;
-  font-size: 1.1rem;
-  line-height: 1.4;
-  color: var(--rf-ink);
-}
-.dataset-mapping > p {
-  margin: 0 0 1rem;
-  font-size: 0.84rem;
-  line-height: 1.8;
-  color: var(--rf-muted);
-}
-.dataset-mapping details {
-  margin-block: 0.75rem;
-  border: 1px solid var(--rf-border);
-  border-radius: 0.35rem;
-  padding: 0.7rem 0.9rem;
-  font-size: 0.8rem;
-}
-.dataset-mapping summary {
-  cursor: pointer;
-  color: var(--sl-color-text-accent);
-}
-.dataset-mapping .expressive-code {
-  margin-top: 1rem;
-  --ec-codeFontSize: 0.77rem;
-}
-.dataset-mapping nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem 1.2rem;
-  margin-block: 1.25rem;
-  font-size: 0.78rem;
-}
-.dataset-mapping nav a {
-  color: var(--sl-color-text-accent);
-  text-underline-offset: 0.2em;
 }
 .erd-tooltip {
   position: fixed;

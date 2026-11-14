@@ -1,6 +1,6 @@
 ---
 title: Advanced usage
-description: Build custom data pipelines, register new data types, and manage learned state as your data changes.
+description: Build custom data pipelines, register new leaf types, and manage learned state as your data changes.
 ---
 
 Extend how data reaches a model, how a field represents information, or how
@@ -11,8 +11,11 @@ behind the high-level modeling API.
 
 | You need to… | Start here | What you will control |
 | --- | --- | --- |
+| Configure prepared sources and preprocessing | [Data modules](/advanced/data-modules/) | Observation boundaries, source delivery, and preprocessing. |
+| Inspect learning and fitted field state | [Training and learned state](/advanced/training/) | Vocabularies, numeric state, training policies, and model artifacts. |
+| Vary training context and input representations | [Regularization](/advanced/regularization/) | Input masking, jitter, dropout, and sampled history windows. |
 | Read a specialized source, stream records, or own a loader | [Custom data modules](/advanced/custom-data-modules/) | Repeatable sources, explicit Arrow schemas, split delivery, and batch ownership. |
-| Introduce a new field representation or learning objective | [Custom data types](/advanced/custom-data-types/) | Accepted values, tensorization, neural components, objectives, and output contracts. |
+| Introduce a new field representation or learning objective | [Custom leaf types](/advanced/custom-data-types/) | Accepted values, tensorization, neural components, objectives, and output contracts. |
 | Train with a changing population of labels | [Online vocabulary](/advanced/online-vocabulary/) | Admission, unknown values, training exposure, persistence, and synchronization. |
 | Evolve an existing model schema | [Mutations](/advanced/mutations/) | Selection, compatible state retention, temporary overrides, and retraining after an edit. |
 | Export learned context for another system | [Embeddings](/advanced/embeddings/) | Output selection, structural coordinates, reduction outputs, and representation identity. |
@@ -39,7 +42,7 @@ the pipeline.
 
 For example, grouping transactions into customer histories belongs to data
 preparation. Choosing how a new signal is encoded and embedded belongs to its
-field type. The [data flow guide](/concepts/data-modules/) explains how those
+field type. The [data flow guide](/concepts/data-flow/) explains how those
 operations meet at the model schema.
 
 ## State is part of the model

@@ -109,14 +109,11 @@ styles. Descriptions also provide native title hints without JavaScript.
 | --- | --- |
 | `/` | What does relflow do, and where does it fit? |
 | `/featureless/` | How does relflow learn from records without a separate feature engineering pipeline? |
-| `/modular/` | How do custom data types, data sources, and specialized model components fit together? |
+| `/modular/` | How do custom leaf types, data sources, and specialized model components fit together? |
 | `/installation/` | How do I install relflow and the optional capabilities I need? |
-| `/data/` | What is one example in my application? |
-| `/datasets/` | How do the example datasets, entities, and columns fit together? |
-| `/predictions/` | Which answers should my model learn? |
-| `/data-types/` | Which representation fits each value? |
 | `/concepts/models/` | How do the core ideas fit my use case? |
 | `/concepts/data-flow/` | How do source records become predictions or training updates? |
+| `/concepts/runtime/` | How do I fit, validate, test, and predict using presets? |
 | `/advanced/` | How do I extend, scale, adapt, and deploy the modeling workflow? |
 | `/api-map/` | Which class, method, or extension contract handles this job? |
 | `/benchmarks/` | How does it compare on published tasks? |
@@ -135,7 +132,7 @@ the repeated teaching patterns; their typed inputs own the relevant contracts.
 
 | Reader task | Component | Authored input |
 | --- | --- | --- |
-| Learn one datatype | `DataTypePage` | A stable example ID, three `TypeExample` records, and the seven reference sections as Markdown. |
+| Learn one leaf type | `DataTypePage` | A stable example ID, three `TypeExample` records, and the seven reference sections as Markdown. |
 | Follow a concept across use cases | `ConceptPage` | A `Concept` with six focused examples, principles, and related guides. |
 | Follow records through the pipeline | `DataFlow` | The six canonical cases, typed stage views, and prediction/training paths in `src/data/concepts/data-flow.ts`. |
 | Understand supplied records | `DataExplorer` | A page-unique ID and a `Dataset` with explicit entities, columns, and relationships. |
@@ -152,12 +149,12 @@ the repeated teaching patterns; their typed inputs own the relevant contracts.
 **Options**, **Request Methods**, **Footguns**, **Related types**, and **Evidence**,
 once each in that order. The build validates the rendered section contract;
 authors keep Markdown headings and code fences rather than filling seven named
-slots. Datatype meaning, examples, and documented limitations remain authored.
+slots. Leaf type meaning, examples, and documented limitations remain authored.
 
-`UseCases`, `ConceptPage`, and `DatasetExplorer` share `CasePicker` and one
+`UseCases`, `ConceptPage`, and `FeaturelessExamples` share `CasePicker` and one
 choice shape: `{ id, panel, label, summary }`. `ExampleSelection` serializes only
 the IDs and panel bindings needed before first paint. These primitives retain
-the six-case URL/storage controller; the datatype scenarios retain their own
+the six-case URL/storage controller; the leaf type scenarios retain their own
 hash selection and field highlighting. Compose the domain components above
 when authoring a page instead of recreating their picker or layout.
 
@@ -182,10 +179,12 @@ records provide the measured predictive comparisons.
 
 ### Core Concepts
 
-The Core Concepts pages each include all six homepage use cases. Choose a case
-once and follow it through schemas, data types, branches, masking, data modules,
-training, regularization, and predictions. Mutations and embeddings live in
-Advanced Usage and also support all six cases. The selector remembers the
+Core Concepts contains Model trees, Context branches, Leaf types, Data flow,
+Targets and masking, and Runtime. Each page includes all six homepage use cases.
+Runtime introduces `fit`, `validate`, `test`, and `predict` through presets and
+incorporates the prediction output examples. Data modules, Training and learned
+state, and Regularization live in Advanced Usage, alongside mutations and
+embeddings, and retain the six-case selector. The selector remembers the
 choice and carries it through concept and advanced links; an explicit
 `?case=claims` URL or example anchor can select a different case. It also
 connects to the homepage.
@@ -220,10 +219,10 @@ code, and the diagrams establish no measured performance result.
 
 ### Advanced Usage
 
-`/advanced/` organizes ten implementation guides: custom data modules, custom
-data types, online vocabulary, mutations, embeddings, distributed training and
-streaming, checkpoints and model state, masking and pretraining, inference
-and deployment, and the command line. Keep Core Concepts focused on the basic modeling contract;
+`/advanced/` organizes data modules, training and learned state, regularization,
+custom data modules and types, online vocabulary, mutations, embeddings,
+distributed training and streaming, checkpoints and model state, masking and
+pretraining, inference and deployment, and the command line. Keep Core Concepts focused on the basic modeling contract;
 these guides own extension protocols and operational lifecycle details.
 
 Mutations and embeddings reuse `ConceptPage.astro` and all six original cases,
@@ -236,7 +235,7 @@ Site builds never run the examples, launch servers, or import the Python runtime
 
 ### Example datasets
 
-`/datasets/` explores the same six cases as entity relationship diagrams. These
+The homepage and `/featureless/#example` explore the six cases as entity relationship diagrams. These
 are hypothetical source-table layouts, with illustrative PK/FK columns added to
 make joins explicit. The matching schemas consume nested observations and do not
 require a relational database or the extra join keys as model inputs. Targets
@@ -251,8 +250,8 @@ Python runtime, or Typst is required.
 
 Column descriptions open on hover, focus, or tap and close with Escape or an
 outside tap. Static descriptions and native title hints remain without JavaScript.
-The shared use-case selector connects diagrams to the homepage and Core Concepts;
-each case also includes the matching input in YAML and the original class schema.
+The shared use-case selector connects diagrams to the homepage and Core Concepts.
+Featureless Modeling lets readers toggle between the data and model ERDs.
 
 ### Describe data anywhere
 
@@ -274,7 +273,7 @@ records with a collection column and relationship; primitive lists remain one
 column. A single flat record needs one entity and an empty relationships array.
 The renderer validates entity IDs and relationship anchors before building.
 
-All 39 data type examples supply their own dataset contract. Their source
+All 39 leaf type examples supply their own dataset contract. Their source
 diagrams lead the example, followed by the schema, inspectable exact YAML
 records, and visual prediction trees. Duration examples describe actual
 timestamp sources and distinguish training-only endpoints from a derived
@@ -282,7 +281,7 @@ prediction target. Column focus and hover share field highlighting with code.
 
 Core Concepts reuses the nested observation contracts in
 `src/data/observations.ts`, with original field meanings and no source-only join
-keys. The introductory data page uses the same component.
+keys.
 Descriptions are authored deliberately, independent of example values, so an
 empty list, null value, or short fixture cannot silently redefine the dataset.
 Keep measured Evidence in its existing result views.
@@ -372,12 +371,13 @@ their dataset definitions. Those sources already feed the sidebar and data
 explorer tooltips, respectively; context-specific descriptions do not need to
 be copied into the shared API reference.
 
-Every individual data type page uses the same eight sections: **Example**,
+Every individual leaf type page uses the same eight sections: **Example**,
 **Inputs**, **Predictions**, **Options**, **Request Methods**, **Footguns**, **Related types**,
 **Evidence**.
 Use `Option | Default | Purpose` for options tables, class schemas with a short
 docstring for examples, and verified input/output contracts. The overview at
-`/data-types/` helps readers choose between representations.
+`/concepts/data-types/` introduces field representations; the individual leaf type
+reference pages describe their detailed contracts.
 Request methods use a `Method | Returns | Purpose` table and a short Python
 example showing the type helper, model, and absolute field address. Include
 explicit result type annotations in each snippet, using the example’s label
@@ -413,7 +413,7 @@ known identities as context for downstream predictions. Ordinal writes native
 ordered labels or integer ranks. Duration can derive a numeric target from
 timestamp sources in the training record; use `answerNote` to explain that step.
 
-The datatype inventory, schema declarations, and workflow APIs follow
+The leaf type inventory, schema declarations, and workflow APIs follow
 stage/0.5.0 revision `a1d0be3e373cf6c183e4926f1bfcbef845f2f883`.
 Keep this source scope explicit when validating examples or preparing publication;
 recorded Evidence and benchmark runs retain their own revisions.

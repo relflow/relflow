@@ -47,7 +47,7 @@ export const models: Concept = {
   intro: [],
   principles: [
     { title: 'Context follows the hierarchy', text: 'Within a branch, attention combines representations of its fields and child records. Cross-attention can reduce a collection to learned summaries for its parent and supply context to prediction heads. Nesting lets this process carry information across several levels of related records.' },
-    { title: 'Typed leaves define how values are represented', text: 'Each data type owns its representation of a value. A number, a category, and a set can therefore enter the same tree through components suited to their meanings.' },
+    { title: 'Typed leaves define how values are represented', text: 'Each leaf type owns its representation of a value. A number, a category, and a set can therefore enter the same tree through components suited to their meanings.' },
     { title: 'Targets keep their place in the tree', text: 'A prediction target can belong to the root or to a nested record. Its location determines where its answer belongs: one probability for a ticket, one forecast for each supplied week, or several answers for each claim.' },
   ],
   examples: scenarios.map((scenario) => {

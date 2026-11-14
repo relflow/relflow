@@ -1,6 +1,6 @@
 import { stringify } from 'yaml';
-import { scenarios } from './scenarios';
-import type { CaseId, Concept } from './types';
+import { scenarios } from '../concepts/scenarios';
+import type { CaseId, Concept } from '../concepts/types';
 
 const observations: Record<CaseId, { title: string; description: string; preparation: string; source: string; takeaway: string }> = {
   tickets: {
@@ -53,14 +53,12 @@ def prepare_ticket(frame):
   maintenance: {
     title: 'Scan asset snapshots while preserving their event histories',
     description: 'One row is an asset at an assessment time, with sensor readings and completed work known then. The source dataset contains these nested snapshots, not a flat stream of unrelated sensor points.',
-    preparation: `import pyarrow.dataset as ds
-
-`,
+    preparation: '',
     source: `data = rf.ArrowDataModule(
-    train=ds.dataset("maintenance/train", format="parquet"),
-    validate=ds.dataset("maintenance/validation", format="parquet"),
+    train="maintenance/train/*.parquet",
+    validate="maintenance/validation/*.parquet",
 )`,
-    takeaway: 'The Arrow Dataset is scanned again for each pass. The loader can stream snapshots, but the application must still bound and order each history and avoid including work performed after the assessment.',
+    takeaway: 'The file shards are scanned again for each pass. The loader can stream snapshots, but the application must still bound and order each history and avoid including work performed after the assessment.',
   },
   claims: {
     title: 'Preserve claim, invoice, and line-item boundaries',
@@ -123,7 +121,7 @@ export const dataModules: Concept = {
 ${observations[scenario.id].preparation}${observations[scenario.id].source}
 
 model = ${scenario.modelClass}(preset="small")
-model.fit(data, batch_size=128, max_epochs=20)`,
+model.fit(data, preset="small")`,
         note: scenario.id === 'tickets'
           ? 'Use the selected TicketModel definition. In this source-renaming variant, input files call the product column source_product; the preprocessor produces the illustrated product field.'
           : `Use the selected ${scenario.modelClass} definition. The files or dataset directories are application-supplied; constructing the model starts it untrained, and fit binds the data module.`,
@@ -134,8 +132,8 @@ model.fit(data, batch_size=128, max_epochs=20)`,
   takeaway: 'Prepare meaningful observation boundaries and splits first. Then stream and batch those records through the same schema contract, keeping source preparation separate from learned feature extraction.',
   links: [
     { label: 'Build a custom data module', href: '/advanced/custom-data-modules/' },
-    { label: 'Define an observation and its cutoff', href: '/data/' },
-    { label: 'Follow training and learned state', href: '/concepts/training/' },
+    { label: 'Describe the observation with a model tree', href: '/concepts/models/' },
+    { label: 'Follow training and learned state', href: '/advanced/training/' },
     { label: 'Find data modules, sources, and preprocessors', href: '/api-map/' },
     { label: 'Inspect experimental data and controls', href: '/evidence/' },
   ],

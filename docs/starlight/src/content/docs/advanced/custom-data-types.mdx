@@ -1,16 +1,16 @@
 ---
-title: Custom data types
+title: Custom leaf types
 description: Own a field’s Arrow contract, tensor representation, neural modules, and optional prediction output through explicit extension roles.
 ---
 
 import DataExplorer from '../../../components/DataExplorer.astro';
 
-A custom data type changes how one kind of value enters the network, learns,
+A custom leaf type changes how one kind of value enters the network, learns,
 or becomes a prediction. Its implementation belongs to the field extension;
 the shared model and data pipeline continue to handle structure, batches, and
 routing.
 
-Start with a [built-in type](/data-types/) when its representation fits. Use a
+Start with a [built-in type](/concepts/data-types/) when its representation fits. Use a
 preprocessor to join, filter, rename, or derive application data. Write an
 extension when the **meaning of the value requires a different representation
 or objective**. A circular bearing, for example, has a different geometry from

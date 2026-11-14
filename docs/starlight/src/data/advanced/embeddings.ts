@@ -69,7 +69,7 @@ with model.override(branch, embed=True):
   ],
   takeaway: 'Export context from a trained model, preserve its structural coordinates, and measure the downstream use of those representations independently.',
   links: [
-    { label: 'Read target predictions', href: '/concepts/predictions/' },
+    { label: 'Read target predictions', href: '/concepts/runtime/' },
     { label: 'Mutate output selection', href: '/advanced/mutations/' },
     { label: 'Save model state', href: '/advanced/checkpoints-and-state/' },
     { label: 'Own preprocessing and loading', href: '/advanced/custom-data-modules/' },

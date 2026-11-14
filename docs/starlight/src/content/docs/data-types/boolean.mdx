@@ -22,7 +22,7 @@ to Booleans in a preprocessor, or use [Enum](/data-types/enum/) for named labels
 
 For a decoded target, `content.probability` is the predicted probability of
 `True`. relflow returns a score that your application can use to rank customers
-or apply a decision threshold. See [Choose your predictions](/predictions/).
+or apply a decision threshold. See [Runtime](/concepts/runtime/).
 
 ## Options
 
@@ -62,8 +62,8 @@ dictionary does not change the model.
 
 - **Turning an unresolved outcome into `False`.** That supplies a known
   negative label. Keep unknown outcomes distinct and wait for the complete
-  outcome window before assigning negatives; see [decision cutoffs](/data/)
-  and the [null-target checks](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_boolean.py#L262).
+  outcome window before assigning negatives; see the
+  [null-target checks](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_boolean.py#L262).
 - **Expecting `threshold` to change prediction scores.** It configures decision
   metrics; your application still receives a probability. Apply the decision
   rule explicitly and compare its costs on held-out data. The

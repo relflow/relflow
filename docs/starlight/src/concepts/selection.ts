@@ -41,7 +41,7 @@ for (const root of document.querySelectorAll<HTMLElement>('[data-use-cases]')) {
           url.pathname.startsWith(`${base}/concepts/`) ||
           url.pathname.startsWith(`${base}/advanced/`) ||
           url.pathname === `${base}/` ||
-          url.pathname === `${base}/datasets/`
+          url.pathname === `${base}/featureless/`
         )
       )
         continue;

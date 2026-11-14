@@ -49,7 +49,7 @@ const lessons: Record<CaseId, { title: string; description: string; fields: stri
 
 export const dataTypes: Concept = {
   id: 'data-types',
-  title: 'Leaf types',
+  title: 'Leaf Types',
   description: 'See how typed leaves bind to values and define their representation and prediction roles.',
   intro: [],
   principles: [
@@ -73,8 +73,8 @@ export const dataTypes: Concept = {
   }),
   takeaway: 'Choose the representation from the value’s meaning, keep its structural owner, and declare separately whether the value is known context or an answer to learn.',
   links: [
-    { label: 'Register a custom data type', href: '/advanced/custom-data-types/' },
-    { label: 'Choose among the field types', href: '/data-types/' },
+    { label: 'Register a custom leaf type', href: '/advanced/custom-data-types/' },
+    { label: 'Browse built-in leaf types', href: '/api-map/?section=types' },
     { label: 'Find field options and extension contracts', href: '/api-map/' },
   ],
 };

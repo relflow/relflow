@@ -105,7 +105,7 @@ row = results.row(0, named=True)`,
   links: [
     { label: 'Export learned embeddings', href: '/advanced/embeddings/' },
     { label: 'Choose prediction targets', href: '/concepts/targets/' },
-    { label: 'Train the model', href: '/concepts/training/' },
+    { label: 'Train the model', href: '/advanced/training/' },
     { label: 'Number output contract', href: '/data-types/number/' },
     { label: 'Boolean output contract', href: '/data-types/boolean/' },
     { label: 'Prediction API', href: '/api-map/#api-model-predict' },

@@ -75,7 +75,7 @@ export const branches: Concept = {
   links: [
     { label: 'Choose the values inside each record', href: '/concepts/data-types/' },
     { label: 'Declare prediction targets', href: '/concepts/targets/' },
-    { label: 'Assemble your observation', href: '/data/' },
+    { label: 'Assemble and load observations', href: '/advanced/data-modules/' },
     { label: 'Look up Branch and reduction APIs', href: '/api-map/' },
   ],
 };

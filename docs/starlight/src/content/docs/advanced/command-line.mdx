@@ -47,7 +47,7 @@ relflow check customer.rf --input 'purchase-requests/*.parquet' \
 The default check resolves the declaration, discovers source metadata, and
 checks structural binding with a typed null observation. It reads no source
 values for tensorization and does not establish that populated nested records
-or datatype values are valid.
+or leaf values are valid.
 
 `--execute` opts into sampled preprocessing and tensorization. It can construct
 the model and initialize optional text encoders or caches. `--sample` requires

@@ -1,13 +1,13 @@
 ---
-title: Leaf types
+title: Leaf Types
 description: Understand how typed leaves bind to source data, represent values, and define prediction and learning behavior.
 ---
 
 import ConceptPage from '../../../components/ConceptPage.astro';
 import { dataTypes } from '../../../data/concepts/data-types';
 
-Values enter a relflow model through the leaves of its tree. Each leaf has a
-data type that defines how those values are read and represented. For supported
+Values enter a relflow model through the leaves of its tree. Each leaf type
+defines how those values are read and represented. For supported
 targets, the type defines its learning objective and any returned prediction.
 
 relflow provides built-in types for numbers, labels, text, sets, vectors, and
@@ -25,7 +25,7 @@ For a different source structure, supply an explicit `query`. A path such as
 The path is relative to the enclosing record; the leaf keeps its declared name
 in the model schema.
 
-Your data source or [preprocessor](/concepts/data-modules/) prepares the records,
+Your data source or [preprocessor](/advanced/data-modules/) prepares the records,
 including any joins, filters, sorting, and application-specific derived values.
 The schema describes how the resulting values bind to model fields.
 
@@ -49,8 +49,45 @@ data contract and the representations, objectives, and outputs it supports.
 You can define your own types for use within your organization or contribute
 them to the open-source library.
 
-[Custom data types](/advanced/custom-data-types/) explains the registration
-protocol. The [data type reference](/data-types/) covers accepted inputs,
+[Custom leaf types](/advanced/custom-data-types/) explains the registration
+protocol. The individual **Leaf Types** reference pages cover accepted inputs,
 returned outputs, options, and limitations for the built-in types.
+
+## Continuous data
+
+- [Number](/data-types/number/) represents scalar measurements and numeric magnitudes.
+- [Quantile](/data-types/quantile/) represents numeric values by their position in the training distribution.
+- [Vector](/data-types/vector/) represents fixed-width numeric coordinates.
+- [Ordinal](/data-types/ordinal/) represents ordered labels or integer ranks through numeric rank.
+
+Choose Number when distances in the original units or predictions beyond the
+observed range matter. Choose Quantile when relative position in the distribution
+is the useful representation. Its learned range bounds its output and can merge
+inputs beyond the same training tail. The retained checks cover
+[range behavior](/evidence/#P068) and [objective differences](/evidence/#P077).
+
+## Discrete data
+
+- [Category](/data-types/category/) learns a vocabulary of labels.
+- [Boolean](/data-types/boolean/) represents true-or-false values and predicts their probability.
+- [Enum](/data-types/enum/) uses an explicitly declared vocabulary.
+- [Hash](/data-types/hash/) preserves identifier relationships without a learned identity vocabulary.
+- [Set](/data-types/set/) represents unordered label membership.
+- [Group](/data-types/group/) learns shared representations for identities.
+
+## Calendar data
+
+- [Period](/data-types/period/) represents recurring calendar parts.
+- [Duration](/data-types/duration/) derives elapsed time from timestamp endpoints.
+
+## Multimodal data
+
+- [Text](/data-types/text/) uses a frozen text encoder and learns how its representations contribute to the task.
+
+## Other data
+
+[Custom leaf types](/advanced/custom-data-types/) let you bring your own
+representation, objective, and output contract through the same plugin system
+as the built-in leaves.
 
 <ConceptPage concept={dataTypes} />

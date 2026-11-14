@@ -7,7 +7,7 @@
     { "route": "/installation/", "htmlKiB": 110, "htmlGzipKiB": 20, "elements": 1300 },
     { "route": "/concepts/models/", "htmlKiB": 560, "htmlGzipKiB": 78, "elements": 4900 },
     { "route": "/concepts/data-flow/", "htmlKiB": 720, "htmlGzipKiB": 82, "elements": 11000 },
-    { "route": "/concepts/predictions/", "htmlKiB": 350, "htmlGzipKiB": 48, "elements": 4300 },
+    { "route": "/concepts/runtime/", "htmlKiB": 350, "htmlGzipKiB": 48, "elements": 4300 },
     { "route": "/advanced/embeddings/", "htmlKiB": 390, "htmlGzipKiB": 50, "elements": 4800 },
     { "route": "/data-types/group/", "htmlKiB": 225, "htmlGzipKiB": 34, "elements": 2500 },
     { "route": "/evidence/P047/", "htmlKiB": 430, "htmlGzipKiB": 44, "elements": 7300 },

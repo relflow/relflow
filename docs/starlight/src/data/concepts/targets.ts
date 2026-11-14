@@ -95,8 +95,8 @@ export const targets: Concept = {
   takeaway: 'Choose the answer type and address, declare how it is hidden and learned, and evaluate each target against its own task. Shared context does not establish that every objective benefits equally.',
   links: [
     { label: 'Build masking and pretraining tasks', href: '/advanced/masking-and-pretraining/' },
-    { label: 'Read structured prediction results', href: '/predictions/' },
-    { label: 'Choose the type of each answer', href: '/data-types/' },
+    { label: 'Read structured prediction results', href: '/concepts/runtime/' },
+    { label: 'Choose the type of each answer', href: '/concepts/data-types/' },
     { label: 'Find Mask and model methods in the API map', href: '/api-map/' },
     { label: 'Inspect controlled masking experiments', href: '/evidence/' },
   ],

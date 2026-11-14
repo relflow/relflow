@@ -107,7 +107,7 @@ export const mutations: Concept = {
     { label: 'Mutation API methods', href: '/api-map/#api-mutation' },
     { label: 'Schema address helper', href: '/api-map/#api-rf-address' },
     { label: 'Define a model', href: '/concepts/models/' },
-    { label: 'Training and continuation', href: '/concepts/training/' },
+    { label: 'Training and continuation', href: '/advanced/training/' },
     { label: 'Recorded mutation experiments', href: '/evidence/?family=Mutations' },
   ],
 };

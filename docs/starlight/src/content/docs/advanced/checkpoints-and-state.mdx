@@ -223,7 +223,7 @@ averaging; an explicitly supplied EMA callback replaces that default.
   are not a persisted input-stream cursor. Record the source snapshot and
   consumer plan, and validate replay after resuming rather than claiming exact
   interrupted-stream continuation from `ckpt_path` alone.
-- **Custom code remains a dependency.** Register custom data types before
+- **Custom code remains a dependency.** Register custom leaf types before
   reconstructing their schemas. Keep extension implementations, preprocessor
   code, and connector configuration versioned beside the artifact. Serialized
   model state does not package their Python implementations or data sources.

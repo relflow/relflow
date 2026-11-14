@@ -151,6 +151,9 @@ h1 {
 .sidebar-content {
   font-size: 0.88rem;
 }
+.sidebar-content details details > summary .group-label > .large {
+  font-size: 0.85rem;
+}
 .sidebar-content a:is([aria-current='page'], [aria-current='location']) {
   background: var(--sl-color-accent-low);
   color: var(--sl-color-text-accent);

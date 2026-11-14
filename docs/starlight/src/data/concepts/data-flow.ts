@@ -93,9 +93,9 @@ export const flowCases: FlowCase[] = scenarios.map((scenario) => {
   ];
   const calls = [
     { mode: 'predict' as const, label: 'Run prediction with a fitted model', source:
-      `# model is a fitted ${scenario.modelClass}.\nresults = model.predict(datamodule=data, batch_size=128, devices=1)` },
+      `# model is a fitted ${scenario.modelClass}.\nresults = model.predict(datamodule=data, devices=1)` },
     { mode: 'train' as const, label: 'Fit the declared model', source:
-      `model = ${scenario.modelClass}(preset="small")\nmodel.fit(\n    data,\n    batch_size=128,\n    learning_rate=1e-3,\n    max_epochs=8,\n)` },
+      `model = ${scenario.modelClass}(preset="small")\nmodel.fit(data, preset="small")` },
   ];
   return {
     id: scenario.id,
@@ -211,7 +211,7 @@ export const flowCases: FlowCase[] = scenarios.map((scenario) => {
         description: 'The optimizer uses accumulated gradients and its run state to update neural parameters at an optimizer step. Training continues with subsequent observations using the updated model.',
         views: [
           { kind: 'tree', label: 'Before', nodes: [{ label: 'Optimizer step', children: [
-            { label: 'Gradients' }, { label: 'Optimizer state' }, { label: 'Learning rate', detail: 'Configured on fit' },
+            { label: 'Gradients' }, { label: 'Optimizer state' }, { label: 'Learning rate', detail: 'Provided by the fit preset' },
           ] }] },
           { kind: 'tree', label: 'After', nodes: [{ label: 'Updated neural parameters' }, { label: 'Continue to the next batch' }] },
         ],
