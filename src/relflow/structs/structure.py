@@ -12,6 +12,7 @@ import pydantic
 
 from relflow.structs.enums import AttentionInput, AttentionMode, Direction, Overflow, OverflowInput
 from relflow.structs.grain import Coordinates, GrainConfig, Steps
+from relflow.structs.masking import Forecast
 from relflow.structs.mixer import Conv, MixerConfig, Transformer
 from relflow.structs.reduction import Attention, ReductionConfig
 from relflow.structs.tree import Leaf, Mask, MaskInput, Node, Rate
@@ -33,6 +34,45 @@ IMPLICIT: Mapping[str, object] = MappingProxyType(
         "time_step": None,
     }
 )
+
+
+def check_forecast_children(
+    branch: Branch,
+    *,
+    singular: str,
+    plural: str,
+    names: tuple[str, ...],
+    taken: Mapping[str, str],
+    remedy: str,
+) -> None:
+    """Require distinct names of direct leaf children that no other Forecast role claims.
+
+    Args:
+        branch: The branch that holds the Forecast mask.
+        singular: Role of one name in messages, such as ``target``.
+        plural: Role of the whole tuple in messages, such as ``targets``.
+        names: The names a Forecast field lists.
+        taken: Names another role claims, each with the reason it cannot appear here.
+        remedy: What to do when a name is a child branch.
+
+    Raises:
+        ValueError: A name repeats, is unknown, is claimed, or is a child branch.
+    """
+    where = f"branch '{branch.address or branch.name}'"
+    children = {field.name: field for field in branch.fields}
+    repeated = sorted({name for name in names if names.count(name) > 1})
+    if repeated:
+        raise ValueError(f"{where} Forecast {plural} name {repeated} more than once; list each {singular} child once")
+    for name in names:
+        if name not in children:
+            raise ValueError(
+                f"{where} Forecast {singular} '{name}' is not a child of the branch; "
+                f"name direct leaf children such as {sorted(str(child) for child in children)}"
+            )
+        if name in taken:
+            raise ValueError(f"{where} Forecast {singular} '{name}' {taken[name]}")
+        if not isinstance(children[name], Leaf):
+            raise ValueError(f"{where} Forecast {singular} '{name}' is a branch; {remedy}")
 
 
 def bounds(branch: Branch) -> None:
@@ -298,6 +338,62 @@ class Branch(Node):
         return self
 
     @pydantic.model_validator(mode="after")
+    def check_forecast(self) -> Self:
+        forecasts = [mask.select for mask in self.mask if isinstance(mask.select, Forecast)]
+        if not forecasts:
+            return self
+        where = f"branch '{self.address or self.name}'"
+        if len(forecasts) > 1:
+            raise ValueError(f"{where} has {len(forecasts)} Forecast masks; use at most one Forecast per branch")
+        if self.direction == Direction.bidirectional:
+            raise ValueError(
+                f"{where} uses Mask(select=Forecast(...)) with direction=bidirectional, which lets rows see "
+                "the future they predict; set direction=rf.Direction.causal"
+            )
+        forecast = forecasts[0]
+        check_forecast_children(
+            self,
+            singular="target",
+            plural="targets",
+            names=forecast.targets,
+            taken={
+                name: "is the time_index child; targets are values to predict, so name another child"
+                for name in filter(None, (self.time_index,))
+            },
+            remedy="targets must be direct leaf children, so name a leaf inside it on that branch instead",
+        )
+        check_forecast_children(
+            self,
+            singular="known",
+            plural="known",
+            names=forecast.known,
+            taken={
+                **{
+                    name: "is also a target; a known covariate stays visible, so remove it from known or from targets"
+                    for name in forecast.targets
+                },
+                **{
+                    name: "is the time_index child, which always stays visible; remove it from known"
+                    for name in filter(None, (self.time_index,))
+                },
+            },
+            remedy="known covariates must be direct leaf children, so move them up or leave the branch hidden",
+        )
+        time_child = next((field for field in self.fields if field.name == self.time_index), None)
+        query = getattr(time_child, "query", None)
+        if query is None:
+            return self
+        from relflow.data.query import Member, compile
+
+        steps = compile(query).steps if isinstance(query, str) else ()
+        if len(steps) == 1 and isinstance(steps[0], Member):
+            return self
+        raise ValueError(
+            f"{where} time_index child '{self.time_index}' must read a single member for Forecast slots, "
+            f"got query {query!r}; derive the time column in a Preprocessor"
+        )
+
+    @pydantic.model_validator(mode="after")
     def check_steps(self) -> Self:
         if not isinstance(self.grain, Steps):
             return self
@@ -321,6 +417,18 @@ class Branch(Node):
     def model_post_init(self, __context: object) -> None:
         for field in self.fields:
             field.parent = self
+
+    @property
+    def forecast(self) -> Forecast | None:
+        """The one ``Forecast`` selector of this branch mask, if any."""
+        return next((mask.select for mask in self.mask if isinstance(mask.select, Forecast)), None)
+
+    @property
+    def capacity(self) -> int | None:
+        """Rows this branch may hold: ``length``, plus the forecast horizon; ``None`` when unbounded."""
+        if self.length is None or self.forecast is None:
+            return self.length
+        return self.length + self.forecast.horizon
 
     @pydantic.model_validator(mode="after")
     def check_unique_child_names(self) -> Self:

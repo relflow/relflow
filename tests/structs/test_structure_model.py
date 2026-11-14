@@ -466,3 +466,108 @@ def test_chronological_loads_from_model_yaml_as_a_plain_branch(tmp_path):
 
 def test_chronological_docstring_warns_about_classification():
     assert "direction=rf.Direction.bidirectional" in rf.Branch.chronological.__doc__
+
+
+CAUSAL = rf.Direction.causal
+FORECAST = rf.Mask(select=rf.Forecast(horizon=2, targets=("value",)), reconstruct=True)
+
+
+def forecast_mask(targets: tuple[str, ...], known: tuple[str, ...] = ()) -> rf.Mask:
+    return rf.Mask(select=rf.Forecast(horizon=2, targets=targets, known=known), reconstruct=True)
+
+
+def checked(mask: rf.Mask) -> rf.Branch:
+    return rf.Branch(
+        length=3,
+        direction=CAUSAL,
+        mask=mask,
+        time_index="ts",
+        time_step=1.0,
+        ts=rf.Number,
+        value=rf.Number,
+        load=rf.Number,
+        tags=rf.Branch(length=2, name=rf.Category),
+    )
+
+
+def test_forecast_with_bidirectional_direction_is_rejected():
+    with pytest.raises(ValueError, match=r"branch.*Forecast.*direction=bidirectional.*Direction\.causal"):
+        rf.Branch(length=3, mask=FORECAST, value=rf.Number)
+
+
+def test_chronological_forecast_with_bidirectional_direction_is_rejected():
+    with pytest.raises(ValueError, match=r"Direction\.causal"):
+        rf.Branch.chronological(length=3, direction=rf.Direction.bidirectional, mask=FORECAST, value=rf.Number)
+
+
+def test_a_branch_accepts_one_forecast_only():
+    second = rf.Mask(select=rf.Forecast(horizon=3, targets=("value",)), reconstruct=True)
+    with pytest.raises(ValueError, match="at most one Forecast"):
+        rf.Branch(length=3, direction=CAUSAL, mask=(FORECAST, second), value=rf.Number)
+
+
+@pytest.mark.parametrize(
+    ("targets", "message"),
+    [
+        (("missing",), r"Forecast target 'missing'.*not a child"),
+        (("ts",), r"Forecast target 'ts'.*time_index"),
+        (("tags",), r"Forecast target 'tags'.*branch"),
+        (("value", "value"), r"Forecast targets.*'value'.*more than once"),
+    ],
+)
+def test_forecast_targets_must_be_distinct_direct_leaf_children(targets, message):
+    with pytest.raises(ValueError, match=message):
+        checked(forecast_mask(targets))
+
+
+@pytest.mark.parametrize(
+    ("known", "message"),
+    [
+        (("missing",), r"branch.*Forecast known 'missing'.*not a child"),
+        (("value",), r"branch.*Forecast known 'value'.*target"),
+        (("ts",), r"branch.*Forecast known 'ts'.*time_index"),
+        (("tags",), r"branch.*Forecast known 'tags'.*branch"),
+        (("load", "load"), r"branch.*Forecast known.*'load'.*more than once"),
+    ],
+)
+def test_forecast_known_must_be_distinct_direct_leaf_covariates(known, message):
+    with pytest.raises(ValueError, match=message):
+        checked(forecast_mask(("value",), known))
+
+
+def test_forecast_accepts_known_covariates():
+    assert checked(forecast_mask(("value",), ("load",))).forecast.known == ("load",)
+
+
+def test_forecast_time_index_child_must_read_one_member():
+    with pytest.raises(ValueError, match=r"time_index child 'ts'.*single member"):
+        rf.Branch(
+            length=3,
+            direction=CAUSAL,
+            mask=FORECAST,
+            time_index="ts",
+            time_step=1.0,
+            ts=rf.Number(query="meta.ts"),
+            value=rf.Number,
+        )
+
+
+def test_capacity_adds_the_forecast_horizon_to_the_length():
+    forecasting = rf.Branch(length=3, direction=CAUSAL, mask=FORECAST, value=rf.Number)
+    assert forecasting.capacity == 5
+    assert forecasting.forecast == FORECAST.select
+    assert rf.Branch(direction=CAUSAL, mask=FORECAST, value=rf.Number).capacity is None
+    assert rf.Branch(length=3, value=rf.Number).capacity == 3
+    assert rf.Branch(length=3, value=rf.Number).forecast is None
+
+
+def test_forecast_branch_round_trips_through_yaml_schema():
+    schema = rf.Schema.from_tree(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        events=rf.Branch(length=3, direction=CAUSAL, mask=FORECAST, value=rf.Number),
+    )
+    restored = rf.Schema.model_validate_json(schema.model_dump_json())
+    assert restored.branches["/events"].mask == (FORECAST,)
+    assert restored.branches["/events"].capacity == 5

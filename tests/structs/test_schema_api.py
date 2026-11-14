@@ -553,3 +553,32 @@ def test_model_mutations_are_blocked_inside_training_loop_lock():
 
     model.update(rf.where("name") == "amount", weight=2.0)
     assert model.schema.requests["/amount"].weight == 2.0
+
+
+def test_forecast_objectives_are_its_targets_and_spans_objectives_are_every_leaf():
+    def schema(mask: rf.Mask) -> rf.Schema:
+        return rf.Schema.from_tree(
+            d_model=8,
+            n_layers=1,
+            n_heads=2,
+            events=rf.Branch(
+                length=3,
+                direction=rf.Direction.causal,
+                mask=mask,
+                value=rf.Number,
+                load=rf.Number,
+                temperature=rf.Number,
+                tags=rf.Branch(length=2, name=rf.Category),
+            ),
+        )
+
+    forecast = schema(
+        rf.Mask(select=rf.Forecast(horizon=1, targets=("value",), known=("temperature",)), reconstruct=True)
+    )
+    assert forecast.objectives == ["/events/value"]
+    assert forecast.decodes == ["/events/value"]
+    for hidden in ("/events/load", "/events/temperature", "/events/tags/name"):
+        assert rf.where("reconstruct").get(forecast.requests[hidden]) is False
+    assert rf.where("reconstruct").get(forecast.requests["/events/value"]) is True
+    spans = schema(rf.Mask(select=rf.Spans(rate=0.2), reconstruct=True))
+    assert spans.objectives == ["/events/value", "/events/load", "/events/temperature", "/events/tags/name"]
