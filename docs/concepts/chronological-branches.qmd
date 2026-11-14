@@ -114,17 +114,56 @@ future context a classifier should use. Causal is measured by step, not by
 token: tokens of one step still see each other.
 :::
 
+UCR [GunPoint](https://timeseriesclassification.com/description.php?Dataset=GunPoint)
+is a binary hand-motion task. Its 50 training and 150 test records each contain
+one 150-step series; class `1` is gun-draw and class `2` is pointing. The UCR TSV
+files store label in first column and 150 readings in remaining columns.
+
 ```python
+import polars as pl
+import relflow as rf
+
+
+def gunpoint(path: str) -> pl.DataFrame:
+    wide = pl.read_csv(path, separator="\t", has_header=False)
+    steps = wide.columns[1:]
+    return wide.select(
+        pl.col("column_1").cast(pl.String).alias("label"),
+        pl.concat_list(
+            *(pl.struct(pl.col(name).alias("value")) for name in steps)
+        ).alias("signal"),
+    )
+
+
+training = gunpoint("data/GunPoint_TRAIN.tsv").sample(fraction=1.0, shuffle=True, seed=0)
+train, validate = training.head(40), training.tail(10)
+test = gunpoint("data/GunPoint_TEST.tsv")
+
 model = rf.Model.xs(
     label=rf.Category(mask=True),
-    ett=rf.Branch.chronological(
-        length=336,
+    signal=rf.Branch.chronological(
+        length=150,
         direction=rf.Direction.bidirectional,
-        HUFL=rf.Number,
-        OT=rf.Number,
+        value=rf.Number,
     ),
 )
+data = rf.PolarsDataModule(
+    train=train,
+    validate=validate,
+    num_workers=0,
+    persistent_workers=False,
+    pin_memory=False,
+)
+model.fit(data, batch_size=16, max_epochs=30)
+
+predicted = model.predict(test.drop("label"))
+guess = predicted["predictions"].struct.field("label").struct.field("content").struct.field("value")
+accuracy = (guess == test["label"]).mean()
 ```
+
+The validation rows come only from the official training split. Keep the official
+test split for final scoring. `accuracy` compares predicted labels with those
+held-out answers.
 
 `direction=` is accepted on child branches only; the generated root has no
 direction. Use `rf.Direction.causal` with forecasting.
