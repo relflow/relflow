@@ -13,7 +13,7 @@ from relflow.data.processors import (
     postprocess,
     preprocess,
 )
-from relflow.data.ragged import RaggedField
+from relflow.data.ragged import RaggedField, Selector
 
 __all__ = [
     "Postprocessor",
@@ -24,6 +24,7 @@ __all__ = [
     "PreprocessorResult",
     "RaggedField",
     "Scope",
+    "Selector",
     "postprocess",
     "preprocess",
 ]
