@@ -607,17 +607,23 @@ def leaves(values: list[pa.Array], *, expressions: tuple[str, ...], address: str
         A fixed-size list per row, null only when every channel is null.
 
     Raises:
-        ValueError: If the source types have no common type.
+        ValueError: If the source types have no common type, or a value does not convert to it exactly.
     """
     types = [item.type for item in values]
     try:
         schemas = [pa.schema([pa.field("value", datatype)]) for datatype in types]
         common = pa.unify_schemas(schemas, promote_options="permissive").field("value").type
-        converted = [pc.cast(item, common, safe=True) for item in values]
     except pa.ArrowException as error:
         raise ValueError(
             f"tuple query {expressions!r} at {address!r} cannot stack source types {types}; "
             "cast them to one type in a preprocessor"
+        ) from error
+    try:
+        converted = [pc.cast(item, common, safe=True) for item in values]
+    except pa.ArrowException as error:
+        raise ValueError(
+            f"tuple query {expressions!r} at {address!r} cannot convert source types {types} to {common} "
+            "without losing precision; integers beyond ±2^53 do not fit float64, so cast them in a preprocessor"
         ) from error
 
     rows, width = len(values[0]), len(values)
@@ -682,6 +688,14 @@ def channels(values: list[pa.Array], *, expressions: tuple[str, ...], address: s
     A source whose Arrow type is ``null`` has no value anywhere; it takes the
     type of its siblings so it reads as a missing channel.
 
+    Args:
+        values: One array per source, all of the same length.
+        expressions: The tuple query, used in messages.
+        address: Field address, used in messages.
+
+    Returns:
+        The stacked array: fixed-size channels below any shared list levels.
+
     Raises:
         ValueError: If only some sources are lists.
     """
@@ -700,7 +714,14 @@ def channels(values: list[pa.Array], *, expressions: tuple[str, ...], address: s
 
 
 def observed(present: list[pa.Array]) -> pa.Array:
-    """Combine source presences: a record is present when any source is present at it."""
+    """Combine source presences: a record is present when any source is present at it.
+
+    Args:
+        present: One presence array per source; a Boolean, or list presence from traversed sources.
+
+    Returns:
+        One non-null Boolean per record.
+    """
     flags = [
         item if item.type == pa.bool_() else pc.is_valid(item)  # traversed sources carry list presence
         for item in present
