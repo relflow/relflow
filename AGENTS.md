@@ -167,7 +167,39 @@ model = rf.Model(
   `Series` does not read elapsed time, so use `Period` or a derived `Number` for
   irregular sampling. Columnar channels use a tuple `query`, such as
   `query=("ett.a", "ett.b")`, which sets `n_dim` and names forecast step
-  members; struct layouts are not read.
+  members; struct layouts are not read. A single `str` query needs `n_dim=C`
+  because layers are built before data is read.
+- `rf.Branch.chronological(...)` returns a plain `Branch` with
+  `overflow="tail"`, `grain=rf.Steps()`, `mixer=rf.Conv()`, and
+  `direction=rf.Direction.causal`. Classification needs
+  `direction=rf.Direction.bidirectional`: the causal default hides future rows
+  from every step. `direction=` is accepted on child branches only.
+- `grain`, `mixer`, `direction`, `time_index`, `time_step`, and `contrastive`
+  are Branch options, so a child with one of these names goes in `fields={...}`,
+  such as `rf.Branch(fields={"direction": rf.Category})`.
+- `time_index` and `time_step` set row positions only and add a learned
+  time-gap embedding; sorting stays in a `Preprocessor`.
+- `rf.Steps()` gives one sequence token per row (336 against 2352 for
+  `rf.Coordinates()` at 336 rows and 7 channels), and leaves under it read only
+  their own row token. `rf.Conv()` requires `grain=rf.Steps()`. A `Steps`
+  branch with `reduction=None` and `embed=True` writes one representation per
+  row, with `parents` ending in the row ordinal and `output_index` 0.
+- `rf.Mask(select=rf.Forecast(horizon=k, targets=("OT",)), reconstruct=True)`
+  hides every child except `time_index` and `known` in the last k rows and
+  predicts `targets`; keep `OT=rf.Number` as an input, not `mask=True`, and do
+  not combine `Forecast` with `skip`. Training reads `length + k` rows. At
+  prediction, trailing rows with all targets null are future rows; without them,
+  k slots fill only `time_index`, allowed only when `known` is empty, and a
+  missing `known` column raises `MissingFieldError`. `rf.Spans` hides whole
+  rows in training.
+- Branch rows must be structs: for `list<fixed_size_list<C>>`, wrap each step in
+  a `Preprocessor` or use `rf.Series(query=..., n_dim=C)`. `Series`
+  checkpoints saved with `channels=` no longer load.
+- `contrastive=rf.Contrastive(views=rf.Crops(...), loss=rf.Hierarchical())` is
+  training-only, costs about 3x branch memory and compute, rejects a child
+  branch with `reduction=None`, and compares records within each device batch
+  under DDP. A contrastive-only model logs no `loss/validate`; pass
+  `early_stopping=False, rollback=False` or add a reconstruction target.
 - `Text(store="dir")` keeps frozen-encoder vectors on disk, keyed by encoder
   configuration and token row and shared by every split, run, and field with
   that encoder; misses are encoded once and appended as shards, the
