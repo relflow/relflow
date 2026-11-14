@@ -1,10 +1,11 @@
 """Public predictions preserve records while embeddings retain explicit coordinates."""
 
+import polars as pl
 import pyarrow as pa
-import pyarrow.ipc as ipc
 import pyarrow.parquet as pq
 import pytest
 import torch
+from polars.testing import assert_frame_equal
 
 import relflow as rf
 from relflow.architecture.output import plan
@@ -54,9 +55,9 @@ def test_nested_records_share_collection_boundaries_and_preserve_structural_hole
     model = configured()
     source = observations()
     output = model.predict(source, retain=("id",))
-    rows = output.to_pylist()
+    rows = output.to_dicts()
 
-    assert output.column_names == ["inputs", "predictions", "representations"]
+    assert output.columns == ["inputs", "predictions", "representations"]
     assert rows[0]["predictions"] == {"accounts": None}
     assert rows[1]["predictions"] == {"accounts": []}
     accounts = rows[2]["predictions"]["accounts"]
@@ -68,23 +69,23 @@ def test_nested_records_share_collection_boundaries_and_preserve_structural_hole
     assert accounts[2]["transactions"] is None
     assert accounts[2]["approved"]["inferred"] is True
     assert "embedding" not in accounts[1]["approved"]
-    account_type = output.schema.field("predictions").type.field("accounts").type
-    assert pa.types.is_list(account_type)
-    assert account_type.value_field.name == "element"
-    assert pa.types.is_list(account_type.value_type.field("transactions").type)
-    assert output.schema.metadata == {b"relflow.model_version": model.version.encode()}
+    account_type = output["predictions"].struct.field("accounts").dtype
+    assert isinstance(account_type, pl.List)
+    assert isinstance(
+        output["predictions"].struct.field("accounts").explode().struct.field("transactions").dtype, pl.List
+    )
 
     chunked = model.predict(source, batch_size=1, retain=("id",))
-    assert chunked.schema.equals(output.schema, check_metadata=True)
-    assert chunked["predictions"].to_pylist()[:2] == [row["predictions"] for row in rows[:2]]
-    assert chunked["predictions"].to_pylist()[2]["accounts"][0] is None
+    assert chunked.schema == output.schema
+    assert chunked["predictions"].to_list()[:2] == [row["predictions"] for row in rows[:2]]
+    assert chunked["predictions"].to_list()[2]["accounts"][0] is None
 
 
 def test_representations_have_schema_paths_local_ordinals_and_unique_output_indices():
     model = configured()
     source = observations()
-    rows = model.predict(source).to_pylist()
-    chunked = model.predict(source, batch_size=1).to_pylist()
+    rows = model.predict(source).to_dicts()
+    chunked = model.predict(source, batch_size=1).to_dicts()
     for first, second in zip(rows, chunked, strict=True):
         assert [(value["path"], value["parents"], value["output_index"]) for value in first["representations"]] == [
             (value["path"], value["parents"], value["output_index"]) for value in second["representations"]
@@ -115,25 +116,24 @@ def test_nested_output_schema_and_values_roundtrip_without_caller_supplied_schem
     model = configured()
     source = observations()[selection]
     output = model.predict(source)
-    assert output.schema.equals(model.predict(observations()).schema, check_metadata=True)
-    sink = pa.BufferOutputStream()
-    with ipc.new_stream(sink, output.schema) as writer:
-        writer.write_table(output)
-    assert ipc.open_stream(sink.getvalue()).read_all().equals(output, check_metadata=True)
+    assert output.schema == model.predict(observations()).schema
+    ipc_path = tmp_path / "predictions.arrow"
+    output.write_ipc(ipc_path)
+    assert_frame_equal(pl.read_ipc(ipc_path), output, check_exact=True)
     path = tmp_path / "predictions.parquet"
-    pq.write_table(output, path)
-    assert pq.read_table(path).equals(output, check_metadata=True)
+    output.write_parquet(path)
+    assert_frame_equal(pl.read_parquet(path), output, check_exact=True)
 
 
 def test_embeddings_only_omit_prediction_and_input_sentinel_columns():
     model = rf.Model(preset="small", d_model=8, embed=True, amount=rf.Number)
     source = pa.table({"amount": [1.0]})
     output = model.predict(source)
-    assert output.column_names == ["representations"]
-    assert output.to_pylist()[0]["representations"][0]["path"] == []
+    assert output.columns == ["representations"]
+    assert output.to_dicts()[0]["representations"][0]["path"] == []
     empty = model.predict(source.slice(0, 0))
-    assert empty.schema.equals(output.schema, check_metadata=True)
-    assert empty.num_rows == 0
+    assert empty.schema == output.schema
+    assert empty.height == 0
 
 
 def test_model_without_selected_output_rejects_prediction_plan():
@@ -179,8 +179,12 @@ def test_third_party_rich_results_keep_nested_declared_types_and_metadata(tmp_pa
             preset="small", d_model=8, events=rf.Branch(length=3, amount=rf.Number, note=Request(mask=True))
         )
         source = pa.Table.from_pylist([{"events": [None, {"amount": 1.0}]}])
-        output = model.predict(source)
+        data = rf.ArrowDataModule(model=model, predict=source)
+        output = model.predict_step(next(iter(data.predict_dataloader())), 0)
         rows = output.to_pylist()
+        public = model.predict(source)
+        assert isinstance(public, pl.DataFrame)
+        assert public.to_dicts() == rows
         assert rows[0]["predictions"]["events"][0] is None
         assert rows[0]["predictions"]["events"][1]["note"]["candidates"] == [{"score": 0.5}]
         assert rows[0]["predictions"]["events"][1]["note"]["embedding"] == 0.25

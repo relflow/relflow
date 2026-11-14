@@ -35,7 +35,7 @@ encode strings and [Branch](branch.qmd) for repeated transaction records.
 
 ## Input and options
 
-Each valued input must be an Arrow list or fixed-size list with exactly
+Use a Polars `List` or fixed-width `Array` column with exactly
 `n_dim` numeric, non-null elements. Values convert to `float32`. A null vector
 is a separate field state; null elements inside a valued vector are invalid.
 A vector with a NaN or infinite element is not a measurement: it takes the
@@ -63,7 +63,7 @@ ancestor records preserve their structural holes. `rf.Writer` rejects these
 fixed-width vectors when PyArrow cannot round-trip them through Parquet; use
 Arrow IPC for affected tables.
 
-Prediction `content` is `fixed_size_list<float32>[n_dim]`. When the most likely
+Prediction `content` is a Polars `Array` of `Float32` values with width `n_dim`. When the most likely
 predicted state is non-valued, the writer emits a zero vector. Zeros therefore
 do not establish whether a vector was observed; read the shared `state` and
 `inferred` members in the [prediction envelope](../reference/prediction-output.qmd).

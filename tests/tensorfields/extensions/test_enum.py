@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import lightning.pytorch as lit
+import polars as pl
 import pyarrow as pa
 import pydantic
 import pytest
@@ -271,15 +272,8 @@ def test_enum_all_null_targets_have_finite_state_loss_and_zero_content_gradient(
 def test_enum_empty_prediction_and_single_class_are_well_defined():
     configured = model(("only",), mask=True, topk=[2])
     empty = configured.predict(records())
-    assert empty.num_rows == 0
-    assert (
-        empty.schema.field("predictions")
-        .type.field(str(ADDRESS).removeprefix("/"))
-        .type.field("content")
-        .type.field("value")
-        .type
-        == pa.large_string()
-    )
+    assert empty.height == 0
+    assert empty["predictions"].struct.field("status").struct.field("content").struct.field("value").dtype == pl.String
     field = configured.encode(records("only"), strata=rf.Strata.train)[ADDRESS]
     extension = rf.TENSORFIELDS["enum"]
     result = (
@@ -435,7 +429,7 @@ def test_enum_lightning_training_preserves_fixed_classes_and_training_counts():
     expected_counts = {"pending": 32, "complete": 32, "rejected": 0}
     assert rf.Enum.counts(configured, ADDRESS) == expected_counts
     output = (
-        configured.predict(validate)["predictions"]
+        pa.table(configured.predict(validate))["predictions"]
         .combine_chunks()
         .field(str(ADDRESS).removeprefix("/"))
         .field("content")

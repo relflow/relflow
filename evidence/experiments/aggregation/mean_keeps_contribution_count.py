@@ -141,6 +141,7 @@ from collections.abc import Iterator
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
@@ -163,7 +164,7 @@ def repeated_contribution_records(*, rows: int, seed: int) -> Iterator[dict]:
 
 def prediction(model: rf.Model, observations: list[dict], target: str) -> np.ndarray:
     inputs = [{"items": row["items"]} for row in observations]
-    output = model.predict(inputs)["predictions"].to_pylist()
+    output = pl.DataFrame(model.predict(inputs))["predictions"].to_list()
     return np.asarray([row[target]["content"] for row in output], dtype=np.float64)
 
 

@@ -38,7 +38,7 @@ dispute supervision alone does not. The groups need not match human categories.
 ## Input and options
 
 Accepts scalar Boolean, integer, floating-point, string, or binary labels, with
-one compatible Arrow family per field. Training grows the vocabulary;
+one compatible type family per field. Training grows the vocabulary;
 validation, test, and prediction reuse it. Unknown labels remain `valued` and
 use a shared unavailable assignment. Nulls have a separate state.
 

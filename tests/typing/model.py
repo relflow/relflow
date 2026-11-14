@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Any, assert_type
 
+import polars as pl
 import pyarrow as pa
 import torch
 from lightning.pytorch.utilities.types import LRSchedulerConfigType
@@ -43,6 +44,7 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
     assert_type(model.track(("throughput", "train"), loss, on_step=True, on_epoch=False), torch.Tensor)
     assert_type(model.track(("loss", "train_epoch"), loss, on_step=False, on_epoch=True, logger=False), torch.Tensor)
     assert_type(model.encode(table), TensorDict)
+    assert_type(model.encode(pl.DataFrame({"amount": [1.0]})), TensorDict)
     assert_type(rf.Enum.vocabulary(model, rf.Address("label")), tuple[bool | int | float | str | bytes, ...])
     assert_type(
         rf.Enum.vocabulary(model.interprocess_encoding_context, "/label"),
@@ -56,8 +58,9 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
     assert_type(model(batch, strata="train"), list[Prediction])
     assert_type(model.training_step(batch, 0), Output | None)
     assert_type(model.validation_step(batch, 0), Output)
-    assert_type(model.predict(table), pa.Table)
-    assert_type(model.predict([{"amount": 1.0}]), pa.Table)
+    assert_type(model.predict(table), pl.DataFrame)
+    assert_type(model.predict(pl.DataFrame({"amount": [1.0]})), pl.DataFrame)
+    assert_type(model.predict([{"amount": 1.0}]), pl.DataFrame)
     data = rf.ArrowDataModule(train=table, validate=table, test=table, predict=table)
     assert_type(model.fit(data, scheduler=schedule, log_every_n_steps=50), Classifier)
     assert_type(model.fit(data, preset="small", ema_decay=None), Classifier)
@@ -78,10 +81,11 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
     )
     assert_type(model.validate(data), list[dict[str, float]])
     assert_type(model.test(data), list[dict[str, float]])
-    assert_type(model.predict(datamodule=data, devices=1), pa.Table)
-    assert_type(model.predict(data, devices=1), pa.Table)
+    assert_type(model.predict(datamodule=data, devices=1), pl.DataFrame)
+    assert_type(model.predict(data, devices=1), pl.DataFrame)
     assert_type(model.predict(datamodule=data, return_predictions=False, callbacks=[rf.Writer("output")]), None)
-    assert_type(model.write([], source=table), pa.Table)
+    assert_type(model.write([], source=table), pl.DataFrame)
+    assert_type(model.write([], source=pl.DataFrame(schema={"amount": pl.Float64})), pl.DataFrame)
     rf.Model(model.schema, optimizer=rf.adamw(1e-3))
     rf.Model(schema=model.schema, optimizer=rf.adamw(1e-3))
     rf.Model(d_model=32, n_heads=4, n_layers=1, fields={"name": rf.Number, "batch_size": rf.Boolean})
@@ -135,10 +139,11 @@ def batches(model: Classifier, data: rf.ArrowDataModule, table: pa.Table, batch_
     assert_type(model.fit(data, batch_size=batch_size, learning_rate=1e-3), Classifier)
     assert_type(model.validate(data, batch_size=batch_size), list[dict[str, float]])
     assert_type(model.test(data, batch_size=batch_size), list[dict[str, float]])
-    assert_type(model.predict(table, batch_size=batch_size), pa.Table)
-    assert_type(model.predict([{"amount": 42.75}], batch_size=batch_size), pa.Table)
-    assert_type(model.predict(datamodule=data, batch_size=batch_size, devices=1), pa.Table)
-    assert_type(model.predict(data, batch_size=batch_size, return_predictions=True, devices=1), pa.Table)
+    assert_type(model.predict(table, batch_size=batch_size), pl.DataFrame)
+    assert_type(model.predict(pl.DataFrame({"amount": [42.75]}), batch_size=batch_size), pl.DataFrame)
+    assert_type(model.predict([{"amount": 42.75}], batch_size=batch_size), pl.DataFrame)
+    assert_type(model.predict(datamodule=data, batch_size=batch_size, devices=1), pl.DataFrame)
+    assert_type(model.predict(data, batch_size=batch_size, return_predictions=True, devices=1), pl.DataFrame)
     assert_type(
         model.predict(
             datamodule=data,

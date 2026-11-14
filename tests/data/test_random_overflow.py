@@ -207,11 +207,11 @@ def test_random_overflow_prediction_keeps_tail_null_slots_and_local_parent_ordin
             {"events": None},
         ]
     )
-    output = model.predict(source)
+    output = pa.table(model.predict(source))
     rows = output.to_pylist()
     assert len(rows[0]["predictions"]["events"]) == 3
     assert rows[0]["predictions"]["events"][1] is None
     assert [item["parents"] for item in rows[0]["representations"]] == [[0], [2]]
     assert rows[1]["predictions"]["events"] == []
     assert rows[2]["predictions"]["events"] is None
-    assert output.schema == model.predict(source, batch_size=1).schema
+    assert output.schema == pa.table(model.predict(source, batch_size=1)).schema

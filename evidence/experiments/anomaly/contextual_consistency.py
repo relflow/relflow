@@ -125,6 +125,7 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import relflow as rf
 from relflow.presets.base import resolve
@@ -175,7 +176,7 @@ def build() -> rf.Model:
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
     visible = [{"group": row["group"], "x": row["x"]} for row in rows]
-    result = model.predict(pa.Table.from_pylist(visible))["predictions"].to_pylist()
+    result = pl.DataFrame(model.predict(pa.Table.from_pylist(visible)))["predictions"].to_list()
     return np.asarray([row["y"]["content"] for row in result], dtype=float)
 
 

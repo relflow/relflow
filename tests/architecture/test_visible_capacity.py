@@ -19,7 +19,7 @@ def table() -> pa.Table:
 
 
 def totals(model: rf.Model) -> list[float]:
-    return model.predict(table())["predictions"].combine_chunks().field("total").field("content").to_pylist()
+    return pa.table(model.predict(table()))["predictions"].combine_chunks().field("total").field("content").to_pylist()
 
 
 @pytest.mark.parametrize("reduction", [rf.Attention(), rf.Mean()], ids=["attention", "mean"])

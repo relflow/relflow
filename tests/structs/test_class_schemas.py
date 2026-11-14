@@ -368,5 +368,5 @@ def test_declared_model_trains_and_predicts_nested_arrow_records(tmp_path):
     )
 
     predictions = model.predict(table)
-    assert predictions.num_rows == table.num_rows
-    assert "fraudulent" in predictions.column("predictions").type.names
+    assert predictions.height == table.num_rows
+    assert "fraudulent" in predictions["predictions"].struct.fields

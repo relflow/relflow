@@ -168,15 +168,15 @@ model = rf.Model(
   Zone-aware timestamps describe their own wall clock; strings carrying an offset
   are read as UTC. A `Vector` with a NaN or infinite element, and a float NaN label
   in `Category`, take the `other` state; a NaN `Set` member is dropped like a null.
-- `Text(store="dir")` keeps frozen-encoder vectors on disk, keyed by encoder
-  configuration and token row and shared by every split, run, and field with
-  that encoder; misses are encoded once and appended as shards, the
-  extension's callback flushes at epoch and phase ends, and
-  `embedder.warm(strings)` fills it ahead of training. A store that fits
-  `resident` MiB of accelerator memory (default a quarter of the device, up
-  to 2 GiB) is uploaded once per index version and answered on the device;
-  rows hash identically on numpy and torch. The in-process `cache` stays for
-  runs without a store.
+- `Text` caches automatically: workers send stable IDs; a bounded device
+  table and shared Rust Moka RAM cache retain hot entries, with SQLite as the
+  durable cold tier. `store` selects a local directory, `memory` budgets RAM
+  (default 64 MiB), and `resident` budgets device tables and replacement
+  workspace (CUDA default: one eighth of free memory, up to 512 MiB).
+  `cache=False` disables all tiers; `cache=N` additionally caps hot entries.
+  Disk storage grows with observed text; only hot state is memory bounded.
+  `embedder.warm(strings)` fills the cache ahead of training. Cache owners are
+  shared by a trainer's loader family; separate DDP ranks share disk, not RAM.
 - `rf.Jitter(add=..., multiply=..., normalize=...)` is a shared frozen
   configuration whose `apply(inputs, mask)` method owns the vectorized affine
   tensor operation. Consumers own training activation, eligible coordinates,
@@ -238,17 +238,25 @@ and supports native Trainer and Tuner workflows. Direct
 processed Arrow rows before encoding, and postprocesses the combined output
 once. Omitting the direct-prediction override preserves whole-input execution.
 
-Use `ArrowDataModule(...)` for canonical examples. Documentation uses static
-illustrations; use tiny data only in executable tests and proofs:
+Lead user documentation with training from any data source, primarily streaming
+from disk or cloud storage. Keep file paths and streaming data modules as the
+default training workflow; also describe query and custom-generator adapters.
+Prefer Polars specifically for user-facing in-memory examples: `pl.DataFrame` with
+`model.predict(...)`, `model.encode(...)`, or `model.write(source=...)`, and
+`rf.PolarsDataModule(...)` for training and evaluation. Use `ArrowDataModule`
+with file paths for streaming; ordinary examples should not require PyArrow
+imports. Keep Arrow explicit in extension contracts, transport, and internal
+data-plane documentation. Documentation uses static illustrations; use tiny
+data only in executable tests and proofs:
 
 ```python
-import pyarrow as pa
+import polars as pl
 
-table = pa.Table.from_pylist(records)
-datamodule = rf.ArrowDataModule(
+frame = pl.DataFrame(records)
+datamodule = rf.PolarsDataModule(
     model=model,
-    train=table,
-    validate=table,
+    train=frame,
+    validate=frame,
     num_workers=0,
     persistent_workers=False,
     pin_memory=False,
@@ -265,17 +273,22 @@ pickles at its own size rather than its shuffle window's. In-process batches
 are untouched. Keep `pin_memory` off with workers; pinning is a main-process
 cost, not an overlap.
 
-`model.predict(...)` returns a `pyarrow.Table`. It accepts Arrow inputs directly
+`model.predict(...)` and `model.write(...)` return eager `polars.DataFrame`
+objects. Prediction accepts eager Polars DataFrames and Arrow inputs directly
 and retains a nonempty sequence of mappings as a small interactive convenience;
-pass a typed empty Arrow object when there are no rows. Canonical decoded
+pass a Polars DataFrame or Arrow object with an explicit schema when there are
+no rows. Collect a Polars LazyFrame before prediction. Canonical decoded
 results use actual schema child names under `predictions`, with branches stored
 as `list<struct<...>>`. Rich leaf results retain `state`, extension-owned output,
 and `inferred`. Requested embeddings are separate `representations` records:
 `path` segments (root `[]`), repeated ancestor `parents` ordinals, intrinsic
 `output_index`, and a fixed-width `embedding`. Omit unconfigured output columns;
 `inputs` appears only when retention is selected. Models with no public output
-reject prediction. The model's recorded relflow version travels with Arrow tables
-and HTTP headers. Extension output list children must be named `element`.
+reject prediction. Polars output uses `Struct`, variable `List`, and fixed-width
+`Array` types; it does not carry Arrow schema or field metadata. Read the model's
+recorded relflow version from `model.version`. Batch `predict_step` and `rf.Writer`
+retain Arrow tables and metadata, and HTTP serving retains Arrow IPC/JSON and
+version headers. Extension output list children must be named `element`.
 
 PyArrow Parquet cannot round-trip fixed-size lists below null containers.
 `rf.Writer` rejects those batches before writing; use Arrow IPC for sparse

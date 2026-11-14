@@ -139,6 +139,7 @@ from itertools import product
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import relflow as rf
 from relflow.presets.base import resolve
@@ -209,7 +210,7 @@ def oracle(rows: list[dict], pattern: tuple[bool, ...]) -> tuple[np.ndarray, flo
 
 
 def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
-    output = model.predict(pa.Table.from_pylist(rows))["predictions"].to_pylist()
+    output = pl.DataFrame(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_list()
     return np.asarray([row["target"]["content"] for row in output], dtype=np.float64)
 
 

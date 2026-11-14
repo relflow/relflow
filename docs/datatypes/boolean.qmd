@@ -35,7 +35,7 @@ Use [Category](category.qmd) for an outcome with more than two named labels.
 
 ## Input and options
 
-The Arrow leaf must be Boolean; integer and string labels are rejected. A null
+Use a Polars `Boolean` column; integer and string labels are rejected. A null
 has its own state. Internally, false and true use fixed content values of
 `-1` and `1`, combined with a learned state embedding. Non-valued content is
 zero.

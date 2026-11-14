@@ -117,6 +117,7 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import relflow as rf
 from relflow.presets.base import resolve
@@ -194,7 +195,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     normalization = rf.Number.normalization(model, "/x")
     test = list(records(rows=2048, seed=seed + 3, shifted=True))
     source = pa.Table.from_pylist(test)
-    output = model.predict(source)["predictions"].to_pylist()
+    output = pl.DataFrame(model.predict(source))["predictions"].to_list()
     content = [row["label"]["content"] for row in output]
     actual = np.asarray([row["label"] for row in test])
     predicted = np.asarray([row["value"] for row in content])
@@ -208,7 +209,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     builtin = float(evaluated[".label/test.accuracy.content"])
     order = np.random.default_rng(seed + 4).permutation(len(test))
     corrupted = [{**row, "x": test[index]["x"]} for row, index in zip(test, order, strict=True)]
-    broken = model.predict(pa.Table.from_pylist(corrupted))["predictions"].to_pylist()
+    broken = pl.DataFrame(model.predict(pa.Table.from_pylist(corrupted)))["predictions"].to_list()
     broken_values = np.asarray([row["label"]["content"]["value"] for row in broken])
     field = model.encode(source, strata="test")["/label"]
     metrics = {

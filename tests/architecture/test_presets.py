@@ -283,14 +283,14 @@ def test_small_predicts_nested_targets_without_padding_and_separate_root_embeddi
     )
     inputs = pa.Table.from_pylist([{"events": [{"value": 1.0}]}, {"events": [{"value": 2.0}, {"value": 3.0}]}])
 
-    result = model.predict(inputs)
+    result = pa.table(model.predict(inputs))
 
     assert result.num_rows == 2
     predictions = result["predictions"].combine_chunks()
     representations = result["representations"].combine_chunks().values
-    assert representations.field("embedding").type == pa.list_(pa.field("element", pa.float32()), 128)
+    assert representations.field("embedding").type == pa.list_(pa.field("item", pa.float32()), 128)
     assert representations.field("path").to_pylist() == [[], []]
     events = predictions.field("events")
-    assert pa.types.is_list(events.type)
+    assert pa.types.is_large_list(events.type)
     assert events.offsets.to_pylist() == [0, 1, 3]
     assert events.values.field("answer").field("inferred").to_pylist() == [True, True, True]

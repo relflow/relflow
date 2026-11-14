@@ -45,7 +45,9 @@ reusable embeddings built in.
    to its datatype. Decoders read context along their schema paths, so targets
    can live at the root or inside repeated records.
 
-Apache Arrow carries the data, and PyTorch Lightning runs training. Your
+Train from data wherever it lives: stream files from disk or cloud storage,
+read database queries, or connect custom record generators. Use Polars when
+data is already in memory. PyTorch Lightning runs training. Your
 application prepares the observations; relflow builds their encoders,
 decoders, and objectives. Built-in and custom field types use the same
 extension protocol, so new representations and objectives plug into the
@@ -158,21 +160,20 @@ They supply optimizer, batch-size, EMA, and run-budget defaults; explicit fit ar
 
 ## Train and predict
 
-Use your application's Parquet datasets, with one payment per row. Training
+Stream your application's Parquet datasets from disk or cloud storage, with
+one payment per row. Training
 and validation contain `amount`, `merchant`, and the known `disputed` label;
 request rows contain the inputs and a `payment_id` for joining results.
 
 ```python
-import pyarrow.dataset as ds
-
 data = rf.ArrowDataModule(
-    train=ds.dataset("payments/train", format="parquet"),
-    validate=ds.dataset("payments/validation", format="parquet"),
+    train="payments/train/*.parquet",
+    validate="payments/validation/*.parquet",
 )
 model.fit(data, batch_size=128, learning_rate=1e-4, max_epochs=30)
 
 requests = rf.ArrowDataModule(
-    predict=ds.dataset("payments/requests", format="parquet"),
+    predict="payments/requests/*.parquet",
     retain=("payment_id",),
 )
 model.predict(
@@ -190,7 +191,32 @@ Datasets are scanned in Arrow batches with a bounded training shuffle buffer;
 the full inputs need not fit in memory. `Writer` streams output to
 `payment-predictions/rank-*.parquet`, and `return_predictions=False` avoids
 collecting the complete result in memory. File paths, globs, `rf.source(...)`,
-and restartable Arrow batch factories are also supported.
+and restartable batch factories are also supported. Cloud paths such as
+`s3://your-data-bucket/payments/train/*.parquet` use the same interface.
+SQL queries and custom record generators connect through relflow's
+[data modules](https://www.relflow.ai/en/latest/guides/data-modules.html).
+
+To collect predictions in memory, call
+`result = model.predict(datamodule=requests, batch_size=256, devices=1)`.
+The result is an eager Polars DataFrame with nested `predictions`, optional
+`representations`, and retained `inputs` columns. Use `result.to_dicts()` for
+Python records or `result.to_arrow()` when integrating with Arrow consumers.
+
+For observations already loaded into memory, pass an eager Polars DataFrame
+directly:
+
+```python
+import polars as pl
+
+requests = pl.read_parquet("payments/requests.parquet")
+result = model.predict(requests, batch_size=256, retain=("payment_id",))
+```
+
+When training and validation frames are already in memory, use
+`rf.PolarsDataModule(train=train_frame, validate=validation_frame)` with the
+same `model.fit(...)` call. `model.encode(frame)` and
+`model.write(raw_predictions, source=frame)` also accept Polars frames for
+custom inference workflows.
 
 `fit` configures AdamW, early stopping, and restoration of the best validation
 checkpoint. Supply hardware, logging, and other Lightning options through
@@ -198,9 +224,9 @@ checkpoint. Supply hardware, logging, and other Lightning options through
 
 Prediction files contain a `predictions.disputed` record with state
 probabilities, content (the probability of `True`), and an `inferred` flag.
-Retained identifiers appear under `inputs`. Open the output directory with
-`ds.dataset("payment-predictions", format="parquet")` to process results in
-batches too.
+Retained identifiers appear under `inputs`. Scan completed output lazily with
+`pl.scan_parquet("payment-predictions/rank-*.parquet")` and use Polars expressions
+to select the columns needed downstream.
 
 ## Add nested context
 

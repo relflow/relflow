@@ -26,19 +26,18 @@ def model(*, nested: bool = False, embed: bool = False) -> rf.Model:
     return rf.Model(preset="small", d_model=8, batch_size=2, embed=embed, **fields)
 
 
-def test_predict_returns_canonical_arrow_table_with_retained_inputs():
+def test_predict_returns_polars_frame_with_retained_inputs():
     configured = model()
     source = pa.table({"request_id": ["a", "b"], "value": [1.0, 2.0]})
 
     result = configured.predict(source, retain=("request_id",))
 
-    assert isinstance(result, pa.Table)
-    assert result.column_names == ["inputs", "predictions"]
-    assert len(result) == 2
-    assert result["inputs"].combine_chunks().type == pa.struct([("request_id", pa.string())])
-    prediction_type = result["predictions"].combine_chunks().type
-    assert prediction_type.get_field_index("label") == 0
-    assert result["inputs"].to_pylist() == [{"request_id": "a"}, {"request_id": "b"}]
+    assert isinstance(result, pl.DataFrame)
+    assert result.columns == ["inputs", "predictions"]
+    assert result.height == 2
+    assert result.schema["inputs"] == pl.Struct({"request_id": pl.String})
+    assert result["predictions"].struct.fields == ["label"]
+    assert result["inputs"].to_list() == [{"request_id": "a"}, {"request_id": "b"}]
 
 
 def test_lightning_predict_step_uses_the_datamodule_retain_plan():
@@ -84,18 +83,112 @@ def test_training_dataloader_carries_pristine_observations_into_step():
 def test_predict_adapts_a_small_python_record_sequence_once():
     result = model().predict([{"value": 1.0}, {"value": 2.0}])
 
-    assert isinstance(result, pa.Table)
-    assert len(result) == 2
+    assert isinstance(result, pl.DataFrame)
+    assert result.height == 2
 
 
-@pytest.mark.parametrize("kind", ["table", "record_batch", "mappings"])
+def test_polars_prediction_converts_once_without_python_rows(monkeypatch):
+    configured = model()
+    source = pl.DataFrame({"request_id": ["a", "b", "c"], "value": [1.0, 2.0, 3.0]})
+    conversions = []
+    convert = runtime.arrow
+
+    def record_conversion(value, **options):
+        conversions.append(value)
+        return convert(value, **options)
+
+    monkeypatch.setattr(runtime, "arrow", record_conversion)
+    monkeypatch.setattr(
+        pl.DataFrame,
+        "to_dicts",
+        lambda self: pytest.fail("Polars prediction must not materialize Python rows"),
+    )
+    result = configured.predict(source, batch_size=1, retain=("request_id",))
+
+    assert len(conversions) == 1 and conversions[0] is source
+    assert result["inputs"].struct.field("request_id").to_list() == ["a", "b", "c"]
+
+
+@pytest.mark.parametrize("batch_size", [None, 1])
+def test_polars_prediction_preserves_nested_inputs_and_structural_holes(batch_size):
+    from polars.testing import assert_frame_equal
+
+    source = pl.DataFrame(
+        {
+            "request_id": ["missing", "empty", "mixed"],
+            "items": [None, [], [None, {"value": 1.0}, {"value": None}]],
+        },
+        schema={"request_id": pl.String, "items": pl.List(pl.Struct({"value": pl.Float64}))},
+    )
+    configured = model(nested=True).eval()
+    result = configured.predict(source, retain="*", batch_size=batch_size)
+    expected = configured.predict(source.to_arrow(), retain="*", batch_size=batch_size)
+
+    assert_frame_equal(result, expected, check_exact=True)
+    assert result["inputs"].to_list() == source.to_dicts()
+    items = result["predictions"].struct.field("items").to_list()
+    assert items[:2] == [None, []]
+    assert len(items[2]) == 3 and items[2][0] is None
+
+
+def test_polars_encode_and_write_preserve_nested_geometry_and_retention():
+    from polars.testing import assert_frame_equal
+
+    source = pl.DataFrame(
+        {"id": ["missing", "empty", "mixed"], "items": [None, [], [None, {"value": 2.0}]]},
+        schema={"id": pl.String, "items": pl.List(pl.Struct({"value": pl.Float64}))},
+    )
+    configured = model(nested=True).eval()
+    encoded = configured.encode(source)
+    raw = configured(encoded, strata="predict")
+    written = configured.write(raw, source=source, retain=("id",))
+
+    assert_frame_equal(written, configured.predict(source, retain=("id",)), check_exact=True)
+    assert written["inputs"].struct.field("id").to_list() == ["missing", "empty", "mixed"]
+
+
+def test_polars_training_encode_preprocesses_once_and_learns_from_processed_values():
+    configured = model()
+    source = pl.DataFrame({"value": [1.0, 3.0], "label": [False, True]})
+    calls = []
+
+    @rf.preprocess
+    def scale(frame: pl.DataFrame) -> pl.DataFrame:
+        calls.append(frame.height)
+        return frame.with_columns(pl.col("value") * 2)
+
+    encoded = configured.encode(source, preprocess=scale, strata="train")
+
+    assert calls == [2]
+    assert encoded["/value"].state.shape == (2, 1)
+    statistics = rf.Number.normalization(configured, "/value")
+    assert statistics["count"] == 2
+    assert statistics["mean"] == pytest.approx(4.0)
+
+
+def test_predict_rejects_lazy_polars_input_with_collection_guidance():
+    with pytest.raises(TypeError, match=r"eager polars.DataFrame; call collect\(\)"):
+        model().predict(pl.LazyFrame({"value": [1.0]}))
+
+
+def test_predict_rejects_polars_input_without_columns():
+    with pytest.raises(ValueError, match="at least one Polars column"):
+        model().predict(pl.DataFrame())
+
+
+@pytest.mark.parametrize("kind", ["table", "record_batch", "polars", "mappings"])
 @pytest.mark.parametrize("batch_size,expected", [(None, [5]), (2, [2, 2, 1]), (3, [3, 2])])
 def test_predict_bounds_preparation_and_forward_without_reordering(
     monkeypatch: pytest.MonkeyPatch, kind: str, batch_size: int | None, expected: list[int]
 ):
     configured = model()
     source = pa.table({"request_id": ["a", "b", "c", "d", "e"], "value": [1.0, 2.0, 3.0, 4.0, 5.0]})
-    inputs = source if kind == "table" else source.to_batches()[0] if kind == "record_batch" else source.to_pylist()
+    inputs = {
+        "table": source,
+        "record_batch": source.to_batches()[0],
+        "polars": pl.from_arrow(source),
+        "mappings": source.to_pylist(),
+    }[kind]
     prepare = runtime.prepare
     prepared: list[int] = []
     forwarded: list[int] = []
@@ -110,7 +203,7 @@ def test_predict_bounds_preparation_and_forward_without_reordering(
     monkeypatch.setattr(runtime, "prepare", record_prepare)
     configured.register_forward_pre_hook(record_forward)
 
-    result = configured.predict(inputs, batch_size=batch_size, retain=("request_id",))
+    result = pa.table(configured.predict(inputs, batch_size=batch_size, retain=("request_id",)))
 
     assert prepared == expected
     assert forwarded == expected
@@ -140,7 +233,10 @@ def test_predict_rejects_invalid_batch_size_before_preprocessing_or_forward(batc
     assert configured.batch_size == 2
 
 
-def test_predict_batches_after_global_preprocessor_expansion_and_postprocesses_once(monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.parametrize("kind", ["arrow", "polars"])
+def test_predict_batches_after_global_preprocessor_expansion_and_postprocesses_once(
+    monkeypatch: pytest.MonkeyPatch, kind
+):
     configured = model()
     calls = {"pre": 0, "post": 0}
     prepared: list[int] = []
@@ -162,8 +258,9 @@ def test_predict_batches_after_global_preprocessor_expansion_and_postprocesses_o
         return frame.select(request_id=pl.col("inputs").struct.field("request_id")).with_row_index("row")
 
     monkeypatch.setattr(runtime, "prepare", record_prepare)
+    source = pl.DataFrame({"request_id": ["a", "b", "c", "d"], "value": [0.0, 1.0, 2.0, 3.0]})
     result = configured.predict(
-        pa.table({"request_id": ["a", "b", "c", "d"], "value": [0.0, 1.0, 2.0, 3.0]}),
+        source if kind == "polars" else source.to_arrow(),
         batch_size=4,
         preprocess=expand,
         postprocess=enumerate_rows,
@@ -172,7 +269,7 @@ def test_predict_batches_after_global_preprocessor_expansion_and_postprocesses_o
 
     assert calls == {"pre": 1, "post": 1}
     assert prepared == [4, 2]
-    assert result.to_pydict() == {
+    assert result.to_dict(as_series=False) == {
         "row": [0, 1, 2, 3, 4, 5],
         "request_id": ["d", "c", "b", "d-copy", "c-copy", "b-copy"],
     }
@@ -186,9 +283,11 @@ def test_predict_rejects_fieldless_mapping_rows():
 
 
 def test_python_prediction_ingress_preserves_keys_introduced_after_the_first_row():
-    result = model().predict(
-        [{"value": 1.0}, {"value": 2.0, "request_id": "second"}],
-        retain="*",
+    result = pa.table(
+        model().predict(
+            [{"value": 1.0}, {"value": 2.0, "request_id": "second"}],
+            retain="*",
+        )
     )
 
     assert result["inputs"].to_pylist() == [
@@ -197,13 +296,14 @@ def test_python_prediction_ingress_preserves_keys_introduced_after_the_first_row
     ]
 
 
-def test_predict_requires_typed_arrow_for_an_empty_sequence():
+def test_predict_requires_typed_input_for_an_empty_sequence():
     with pytest.raises(ValueError, match="empty Python prediction sequence has no Arrow schema"):
         model().predict([])
 
 
+@pytest.mark.parametrize("kind", ["arrow", "polars"])
 @pytest.mark.parametrize("batch_size", [None, 2])
-def test_typed_empty_prediction_compiles_the_exact_output_schema_without_forward(batch_size: int | None):
+def test_typed_empty_prediction_compiles_the_exact_output_schema_without_forward(batch_size: int | None, kind):
     source = pa.table(
         {
             "request_id": pa.array([], type=pa.large_string()),
@@ -217,13 +317,13 @@ def test_typed_empty_prediction_compiles_the_exact_output_schema_without_forward
         pytest.fail("typed empty observations must not enter forward")
 
     configured.register_forward_pre_hook(reject_forward)
-    result = configured.predict(source, batch_size=batch_size, retain=("request_id",))
+    result = configured.predict(
+        pl.from_arrow(source) if kind == "polars" else source, batch_size=batch_size, retain=("request_id",)
+    )
 
     assert len(result) == 0
-    assert result["inputs"].type == pa.struct([pa.field("request_id", pa.large_string())])
-    predictions = result["predictions"].type
-    assert pa.types.is_struct(predictions)
-    assert predictions.get_field_index("label") == 0
+    assert result["inputs"].dtype == pl.Struct({"request_id": pl.String})
+    assert result["predictions"].struct.fields == ["label"]
 
 
 @pytest.mark.parametrize("batch_size", [None, 2])
@@ -257,9 +357,8 @@ def test_preprocessor_may_filter_every_prediction_row_without_erasing_schema(bat
 
     assert calls == {"pre": 1, "post": 1}
     assert len(result) == 0
-    # Retained inputs keep their source Arrow types through the Polars round trip.
-    assert result["inputs"].type == pa.struct([pa.field("request_id", pa.string())])
-    assert result["predictions"].type.get_field_index("label") == 0
+    assert result["inputs"].dtype == pl.Struct({"request_id": pl.String})
+    assert result["predictions"].struct.fields == ["label"]
 
 
 def test_predict_writes_bounded_branches_as_observed_record_collections():
@@ -271,12 +370,12 @@ def test_predict_writes_bounded_branches_as_observed_record_collections():
         ]
     )
 
-    result = configured.predict(source)
+    result = pa.table(configured.predict(source))
     predictions = result["predictions"].combine_chunks()
     field = predictions.type.field("items")
 
-    assert pa.types.is_list(field.type)
-    assert field.type.value_field.name == "element"
+    assert pa.types.is_large_list(field.type)
+    assert field.type.value_field.name == "item"
     assert [child.name for child in field.type.value_type] == ["label"]
     assert [len(row["items"]) for row in predictions.to_pylist()] == [2, 1]
 
@@ -293,11 +392,11 @@ def test_predict_batches_nested_outputs_with_retained_row_identity():
         ]
     )
 
-    result = configured.predict(source, batch_size=2, retain=("request_id",))
+    result = pa.table(configured.predict(source, batch_size=2, retain=("request_id",)))
     predictions = result["predictions"].combine_chunks()
 
     assert result["inputs"].to_pylist() == [{"request_id": name} for name in ["a", "b", "c", "d", "e"]]
-    assert pa.types.is_list(predictions.type.field("items").type)
+    assert pa.types.is_large_list(predictions.type.field("items").type)
     assert [len(row["items"]) for row in predictions.to_pylist()] == [2, 0, 1, 3, 1]
 
 
@@ -316,7 +415,7 @@ def test_nested_sibling_results_share_structural_slots_and_allow_metadata_names(
     )
     source = pa.Table.from_pylist([{"events": [{"amount": 1.0}, None, {"amount": 2.0}]}])
 
-    result = configured.predict(source)
+    result = pa.table(configured.predict(source))
     events = result["predictions"].combine_chunks().field("events")
 
     assert events.offsets.to_pylist() == [0, 3]
@@ -331,8 +430,8 @@ def test_bounded_collection_validity_is_independent_of_batch_width():
     configured = model(nested=True)
     source = pa.Table.from_pylist([{"items": []}, {"items": None}, {"items": [{"value": 1.0}]}])
 
-    whole = configured.predict(source)
-    chunked = configured.predict(source, batch_size=1)
+    whole = pa.table(configured.predict(source))
+    chunked = pa.table(configured.predict(source, batch_size=1))
     whole_items = whole["predictions"].combine_chunks().field("items")
     chunked_items = chunked["predictions"].combine_chunks().field("items")
 
@@ -345,7 +444,7 @@ def test_bounded_collection_validity_is_independent_of_batch_width():
 def test_embedding_only_address_has_no_state_or_inferred_fields():
     configured = model(embed=True)
 
-    result = configured.predict(pa.table({"value": [1.0]}))
+    result = pa.table(configured.predict(pa.table({"value": [1.0]})))
     root = result["representations"].combine_chunks().type.value_type
 
     assert [field.name for field in root] == ["path", "parents", "output_index", "embedding"]
@@ -357,7 +456,7 @@ def test_embedding_only_address_has_no_state_or_inferred_fields():
 def test_root_embedding_exposes_each_configured_reduction_output():
     configured = rf.Model(preset="small", value=rf.Number, d_model=8, embed=True, reduction=rf.Attention(n_outputs=3))
 
-    result = configured.predict(pa.table({"value": [1.0, 2.0]}))
+    result = pa.table(configured.predict(pa.table({"value": [1.0, 2.0]})))
     rows = result["representations"].to_pylist()
 
     assert result.column_names == ["representations"]
@@ -371,7 +470,7 @@ def test_none_reduction_root_embedding_exposes_every_input_token():
         preset="small", first=rf.Number, second=rf.Number, d_model=8, embed=True, attention=None, reduction=None
     )
 
-    result = configured.predict(pa.table({"first": [1.0], "second": [2.0]}))
+    result = pa.table(configured.predict(pa.table({"first": [1.0], "second": [2.0]})))
     root = result["representations"].to_pylist()[0]
 
     assert result.column_names == ["representations"]
@@ -398,7 +497,7 @@ def test_nested_branch_embedding_preserves_parent_and_reduction_axes():
         ]
     )
 
-    result = configured.predict(source)
+    result = pa.table(configured.predict(source))
     children = result["representations"].to_pylist()[0]
 
     assert result.column_names == ["representations"]
@@ -408,7 +507,7 @@ def test_nested_branch_embedding_preserves_parent_and_reduction_axes():
 
 
 def test_empty_retain_omits_inputs_without_changing_row_count():
-    result = model().predict(pa.table({"value": [1.0, 2.0, 3.0]}))
+    result = pa.table(model().predict(pa.table({"value": [1.0, 2.0, 3.0]})))
 
     assert result.column_names == ["predictions"]
     assert len(result) == 3
@@ -442,7 +541,7 @@ def test_predict_runs_polars_preprocessor_and_postprocessor_once():
     )
 
     assert calls == {"pre": 1, "post": 1}
-    assert result.to_pydict() == {"prepared": [2.0, 4.0]}
+    assert result.to_dict(as_series=False) == {"prepared": [2.0, 4.0]}
 
 
 def test_predict_runs_postprocessors_in_order():
@@ -465,7 +564,7 @@ def test_predict_runs_postprocessors_in_order():
     )
 
     assert calls == ["project", "double"]
-    assert result.to_pydict() == {"doubled": [2.0, 4.0]}
+    assert result.to_dict(as_series=False) == {"doubled": [2.0, 4.0]}
 
 
 @pytest.mark.parametrize("batch_size", [None, 2])

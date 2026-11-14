@@ -80,7 +80,7 @@ repeated axis. Its execution width follows the selected collections in each
 batch; an explicit `length` caps retained items. Padding does not contribute to
 attention or reduction, but it still has storage and processing costs.
 [Prediction output](../reference/prediction-output.qmd#repeated-coordinates) writes
-every record collection as a variable Arrow list of sibling result structs,
+every record collection as a variable Polars `List` of sibling `Struct` values,
 without public cap padding. Structural nulls and empty collections are preserved.
 
 A branch can own nested branches: purchases within transactions can each vary

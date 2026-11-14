@@ -35,9 +35,9 @@ disputed: false
 
 ## Input and options
 
-An Arrow list holds the labels; a scalar label is treated as a one-member set.
+Use a Polars `List` column for labels; a scalar label is treated as a one-member set.
 Labels may be Boolean, integer, floating-point, string, or binary, with one
-compatible Arrow type family per field. Duplicate members collapse, and null
+compatible type family per field. Duplicate members collapse, and null
 members are ignored, as are NaN members of floating-point sets. An empty list
 is valued; a null list has state `null`.
 

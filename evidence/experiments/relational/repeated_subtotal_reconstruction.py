@@ -116,6 +116,7 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import relflow as rf
 import torch
 from relflow.presets.base import resolve
@@ -154,7 +155,7 @@ def targets(rows: list[dict]) -> np.ndarray:
 
 
 def prediction(model: rf.Model, rows: list[dict]) -> list[list[dict]]:
-    output = model.predict(inputs(rows)).to_pylist()
+    output = pl.DataFrame(model.predict(inputs(rows))).to_dicts()
     return [[item["subtotal"] for item in row["predictions"]["items"]] for row in output]
 
 

@@ -90,6 +90,7 @@ from datetime import datetime, timedelta, timezone
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import relflow as rf
 from relflow.presets.base import resolve
@@ -149,7 +150,7 @@ def build(arm: str) -> rf.Model:
 
 
 def prediction(model: rf.Model, rows: list[dict], arm: str) -> np.ndarray:
-    output = model.predict(table(rows, arm=arm, targets=False), batch_size=256)["predictions"].to_pylist()
+    output = pl.DataFrame(model.predict(table(rows, arm=arm, targets=False), batch_size=256))["predictions"].to_list()
     return np.asarray([row["target"]["content"] for row in output], dtype=np.float64)
 
 

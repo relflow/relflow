@@ -35,7 +35,7 @@ and [Text](text.qmd) for word meaning.
 ## Input and options
 
 Accepts scalar Boolean, integer, floating-point, string, or binary labels.
-Keep one compatible Arrow type family per field; normalize inconsistent labels
+Keep one compatible type family per field; normalize inconsistent labels
 upstream, or fold look-alike spellings with `strip` and `cased`. A null is a
 [value state](index.qmd#value-state), not a vocabulary member, and a
 floating-point NaN label is not a label: it takes the `other` state and never

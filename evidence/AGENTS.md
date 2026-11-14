@@ -4,6 +4,12 @@ Preserve stable P identifiers, generators, seeds, budgets, optimizers, capacitie
 checks, and current result provenance. Read SPEC.md before changing semantics. Never
 rewrite measurements to make a gate pass. The root AGENTS.md also applies.
 
+Read prediction output with Polars DataFrames and Series. Use
+`pl.DataFrame(model.predict(...))` to normalize the older Arrow-returning
+baseline into Polars while retaining the candidate's native frame; do not
+coerce predictions back to Arrow for metric checks. IPC diagnostic artifacts
+remain a separate persistence boundary.
+
 From the repository root, `make check` validates static docs and evidence tooling.
 Runtime tests under evidence/tests/runtime are explicit and require a separately
 supplied RelFlow wheel; use `uv run --project docs --with /path/to/matching-relflow.whl`

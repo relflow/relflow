@@ -147,6 +147,7 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import relflow as rf
 import torch
@@ -243,7 +244,7 @@ def fit(model: rf.Model, train, validate, seed: int, steps: int | None, accelera
 
 def predict(model: rf.Model, rows: list[dict], task: str) -> np.ndarray:
     visible = [{"group": row["group"]} if task == "noisy" else {"x": row["x"]} for row in rows]
-    predictions = model.predict(pa.Table.from_pylist(visible))["predictions"].to_pylist()
+    predictions = pl.DataFrame(model.predict(pa.Table.from_pylist(visible)))["predictions"].to_list()
     name = "target" if task == "noisy" else task
     content = [row[name]["content"] for row in predictions]
     if task == "rank":

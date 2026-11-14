@@ -356,7 +356,7 @@ def test_quantile_nullable_false_and_typed_empty_predictions():
     with pytest.raises(ValueError, match="nullable=False"):
         configured.encode(values(None))
 
-    output = configured.predict(values())
+    output = pa.table(configured.predict(values()))
     assert output.num_rows == 0
     content = output.schema.field("predictions").type.field(str(ADDRESS).removeprefix("/")).type.field("content")
     assert content.type == pa.float64()
@@ -447,7 +447,7 @@ def test_quantile_lightning_training_learns_only_consumed_values():
         assert isinstance(distribution.state.master, list)
 
     predictions = (
-        configured.predict(validate)["predictions"]
+        pa.table(configured.predict(validate))["predictions"]
         .combine_chunks()
         .field(str(target).removeprefix("/"))
         .field("content")

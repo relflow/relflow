@@ -46,7 +46,7 @@ Use one exact built-in Python type throughout the labels: `bool`, `int`,
 `float`, `str`, or `bytes`.
 Mixed types, null labels, NaN, and infinity are rejected. For example,
 `rf.Enum(1, 2, 3)` declares integer labels; floating-point inputs must not be
-used in their place. Arrow widths may differ within the declared type family.
+used in their place. Integer or floating-point widths may differ within the declared type family.
 
 Null inputs are separate [value states](index.qmd#value-state),
 not members of `values`. An input outside the declared set raises an error in
@@ -102,7 +102,7 @@ valued target inside the declared vocabulary.
 `content` contains `value`, `probability`, and `topk`. Probabilities are
 normalized over all declared labels. The candidate list has up to `max(topk)`
 entries, capped by the declared label count, and is empty when no cutoffs are
-configured. Labels are written as Arrow `large_string`, including when input
+configured. Labels are written as Polars `String` values, including when input
 labels are numeric or Boolean.
 
 A declared label may receive a prediction before it has training examples;

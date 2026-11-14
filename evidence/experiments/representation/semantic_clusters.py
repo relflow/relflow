@@ -171,6 +171,7 @@ from functools import partial
 
 import lightning.pytorch as lit
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import relflow as rf
 import torch
@@ -241,7 +242,7 @@ def build() -> rf.Model:
 
 
 def embedding(model: rf.Model, rows: list[dict], *, batch_size: int = 128) -> np.ndarray:
-    output = model.predict(pa.Table.from_pylist(rows), batch_size=batch_size)["representations"].to_pylist()
+    output = pl.DataFrame(model.predict(pa.Table.from_pylist(rows), batch_size=batch_size))["representations"].to_list()
     roots = [[record for record in row if record["path"] == [] and record["parents"] == []] for row in output]
     if len(roots) != len(rows) or any(len(root) != 1 or root[0]["output_index"] != 0 for root in roots):
         raise ValueError("P080 requires one root representation with output index zero per financial record")

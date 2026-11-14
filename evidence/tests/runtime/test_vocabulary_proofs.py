@@ -112,9 +112,9 @@ def test_set_probes_distinguish_omitted_members_from_null_state():
     ]
     fields = model.encode(pa.Table.from_pylist(rows), strata="test")
     inputs = fields["/tags"]
-    targets = fields["/labels"].targets[rf.TensorKey.content]["membership"]
-    assert torch.equal(inputs.content["membership"][0], inputs.content["membership"][1])
-    assert torch.equal(inputs.content["membership"][3], inputs.content["membership"][4])
+    targets = fields["/labels"].targets[rf.TensorKey.content]["indices"]
+    assert torch.equal(inputs.content["indices"][0], inputs.content["indices"][1])
+    assert torch.equal(inputs.content["indices"][3], inputs.content["indices"][4])
     assert torch.equal(targets[0], targets[1])
     assert torch.equal(targets[3], targets[4])
     assert inputs.state[:2].eq(rf.Tokens.valued).all()

@@ -156,20 +156,24 @@ The request file contains `payment_id`, `amount`, and `merchant`. It omits `disp
 because that is the outcome you want to predict.
 
 ```python
-requests = rf.ArrowDataModule(
-    predict="payments/flat/requests.parquet",
-)
-predictions = model.predict(datamodule=requests, batch_size=256, devices=1)
+import polars as pl
+
+requests = pl.read_parquet("payments/flat/requests.parquet")
+predictions = model.predict(requests, batch_size=256)
 ```
 
-`devices=1` collects the predictions on one device. `predictions` is an Arrow
-table, a column-oriented table that can also contain nested records. It has
+For a request file that fits in memory, `predictions` is a Polars DataFrame. It has
 one row per request, with the target under `predictions.disputed`. To inspect
 the first payment's estimated dispute probability:
 
 ```python
-first = predictions.slice(0, 1).to_pylist()[0]
-dispute_probability = first["predictions"]["disputed"]["content"]["probability"]
+dispute_probability = (
+    predictions["predictions"]
+    .struct.field("disputed")
+    .struct.field("content")
+    .struct.field("probability")
+    .item(0)
+)
 ```
 
 [Read predictions](read-predictions.qmd) shows the full result and how to keep

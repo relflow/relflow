@@ -357,7 +357,7 @@ def test_yaml_model_predicts_nested_targets_and_exports_root_embedding(tmp_path)
     model = rf.Model.from_yaml(path)
     data = pa.Table.from_pylist([{"events": [{"amount": 1.0}]}, {"events": [{"amount": 2.0}, {"amount": 3.0}]}])
 
-    result = model.predict(data)
+    result = pa.table(model.predict(data))
     predictions = result["predictions"].combine_chunks()
 
     representations = result["representations"].combine_chunks().values

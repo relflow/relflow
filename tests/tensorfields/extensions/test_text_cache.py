@@ -1,403 +1,231 @@
+"""Automatic Text IDs preserve predictions, precision, gradients, and reuse."""
+
 import pickle
 from copy import deepcopy
-from types import SimpleNamespace
 
+import polars as pl
 import pytest
 import torch
-from tensordict import TensorDict
 
 import relflow as rf
-from relflow.data.ragged import coalesce
-from relflow.structs.enums import Strata, TensorKey, Tokens
-from relflow.structs.experiment import Schema
-from relflow.structs.packages import Prediction
-from relflow.structs.tree import Address, Mask
-from relflow.tensorfields.base import TENSORFIELDS
-from relflow.tensorfields.extensions.text import (
-    ATTENTION_MASK,
-    INPUT_IDS,
-    CachedModel,
-    Decoder,
-    Embedder,
-    TensorField,
-    loss,
-)
-from relflow.tensorfields.shared.jitter import Jitter
-from tests.arrow import table as arrow_table
-from tests.tensorfields.extensions.test_text import FakeHFModel, FakeTokenizer
-from tests.tensorfields.helpers import tensorize
+from relflow.tensorfields.extensions.text import IDENTIFIERS, INPUT_IDS, CachedModel
+from tests.tensorfields.extensions.test_text import patch_hf
 
-ADDRESS = Address("body")
-MODEL = "test-text-cache-encoder"
+MODEL = "test-automatic-text"
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def encoder(monkeypatch: pytest.MonkeyPatch) -> FakeHFModel:
-    model = FakeHFModel()
-    monkeypatch.setattr(
-        CachedModel,
-        "_models",
-        {MODEL: CachedModel(key=MODEL, model=model, hidden_size=4)},
-    )
-    monkeypatch.setattr(CachedModel, "_tokenizers", {MODEL: FakeTokenizer()})
-    return model
+def encoder(monkeypatch):
+    return patch_hf(monkeypatch)
 
 
-def schema(
-    *,
-    cache: bool | int = False,
-    pooling: str = "mean",
-    jitter: Jitter | None = None,
-    mask: bool | Mask = False,
-) -> Schema:
-    return rf.Schema.from_tree(
-        d_model=8,
-        n_layers=1,
-        n_heads=4,
-        body=rf.Text(
-            model=MODEL,
-            max_length=4,
-            encoder_batch_size=2,
-            encoder_pooling=pooling,
-            cache=cache,
-            jitter=jitter or Jitter(),
-            mask=mask,
-        ),
-    )
+def build(cache=True, **options):
+    return rf.Model(preset="small", attention=None, body=rf.Text(model=MODEL, max_length=4, cache=cache, **options))
 
 
-def field(structure: Schema, texts: list[str | None]) -> TensorField:
-    batch = arrow_table([{"body": text} for text in texts])
-    projection = coalesce(batch, schema=structure, strata=Strata.train).fields[ADDRESS]
-    return tensorize(
-        TensorField,
-        projection,
-        TENSORFIELDS["text"],
-        address=ADDRESS,
-        schema=structure,
-        strata=Strata.train,
-    )
+def field(model, texts, strata="validate"):
+    return model.encode(pl.DataFrame({"body": texts}, schema={"body": pl.String}), strata=strata)["/body"]
 
 
-def encode(embedder: Embedder, texts: list[str | None]) -> torch.Tensor:
-    batch = field(schema(), texts)
-    return embedder.encode(content=batch.content, state=batch.state)
+def encoded(model, texts):
+    batch = field(model, texts)
+    return model.nodes["/body"].embedder.encode(content=batch.content, state=batch.state)
 
 
-def test_text_cache_defaults_to_disabled(encoder: FakeHFModel):
-    assert rf.Text().cache is False
-    embedder = Embedder(schema=schema(), address=ADDRESS)
-    assert embedder.cache is None
+def test_default_is_compact_automatic_reuse(encoder):
+    model = build()
+    assert rf.Text().cache is True
+    batch = field(model, ["alpha", "bb", None, "alpha"])
+    assert list(batch.content.keys()) == [IDENTIFIERS]
+    assert batch.content[IDENTIFIERS].shape == (4, 1, 1)
+    first = encoded(model, ["alpha", "bb", None, "alpha"])
+    second = encoded(model, ["bb", "alpha", None, "bb"])
+    torch.testing.assert_close(first[0], second[1])
+    assert not first[2].any()
+    assert encoder.calls == 1
+    assert CachedModel.get_tokenizer(MODEL).batches == [["alpha", "bb"]]
 
-    first = encode(embedder, ["alpha"])
-    second = encode(embedder, ["alpha"])
 
-    assert torch.equal(first, second)
+def test_disabled_cache_retokenizes_and_reencodes(encoder):
+    model = build(False)
+    batch = field(model, ["alpha"])
+    assert INPUT_IDS in batch.content.keys()
+    assert model.nodes["/body"].embedder.store is None
+    encoded(model, ["alpha"])
+    encoded(model, ["alpha"])
     assert encoder.calls == 2
+    assert len(CachedModel.get_tokenizer(MODEL).batches) == 3
 
 
 @pytest.mark.parametrize("cache", [False, True, 1, 128])
-def test_text_cache_configuration_roundtrips(cache: bool | int):
-    request = rf.Text(cache=cache)
-    assert request.cache == cache
-    assert type(request.cache) is type(cache)
-    restored = Schema.model_validate(schema(cache=cache).model_dump(mode="json"))
-    assert restored.requests[ADDRESS].cache == cache
-    assert type(restored.requests[ADDRESS].cache) is type(cache)
+def test_cache_options_roundtrip(encoder, cache):
+    model = build(cache, memory=2, resident=0)
+    schema = rf.Schema.model_validate(model.schema.model_dump(mode="json"))
+    request = schema.requests[rf.Address("body")]
+    assert request.cache == cache and type(request.cache) is type(cache)
+    assert request.memory == 2 and request.resident == 0
 
 
 @pytest.mark.parametrize("cache", [0, -1, 1.0, 1.5, "2", "true", None])
-def test_text_cache_rejects_invalid_configuration(cache: object):
+def test_invalid_cache_options(cache):
     with pytest.raises(ValueError):
         rf.Text(cache=cache)
 
 
 @pytest.mark.parametrize("pooling", ["cls", "mean", "pooler"])
-def test_text_cache_reuses_unique_rows_across_fresh_batches_in_order(
-    encoder: FakeHFModel,
-    pooling: str,
-):
+def test_cached_and_direct_outputs_agree(encoder, pooling):
     texts = ["a", "longer", None, "a", "bbb", "longer"]
-    reference = Embedder(schema=schema(pooling=pooling), address=ADDRESS)
-    expected = encode(reference, texts)
-    encoder.calls = 0
-    encoder.batches.clear()
-    structure = schema(cache=True, pooling=pooling)
-    cached = Embedder(schema=structure, address=ADDRESS)
-
-    first = encode(cached, texts)
-    encoded_rows = sum(ids.shape[0] for ids, _ in encoder.batches)
-    calls = encoder.calls
-    second = encode(cached, texts)
-
-    assert torch.equal(first, expected)
-    assert torch.equal(second, expected)
-    assert torch.count_nonzero(first[2]) == 0
-    assert encoded_rows == 3
-    assert encoder.calls == calls
-    assert cached.cache is not None
-    assert len(cached.cache) == 3
-    tokenizer = CachedModel.get_tokenizer(MODEL)
-    assert len(tokenizer.batches) == 3
+    reference = encoded(build(False, encoder_pooling=pooling), texts)
+    model = build(encoder_pooling=pooling)
+    actual = encoded(model, texts)
+    before = encoder.calls
+    torch.testing.assert_close(actual, reference)
+    assert torch.equal(actual, encoded(model, texts))
+    assert encoder.calls == before
 
 
-def test_text_cache_distinguishes_attention_masks(encoder: FakeHFModel):
-    embedder = Embedder(schema=schema(cache=True), address=ADDRESS)
-    state = torch.tensor([[Tokens.valued.value]])
-    content = TensorDict(
-        {
-            INPUT_IDS: torch.tensor([[[5, 7, 0, 0]]]),
-            ATTENTION_MASK: torch.tensor([[[1, 1, 0, 0]]]),
-        },
-        batch_size=[1, 1],
-    )
-
-    first = embedder.encode(content=content, state=state)
-    content[ATTENTION_MASK][0, 0, 1] = 0
-    second = embedder.encode(content=content, state=state)
-    repeated = embedder.encode(content=content, state=state)
-
-    assert not torch.equal(first, second)
-    assert torch.equal(second, repeated)
-    assert encoder.calls == 2
-    assert embedder.cache is not None
-    assert len(embedder.cache) == 2
-
-
-@pytest.mark.parametrize("pooling", ["cls", "mean", "pooler"])
-def test_text_cache_preserves_left_padding_and_valued_empty_tokens(
-    encoder: FakeHFModel,
-    pooling: str,
-):
-    CachedModel.get_tokenizer(MODEL).padding_side = "left"
-    content = TensorDict(
-        {
-            INPUT_IDS: torch.tensor([[[0, 0, 0, 5]], [[0, 0, 7, 9]], [[0, 0, 0, 0]], [[0, 0, 0, 0]]]),
-            ATTENTION_MASK: torch.tensor([[[0, 0, 0, 1]], [[0, 0, 1, 1]], [[0, 0, 0, 0]], [[0, 0, 0, 0]]]),
-        },
-        batch_size=[4, 1],
-    )
-    state = torch.tensor([[Tokens.valued], [Tokens.valued], [Tokens.valued], [Tokens.null]])
-    reference = Embedder(schema=schema(pooling=pooling), address=ADDRESS)
-    expected = reference.encode(content=content, state=state)
-    encoder.calls = 0
-    encoder.batches.clear()
-    cached = Embedder(schema=schema(cache=True, pooling=pooling), address=ADDRESS)
-
-    first = cached.encode(content=content, state=state)
-    calls = encoder.calls
-    second = cached.encode(content=content, state=state)
-
-    assert torch.equal(first, expected)
-    assert torch.equal(second, expected)
-    assert torch.count_nonzero(first[3]) == 0
-    assert encoder.calls == calls
-    assert all(ids.shape[-1] == 4 for ids, _ in encoder.batches)
-    assert sum(ids.shape[0] for ids, _ in encoder.batches) == 3
-
-
-def test_text_cache_retains_hot_entries_with_a_bounded_capacity(encoder: FakeHFModel):
-    embedder = Embedder(schema=schema(cache=2), address=ADDRESS)
-    encode(embedder, ["a", "bb"])
-    for _ in range(3):
-        encode(embedder, ["bb"])
+def test_equal_token_rows_share_a_stable_id(encoder):
+    model = build()
+    batch = field(model, ["a", "b", "a"])
+    assert batch.content[IDENTIFIERS].unique().numel() == 1
+    encoded(model, ["a", "b", "a"])
     assert encoder.calls == 1
-
-    for text in ["ccc", "dddd", "eeeee", "ffffff"]:
-        encode(embedder, [text])
-        calls = encoder.calls
-        encode(embedder, ["bb"])
-        assert encoder.calls == calls
-        assert embedder.cache is not None
-        assert len(embedder.cache) == 2
-        assert len(embedder.cache.frequencies) == 2
-        assert sum(len(bucket) for bucket in embedder.cache.buckets.values()) == 2
+    assert model.nodes["/body"].embedder.store.stats()["objects"] == 1
 
 
-def test_text_cache_counts_duplicate_exposure_within_a_batch(encoder: FakeHFModel):
-    embedder = Embedder(schema=schema(cache=2), address=ADDRESS)
-    encode(embedder, ["a", "a", "a", "bb"])
+def test_fields_share_frozen_vectors_but_keep_their_projections(encoder):
+    model = rf.Model(preset="small", body=rf.Text(model=MODEL, max_length=4), title=rf.Text(model=MODEL, max_length=4))
+    batch = model.encode(pl.DataFrame({"body": ["shared"], "title": ["shared"]}))
+    for address in ("/body", "/title"):
+        model.nodes[address].embedder.encode(content=batch[address].content, state=batch[address].state)
     assert encoder.calls == 1
-    encode(embedder, ["ccc"])
-    calls = encoder.calls
-
-    encode(embedder, ["a"])
-    assert encoder.calls == calls
-    encode(embedder, ["bb"])
-    assert encoder.calls == calls + 1
+    assert model.nodes["/body"].embedder.linear is not model.nodes["/title"].embedder.linear
 
 
-def test_text_cache_breaks_frequency_ties_by_recency(encoder: FakeHFModel):
-    embedder = Embedder(schema=schema(cache=2), address=ADDRESS)
-    encode(embedder, ["a", "bb"])
-    encode(embedder, ["a"])
-    encode(embedder, ["bb"])
-    encode(embedder, ["ccc"])
-    calls = encoder.calls
-
-    encode(embedder, ["bb"])
-    assert encoder.calls == calls
-    encode(embedder, ["a"])
-    assert encoder.calls == calls + 1
-
-
-def test_text_cache_keeps_autocast_contexts_separate(encoder: FakeHFModel):
-    embedder = Embedder(schema=schema(cache=True), address=ADDRESS)
-    original = encode(embedder, ["alpha"])
+def test_precision_namespaces_do_not_alias(encoder):
+    model = build()
+    first = encoded(model, ["alpha"])
     with torch.autocast("cpu", dtype=torch.bfloat16):
-        encode(embedder, ["alpha"])
-        encode(embedder, ["alpha"])
-
-    repeated = encode(embedder, ["alpha"])
-
-    assert torch.equal(original, repeated)
+        encoded(model, ["alpha"])
+        encoded(model, ["alpha"])
+    assert torch.equal(first, encoded(model, ["alpha"]))
     assert encoder.calls == 2
 
 
-def test_text_caches_are_owned_by_each_field(encoder: FakeHFModel):
-    structure = schema(cache=True)
-    first = Embedder(schema=structure, address=ADDRESS)
-    second = Embedder(schema=structure, address=ADDRESS)
-
-    encode(first, ["alpha"])
-    encode(second, ["alpha"])
-
-    assert encoder.calls == 2
-    assert first.cache is not second.cache
-
-
-def test_text_cache_keeps_jitter_and_projection_trainable(
-    encoder: FakeHFModel,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    structure = schema(cache=True, jitter=Jitter(add=0.5))
-    embedder = Embedder(schema=structure, address=ADDRESS)
-    batch = field(structure, ["alpha"])
-    pristine = embedder.encode(content=batch.content, state=batch.state).clone()
-    perturbations = iter((1.0, 2.0))
-
-    def perturb(self: Jitter, inputs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        result = inputs.clone()
-        result[mask] += next(perturbations)
-        return result
-
-    monkeypatch.setattr(Jitter, "apply", perturb)
-    embedder.train()
-    first = embedder.embed(batch).payload
-    second = embedder.embed(field(structure, ["alpha"])).payload
-    (first.sum() + second.sum()).backward()
-
-    assert encoder.calls == 1
-    assert not torch.equal(first, second)
-    assert embedder.linear[0].weight.grad is not None
-    assert torch.count_nonzero(embedder.linear[0].weight.grad) > 0
-    assert torch.equal(embedder.encode(content=batch.content, state=batch.state), pristine)
+@pytest.mark.parametrize("operation", [deepcopy, pickle.loads])
+def test_context_copy_reuses_ids_without_copying_device_state(encoder, operation):
+    model = build(resident=1)
+    encoded(model, ["alpha"])
+    store = model.nodes["/body"].embedder.store
+    copy = operation(pickle.dumps(store)) if operation is pickle.loads else operation(store)
+    assert not copy.views
+    assert copy.owner is store.owner
+    assert copy.client.endpoint.identity == store.client.endpoint.identity
+    assert not any("store" in name for name in model.state_dict())
 
 
-def test_text_cache_warmed_by_inference_supports_training_gradients(encoder: FakeHFModel):
-    structure = schema(cache=True)
-    embedder = Embedder(schema=structure, address=ADDRESS)
-    embedder.eval()
+def test_inference_warmup_keeps_training_projection_gradients(encoder):
+    model = build(resident=1)
+    embedder = model.nodes["/body"].embedder
     with torch.inference_mode():
-        embedder.embed(field(structure, ["alpha"]))
-
+        encoded(model, ["alpha"])
+    batch = field(model, ["alpha"])
     embedder.train()
-    output = embedder.embed(field(structure, ["alpha"])).payload
-    output.square().sum().backward()
-
-    assert encoder.calls == 1
+    embedder.embed(batch).payload.square().sum().backward()
     assert embedder.linear[0].weight.grad is not None
-    assert torch.count_nonzero(embedder.linear[0].weight.grad) > 0
-    assert embedder.cache is not None
-    for value in embedder.cache.values.values():
-        assert value.device.type == "cpu"
-        assert value.dtype == torch.float32
-        assert value.shape == (embedder.hidden_size,)
-        assert not value.requires_grad
-        assert value.grad_fn is None
+    assert torch.count_nonzero(embedder.linear[0].weight.grad)
+    assert encoder.calls == 1
 
 
-@pytest.mark.integration
-@pytest.mark.parametrize("pooling", ["cls", "mean", "pooler"])
-@pytest.mark.parametrize("mixed", [False, True])
-def test_text_cache_matches_an_offline_frozen_bert(
-    encoder: FakeHFModel,
-    pooling: str,
-    mixed: bool,
-):
-    transformers = pytest.importorskip("transformers")
-    model = transformers.BertModel(
-        transformers.BertConfig(
-            vocab_size=64,
-            hidden_size=8,
-            intermediate_size=16,
-            num_hidden_layers=1,
-            num_attention_heads=2,
-            max_position_embeddings=8,
-            hidden_dropout_prob=0.0,
-            attention_probs_dropout_prob=0.0,
-        )
-    ).eval()
-    model.requires_grad_(False)
-    CachedModel._models[MODEL] = CachedModel(key=MODEL, model=model, hidden_size=8)
-    calls = []
-    handle = model.register_forward_pre_hook(lambda module, args: calls.append(None))
-    reference = Embedder(schema=schema(pooling=pooling), address=ADDRESS)
-    cached = Embedder(schema=schema(cache=True, pooling=pooling), address=ADDRESS)
-    texts = ["a", "longer", None, "a", "bbb", "longer"]
-
-    try:
-        with torch.autocast("cpu", dtype=torch.bfloat16, enabled=mixed):
-            expected = encode(reference, texts)
-            actual = encode(cached, texts)
-            count = len(calls)
-            repeated = encode(cached, texts)
-    finally:
-        handle.remove()
-
-    torch.testing.assert_close(actual, expected, rtol=1e-2 if mixed else 1e-5, atol=5e-3 if mixed else 1e-6)
-    assert torch.equal(actual, repeated)
-    assert len(calls) == count
+def test_warm_has_no_required_directory_and_counts_only_new_vectors(encoder):
+    model = build()
+    embedder = model.nodes["/body"].embedder
+    assert embedder.warm(["a", "bbb", None, "a"]) == 2
+    assert embedder.warm(["bbb", "ccccc"]) == 1
+    before = encoder.calls
+    encoded(model, ["a", "bbb", "ccccc"])
+    assert encoder.calls == before
 
 
-def test_text_cache_reuses_reconstruction_targets_without_revealing_hidden_inputs(encoder: FakeHFModel):
-    structure = schema(cache=True, mask=Mask(reconstruct=True))
-    embedder = Embedder(schema=structure, address=ADDRESS)
-    module = SimpleNamespace(
-        schema=structure,
-        nodes={ADDRESS: SimpleNamespace(embedder=embedder, decoder=Decoder(schema=structure, address=ADDRESS))},
-        track=lambda names, value: value,
+def test_empty_collection_and_hidden_targets_keep_geometry(encoder):
+    model = rf.Model(preset="small", events=rf.Branch(length=None, body=rf.Text(model=MODEL, max_length=4, mask=True)))
+    source = pl.DataFrame({"events": [[{"body": "a"}, None, {"body": ""}], [], None]})
+    batch = model.encode(source, strata="train")["/events/body"]
+    embedder = model.nodes["/events/body"].embedder
+    assert not batch.content[IDENTIFIERS].any()
+    targets = embedder.encode(content=batch.targets["content"], state=batch.targets["state"])
+    assert targets.shape[:-1] == batch.state.shape
+    assert torch.count_nonzero(targets) > 0
+    empty = model.encode(pl.DataFrame({"events": [[], []]}, schema=source.schema), strata="train")["/events/body"]
+    assert embedder.encode(content=empty.content, state=empty.state).numel() == 0
+
+
+def test_compiled_projection_can_reuse_runtime_cache(encoder):
+    model = build(resident=1)
+    batch = field(model, ["a", "bbb", None])
+    embedder = model.nodes["/body"].embedder
+    reference = embedder.encode(content=batch.content, state=batch.state)
+    compiled = torch.compile(embedder.encode, backend="eager")
+    torch.testing.assert_close(compiled(content=batch.content, state=batch.state), reference)
+    assert encoder.calls == 1
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_real_local_encoder_training_and_weight_invalidation(tmp_path, device):
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    from transformers import BertConfig, BertModel, BertTokenizerFast
+
+    assets = tmp_path / "encoder"
+    assets.mkdir()
+    (assets / "vocab.txt").write_text("[PAD]\n[UNK]\n[CLS]\n[SEP]\n[MASK]\nhello\nworld\nother\n")
+    tokenizer = BertTokenizerFast(vocab_file=str(assets / "vocab.txt"))
+    tokenizer.save_pretrained(assets)
+    BertModel(
+        BertConfig(vocab_size=8, hidden_size=8, num_hidden_layers=1, num_attention_heads=2, intermediate_size=16)
+    ).save_pretrained(assets)
+    model = rf.Model(
+        preset="small",
+        attention=None,
+        dropout=0.0,
+        body=rf.Text(model=str(assets), max_length=8, resident=1, embed=True),
+        target=rf.Text(model=str(assets), max_length=8, mask=True),
+    ).to(device)
+    reference = rf.Model(preset="small", body=rf.Text(model=str(assets), max_length=8, cache=False)).to(device)
+    source = pl.DataFrame({"body": ["hello world", "other", None], "target": ["other", "hello", "world"]})
+    actual = model.encode(source)["/body"].to(device)
+    raw = field(reference, source["body"].to_list()).to(device)
+    embedder = model.nodes["/body"].embedder
+    direct = reference.nodes["/body"].embedder.encode(content=raw.content, state=raw.state)
+    with torch.inference_mode():
+        cached = embedder.encode(content=actual.content, state=actual.state)
+    torch.testing.assert_close(cached, direct, rtol=1e-5, atol=1e-6)
+    data = rf.PolarsDataModule(train=source, validate=source, num_workers=0, pin_memory=False)
+    before = embedder.linear[0].weight.detach().clone()
+    model.fit(
+        data,
+        batch_size=3,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        num_sanity_val_steps=0,
+        accelerator=device,
+        devices=1,
+        # CPU training exercises cache/gradient behavior without requiring BF16 CPU instructions.
+        precision="32-true" if device == "cpu" else "bf16-mixed",
+        logger=False,
+        rollback=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
     )
-
-    for _ in range(2):
-        batch = field(structure, ["alpha", "alpha"])
-        parcel = embedder.embed(batch)
-        assert torch.all(batch.state == Tokens.masked.value)
-        assert torch.equal(parcel.payload, embedder.embeddings(batch.state))
-        prediction = Prediction(
-            address=ADDRESS,
-            payload=TensorDict(
-                {
-                    TensorKey.state: torch.zeros(*batch.state.shape, len(Tokens)),
-                    TensorKey.content: torch.zeros(*batch.state.shape, embedder.hidden_size),
-                },
-                batch_size=batch.batch_size,
-            ),
-        )
-        value = loss(module=module, prediction=prediction, batch=batch, strata=Strata.train)
-        assert torch.isfinite(value)
-        assert encoder.calls == 1
-
-
-@pytest.mark.parametrize("operation", ["pickle", "deepcopy"])
-def test_text_cache_serializes_cold(encoder: FakeHFModel, operation: str):
-    embedder = Embedder(schema=schema(cache=2), address=ADDRESS)
-    encode(embedder, ["alpha"])
-    assert embedder.cache is not None
-    assert len(embedder.cache) == 1
-
-    restored = pickle.loads(pickle.dumps(embedder.cache)) if operation == "pickle" else deepcopy(embedder.cache)
-
-    assert len(restored) == 0
-    assert len(embedder.cache) == 1
-    assert all("cache" not in name for name in embedder.state_dict())
+    assert not torch.equal(before.cpu(), embedder.linear[0].weight.detach().cpu())
+    frozen = CachedModel.get_model(str(assets))
+    assert all(parameter.grad is None for parameter in frozen.model.parameters())
+    old = embedder.variant(torch.device(device))
+    with torch.no_grad():
+        next(frozen.model.parameters()).add_(0.1)
+    assert embedder.variant(torch.device(device)) != old
+    before = embedder.store.stats()["results"]
+    embedder.encode(content=actual.content, state=actual.state)
+    assert embedder.store.stats()["results"] > before

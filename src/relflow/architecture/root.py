@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, Required, Self, TypedDict, TypeVar, Unpack, cast, overload
 
 import lightning.pytorch as lit
+import polars as pl
 import pyarrow as pa
 import torch
 from beartype import beartype
@@ -43,7 +44,7 @@ from relflow.architecture.runtime import (
 )
 from relflow.data.arrow import Encoded, Retain
 from relflow.data.datasets.base import EncodedInput, InterprocessEncodingContext
-from relflow.data.processors import PostprocessorInput, PreprocessorInput
+from relflow.data.processors import PostprocessorInput, PreprocessorInput, arrow, polars
 from relflow.helpers.optimizers import adamw
 from relflow.logging import logger
 from relflow.logging.throughput import ThroughputLogger
@@ -908,24 +909,27 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         self,
         predictions: list[Prediction],
         *,
-        source: pa.Table,
+        source: pl.DataFrame | pa.Table,
         retain: Retain = (),
-    ) -> pa.Table:
-        """Convert tensor predictions into the canonical Arrow output table."""
+    ) -> pl.DataFrame:
+        """Write tensor predictions against a Polars or Arrow source into a Polars DataFrame."""
 
-        return output.write(self, predictions, source=source, retain=retain)
+        if isinstance(source, pl.DataFrame):
+            source = arrow(source, context="prediction source")
+        return polars(output.write(self, predictions, source=source, retain=retain), context="prediction output")
 
     @immutable("inference")
     def encode(
         self,
-        batch: pa.Table | pa.RecordBatch,
+        batch: pl.DataFrame | pa.Table | pa.RecordBatch,
         preprocess: PreprocessorInput = (),
         strata: StrataInput = Strata.predict,
         seed: int = 0,
         epoch: int = 0,
     ) -> EncodedInput:
-        """Tensorize an Arrow table or record batch using this model's schema.
+        """Tensorize an eager Polars DataFrame, Arrow table, or record batch.
 
+        Polars input converts once to Arrow before preprocessing and tensorization.
         Preprocessors run on eager Polars frames before structural queries.
         ``strata`` selects training, validation, test, or prediction masking;
         ``seed`` and ``epoch`` control deterministic batch randomness.
@@ -948,7 +952,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         retain: Retain = (),
         *,
         batch_size: int | None = None,
-    ) -> pa.Table: ...
+    ) -> pl.DataFrame: ...
 
     @overload
     def predict(
@@ -960,7 +964,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         ckpt_path: str | Path | None = None,
         return_predictions: Literal[True] = True,
         **trainer_options: Any,
-    ) -> pa.Table: ...
+    ) -> pl.DataFrame: ...
 
     @overload
     def predict(
@@ -984,7 +988,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         ckpt_path: str | Path | None = None,
         return_predictions: Literal[True] = True,
         **trainer_options: Any,
-    ) -> pa.Table: ...
+    ) -> pl.DataFrame: ...
 
     @overload
     def predict(
@@ -1012,30 +1016,32 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         ckpt_path: str | Path | None = None,
         return_predictions: bool = True,
         **trainer_options: Any,
-    ) -> pa.Table | None:
+    ) -> pl.DataFrame | None:
         """Predict direct observations or a data module's batched prediction split.
 
-        Returns one Arrow row per processed observation. The ``predictions``
+        Returns an eager Polars DataFrame with one row per processed observation. The ``predictions``
         column nests rich decoded results under schema field names and record
         lists. Requested embeddings appear separately in ``representations``;
         either column is omitted when unconfigured. ``retain`` adds selected
-        input columns under ``inputs``, or all columns with ``"*"``. Use a typed
-        empty Arrow object when there are no observations.
+        input columns under ``inputs``, or all columns with ``"*"``. Direct
+        inputs accept eager Polars DataFrames, Arrow tables and record batches,
+        or a nonempty sequence of mappings. For empty input, supply a Polars
+        DataFrame or Arrow object with an explicit schema.
 
         Preprocessors run before encoding; postprocessors receive the final
-        eager Polars frame and may reshape the output before conversion to Arrow.
+        eager Polars frame and may reshape the returned output.
         For direct inputs, ``batch_size`` bounds each encoded and forwarded
         batch after preprocessing. Postprocessing runs once on the combined
         output. A supplied size also becomes the model's current batch size.
         Omission processes the direct input as one batch.
 
         Data-module inference accepts Lightning callbacks and Trainer options,
-        and binds an unbound RelFlow data module before loading its batches.
+        and binds an unbound relflow data module before loading its batches.
         ``batch_size`` updates the current per-device size for model-owned data
         loaders; omission retains the current size.
         Configure preprocessing/retention on the data module and postprocessing
         on a Writer. Distributed prediction requires a prediction writer and
-        ``return_predictions=False``; ``devices=1`` collects one Arrow table.
+        ``return_predictions=False``; ``devices=1`` collects one Polars frame.
         """
         if batch is not None and datamodule is not None:
             raise TypeError("predict accepts either observations or a datamodule, not both")
@@ -1070,7 +1076,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         )
         if return_predictions and runner.num_devices * runner.num_nodes > 1:
             raise ValueError(
-                "distributed prediction requires a writer and return_predictions=False; use devices=1 to collect an Arrow table"
+                "distributed prediction requires a writer and return_predictions=False; use devices=1 to collect a Polars DataFrame"
             )
         outputs = runner.predict(
             self, datamodule=datamodule, ckpt_path=ckpt_path, return_predictions=return_predictions
@@ -1080,7 +1086,8 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         tables = [table for output in outputs or () for table in (output if isinstance(output, list) else [output])]
         if any(not isinstance(table, pa.Table) for table in tables):
             raise TypeError("data-module predict_step must return pyarrow.Table batches")
-        return pa.concat_tables(tables) if tables else output.write(self, [], source=pa.table({}))
+        combined = pa.concat_tables(tables) if tables else output.write(self, [], source=pa.table({}))
+        return polars(combined, context="prediction output")
 
     def on_before_batch_transfer(self, batch: Any, dataloader_idx: int) -> Any:
         """Commit extension resources before DDP starts this batch's graph."""

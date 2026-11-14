@@ -4,6 +4,7 @@ import asyncio
 from types import SimpleNamespace
 
 import orjson
+import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -23,11 +24,14 @@ def test_direct_parquet_arrow_and_json_preserve_the_same_selected_columns(tmp_pa
     )
     source = pa.table({"amount": [1.0, 2.0]})
     direct = model.predict(source, retain=retain, batch_size=2)
+    assert isinstance(direct, pl.DataFrame)
+    data = rf.ArrowDataModule(model=model, predict=source, retain=retain)
+    batch = model.predict_step(next(iter(data.predict_dataloader())), 0)
     writer = rf.Writer(tmp_path)
     writer.write_on_batch_end(
         SimpleNamespace(global_rank=0),
         SimpleNamespace(),
-        direct,
+        batch,
         None,
         None,
         0,
@@ -35,8 +39,8 @@ def test_direct_parquet_arrow_and_json_preserve_the_same_selected_columns(tmp_pa
     )
     writer.close()
     persisted = pq.read_table(tmp_path / "rank-0.parquet")
-    assert persisted.equals(direct)
-    assert persisted.schema.equals(direct.schema, check_metadata=True)
+    assert pl.from_arrow(persisted).equals(direct)
+    assert persisted.schema.metadata == {b"relflow.model_version": model.version.encode()}
 
     sink = pa.BufferOutputStream()
     with pa.ipc.new_stream(sink, source.schema) as stream:
@@ -63,18 +67,18 @@ def test_direct_parquet_arrow_and_json_preserve_the_same_selected_columns(tmp_pa
 
     arrow_response, json_response, partial_response = asyncio.run(run())
     served = pa.ipc.open_stream(pa.BufferReader(arrow_response.body)).read_all()
-    assert served.equals(direct)
-    assert served.schema.equals(direct.schema, check_metadata=True)
-    assert orjson.loads(json_response.body) == direct.to_pylist()
+    assert pl.from_arrow(served).equals(direct)
+    assert served.schema.metadata == persisted.schema.metadata
+    assert orjson.loads(json_response.body) == direct.to_dicts()
     assert "model" not in served.column_names
     assert ("inputs" in served.column_names) == (retain == "*")
     partial = orjson.loads(partial_response.body)
     assert len(partial) == 3
-    assert set(partial[0]) == set(direct.to_pylist()[0])
+    assert set(partial[0]) == set(direct.to_dicts()[0])
     assert partial[1] == {
         "predictions": None,
         "error": {"status_code": 422, "message": "each request must be a JSON object, got str"},
     }
-    assert set(partial[2]) == set(direct.to_pylist()[1])
+    assert set(partial[2]) == set(direct.to_dicts()[1])
     for response in (arrow_response, json_response, partial_response):
         assert response.headers["x-relflow-model-version"] == model.version

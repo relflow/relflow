@@ -17,6 +17,7 @@ application supplies the Parquet files shown below. Training and validation
 records include `disputed`; prediction requests can omit it.
 
 ```python
+import polars as pl
 import relflow as rf
 
 model = rf.Model(
@@ -30,14 +31,12 @@ datamodule = rf.ArrowDataModule(
     validate="payments/flat/validation.parquet",
 )
 model.fit(datamodule, batch_size=128, max_epochs=20)
-prediction_data = rf.ArrowDataModule(
-    predict="payments/flat/requests.parquet",
-)
-predictions = model.predict(datamodule=prediction_data, batch_size=256, devices=1)
+requests = pl.read_parquet("payments/flat/requests.parquet")
+predictions = model.predict(requests, batch_size=256)
 ```
 
 `mask=True` declares the prediction target. Fitting restores the best validation
-checkpoint by default. Predictions are returned as an Arrow table.
+checkpoint by default. Predictions are returned as a Polars DataFrame.
 [Prediction output](prediction-output.qmd) uses nested field
 names for decoded results and a separate column for requested representations.
 
@@ -63,8 +62,8 @@ Constructor options live with their owning type.
 
 | API | Purpose |
 | --- | --- |
-| `rf.ArrowDataModule` | Provide named splits from Arrow tables, files, datasets, or restartable Arrow factories; the model loop binds the module automatically. |
-| `rf.PolarsDataModule` | Convert eager DataFrames once into the Arrow pipeline. |
+| `rf.PolarsDataModule` | Train, evaluate, or predict using named splits of in-memory Polars DataFrames. |
+| `rf.ArrowDataModule` | Stream file paths, datasets, or restartable Arrow factories; also accepts existing Arrow tables. |
 | `rf.DuckDBDataModule` | Read restartable Arrow batches from configured DuckDB queries. |
 | `rf.source` | Configure Arrow file reading. |
 | `rf.preprocess`, `rf.Preprocessor` | Transform eager Polars frames before binding data. |
@@ -92,7 +91,7 @@ For an unlabeled training objective followed by a labeled task, see
 
 | API | Purpose |
 | --- | --- |
-| `model.predict` | Return an Arrow prediction table, with optional batch sizing for direct input or a prediction data module. |
+| `model.predict` | Return a Polars prediction DataFrame, with optional batch sizing for direct input or a prediction data module. |
 | `model.save`, `rf.Model.load` | Save and restore the schema and learned model state. |
 | `rf.Writer` | Write Lightning prediction batches to rank-partitioned Parquet files. |
 | `rf.postprocess`, `rf.Postprocessor` | Transform decoded prediction frames before returning responses or persisting files. |
@@ -110,7 +109,7 @@ Serving types, including `rf.Accelerator`, `rf.JSONBackend`, and
 | `rf.Address`, `rf.where`, `rf.predicate` | Address and select schema nodes, such as `rf.Address("trxns", "amount")`. |
 | `model.select`, `update`, `extend`, `delete`, `reset`, `override` | Inspect or evolve a trained schema; rebuilds retain compatible state, while reset reinitializes selected modules. |
 | `rf.presets.register`, `rf.presets.get` | Register a custom policy under a unique name or retrieve a registered policy for model construction, fit, and YAML templates. |
-| `model.encode`, `model.forward`, `model.write` | Access the encoding, Torch computation, and Arrow writing stages. |
+| `model.encode`, `model.forward`, `model.write` | Encode Polars frames into tensors, run Torch computation, and write results back to Polars; Arrow inputs remain supported. |
 
 See [Schema mutation](../guides/schema-mutation.qmd) and
 [Model tree](../concepts/model-tree.qmd) before changing a fitted model.
