@@ -324,7 +324,7 @@ def test_executable_streamed_prediction_matches_python(inputs, tmp_path):
     checkpoint = tmp_path / "model.rf"
     restored = rf.Model.from_yaml(model)
     restored.save(checkpoint)
-    expected = restored.predict(pl.read_parquet(data), retain=("id",))
+    expected = restored.predict(pl.read_parquet(data), retain=("id",), batch_size=2)
     payload = yaml.safe_load(config.read_text())
     payload["data"]["predict"] = "unavailable.parquet"
     config.write_text(yaml.safe_dump(payload))
