@@ -383,7 +383,7 @@ def test_workflow_never_promotes_pr_runs_or_installs_model_runtime():
     job = workflow["jobs"]["publish"]
     triggers = workflow.get("on", workflow.get(True))
     assert set(triggers) == {"workflow_call", "workflow_dispatch", "workflow_run"}
-    assert "!inputs.preview" in job["if"] and "workflow_run" in job["if"]
+    assert "!inputs.preview" in job["if"] and "inputs.library_run_id != ''" in job["if"]
     assert "pull-requests" not in job["permissions"]
     checkout = next(step["with"] for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@"))
     assert checkout["persist-credentials"] is False and checkout["fetch-depth"] == 0

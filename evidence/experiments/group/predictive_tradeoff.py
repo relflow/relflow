@@ -3,7 +3,7 @@
 # title: When does grouping identities help prediction?
 # categories:
 # - Representation
-# description: Compare Cluster, Category, and a true-group reference across dense, sparse,
+# description: Compare Group, Category, and a true-group reference across dense, sparse,
 #   and skewed known-identity populations.
 # execute:
 #   enabled: false
@@ -11,12 +11,12 @@
 # code-fold: true
 # toc: false
 # evidence-readout:
-# - label: Dense Cluster error
+# - label: Dense Group error
 #   metric:
 #   - conditions
 #   - dense
 #   - arms
-#   - cluster
+#   - group
 #   - nrmse
 #   format: number
 # - label: Dense Category error
@@ -30,7 +30,7 @@
 # evidence-group: Representation
 # ---
 #
-# Several occupied clusters do not establish a useful modeling tradeoff. Here grouping must be judged
+# Several occupied groups do not establish a useful modeling tradeoff. Here grouping must be judged
 # alongside prediction error, ordinary Category performance, actual parameter counts, and how frequently
 # each identity was observed.
 #
@@ -42,25 +42,25 @@
 # answer: 2.6
 # ```
 #
-# Compare Cluster, Category, and a true-group reference across dense, sparse, and skewed known-identity
+# Compare Group, Category, and a true-group reference across dense, sparse, and skewed known-identity
 # populations. The example is illustrative; its answer is hidden during scoring.
 #
 # ```{typst}
-# //| label: fig-evidence-p095
+# //| label: fig-evidence-p112
 # //| fig-cap: "Visible fields supply evidence; prediction targets are hidden."
-# //| fig-alt: "Compare Cluster, Category, and a true-group reference across dense, sparse, and skewed known-identity populations."
-# #tree(node("record",kind:"root",children:(node("entity",type:"Cluster or Category"),node("x",type:"Number"),node("answer",kind:"target",type:"Number"))))
+# //| fig-alt: "Compare Group, Category, and a true-group reference across dense, sparse, and skewed known-identity populations."
+# #tree(node("record",kind:"root",children:(node("entity",type:"Group or Category"),node("x",type:"Number"),node("answer",kind:"target",type:"Number"))))
 # ```
 #
 # ## Comparison
 #
-# Fit Cluster, Category, a model given the true group, and a shuffled-ID Category control. Train on dense,
+# Fit Group, Category, a model given the true group, and a shuffled-ID Category control. Train on dense,
 # sparse, and skewed populations, then score every known identity equally. Recovered ARI and gains over
 # Category remain diagnostics; the true-group reference validates observability.
 #
 # ## Result
 #
-# {{< evidence P095 status >}}
+# {{< evidence P112 status >}}
 #
 # No result is claimed before a full run is recorded. The checks below are provisional hypotheses, not
 # established capabilities. Lower error and proper loss are better; larger accuracy is better. Controls and
@@ -69,11 +69,11 @@
 # <details class="evidence-details">
 # <summary>Experiment details and code</summary>
 #
-# {{< evidence P095 evidence >}}
+# {{< evidence P112 evidence >}}
 #
 # ### Run this experiment
 #
-# {{< evidence P095 script >}}
+# {{< evidence P112 script >}}
 #
 # ### Process, splits, and interpretation
 #
@@ -82,14 +82,14 @@
 # generated mapping promise. Independent Gaussian noise has standard deviation 0.15. Train conditions use
 # 4,096 balanced,256 sparse,or2048 power-law-skewed observations. Validation 512 and test 2,048 use
 # independent draws; test includes each identity equally. All models share width 16, one layer, four heads
-# and 500 updates. The oracle is supplied a true-group Enum, so it is an information reference, not
-# parameter-matched. Parameters are counted after fitting and not assumed smaller for Cluster.
+# and 2,400 updates. The oracle is supplied a true-group Enum, so it is an information reference, not
+# parameter-matched. Parameters are counted after fitting and not assumed smaller for Group.
 # Sparse/rare-identity and comparative scores remain visible even when broad capability gates pass.
 # Arbitrary unseen identities are outside this task.
 #
 # ### Complete experiment code
 # %%
-"""P095: compare Cluster and Category on sparse, skewed known identities."""
+"""P112: compare Group and Category on sparse, skewed known identities."""
 
 import lightning.pytorch as lit
 import numpy as np
@@ -98,7 +98,7 @@ import pyarrow as pa
 import relflow as rf
 from reporting import experiment, report
 
-BUDGET = 500
+BUDGET = 2400
 ENTITIES = 32
 GROUPS = 4
 INTERCEPT = np.asarray([-3.0, -1.0, 1.0, 3.0])
@@ -128,8 +128,8 @@ def records(
 
 def build(kind: str) -> rf.Model:
     identity = (
-        rf.Cluster(bounds=(2, 8), mask=rf.Mask(rate=0.1, reconstruct=True), p_unavailable=0.0)
-        if kind == "cluster"
+        rf.Group(n_groups=8, mask=rf.Mask(rate=0.1, reconstruct=True), p_unavailable=0.0)
+        if kind == "group"
         else rf.Category(p_unavailable=0.0)
     )
     fields = (
@@ -208,7 +208,7 @@ def fit(model: rf.Model, train: list[dict], validation: list[dict], seed: int, b
     return int(model.trainer.global_step)
 
 
-@experiment("P095", seed=9501)
+@experiment("P112", seed=11201)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     budget = BUDGET if steps is None else min(steps, BUDGET)
     mapping_seed = seed + 40
@@ -222,7 +222,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         scale = float(np.std([row["answer"] for row in train]))
         exposures = np.bincount([int(row["entity"].split("-")[1]) for row in train], minlength=ENTITIES)
         arms = {}
-        for kind in ("cluster", "category", "oracle", "shuffled"):
+        for kind in ("group", "category", "oracle", "shuffled"):
             lit.seed_everything(seed, workers=True)
             model = build(kind)
             fitting = (
@@ -244,9 +244,9 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
                 "per_identity_nrmse": per_identity,
                 "rare_identity_nrmse": float(np.mean([per_identity[f"id-{i}"] for i in np.argsort(exposures)[:8]])),
             }
-            if kind == "cluster":
-                assignments = rf.Cluster.assignments(model, rf.Address("entity"))
-                assigned = np.asarray([assignments.get(f"id-{i}", {}).get("cluster", -1) for i in range(ENTITIES)])
+            if kind == "group":
+                assignments = rf.Group.assignments(model, rf.Address("entity"))
+                assigned = np.asarray([assignments.get(f"id-{i}", {}).get("group", -1) for i in range(ENTITIES)])
                 measured["ari"] = adjusted_rand(partition(mapping_seed), assigned)
                 measured["identity_coverage"] = int((assigned >= 0).sum())
             arms[kind] = measured
@@ -255,14 +255,14 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             )
             if kind == "oracle":
                 checks[f"{condition}: true-group reference learns below 0.40 nRMSE"] = measured["nrmse"] < 0.40
-        arms["cluster_minus_category_nrmse"] = arms["cluster"]["nrmse"] - arms["category"]["nrmse"]
+        arms["group_minus_category_nrmse"] = arms["group"]["nrmse"] - arms["category"]["nrmse"]
         metrics["conditions"][condition] = {
             "training_rows": rows,
             "identity_exposures": exposures.tolist(),
             "arms": arms,
         }
     dense = metrics["conditions"]["dense"]["arms"]
-    checks["Dense Cluster reaches below 0.50 nRMSE"] = dense["cluster"]["nrmse"] < 0.50
+    checks["Dense Group reaches below 0.50 nRMSE"] = dense["group"]["nrmse"] < 0.50
     checks["Shuffled-ID dense control remains above 0.80 nRMSE"] = dense["shuffled"]["nrmse"] > 0.80
     return metrics, checks
 

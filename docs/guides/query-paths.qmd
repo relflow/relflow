@@ -5,7 +5,8 @@ engine: markdown
 ---
 
 Use `query=` when a model node reads a differently named or nested source.
-Every path starts from the value selected by its parent node. When names and
+Ordinary paths start from the value selected by their parent node. Leaf
+sources can also select a modeled ancestor with a leading `../`. When names and
 nesting already match the schema, no query is needed; see
 [Prepare observations](../learn/prepare-observations.qmd).
 
@@ -89,6 +90,7 @@ are determined from the retained parent records. See
 | `transactions[0].merchant_info.name` | One position; negative indices count from the end |
 | `transactions[-10:]` | A slice of each list |
 | `attributes["country"]` | One literal Arrow map key |
+| `../account.created_at` | A leaf source in its owning branch's parent record |
 
 `[*]` retains a list axis; it does not flatten it. Use it when a leaf path
 crosses an unmodeled list. Children of a modeled branch already operate on each
@@ -97,6 +99,36 @@ branch element.
 Slices use half-open, clamped bounds; steps such as `[::2]` are unsupported.
 Map keys may be strings, integers, or booleans that match the Arrow key type
 exactly. Duplicate matches are errors. Paths have no `$` source-root prefix.
+
+## Ancestor sources {#ancestor-sources}
+
+A leaf source may begin with one `../` per modeled ancestor branch. Inside
+`transactions=rf.Branch(...)`, `../account.created_at` reads from the root
+source record and broadcasts its scalar value over that observation's
+retained transactions. Another `../` ascends another modeled branch.
+
+References stay within the selected model root. If `Model(query="payload")`
+selects that root, an ancestor reference cannot escape to unrelated columns
+outside `payload`. These paths read preprocessed source data, independently
+of schema field names or predictions. Broadcasting follows retained branch
+coordinates, including cropping and structural holes.
+
+Branch and mask queries remain ordinary single paths. Use leading `../`
+for leaf sources, including individual operands of a derived field.
+
+## Derived inputs
+
+A type with a registered `Component.derive` can accept an ordered tuple of
+source paths. [Duration](../datatypes/duration.qmd), for example, uses
+`query=("opened_at", "closed_at")` to calculate elapsed time. Each path still
+only navigates structure; the type owns the computation and operand rules.
+Tuple queries are rejected for types without that registered capability.
+See [custom tensorfields](../datatypes/custom-tensorfields.qmd#derive-inputs).
+
+A Duration computes one scalar per owning Branch coordinate. Its ancestor
+operands broadcast within that geometry. Wildcard paths retain lists and do
+not create automatic Duration axes; use a Branch for a shared repeated
+history and a preprocessor for joins between separate histories.
 
 ## Structural absence
 

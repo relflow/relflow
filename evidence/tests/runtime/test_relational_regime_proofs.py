@@ -66,7 +66,7 @@ def test_permutation_changes_positions_without_changing_keyed_relations():
 
 
 def test_regime_control_preserves_numeric_pairs_and_identity_counts():
-    proof = load("cluster", "regime_recovery")
+    proof = load("group", "regime_recovery")
     options = {"rows": 4096, "seed": 21, "partition_seed": 20}
     stable = list(proof.records(**options))
     control = list(proof.records(**options, no_regime=True))
@@ -91,7 +91,7 @@ def test_regime_control_preserves_numeric_pairs_and_identity_counts():
 
 
 def test_adjusted_rand_ignores_label_names_and_penalizes_wrong_partitions():
-    proof = load("cluster", "regime_recovery")
+    proof = load("group", "regime_recovery")
     actual = np.repeat(np.arange(4), 16)
     assert proof.adjusted_rand(actual, 10 - actual) == 1.0
     assert proof.adjusted_rand(actual, np.zeros(64)) == 0.0

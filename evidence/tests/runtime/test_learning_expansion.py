@@ -46,8 +46,8 @@ def test_cohort_targets_have_stable_compatible_rules_and_independent_test_rows()
             assert row["answer"] == (2.0, -2.0, 1.5)[index] * row["x"] + (-1.0, 1.0, 0.0)[index]
 
 
-def test_cluster_shuffling_preserves_response_and_identity_marginals():
-    experiment = load("experiments/cluster/predictive_tradeoff.py")
+def test_group_shuffling_preserves_response_and_identity_marginals():
+    experiment = load("experiments/group/predictive_tradeoff.py")
     rows = list(experiment.records(512, 11, 19, skew=True))
     shuffled = list(experiment.records(512, 11, 19, skew=True, shuffled=True))
     assert [row["answer"] for row in rows] == [row["answer"] for row in shuffled]

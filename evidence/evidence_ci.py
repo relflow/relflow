@@ -6,8 +6,10 @@ import argparse
 import ast
 import hashlib
 import html
+import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -19,7 +21,7 @@ import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-from experiments.source import declaration, frontmatter, metadata, registry
+from experiments.source import declaration, describe, frontmatter, metadata, registry
 
 ROOT = Path(__file__).resolve().parent
 
@@ -81,7 +83,8 @@ def suite_identity(root: Path) -> str:
 def runtime_inputs(root: Path) -> dict:
     """Bind experiment code and shared runtime files, excluding publication and test tooling."""
     inputs = {}
-    for path in sorted((root / "experiments").rglob("*")):
+    paths = list((root / "experiments").rglob("*"))
+    for path in sorted(paths):
         name = path.relative_to(root).as_posix()
         if "__pycache__" in path.parts:
             continue
@@ -93,6 +96,41 @@ def runtime_inputs(root: Path) -> dict:
             raise ValueError(f"Execution inputs reject special files: {name}")
         inputs[name] = {"sha256": digest(path), "mode": path.stat().st_mode & 0o777}
     return inputs
+
+
+def script_paths(root: Path, entries: dict) -> set[str]:
+    """Identify experiment scripts that must be isolated from one another."""
+    return {entry["script"] for entry in entries.values()}
+
+
+def baseline_catalog(revision: str) -> set[str]:
+    """Read proof identities from the exact baseline Git tree without executing it."""
+    if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise ValueError("Baseline catalog requires a full Git revision")
+    try:
+        data = subprocess.check_output(
+            ["git", "archive", revision, "evidence/experiments"], cwd=ROOT.parent, stderr=subprocess.PIPE
+        )
+        entries = set()
+        with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+            for member in archive:
+                parts = Path(member.name).parts
+                if len(parts) != 4 or parts[:2] != ("evidence", "experiments") or not parts[-1].endswith(".py"):
+                    continue
+                if not member.isfile():
+                    raise ValueError(f"Baseline experiment must be a regular file: {member.name}")
+                stream = archive.extractfile(member)
+                if stream is None:
+                    raise ValueError(f"Cannot read baseline experiment: {member.name}")
+                identifier = describe(stream.read().decode())["evidence-id"]
+                if identifier in entries:
+                    raise ValueError(f"Duplicate baseline experiment: {identifier}")
+                entries.add(identifier)
+        if not entries:
+            raise ValueError("Baseline catalog is empty")
+        return entries
+    except (subprocess.CalledProcessError, OSError, tarfile.TarError, UnicodeError) as error:
+        raise ValueError(f"Cannot read baseline catalog at {revision}") from error
 
 
 def execution_key(manifest: dict, task: dict, execution: dict) -> str:
@@ -249,6 +287,7 @@ def plan(
     root: Path = ROOT,
     identifiers: list[str] | None = None,
     steps: int | None = None,
+    baseline_ids: set[str] | None = None,
 ) -> dict:
     entries = registry(root, measurements=False)
     selected = identifiers if identifiers is not None else list(entries)
@@ -256,10 +295,11 @@ def plan(
         raise ValueError("Select distinct registered experiment IDs")
     tasks = []
     inputs = runtime_inputs(root)
-    scripts = {entry["script"] for entry in entries.values()}
+    scripts = script_paths(root, entries)
+    introduced = set(entries) - baseline_ids if baseline_ids is not None else set()
     for identifier in selected:
         script = root / entries[identifier]["script"]
-        for role in ("baseline", "candidate"):
+        for role in ("candidate",) if identifier in introduced else ("baseline", "candidate"):
             tasks.append(
                 {
                     "id": identifier,
@@ -286,13 +326,14 @@ def plan(
         "created_at": datetime.now(UTC).isoformat(),
         "evidence_sha": evidence_sha,
         "executor_sha": executor_sha,
-        "policy": "paired-passing-checks-v1",
+        "policy": "introduced-passing-checks-v1" if introduced else "paired-passing-checks-v1",
         "candidate": candidate,
         "baseline": baseline,
         "full_catalog": set(selected) == set(entries),
         "mode": "full" if steps is None else "smoke",
         "tasks": tasks,
         "runtime_sha256": identity(inputs),
+        **({"introduced": sorted(introduced), "retired": sorted(baseline_ids - set(entries))} if introduced else {}),
     }
 
 
@@ -440,9 +481,31 @@ def evaluate(
     seen = {}
     errors = reuse_errors + verify_execution(manifest, records, reports)
     catalog = registry(root, measurements=False)
+    introduced = set()
+    if manifest.get("policy") not in {"paired-passing-checks-v1", "introduced-passing-checks-v1"}:
+        errors.append("Unknown Evidence comparison policy")
+    if manifest.get("policy") == "introduced-passing-checks-v1":
+        try:
+            baseline_ids = baseline_catalog(manifest["baseline"]["revision"])
+            introduced = set(catalog) - baseline_ids
+            planned = plan(
+                run_id=manifest["run_id"],
+                candidate=manifest["candidate"],
+                baseline=manifest["baseline"],
+                evidence_sha=manifest["evidence_sha"],
+                executor_sha=manifest["executor_sha"],
+                root=root,
+                baseline_ids=baseline_ids,
+            )
+            if any(manifest.get(key) != planned.get(key) for key in ("policy", "introduced", "retired", "tasks")):
+                raise ValueError("Task plan differs from the baseline catalog")
+        except (ValueError, KeyError, OSError, TypeError) as error:
+            errors.append(f"Invalid baseline catalog: {error}")
+    elif "introduced" in manifest or "retired" in manifest:
+        errors.append("Introduced proofs require the catalog comparison policy")
     if "runtime_sha256" in manifest:
         inputs = runtime_inputs(root)
-        scripts = {entry["script"] for entry in catalog.values()}
+        scripts = script_paths(root, catalog)
         if manifest["runtime_sha256"] != identity(inputs):
             errors.append("Experiment runtime inputs differ from the manifest")
         for task in manifest["tasks"]:
@@ -460,11 +523,11 @@ def evaluate(
         errors.append("Manifest contains duplicate tasks")
     if {task["id"] for task in manifest["tasks"]} != set(catalog):
         errors.append("Manifest does not cover the complete registered catalog")
-    if len(expected) != 2 * len(catalog):
-        errors.append("Every experiment needs both baseline and candidate execution")
     for identifier in catalog:
-        if {task["role"] for task in manifest["tasks"] if task["id"] == identifier} != {"baseline", "candidate"}:
-            errors.append(f"Missing baseline or candidate task: {identifier}")
+        roles = {task["role"] for task in manifest["tasks"] if task["id"] == identifier}
+        wanted = {"candidate"} if identifier in introduced else {"baseline", "candidate"}
+        if roles != wanted:
+            errors.append(f"Missing or unexpected task roles: {identifier}")
     for record in records:
         key = task_key(record["task"])
         if key not in expected or key in seen or record["task"] != expected.get(key):
@@ -498,8 +561,17 @@ def evaluate(
     errors += [f"Missing result: {key}" for key in sorted(expected.keys() - seen.keys())]
     regressions = []
     limitations = []
+    new_unmet = []
     for task in manifest["tasks"]:
         if task["role"] != "candidate":
+            continue
+        if task["id"] in introduced:
+            candidate = seen.get(task_key(task), {}).get("result") or {}
+            new_unmet.extend(
+                {"id": task["id"], "seed": task["seed"], "check": name}
+                for name, passed in candidate.get("checks", {}).items()
+                if passed is False
+            )
             continue
         candidate = seen.get(task_key(task), {}).get("result") or {}
         baseline = seen.get(task_key(dict(task, role="baseline")), {}).get("result") or {}
@@ -519,10 +591,11 @@ def evaluate(
         "schema": 1,
         "run_id": manifest["run_id"],
         "complete": len(seen) == len(expected),
-        "passed": not errors and not regressions,
+        "passed": not errors and not regressions and not new_unmet,
         "errors": errors,
         "regressions": regressions,
         "baseline_unmet_checks": limitations,
+        **({"introduced_unmet_checks": new_unmet} if introduced else {}),
         "expected_tasks": len(expected),
         "received_tasks": len(seen),
         **(

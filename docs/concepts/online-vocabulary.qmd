@@ -1,10 +1,10 @@
 ---
 title: Online vocabulary
-description: "Category, Set, and Cluster learn labels during training, grow storage automatically, and handle unknown values."
+description: "Category, Set, and Group learn labels during training, grow storage automatically, and handle unknown values."
 engine: markdown
 ---
 
-`Category`, `Set`, and `Cluster` learn their labels from training data. Supply
+`Category`, `Set`, and `Group` learn their labels from training data. Supply
 merchant names and tags directly; there is no separate integer-encoding step.
 Each field keeps its own vocabulary, saved with the model.
 
@@ -130,8 +130,8 @@ prior and unavailable values. Repeated epochs count again; these are not
 unique-record counts. DDP exposure counts synchronize at epoch end and before
 the evaluation-loop warning checks.
 New training labels are counted from their first consumed batch.
-`rf.Cluster.vocabulary(model, address)` provides the same mapping inspection
-for Cluster fields.
+`rf.Group.vocabulary(model, address)` provides the same mapping inspection
+for Group fields.
 
 Preprocessors can inspect established mappings through `encoding_context`.
 Training preprocessing runs before vocabulary admission: filtering new labels
@@ -144,7 +144,7 @@ associated model state. [Fine-tuning](../learn/pretraining-and-fine-tuning.qmd) 
 learning from it; freezing parameter gradients alone does not freeze vocabulary
 admission. Use prediction stages for a fixed vocabulary.
 
-Cluster also has an explicit [assignment API](../datatypes/cluster.qmd#learning-and-inspection)
+Group also has an explicit [assignment API](../datatypes/group.qmd#learning-and-inspection)
 that can add labels and grow storage on an idle model outside training.
 
 Automatic growth needs no schema update. Resetting a field discards its learned
@@ -161,21 +161,22 @@ Its content representation depends on the datatype:
 | --- | --- |
 | Category | Zero categorical content plus the value-state embedding. |
 | Set | Known membership plus unavailable-member counts. A learned unavailable contribution distinguishes unknown from empty sets, without recovering unknown identities. |
-| Cluster | A shared unavailable assignment. |
+| Group | A shared unavailable assignment. |
 
 These types default to `p_unavailable=0.01`, which simulates unavailable content
 during training. All three perturb inputs only, preserving the original
 reconstruction answers. This changes input content, not membership in the
 learned vocabulary or pristine exposure counts. See the datatype pages for
-their respective loss and coverage definitions: a Set counts memberships,
-where Category and Cluster count scalar targets.
+their respective loss and coverage definitions: a Set counts memberships and
+Category counts scalar targets. Group reconstruction trains state only.
 
-Predictions name only populated vocabulary entries. Category and Cluster label
-probabilities are normalized over those entries; Set emits their independent
-membership probabilities. None can name an unseen label. A high probability
+Category predictions name only populated vocabulary entries and normalize
+label probabilities over them; Set emits independent membership probabilities.
+Neither can name an unseen label. Group does not decode vocabulary labels.
+A high probability
 does not establish that a request belongs to the known vocabulary. Evaluate
 unknown-label coverage alongside content accuracy, which excludes unknown
-targets for Category and Cluster.
+targets for Category.
 
 ### Cold input identities
 
@@ -216,18 +217,18 @@ For pretraining targets, see
 
 ## Automatic storage growth
 
-Category, Set, and Cluster manage vocabulary storage automatically. Neither
+Category, Set, and Group manage vocabulary storage automatically. Neither
 `size` nor `capacity` is a field option, and there is no configured maximum.
 When a training batch introduces more labels than fit, storage grows
 geometrically until it can hold them. Users do not need to estimate the number
-of labels before training. Cluster's `bounds` controls latent clusters, not
+of labels before training. Group's `n_groups` controls latent groups, not
 vocabulary storage.
 
 Growth preserves existing label IDs, learned embedding and decoder rows,
 exposure counters, partial gradients, and optimizer history: Adam/AdamW moments
 and step counters, or SGD momentum. New parameter rows receive standard
-initialization and zeroed optimizer moments or momentum. Cluster preserves its unavailable assignment
-while growing per-label rows; its configured cluster bounds are unchanged.
+initialization and zeroed optimizer moments or momentum. Group preserves its unavailable assignment
+while growing per-label rows; its configured group count is unchanged.
 Checkpoints preserve the mapping and grown tensor sizes, so resumed training
 can continue from that allocation. Vocabulary storage is runtime state, not
 schema configuration; growing it does not change the schema.
@@ -246,7 +247,7 @@ discovered labels. Actual new labels can change the learning objective;
 additional storage alone does not add classes.
 
 Use [Hash](../datatypes/hash.qmd) for identifier equality without a persistent
-vocabulary. [Cluster](../datatypes/cluster.qmd) shares latent representations
+vocabulary. [Group](../datatypes/group.qmd) shares latent representations
 between labels but still keeps growing per-label state.
 
 ## Workers and distributed training

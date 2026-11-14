@@ -207,3 +207,59 @@ def test_release_skips_superseded_main_and_rejects_missing_validation(release):
     assert stale.returncode == 0
     assert json.loads(stale.stdout) == {"current": "false"}
     assert release(manual=True, available=False).returncode != 0
+
+
+@pytest.mark.parametrize(
+    "event,run_id,preview,conclusion,repository,expected",
+    [
+        ("workflow_run", "123", False, "success", "relflow/relflow", (True, False)),
+        ("workflow_dispatch", "123", False, "success", "relflow/relflow", (True, False)),
+        ("workflow_run", "", False, "success", "relflow/relflow", (False, True)),
+        ("workflow_run", "", False, "failure", "relflow/relflow", (False, True)),
+        ("workflow_run", "", False, "cancelled", "relflow/relflow", (False, False)),
+        ("workflow_run", "", False, "success", "fork/relflow", (False, False)),
+        ("workflow_dispatch", "123", True, "success", "relflow/relflow", (False, True)),
+    ],
+    ids=[
+        "automatic-release",
+        "manual-release",
+        "ci-preview",
+        "failed-ci-preview",
+        "cancelled-ci",
+        "fork-ci",
+        "manual-preview",
+    ],
+)
+def test_evidence_publication_routes_explicit_release_inputs_despite_inherited_caller_event(
+    event, run_id, preview, conclusion, repository, expected
+):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required to execute the GitHub Actions publication conditions")
+    jobs = yaml.safe_load((WORKFLOWS / "publish-evidence.yml").read_text())["jobs"]
+    fixture = {
+        "conditions": {name: jobs[name]["if"] for name in ("publish", "preview")},
+        "inputs": {"library_run_id": run_id, "preview": preview},
+        "github": {
+            "event_name": event,
+            "repository": "relflow/relflow",
+            "event": {"workflow_run": {"head_repository": {"full_name": repository}, "conclusion": conclusion}},
+        },
+    }
+    harness = """
+    const fixture = JSON.parse(process.env.PUBLICATION_FIXTURE);
+    const result = {};
+    for (const [name, expression] of Object.entries(fixture.conditions)) {
+      result[name] = Boolean(new Function('inputs', 'github', `return (${expression});`)(fixture.inputs, fixture.github));
+    }
+    process.stdout.write(JSON.stringify(result));
+    """
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", harness],
+        env=dict(os.environ, PUBLICATION_FIXTURE=json.dumps(fixture)),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == dict(zip(("publish", "preview"), expected, strict=True))

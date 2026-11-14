@@ -122,7 +122,7 @@ output = "coverage.json"
 
 [tool.ruff]
 line-length = 120
-extend-exclude = ["docs", "evidence"]
+extend-exclude = ["docs", "evidence", "research/**/output", "research/**/attempts", "research/**/evidence-plots"]
 lint.extend-select = ["I"]
 
 [tool.pyrefly]

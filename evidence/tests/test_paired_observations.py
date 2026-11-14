@@ -116,3 +116,26 @@ def test_archive_rejects_changed_bytes_before_installing(paired, tmp_path):
     assert not (tmp_path / "invalid").exists()
     value = read(archive)
     assert value["manifest"]["runtime"]["run_id"] == "gh-42-2"
+
+
+def test_introduced_proof_has_candidate_only_observations(paired, tmp_path):
+    reports, observations, selected = paired
+    manifest_path = reports / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest.update(policy="introduced-passing-checks-v1", introduced=["P001"], retired=["P018"])
+    baseline = next(task for task in manifest["tasks"] if task["role"] == "baseline")
+    manifest["tasks"].remove(baseline)
+    (reports / "results" / (task_key(baseline) + ".json")).unlink()
+    for path in observations.rglob("bundle.zip"):
+        if read(path)["manifest"]["task"] == baseline:
+            path.unlink()
+            break
+    manifest_path.write_text(json.dumps(manifest))
+    ci = prepare(reports, observations, selected)
+    assert ci["candidate_only"] == ["P001"]
+    assert {path.name for path in selected.iterdir()} == {"P001"}
+    shutil.rmtree(selected)
+    manifest["introduced"] = []
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="complete full-budget"):
+        prepare(reports, observations, selected)

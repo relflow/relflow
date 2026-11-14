@@ -30,6 +30,7 @@ disputed: false
 
 Use `rf.Number(mask=True)` to predict a numeric value, such as a refund amount.
 Use [Quantile](quantile.qmd) for percentile-based values,
+[Ordinal](ordinal.qmd) for ordered labels or integer ranks,
 [Category](category.qmd) for numeric-looking labels, and
 [Period](dateparts.qmd) for recurring calendar positions.
 

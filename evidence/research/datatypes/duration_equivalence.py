@@ -20,7 +20,7 @@
 #   format: number
 # evidence-group: Temporal
 # evidence-requires:
-# - "relflow stage/0.5.0 wheel exporting Duration"
+# - "relflow 0.4.6 wheel exporting Duration"
 # ---
 #
 # Compare elapsed-time features derived from two timestamps or one configured endpoint with an
@@ -38,9 +38,9 @@
 # valid; the sign comes from end minus start. The hidden target contains a small independent noise term
 # in generated records.
 #
-# This research experiment needs the stage/0.5.0 wheel that exports Duration. The current core package
-# does not yet provide that API. Days are fixed 86,400-second intervals here; months and years remain
-# outside this experiment.
+# This study requires a wheel exporting Duration and remains in the research lane while the paired
+# baseline predates it. Days are fixed 86,400-second intervals here; months and years remain outside
+# this experiment.
 #
 # ```{typst}
 # //| label: fig-evidence-p099
@@ -54,6 +54,8 @@
 # Compare a two-query Duration, a configured-start Duration, and a prederived Number using the same
 # latent elapsed times and numerical targets. Translating both endpoints by 371 days should preserve the
 # two-query model's predictions.
+# A Number control shuffles only the training durations, preserving their distribution while breaking
+# their relationship with the target. Its validation and test observations stay intact.
 #
 # ## Result
 #
@@ -79,6 +81,8 @@
 # rather than an independently rounded duration. This probes the convenience type's learning
 # equivalence, not exact date arithmetic performed by neural weights. Query broadcasting and malformed
 # timestamp rejection remain separate package contracts.
+# The additional shuffled Number control uses the same samples and 400-update budget. Its training
+# permutation uses seed + 4 without changing any of the three original arms.
 #
 # ### Complete experiment code
 
@@ -90,7 +94,6 @@ from datetime import datetime, timedelta, timezone
 
 import lightning.pytorch as lit
 import numpy as np
-import polars as pl
 import pyarrow as pa
 import relflow as rf
 from relflow.presets.base import resolve
@@ -102,20 +105,25 @@ TEST_ROWS = 2048
 ANCHOR = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
-def records(*, rows: int, seed: int, static: bool = False) -> Iterator[dict]:
+def records(*, rows: int, seed: int, static: bool = False, shuffled: bool = False) -> Iterator[dict]:
     rng = np.random.default_rng(seed)
     starts = rng.integers(-2000, 2000, rows)
     days = rng.uniform(-10.0, 10.0, rows)
     noise = rng.normal(0, 0.03, rows)
+    prepared = []
     for start_day, elapsed, error in zip(starts, days, noise, strict=True):
         start = ANCHOR if static else ANCHOR + timedelta(days=int(start_day))
         end = start + timedelta(days=float(elapsed))
         actual = (end - start).total_seconds() / 86400.0
-        yield {"started_at": start, "ended_at": end, "elapsed": actual, "target": 2 * actual + float(error)}
+        prepared.append({"started_at": start, "ended_at": end, "elapsed": actual, "target": 2 * actual + float(error)})
+    if shuffled:
+        order = np.random.default_rng(seed + 3).permutation(rows)
+        prepared = [{**row, "elapsed": prepared[index]["elapsed"]} for row, index in zip(prepared, order, strict=True)]
+    yield from prepared
 
 
 def table(rows: list[dict], *, arm: str, targets: bool = True) -> pa.Table:
-    if arm == "number":
+    if arm in ("number", "shuffled"):
         columns = {"elapsed": pa.array([row["elapsed"] for row in rows], type=pa.float64())}
     else:
         timestamp = pa.timestamp("us", tz="UTC")
@@ -127,10 +135,8 @@ def table(rows: list[dict], *, arm: str, targets: bool = True) -> pa.Table:
 
 def build(arm: str) -> rf.Model:
     if not hasattr(rf, "Duration"):
-        raise RuntimeError(
-            "P099 requires the stage/0.5.0 relflow wheel exporting rf.Duration; the ordinary core wheel cannot execute this research experiment"
-        )
-    if arm == "number":
+        raise RuntimeError("P099 requires a relflow wheel exporting rf.Duration (0.4.6 or later)")
+    if arm in ("number", "shuffled"):
         feature = rf.Number
     elif arm == "static":
         feature = rf.Duration(query="ended_at", start=ANCHOR, granularity="days")
@@ -150,8 +156,12 @@ def build(arm: str) -> rf.Model:
 
 
 def prediction(model: rf.Model, rows: list[dict], arm: str) -> np.ndarray:
-    output = pl.DataFrame(model.predict(table(rows, arm=arm, targets=False), batch_size=256))["predictions"].to_list()
-    return np.asarray([row["target"]["content"] for row in output], dtype=np.float64)
+    return (
+        model.predict(table(rows, arm=arm, targets=False), batch_size=256)["predictions"]
+        .struct.field("target")
+        .struct.field("content")
+        .to_numpy()
+    )
 
 
 def fit(model: rf.Model, train: pa.Table, validate: pa.Table, seed: int, steps: int | None, accelerator: str) -> int:
@@ -186,10 +196,10 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     metrics = {"budget": BUDGET, "arms": {}}
     checks = {}
     predictions = {}
-    for arm in ("duration", "static", "number"):
+    for arm in ("duration", "static", "number", "shuffled"):
         lit.seed_everything(seed, workers=True)
         model = build(arm)
-        train = list(records(rows=TRAIN_ROWS, seed=seed + 1, static=arm == "static"))
+        train = list(records(rows=TRAIN_ROWS, seed=seed + 1, static=arm == "static", shuffled=arm == "shuffled"))
         validation = list(records(rows=512, seed=seed + 2, static=arm == "static"))
         test = list(records(rows=TEST_ROWS, seed=seed + 3, static=arm == "static"))
         updates = fit(model, table(train, arm=arm), table(validation, arm=arm), seed, steps, accelerator)
@@ -217,7 +227,8 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         metrics["arms"][arm] = measured
         checks[f"{arm}: full budget retained"] = updates == BUDGET
         checks[f"{arm}: finite predictions"] = measured["finite"]
-        checks[f"{arm}: held-out nRMSE below 0.25"] = measured["nrmse"] < 0.25
+        if arm != "shuffled":
+            checks[f"{arm}: held-out nRMSE below 0.25"] = measured["nrmse"] < 0.25
     metrics["duration_number_prediction_rmse"] = float(
         np.sqrt(np.mean((predictions["duration"] - predictions["number"]) ** 2))
     )
@@ -226,6 +237,13 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     )
     checks["Moving both endpoints preserves elapsed-time predictions"] = (
         metrics["arms"]["duration"]["joint_endpoint_shift_max_drift"] < 1e-5
+    )
+    checks["Configured-start Duration stays within 0.05 nRMSE of derived Number"] = (
+        metrics["arms"]["static"]["nrmse"] <= metrics["arms"]["number"]["nrmse"] + 0.05
+    )
+    checks["Shuffled training durations retain nRMSE at least 0.90"] = metrics["arms"]["shuffled"]["nrmse"] >= 0.90
+    checks["Duration beats shuffled training by at least 0.50 nRMSE"] = (
+        metrics["arms"]["shuffled"]["nrmse"] - metrics["arms"]["duration"]["nrmse"] >= 0.50
     )
     return metrics, checks
 

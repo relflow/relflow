@@ -77,11 +77,10 @@ def fragment(root: Path, identifier: str, run: dict | None, review: dict | None)
     else:
         scope = f"Full-budget diagnostic run · seed {run['seed']} · {run['accelerator']} · {run['started_at'][:10]}. "
         scope += "These figures and the selected measurements come from the same captured execution. "
-        scope += (
-            "This is the candidate role of the paired Evidence CI run."
-            if data.get("scope") == "paired Evidence CI candidate"
-            else "This is an unpaired visualization run."
-        )
+        scope += {
+            "paired Evidence CI candidate": "This is the candidate role of the paired Evidence CI run.",
+            "candidate-only Evidence CI proof": ("This new proof has no directly comparable baseline measurement."),
+        }.get(data.get("scope"), "This is an unpaired visualization run.")
     blocks.append('<p class="diagnostic-scope">' + html.escape(scope) + "</p>")
     if run is None and data.get("requires"):
         blocks.append("<p>To measure this study: " + html.escape("; ".join(data["requires"])) + ".</p>")
@@ -99,12 +98,17 @@ def fragment(root: Path, identifier: str, run: dict | None, review: dict | None)
     blocks.append('<p class="diagnostic-limit">' + html.escape(data["limit"]) + "</p>")
     if run is not None:
         run_id = data["capture_run"]
-        blocks.append(
+        downloads = (
             f'<p class="diagnostic-downloads"><a href="{base}{identifier}-record.json">Full run and checks</a> · '
             f'<a href="{base}{html.escape(data["manifest"], quote=True)}">Observation manifest (gzip)</a> · '
             f'<a href="{base}{identifier}-proof.py">Executed proof source</a> · '
-            f'<a href="{base}{entry["data"]}">Figure and example data</a> · '
-            f'<a href="https://github.com/relflow/relflow/actions/runs/{html.escape(str(run_id), quote=True)}">CI observation bundles</a></p>'
+            f'<a href="{base}{entry["data"]}">Figure and example data</a>'
         )
+        if (
+            data.get("scope") in {"paired Evidence CI candidate", "candidate-only Evidence CI proof"}
+            and run_id is not None
+        ):
+            downloads += f' · <a href="https://github.com/relflow/relflow/actions/runs/{html.escape(str(run_id), quote=True)}">CI observation bundles</a>'
+        blocks.append(downloads + "</p>")
     blocks.append(f'</section>\n<script src="{base}controls.js" defer></script>')
     return "\n".join(blocks) + "\n"

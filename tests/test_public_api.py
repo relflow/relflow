@@ -61,6 +61,8 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.Enum.model_fields["values"].is_required()
     assert relflow.Boolean.model_fields["type"].default == "boolean"
     assert relflow.Number.model_fields["type"].default == "number"
+    assert relflow.Duration is relflow.TENSORFIELDS["duration"].Request
+    assert relflow.Ordinal is relflow.TENSORFIELDS["ordinal"].Request
     assert relflow.Quantile.model_fields["type"].default == "quantile"
     assert relflow.Set.model_fields["type"].default == "set"
     assert relflow.Hash.model_fields["type"].default == "hash"

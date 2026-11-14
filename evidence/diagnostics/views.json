@@ -146,24 +146,6 @@
     "comparison": "Compare the two independently fitted arms using held-out AUC.",
     "limit": "An AUC summary does not determine an entire ROC curve; a curve is shown only when individual scores exist."
   },
-  "P018": {
-    "mode": "trajectory",
-    "focus": "How do committed groups and usage evolve during reconstruction?",
-    "comparison": "Follow the actual epoch-by-epoch group count and perplexity.",
-    "limit": "Training and validation reuse observations here. Group occupancy is not held-out prediction or partition recovery."
-  },
-  "P019": {
-    "mode": "trajectory",
-    "focus": "Does a plain input activate adaptive clustering?",
-    "comparison": "Follow committed groups and adherence when the Cluster field is only an input.",
-    "limit": "Dormancy is an architectural behavior; this experiment does not test unseen-identity prediction."
-  },
-  "P020": {
-    "mode": "trajectory",
-    "focus": "How does reconstructing categorical identities change group usage?",
-    "comparison": "Inspect committed groups and perplexity across the recorded training trajectory.",
-    "limit": "Occupancy and usage do not establish agreement with a true partition or held-out prediction quality."
-  },
   "P021": {
     "mode": "ranking",
     "target": "equal",
@@ -492,13 +474,6 @@
     "comparison": "Compare exposed and unexposed fallback arms on known and unknown members.",
     "limit": "Identity and duplicate-member interventions are checked separately from fallback prediction error."
   },
-  "P065": {
-    "mode": "coverage",
-    "target": "code",
-    "focus": "Does Cluster coverage obey the same conditional-score boundary?",
-    "comparison": "Keep coverage and all-target accuracy beside known-target accuracy across the declared removal levels.",
-    "limit": "Zero-coverage conditional scores are undefined; batching checks remain separate."
-  },
   "P066": {
     "mode": "cohorts",
     "target": "target",
@@ -586,13 +561,6 @@
     "focus": "When do representation and loss choices favor different answers?",
     "comparison": "Separate corrupted-input robustness from the noisy-target population optima.",
     "limit": "Source-unit and percentile objectives need not share an optimum, especially in heavy tails."
-  },
-  "P078": {
-    "mode": "grouping",
-    "target": "y",
-    "focus": "Do the learned groups recover the generating partition and help prediction?",
-    "comparison": "Show the true-versus-assigned partition beside prediction error and the no-regime control.",
-    "limit": "Cluster identifiers are arbitrary; occupancy alone is not recovery, and ARI is invariant to renaming."
   },
   "P079": {
     "mode": "tradeoff",
@@ -710,13 +678,6 @@
     "comparison": "Separate requested operations, held-out request combinations, and declared cardinality conditions.",
     "limit": "Each operation-length cell remains visible; success at familiar lengths does not establish all lengths."
   },
-  "P095": {
-    "mode": "grouping",
-    "target": "answer",
-    "focus": "When does grouping identities help or hurt prediction?",
-    "comparison": "Compare Cluster and Category across declared exposure regimes, with per-identity error and group agreement.",
-    "limit": "Parameter counts and tail identities stay visible; compactness and predictive quality are different outcomes."
-  },
   "P096": {
     "mode": "anomaly-variance",
     "target": "answer",
@@ -740,16 +701,51 @@
   },
   "P099": {
     "mode": "research",
+    "measured_mode": "duration",
     "target": "target",
     "focus": "Does elapsed-time Duration behave like the equivalent prepared Number?",
-    "comparison": "Compare the declared Duration and Number arms and the paired joint-endpoint translation.",
-    "limit": "A matching stage/0.5.0 Duration wheel is required; a generator illustration does not establish learned equivalence."
+    "comparison": "Compare held-out predictions, error distributions and normalized error for two-query Duration, a fixed start, prepared Number and shuffled training durations.",
+    "limit": "One seed and a fixed synthetic task test numeric equivalence. Joint endpoint translation is an arithmetic invariant, not learned calendar reasoning. Without a matching recorded run, only the generator is illustrated."
   },
   "P100": {
     "mode": "research",
+    "measured_mode": "ordinal",
     "target": "rank",
     "focus": "Can an ordered decoder fill ranks absent from training?",
     "comparison": "Separate familiar and withheld ranks for Ordinal, rounded Number, and Category outputs.",
-    "limit": "A matching stage/0.5.0 Ordinal wheel is required; declared ordering alone is not learned interpolation."
+    "limit": "Withheld ranks lie inside the observed range. One seed does not establish arbitrary extrapolation; Category has no output classes for the withheld answers. Without a matching recorded run, only the split design is illustrated."
+  },
+  "P108": {
+    "mode": "grouping",
+    "target": "y",
+    "focus": "Can fixed Group slots recover nonlinear identity regimes?",
+    "comparison": "Follow assignment agreement and validation error alongside the shuffled-identity control.",
+    "limit": "The evaluation uses new observations of known identities, not unseen identities."
+  },
+  "P109": {
+    "mode": "trajectory",
+    "focus": "Can a plain-input Group recover label groups?",
+    "comparison": "Follow assignment agreement, then compare held-out predictions with shuffled identities.",
+    "limit": "The held-out rows have new nuisance values but familiar identities; this does not test unseen identities."
+  },
+  "P110": {
+    "mode": "trajectory",
+    "focus": "Can a masked Group recover label groups?",
+    "comparison": "Follow assignment agreement, then compare held-out predictions with shuffled identities.",
+    "limit": "The held-out rows have new nuisance values but familiar identities; this does not test unseen identities."
+  },
+  "P111": {
+    "mode": "grouping",
+    "target": "y",
+    "focus": "Do the learned groups recover the generating partition and help prediction?",
+    "comparison": "Show the true-versus-assigned partition beside prediction error and the no-regime control.",
+    "limit": "Group identifiers are arbitrary; occupancy alone is not recovery, and ARI is invariant to renaming."
+  },
+  "P112": {
+    "mode": "grouping",
+    "target": "answer",
+    "focus": "When does grouping identities help or hurt prediction?",
+    "comparison": "Compare Group and Category across declared exposure regimes, with per-identity error and group agreement.",
+    "limit": "Parameter counts and tail identities stay visible; compactness and predictive quality are different outcomes."
   }
 }

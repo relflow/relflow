@@ -1,0 +1,159 @@
+---
+title: Duration
+description: "Signed elapsed time between two timestamps, with Number's encodings and numeric objectives."
+---
+
+`Duration` represents elapsed time as a numeric magnitude. For a payment,
+account age at posting can provide context for predicting a later dispute.
+Both timestamps must be available at the payment's scoring cutoff.
+
+```python
+import relflow as rf
+
+model = rf.Model(
+    preset="small",
+    account_age=rf.Duration(
+        query=("account.created_at", "posted_at"),
+        granularity="days",
+    ),
+    amount=rf.Number,
+    merchant=rf.Category,
+    disputed=rf.Boolean(mask=True),
+)
+```
+
+One labeled payment:
+
+```yaml
+account:
+  created_at: "2026-01-01T12:00:00Z"
+posted_at: "2026-01-03T00:00:00Z"
+amount: 84.50
+merchant: North Market
+disputed: false
+```
+
+The derived `account_age` is `1.5` days. The ordered query tuple supplies
+**start, then end**; the field computes `end - start`. Fractions and negative
+values are retained. Zero is a valued duration.
+
+Use [Period](dateparts.qmd) for recurring calendar positions and
+[Number](number.qmd) for an elapsed value already computed upstream.
+
+## Endpoints and options
+
+Two query paths select the endpoints from source data. A single query pairs
+its source with exactly one configured `start` or `end`. Endpoint strings are
+timestamp literals; strings inside `query` are structural paths.
+
+```python
+model = rf.Model(
+    preset="small",
+    since_launch=rf.Duration(
+        query="posted_at",
+        start="2026-01-01T00:00:00Z",
+        granularity="days",
+    ),
+    until_cutoff=rf.Duration(
+        query="posted_at",
+        end="2026-12-31T00:00:00Z",
+        granularity="hours",
+    ),
+    disputed=rf.Boolean(mask=True),
+)
+```
+
+With one configured endpoint and no `query`, the field reads its same-named
+source member. Configuring both endpoints without queries creates a constant
+duration. Supply recency cutoffs explicitly as source values or serializable
+constants so every worker uses the same cutoff.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `query` | `None` | Ordered `(start_path, end_path)`, or one path with exactly one configured endpoint. |
+| `start` | `None` | Fixed start as a date, datetime, or timestamp string. |
+| `end` | `None` | Fixed end as a date, datetime, or timestamp string. |
+| `granularity` | `"days"` | `"seconds"`, `"minutes"`, `"hours"`, `"days"`, or `"weeks"`. |
+| `pattern` | `None` | Optional Arrow strptime format applied to string endpoints, as with [Period](dateparts.qmd). |
+
+A day is exactly 86,400 elapsed seconds and a week is seven such days. Months
+and years are deferred. For custom string formats:
+
+```python
+elapsed = rf.Duration(
+    query=("opened_at", "closed_at"),
+    pattern="%d/%m/%Y %H:%M",
+    granularity="minutes",
+)
+```
+
+Named-zone `%Z` string formats are unsupported; use `%z` numeric offsets or
+typed timezone-aware timestamps.
+Numeric offsets, composite formats (`%F`, `%D`, `%x`, `%c`), English month
+and weekday names, and day-of-year coordinates are handled portably with Arrow.
+
+## Timestamps and missing values
+
+Endpoints accept Arrow dates, timestamps, and strings. ISO strings preserve
+nanosecond precision; typed timestamps retain their resolution. Arithmetic
+subtracts integer timestamps before converting the elapsed value to a number,
+so a small difference is preserved even at a large epoch offset. Invalid
+strings and unsafe range or resolution conversions raise an error.
+
+Timezone-aware endpoints represent absolute instants. For example, `01:30-05:00`
+to `03:30-04:00` is one elapsed hour across a spring daylight-saving transition.
+Two naive endpoints use their naive timeline; a date supplies naive midnight.
+Mixing aware and naive endpoints is rejected. Give both operands consistent
+timezone semantics upstream.
+
+When both source positions are present, a null in either endpoint produces a
+null Duration. Structural absence in either source, such as a null containing
+record or an out-of-range index, produces an absent position. See [value state](index.qmd#value-state) and
+[query paths](../guides/query-paths.qmd#structural-absence).
+
+## Repeated transactions
+
+Declare the shared transaction axis with [Branch](branch.qmd). A leaf's
+leading `../` selects an ancestor source and broadcasts it over the branch's
+retained records:
+
+```python
+model = rf.Model(
+    preset="small",
+    transactions=rf.Branch(
+        length=64,
+        overflow="tail",
+        account_age=rf.Duration(
+            query=("../account.created_at", "posted_at"),
+            granularity="days",
+        ),
+        amount=rf.Number,
+        disputed=rf.Boolean(mask=True),
+    ),
+)
+```
+
+Here the root source contains `account.created_at` and `transactions`; each
+transaction supplies `posted_at`, `amount`, and its dispute label. Every age
+uses its own observation's account timestamp. Branch cropping, null items,
+and sibling fields keep their existing alignment. See
+[ancestor sources](../guides/query-paths.qmd#ancestor-sources).
+
+Wildcard paths retain Arrow lists. Automatic Duration axes from paths such as
+`transactions[*].posted_at` are not implemented; use an explicit Branch.
+Prepare relationships between separate histories with a
+[preprocessor](../guides/preprocessing.qmd).
+
+## Numeric representation and output
+
+Duration reuses Number's raw and signed-log lanes, training statistics, jitter,
+objectives, reconstruction heads, and output. Its numeric options are the
+[Number options](number.qmd#options), together with
+[shared leaf options](index.qmd#shared-leaf-options). Statistics observe
+pristine derived training values before masking; evaluation reuses those
+statistics.
+
+Use `mask=True` to predict a duration. Decoded `content` is a `float64` scalar
+in the configured granularity, alongside `state` and `inferred`. `embed=True`
+exports a contextual representation. Keep the chosen granularity consistent
+with the model's trained numeric state.

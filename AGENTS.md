@@ -164,7 +164,15 @@ model = rf.Model(
   MPS, which has no float64), so large offsets keep their spread. A float NaN
   tensorizes as the `other` state, not as a value or a null; ±inf stays valued
   but is never a regression target. Integers beyond ±2^53 are rejected.
-- `Period` is for calendar parts (`DateParts` remains a compatible alias). If elapsed time or recency matters, derive a `Number`.
+- `Ordinal(values=(...))` models declared labels by their ordered positions;
+  bare `Ordinal` accepts integer ranks, including unseen ranks. Predictions
+  round to the nearest rank with ties to even and return native labels or integers.
+- `Duration(query=(start_path, end_path), granularity="days")` computes signed
+  elapsed time before Number's numeric modeling. A single query pairs with a
+  configured `start` or `end`; ancestor sources use leading `../` within an
+  explicit Branch. Endpoints must agree on aware versus naive semantics.
+- `Period` is for calendar parts (`DateParts` remains a compatible alias).
+  Use `Duration` for elapsed time, or `Number` when it is already derived upstream.
   Zone-aware timestamps describe their own wall clock; strings carrying an offset
   are read as UTC. A `Vector` with a NaN or infinite element, and a float NaN label
   in `Category`, take the `other` state; a NaN `Set` member is dropped like a null.

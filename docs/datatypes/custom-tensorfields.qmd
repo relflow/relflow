@@ -63,6 +63,10 @@ terminal types. Null is a shared state and needs no type entry. These checks
 see Arrow types after ingress conversion, not the original Python objects.
 Semantic shape checks, such as vector width, belong in the codec.
 
+For an extension with `Component.derive`, this family contract applies to the
+derived column. The derive component validates its source operands before
+producing that canonical value; Duration validates timestamps and emits numbers.
+
 A custom atom, such as an exact-decimal monetary value, supplies a physical-type
 matcher. The extension still owns its numerical representation:
 
@@ -89,6 +93,7 @@ union must be handled by the extension codec.
 | Component | Contract |
 | --- | --- |
 | `Request` | Pydantic field options and semantic validation. |
+| `derive` | Optional computation from ordered Arrow source projections, before state routing, observations, and masking. |
 | `TensorField` | Subclass `TensorFieldBase`; convert separate input and target projections to tensors. |
 | `Embedder` | Subclass `EmbedderBase`; turn compact `TensorInput` into a `Parcel` with model-width vectors. |
 | `Decoder` | Subclass `DecoderBase`; turn pooled context into decoded tensors. Required for reconstruction or `embed=True`. |
@@ -99,6 +104,37 @@ union must be handled by the extension codec.
 An input-only field needs Request, TensorField, and Embedder. A reconstructing
 ancestor mask also requires Decoder and loss for every affected active leaf.
 The schema checks these capabilities when binding, loading, and mutating.
+
+### Derive inputs {#derive-inputs}
+
+Register `Component.derive` when a type computes its canonical values from
+source inputs. A leaf can then supply `query=(first_path, second_path)`;
+the extension owns its accepted arities and operand semantics. Shared query
+resolution handles [ancestor sources](../guides/query-paths.qmd#ancestor-sources).
+
+The component has this signature; this excerpt leaves its body to the extension:
+
+```python
+from relflow.data.query import Projection
+
+@signed_scalar.register(rf.Component.derive)
+def derive(inputs, *, request, address, rows) -> Projection:
+    ...
+```
+
+`inputs` is an ordered tuple of Arrow `Projection` objects, each containing
+`values` and structural `present`. Return a Projection with exactly `rows`
+values and one non-null Boolean presence value per retained owner record.
+Presence distinguishes structural absence from a present null value. The
+component owns datatype computation and derived presence; it preserves the
+model's existing branch coordinates.
+
+Derivation precedes pristine state construction, `Extension.prepare`, exposure
+observation, and input/target masking. Its result therefore feeds ordinary
+TensorField, Embedder, Decoder, and learning components. Duration uses this
+boundary to calculate elapsed values and reuse Number's numeric components.
+List values may belong to a datatype's intrinsic content, but this hook does
+not create new model axes.
 
 ### Tensorize and embed
 

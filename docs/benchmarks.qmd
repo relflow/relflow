@@ -1,0 +1,271 @@
+---
+title: Benchmarks
+description-meta: "Featureless models with real-time serving. The highest-ranked non-ICL model on RelArena, with shared recipes calibrated using approximately US$1,500 in research compute."
+engine: markdown
+body-classes: benchmark
+toc: false
+---
+
+::: {.benchmark-feature}
+::: {.benchmark-kicker}
+Featureless · Open source · No ICL · No DFS
+:::
+
+## Top three. Built for scale.
+
+::: {.lead}
+**relflow is the highest-ranked model outside the TabPFN family on
+RelArena.** The only models ahead are the API and local variants of
+TabPFN-Rel. On million-row training tasks, relflow beats both on **6 of 9**.
+:::
+
+::: {.benchmark-stats}
+::: {}
+[**#1**]{.benchmark-value}
+
+Model without ICL
+:::
+
+::: {}
+[**#3**]{.benchmark-value}
+
+Of all 13 models
+:::
+
+::: {}
+[**6 / 9**]{.benchmark-value}
+
+Million-row tasks won
+
+::: {.benchmark-stat-note}
+Against both TabPFN variants
+:::
+:::
+:::
+
+::: {.benchmark-caption}
+**Featureless learning. Real-time prediction.** Shared recipes calibrated
+with approximately **US$1,500 in compute**.
+
+21 tasks · 7 databases · relflow 0.4.4 · November 10, 2026
+
+[Published leaderboard](https://github.com/PriorLabs/relarena/blob/fa4f1468c02b7dafd0c7b107544a887b83ca04c1/README.md#-leaderboards)
+· [Merged submission](https://github.com/PriorLabs/relarena/pull/82)
+· [Apache-2.0 license](https://github.com/relflow/relflow/blob/v0.4.4/LICENSE)
+:::
+:::
+
+## Winning on million-row training tasks
+
+**relflow beats both leading TabPFN-Rel variants on 6 of the 9 largest
+training tasks**, including **all four Amazon tasks**. These tasks contain
+**1.36 million to 5.49 million training examples each**. relflow takes
+**5 first places** and finishes in the **top three on 8 of 9** among models.
+
+::: {.benchmark-table .benchmark-scale}
+| Task | Training anchors | Metric | relflow | TabPFN API | TabPFN Local |
+| :--- | ---: | :--- | ---: | ---: | ---: |
+| Amazon item churn | 2,536,014 | ROC AUC ↑ | **0.83004** | 0.82865 | 0.82768 |
+| Amazon item lifetime value | 2,707,679 | MAE ↓ | **39.85799** | 45.27051 | 45.34961 |
+| Amazon user churn | 4,708,383 | ROC AUC ↑ | **0.71232** | 0.71170 | 0.70667 |
+| Amazon user lifetime value | 4,708,383 | MAE ↓ | **13.87529** | 13.87712 | 13.88577 |
+| H&M item sales | 5,488,184 | MAE ↓ | 0.04453 | **0.03648** | 0.03654 |
+| H&M user churn | 3,832,692 | ROC AUC ↑ | **0.70851** | 0.70602 | 0.70542 |
+| Stack Exchange post votes | 2,453,921 | MAE ↓ | 0.06362 | **0.06273** | 0.06284 |
+| Stack Exchange user badge | 3,386,276 | ROC AUC ↑ | **0.89315** | 0.88344 | 0.88463 |
+| Stack Exchange user engagement | 1,360,743 | ROC AUC ↑ | 0.90712 | 0.90766 | **0.90774** |
+:::
+
+::: {.benchmark-caption}
+Bold marks the best of these three models, using unrounded scores. Both
+TabPFN columns use the September 28 submissions. Higher ROC AUC and lower
+mean absolute error (MAE) are better.
+[Published scores and training counts](https://github.com/PriorLabs/relarena/blob/fa4f1468c02b7dafd0c7b107544a887b83ca04c1/baseline_results/results.csv).
+:::
+
+On Amazon item lifetime value, relflow cuts MAE by **12.0% against the
+leading TabPFN-Rel API**. On the full LARGE group it also beats RelGT and
+RelGNN-ES on **all 9 tasks**, and GraphSAGE on **8 of 9**.
+
+::: {.callout-note collapse="true" title="Task sizes and training setup"}
+This group is the adapter's predefined **LARGE tier**: at least 500,000
+original inner training anchors. Every task in that tier exceeds one
+million anchors in this snapshot. An anchor is one entity at one
+prediction cutoff; the same entity can appear at multiple cutoffs. Counts
+come from the published run configurations.
+
+relflow learns from large datasets through batched training
+and bounded nested histories. This submission uses eight pass-equivalents
+and size-based resource limits, with training anchors streamed through
+the data loader. LARGE runs use an RTX Pro 6000 and finish within the
+benchmark's 24-hour ceiling. The
+[published adapter](https://github.com/PriorLabs/relarena/blob/fa4f1468c02b7dafd0c7b107544a887b83ca04c1/docs/models/relflow.md)
+records the history caps, batch sizes, workers, and preparation limits.
+:::
+
+## Two TabPFN variants, then relflow
+
+The two higher-ranked models are **TabPFN-Rel API** and **TabPFN-Rel Local**:
+two deployments of the same model family. Both combine
+[TabPFN in-context learning with synthesized relational features](https://github.com/PriorLabs/relarena/blob/fa4f1468c02b7dafd0c7b107544a887b83ca04c1/README.md#how-it-works).
+relflow learns from nested observations, using **one fixed configuration
+per training-size tier**.
+
+relflow ranks ahead of every reproduced GNN model, Nori-Rel, RDBLearn,
+entity-only LightGBM, and the earlier TabPFN-Rel submissions in the complete
+model board.
+
+::: {.benchmark-table .benchmark-board}
+| Rank | Model | Elo ↑ | 95% task-bootstrap interval |
+| ---: | :--- | ---: | ---: |
+| 1 | TabPFN-Rel API (latest) | 1979.4 | 1905.1–2096.6 |
+| 2 | TabPFN-Rel Local (latest) | 1932.0 | 1865.0–2028.8 |
+| **3** | **relflow** | **1897.1** | **1776.1–2041.9** |
+| 4 | TabPFN-Rel API (August) | 1816.8 | 1758.0–1896.8 |
+| 5 | Nori-Rel | 1778.9 | 1705.0–1881.9 |
+| 6 | TabPFN-Rel Local (August) | 1716.4 | 1621.0–1814.8 |
+| 7 | GraphSAGE | 1676.4 | 1562.4–1768.1 |
+| 8 | RelGT | 1585.5 | 1477.0–1699.0 |
+| 9 | RDBLearn | 1540.9 | 1454.7–1616.4 |
+| 10 | RelGNN-ES | 1527.0 | 1434.1–1625.0 |
+| 11 | LightGBM (entity-only) | 1363.9 | 1205.4–1494.6 |
+| 12 | Constant (per-entity) | 1268.2 | 1093.2–1412.1 |
+| 13 | Constant (global) | 1000.0 | 851.7–1066.2 |
+:::
+
+::: {.benchmark-caption}
+These are the published model-board point estimates. Elo is fitted across
+all pairwise task comparisons, with the global constant predictor anchored
+at 1000. The intervals come from resampling tasks; they overlap and do not
+measure variation across training seeds. “Latest” TabPFN rows refer to the
+September 28 submissions; “August” rows refer to August 15.
+[Source and ranking protocol](https://github.com/PriorLabs/relarena/blob/fa4f1468c02b7dafd0c7b107544a887b83ca04c1/README.md#-leaderboards).
+:::
+
+## Wins against strong baselines
+
+Across the same 21 held-out tasks, relflow beats the latest TabPFN-Rel API
+on **11 tasks** head-to-head. Its aggregate Elo rank is third because the
+leaderboard also accounts for comparisons against every other model.
+
+::: {.benchmark-table}
+| Opponent | Tasks won by relflow |
+| :--- | ---: |
+| TabPFN-Rel API (latest) | **11 / 21** |
+| LightGBM (entity-only) | **20 / 21** |
+| RelGT | **19 / 21** |
+| GraphSAGE | **18 / 21** |
+| RelGNN-ES | **18 / 21** |
+| RDBLearn | **16 / 21** |
+:::
+
+relflow takes first place among models on Amazon item lifetime value,
+user lifetime value and user churn; H&M user churn; Stack Exchange user
+badge; and clinical-trial site success. **Three of those are outright wins
+across all 17 models and systems**:
+
+::: {.benchmark-table}
+| Task | relflow | Best competing method | Result |
+| :--- | ---: | :--- | :--- |
+| Amazon item lifetime value | MAE **39.8580** | KurveRSC (September), 42.2731 | **5.7% lower MAE** |
+| H&M user churn | ROC AUC **0.7085** | KurveRSC (latest), 0.7072 | Best of all 17 |
+| Clinical-trial site success | MAE **0.2787** | GraphSAGE, 0.3249 | **14.2% lower MAE** |
+:::
+
+::: {.benchmark-caption}
+Wins use the unrounded test scores, with no tied relflow
+comparisons. [Per-task source data](https://github.com/PriorLabs/relarena/blob/fa4f1468c02b7dafd0c7b107544a887b83ca04c1/baseline_results/results.csv).
+:::
+
+## Featureless learning and real-time prediction
+
+- **Featureless:** learn from typed fields and nested records without
+  engineering a fixed-width table of aggregate features. The adapter
+  derives a schema and bounded joins, then supplies raw values, timestamp
+  ages, and nested histories, with **no DFS**. See
+  [Featureless models](learn/featureless-models.qmd).
+- **Real-time prediction:** deploy the trained model behind an
+  [HTTP endpoint](guides/serving.qmd) to score incoming records as they
+  arrive. The serving runtime loads the saved model and accepts individual
+  JSON records, batches, or Arrow IPC streams.
+- **Open source:** relflow is Apache-2.0 licensed, with the adapter, recipes,
+  and evaluation results available in public repositories.
+- **No ICL:** training produces task-specific model weights. Prediction
+  uses those weights rather than a labeled demonstration set in the prompt
+  or context. Text fields use a frozen MiniLM encoder.
+
+The published adapter specifies the complete
+[model and training recipe](https://github.com/PriorLabs/relarena/blob/fa4f1468c02b7dafd0c7b107544a887b83ca04c1/docs/models/relflow.md).
+To use the same modeling approach on your own records, start with
+[Your first model](learn/your-first-model.qmd) and
+[Featureless models](learn/featureless-models.qmd).
+
+## Calibrated with approximately US$1,500 in compute
+
+The shared training recipes were calibrated using approximately
+**US$1,500 in Modal research compute**, as reported in the
+[original submission notes](https://github.com/PriorLabs/relarena/blob/f6d81c38947e3a9a69207321d3b0bc170f799392/docs/models/relflow.md).
+That development budget produced shared size-tier presets covering the
+21-task suite. Each task uses the frozen recipe selected by its training
+size, with no per-task hyperparameter search in the submitted method.
+
+This figure describes recipe-development compute. The published RelArena
+scores come from the maintainers' subsequent reproduction of the frozen
+submission.
+
+## Protocol and reproducibility
+
+This snapshot uses RelArena's **21 RelBench v1 entity tasks**, spanning
+7 databases, 12 binary classification tasks and 9 regression tasks, all at
+**seed 0**. Reported scores are held-out test results. The original inner
+training-anchor count selects one fixed recipe per size tier; the final
+model is refitted on training plus validation data. relflow's runs use an
+**RTX Pro 6000**. Preparation, text encoding, final refit, and prediction
+are included in the default-only benchmark runtime; the diagnostic inner
+fit is recorded separately.
+
+RelArena distinguishes **models**, which follow its standardized tuning
+contract, from **systems**, which bring their own selection procedure.
+relflow is a model submission. In the combined board it ranks **#4 of 17**,
+ahead of RT-J and RT-PluRel; KurveRSC's latest system ranks second.
+Each board fits Elo separately.
+
+::: {.callout-note collapse="true" title="Full models + systems leaderboard"}
+::: {.benchmark-table}
+| Rank | Method | Kind | Elo ↑ |
+| ---: | :--- | :--- | ---: |
+| 1 | TabPFN-Rel API (latest) | Model | 1926.2 |
+| 2 | KurveRSC (latest) | System | 1917.1 |
+| 3 | TabPFN-Rel Local (latest) | Model | 1887.8 |
+| **4** | **relflow** | **Model** | **1865.3** |
+| 5 | RT-J | System | 1843.4 |
+| 6 | TabPFN-Rel API (August) | Model | 1795.8 |
+| 7 | RT-PluRel | System | 1788.0 |
+| 8 | KurveRSC (September) | System | 1775.1 |
+| 9 | Nori-Rel | Model | 1741.8 |
+| 10 | TabPFN-Rel Local (August) | Model | 1703.2 |
+| 11 | GraphSAGE | Model | 1656.3 |
+| 12 | RelGT | Model | 1560.7 |
+| 13 | RDBLearn | Model | 1538.3 |
+| 14 | RelGNN-ES | Model | 1527.6 |
+| 15 | LightGBM (entity-only) | Model | 1365.1 |
+| 16 | Constant (per-entity) | Model | 1270.0 |
+| 17 | Constant (global) | Model | 1000.0 |
+:::
+:::
+
+The snapshot is pinned to RelArena commit
+[`fa4f1468c02b`](https://github.com/PriorLabs/relarena/tree/fa4f1468c02b7dafd0c7b107544a887b83ca04c1),
+retrieved November 10, 2026, after the maintainers merged
+[submission #82](https://github.com/PriorLabs/relarena/pull/82).
+Only selected rows from `baseline_results/results.csv` enter these
+comparisons; exploratory runs and publication-only reference scores are
+excluded. This page reports that benchmark snapshot; the
+[Evidence](evidence.qmd) section records separate controlled learning
+experiments.
+
+Download the [selected test scores](assets/benchmarks/relarena-2026-11-10.csv)
+and [snapshot provenance and calculations](assets/benchmarks/relarena-2026-11-10.json).
+The CSV contains all 357 selected method/task results. The JSON records the
+upstream revision and file hashes, both published Elo boards, per-task
+ranks, and the head-to-head comparisons used here.
