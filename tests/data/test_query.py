@@ -4,7 +4,7 @@ import pyarrow as pa
 import pytest
 
 import relflow as rf
-from relflow.data.query import Index, Literal, Member, Slice, Traverse, bind, compile, query
+from relflow.data.query import Index, Literal, Member, Slice, Traverse, bind, compile, query, stack
 from relflow.data.ragged import coalesce
 from relflow.structs.enums import Strata, Tokens
 
@@ -295,3 +295,63 @@ def test_arrow_query_treats_mask_spelling_as_ordinary_content():
 
     assert field.dense.tolist() == [[Tokens.valued.value], [Tokens.null.value]]
     assert field.values.to_pylist() == ["<MASK>"]
+
+
+ROWS = pa.array([{"a": 1.0, "b": 2.0}, {"a": None, "b": 4.0}, {"a": None, "b": None}])
+
+
+def test_stack_scalar_sources_into_channels_with_validity_per_channel():
+    stacked = stack(ROWS, ("a", "b"))
+    assert pa.types.is_fixed_size_list(stacked.values.type) and stacked.values.type.list_size == 2
+    assert stacked.values.type.value_type == pa.float64()
+    assert stacked.values.to_pylist() == [[1.0, 2.0], [None, 4.0], None]
+    assert stacked.present.to_pylist() == [True, True, True]
+
+
+def test_stack_keeps_the_channel_order_of_the_tuple():
+    assert stack(ROWS, ("b", "a")).values.to_pylist()[0] == [2.0, 1.0]
+
+
+def test_stack_promotes_integer_and_float_sources():
+    stacked = stack(pa.array([{"a": 1, "b": 2.5}]), ("a", "b"))
+    assert stacked.values.type.value_type == pa.float64()
+    assert stacked.values.to_pylist() == [[1.0, 2.5]]
+
+
+def test_stack_list_sources_share_offsets_and_a_null_list_is_a_missing_channel():
+    rows = pa.array(
+        [
+            {"ett": {"a": [1.0, 2.0], "b": [3.0, 4.0]}},
+            {"ett": {"a": None, "b": [5.0]}},
+            {"ett": {"a": None, "b": None}},
+        ]
+    )
+    stacked = stack(rows, ("ett.a", "ett.b"))
+    assert pa.types.is_list(stacked.values.type)
+    assert stacked.values.to_pylist() == [[[1.0, 3.0], [2.0, 4.0]], [[None, 5.0]], None]
+
+
+def test_stack_rejects_lists_of_different_lengths_naming_queries_and_address():
+    rows = pa.array([{"a": [1.0, 2.0], "b": [3.0]}])
+    with pytest.raises(ValueError, match=r"\('a', 'b'\).*'/x'.*different lengths.*record 0"):
+        stack(rows, ("a", "b"), address="/x")
+
+
+def test_stack_rejects_sources_at_different_nesting():
+    with pytest.raises(ValueError, match="different nesting"):
+        stack(pa.array([{"a": [1.0], "b": 2.0}]), ("a", "b"), address="/x")
+
+
+def test_stack_rejects_a_source_type_that_cannot_be_unified():
+    with pytest.raises(ValueError, match=r"\('a', 'b'\).*cannot stack"):
+        stack(pa.array([{"a": 1.0, "b": "x"}]), ("a", "b"), address="/x")
+
+
+def test_stack_of_chunked_records_matches_contiguous_records():
+    chunked = pa.chunked_array([ROWS.slice(0, 2), ROWS.slice(2)])
+    assert stack(chunked, ("a", "b")).values.combine_chunks().equals(stack(ROWS, ("a", "b")).values)
+
+
+def test_stack_of_zero_chunks_keeps_the_stacked_type():
+    empty = pa.chunked_array([], type=ROWS.type)
+    assert stack(empty, ("a", "b")).values.type == stack(ROWS, ("a", "b")).values.type
