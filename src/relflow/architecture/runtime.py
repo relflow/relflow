@@ -80,6 +80,7 @@ class ExecutionPlan:
     objectives: tuple[Objective, ...]
     decoders: tuple[DecoderRoute, ...]
     sequenced: frozenset[Address]
+    passthrough: frozenset[Address]
 
 
 def row_branch(module: Model, address: Address) -> Address | None:
@@ -117,6 +118,11 @@ def execution(module: Model) -> ExecutionPlan:
         objectives=entries,
         decoders=decoders,
         # Only ancestors of a decoded leaf need their encoded sequence beside the summary.
+        passthrough=frozenset(
+            address
+            for address in embeds
+            if address in module.schema.branches and output.passthrough(module.schema.branches[address])
+        ),
         sequenced=frozenset(item for route in decoders for item in route.heritage).union(
             route.readout for route in decoders if route.readout is not None
         ),
@@ -283,7 +289,7 @@ def compute(
 
             if address in plan.embeds:
                 positions, spans, slots = (
-                    encoder.arrange(processed[address]) if encoder.reduction is None else (None, None, None)
+                    encoder.arrange(processed[address]) if address in plan.passthrough else (None, None, None)
                 )
                 predictions.append(
                     Prediction(

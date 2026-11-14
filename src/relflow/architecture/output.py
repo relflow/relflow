@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
@@ -14,6 +15,7 @@ import torch
 
 from relflow.data.arrow import Geometry, Retain, retention
 from relflow.structs.enums import TensorKey, Tokens
+from relflow.structs.grain import Coordinates, Steps
 from relflow.structs.packages import Prediction
 from relflow.structs.tree import Address, Node
 from relflow.tensorfields.base import TENSORFIELDS, Write
@@ -27,6 +29,19 @@ __all__ = ["Layout", "OutputEntry", "OutputPlan", "Projection", "metadata", "pla
 
 RESERVED = frozenset({TensorKey.state.name, TensorKey.inferred.name})
 LIST_MAX = np.iinfo(np.int32).max
+
+# Whether an unreduced branch writes one coordinate per token or one per row.
+TOKENWISE: Mapping[type, bool] = MappingProxyType({Coordinates: True, Steps: False})
+
+
+def passthrough(branch: Branch) -> bool:
+    """Report whether an unreduced branch writes one coordinate per token."""
+    return branch.reduction is None and TOKENWISE[type(branch.grain)]
+
+
+def rowwise(branch: Branch) -> bool:
+    """Report whether an unreduced branch writes one coordinate per row."""
+    return branch.reduction is None and not TOKENWISE[type(branch.grain)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -307,6 +322,8 @@ def axes(module: Model, address: Address) -> tuple[int | None, ...]:
             for node in module.schema.branches[address].path
             if getattr(node, "type", None) == "branch"
         )
+        if rowwise(module.schema.branches[address]):
+            return lengths[1:]
         structural = lengths[1:-1]
         outputs = module.schema.branch_outputs[address]
         return (*structural, outputs) if outputs is None or outputs > 1 else structural
@@ -408,9 +425,13 @@ def plan(module: Model, retain: Retain = (), *, refresh: bool = False) -> Output
                     for owner in node.path
                     if getattr(owner, "type", None) == "branch"
                     and owner.address != Address()
-                    and (address in module.schema.requests or owner.address != address)
+                    and (
+                        address in module.schema.requests
+                        or owner.address != address
+                        or rowwise(module.schema.branches[address])
+                    )
                 ),
-                passthrough=address in module.schema.branches and module.schema.branches[address].reduction is None,
+                passthrough=address in module.schema.branches and passthrough(module.schema.branches[address]),
                 decoded=decoded,
                 writer=writer,
                 embed=address in embeds,

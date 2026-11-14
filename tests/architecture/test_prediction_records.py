@@ -1,5 +1,7 @@
 """Public predictions preserve records while embeddings retain explicit coordinates."""
 
+import typing
+
 import lightning.pytorch
 import polars as pl
 import pyarrow as pa
@@ -9,7 +11,9 @@ import torch
 from polars.testing import assert_frame_equal
 
 import relflow as rf
+from relflow.architecture import output
 from relflow.architecture.output import plan
+from relflow.structs.grain import GrainConfig
 
 
 def configured():
@@ -266,3 +270,70 @@ def test_a_hidden_covariate_in_a_user_future_row_does_not_change_the_prediction(
 
     assert forecast(load=1.0, temperature=5.0) == forecast(load=-1e6, temperature=5.0)
     assert forecast(load=1.0, temperature=5.0) != forecast(load=1.0, temperature=-1e6)
+
+
+def test_tokenwise_table_covers_every_grain():
+    assert set(output.TOKENWISE) == set(typing.get_args(typing.get_args(GrainConfig)[0]))
+
+
+def test_steps_branch_without_reduction_writes_one_representation_per_row():
+    model = rf.Model.xs(
+        d_model=8,
+        ett=rf.Branch.chronological(length=4, reduction=None, embed=True, x=rf.Number, y=rf.Number),
+    )
+    rows = [
+        {"ett": [{"x": 1.0, "y": 2.0}, {"x": 2.0, "y": 1.0}, {"x": 3.0, "y": 0.0}]},
+        {"ett": [{"x": 4.0, "y": 4.0}]},
+    ]
+    records = model.predict(pa.Table.from_pylist(rows))["representations"].to_list()
+    assert [[r["parents"] for r in row] for row in records] == [[[0], [1], [2]], [[0]]]
+    assert all(r["output_index"] == 0 and r["path"] == ["ett"] for row in records for r in row)
+
+
+def test_coordinates_branch_without_reduction_keeps_one_representation_per_token():
+    model = rf.Model.xs(
+        d_model=8,
+        ett=rf.Branch(length=4, reduction=None, embed=True, x=rf.Number, y=rf.Number),
+    )
+    rows = [{"ett": [{"x": 1.0, "y": 2.0}, {"x": 2.0, "y": 1.0}, {"x": 3.0, "y": 0.0}]}]
+    first = model.predict(pa.Table.from_pylist(rows))["representations"].to_list()[0]
+    assert [r["parents"] for r in first] == [[]] * 6
+    assert [r["output_index"] for r in first] == [0, 1, 2, 3, 4, 5]
+
+
+def test_nested_steps_rows_carry_parent_and_row_ordinals():
+    model = rf.Model.xs(
+        d_model=8,
+        visits=rf.Branch(
+            length=2,
+            reduction=rf.Mean(),
+            ett=rf.Branch.chronological(length=3, reduction=None, embed=True, x=rf.Number),
+        ),
+    )
+    rows = [{"visits": [{"ett": [{"x": 1.0}, {"x": 2.0}]}, {"ett": [{"x": 3.0}]}]}]
+    first = model.predict(pa.Table.from_pylist(rows))["representations"].to_list()[0]
+    assert [r["parents"] for r in first] == [[0, 0], [0, 1], [1, 0]]
+
+
+@pytest.mark.parametrize("mixer", [rf.Conv(), rf.Transformer()])
+@pytest.mark.parametrize("ragged", [False, True], ids=["dense", "packed"])
+def test_changing_a_future_row_never_changes_earlier_row_representations(mixer, ragged):
+    torch.manual_seed(0)
+    model = rf.Model.xs(
+        d_model=8,
+        dropout=0.0,
+        ett=rf.Branch.chronological(length=6, mixer=mixer, reduction=None, embed=True, x=rf.Number, y=rf.Number),
+    )
+
+    def table(future: float) -> pa.Table:
+        first = [{"x": float(i), "y": float(-i)} for i in range(6)]
+        first[4] = {"x": future, "y": future}
+        second = first[:3] if ragged else first
+        return pa.Table.from_pylist([{"ett": first}, {"ett": second}])
+
+    before, after = (model.predict(table(value))["representations"].to_list()[0] for value in (4.0, 99.0))
+    for row in range(4):
+        torch.testing.assert_close(
+            torch.tensor(after[row]["embedding"]), torch.tensor(before[row]["embedding"]), rtol=0, atol=1e-6
+        )
+    assert before[4]["embedding"] != after[4]["embedding"]

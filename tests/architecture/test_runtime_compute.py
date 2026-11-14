@@ -201,5 +201,4 @@ def test_steps_embedding_geometry_uses_rows():
     (embedding,) = runtime.compute(model, inputs, plan=execution(model), decoders=(), predict=True)
     assert embedding.address == Address("/ett")
     assert embedding.payload[TensorKey.embedding].shape == (2, 3, 8)
-    assert embedding.positions.shape[-1] == 3
-    assert embedding.positions.reshape(2, 3).tolist() == [[0, 1, 2], [0, 1, 2]]
+    assert embedding.positions is None and embedding.spans is None and embedding.slots is None
