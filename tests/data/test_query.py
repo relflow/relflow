@@ -360,3 +360,29 @@ def test_stack_of_zero_chunks_keeps_the_stacked_type():
 def test_stack_reads_an_untyped_null_source_as_a_missing_channel():
     rows = pa.array([{"a": [1.0, 2.0], "b": None}])
     assert stack(rows, ("a", "b")).values.to_pylist() == [[[1.0, None], [2.0, None]]]
+
+
+def test_stack_reports_integers_beyond_float_precision_as_a_cast_failure():
+    rows = pa.array([{"a": 2**60 + 1, "b": 0.5}])
+    with pytest.raises(ValueError, match=r"2\^53") as caught:
+        stack(rows, ("a", "b"), address="/x")
+    assert isinstance(caught.value.__cause__, pa.ArrowInvalid)
+    assert "cast them to one type" not in str(caught.value)
+
+
+def test_stack_keeps_a_large_list_source_as_large_list():
+    rows = pa.array(
+        [{"a": [1.0, 2.0], "b": [3.0, 4.0]}],
+        type=pa.struct([("a", pa.large_list(pa.float64())), ("b", pa.large_list(pa.float64()))]),
+    )
+    stacked = stack(rows, ("a", "b"))
+    assert pa.types.is_large_list(stacked.values.type)
+    assert stacked.values.to_pylist() == [[[1.0, 3.0], [2.0, 4.0]]]
+
+
+def test_stack_rebuilds_fixed_size_list_sources_as_variable_lists():
+    fixed = pa.list_(pa.float64(), 2)
+    rows = pa.array([{"a": [1.0, 2.0], "b": [3.0, 4.0]}], type=pa.struct([("a", fixed), ("b", fixed)]))
+    stacked = stack(rows, ("a", "b"))
+    assert pa.types.is_list(stacked.values.type)
+    assert stacked.values.to_pylist() == [[[1.0, 3.0], [2.0, 4.0]]]
