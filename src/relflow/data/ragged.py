@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import math
@@ -20,8 +21,10 @@ from relflow.data.arrow import variants
 from relflow.data.chronology import positions
 from relflow.data.query import Literal, Member, MissingFieldError, compile, listed, parts, query, scope, stack
 from relflow.data.query import Projection as SourceProjection
+from relflow.data.rows import last, runs
 from relflow.logging.config import logger
 from relflow.structs.enums import Component, Overflow, Strata, Tokens
+from relflow.structs.masking import Forecast, Spans
 from relflow.structs.tree import Address, Leaf
 
 if TYPE_CHECKING:
@@ -229,6 +232,16 @@ class Decision:
     mask: Mask
     selected: np.ndarray
     shape: tuple[int, ...]
+    owner: Any
+    target: bool = True
+
+    def hides(self, leaf: Address) -> bool:
+        """Whether the selection hides ``leaf`` where it selects."""
+        return self.mask.hides(owner=self.owner, leaf=leaf)
+
+    def supervises(self, leaf: Address) -> bool:
+        """Whether the selection makes ``leaf`` a reconstruction target where it selects."""
+        return self.mask.supervises(owner=self.owner, leaf=leaf)
 
 
 @dataclass(frozen=True, slots=True)
@@ -675,8 +688,9 @@ def scores(
         return np.empty(0, dtype=np.uint64)
 
     effective_epoch = epoch if strata == Strata.train else 0
+    chosen = () if mask.select is None else (mask.select.model_dump_json(),)
     selection = json.dumps(
-        (mask.query, float(mask.rate).hex() if mask.rate is not None else None),
+        (mask.query, float(mask.rate).hex() if mask.rate is not None else None, *chosen),
         separators=(",", ":"),
     )
     payload = f"relflow-mask-v3:{seed}:{strata}:{effective_epoch}:{ordinal}:{address}:{selection}".encode()
@@ -755,7 +769,68 @@ class CoordinateSelector:
         return dense
 
 
-selectors: Mapping[type, Selector] = MappingProxyType({type(None): CoordinateSelector()})
+@dataclass(frozen=True, kw_only=True)
+class ForecastSelector:
+    """Select the last ``horizon`` retained rows of each parent."""
+
+    def active(self, mask: Mask, *, strata: Strata) -> bool:
+        # A forecast mask always reconstructs, so it never drops out of validation, test or prediction.
+        return True
+
+    def __call__(
+        self,
+        layout: Layout,
+        mask: Mask,
+        *,
+        node: Any,
+        seed: int,
+        epoch: int,
+        ordinal: int,
+        strata: Strata,
+    ) -> np.ndarray:
+        dense = np.zeros(math.prod(layout.shape), dtype=bool)
+        if strata == Strata.predict:
+            return dense
+        forecast = cast(Forecast, mask.select)
+        dense[layout.placement] = last(layout.placement, extent=layout.shape[-1], count=forecast.horizon)
+        return dense
+
+
+@dataclass(frozen=True, kw_only=True)
+class SpanSelector:
+    """Select runs of whole rows during training."""
+
+    def active(self, mask: Mask, *, strata: Strata) -> bool:
+        return strata == Strata.train
+
+    def __call__(
+        self,
+        layout: Layout,
+        mask: Mask,
+        *,
+        node: Any,
+        seed: int,
+        epoch: int,
+        ordinal: int,
+        strata: Strata,
+    ) -> np.ndarray:
+        spans = cast(Spans, mask.select)
+        # A row lies in a run with probability ``rate`` when each start covers ``length`` rows.
+        start = 1.0 - (1.0 - spans.rate) ** (1.0 / spans.length)
+        threshold = np.uint64(int(start * np.iinfo(np.uint64).max))
+        draws = scores(layout, address=node.address, mask=mask, seed=seed, epoch=epoch, ordinal=ordinal, strata=strata)
+        dense = np.zeros(math.prod(layout.shape), dtype=bool)
+        if not len(layout.placement):
+            return dense
+        dense[layout.placement] = runs(
+            layout.placement, extent=layout.shape[-1], starts=draws <= threshold, length=spans.length
+        )
+        return dense
+
+
+selectors: Mapping[type, Selector] = MappingProxyType(
+    {type(None): CoordinateSelector(), Forecast: ForecastSelector(), Spans: SpanSelector()}
+)
 
 
 def resolve(
@@ -782,6 +857,7 @@ def resolve(
                 strata=strata,
             ),
             shape=layout.shape,
+            owner=node,
         )
         for mask in node.mask
         if selectors[type(mask.select)].active(mask, strata=strata)
@@ -807,7 +883,7 @@ def project(
     """Build pristine values and resolved input/objective routing for one leaf."""
 
     allow_vacancy = strata == Strata.predict and any(
-        decision.mask.reconstruct and decision.mask.query is None and decision.mask.rate is None
+        decision.mask.reconstruct and decision.target and decision.mask.query is None and decision.mask.rate is None
         for decision in decisions
     )
     source_less = bool(
@@ -840,7 +916,7 @@ def project(
 
     for decision in decisions:
         selected = broadcast(decision, field.shape) & owner
-        if decision.mask.reconstruct:
+        if decision.mask.reconstruct and decision.target:
             requested |= selected
         if decision.mask.skip:
             skipped |= selected
@@ -963,9 +1039,12 @@ def coalesce(
                     ordinal=ordinal,
                     strata=strata,
                 )
-                fields[child.address] = project(
-                    layout, child, (*inherited, *decisions), strata=strata, ancestors=ancestors
+                scoped = tuple(
+                    dataclasses.replace(decision, target=decision.supervises(child.address))
+                    for decision in (*inherited, *decisions)
+                    if decision.hides(child.address)
                 )
+                fields[child.address] = project(layout, child, scoped, strata=strata, ancestors=ancestors)
 
     layout = root(values, schema.fields)
     decisions = resolve(layout, schema.fields, seed=seed, epoch=epoch, ordinal=ordinal, strata=strata)
@@ -974,4 +1053,13 @@ def coalesce(
     return Coalesced(fields=fields, layouts=layouts, times=times)
 
 
-__all__ = ["Coalesced", "CoordinateSelector", "Projection", "RaggedField", "Selector", "selectors"]
+__all__ = [
+    "Coalesced",
+    "CoordinateSelector",
+    "ForecastSelector",
+    "Projection",
+    "RaggedField",
+    "Selector",
+    "SpanSelector",
+    "selectors",
+]
