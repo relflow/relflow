@@ -3,7 +3,7 @@
   "cssGzipKiB": 32,
   "javascriptAssetGzipKiB": 32,
   "pages": [
-    { "route": "/", "htmlKiB": 180, "htmlGzipKiB": 20, "elements": 2100 },
+    { "route": "/", "htmlKiB": 180, "htmlGzipKiB": 26, "elements": 2100 },
     { "route": "/installation/", "htmlKiB": 110, "htmlGzipKiB": 20, "elements": 1300 },
     { "route": "/concepts/models/", "htmlKiB": 560, "htmlGzipKiB": 78, "elements": 4900 },
     { "route": "/concepts/data-flow/", "htmlKiB": 720, "htmlGzipKiB": 82, "elements": 11000 },

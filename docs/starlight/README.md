@@ -46,6 +46,11 @@ assets, and count inert template contents. The report is saved to
 build estimates, not measurements of hosting compression. Revise a budget
 deliberately when justified by content changes and browser measurements.
 
+The homepage renders all six ERDs and their column descriptions in HTML so the
+examples remain readable without JavaScript. Its 26 KiB gzip HTML budget allows
+about 20% headroom over the 21.8 KiB ERD version; its HTML, element, JavaScript,
+and stylesheet limits remain unchanged.
+
 The Model trees page has a larger HTML budget for six interactive construction
 walkthroughs and their complete no-JavaScript references. Each case reuses one
 highlighted schema for all three steps; copying derives from those same source
@@ -162,11 +167,14 @@ padding, picker padding/gaps, and section spacing use the `--rf-panel-padding`,
 fixed. Avoid wide component breakouts and viewport-specific padding changes.
 Markdown heading gaps use rem independently of responsive heading sizes.
 
-The homepage's six use cases live in `src/data/use-cases.json` and render through
-`UseCases.astro`. Keep the complete class declarations and their target meanings
-consistent. All six choices remain visible; the selected schema uses its natural
-height, without reserving space for longer examples.
-Examples show the API's range of data structures and target types. Benchmark
+The homepage's six use cases render through `UseCases.astro` as entity relationship
+diagrams from `src/data/datasets.ts`. Labels and task descriptions come from
+`src/data/use-cases.json`; its class schemas remain available to other guides.
+Keep schemas, record snippets, prediction outputs, and code tabs out of the
+homepage examples. All six choices remain visible; the selected diagram uses
+its natural height, without reserving space for longer examples. Column
+descriptions retain hover, keyboard, touch, and no-JavaScript access.
+Examples show the range of data structures and prediction targets. Benchmark
 records provide the measured predictive comparisons.
 
 ### Core Concepts
@@ -186,7 +194,7 @@ so initialization does not insert a new row. Without JavaScript, all cases
 remain readable. Example panels retain their natural heights.
 
 `src/data/concepts/scenarios.ts` owns the shared illustrative records and reuses
-the homepage class schemas. Each topic in `src/data/concepts/` owns six focused
+the canonical class schemas in `src/data/use-cases.json`. Each topic in `src/data/concepts/` owns six focused
 examples and its explanation. `ConceptPage.astro` renders them using the same
 contextual code notes as the rest of the site. Examples are static illustrations,
 not executions or measured results. All six remain readable without JavaScript.

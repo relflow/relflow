@@ -1,10 +1,17 @@
 ---
-import { Code } from '@astrojs/starlight/components';
 import cases from '../data/use-cases.json';
+import { datasets } from '../data/datasets';
 import ExampleSelection from './ExampleSelection.astro';
 import CasePicker from './CasePicker.astro';
+import DataExplorer from './DataExplorer.astro';
 
-const choices = cases.map((item) => ({
+const examples = cases.map((item) => {
+  const dataset = datasets.find((dataset) => dataset.id === item.id);
+  if (!dataset) throw new Error(`Homepage use case ${item.id} needs a matching example dataset.`);
+  return { ...item, dataset };
+});
+
+const choices = examples.map((item) => ({
   id: item.id,
   panel: `case-${item.id}`,
   label: item.label,
@@ -16,17 +23,13 @@ const choices = cases.map((item) => ({
   <ExampleSelection choices={choices} persistent />
   <header class="cases-intro">
     <h2 id="use-cases-title">What can you build with relflow?</h2>
-    <p>
-      Choose a use case to see how a typed schema describes the available information, related
-      records, and prediction targets.
-    </p>
-    <p class="code-help">Dotted settings have notes: hover, focus, or tap to read them.</p>
+    <p>Choose a use case to explore its records, relationships, and prediction targets.</p>
   </header>
   <CasePicker choices={choices} />
   <p class="sr-only" role="status" aria-live="polite" aria-atomic="true" data-case-status></p>
   <div class="case-examples">
     {
-      cases.map((item) => (
+      examples.map((item) => (
         <section
           id={`case-${item.id}`}
           class="case-example"
@@ -37,14 +40,15 @@ const choices = cases.map((item) => ({
             <h3 id={`case-${item.id}-title`}>{item.title}</h3>
             <p>{item.description}</p>
           </div>
-          <Code code={item.code} lang="python" />
+          <DataExplorer id={`case-${item.id}-data`} dataset={item.dataset} headingLevel={4} />
         </section>
       ))
     }
   </div>
   <p class="cases-next">
-    Each schema defines an untrained model. <a href="/datasets/">Explore the example datasets →</a>,
-    or <a href="/concepts/models/">follow this use case through Core Concepts →</a>.
+    <a href="/datasets/">Explore the example datasets →</a>, or <a href="/concepts/models/">
+      follow this use case through Core Concepts →
+    </a>.
   </p>
 </section>
 
@@ -69,10 +73,6 @@ const choices = cases.map((item) => ({
     line-height: 1.7;
     margin: 0;
   }
-  .cases-intro .code-help {
-    font-size: 0.78rem;
-    margin-top: 0.5rem;
-  }
   .case-examples {
     min-width: 0;
   }
@@ -95,13 +95,6 @@ const choices = cases.map((item) => ({
     font-size: 0.85rem;
     line-height: 1.7;
     margin: 0;
-  }
-  .case-example :global(.expressive-code) {
-    max-width: 100%;
-    margin: 0;
-  }
-  .case-example :global(pre) {
-    scrollbar-width: thin;
   }
   [data-prepared] .case-example,
   [data-ready] .case-example {

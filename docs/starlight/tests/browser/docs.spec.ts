@@ -35,6 +35,41 @@ test('a selected use case follows native links and explicit URLs take precedence
   await expect(first).toHaveAttribute('aria-pressed', 'true');
 });
 
+test('the homepage switches among six dataset diagrams without schema code or prediction trees', async ({
+  page,
+}) => {
+  await page.goto('/?case=tickets');
+  const cases = page.locator('[data-use-cases]');
+  await expect(cases).toHaveAttribute('data-ready', '');
+  await expect(cases.locator('[data-case-select]')).toHaveCount(6);
+  await expect(cases.locator('[data-data-explorer]')).toHaveCount(6);
+  await expect(cases.locator('pre, .expressive-code, [data-value-tree]')).toHaveCount(0);
+
+  for (const id of ['tickets', 'churn', 'demand', 'credit', 'maintenance', 'claims']) {
+    const choice = cases.locator(`[data-case-select="${id}"]`);
+    await choice.click();
+    await expect(choice).toHaveAttribute('aria-pressed', 'true');
+    await expect(cases.locator('[data-case]:visible')).toHaveCount(1);
+    const selected = cases.locator(`[data-case="${id}"]`);
+    await expect(selected).toBeVisible();
+    await expect(selected.locator('[data-data-explorer]')).toBeVisible();
+    const diagram = selected.locator('[data-erd]');
+    await diagram.scrollIntoViewIfNeeded();
+    await expect(diagram).toHaveAttribute('data-erd-ready', '');
+    await expect(diagram.locator('[data-entity]').first()).toBeVisible();
+    await expect(diagram.locator('.erd-column').first()).toHaveAttribute('title', /.+/);
+    await expect
+      .poll(() =>
+        diagram
+          .locator('[data-edge-from] .erd-edge-line')
+          .evaluateAll(
+            (edges) => edges.length > 0 && edges.every((edge) => Boolean(edge.getAttribute('d'))),
+          ),
+      )
+      .toBe(true);
+  }
+});
+
 test('scenario deep links select the matching example and copying keeps exact source', async ({
   page,
   context,
@@ -85,22 +120,28 @@ test('tree controls include returned metadata, preserve other instances, and cop
   expect(copied).not.toHaveProperty('inputs');
 });
 
-test('opening a code note dismisses a sidebar note even while its link keeps focus', async ({
+test('opening a column note dismisses a sidebar note even while its link keeps focus', async ({
   page,
   isMobile,
 }) => {
   test.skip(isMobile, 'The persistent sidebar is a desktop interaction.');
   await page.goto('/');
+  const example = page.locator('[data-case][aria-hidden="false"]');
+  const column = example.locator('.erd-column').first();
+  await column.scrollIntoViewIfNeeded();
+  await expect(example.locator('[data-erd]')).toHaveAttribute('data-erd-ready', '');
+  const staticDescription = await column.getAttribute('aria-describedby');
   const link = page.locator('.sidebar-content a').first();
   await link.focus();
   await expect(page.locator('#rf-sidebar-tooltip')).toBeVisible();
-  const note = page.locator('[data-case][aria-hidden="false"] .rf-code-note').first();
-  await note.hover();
-  await expect(page.locator('#rf-code-tooltip')).toBeVisible();
+  await column.hover();
+  const datasetNote = example.locator('[data-erd-tooltip]');
+  await expect(datasetNote).toBeVisible();
   await expect(page.locator('#rf-sidebar-tooltip')).toBeHidden();
   await expect(link).toBeFocused();
   await page.keyboard.press('Escape');
-  await expect(page.locator('#rf-code-tooltip')).toBeHidden();
+  await expect(datasetNote).toBeHidden();
+  await expect(column).toHaveAttribute('aria-describedby', staticDescription!);
   await expect(link).toBeFocused();
 });
 
@@ -194,7 +235,18 @@ test('all cases, native trees, and descriptions stay readable without JavaScript
   const page = await context.newPage();
   try {
     await page.goto(`${baseURL}/`);
-    await expect(page.locator('[data-case]:visible')).toHaveCount(6);
+    const cases = page.locator('[data-use-cases]');
+    await expect(cases.locator('[data-case]:visible')).toHaveCount(6);
+    await expect(cases.locator('[data-erd]:visible')).toHaveCount(6);
+    await expect(cases.locator('pre, .expressive-code, [data-value-tree]')).toHaveCount(0);
+    for (const example of await cases.locator('[data-case]').all()) {
+      const column = example.locator('.erd-column').first();
+      const description = await column.getAttribute('title');
+      expect(description).toBeTruthy();
+      const descriptionId = await column.getAttribute('aria-describedby');
+      expect(descriptionId).toBeTruthy();
+      await expect(page.locator(`[id="${descriptionId}"]`)).toHaveText(description!);
+    }
     await page.goto(`${baseURL}/data-types/boolean/`);
     await expect(page.locator('[data-type-example]:visible')).toHaveCount(3);
     const column = page.locator('.erd-column').first();

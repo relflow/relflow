@@ -61,11 +61,13 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   source definition and an existing guide when available. Preserve the documented
   source scopes, optional serving requirements, search/filter URLs, entry anchors,
   and full content without JavaScript. Never import the Python runtime to build it.
-- The homepage highlights six use cases through their class schemas, showing
-  different data types, histories, forecast slots, and nested targets. Keep all
-  six choices visible, with natural-height schema panels and accessible keyboard
-  selection. Keep sample data and diagrams out of this component.
-  Give each schema class a short, one-line docstring describing its record.
+- The homepage highlights six use cases through entity relationship diagrams,
+  showing their records, relationships, and prediction targets. Use `DataExplorer`
+  with the canonical datasets from `src/data/datasets.ts`; keep schemas, record
+  snippets, prediction outputs, and code tabs out of this component. Keep all
+  six choices visible, with natural-height diagram panels, column descriptions,
+  and accessible keyboard selection. The shared class schemas remain available
+  to Core Concepts and other guides.
   Shared `ExampleSelection.astro` resolves the initial panel before parsing it.
   Reserve the picker's natural space before enhancement; do not insert it later
   or impose a shared height on example panels. Preserve all-case no-JS content.
@@ -115,9 +117,13 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   static and executes no model or training code; it creates no learning evidence.
 - Follow the current shared [Google Doc](https://docs.google.com/document/d/1q04H63KEJnykRBGzkKQo86DohyOmMO-4OThlyrFn4ig/edit)
   page by page. Refresh it before starting the next page and keep content review
-  incremental. Do not fill unwritten sections with new tutorials; the purchase
-  quickstart was deliberately removed. Explain inputs, learning, and outputs
-  before architecture details.
+  incremental. Preserve its intended content, emphasis, and page boundaries.
+  Treat layout notes and outline shorthand as authoring instructions. Apply
+  light copy edits and normal web formatting; do not replace the message with
+  new positioning or insist on verbatim wording unless the user requests it.
+  Do not fill unwritten sections with new tutorials; the purchase quickstart was
+  deliberately removed. Explain inputs,
+  learning, and outputs before architecture details.
 - Advanced Usage owns custom data modules/types, online vocabulary, mutations,
   embeddings, distributed data, checkpoints and state, masking/pretraining, and
   inference/deployment. Keep basic predictions in Core Concepts. Mutations and
