@@ -245,7 +245,12 @@ class Schema(Node):
                 embeds.append(node.address)
             if not isinstance(node, Leaf):
                 continue
-            policies = [policy for owner in node.path for policy in getattr(owner, "mask", ()) if policy.reconstruct]
+            policies = [
+                policy
+                for owner in node.path
+                for policy in getattr(owner, "mask", ())
+                if policy.reconstruct and policy.supervises(owner=owner, leaf=node.address)
+            ]
             if policies:
                 objectives.append(node.address)
             if any(policy.rate is None for policy in policies):
@@ -430,7 +435,10 @@ class Schema(Node):
             owners = [
                 owner.address
                 for owner in request.path
-                if any(policy.reconstruct for policy in getattr(owner, "mask", ()))
+                if any(
+                    policy.reconstruct and policy.supervises(owner=owner, leaf=request.address)
+                    for policy in getattr(owner, "mask", ())
+                )
             ]
             required: list[Component] = []
             if owners:
