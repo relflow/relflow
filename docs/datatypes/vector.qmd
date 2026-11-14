@@ -42,9 +42,24 @@ A vector with a NaN or infinite element is not a measurement: it takes the
 targets, so one bad element cannot poison training.
 relflow does not fit a vector normalizer: prepare coordinate scales upstream.
 
+### Channels from several sources
+
+A tuple `query` reads one source per channel:
+
+```python
+load = rf.Vector(query=("HUFL", "HULL", "OT"))
+```
+
+`n_dim` comes from the tuple, so it may be omitted. A null or NaN in one source
+makes only that channel missing: the encoder sees which channels are missing,
+and the loss skips them. A vector with no finite channel is `other`, and a
+vector whose sources are all null is `null`. A single source keeps the rule
+above: a null element is an error, and a NaN element makes the vector `other`.
+See [queries](../guides/query-paths.qmd#several-sources).
+
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `n_dim` | required | Positive vector width. |
+| `n_dim` | required unless `query` is a tuple | Positive vector width. |
 | `jitter` | `rf.Jitter()` | Training noise in supplied coordinate units. |
 | `objective` | `"l2"` | Reconstruction loss: `"l1"` or `"l2"`. |
 
