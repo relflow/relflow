@@ -12,6 +12,7 @@ from tensordict import TensorDict
 from relflow.architecture.attention import RotaryMultiheadAttention
 from relflow.architecture.blocks import feed_forward, norm
 from relflow.architecture.direction import rules, stepped
+from relflow.architecture.elapsed import Elapsed, gaps
 from relflow.architecture.grain import extents, grains, rows
 from relflow.architecture.mixers import TransformerMixer, mixers
 from relflow.architecture.packed import SDPA_BATCH_MAX, Packed, block, customized, pack, unpack
@@ -283,6 +284,8 @@ class BranchEncoder(torch.nn.Module):
             )
         )
         self.n_outputs: int | None = None if self.pool is None else self.pool.n_context
+        # Built last so a plain branch keeps its parameter order and state dict.
+        self.elapsed: Elapsed | None = Elapsed(d_model=schema.d_model) if self.timed else None
 
     def admit(self, parcels: list[Parcel]) -> list[Parcel]:
         """Check that every parcel comes from a child and order them by field order.
@@ -468,6 +471,7 @@ class BranchEncoder(torch.nn.Module):
         flat_positions = positions.reshape(rows, L)
         if flat_steps is not None:
             flat_positions = timeline(structural=flat_positions, steps=flat_steps, times=self.clock(geometry))
+        flat_gaps = self.lapse(geometry, steps=flat_steps)
         active = present.any(dim=1)
         indices = active.nonzero(as_tuple=False).reshape(-1)
 
@@ -486,6 +490,9 @@ class BranchEncoder(torch.nn.Module):
                 None if flat_steps is None else flat_steps if complete else flat_steps.index_select(0, indices)
             )
             selected = selected.masked_fill(~selected_present.unsqueeze(-1), 0.0)
+            if self.elapsed is not None and flat_gaps is not None:
+                selected_gaps = flat_gaps if complete else flat_gaps.index_select(0, indices)
+                selected = (selected + self.elapsed(selected_gaps)).masked_fill(~selected_present.unsqueeze(-1), 0.0)
             evidence = selected
             selected_context = (
                 None if conditioned is None else conditioned if complete else conditioned.index_select(0, indices)
@@ -578,6 +585,22 @@ class BranchEncoder(torch.nn.Module):
         """
         ordered = sorted(parcels, key=lambda parcel: self.child_order[parcel.origin])
         return self.arrangement(ordered)
+
+    def lapse(self, geometry: TensorDict | None, *, steps: torch.Tensor | None) -> torch.Tensor | None:
+        """Give every token the time gap that precedes its row, or ``None`` without ``time_index``.
+
+        Args:
+            geometry: Batch geometry carrying the branch times.
+            steps: Row index of every token, shape ``(rows, L)``.
+
+        Returns:
+            Float gaps of shape ``(rows, L)`` in ``time_step`` units, or ``None``.
+        """
+        if self.elapsed is None or steps is None:
+            return None
+        times = cast(torch.Tensor, self.clock(geometry))
+        slots = cast("Geometry", cast(TensorDict, geometry)[self.origin]).slots
+        return gaps(times, slots=slots).reshape(steps.shape[0], -1).gather(1, steps)
 
     def clock(self, geometry: TensorDict | None) -> torch.Tensor | None:
         """Return the time of every row slot of this branch, or ``None`` without ``time_index``.
