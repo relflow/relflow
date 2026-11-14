@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 import torch
 
 import relflow as rf
@@ -508,3 +509,42 @@ def test_decoder_ignores_inactive_sibling_branches() -> None:
     decoder = model.nodes["/answer"].decoder
 
     assert decoder.context_addresses == ("/visible",)
+
+
+def test_admit_orders_parcels_by_field_order_and_rejects_strangers():
+    encoder = BranchEncoder(schema=configuration(), address=rf.Address("items"))
+    category = Parcel(
+        payload=torch.zeros(1, 2, 16),
+        present=torch.ones(1, 2, dtype=torch.bool),
+        origin=rf.Address("items", "category"),
+        destination=rf.Address("items"),
+        batch_size=1,
+    )
+    assert encoder.admit([category]) == [category]
+    stranger = Parcel(
+        payload=torch.zeros(1, 2, 16),
+        present=torch.ones(1, 2, dtype=torch.bool),
+        origin=rf.Address("other"),
+        destination=rf.Address("items"),
+        batch_size=1,
+    )
+    with pytest.raises(ValueError, match="non-child address"):
+        encoder.admit([category, stranger])
+
+
+def test_mix_without_sequence_layers_returns_its_inputs():
+    encoder = BranchEncoder(schema=configuration(attention=None), address="/")
+    inputs = torch.randn(2, 3, 16, generator=torch.Generator().manual_seed(0))
+    present = torch.tensor([[True, True, False], [True, True, True]])
+    torch.testing.assert_close(encoder.mix(inputs, present=present, positions=None), inputs)
+
+
+def test_reduce_without_reduction_returns_the_sequence():
+    schema = rf.Schema.from_tree(d_model=16, n_layers=1, n_heads=4, reduction=None, value=rf.Number)
+    encoder = BranchEncoder(schema=schema, address="/")
+    selected = torch.randn(2, 1, 16, generator=torch.Generator().manual_seed(0))
+    present = torch.ones(2, 1, dtype=torch.bool)
+    output, output_present = encoder.reduce(
+        selected, present=present, evidence=selected, context=None, positions=None, width=1
+    )
+    assert output is selected and output_present is present
