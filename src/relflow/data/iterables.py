@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping
 from dataclasses import replace
+from types import MappingProxyType
 from typing import Any, cast
 
 import numpy as np
@@ -20,8 +21,12 @@ from relflow.structs.experiment import Schema
 from relflow.structs.tree import Address, Node
 from relflow.tensorfields.base import TENSORFIELDS, BatchContext, Context, TensorFieldBase
 
+NO_TIMES: Mapping[Address, np.ndarray] = MappingProxyType({})
 
-def geometry(layouts: Mapping[Address, Layout], *, rows: int) -> TensorDict:
+
+def geometry(
+    layouts: Mapping[Address, Layout], *, rows: int, times: Mapping[Address, np.ndarray] = NO_TIMES
+) -> TensorDict:
     """Move shared Arrow structural coordinates into the Torch batch plane."""
 
     axes: dict[Address, Geometry] = {}
@@ -33,6 +38,7 @@ def geometry(layouts: Mapping[Address, Layout], *, rows: int) -> TensorDict:
             present=torch.from_numpy(layout.present),
             valid=torch.from_numpy(layout.valid),
             slots=torch.from_numpy(slots),
+            times=torch.from_numpy(times[address]) if address in times else None,
             batch_size=[rows],
         )
     return TensorDict(source=cast(Any, axes), batch_size=[rows])
@@ -134,7 +140,7 @@ def encode(
         )
 
     inputs = TensorDict(source=cast(Any, out), batch_size=[batch.num_rows])
-    inputs[Address()] = geometry(coalesced.layouts, rows=batch.num_rows)
+    inputs[Address()] = geometry(coalesced.layouts, rows=batch.num_rows, times=coalesced.times)
     return Encoded(tensors=inputs, source=batch, retain=retain, observations=observations, bindings=bindings)
 
 
@@ -161,6 +167,7 @@ def mock(schema: Schema, batch_size: int) -> EncodedInput:
             present=torch.zeros(parent, dtype=torch.bool),
             valid=torch.zeros(parent, dtype=torch.bool),
             slots=torch.zeros((*parent, 0), dtype=torch.bool),
+            times=None if branch.time_index is None else torch.zeros((*parent, 0), dtype=torch.float64),
             batch_size=[batch_size],
         )
 

@@ -20,13 +20,16 @@ class Geometry(TensorClass):
     """Retained collection slots, independent of tensorfield values and masks.
 
     Lengths and collection validity use the parent grid. ``slots`` adds the
-    resolved branch axis and marks its non-null object records.
+    resolved branch axis and marks its non-null object records. ``times`` holds
+    the float64 time position of every slot, relative to the first row of its
+    instance, and is ``None`` for a branch without ``time_index``.
     """
 
     lengths: torch.Tensor
     present: torch.Tensor
     valid: torch.Tensor
     slots: torch.Tensor
+    times: torch.Tensor | None = None
 
 
 def retention(names: Retain, *, context: str = "retain") -> Retain:
