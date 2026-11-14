@@ -154,8 +154,9 @@ model = rf.Model(
 - `Period` is for calendar parts (`DateParts` remains a compatible alias).
   Use `Duration` for elapsed time, or `Number` when it is already derived upstream.
   Zone-aware timestamps describe their own wall clock; strings carrying an offset
-  are read as UTC. A `Vector` with a NaN or infinite element, and a float NaN label
-  in `Category`, take the `other` state; a NaN `Set` member is dropped like a null.
+  are read as UTC. A `Vector` with a NaN or infinite element takes the `other` state under a single
+  query; under a tuple query only that channel is missing. A float NaN label
+  in `Category` takes the `other` state; a NaN `Set` member is dropped like a null.
 - `Series(n_dim=C)` holds one ordered multichannel run per record, not a
   timestamped one. A null, NaN, or infinite step is unobserved; the rest of the
   record stays valid. As input it embeds as one token: each step feature sees

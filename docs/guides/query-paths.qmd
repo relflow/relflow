@@ -138,12 +138,13 @@ history and a preprocessor for joins between separate histories.
 load = rf.Vector(query=("HUFL", "HULL", "OT"))
 ```
 
-Channel `c` reads `query[c]`, so the query text names the channel, and `n_dim`
+Channel `c` reads `query[c]`, so `n_dim`
 follows from the tuple length. Every source must select the same rows: lists
 that are valid at a record must have equal lengths. A null source makes only
 its channel missing at that record. Only tensorfields whose Request declares
 `stacked` accept a tuple, and every source must start at the owner record, with
-no leading `../`.
+no leading `../`. Channel names appear only in the forecast steps of a
+`Series`, which carry the query text; `Vector` output has no channel names.
 
 A branch reads rows as structs. Dense `list<fixed_size_list<C>>` data has no
 struct per row, so reading it as `ett=rf.Branch(load=rf.Vector(n_dim=C))`

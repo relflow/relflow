@@ -122,7 +122,18 @@ class Request(RequestBase):
     @pydantic.model_validator(mode="before")
     @classmethod
     def check_n_dim(cls, data: Any) -> Any:
-        return channels.width(data)
+        """Fill ``n_dim`` from a tuple ``query`` before validation.
+
+        Args:
+            data: Raw request input.
+
+        Returns:
+            The input with ``n_dim`` set to the number of tuple sources, if any.
+
+        Raises:
+            ValueError: If the tuple query is empty or disagrees with an explicit ``n_dim``.
+        """
+        return channels.width(data=data)
 
     @pydantic.model_validator(mode="after")
     def check_bounds(self) -> Self:
@@ -172,7 +183,7 @@ def listlike(datatype: pa.DataType) -> bool:
     return pa.types.is_list(datatype) or pa.types.is_large_list(datatype) or pa.types.is_fixed_size_list(datatype)
 
 
-def steps(values: pa.Array, *, width: int, address: Address) -> tuple[np.ndarray, np.ndarray]:
+def steps(values: pa.Array, *, width: int, address: Address, stacked: bool = False) -> tuple[np.ndarray, np.ndarray]:
     """Every step of every series back to back as ``(steps, channels)`` float64, with the step count per series.
 
     A null step or element is NaN; a step reads as observed only when all
@@ -182,12 +193,14 @@ def steps(values: pa.Array, *, width: int, address: Address) -> tuple[np.ndarray
         values: One Arrow list of steps per record.
         width: Number of channels per step.
         address: Field address, for error messages.
+        stacked: Whether the values come from a tuple query, whose sources must each select a list.
 
     Returns:
         The step matrix and the number of steps of each record.
 
     Raises:
-        ValueError: If a record is not a list or a step does not hold ``width`` values.
+        ValueError: If a record is not a list, a tuple query selects no list level, or a step does not hold
+            ``width`` values.
     """
     if not len(values):
         return np.empty((0, width)), np.empty(0, dtype=np.int64)
@@ -197,6 +210,12 @@ def steps(values: pa.Array, *, width: int, address: Address) -> tuple[np.ndarray
 
     lengths = pc.list_value_length(values).to_numpy(zero_copy_only=False).astype(np.int64)
     flat = pc.list_flatten(values)
+    if stacked and not listlike(flat.type):
+        message = (
+            f"series field at '{address}' reads a tuple query of scalar values; "
+            "each tuple source must select a list per record, one element per step"
+        )
+        raise ValueError(message)
     if not listlike(flat.type):
         if width != 1:
             message = (
@@ -322,7 +341,9 @@ def encode(
     one observed step takes the ``other`` state; an empty one stays valued.
     """
 
-    matrix, lengths = steps(values=combine(field=field), width=request.n_dim, address=address)
+    matrix, lengths = steps(
+        values=combine(field=field), width=request.n_dim, address=address, stacked=isinstance(request.query, tuple)
+    )
     cap = request.horizon if target else request.length
     kept = lengths if cap is None else np.minimum(lengths, cap)
     start = crop(
@@ -425,7 +446,9 @@ def observe(
     if not learn:
         return None
     request = cast(Request, schema.requests[address])
-    matrix, _ = steps(values=combine(field=field), width=request.n_dim, address=address)
+    matrix, _ = steps(
+        values=combine(field=field), width=request.n_dim, address=address, stacked=isinstance(request.query, tuple)
+    )
     observed = torch.from_numpy(matrix[np.isfinite(matrix).all(axis=1)])
     return TensorDict({TensorKey.content: moments(observed, width=request.n_dim)}, batch_size=[])
 

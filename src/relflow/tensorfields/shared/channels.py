@@ -14,11 +14,13 @@ def width(data: object) -> object:
         holds a list or tuple ``query``; any other input unchanged.
 
     Raises:
-        ValueError: If an explicit ``n_dim`` differs from the number of sources.
+        ValueError: If the query names no source, or an explicit ``n_dim`` differs from the number of sources.
     """
     if not isinstance(data, Mapping) or not isinstance(data.get("query"), (list, tuple)):
         return data
     query = tuple(data["query"])
+    if not query:
+        raise ValueError("tuple query names no source; name at least one source or use a single query")
     n_dim = data.get("n_dim", len(query))
     if n_dim != len(query):
         raise ValueError(
