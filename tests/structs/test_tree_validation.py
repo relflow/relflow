@@ -1,6 +1,9 @@
+from typing import ClassVar
+
 import pydantic
 import pytest
 
+import relflow as rf
 from relflow.structs.tree import Address, Leaf, Mask, Node
 
 
@@ -157,3 +160,38 @@ def test_node_description_trims_and_accepts_optional_metadata():
 def test_node_description_empty_string_becomes_none():
     node = Node.model_validate({"name": "ok_name", "type": "node", "description": "   ", "n_heads": 4})
     assert node.description is None
+
+
+def test_leaf_accepts_a_tuple_query_and_coerces_a_list():
+    leaf = Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "query": ["ett.HUFL", "ett.OT"]})
+    assert leaf.query == ("ett.HUFL", "ett.OT")
+
+
+def test_leaf_rejects_an_invalid_tuple_query_source():
+    with pytest.raises(ValueError, match="invalid query"):
+        Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "query": ("a", "[")})
+
+
+@pytest.mark.parametrize(("query", "match"), [((), "at least one source"), (("a", "a"), "repeats 'a'")])
+def test_stacked_request_rejects_empty_or_repeated_sources(query, match):
+    class Stacking(Leaf):
+        stacked: ClassVar[bool] = True
+
+    leaf = Stacking.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "query": query})
+    with pytest.raises(ValueError, match=match):
+        leaf.post_bind_validate()
+
+
+def test_requests_do_not_stack_by_default():
+    assert Leaf.stacked is False
+
+
+def test_single_source_field_rejects_a_tuple_query_naming_its_address():
+    with pytest.raises(ValueError, match=r"'/amount'.*no derive component.*stacked"):
+        rf.Model.xs(d_model=8, amount=rf.Number(query=("a", "b")))
+
+
+def test_a_request_without_stacked_rejects_a_tuple_query_at_bind():
+    leaf = Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "query": ("a", "b")})
+    with pytest.raises(ValueError, match="no derive component"):
+        leaf.post_bind_validate()
