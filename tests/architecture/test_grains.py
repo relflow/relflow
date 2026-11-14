@@ -5,7 +5,8 @@ import torch
 
 import relflow as rf
 from relflow.architecture.encoder import BranchEncoder
-from relflow.architecture.grain import StepStage, grains
+from relflow.architecture.grain import RowReadout, StepStage, grains, readouts
+from relflow.architecture.runtime import execution
 from relflow.structs.grain import GrainConfig, Steps
 from relflow.structs.packages import Parcel
 from relflow.structs.tree import Address
@@ -159,3 +160,36 @@ def test_steps_branch_widths_are_length():
     schema = ett()
     assert schema.branch_outputs[Address("/ett")] == 4
     assert schema.branch_widths[Address("/ett")] == 4
+
+
+def test_every_grain_setting_has_a_readout():
+    union = typing.get_args(typing.get_args(GrainConfig)[0])
+    assert set(union) == set(readouts)
+
+
+def test_steps_leaf_decoder_reads_only_its_row_token():
+    model = rf.Model(
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+        ett=rf.Branch(length=4, grain=Steps(), reduction=rf.Mean(), a=rf.Number, y=rf.Number(mask=True)),
+    )
+    (route,) = (route for route in execution(model).decoders if route.address == Address("/ett/y"))
+    assert route.heritage == () and route.readout == Address("/ett")
+    assert Address("/ett") in execution(model).sequenced
+    assert isinstance(model.nodes[Address("/ett/y")].decoder.pool, RowReadout)
+    assert model.nodes[Address("/ett/y")].decoder.context_addresses == ()
+
+
+def test_coordinates_leaf_decoder_keeps_its_heritage_and_pool():
+    model = rf.Model(d_model=16, n_layers=1, n_heads=4, ett=rf.Branch(length=4, a=rf.Number, y=rf.Number(mask=True)))
+    (route,) = (route for route in execution(model).decoders if route.address == Address("/ett/y"))
+    assert route.readout is None and route.heritage != ()
+    assert not isinstance(model.nodes[Address("/ett/y")].decoder.pool, RowReadout)
+
+
+def test_row_readout_returns_its_memory_without_parameters():
+    memory = torch.randn(2, 3, 8)
+    readout = RowReadout()
+    assert readout(memory, present=torch.ones(2, 3, dtype=torch.bool)) is memory
+    assert not list(readout.parameters())

@@ -17,6 +17,7 @@ from relflow.architecture import output
 from relflow.architecture.binding import bind
 from relflow.architecture.contracts import sanitize
 from relflow.architecture.encoder import BranchEncoder, locate
+from relflow.architecture.grain import readouts
 from relflow.architecture.node import NodeModule
 from relflow.architecture.output import OutputPlan
 from relflow.data.arrow import Encoded, Retain, mappings
@@ -46,6 +47,7 @@ from relflow.tensorfields.base import (
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
+    from relflow.structs.structure import Branch
 
 __all__ = ["ExecutionPlan", "Output", "PredictionInput", "encode", "forward", "predict", "step", "transfer"]
 
@@ -64,6 +66,7 @@ class DecoderRoute:
 
     address: Address
     heritage: tuple[Address, ...]
+    readout: Address | None
     embed: bool
     decode: bool
 
@@ -80,6 +83,12 @@ class ExecutionPlan:
     sequenced: frozenset[Address]
 
 
+def row_branch(module: Model, address: Address) -> Address | None:
+    """Return the parent branch of a leaf when its decoder reads that branch row tokens."""
+    parent = cast("Branch", module.schema.requests[address].parent)
+    return parent.address if readouts[type(parent.grain)] is not None else None
+
+
 def execution(module: Model) -> ExecutionPlan:
     """Resolve schema predicates and decoder routes once per model generation."""
 
@@ -94,7 +103,8 @@ def execution(module: Model) -> ExecutionPlan:
     decoders = tuple(
         DecoderRoute(
             address=address,
-            heritage=tuple(module.schema.requests[address].heritage),
+            heritage=() if row_branch(module, address) else tuple(module.schema.requests[address].heritage),
+            readout=row_branch(module, address),
             embed=address in embeds,
             decode=address in decodes,
         )
@@ -108,7 +118,9 @@ def execution(module: Model) -> ExecutionPlan:
         objectives=objectives,
         decoders=decoders,
         # Only ancestors of a decoded leaf need their encoded sequence beside the summary.
-        sequenced=frozenset(item for route in decoders for item in route.heritage),
+        sequenced=frozenset(item for route in decoders for item in route.heritage).union(
+            route.readout for route in decoders if route.readout is not None
+        ),
     )
     return module.execution_plan
 
@@ -302,6 +314,10 @@ def compute(
                 kept = outgoing[item].sequence
                 if kept is not None:
                     parcels.append(kept)
+
+        if route.readout in outgoing:
+            row = outgoing[route.readout]
+            parcels.append(row if row.sequence is None else row.sequence)
 
         node_module = cast(NodeModule, module.nodes[address])
         decoder: DecoderBase = node_module.decoder

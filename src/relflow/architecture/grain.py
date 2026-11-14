@@ -204,6 +204,46 @@ def steps(grain: Steps, *, branch: Branch, schema: Schema) -> Grain:
     return StepStage(grain, branch=branch, schema=schema)
 
 
+class RowReadout(torch.nn.Module):
+    """Hand each target coordinate the mixed token of its own row.
+
+    It has no parameters. Reading only that token, never a summary of the
+    branch, keeps a causal branch free of future leakage.
+    """
+
+    @override
+    def forward(self, memory: torch.Tensor, present: torch.Tensor | None = None) -> torch.Tensor:
+        """Return the row tokens unchanged.
+
+        Args:
+            memory: Row tokens of shape ``(N, rows, d_model)``.
+            present: Row presence, ignored: absent rows are zero.
+
+        Returns:
+            ``memory`` itself.
+        """
+        return memory
+
+    if TYPE_CHECKING:
+        __call__ = forward
+
+
+# The decoder pool of a leaf by the grain of its parent branch; ``None`` keeps the leaf pooling.
+readouts: Mapping[type, type[RowReadout] | None] = MappingProxyType({Coordinates: None, Steps: RowReadout})
+
 grains: Mapping[type, GrainBuilder[Any]] = MappingProxyType({Coordinates: coordinates, Steps: steps})
 
-__all__ = ["Grain", "GrainBuilder", "StepStage", "coordinates", "extents", "grains", "keep", "pools", "rows", "steps"]
+__all__ = [
+    "Grain",
+    "GrainBuilder",
+    "RowReadout",
+    "StepStage",
+    "coordinates",
+    "extents",
+    "grains",
+    "keep",
+    "pools",
+    "readouts",
+    "rows",
+    "steps",
+]
