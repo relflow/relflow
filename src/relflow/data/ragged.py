@@ -15,7 +15,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from relflow.data.arrow import variants
-from relflow.data.query import Literal, Member, MissingFieldError, compile, listed, parts, query, scope
+from relflow.data.query import Literal, Member, MissingFieldError, compile, listed, parts, query, scope, stack
 from relflow.data.query import Projection as SourceProjection
 from relflow.logging.config import logger
 from relflow.structs.enums import Component, Overflow, Strata, Tokens
@@ -581,7 +581,9 @@ def pristine(layout: Layout, request: Leaf, *, ancestors: tuple[Layout, ...]) ->
 
     extension = TENSORFIELDS[request.type]
     expressions = queries(request)
-    if Component.derive in extension.components:
+    if request.stacked and isinstance(request.query, tuple):
+        selected = stack(layout.records, request.query, address=str(request.address))
+    elif Component.derive in extension.components:
         inputs = tuple(
             source(layout, expression, ancestors=ancestors, address=request.address) for expression in expressions
         )

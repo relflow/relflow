@@ -172,7 +172,10 @@ def test_leaf_rejects_an_invalid_tuple_query_source():
         Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "query": ("a", "[")})
 
 
-@pytest.mark.parametrize(("query", "match"), [((), "at least one source"), (("a", "a"), "repeats 'a'")])
+@pytest.mark.parametrize(
+    ("query", "match"),
+    [((), "empty tuple query"), (("a", "a"), "repeats 'a'"), (("a", "../b"), "ancestor branch")],
+)
 def test_stacked_request_rejects_empty_or_repeated_sources(query, match):
     class Stacking(Leaf):
         stacked: ClassVar[bool] = True

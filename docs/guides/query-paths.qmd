@@ -123,11 +123,40 @@ source paths. [Duration](../datatypes/duration.qmd), for example, uses
 only navigates structure; the type owns the computation and operand rules.
 Tuple queries are rejected for types without that registered capability.
 See [custom tensorfields](../datatypes/custom-tensorfields.qmd#derive-inputs).
+Types that declare `stacked`, described next, also accept a tuple.
 
 A Duration computes one scalar per owning Branch coordinate. Its ancestor
 operands broadcast within that geometry. Wildcard paths retain lists and do
 not create automatic Duration axes; use a Branch for a shared repeated
 history and a preprocessor for joins between separate histories.
+
+## Several sources
+
+`Vector` and `Series` read a tuple query as the channels of one value:
+
+```python
+load = rf.Vector(query=("HUFL", "HULL", "OT"))
+```
+
+Channel `c` reads `query[c]`, so the query text names the channel, and `n_dim`
+follows from the tuple length. Every source must select the same rows: lists
+that are valid at a record must have equal lengths. A null source makes only
+its channel missing at that record. Only tensorfields whose Request declares
+`stacked` accept a tuple, and every source must start at the owner record, with
+no leading `../`.
+
+A branch reads rows as structs. Dense `list<fixed_size_list<C>>` data has no
+struct per row, so reading it as `ett=rf.Branch(load=rf.Vector(n_dim=C))`
+fails with an error asking for a struct. Either read it as one `Series`,
+`rf.Series(query="ett", n_dim=C)`, or wrap each step in a `Preprocessor`
+and keep the branch:
+
+```python
+@rf.preprocess
+def wrap(frame: pl.DataFrame) -> pl.DataFrame:
+    step = pl.struct(pl.element().alias("load"))
+    return frame.with_columns(pl.col("ett").list.eval(step))
+```
 
 ## Structural absence
 
