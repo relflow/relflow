@@ -123,6 +123,9 @@ model = rf.Model(
   as `query="source.path"` or `query="items[-32:][*].sku"`; relflow never
   infers queries. Filters, joins, sorting, and derived values belong in an
   `rf.Preprocessor`.
+- A tuple `query` stacks one source per channel for tensorfields whose Request
+  declares `stacked = True` (`Vector`, `Series`); sources must select the same
+  rows, and a null source makes only its channel missing.
 - `transactions=rf.Branch(...)` reads the same-named child collection, and its
   leaves read keys such as `amount` from each child mapping.
 - `Branch.length` defaults to `None`: collection width follows the largest
@@ -191,7 +194,7 @@ model = rf.Model(
   Zone-aware timestamps describe their own wall clock; strings carrying an offset
   are read as UTC. A `Vector` with a NaN or infinite element, and a float NaN label
   in `Category`, take the `other` state; a NaN `Set` member is dropped like a null.
-- `Series(channels=C)` holds one ordered multichannel run per record, not a
+- `Series(n_dim=C)` holds one ordered multichannel run per record, not a
   timestamped one. A null, NaN, or infinite step is unobserved; the rest of the
   record stays valid. As input it embeds as one token: each step feature sees
   `1 + 4*(2^n_blocks - 1)` steps (253 at the default `n_blocks=6`), and a masked
@@ -199,9 +202,9 @@ model = rf.Model(
   reconstruction targets (`mask=True` or a reconstructing ancestor) and
   rejected otherwise. Forecasts are written as exactly `horizon` steps in source units.
   `Series` does not read elapsed time, so use `Period` or a derived `Number` for
-  irregular sampling. Steps may also arrive as `list<struct<...>>` or
-  `struct<list<...>>`; `channels` may name struct members, whose order sets the
-  channel order and whose names label forecast steps.
+  irregular sampling. Columnar channels use a tuple `query`, such as
+  `query=("ett.a", "ett.b")`, which sets `n_dim` and names forecast step
+  members; struct layouts are not read.
 - `Text` caches automatically: workers send stable IDs; a bounded device
   table and shared Rust Moka RAM cache retain hot entries, with SQLite as the
   durable cold tier. `store` selects a local directory, `memory` budgets RAM

@@ -355,3 +355,8 @@ def test_stack_of_chunked_records_matches_contiguous_records():
 def test_stack_of_zero_chunks_keeps_the_stacked_type():
     empty = pa.chunked_array([], type=ROWS.type)
     assert stack(empty, ("a", "b")).values.type == stack(ROWS, ("a", "b")).values.type
+
+
+def test_stack_reads_an_untyped_null_source_as_a_missing_channel():
+    rows = pa.array([{"a": [1.0, 2.0], "b": None}])
+    assert stack(rows, ("a", "b")).values.to_pylist() == [[[1.0, None], [2.0, None]]]

@@ -679,9 +679,15 @@ def lists(values: list[pa.Array], *, expressions: tuple[str, ...], address: str 
 def channels(values: list[pa.Array], *, expressions: tuple[str, ...], address: str | None) -> pa.Array:
     """Stack aligned sources level by level until the scalar leaves.
 
+    A source whose Arrow type is ``null`` has no value anywhere; it takes the
+    type of its siblings so it reads as a missing channel.
+
     Raises:
         ValueError: If only some sources are lists.
     """
+    typed = next((item.type for item in values if not pa.types.is_null(item.type)), None)
+    if typed is not None:
+        values = [pc.cast(item, typed) if pa.types.is_null(item.type) else item for item in values]
     nested = [listed(item.type) for item in values]
     if not any(nested):
         return leaves(values, expressions=expressions, address=address)
