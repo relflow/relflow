@@ -65,7 +65,7 @@ class Region(Generic[P]):
         if kwargs.get("packing") is not None:
             return cast(torch.Tensor, self.eager(*args, **kwargs))
         layers: list[torch.nn.Module] = (
-            [owner.encoder]
+            [cast(torch.nn.Module, owner.encoder)]  # every mixer is a module; the protocol only hides it
             if isinstance(owner, BranchEncoder)
             else [*owner.blocks, owner.norm, *([owner.mass_projection] if owner.mass_projection is not None else [])]
         )
