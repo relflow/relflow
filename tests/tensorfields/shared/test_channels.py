@@ -19,3 +19,15 @@ def test_width_keeps_inputs_without_a_tuple_query_and_never_mutates():
 def test_width_rejects_a_different_explicit_n_dim():
     with pytest.raises(ValueError, match=r"n_dim=2 differs from the 3 sources"):
         width({"query": ("a", "b", "c"), "n_dim": 2})
+
+
+def test_width_rejects_an_empty_tuple_query():
+    with pytest.raises(ValueError, match="tuple query names no source"):
+        width({"query": ()})
+
+
+def test_vector_rejects_an_empty_tuple_query_naming_the_cause():
+    import relflow as rf
+
+    with pytest.raises(ValueError, match="tuple query names no source"):
+        rf.Vector(query=())
