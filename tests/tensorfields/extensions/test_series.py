@@ -727,8 +727,7 @@ def test_tuple_query_names_forecast_step_columns_and_round_trips_parquet(tmp_pat
     )
     step = output_type(model, Address("/future")).field("content").type.value_type
     assert [field.name for field in step] == ["next.temp", "next.hum"]
-    unseen = pa.struct([("temp", pa.list_(pa.float64())), ("hum", pa.list_(pa.float64()))])
-    rows = pa.table({"history": [[[1.0, 2.0]], [[3.0, 4.0]]], "next": pa.array([None, None], type=unseen)})
+    rows = pa.table({"history": [[[1.0, 2.0]], [[3.0, 4.0]]]})
     table = model.predict(rows)
     path = tmp_path / "out.parquet"
     table.write_parquet(path)
@@ -749,3 +748,11 @@ def test_tuple_query_series_round_trips_yaml(tmp_path):
     )
     loaded = rf.Model.from_yaml(path)
     assert (loaded.schema.requests["/signal"].query, loaded.schema.requests["/signal"].n_dim) == (("ett.a", "ett.b"), 2)
+
+
+@pytest.mark.parametrize("query", [("x",), ("x", "y")])
+def test_tuple_query_on_scalar_columns_is_rejected_without_a_list_level(query):
+    model = rf.Model.xs(d_model=8, ett=rf.Series(query=query), y=rf.Number(mask=True))
+    rows = pa.table({"x": [1.0, 2.0], "y": [3.0, 4.0]})
+    with pytest.raises(ValueError, match="each tuple source must select a list per record"):
+        model.encode(rows, strata="predict")

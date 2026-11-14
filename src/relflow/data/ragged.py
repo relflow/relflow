@@ -791,7 +791,8 @@ def project(
         except MissingFieldError:
             from relflow.tensorfields.base import TENSORFIELDS
 
-            if not allow_vacancy or Component.derive not in TENSORFIELDS[request.type].components:
+            vacant = Component.derive in TENSORFIELDS[request.type].components or request.stacked
+            if not allow_vacancy or not vacant:
                 raise
             field = vacancy(layout)
             source_less = True
