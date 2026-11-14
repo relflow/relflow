@@ -211,3 +211,43 @@ def test_request_declaring_stacked_and_derive_is_rejected_naming_the_address():
     with patch.dict(TENSORFIELDS[leaf.type].components, {Component.derive: object()}):
         with pytest.raises(ValueError, match=r"both stacked and a derive.*choose one"):
             leaf.post_bind_validate()
+
+
+FORECAST = rf.Forecast(horizon=2, targets=("value",))
+
+
+@pytest.mark.parametrize("other", [{"query": "keep"}, {"rate": 0.5}])
+def test_mask_select_is_exclusive_with_query_and_rate(other):
+    with pytest.raises(ValueError, match="select cannot be combined with query or rate"):
+        rf.Mask(select=rf.Spans(rate=0.2), reconstruct=True, **other)
+
+
+def test_forecast_mask_requires_reconstruct():
+    with pytest.raises(ValueError, match=r"Forecast.*reconstruct=True"):
+        rf.Mask(select=FORECAST)
+
+
+def test_forecast_mask_rejects_skip():
+    with pytest.raises(ValueError, match=r"Forecast.*drop skip=True"):
+        rf.Mask(select=FORECAST, skip=True, reconstruct=True)
+
+
+def test_row_selector_on_a_leaf_is_rejected():
+    with pytest.raises(ValueError, match="row selectors apply to branches"):
+        rf.Number(mask=rf.Mask(select=rf.Spans(rate=0.2), reconstruct=True))
+
+
+def test_mask_without_select_keeps_its_serialized_form():
+    assert rf.Mask.model_validate({"rate": 0.5}) == rf.Mask(rate=0.5)
+    assert rf.Mask(rate=0.5).select is None
+    assert rf.Mask(rate=0.5).model_dump() == {
+        "query": None,
+        "rate": 0.5,
+        "skip": False,
+        "dropout": True,
+        "reconstruct": False,
+    }
+    assert "select" not in rf.Number(mask=True).model_dump(mode="json")["mask"][0]
+    dumped = rf.Mask(select=FORECAST, reconstruct=True).model_dump()["select"]
+    assert dumped["targets"] == ("value",)
+    assert dumped["known"] == ()
