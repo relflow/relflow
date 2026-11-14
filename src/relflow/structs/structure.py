@@ -167,6 +167,58 @@ class Branch(Node, metaclass=BranchMeta):
         # a model preset to fill without replacing explicit defaults or None.
         super().__init__(**{name: value for name, value in data.items() if value is not OMITTED})
 
+    @classmethod
+    def chronological(
+        cls,
+        *,
+        length: int | None = None,
+        overflow: OverflowInput | None = cast(OverflowInput | None, OMITTED),
+        grain: GrainConfig = cast(GrainConfig, OMITTED),
+        mixer: MixerConfig | None = cast(MixerConfig | None, OMITTED),
+        direction: Direction = cast(Direction, OMITTED),
+        **options: Any,
+    ) -> Self:
+        """Build a branch of ordered rows with time series defaults.
+
+        The result is a plain ``Branch``: one token per row (``grain=Steps()``),
+        a dilated convolution mixer (``mixer=Conv()``) and causal steps
+        (``direction=Direction.causal``). A bounded branch keeps the most
+        recent rows (``overflow="tail"``). Every explicit argument replaces its
+        default. Rows are positioned by their count unless ``time_index`` is
+        set, in which case rows also receive a learned time-gap embedding.
+
+        The causal default suits forecasting and per-row targets. Classification
+        and other whole-series targets need
+        ``direction=rf.Direction.bidirectional``, because a causal branch lets
+        no row see the rows after it.
+
+        Args:
+            length: Row cap, or ``None`` to keep every row.
+            overflow: Which rows to keep beyond ``length``; ``"tail"`` when omitted and bounded.
+            grain: What one sequence token stands for.
+            mixer: The sequence mixer.
+            direction: Which steps a token may see.
+            **options: Any other ``Branch`` option, child field or ``fields`` mapping.
+
+        Returns:
+            A plain ``Branch``.
+
+        Raises:
+            ValueError: If the resulting options contradict each other, such as
+                ``mixer=Conv()`` without ``grain=Steps()`` or a ``time_index``
+                that names no child. The message names the branch and the remedy.
+        """
+        defaults: dict[str, Any] = {"grain": Steps(), "mixer": Conv(), "direction": Direction.causal}
+        if length is not None:
+            defaults["overflow"] = Overflow.tail
+        given: dict[str, Any] = {
+            name: value
+            for name, value in (("overflow", overflow), ("grain", grain), ("mixer", mixer), ("direction", direction))
+            if value is not OMITTED
+        }
+        merged: dict[str, Any] = {**defaults, **given, **options}
+        return cls(length=length, **merged)
+
     @pydantic.model_serializer(mode="wrap")
     def serialize_options(self, handler: pydantic.SerializerFunctionWrapHandler) -> dict[str, Any]:
         """Dump the branch without options that still hold their implicit value."""
