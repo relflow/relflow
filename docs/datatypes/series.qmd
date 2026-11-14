@@ -7,8 +7,10 @@ The daily spend of an account is a run of numbers whose order matters: a payment
 model can use the last 90 days as context, or forecast the next seven. `Series`
 holds one such run per record. Each step carries `n_dim` numeric values, such
 as daily amount spent and daily transaction count. Steps are ordered, not
-timestamped; use a [Branch](branch.qmd) with [Period](dateparts.qmd) when the
-calendar position of each item matters.
+timestamped. If each step needs its own fields, time gaps, or per-row outputs,
+use a [chronological Branch](../concepts/chronological-branches.qmd) instead.
+Its `time_index` can position rows by elapsed time; [Period](dateparts.qmd)
+alone encodes calendar parts, not elapsed spacing.
 
 ```python
 import relflow as rf
@@ -31,9 +33,11 @@ next_week:
   - [0.00, 0]
 ```
 
-The record shows three days of history and two forecast days; real records carry
-the full `length` and `horizon`. Every step in the history is known at the
-decision time. Use [Number](number.qmd) for a single value per record and
+The record shows three days of history and two labeled forecast days.
+`length=90` caps the history; it does not require 90 days. A target shorter
+than `horizon=7` has unobserved slots for the remaining days, while a longer
+target raises. Every step in the history is known at the decision time. Use
+[Number](number.qmd) for a single value per record and
 [Branch](branch.qmd) when each step has fields of different types. A `Series`
 can also sit inside each row of a
 [chronological branch](../concepts/chronological-branches.qmd), where it adds
@@ -61,11 +65,29 @@ source per channel, in tuple order, and sets `n_dim`; an explicit `n_dim` must
 equal its length. Every source must select the same steps: see
 [queries](../guides/query-paths.qmd#several-sources).
 
+For columnar lists, name both source paths explicitly. These source names
+also become the member names of each forecast step:
+
+```python
+import relflow as rf
+
+model = rf.Model.xs(
+    recent=rf.Series(query=("history.temp", "history.hum")),
+    next_day=rf.Series(query=("future.temp", "future.hum"), horizon=24, mask=True),
+)
+```
+
+A training record has `history: {temp: [...], hum: [...]}` and
+`future: {temp: [...], hum: [...]}`. Both lists within each struct must
+describe the same steps in the same order. Prediction can omit `future`
+because `next_day` is a hidden target.
+
 ### Missing values
 
 A step is observed only when every one of its channels is finite. A null, NaN,
 or infinite value makes its step unobserved, silently: the rest of the series
-stays valid, and the encoder sees which steps were observed. This covers a null
+stays valid, and the encoder sees which steps were observed. It does not impute
+missing values or keep partially observed steps. This covers a null
 value inside a list, a null step in a list of lists, and a missing channel.
 
 With a tuple query, a null source list is a missing channel at every step of
@@ -80,7 +102,7 @@ An empty series is `valued`. A non-empty series with no observed step takes the
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `n_dim` | required unless `query` is a tuple | Positive number of values per step. A tuple `query` sets it. |
-| `length` | `None` | Hard cap on retained steps. `None` keeps the whole series and pads each batch to its longest. |
+| `length` | `None` | Hard cap on retained input steps. `None` keeps the whole series; batches pad to their longest retained series. |
 | `overflow` | `None` | With a finite `length`: `head` (default), `tail`, `random`, or `error`. Rejected when `length` is `None`. |
 | `horizon` | `None` | Steps to predict. Required on reconstruction targets (`mask=True` or a reconstructing ancestor), rejected otherwise. |
 | `n_blocks` | `6` | Number of dilated convolution blocks. |
@@ -106,6 +128,8 @@ With `n_blocks=k`, each step feature sees up to `1 + 4 * (2^k - 1)` neighboring
 steps: 253 at the default of six. The masked max-pool then covers every
 retained observed step, so any of them can influence the token. Choose
 `n_blocks` so that the local context per step matches the patterns that matter.
+The single token exposes no per-step contextual representation; the forecast
+decoder predicts all `horizon` steps from the record context instead.
 Apply `length` to bound memory.
 
 ## Reshaping in a preprocessor
@@ -181,9 +205,11 @@ model width. See [shared leaf options](index.qmd#shared-leaf-options).
 In [prediction output](../reference/prediction-output.qmd), `content` is a list
 of `horizon` steps. With a single query, each step is a list of float64
 values; with a tuple query, each step is a struct with one float64 member per
-query text, in tuple order. A forecast target does not need its source
+query text, in tuple order. For the `next_day` field above, one step is shaped
+like `{future.temp: 21.5, future.hum: 0.61}`. These are predicted values,
+not actual future observations. A forecast target does not need its source
 columns at prediction time: when they are absent, the series is still
-predicted. The writer emits exactly `horizon` steps per coordinate. Parquet round-trips these lists,
-including inside a `Branch` with null items. As with other decoded fields, read
-the shared `state` and `inferred` members to learn whether a series was
-reconstructed.
+predicted. The writer emits exactly `horizon` steps per coordinate. Parquet
+round-trips these variable lists, including inside a `Branch` with null items.
+As with other decoded fields, read the shared `state` and `inferred` members
+to learn whether a series was reconstructed.
