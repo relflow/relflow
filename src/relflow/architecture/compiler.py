@@ -131,6 +131,7 @@ def compile(
     replacements = []
     for module in model.modules():
         if not (
+            # A mixer without a length (a convolution stack) must be gated here before it is built.
             (encoders and type(module) is BranchEncoder and len(module.encoder))
             or (pools and type(module) is LearnedQueryCrossAttention)
         ):

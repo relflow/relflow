@@ -9,6 +9,8 @@ from tensordict import TensorDict
 
 from relflow.architecture.attention import RotaryMultiheadAttention
 from relflow.architecture.blocks import feed_forward, norm
+from relflow.architecture.direction import rules
+from relflow.architecture.mixers import TransformerMixer, mixers
 from relflow.architecture.packed import SDPA_BATCH_MAX, Packed, block, customized, pack, unpack
 from relflow.architecture.reducers import Reducer, reducers
 from relflow.structs.packages import Parcel
@@ -162,21 +164,10 @@ class BranchEncoder(torch.nn.Module):
         # Schema binding attaches every branch to a node, including the schema root.
         self.destination: Address = cast(Node, branch.parent).address
 
-        layers: list[RotaryTransformerEncoderLayer] = []
         attention = branch.attention
-        if attention is not None:
-            for _ in range(branch.n_layers):
-                layers.append(
-                    RotaryTransformerEncoderLayer(
-                        d_model=schema.d_model,
-                        nhead=branch.n_heads,
-                        n_kv_heads=attention.kv_heads(branch.n_heads),
-                        dropout=dropout,
-                        ffnx=branch.ffnx,
-                    )
-                )
-
-        self.encoder = torch.nn.ModuleList(layers)
+        self.encoder = mixers[type(branch.mixer)](
+            branch.mixer, branch=branch, schema=schema, dropout=dropout, rule=rules[branch.direction]
+        )
 
         widths = [
             int(child.active) if isinstance(child, Leaf) else schema.branch_outputs[child.address]
@@ -322,7 +313,7 @@ class BranchEncoder(torch.nn.Module):
         """
         from relflow.architecture.compiler import canonical
 
-        prepared = bool(self.encoder) and not customized(self.encoder)
+        prepared = type(self.encoder) is TransformerMixer and bool(self.encoder) and not customized(self.encoder)
         full = prepared and bool(present.all())
         if prepared and not full:
             values, packing = pack(selected, present, positions)
@@ -338,6 +329,7 @@ class BranchEncoder(torch.nn.Module):
             # FlashAttention uses a CUDA grid dimension for sequence batches.
             unmasked = (
                 full
+                and type(self.encoder) is TransformerMixer
                 and selected.is_cuda
                 and selected.shape[0] <= SDPA_BATCH_MAX
                 and type(self) is BranchEncoder
@@ -588,14 +580,7 @@ class BranchEncoder(torch.nn.Module):
 
         Layers receive the branch's structural positions whenever it has them.
         """
-        for layer in cast(Iterable[RotaryTransformerEncoderLayer], self.encoder):
-            if packing is not None:
-                inputs = layer(inputs, present=present, packing=packing)
-            elif positions is not None:
-                inputs = layer(inputs, present=present, positions=positions)
-            else:
-                inputs = layer(inputs, present=present)
-        return inputs
+        return self.encoder(inputs, present=present, positions=positions, steps=None, packing=packing)
 
     def contextualize(self, parcels: list[Parcel]) -> list[Parcel]:
         """Mix each item's fields: its leaves and the summaries of its reduced child branches."""

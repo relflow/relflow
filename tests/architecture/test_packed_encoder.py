@@ -6,6 +6,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 import relflow as rf
 from relflow.architecture.encoder import BranchEncoder
+from relflow.architecture.mixers import TransformerMixer
 from relflow.structs.packages import Parcel
 
 
@@ -185,7 +186,7 @@ def test_custom_layer_needs_only_original_forward_protocol(scope):
         for value in result:
             torch.testing.assert_close(value.payload, (values * 2).masked_fill(~present[..., None], 0))
     else:
-        encoder.encoder = torch.nn.ModuleList([Layer()])
+        encoder.encoder = TransformerMixer([Layer()])
         values = torch.randn(4, 7, 20, dtype=torch.float64)
         present = presence()
         result = encoder([parcel(values, present)])
