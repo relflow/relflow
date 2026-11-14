@@ -105,7 +105,7 @@ are rejected.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `query` | `None` | Read the parent's same-named child; [queries](../guides/query-paths.qmd) select local or ancestor paths, with ordered inputs for types that support derivation. |
+| `query` | `None` | Read the parent's same-named child; [queries](../guides/query-paths.qmd) select local or ancestor paths, with ordered inputs for types that support derivation, or a tuple of sources for tensorfields that stack channels (`Vector`, `Series`). |
 | `description` | `None` | Human-readable meaning or units. |
 | `active` | `True` | Inactive leaves remain in the schema but do not encode, train, or predict. |
 | `nullable` | `True` | Whether explicit nulls are allowed in the projected input. |

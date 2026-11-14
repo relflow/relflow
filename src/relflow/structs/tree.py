@@ -2,7 +2,7 @@
 
 import functools
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypeAlias, TypedDict, cast
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self, TypeAlias, TypedDict, cast
 
 import pydantic
 from anytree import NodeMixin
@@ -271,6 +271,8 @@ class Leaf(Node):
     else:
         type: str
     query: str | tuple[str, ...] | None = None
+    # Declared by the extension request; shared code never infers it from the type name.
+    stacked: ClassVar[bool] = False
     nullable: bool = True
     pooling: Literal["query", "mean"] = "query"
     decoder_position: pydantic.StrictBool | None = None
@@ -316,17 +318,39 @@ class Leaf(Node):
             scope(expression)
         return self
 
+    def check_sources(self, sources: tuple[str, ...]) -> None:
+        """Reject an empty or repeated source list for a request that stacks channels.
+
+        Args:
+            sources: The tuple query of this leaf.
+
+        Raises:
+            ValueError: If no source is named or one source repeats.
+        """
+        if not sources:
+            raise ValueError(f"field '{self.address}' has an empty tuple query; name at least one source")
+        repeated = next((text for index, text in enumerate(sources) if text in sources[:index]), None)
+        if repeated is not None:
+            raise ValueError(
+                f"field '{self.address}' query tuple {sources!r} repeats {repeated!r}; name each source once"
+            )
+
     def post_bind_validate(self) -> None:
         """Check scoped sources and derived-input capability against the live registry."""
         from relflow.data.query import scope
         from relflow.structs.enums import Component
         from relflow.tensorfields.base import TENSORFIELDS
 
-        if isinstance(self.query, tuple) and Component.derive not in TENSORFIELDS[self.type].components:
+        if isinstance(self.query, tuple) and not (
+            Component.derive in TENSORFIELDS[self.type].components or type(self).stacked
+        ):
             raise ValueError(
                 f"field '{self.address}' has multiple source queries but extension '{self.type}' has no "
-                "derive component; register Component.derive or use one query"
+                "derive component and its Request does not declare stacked = True; "
+                "register Component.derive, declare stacked, or use one query"
             )
+        if isinstance(self.query, tuple) and type(self).stacked:
+            self.check_sources(self.query)
         if self.query is None:
             return
         ancestors = sum(node.type == "branch" for node in self.path) - 1
