@@ -595,4 +595,159 @@ def query(
     return selected
 
 
-__all__ = ["Plan", "Projection", "Query", "bind", "compile", "query", "scope"]
+def leaves(values: list[pa.Array], *, expressions: tuple[str, ...], address: str | None) -> pa.Array:
+    """Interleave aligned scalar sources into one fixed-size channel axis.
+
+    Args:
+        values: One array per channel, all of the same length.
+        expressions: The tuple query, used in messages.
+        address: Field address, used in messages.
+
+    Returns:
+        A fixed-size list per row, null only when every channel is null.
+
+    Raises:
+        ValueError: If the source types have no common type.
+    """
+    types = [item.type for item in values]
+    try:
+        schemas = [pa.schema([pa.field("value", datatype)]) for datatype in types]
+        common = pa.unify_schemas(schemas, promote_options="permissive").field("value").type
+        converted = [pc.cast(item, common, safe=True) for item in values]
+    except pa.ArrowException as error:
+        raise ValueError(
+            f"tuple query {expressions!r} at {address!r} cannot stack source types {types}; "
+            "cast them to one type in a preprocessor"
+        ) from error
+
+    rows, width = len(values[0]), len(values)
+    order = (np.arange(rows)[:, None] + rows * np.arange(width)[None, :]).ravel()
+    child = pc.take(pa.concat_arrays(converted), pa.array(order, type=pa.int64()))
+    any_valid = np.any([pc.is_valid(item).to_numpy(zero_copy_only=False) for item in values], axis=0)
+    # Arrow accepts an explicit mask; pyarrow-stubs omits it.
+    return pa.FixedSizeListArray.from_arrays(child, width, mask=pa.array(~any_valid, type=pa.bool_()))  # pyrefly: ignore[no-matching-overload]
+
+
+def lists(values: list[pa.Array], *, expressions: tuple[str, ...], address: str | None) -> pa.Array:
+    """Align list sources on shared offsets and stack their children.
+
+    A null list is a missing channel: it takes the length of the valid sources.
+    Valid lists must have equal lengths.
+
+    Args:
+        values: One list array per channel, all of the same length.
+        expressions: The tuple query, used in messages.
+        address: Field address, used in messages.
+
+    Returns:
+        One list container holding the stacked children, null when every source is null.
+
+    Raises:
+        ValueError: If valid lists differ in length at some record.
+    """
+    sources = [parts(item) for item in values]
+    offsets = [item[0] for item in sources]
+    valid = np.stack([item[2] for item in sources])
+    lengths = np.stack([np.diff(item) for item in offsets])
+    reference = np.where(valid, lengths, 0).max(axis=0)
+    mismatch = valid & (lengths != reference[None, :])
+    if mismatch.any():
+        first = int(np.flatnonzero(mismatch.any(axis=0))[0])
+        raise ValueError(
+            f"tuple query {expressions!r} at {address!r} selects lists of different lengths at record {first}: "
+            f"{lengths[:, first].tolist()}; every source must select the same rows. Pad or trim them in a preprocessor"
+        )
+
+    total = int(reference.sum())
+    starts = np.cumsum(reference) - reference
+    parents = np.repeat(np.arange(len(reference)), reference)
+    within = np.arange(total) - np.repeat(starts, reference)
+    children = [
+        pc.take(source[1], pa.array(base[parents] + within, mask=~ok[parents], type=pa.int64()))
+        for source, base, ok in zip(sources, offsets, valid, strict=True)
+    ]
+    inner = channels(children, expressions=expressions, address=address)
+
+    large = any(pa.types.is_large_list(item.type) for item in values)
+    boundaries = pa.array(np.append(starts, total), type=pa.int64() if large else pa.int32())
+    container = pa.LargeListArray if large else pa.ListArray
+    mask = pa.array(np.asarray(~valid.any(axis=0), dtype=bool))
+    # Arrow accepts an explicit mask; pyarrow-stubs omits it.
+    return container.from_arrays(boundaries, inner, mask=mask)  # pyrefly: ignore[no-matching-overload]
+
+
+def channels(values: list[pa.Array], *, expressions: tuple[str, ...], address: str | None) -> pa.Array:
+    """Stack aligned sources level by level until the scalar leaves.
+
+    Raises:
+        ValueError: If only some sources are lists.
+    """
+    nested = [listed(item.type) for item in values]
+    if not any(nested):
+        return leaves(values, expressions=expressions, address=address)
+    if not all(nested):
+        raise ValueError(
+            f"tuple query {expressions!r} at {address!r} selects values at different nesting: "
+            f"{[str(item.type) for item in values]}; select the same list depth for every source"
+        )
+    return lists(values, expressions=expressions, address=address)
+
+
+def observed(present: list[pa.Array]) -> pa.Array:
+    """Combine source presences: a record is present when any source is present at it."""
+    flags = [
+        item if item.type == pa.bool_() else pc.is_valid(item)  # traversed sources carry list presence
+        for item in present
+    ]
+    return pa.array(np.any([item.fill_null(False).to_numpy(zero_copy_only=False) for item in flags], axis=0))
+
+
+def stack(
+    source: pa.Table | pa.Array | pa.ChunkedArray, expressions: tuple[str, ...], *, address: str | None = None
+) -> Projection[pa.Array | pa.ChunkedArray]:
+    """Bind several queries and stack the selected values into a trailing channel axis.
+
+    Channel ``c`` reads ``expressions[c]``. Validity is kept per channel: a
+    source that is null at a row only makes its channel null there.
+
+    Args:
+        source: Records, as for ``query``.
+        expressions: One query per channel.
+        address: Field address, used in messages.
+
+    Returns:
+        Values of ``fixed_size_list<N>`` below any shared list levels, and one
+        Boolean presence per record: true when any source is present.
+
+    Raises:
+        ValueError: If the sources select different nesting, different list
+            lengths, or types without a common type.
+    """
+    selected = [query(source, text, address=address) for text in expressions]
+    chunked = isinstance(selected[0].values, pa.ChunkedArray)
+    groups = (
+        list(zip(*(cast(pa.ChunkedArray, item.values).chunks for item in selected), strict=True))
+        if chunked
+        else [tuple(cast(pa.Array, item.values) for item in selected)]
+    )
+    marks = (
+        list(zip(*(cast(pa.ChunkedArray, item.present).chunks for item in selected), strict=True))
+        if chunked
+        else [tuple(cast(pa.Array, item.present) for item in selected)]
+    )
+    # A zero-chunk input still needs the stacked type, so stack one empty group.
+    empty = chunked and not groups
+    if empty:
+        groups = [tuple(pa.array([], type=item.values.type) for item in selected)]
+        marks = [tuple(pa.array([], type=item.present.type) for item in selected)]
+    stacked = [channels(list(group), expressions=expressions, address=address) for group in groups]
+    present = [observed(list(mark)) for mark in marks]
+    if not chunked:
+        return Projection(values=stacked[0], present=present[0])
+    return Projection(
+        values=pa.chunked_array([] if empty else stacked, type=stacked[0].type),
+        present=pa.chunked_array([] if empty else present, type=pa.bool_()),
+    )
+
+
+__all__ = ["Plan", "Projection", "Query", "bind", "compile", "query", "scope", "stack"]
