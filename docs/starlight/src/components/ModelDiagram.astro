@@ -21,15 +21,21 @@ const dataset: Dataset = {
   relations: [],
 };
 
-function describe(path: string, name: string, description: string, nodes: ModelNode[]) {
+function describe(path: string, name: string, nodes: ModelNode[]) {
   dataset.entities.push({
     id: path,
     name,
-    description,
+    description: reference.representations[path === '/' ? 'Model' : 'Branch'],
     columns: nodes.map((node) => ({
       name: node.name,
       type: `rf.${node.type}`,
-      description: [reference.types[node.type]?.text, node.description || node.declaration]
+      description: [
+        node.target
+          ? reference.types[node.type]?.text
+          : reference.representations[node.type] || reference.types[node.type]?.text,
+        node.target ? reference.options.target.text : undefined,
+        `Configuration: ${node.declaration}`,
+      ]
         .filter(Boolean)
         .join(' '),
       ...(node.kind === 'branch'
@@ -46,13 +52,13 @@ function describe(path: string, name: string, description: string, nodes: ModelN
       to: node.path,
       fromColumn: node.name,
       cardinality: 'many',
-      description: node.docstring || node.declaration,
+      description: `${node.className} records provide context to ${name} through ${node.name}.`,
     });
-    describe(node.path, node.className!, node.docstring || '', node.children);
+    describe(node.path, node.className!, node.children);
   }
 }
 
-describe('/', model.modelClass, root.docstring, model.nodes);
+describe('/', model.modelClass, model.nodes);
 ---
 
-<DataExplorer {id} {dataset} headingLevel={4} showObservation={false} />
+<DataExplorer {id} {dataset} view="model" headingLevel={4} showObservation={false} />

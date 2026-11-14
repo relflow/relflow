@@ -5,6 +5,9 @@
 /** Authored reference explanations. Matching and annotation mechanics live in code/config-notes.mjs. */
 export const reference = {
   representations: /** @type {Record<string, string>} */ ({
+    Model: 'Typed fields and related-record context are combined to predict the declared targets.',
+    Branch:
+      'Each record is encoded from its typed fields. The collection provides context to its parent while preserving record boundaries.',
     Number: 'Standardized raw and signed-log values preserve numeric magnitude for the model.',
     Boolean:
       'Fixed true/false value codes and a learned value-state representation describe this fact.',

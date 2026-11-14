@@ -8,9 +8,10 @@ interface Props {
   dataset: Dataset;
   headingLevel?: 3 | 4 | 5 | 6;
   showObservation?: boolean;
+  view?: 'data' | 'model';
 }
 
-const { id, dataset, headingLevel = 3, showObservation = true } = Astro.props;
+const { id, dataset, headingLevel = 3, showObservation = true, view = 'data' } = Astro.props;
 if (!id || /\s/.test(id))
   throw new Error('DataExplorer needs a page-unique id without whitespace.');
 const Heading = `h${headingLevel}` as 'h3' | 'h4' | 'h5' | 'h6';
@@ -19,7 +20,7 @@ const columns = dataset.entities.flatMap((entity) => entity.columns);
 const roles = {
   key: ['PK', 'Primary key'],
   reference: ['FK', 'Foreign key'],
-  target: ['●', 'Prediction target'],
+  target: ['●', view === 'model' ? 'Prediction target' : 'Recorded outcome'],
   training: ['T', 'Training-only source'],
   collection: ['↳', 'Record collection'],
   record: ['↳', 'Nested record'],
@@ -90,7 +91,7 @@ const roles = {
                         const columnId = `${id}-entity-${dataset.entities.indexOf(entity)}-column-${index}`;
                         const [symbol, role] = column.role
                           ? roles[column.role]
-                          : ['', 'Known input'];
+                          : ['', view === 'model' ? 'Model input' : 'Source field'];
                         return (
                           <li>
                             <button

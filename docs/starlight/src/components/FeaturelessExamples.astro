@@ -34,10 +34,9 @@ const choices = examples.map((item) => ({
       <article
         id={`featureless-${item.id}`}
         class="featureless-example"
-        aria-labelledby={`featureless-${item.id}-title`}
+        aria-label={item.label}
         data-case={item.id}
       >
-        <h3 id={`featureless-${item.id}-title`}>{item.label}</h3>
         <ErdToggle id={`featureless-${item.id}`}>
           <DataExplorer
             slot="data"
@@ -72,13 +71,6 @@ const choices = examples.map((item) => ({
   }
   [data-ready] .featureless-example[aria-hidden='true'] {
     display: none;
-  }
-  .featureless-example h3 {
-    margin: 0 0 1rem;
-    color: var(--rf-ink);
-    font-size: 1.12rem;
-    line-height: 1.4;
-    letter-spacing: -0.015em;
   }
   .sr-only {
     position: absolute;

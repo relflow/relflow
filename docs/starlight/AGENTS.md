@@ -83,6 +83,10 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   reuses their field descriptions for the nested Core Concepts records.
   Mark source-only keys separately from modeled inputs. Only source-table views
   add illustrative joins; nested examples do not need extra PK/FK fields.
+  Source descriptions explain field meaning, units, timing, and relationships,
+  without model configuration or encoding details. Model ERDs use shared
+  representation descriptions and their declarations instead; set `view="model"`
+  for model-input and prediction-target labels.
   `src/datasets/` owns shared layout, measured SVG connectors, and column notes.
   Keep instance IDs unique, tooltips independent, both themes, keyboard/touch use,
   Escape, no-JavaScript descriptions, and shared use-case selection working.
