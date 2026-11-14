@@ -45,6 +45,7 @@ from relflow.data.ragged import RaggedField
 from relflow.data.sources import source
 from relflow.helpers.optimizers import adamw
 from relflow.inference.callback import Writer
+from relflow.structs.contrastive import Contrastive, Crops, Hierarchical
 from relflow.structs.enums import (
     AttentionInput,
     AttentionMode,
@@ -165,7 +166,10 @@ __all__ = [
     "Conv",
     "Coordinates",
     "CustomDataModule",
+    "Contrastive",
+    "Crops",
     "Direction",
+    "Hierarchical",
     "DuckDBDataModule",
     "DateParts",
     "Enum",

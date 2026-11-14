@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal, Self, TypeAlias, cast
 
 import pydantic
 
+from relflow.structs.contrastive import Contrastive
 from relflow.structs.enums import AttentionInput, AttentionMode, Direction, Overflow, OverflowInput
 from relflow.structs.grain import Coordinates, GrainConfig, Steps
 from relflow.structs.masking import Forecast
@@ -32,6 +33,7 @@ IMPLICIT: Mapping[str, object] = MappingProxyType(
         "direction": Direction.bidirectional,
         "time_index": None,
         "time_step": None,
+        "contrastive": None,
     }
 )
 
@@ -73,6 +75,26 @@ def check_forecast_children(
             raise ValueError(f"{where} Forecast {singular} '{name}' {taken[name]}")
         if not isinstance(children[name], Leaf):
             raise ValueError(f"{where} Forecast {singular} '{name}' is a branch; {remedy}")
+
+
+def check_contrastive(branch: Branch) -> None:
+    """Require a fixed token count per row for every child of a contrastive branch.
+
+    Args:
+        branch: The branch to check.
+
+    Raises:
+        ValueError: A child branch has ``reduction=None``.
+    """
+    if branch.contrastive is None:
+        return
+    unreduced = next((f for f in branch.fields if isinstance(f, Branch) and f.reduction is None), None)
+    if unreduced is None:
+        return
+    raise ValueError(
+        f"branch '{branch.address}' contrastive views need a fixed width per row, but child "
+        f"'{unreduced.address}' has reduction=None; set a reduction on that child or remove contrastive"
+    )
 
 
 def bounds(branch: Branch) -> None:
@@ -123,7 +145,8 @@ class Branch(Node):
     child leaf whose values give each row a position in time, relative to the
     first row of its record and non-decreasing; ``time_step`` is the unit of
     those positions. They set attention positions and a learned gap embedding;
-    they do not resample rows.
+    they do not resample rows. ``contrastive`` adds a training objective that
+    contrasts two crops of each record; see ``Contrastive``.
     ``mask`` accepts the same policies as a leaf and applies to its descendants.
     """
 
@@ -141,6 +164,7 @@ class Branch(Node):
     direction: Direction = Direction.bidirectional
     time_index: str | None = None
     time_step: float | datetime.timedelta | None = None
+    contrastive: Contrastive | None = None
     # The before-validator normalizes this public Boolean default to a tuple.
     mask: tuple[Mask, ...] = cast(tuple[Mask, ...], pydantic.Field(default=False))
     fields: list[Self | pydantic.SerializeAsAny[pydantic.InstanceOf[Leaf]]] = pydantic.Field(default_factory=list)
@@ -164,6 +188,7 @@ class Branch(Node):
         direction: Direction = cast(Direction, OMITTED),
         time_index: str | None = cast(str | None, OMITTED),
         time_step: float | datetime.timedelta | None = cast(float | datetime.timedelta | None, OMITTED),
+        contrastive: Contrastive | None = cast(Contrastive | None, OMITTED),
         dropout: Rate | None = cast(Rate | None, OMITTED),
         mask: MaskInput = False,
         type: Literal["branch"] = "branch",
@@ -188,6 +213,7 @@ class Branch(Node):
             direction=direction,
             time_index=time_index,
             time_step=time_step,
+            contrastive=contrastive,
             dropout=dropout,
             mask=mask,
             type=type,
@@ -444,6 +470,7 @@ class Branch(Node):
 
     def post_bind_validate(self) -> None:
         bounds(self)
+        check_contrastive(self)
         if len(self.mask) == 0:
             return None
 
