@@ -72,6 +72,16 @@ class Request(RequestBase):
     jitter: Jitter = pydantic.Field(default_factory=Jitter)
     objective: Objective = Objective.l2
 
+    @property
+    def channelwise(self) -> bool:
+        """Whether a tuple ``query`` stacks channels that each keep their own validity.
+
+        A channel that is null or non-finite is missing: its content is NaN,
+        the embedder is told which channels are missing, and the loss skips
+        it. A vector with no finite channel takes the ``other`` state.
+        """
+        return isinstance(self.query, tuple)
+
     @pydantic.model_validator(mode="before")
     @classmethod
     def check_n_dim(cls, data: Any) -> Any:
@@ -143,17 +153,20 @@ class TensorField(TensorFieldBase[torch.Tensor]):
                 if pc.any(pc.not_equal(lengths, request.n_dim)).as_py():  # pyrefly: ignore [no-matching-overload]
                     raise ValueError(f"vector field at '{address}' expects every value to have length {request.n_dim}")
                 flattened = pc.list_flatten(values)
-                if flattened.null_count:
+                if flattened.null_count and not request.channelwise:
                     raise ValueError(f"vector field at '{address}' expects non-null numeric elements")
                 try:
                     flattened = pc.cast(flattened, pa.float32(), safe=True)
                 except pa.ArrowException as error:
                     raise ValueError(f"vector field at '{address}' could not be converted to float32") from error
                 encoded = flattened.to_numpy(zero_copy_only=False).reshape(-1, request.n_dim).copy()
-                finite = np.isfinite(encoded).all(axis=1)
-                if not finite.all():
-                    encoded[~finite] = 0.0
-                    state[field.place(np.logical_not(finite), fill=False)] = Tokens.other.value
+                finite = np.isfinite(encoded)
+                usable = finite.any(axis=1) if request.channelwise else finite.all(axis=1)
+                if request.channelwise:
+                    encoded[~finite] = math.nan
+                if not usable.all():
+                    encoded[~usable] = 0.0
+                    state[field.place(np.logical_not(usable), fill=False)] = Tokens.other.value
             content = torch.from_numpy(field.place(encoded, fill=0.0, value_shape=(request.n_dim,)))
             return content, torch.from_numpy(state)
 
@@ -185,13 +198,14 @@ class Embedder(EmbedderBase):
         self.origin: Address = address
         self.destination: Address = cast("Branch", request.parent).address
         self.jitter: Jitter = request.jitter
+        self.channelwise: bool = request.channelwise
 
         self.embeddings = torch.nn.Embedding(
             num_embeddings=len(Tokens),
             embedding_dim=schema.d_model,
         )
         self.linear = torch.nn.Sequential(
-            torch.nn.Linear(in_features=request.n_dim, out_features=schema.d_model),
+            torch.nn.Linear(in_features=request.n_dim * (2 if request.channelwise else 1), out_features=schema.d_model),
             torch.nn.GELU(approximate="tanh"),
         )
 
@@ -206,6 +220,10 @@ class Embedder(EmbedderBase):
         if self.training:
             eligible = state.eq(Tokens.valued).unsqueeze(-1) & torch.isfinite(content)
             content = self.jitter.apply(content, eligible)
+
+        if self.channelwise:
+            observed = torch.isfinite(content)
+            content = torch.cat([content.masked_fill(~observed, 0.0), observed.to(content.dtype)], dim=-1)
 
         projected = self.linear(content)
         embeddings = self.embeddings(state)
@@ -286,6 +304,9 @@ def loss(
     targets = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(-1, request.n_dim)
     predicted = inputs[valued]
     observed = targets[valued]
+    if request.channelwise:
+        finite = torch.isfinite(observed)
+        predicted, observed = predicted[finite], observed[finite]
     if predicted.numel():
         output += module.track(
             (address, strata, Metric.loss, TensorKey.content),
