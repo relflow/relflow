@@ -62,8 +62,8 @@ export default defineConfig({
           label: 'Core Concepts',
           items: [
             { label: 'Model trees', slug: 'concepts/models' },
-            { label: 'Data types', slug: 'concepts/data-types' },
             { label: 'Branches & context', slug: 'concepts/branches' },
+            { label: 'Data types', slug: 'concepts/data-types' },
             { label: 'Targets & masking', slug: 'concepts/targets' },
             { label: 'Data modules', slug: 'concepts/data-modules' },
             { label: 'Training & learned state', slug: 'concepts/training' },
