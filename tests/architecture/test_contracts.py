@@ -374,3 +374,22 @@ def test_forward_accepts_forecast_extent_up_to_capacity():
     batch = model.encode(table, strata="train")
     output = runtime.step(model, batch, 0, strata=rf.Strata.train)
     assert output is not None and torch.isfinite(output["loss"])
+
+
+def test_geometry_views_must_match_the_parent_shape_and_be_non_negative() -> None:
+    model = rf.Model.xs(
+        d_model=8, history=rf.Branch(length=3, amount=rf.Number, contrastive=rf.Contrastive(views=rf.Crops(width=2)))
+    )
+    inputs = model.encode(arrow_table([{"history": [{"amount": 1.0}] * 3}]), strata=Strata.train)
+    geometry = inputs[Address()][Address("history")]
+    assert geometry.views.shape == (1, 1, 2)
+    sanitize(model, inputs, strata=Strata.train)
+
+    original = geometry.views
+    geometry.views = torch.zeros(1, 2, dtype=torch.int64)
+    with pytest.raises(ForwardContractError, match="/history.*views must be int64 with shape"):
+        sanitize(model, inputs, strata=Strata.train)
+
+    geometry.views = -torch.ones_like(original)
+    with pytest.raises(ForwardContractError, match="/history.*views must be non-negative"):
+        sanitize(model, inputs, strata=Strata.train)

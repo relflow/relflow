@@ -14,6 +14,7 @@ import torch
 from tensordict import TensorDict
 
 from relflow.data.arrow import Encoded, Geometry, Retain
+from relflow.data.crops import starts
 from relflow.data.datasets.base import EncodedInput, InterprocessEncodingContext
 from relflow.data.ragged import Layout, RaggedField, coalesce
 from relflow.structs.enums import Component, Strata, Tokens
@@ -25,7 +26,11 @@ NO_TIMES: Mapping[Address, np.ndarray] = MappingProxyType({})
 
 
 def geometry(
-    layouts: Mapping[Address, Layout], *, rows: int, times: Mapping[Address, np.ndarray] = NO_TIMES
+    layouts: Mapping[Address, Layout],
+    *,
+    rows: int,
+    times: Mapping[Address, np.ndarray] = NO_TIMES,
+    views: Mapping[Address, np.ndarray] = NO_TIMES,
 ) -> TensorDict:
     """Move shared Arrow structural coordinates into the Torch batch plane."""
 
@@ -39,6 +44,7 @@ def geometry(
             valid=torch.from_numpy(layout.valid),
             slots=torch.from_numpy(slots),
             times=torch.from_numpy(times[address]) if address in times else None,
+            views=torch.from_numpy(views[address]) if address in views else None,
             batch_size=[rows],
         )
     return TensorDict(source=cast(Any, axes), batch_size=[rows])
@@ -140,7 +146,19 @@ def encode(
         )
 
     inputs = TensorDict(source=cast(Any, out), batch_size=[batch.num_rows])
-    inputs[Address()] = geometry(coalesced.layouts, rows=batch.num_rows, times=coalesced.times)
+    views = {
+        address: starts(
+            coalesced.layouts[address].lengths,
+            crops=branch.contrastive.views,
+            seed=seed,
+            epoch=epoch,
+            ordinal=ordinal,
+            address=address,
+        )
+        for address, branch in schema.branches.items()
+        if strata == Strata.train and branch.contrastive is not None and address in coalesced.layouts
+    }
+    inputs[Address()] = geometry(coalesced.layouts, rows=batch.num_rows, times=coalesced.times, views=views)
     return Encoded(tensors=inputs, source=batch, retain=retain, observations=observations, bindings=bindings)
 
 

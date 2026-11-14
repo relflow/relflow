@@ -301,6 +301,13 @@ def require_geometry(module: "Model", inputs: TensorDict) -> dict[Address, tuple
                 f"forward branch geometry '{address}' slots must start with parent shape {parent_shape}, "
                 f"got {tuple(geometry.slots.shape)}"
             )
+        if geometry.views is not None and (
+            geometry.views.dtype != torch.int64 or tuple(geometry.views.shape) != (*parent_shape, 2)
+        ):
+            raise ForwardContractError(
+                f"forward branch geometry '{address}' views must be int64 with shape {(*parent_shape, 2)}, "
+                f"got {geometry.views.dtype} with shape {tuple(geometry.views.shape)}"
+            )
         extent = geometry.slots.shape[-1]
         if (address == Address() and extent != 1) or (branch.capacity is not None and extent > branch.capacity):
             raise ForwardContractError(
@@ -333,6 +340,8 @@ def require_geometry_values(module: "Model", inputs: TensorDict) -> None:
             raise ForwardContractError(
                 f"forward branch geometry '{address}' validity must agree with collection lengths"
             )
+        if geometry.views is not None and (geometry.views < 0).any():
+            raise ForwardContractError(f"forward branch geometry '{address}' views must be non-negative")
         positions = torch.arange(geometry.slots.shape[-1], device=geometry.slots.device)
         if (geometry.slots & (positions >= geometry.lengths.unsqueeze(-1))).any():
             raise ForwardContractError(f"forward branch geometry '{address}' slots must lie within collection lengths")
