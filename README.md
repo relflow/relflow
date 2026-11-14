@@ -196,6 +196,18 @@ and restartable batch factories are also supported. Cloud paths such as
 SQL queries and custom record generators connect through relflow's
 [data modules](https://www.relflow.ai/en/latest/guides/data-modules.html).
 
+The included [command line](https://www.relflow.ai/en/latest/guides/command-line.html)
+inspects models and runs prediction and serving workflows from a saved artifact:
+
+```bash
+relflow inspect payment.rf
+relflow predict payment.rf --input payments/requests --output predictions/payment
+relflow serve payment.rf --host 127.0.0.1 --port 8080
+```
+
+Use `relflow inspect` to describe a model and `relflow check` for preflight.
+Serving requires `relflow[serving]`.
+
 To collect predictions in memory, call
 `result = model.predict(datamodule=requests, batch_size=256, devices=1)`.
 The result is an eager Polars DataFrame with nested `predictions`, optional

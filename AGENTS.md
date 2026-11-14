@@ -291,9 +291,16 @@ retain Arrow tables and metadata, and HTTP serving retains Arrow IPC/JSON and
 version headers. Extension output list children must be named `element`.
 
 PyArrow Parquet cannot round-trip fixed-size lists below null containers.
-`rf.Writer` rejects those batches before writing; use Arrow IPC for sparse
+`rf.Writer` in its default Parquet mode rejects those batches before writing;
+use `rf.Writer(..., format="ipc")` for streaming sparse
 vector results. Scalar rich results and nonnull representation vectors retain
 normal Parquet support.
+
+The base install includes `relflow inspect`, `check`, `predict`, and
+`serve` (also `python -m relflow`). Architecture stays in model YAML; versioned
+run YAML configures data and execution. Prediction jobs use fresh output directories
+and `_SUCCESS` completion markers. `rf.inspect` and `rf.check` expose the same
+inspection and preflight contracts from Python. See `docs/guides/command-line.qmd`.
 
 ## Inference
 

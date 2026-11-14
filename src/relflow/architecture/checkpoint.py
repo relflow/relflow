@@ -96,11 +96,35 @@ class CheckpointState:
 
     @staticmethod
     def require(checkpoint: dict[str, Any]) -> None:
-        """Reject a checkpoint mapping that lacks a RelFlow field."""
+        """Validate the metadata needed to construct or restore a model."""
+        if not isinstance(checkpoint, dict):
+            raise ValueError("checkpoint must contain a mapping")
         missing = CheckpointState.required_fields - set(checkpoint)
         if missing:
             fields = ", ".join(sorted(missing))
             raise ValueError(f"missing checkpoint fields: {fields}")
+        if not isinstance(checkpoint["state_dict"], dict):
+            raise ValueError("checkpoint state_dict must be a mapping")
+        batch_size = checkpoint["batch_size"]
+        if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size < 1:
+            raise ValueError(f"checkpoint batch_size must be a positive integer, got {batch_size!r}")
+        if not isinstance(checkpoint["version"], str):
+            raise ValueError("checkpoint version must be a string")
+
+    @staticmethod
+    def read(path: str | Path) -> dict[str, Any]:
+        """Read and validate CPU state without constructing the neural graph."""
+        state = torch.load(path, weights_only=False, map_location="cpu")
+        CheckpointState.require(state)
+        return state
+
+    @staticmethod
+    def build(model_cls: type[M], state: dict[str, Any]) -> M:
+        """Construct the saved graph from validated CPU state and restore its provenance."""
+        model = model_cls(schema=Schema.model_validate(state["schema"]), batch_size=state["batch_size"])
+        CheckpointState.restore_metadata(model, state)
+        model.load_state_dict(state_dict=state["state_dict"])
+        return model
 
     @staticmethod
     def restore(module: "Model", checkpoint: dict[str, Any]) -> None:
@@ -140,13 +164,8 @@ class CheckpointState:
         """Construct the requested Model subclass from saved schema and tensor state."""
         path = Path(checkpoint)
         logger.bind(component="model_factory", checkpoint=str(path)).info("loading Model from checkpoint")
-        state = torch.load(path, weights_only=False, map_location="cpu")
-        CheckpointState.require(state)
-
-        # Construction installs the saved schema's graph once; only tensors and provenance remain.
-        model = model_cls(schema=Schema.model_validate(state["schema"]), batch_size=state["batch_size"])
-        CheckpointState.restore_metadata(model, state)
-        model.load_state_dict(state_dict=state["state_dict"])
+        state = CheckpointState.read(path)
+        model = CheckpointState.build(model_cls, state)
         logger.bind(component="model_factory", checkpoint=str(path)).info("restored model state from checkpoint")
 
         return model

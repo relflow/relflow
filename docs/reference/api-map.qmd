@@ -93,7 +93,8 @@ For an unlabeled training objective followed by a labeled task, see
 | --- | --- |
 | `model.predict` | Return a Polars prediction DataFrame, with optional batch sizing for direct input or a prediction data module. |
 | `model.save`, `rf.Model.load` | Save and restore the schema and learned model state. |
-| `rf.Writer` | Write Lightning prediction batches to rank-partitioned Parquet files. |
+| `rf.Writer` | Stream Lightning prediction batches to Parquet or Arrow IPC files. |
+| `rf.inspect`, `rf.check` | Inspect template/checkpoint metadata and run explicit preflight checks. |
 | `rf.postprocess`, `rf.Postprocessor` | Transform decoded prediction frames before returning responses or persisting files. |
 | `rf.Deployment` | Serve models through the optional HTTP runtime. |
 
@@ -101,6 +102,8 @@ Serving types, including `rf.Accelerator`, `rf.JSONBackend`, and
 `rf.ModelSource`, require `relflow[serving]`. See
 [Prediction output](prediction-output.qmd),
 [Postprocessing](../guides/postprocessing.qmd), and [Serving](../guides/serving.qmd).
+The [command line](../guides/command-line.qmd) runs inspection, preflight,
+training, streaming prediction, and serving from a shell.
 
 ## Advanced schema operations
 
