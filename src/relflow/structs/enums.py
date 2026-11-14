@@ -92,9 +92,14 @@ class Overflow(enum.StrEnum):
 
 
 class Direction(enum.StrEnum):
-    """Which steps of a branch sequence one token may see."""
+    """Which steps of a branch sequence one token may see.
+
+    ``bidirectional`` sees every step. ``causal`` sees the steps at or before its
+    own, so tokens of one step see each other and no token sees a later step.
+    """
 
     bidirectional = "bidirectional"
+    causal = "causal"
 
 
 AttentionInput: TypeAlias = AttentionMode | Literal["mha", "gqa", "mqa"] | None

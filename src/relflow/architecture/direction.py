@@ -33,6 +33,31 @@ def bidirectional(*, steps: torch.Tensor | None) -> None:
     return None
 
 
-rules: Mapping[Direction, Rule] = MappingProxyType({Direction.bidirectional: bidirectional})
+def causal(*, steps: torch.Tensor | None) -> torch.Tensor:
+    """Let a token see the tokens whose step is at or before its own.
 
-__all__ = ["Rule", "bidirectional", "rules"]
+    Tokens are numbered item-major, so token order says nothing about steps and the
+    rule reads the step ids.
+
+    Args:
+        steps: Row index of every token within its branch instance, shape ``(rows, L)``.
+
+    Returns:
+        A Boolean ``(rows, L, L)`` mask where ``[r, query, key]`` is true when the key
+        step is not after the query step.
+
+    Raises:
+        ValueError: If ``steps`` is ``None``.
+    """
+    if steps is None:
+        message = "direction 'causal' needs the step ids of every token, but the encoder passed none"
+        raise ValueError(message)
+    return steps.unsqueeze(-2) <= steps.unsqueeze(-1)
+
+
+rules: Mapping[Direction, Rule] = MappingProxyType({Direction.bidirectional: bidirectional, Direction.causal: causal})
+
+# Whether a rule reads step ids; the encoder computes them only when one does.
+stepped: Mapping[Direction, bool] = MappingProxyType({Direction.bidirectional: False, Direction.causal: True})
+
+__all__ = ["Rule", "bidirectional", "causal", "rules", "stepped"]

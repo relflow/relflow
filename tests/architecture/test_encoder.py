@@ -5,7 +5,7 @@ import pytest
 import torch
 
 import relflow as rf
-from relflow.architecture.encoder import BranchEncoder
+from relflow.architecture.encoder import BranchEncoder, stepwise
 from relflow.architecture.pool import MeanPool
 from relflow.architecture.root import Model
 from relflow.structs.enums import Strata, TensorKey, Tokens
@@ -548,3 +548,42 @@ def test_reduce_without_reduction_returns_the_sequence():
         selected, present=present, evidence=selected, context=None, positions=None, width=1
     )
     assert output is selected and output_present is present
+
+
+def test_stepwise_numbers_tokens_by_row_in_sequence_order():
+    def token(name, count):
+        return Parcel(
+            origin=name,
+            destination="/",
+            payload=torch.zeros(1, count, 4),
+            present=torch.ones(1, count, dtype=torch.bool),
+            batch_size=1,
+        )
+
+    parcels = [token("/a", 3), token("/b", 3), token("/c", 6)]
+    assert stepwise(parcels).tolist() == [[0, 1, 2, 0, 1, 2, 0, 0, 1, 1, 2, 2]]
+
+
+def test_plain_branch_calls_compute_without_steps():
+    schema = rf.Schema.from_tree(d_model=16, n_layers=1, n_heads=4, reduction=None, value=rf.Number)
+    encoder = BranchEncoder(schema=schema, address="/")
+    calls = []
+
+    def compute(inputs, present, **keywords):
+        calls.append(keywords)
+        return inputs
+
+    encoder.compute = compute
+    payload = torch.randn(2, 3, 16)
+    encoder(
+        [
+            Parcel(
+                origin="/value",
+                destination="/",
+                payload=payload,
+                present=torch.ones(2, 3, dtype=torch.bool),
+                batch_size=2,
+            )
+        ]
+    )
+    assert calls == [{}]
