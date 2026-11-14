@@ -3,11 +3,10 @@ from __future__ import annotations
 import enum
 import hashlib
 import math
-import warnings
 from collections.abc import Callable, Mapping
-from dataclasses import InitVar, dataclass
+from dataclasses import InitVar
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Annotated, Literal, Self, Unpack, cast
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self, Unpack, cast
 
 import numpy as np
 import pyarrow as pa
@@ -15,7 +14,7 @@ import pyarrow.compute as pc
 import pydantic
 import torch
 from beartype import beartype
-from pydantic import StrictInt, StrictStr
+from pydantic import StrictInt
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
@@ -32,6 +31,7 @@ from relflow.tensorfields.base import (
     TensorInput,
 )
 from relflow.tensorfields.output import array, struct, variable
+from relflow.tensorfields.shared import channels
 from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.normalizer import GlobalOnlineNormalizer, moments, precise
 from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
@@ -42,39 +42,7 @@ if TYPE_CHECKING:
     from relflow.structs.structure import Branch
 
 
-def numeric(datatype: pa.DataType) -> bool:
-    """Whether an Arrow type is a number or a list of numbers.
-
-    Args:
-        datatype: The Arrow type to test.
-
-    Returns:
-        True for an integer or floating type, or one list level of them.
-    """
-    # Every list layout exposes value_type; pyarrow types it only on ListType.
-    datatype = cast(pa.ListType, datatype).value_type if listlike(datatype=datatype) else datatype
-    return pa.types.is_integer(datatype) or pa.types.is_floating(datatype)
-
-
-def channelled(datatype: pa.DataType) -> bool:
-    """Whether an Arrow type is a struct of channels.
-
-    Args:
-        datatype: The Arrow type to test.
-
-    Returns:
-        True for a non-empty struct whose members are all numbers (one step)
-        or all lists of numbers (one list per channel).
-    """
-    if not pa.types.is_struct(datatype) or not datatype.num_fields:
-        return False
-    kinds = [field.type for field in datatype]
-    return all(numeric(datatype=kind) and not listlike(datatype=kind) for kind in kinds) or all(
-        listlike(datatype=kind) and numeric(datatype=kind) for kind in kinds
-    )
-
-
-series: Extension = Extension(name="series", types=(int | float, dict), arrow={dict: channelled}, callbacks=(Metrics,))
+series: Extension = Extension(name="series", types=(int | float,), callbacks=(Metrics,))
 
 VALUES = "values"
 OBSERVED = "observed"
@@ -103,41 +71,31 @@ LOSSES: Mapping[Objective, Callable[..., torch.Tensor]] = MappingProxyType(
 )
 
 
-@dataclass(frozen=True, kw_only=True)
-class Channels:
-    """The channels of one step.
-
-    Attributes:
-        width: Number of channels per step.
-        names: Struct member names that are the channels, in channel order; ``None`` for a plain count.
-    """
-
-    width: int
-    names: tuple[str, ...] | None
-
-
 @series.register(Component.Request)
 class Request(RequestBase):
     """One multichannel time series per record.
 
     Each record holds one numeric value per channel and step, observed at
-    consecutive positions; steps are ordered but not timestamped. ``channels``
-    is either a positive count or a tuple of distinct struct member names; a
-    tuple sets the count and the channel order and labels forecast steps. ``length``
-    caps the retained steps with an ``overflow`` policy as ``Branch`` does;
-    ``None`` keeps the whole series and pads each batch to its longest.
-    ``n_blocks`` sets the number of dilated convolution blocks. As an input, the
-    series embeds as one pooled token. As a reconstruction target (``mask=True``
-    or a reconstructing ancestor) the series is a forecast target and
-    ``horizon`` gives the number of steps to predict; ``horizon`` is required
-    there and rejected elsewhere. ``jitter`` adds
-    training-only noise to input steps, and ``objective`` selects mean ``"l1"``
-    or ``"l2"`` error over predicted steps. Predictions contain ``horizon``
-    steps of one value per channel in source units.
+    consecutive positions; steps are ordered but not timestamped. ``n_dim`` is
+    the number of channels. A tuple ``query`` reads one source per channel,
+    sets ``n_dim`` and names the forecast step members by its query text; a
+    single query reads ``list<number>`` (``n_dim=1``) or lists of steps that
+    each hold ``n_dim`` values. A step with a missing channel is unobserved.
+    ``length`` caps the retained steps with an ``overflow`` policy as
+    ``Branch`` does; ``None`` keeps the whole series and pads each batch to its
+    longest. ``n_blocks`` sets the number of dilated convolution blocks. As an
+    input, the series embeds as one pooled token. As a reconstruction target
+    (``mask=True`` or a reconstructing ancestor) the series is a forecast
+    target and ``horizon`` gives the number of steps to predict; ``horizon`` is
+    required there and rejected elsewhere. ``jitter`` adds training-only noise
+    to input steps, and ``objective`` selects mean ``"l1"`` or ``"l2"`` error
+    over predicted steps. Predictions contain ``horizon`` steps of one value
+    per channel in source units.
     """
 
     type: Literal["series"] = "series"
-    channels: Annotated[StrictInt, pydantic.Field(gt=0)] | tuple[StrictStr, ...]
+    stacked: ClassVar[bool] = True
+    n_dim: Annotated[StrictInt, pydantic.Field(gt=0)]
     length: Annotated[StrictInt | None, pydantic.Field(gt=0)] = None
     overflow: Overflow | None = None
     horizon: Annotated[StrictInt | None, pydantic.Field(gt=0)] = None
@@ -150,7 +108,7 @@ class Request(RequestBase):
         def __init__(
             self,
             *,
-            channels: int | tuple[str, ...],
+            n_dim: int = ...,
             length: int | None = None,
             overflow: Overflow | Literal["head", "tail", "random", "error"] | None = None,
             horizon: int | None = None,
@@ -161,40 +119,10 @@ class Request(RequestBase):
             **options: Unpack[FieldOptions],
         ) -> None: ...
 
-    @pydantic.field_validator("channels")
+    @pydantic.model_validator(mode="before")
     @classmethod
-    def check_channels(cls, channels: int | tuple[str, ...]) -> int | tuple[str, ...]:
-        """Reject an empty, blank or duplicated channel name list.
-
-        Args:
-            channels: A channel count or the channel names.
-
-        Returns:
-            The unchanged channels.
-
-        Raises:
-            ValueError: If names are empty, blank or repeated.
-        """
-        if isinstance(channels, int):
-            return channels
-        repeated = sorted({name for name in channels if channels.count(name) > 1})
-        if not channels or not all(name.strip() for name in channels) or repeated:
-            message = f"series channels must be a non-empty tuple of distinct, non-blank names, got {channels!r}" + (
-                f" with repeated {repeated}" if repeated else ""
-            )
-            raise ValueError(message)
-        return channels
-
-    @property
-    def layout(self) -> Channels:
-        """The channels of one step.
-
-        Returns:
-            The channel count, with the member names when ``channels`` is a tuple of names.
-        """
-        if isinstance(self.channels, int):
-            return Channels(width=self.channels, names=None)
-        return Channels(width=len(self.channels), names=self.channels)
+    def check_n_dim(cls, data: Any) -> Any:
+        return channels.width(data)
 
     @pydantic.model_validator(mode="after")
     def check_bounds(self) -> Self:
@@ -244,159 +172,27 @@ def listlike(datatype: pa.DataType) -> bool:
     return pa.types.is_list(datatype) or pa.types.is_large_list(datatype) or pa.types.is_fixed_size_list(datatype)
 
 
-def members(datatype: pa.StructType, *, layout: Channels, address: Address) -> tuple[str, ...]:
-    """Struct member names to read, in channel order.
-
-    Args:
-        datatype: The Arrow struct type of a step or of a record.
-        layout: The channel count, or the member names to select.
-        address: Field address, for error messages.
-
-    Returns:
-        The member names, in the struct order for a count and in tuple order for names.
-
-    Raises:
-        ValueError: If a count differs from the member count or a name is not a member.
-    """
-    names = tuple(field.name for field in datatype)
-    if layout.names is None and len(names) != layout.width:
-        message = (
-            f"series field at '{address}' has channels={layout.width} but its struct has {len(names)} members "
-            f"{names}; name the members in channels or select them in a preprocessor"
-        )
-        raise ValueError(message)
-    if layout.names is None:
-        return names
-    missing = [name for name in layout.names if name not in names]
-    if missing:
-        message = (
-            f"series field at '{address}' names channels {missing} absent from its struct members {names}; "
-            "check the names in channels or rename the members in a preprocessor"
-        )
-        raise ValueError(message)
-    return layout.names
-
-
-def children(datatype: pa.StructType, *, flat: list[pa.Array]) -> dict[str, pa.Array]:
-    """Map member names of a struct to their arrays.
-
-    Args:
-        datatype: The struct type whose member names label the arrays.
-        flat: The member arrays in struct order, from ``StructArray.flatten()``.
-
-    Returns:
-        A dict from member name to member array.
-    """
-    return dict(zip((field.name for field in datatype), flat, strict=True))
-
-
-def rows(values: pa.Array, *, layout: Channels, address: Address) -> tuple[np.ndarray, np.ndarray]:
-    """Steps of lists of structs, one struct per step.
-
-    A null step struct or a null member makes the whole step NaN.
-
-    Args:
-        values: One Arrow list of step structs per record.
-        layout: The channel count, or the member names to select.
-        address: Field address, for error messages.
-
-    Returns:
-        The step matrix and the number of steps of each record.
-
-    Raises:
-        ValueError: If the members do not match ``layout``.
-    """
-    flat = cast(pa.StructArray, pc.list_flatten(values))
-    names = members(datatype=flat.type, layout=layout, address=address)
-    by_name = children(datatype=flat.type, flat=flat.flatten())
-    matrix = np.column_stack([floats(values=by_name[name], address=address) for name in names])
-    return matrix, pc.list_value_length(values).to_numpy(zero_copy_only=False).astype(np.int64)
-
-
-def columns(values: pa.StructArray, *, layout: Channels, address: Address) -> tuple[np.ndarray, np.ndarray]:
-    """Steps of structs with one list per channel.
-
-    A null channel list is a missing channel: it warns, and the steps of its
-    record are NaN. A record whose channel lists are all null has no steps.
-    The warning text is the same for every batch, so Python shows it once per
-    field and member.
-
-    Args:
-        values: One Arrow struct of channel lists per record.
-        layout: The channel count, or the member names to select.
-        address: Field address, for error messages.
-
-    Returns:
-        The step matrix and the number of steps of each record.
-
-    Raises:
-        ValueError: If the channel lists of a record differ in length or the members do not match ``layout``.
-    """
-    names = members(datatype=values.type, layout=layout, address=address)
-    by_name = children(datatype=values.type, flat=values.flatten())
-    lists = [by_name[name] for name in names]
-    counts = np.stack(
-        [floats(values=pc.list_value_length(member), address=address) for member in lists]
-    )  # NaN marks a null list
-    missing = np.isnan(counts)
-    for name, absent in zip(names, missing, strict=True):
-        if absent.any():
-            message = (
-                f"series field at '{address}' has a null channel list '{name}' in some records; "
-                "its steps are unobserved. Supply a list of nulls with the record step count, "
-                "or drop or fill the record in a preprocessor"
-            )
-            warnings.warn(message, UserWarning, stacklevel=2)
-    longest = np.where(missing, -1, counts).max(axis=0)
-    shortest = np.where(missing, np.inf, counts).min(axis=0)
-    differing = np.flatnonzero(~missing.all(axis=0) & (longest != shortest))
-    if len(differing):
-        message = (
-            f"series field at '{address}' has channel lists {names} with different step count "
-            f"in record {int(differing[0])}: {counts[:, differing[0]].tolist()}; "
-            "pad the shorter lists with nulls or trim them in a preprocessor"
-        )
-        raise ValueError(message)
-    lengths = np.where(missing.all(axis=0), 0, longest).astype(np.int64)
-    matrix = np.full((int(lengths.sum()), len(names)), math.nan)
-    for index, (member, absent) in enumerate(zip(lists, missing, strict=True)):
-        matrix[np.repeat(~absent, lengths), index] = floats(values=pc.list_flatten(member), address=address)
-    return matrix, lengths
-
-
-def steps(values: pa.Array, *, layout: Channels, address: Address) -> tuple[np.ndarray, np.ndarray]:
+def steps(values: pa.Array, *, width: int, address: Address) -> tuple[np.ndarray, np.ndarray]:
     """Every step of every series back to back as ``(steps, channels)`` float64, with the step count per series.
 
     A null step or element is NaN; a step reads as observed only when all
     its channels are finite.
 
     Args:
-        values: One Arrow list of steps per record, a list of step structs, or a struct of channel lists.
-        layout: The channel count, with the member names to select when ``channels`` was a tuple of names.
+        values: One Arrow list of steps per record.
+        width: Number of channels per step.
         address: Field address, for error messages.
 
     Returns:
         The step matrix and the number of steps of each record.
 
     Raises:
-        ValueError: If a record is not a list or struct, named channels meet a list input,
-            or a step does not hold ``layout.width`` values.
+        ValueError: If a record is not a list or a step does not hold ``width`` values.
     """
-    width = layout.width
     if not len(values):
         return np.empty((0, width)), np.empty(0, dtype=np.int64)
-    if pa.types.is_struct(values.type):
-        return columns(values=cast(pa.StructArray, values), layout=layout, address=address)
     if not listlike(values.type):
-        message = f"series field at '{address}' expects an Arrow list or struct per record, got {values.type}"
-        raise ValueError(message)
-    if pa.types.is_struct(cast(pa.ListType, values.type).value_type):
-        return rows(values=values, layout=layout, address=address)
-    if layout.names is not None:
-        message = (
-            f"series field at '{address}' names channels {layout.names} but its input has no struct members; "
-            "provide a list of structs or a struct of lists, or set channels to a count"
-        )
+        message = f"series field at '{address}' expects an Arrow list per record, got {values.type}"
         raise ValueError(message)
 
     lengths = pc.list_value_length(values).to_numpy(zero_copy_only=False).astype(np.int64)
@@ -404,7 +200,7 @@ def steps(values: pa.Array, *, layout: Channels, address: Address) -> tuple[np.n
     if not listlike(flat.type):
         if width != 1:
             message = (
-                f"series field at '{address}' has scalar steps but expects channels={width} values per step; "
+                f"series field at '{address}' has scalar steps but expects n_dim={width} values per step; "
                 "nest each step as a list"
             )
             raise ValueError(message)
@@ -413,7 +209,7 @@ def steps(values: pa.Array, *, layout: Channels, address: Address) -> tuple[np.n
     widths = pc.list_value_length(flat)
     wrong = pc.filter(widths, pc.not_equal(widths, pa.scalar(width, widths.type)))
     if len(wrong):
-        message = f"series field at '{address}' expects channels={width} values per step, got {wrong[0].as_py()}"
+        message = f"series field at '{address}' expects n_dim={width} values per step, got {wrong[0].as_py()}"
         raise ValueError(message)
     matrix = np.full((len(flat), width), math.nan)
     matrix[pc.is_valid(flat).to_numpy(zero_copy_only=False)] = floats(pc.list_flatten(flat), address=address).reshape(
@@ -526,7 +322,7 @@ def encode(
     one observed step takes the ``other`` state; an empty one stays valued.
     """
 
-    matrix, lengths = steps(values=combine(field=field), layout=request.layout, address=address)
+    matrix, lengths = steps(values=combine(field=field), width=request.n_dim, address=address)
     cap = request.horizon if target else request.length
     kept = lengths if cap is None else np.minimum(lengths, cap)
     start = crop(
@@ -546,7 +342,7 @@ def encode(
     picked = matrix[(np.cumsum(lengths) - lengths)[record] + start[record] + offset]
     finite = np.isfinite(picked).all(axis=1)
 
-    content = np.zeros((len(lengths), width, request.layout.width))
+    content = np.zeros((len(lengths), width, request.n_dim))
     observed = np.zeros((len(lengths), width), dtype=np.bool_)
     content[record[finite], offset[finite]] = picked[finite]
     observed[record[finite], offset[finite]] = True
@@ -555,7 +351,7 @@ def encode(
     state[field.place((kept > 0) & ~observed.any(axis=1), fill=False)] = Tokens.other.value
     encoded = TensorDict(
         {
-            VALUES: torch.from_numpy(field.place(content, fill=0.0, value_shape=(width, request.layout.width))),
+            VALUES: torch.from_numpy(field.place(content, fill=0.0, value_shape=(width, request.n_dim))),
             OBSERVED: torch.from_numpy(field.place(observed, fill=False, value_shape=(width,))),
         },
         batch_size=field.shape,
@@ -629,9 +425,9 @@ def observe(
     if not learn:
         return None
     request = cast(Request, schema.requests[address])
-    matrix, _ = steps(values=combine(field=field), layout=request.layout, address=address)
+    matrix, _ = steps(values=combine(field=field), width=request.n_dim, address=address)
     observed = torch.from_numpy(matrix[np.isfinite(matrix).all(axis=1)])
-    return TensorDict({TensorKey.content: moments(observed, width=request.layout.width)}, batch_size=[])
+    return TensorDict({TensorKey.content: moments(observed, width=request.n_dim)}, batch_size=[])
 
 
 class Block(torch.nn.Module):
@@ -680,8 +476,8 @@ class Embedder(EmbedderBase):
         self.destination: Address = cast("Branch", request.parent).address
         self.jitter: Jitter = request.jitter
 
-        self.normalizer = GlobalOnlineNormalizer(width=request.layout.width)
-        self.projection = torch.nn.Linear(in_features=request.layout.width, out_features=schema.d_model)
+        self.normalizer = GlobalOnlineNormalizer(width=request.n_dim)
+        self.projection = torch.nn.Linear(in_features=request.n_dim, out_features=schema.d_model)
         self.blocks = torch.nn.ModuleList(
             [Block(width=schema.d_model, dilation=2**depth) for depth in range(request.n_blocks)]
         )
@@ -762,10 +558,10 @@ class Decoder(DecoderBase):
 
         horizon = cast(int, request.horizon)
         self.horizon: int = horizon
-        self.width: int = request.layout.width
-        self.regression = torch.nn.Linear(in_features=schema.d_model, out_features=horizon * request.layout.width)
+        self.width: int = request.n_dim
+        self.regression = torch.nn.Linear(in_features=schema.d_model, out_features=horizon * request.n_dim)
         # Target statistics per channel: the forecast starts at their mean and predicts standardized deviations.
-        self.normalizer: GlobalOnlineNormalizer = GlobalOnlineNormalizer(width=request.layout.width)
+        self.normalizer: GlobalOnlineNormalizer = GlobalOnlineNormalizer(width=request.n_dim)
         self.metrics = Scores(address=address, factory=Errors)
 
     @beartype
@@ -792,7 +588,7 @@ def loss(
     address: Address = prediction.address
     request: Request = cast(Request, module.schema.requests[address])
     decoder: Decoder = cast(Decoder, module.nodes[address].decoder)
-    horizon, width = decoder.horizon, request.layout.width
+    horizon, width = decoder.horizon, request.n_dim
 
     size: int = cast(torch.Tensor, batch.targets[TensorKey.state]).numel()
     trainable = batch.trainable.reshape(size)
@@ -833,27 +629,27 @@ def loss(
     return output
 
 
-def step_type(*, layout: Channels) -> pa.DataType:
+def step_type(*, names: tuple[str, ...] | None) -> pa.DataType:
     """Arrow type of one forecast step.
 
     Args:
-        layout: The channels of one step.
+        names: The query text of each channel for a tuple query, else ``None``.
 
     Returns:
-        A list of float64 values for a channel count, or a struct with one
+        A list of float64 values without names, or a struct with one
         non-null float64 member per name, in name order.
     """
-    if layout.names is None:
+    if names is None:
         return pa.list_(pa.field("element", pa.float64()))
-    return pa.struct([pa.field(name, pa.float64(), nullable=False) for name in layout.names])
+    return pa.struct([pa.field(name, pa.float64(), nullable=False) for name in names])
 
 
 @series.register(Component.output)
 def output(module: Model, address: Address) -> pa.StructType:
     """Arrow type of a prediction: ``horizon`` steps of one float64 value per channel per record.
 
-    A channel count writes each step as a list of values; channel names write
-    each step as a struct with one member per name, in tuple order.
+    A single query writes each step as a list of values; a tuple query writes
+    each step as a struct with one member per query text, in tuple order.
 
     Args:
         module: The model that owns the field.
@@ -862,7 +658,8 @@ def output(module: Model, address: Address) -> pa.StructType:
     Returns:
         A struct with a non-null ``content`` list of steps.
     """
-    step = step_type(layout=cast(Request, module.schema.requests[address]).layout)
+    query = cast(Request, module.schema.requests[address]).query
+    step = step_type(names=query if isinstance(query, tuple) else None)
     return pa.struct([pa.field(TensorKey.content.name, pa.list_(pa.field("element", step)), nullable=False)])
 
 

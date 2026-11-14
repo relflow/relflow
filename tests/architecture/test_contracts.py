@@ -126,8 +126,8 @@ def test_forward_contract_allows_target_content_wider_than_input_content() -> No
     model = rf.Model.xs(
         d_model=8,
         attention=None,
-        history=rf.Series(channels=1),
-        future=rf.Series(channels=1, horizon=3, mask=True),
+        history=rf.Series(n_dim=1),
+        future=rf.Series(n_dim=1, horizon=3, mask=True),
     )
     inputs = model.encode(
         arrow_table([{"history": [1.0, 2.0], "future": [3.0, 4.0, 5.0]}] * 2),

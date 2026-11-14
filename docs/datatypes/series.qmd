@@ -5,7 +5,7 @@ description: "One multichannel run of ordered numeric steps per record, as conte
 
 The daily spend of an account is a run of numbers whose order matters: a payment
 model can use the last 90 days as context, or forecast the next seven. `Series`
-holds one such run per record. Each step carries `channels` numeric values, such
+holds one such run per record. Each step carries `n_dim` numeric values, such
 as daily amount spent and daily transaction count. Steps are ordered, not
 timestamped; use a [Branch](branch.qmd) with [Period](dateparts.qmd) when the
 calendar position of each item matters.
@@ -14,8 +14,8 @@ calendar position of each item matters.
 import relflow as rf
 
 model = rf.Model.xs(
-    recent=rf.Series(channels=2, length=90, overflow="tail"),
-    next_week=rf.Series(channels=2, horizon=7, mask=True),
+    recent=rf.Series(n_dim=2, length=90, overflow="tail"),
+    next_week=rf.Series(n_dim=2, horizon=7, mask=True),
 )
 ```
 
@@ -38,64 +38,45 @@ decision time. Use [Number](number.qmd) for a single value per record and
 
 ## Input and options
 
-Each valued input takes one of four Arrow shapes. Each row below shows the same
+Each valued input takes one of three shapes. Each row below shows the same
 three steps of temperature and humidity:
 
 | Shape | Arrow type per record | Example record | Field |
 | --- | --- | --- | --- |
-| list | `list<number>` | `[21.5, 22.0, 22.4]` | `rf.Series(channels=1)` |
-| list of lists | `list<list<number>>` or `list<fixed_size_list<number, C>>` | `[[21.5, 0.61], [22.0, 0.58], [22.4, 0.55]]` | `rf.Series(channels=2)` |
-| list of structs | `list<struct<temp: number, hum: number>>` | `[{temp: 21.5, hum: 0.61}, {temp: 22.0, hum: 0.58}, {temp: 22.4, hum: 0.55}]` | `rf.Series(channels=("temp", "hum"))` |
-| struct of lists | `struct<temp: list<number>, hum: list<number>>` | `{temp: [21.5, 22.0, 22.4], hum: [0.61, 0.58, 0.55]}` | `rf.Series(channels=("temp", "hum"))` |
+| list | `list<number>` | `[21.5, 22.0, 22.4]` | `rf.Series(n_dim=1)` |
+| list of lists | `list<list<number>>` or `list<fixed_size_list<number, C>>` | `[[21.5, 0.61], [22.0, 0.58], [22.4, 0.55]]` | `rf.Series(n_dim=2)` |
+| columnar sources | one `list<number>` per channel, in separate columns or struct members | `{temp: [21.5, 22.0, 22.4], hum: [0.61, 0.58, 0.55]}` | `rf.Series(query=("ett.temp", "ett.hum"))` |
 
-Large lists and fixed-size lists are accepted wherever lists are: for the outer
-list of a list of structs and for the channel lists of a struct of lists.
-Values convert to `float64`; integers beyond ±2^53 are rejected.
+Large lists and fixed-size lists are accepted wherever lists are. Values
+convert to `float64`; integers beyond ±2^53 are rejected. Struct steps, such as
+`list<struct<temp: number, hum: number>>`, are not read; reshape them as
+described [below](#reshaping-in-a-preprocessor).
 
-The two struct shapes accept either form of `channels`:
-
-- A tuple of names selects those struct members, in tuple order. Other members
-  are ignored, so `channels=("hum",)` reads only humidity and
-  `channels=("hum", "temp")` swaps the channel order. A named member that is
-  absent raises an error.
-- An integer reads every member, in struct order, and must equal the member
-  count. `channels=2` reads both examples above; `channels=3` raises an error.
-
-Every struct member must be numeric (list of structs) or a list of numbers
-(struct of lists). A struct with a string member or with mixed members is
-rejected when relflow checks the input Arrow types, even when `channels` does
-not name that member; narrow it in a
-[preprocessor](#reshaping-in-a-preprocessor). A tuple of names on a list or list
-of lists raises an error, because those shapes have no member names.
+`n_dim` is the number of channels per step. It is required for a single query
+because the model is built before any data is read. A tuple `query` reads one
+source per channel, in tuple order, and sets `n_dim`; an explicit `n_dim` must
+equal its length. Every source must select the same steps: see
+[queries](../guides/query-paths.qmd#several-sources).
 
 ### Missing values
 
 A step is observed only when every one of its channels is finite. A null, NaN,
 or infinite value makes its step unobserved, silently: the rest of the series
 stays valid, and the encoder sees which steps were observed. This covers a null
-value inside a list, a null step in a list of lists, and a null step struct or
-null member value in a list of structs.
+value inside a list, a null step in a list of lists, and a missing channel.
 
-A null channel list in a struct of lists is a missing channel, not a missing
-step, so it is never silent. relflow emits a `UserWarning` that names the
-field and the channel, then reads the record. The message carries no record
-count, so under the default Python warning filter it shows once per field and
-channel:
-
-- When some channel lists are null, those channels are NaN at every step of the
-  record, so its steps are unobserved.
-- When every named channel list is null, the series is empty.
-
-In one record, every non-null channel list must hold the same number of steps.
-Lists of different lengths raise an error naming the field, the channels, and
-the first record that differs.
+With a tuple query, a null source list is a missing channel at every step of
+the record, so those steps are unobserved, with no warning. When every source
+list is null, the series is null. Source lists that are valid and differ in
+length raise an error naming the field, the queries, and the first record that
+differs.
 
 An empty series is `valued`. A non-empty series with no observed step takes the
 `other` [value state](index.qmd#value-state). A null series is `null`.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `channels` | required | Positive number of values per step, or a tuple of struct member names. A tuple sets the count and order, selects those members, and requires struct input. An integer needs exactly that many struct members. |
+| `n_dim` | required unless `query` is a tuple | Positive number of values per step. A tuple `query` sets it. |
 | `length` | `None` | Hard cap on retained steps. `None` keeps the whole series and pads each batch to its longest. |
 | `overflow` | `None` | With a finite `length`: `head` (default), `tail`, `random`, or `error`. Rejected when `length` is `None`. |
 | `horizon` | `None` | Steps to predict. Required on reconstruction targets (`mask=True` or a reconstructing ancestor), rejected otherwise. |
@@ -126,12 +107,14 @@ Apply `length` to bound memory.
 
 ## Reshaping in a preprocessor
 
-`Series` reads one field. When the channels live elsewhere, gather them into
-one of the shapes above with a [preprocessor](../guides/preprocessing.qmd). A
-struct of lists is usually the shortest route, because `pl.struct` combines
-list columns directly.
+`Series` reads one field or one source per channel. When the steps are shaped
+differently, reshape them with a [preprocessor](../guides/preprocessing.qmd).
 
-Channels from separate columns or nested paths become a struct of lists:
+Channels from separate columns or nested paths need no reshaping: name each
+source in a tuple, such as `rf.Series(query=("temp", "weather.humidity"))`.
+
+Long-format data has one row per step. Sort by step and group by record to get
+one row per record with one list per channel:
 
 ```python
 import polars as pl
@@ -139,75 +122,28 @@ import relflow as rf
 
 
 @rf.preprocess
-def gather(frame: pl.DataFrame) -> pl.DataFrame:
-    return frame.with_columns(
-        signals=pl.struct(
-            temp=pl.col("temp"),
-            hum=pl.col("weather").struct.field("humidity"),
-        ),
-    )
-```
-
-Read it with `signals=rf.Series(channels=("temp", "hum"))`.
-
-Long-format data has one row per step. Sort by step and group by record to get
-one row per record with a struct of lists:
-
-```python
-@rf.preprocess
 def collect(frame: pl.DataFrame) -> pl.DataFrame:
     return (
         frame.sort("step")
         .group_by("id", maintain_order=True)
         .agg(pl.col("temp"), pl.col("hum"))
-        .select("id", signals=pl.struct("temp", "hum"))
     )
 ```
 
 Here `frame` has the columns `id`, `step`, `temp` and `hum`. The sort by `step`
 fixes the order of the steps inside each list, and `maintain_order=True` keeps
 the order of the records. Without the sort, the steps follow row order. Read the
-result with `signals=rf.Series(channels=("temp", "hum"))`.
+result with `signals=rf.Series(query=("temp", "hum"))`.
 
-A list of lists becomes a named struct of lists, one channel per position:
-
-```python
-@rf.preprocess
-def name(frame: pl.DataFrame) -> pl.DataFrame:
-    return frame.with_columns(
-        signals=pl.struct(
-            temp=pl.col("readings").list.eval(pl.element().list.get(0)),
-            hum=pl.col("readings").list.eval(pl.element().list.get(1)),
-        ),
-    )
-```
-
-When the steps are fixed-size lists (`list<pl.Array>`), `list.get` fails on the
-inner element. Use `.arr.get` instead:
+Steps stored as structs, such as `list<struct<temp: number, hum: number>>`, are
+not read. Turn each step into a list of its numeric members:
 
 ```python
 @rf.preprocess
-def name_fixed(frame: pl.DataFrame) -> pl.DataFrame:
-    return frame.with_columns(
-        signals=pl.struct(
-            temp=pl.col("readings").list.eval(pl.element().arr.get(0)),
-            hum=pl.col("readings").list.eval(pl.element().arr.get(1)),
-        ),
-    )
-```
-
-Both forms give `struct<temp: list<float64>, hum: list<float64>>`.
-
-A list of step records with a non-numeric member, such as
-`[{temp: 21.5, hum: 0.61, station: "a"}, ...]`, fails the type check. Keep only
-the numeric members to make a list of structs:
-
-```python
-@rf.preprocess
-def narrow(frame: pl.DataFrame) -> pl.DataFrame:
+def steps(frame: pl.DataFrame) -> pl.DataFrame:
     return frame.with_columns(
         hourly=pl.col("hourly").list.eval(
-            pl.struct(
+            pl.concat_list(
                 pl.element().struct.field("temp"),
                 pl.element().struct.field("hum"),
             ),
@@ -215,25 +151,11 @@ def narrow(frame: pl.DataFrame) -> pl.DataFrame:
     )
 ```
 
-Read it with `hourly=rf.Series(channels=("temp", "hum"))`.
+Read it with `hourly=rf.Series(n_dim=2)`.
 
-A struct of lists with a text member, such as
-`{temp: [...], hum: [...], station: "a"}`, fails the type check in the same
-way. Rebuild the struct from the numeric members only:
-
-```python
-@rf.preprocess
-def narrow_columns(frame: pl.DataFrame) -> pl.DataFrame:
-    return frame.with_columns(
-        signals=pl.struct(
-            pl.col("signals").struct.field("temp"),
-            pl.col("signals").struct.field("hum"),
-        ),
-    )
-```
-
-To avoid the null channel warning, either drop the records whose channel is
-missing:
+A record that lacks a channel keeps its steps if the missing source is null,
+and those steps read as unobserved. To drop such records instead, filter them
+before reading:
 
 ```python
 @rf.preprocess
@@ -241,22 +163,9 @@ def complete(frame: pl.DataFrame) -> pl.DataFrame:
     return frame.filter(pl.col("hum").is_not_null())
 ```
 
-or fill the missing channel with nulls, one per step of another channel, so its
-steps read as unobserved:
-
-```python
-@rf.preprocess
-def fill(frame: pl.DataFrame) -> pl.DataFrame:
-    # Multiplying by None keeps the step count of temp and makes every value null.
-    unobserved = pl.col("temp").list.eval(pl.element() * None)
-    return frame.with_columns(hum=pl.col("hum").fill_null(unobserved))
-```
-
-Apply either before gathering the columns into a struct.
-
 ## Learning and output
 
-As a forecast target, `Series` predicts `horizon` steps of `channels` values
+As a forecast target, `Series` predicts `horizon` steps of `n_dim` values
 from the context of the record. The loss is the `objective` error over target steps
 observed in the source, after both sides are standardized per channel.
 Predictions are decoded back to source units. MAE and RMSE metrics report in
@@ -267,9 +176,9 @@ Classify a series by pairing it with a sibling target such as
 model width. See [shared leaf options](index.qmd#shared-leaf-options).
 
 In [prediction output](../reference/prediction-output.qmd), `content` is a list
-of `horizon` steps. With integer `channels`, each step is a list of float64
-values; with named channels, each step is a struct with one float64 member per
-name, in tuple order. The writer emits
+of `horizon` steps. With a single query, each step is a list of float64
+values; with a tuple query, each step is a struct with one float64 member per
+query text, in tuple order. The writer emits
 exactly `horizon` steps per coordinate. Parquet round-trips these lists,
 including inside a `Branch` with null items. As with other decoded fields, read
 the shared `state` and `inferred` members to learn whether a series was

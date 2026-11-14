@@ -147,7 +147,7 @@ its remaining payload:
 | Group | Group decoder output; see its training limitation on the [Group page](group.qmd#prediction) |
 | Set | Label/probability pairs |
 | Vector | Fixed-width reconstructed vector |
-| Series | `horizon` forecast steps of `channels` values in source units |
+| Series | `horizon` forecast steps of `n_dim` values in source units |
 | Period, Hash, Text | No decoded public payload |
 
 All types can export an embedding when configured. These vectors live in the

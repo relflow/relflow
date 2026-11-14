@@ -164,8 +164,8 @@ def fit(
         d_model=32,
         n_layers=1,
         n_heads=4,
-        history=rf.Series(channels=CHANNELS, length=HISTORY, overflow="tail", n_blocks=4),
-        future=rf.Series(channels=CHANNELS, horizon=HORIZON, mask=True),
+        history=rf.Series(n_dim=CHANNELS, length=HISTORY, overflow="tail", n_blocks=4),
+        future=rf.Series(n_dim=CHANNELS, horizon=HORIZON, mask=True),
     )
     data = rf.SyntheticDataModule(train=train, validate=validate, seed=seed)
     model.fit(
