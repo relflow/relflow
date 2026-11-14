@@ -47,13 +47,12 @@ class Job:
     """An exclusively reserved directory with one atomic terminal receipt."""
 
     path: Path
-    command: str
     configuration: dict[str, Any]
     report: dict[str, Any] = field(default_factory=dict)
 
     @property
     def metadata(self) -> Path:
-        return self.path / "_metadata" if self.command == "predict" else self.path
+        return self.path / "_metadata"
 
     def write(self, name: str, value: Any) -> None:
         path = self.metadata / name
@@ -71,7 +70,7 @@ class Job:
         self.metadata.mkdir(exist_ok=True)
         self.report.update(
             schema_version=1,
-            command=self.command,
+            command="predict",
             status="running",
             output=str(self.path),
             started_at=datetime.now(timezone.utc).isoformat(),

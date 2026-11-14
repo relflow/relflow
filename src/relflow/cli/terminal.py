@@ -111,19 +111,6 @@ def render(report: dict[str, Any], console: Console) -> None:
         console.print(phases)
         return
     title, fields = {
-        "train": (
-            "Training complete",
-            (
-                ("Model", "model"),
-                ("Output", "output"),
-                ("Last checkpoint", "last_checkpoint"),
-                ("Best checkpoint", "best_checkpoint"),
-                ("Optimizer steps", "global_step"),
-                ("Epoch", "epoch"),
-                ("Accelerator", "accelerator"),
-                ("Precision", "precision"),
-            ),
-        ),
         "predict": (
             "Prediction complete",
             (
@@ -143,8 +130,3 @@ def render(report: dict[str, Any], console: Console) -> None:
         value = report.get(key)
         details.add_row(label, Text(str(value) if value is not None else "—"))
     console.print(details)
-    if report.get("metrics"):
-        metrics = Table("Metric", "Value")
-        for name, value in report["metrics"].items():
-            metrics.add_row(Text(name), "—" if value is None else f"{value:.6g}")
-        console.print(metrics)

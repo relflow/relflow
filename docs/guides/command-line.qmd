@@ -1,14 +1,15 @@
 ---
 title: Command line
-description: "Inspect, check, train, predict, and serve saved relflow models from a shell."
+description: "Inspect, check, predict, and serve saved relflow models from a shell."
 ---
 
-The `relflow` executable runs file-backed model workflows from a terminal,
-container, or scheduler. Keep the model architecture in a
-[YAML template](model-templates.qmd), supply application datasets from disk or
-supported filesystem URIs, and reuse the saved model for streamed prediction
-or HTTP serving. The CLI uses the same model, data-module, processor, and
-tensorfield contracts as the Python API.
+The `relflow` executable inspects models, checks data, streams predictions,
+and starts HTTP serving from a terminal, container, or scheduler. Train and
+adapt models through the [Python API](training-options.qmd), then save an
+artifact for prediction or serving. Keep architecture in a
+[YAML template](model-templates.qmd) and supply application datasets from disk
+or supported filesystem URIs. The CLI uses the same model, data-module,
+processor, and tensorfield contracts as the Python API.
 
 The executable is included in the base installation. `python -m relflow` is
 equivalent. Serving requires the existing `relflow[serving]` extra, and text
@@ -16,7 +17,7 @@ encoders require their configured dependencies.
 
 ```bash
 relflow --help
-relflow train --help
+relflow predict --help
 ```
 
 Typer generates command help, validates typed options, and provides shell
@@ -62,39 +63,36 @@ semantics as `Model.load(...)`.
 
 ## Configure and check a run
 
-Keep execution settings in a separate `train.yaml`:
+Keep execution settings in a separate `predict.yaml`:
 
 ```yaml
 version: 1
 seed: 42
 data:
-  train: payments/train
-  validate: payments/validation
+  predict: payments/requests
 loader:
   num_workers: 0
-  shuffle_rows: 65536
-fit:
-  batch_size: 128
-  learning_rate: 0.0001
-  max_epochs: 30
+predict:
+  batch_size: 256
   accelerator: auto
 ```
 
-Local data paths in this file resolve relative to `train.yaml`. Direct
+Local data paths in this file resolve relative to `predict.yaml`. Direct
 command-line paths resolve relative to the working directory. Explicit flags
 override their corresponding run settings. Unknown options, duplicate YAML
 keys, and unsupported run-file versions are rejected.
 
-Run files support `data`, `loader`, `fit`, `predict`, and `serve` sections.
+Run files support `data`, `loader`, `predict`, and `serve` sections.
 `data` names the `train`, `validate`, `test`, or `predict` splits and accepts a
-location or a list of explicit files. The CLI uses one device for training and
-prediction, and one HTTP server worker. Model architecture and preset options
-continue to belong in the model template. Custom optimizers, schedulers, and
-Trainer callbacks remain Python configurations.
+location or a list of explicit files. Training and validation splits are
+available for preflight checks. The CLI uses one device for prediction and
+one HTTP server worker. Model architecture and preset options continue to
+belong in the model template. Training, checkpoint resume, optimizers,
+schedulers, and Trainer callbacks use Python.
 
 ```bash
-relflow check model.yaml --config train.yaml --json
-relflow check model.yaml --config train.yaml --execute --sample 128 --json
+relflow check artifacts/payment.rf --config predict.yaml --json
+relflow check artifacts/payment.rf --config predict.yaml --execute --sample 128 --json
 ```
 
 Default checks validate declarations, file discovery, and structural binding
@@ -120,47 +118,10 @@ For request data, select its prediction contract explicitly:
 relflow check artifacts/payment.rf --input payments/requests --stage predict
 ```
 
-## Train and resume
-
-```bash
-relflow train model.yaml --config train.yaml --output runs/payment --json
-```
-
-The output directory must not exist. A successful job writes `model.rf`,
-`resolved.yaml`, `sources.json`, `report.json`, full checkpoints under
-`checkpoints/`, and `_SUCCESS`. The report records actual checkpoint paths,
-optimizer steps, metrics, hardware and precision, seed, package versions,
-and input and output model digests. Source identity uses available file
-metadata, with no claim that source contents were hashed.
-
-Training retains the SDK's default early stopping and rollback policies.
-Their default validation monitor requires validation data. Configure a
-compatible training monitor or explicitly disable both policies for training
-without a validation split. A last full checkpoint is still retained.
-
-```bash
-relflow train model.yaml --config train.yaml \
-  --learning-rate 0.00003 --max-epochs 60 --output runs/payment-longer
-
-relflow train --resume runs/payment \
-  --max-epochs 60 --output runs/payment-resumed
-```
-
-Resume restores the full last checkpoint named by the prior report, including
-optimizer and loop progress, and reuses its resolved configuration. It accepts
-a new output directory and an optional epoch budget; it rejects replacement
-model, data, or execution settings. A failed run can be resumed if it retained
-a full last checkpoint. A repeated seed alone does not promise identical
-results across changed execution layouts or dependency versions.
-
-Passing `model.rf` as the positional training input starts a new optimizer run
-from its saved learned state. This is adaptation, rather than full training
-resume. See [Checkpoints and resuming](checkpoints-ema-and-resuming.qmd).
-
 ## Stream predictions
 
 ```bash
-relflow predict runs/payment/model.rf \
+relflow predict artifacts/payment.rf \
   --input payments/requests \
   --retain payment_id \
   --batch-size 256 \
@@ -181,8 +142,11 @@ containers that Parquet cannot round-trip. Both formats retain Arrow schema
 metadata and require a stable schema across batches. See
 [Batch inference](batch-inference.qmd).
 
-The output directory includes `_metadata/` for configuration, source, and job
-reports. Underscore-prefixed paths are excluded by file-source discovery, so
+The output directory must not exist. It includes `_metadata/` for resolved
+configuration, source manifests, and job reports. Source identity uses file
+metadata; source contents are not hashed. Reports record model digests, seed,
+package versions, hardware, precision, and row counts.
+Underscore-prefixed paths are excluded by file-source discovery, so
 the directory can be read as data without including those sidecars. Consume
 the complete result only after `_SUCCESS` appears. Failures retain a failed
 report where possible, discard partial shards, and leave no success marker.
@@ -194,7 +158,7 @@ Automatic precision follows the SDK's hardware policy. Set
 ## Serve a checkpoint
 
 ```bash
-relflow serve runs/payment/model.rf \
+relflow serve artifacts/payment.rf \
   --host 127.0.0.1 --port 8080 --max-batch-size 128
 ```
 

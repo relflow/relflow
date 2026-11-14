@@ -13,13 +13,11 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from textwrap import dedent
-from types import SimpleNamespace
 
 import polars as pl
 import pyarrow.ipc as ipc
 import pyarrow.parquet as pq
 import pytest
-import torch
 import yaml
 
 import relflow as rf
@@ -58,21 +56,14 @@ def inputs(tmp_path):
     )
     data = tmp_path / "data.parquet"
     frame.write_parquet(data)
-    config = tmp_path / "train.yaml"
+    config = tmp_path / "run.yaml"
     config.write_text(
         yaml.safe_dump(
             {
                 "version": 1,
                 "seed": 17,
-                "data": {"train": "data.parquet", "validate": "data.parquet"},
-                "fit": {
-                    "batch_size": 2,
-                    "max_epochs": 1,
-                    "accelerator": "cpu",
-                    "num_sanity_val_steps": 0,
-                    "limit_train_batches": 1,
-                    "limit_val_batches": 1,
-                },
+                "data": {"predict": "data.parquet"},
+                "predict": {"batch_size": 1, "accelerator": "cpu", "precision": "32-true"},
             }
         )
     )
@@ -121,7 +112,7 @@ def test_structural_check_reports_zero_values_read(inputs, monkeypatch):
     report = rf.check(model, data={"train": str(data)})
     assert report["phases"][-1]["source_rows"] == 0
     assert report["phases"][-1]["status"] == "passed"
-    assert report["sources"]["train"]["files"][0]["path"] == str(data)
+    assert Path(report["sources"]["train"]["files"][0]["path"]) == data
 
 
 def test_sampled_check_uses_processors_and_obeys_source_row_cap(inputs):
@@ -165,76 +156,7 @@ def test_run_paths_resolve_against_configuration(inputs, monkeypatch, tmp_path):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
-    assert read(config).data["train"] == str(data)
-
-
-@pytest.fixture
-def training(monkeypatch):
-    trainer = SimpleNamespace(
-        options={},
-        interrupted=False,
-        callback_metrics={},
-        checkpoint_callbacks=[],
-        global_step=0,
-        current_epoch=0,
-        accelerator=None,
-        precision="32-true",
-    )
-
-    def fit(model, data, **options):
-        trainer.options = options
-        trainer.data = data
-        return model
-
-    monkeypatch.setattr(rf.Model, "fit", fit)
-    monkeypatch.setattr(rf.Model, "trainer", property(lambda model: trainer))
-    return trainer
-
-
-def test_explicit_flags_override_run_options_and_paths(inputs, training, tmp_path, capsys):
-    model, data, config = inputs
-    output = tmp_path / "run"
-    assert (
-        main(
-            [
-                "train",
-                str(model),
-                "--config",
-                str(config),
-                "--batch-size",
-                "7",
-                "--train",
-                str(data),
-                "--output",
-                str(output),
-                "--json",
-            ]
-        )
-        == 0
-    )
-    assert training.options["batch_size"] == 7
-    assert training.options["max_epochs"] == 1
-    assert training.options["ckpt_path"] is None
-    resolved = yaml.safe_load((output / "resolved.yaml").read_text())
-    assert resolved["run"]["data"]["train"] == str(data)
-    assert resolved["model"] == str(model)
-    assert json.loads(capsys.readouterr().out)["status"] == "success"
-
-
-@pytest.mark.parametrize("enabled", [True, False])
-@pytest.mark.parametrize("flags", [[], ["--no-rollback", "--no-early-stopping"], ["--rollback", "--early-stopping"]])
-def test_training_flags_preserve_or_override_run_policy(inputs, training, tmp_path, capsys, flags, enabled):
-    model, _, config = inputs
-    payload = yaml.safe_load(config.read_text())
-    payload["fit"].update(rollback=enabled, early_stopping=enabled)
-    config.write_text(yaml.safe_dump(payload))
-    assert (
-        main(["train", str(model), "--config", str(config), "--output", str(tmp_path / "run"), *flags, "--json"]) == 0
-    )
-    expected = "--rollback" in flags if flags else enabled
-    assert training.options["rollback"] is expected
-    assert training.options["early_stopping"] is expected
-    assert json.loads(capsys.readouterr().out)["status"] == "success"
+    assert read(config).data["predict"] == str(data)
 
 
 def test_inspection_does_not_resolve_unused_processors(inputs, tmp_path, capsys):
@@ -244,41 +166,6 @@ def test_inspection_does_not_resolve_unused_processors(inputs, tmp_path, capsys)
     config.write_text(yaml.safe_dump(payload))
     assert main(["inspect", str(model), "--config", str(config), "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["objectives"] == ["/events/label"]
-
-
-def test_training_does_not_resolve_an_unused_postprocessor(inputs, training, tmp_path, capsys):
-    model, _, config = inputs
-    payload = yaml.safe_load(config.read_text())
-    payload["postprocessor"] = "unavailable_application:write"
-    config.write_text(yaml.safe_dump(payload))
-    assert main(["train", str(model), "--config", str(config), "--output", str(tmp_path / "run"), "--json"]) == 0
-    assert json.loads(capsys.readouterr().out)["status"] == "success"
-
-
-def test_invalid_training_options_do_not_import_application_modules(inputs, tmp_path, capsys):
-    model, _, config = inputs
-    payload = yaml.safe_load(config.read_text())
-    payload["imports"] = ["unavailable_application"]
-    config.write_text(yaml.safe_dump(payload))
-    assert (
-        main(
-            [
-                "train",
-                str(model),
-                "--config",
-                str(config),
-                "--learning-rate",
-                "0",
-                "--output",
-                str(tmp_path / "run"),
-                "--json",
-            ]
-        )
-        == 2
-    )
-    error = json.loads(capsys.readouterr().out)["error"]
-    assert error["type"] == "ValidationError"
-    assert "learning_rate" in error["message"]
 
 
 def test_serving_passes_the_checkpoint_to_the_runtime_without_preloading(inputs, tmp_path, monkeypatch, capsys):
@@ -301,14 +188,6 @@ def test_serving_passes_the_checkpoint_to_the_runtime_without_preloading(inputs,
     assert json.loads(capsys.readouterr().out)["status"] == "success"
 
 
-def test_check_reports_invalid_training_selection_before_execution(inputs, capsys, tmp_path):
-    model, data, _ = inputs
-    config = tmp_path / "invalid.yaml"
-    config.write_text(yaml.safe_dump({"version": 1, "data": {"train": str(data)}}))
-    assert main(["check", str(model), "--config", str(config), "--json"]) == 2
-    assert "validation data" in json.loads(capsys.readouterr().out)["error"]["message"]
-
-
 def test_explicit_training_input_can_be_checked_without_a_validation_split(inputs, capsys):
     model, data, _ = inputs
     assert main(["check", str(model), "--input", str(data), "--stage", "train", "--json"]) == 0
@@ -329,7 +208,7 @@ def test_duplicate_run_yaml_is_an_input_error(inputs, tmp_path, capsys):
         {"fit": {"devices": 2}},
         {"loader": {"num_workers": True}},
         {"predict": {"batch_size": 0}},
-        {"fit": {"learning_rate": float("nan")}},
+        {"serve": {"batch_timeout": float("nan")}},
     ],
 )
 def test_run_settings_enforce_declared_boundaries(payload):
@@ -347,7 +226,8 @@ def test_json_stdout_has_only_the_report_on_success_and_failure(inputs, capsys):
     assert "requires --execute" in captured.err
 
 
-def test_human_reports_show_the_model_and_check_results(inputs, capsys):
+def test_human_reports_show_the_model_and_check_results(inputs, capsys, monkeypatch):
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
     model, data, _ = inputs
     assert main(["inspect", str(model)]) == 0
     captured = capsys.readouterr()
@@ -402,26 +282,32 @@ def test_existing_job_is_a_contract_error_and_keeps_its_receipt(inputs, tmp_path
 def test_job_failure_preserves_receipt_and_has_no_success_marker(tmp_path):
     output = tmp_path / "failed"
     with pytest.raises(RuntimeError, match="failure"):
-        with Job(output, "predict", {"run": {}}):
+        with Job(output, {"run": {}}):
             raise RuntimeError("failure")
     assert json.loads((output / "_metadata/report.json").read_text())["status"] == "failed"
     assert not (output / "_SUCCESS").exists()
     assert not list(output.rglob("*.partial"))
     with pytest.raises(FileExistsError):
-        with Job(output, "predict", {}):
+        with Job(output, {}):
             pass
 
 
-def test_trainer_interrupt_never_publishes_a_successful_model(inputs, training, tmp_path, capsys):
-    model, _, config = inputs
-    training.interrupted = True
+def test_interrupted_prediction_retains_its_failed_report(inputs, tmp_path, monkeypatch, capsys):
+    model, data, _ = inputs
+    checkpoint = tmp_path / "model.rf"
+    rf.Model.from_yaml(model).save(checkpoint)
     output = tmp_path / "interrupted"
-    assert main(["train", str(model), "--config", str(config), "--output", str(output), "--json"]) == 130
-    receipt = json.loads((output / "report.json").read_text())
+
+    def interrupt(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(rf.Model, "predict", interrupt)
+    assert main(["predict", str(checkpoint), "--input", str(data), "--output", str(output), "--json"]) == 130
+    receipt = json.loads((output / "_metadata/report.json").read_text())
     assert receipt["status"] == "failed"
     assert json.loads(capsys.readouterr().out) == receipt
-    assert not (output / "model.rf").exists()
     assert not (output / "_SUCCESS").exists()
+    assert not list(output.rglob("*.partial"))
 
 
 def invoke(*arguments: str, cwd: Path, env=None):
@@ -433,41 +319,24 @@ def invoke(*arguments: str, cwd: Path, env=None):
 
 
 @pytest.mark.integration
-def test_executable_train_resume_and_streamed_prediction_match_python(inputs, tmp_path):
+def test_executable_streamed_prediction_matches_python(inputs, tmp_path):
     model, data, config = inputs
-    output = tmp_path / "run"
-    trained = invoke("train", str(model), "--config", str(config), "--output", str(output), "--json", cwd=tmp_path)
-    assert trained["global_step"] == 1
-    assert (output / "_SUCCESS").exists()
-    state = torch.load(trained["last_checkpoint"], weights_only=False, map_location="cpu")
-    assert state["optimizer_states"][0]["state"]
-    resumed_path = tmp_path / "resumed"
-    resumed = invoke(
-        "train", "--resume", str(output), "--max-epochs", "2", "--output", str(resumed_path), "--json", cwd=tmp_path
-    )
-    assert resumed["global_step"] == 2
-    assert resumed["parent_checkpoint"] == trained["last_checkpoint"]
-    assert (resumed_path / "_SUCCESS").exists()
-    adapted = invoke(
-        "train",
-        str(output / "model.rf"),
-        "--config",
-        str(config),
-        "--output",
-        str(tmp_path / "adapted"),
-        "--json",
-        cwd=tmp_path,
-    )
-    assert adapted["global_step"] == 1
-    assert adapted["parent_checkpoint"] is None
-
-    restored = rf.Model.load(output / "model.rf")
+    checkpoint = tmp_path / "model.rf"
+    restored = rf.Model.from_yaml(model)
+    restored.save(checkpoint)
     expected = restored.predict(pl.read_parquet(data), retain=("id",))
+    payload = yaml.safe_load(config.read_text())
+    payload["data"]["predict"] = "unavailable.parquet"
+    config.write_text(yaml.safe_dump(payload))
     for format in ("parquet", "ipc"):
         directory = tmp_path / format
         report = invoke(
             "predict",
-            str(output / "model.rf"),
+            str(checkpoint),
+            "--config",
+            str(config),
+            "--batch-size",
+            "2",
             "--input",
             str(data),
             "--output",
@@ -487,6 +356,9 @@ def test_executable_train_resume_and_streamed_prediction_match_python(inputs, tm
         actual = pq.read_table(shard) if format == "parquet" else ipc.open_file(shard).read_all()
         assert pl.from_arrow(actual).equals(expected)
         assert report["written_rows"] == len(expected)
+        resolved = yaml.safe_load((directory / "_metadata/resolved.yaml").read_text())
+        assert resolved["run"]["predict"]["batch_size"] == 2
+        assert resolved["run"]["data"]["predict"] == str(data)
         assert (directory / "_SUCCESS").exists()
         assert rf.source(str(directory)).discover().schema.equals(actual.schema)
 

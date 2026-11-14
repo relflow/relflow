@@ -3,6 +3,7 @@
 import json
 
 import pytest
+from rich.text import Text
 from typer.testing import CliRunner
 
 import relflow as rf
@@ -11,23 +12,25 @@ from relflow.cli import app, main
 from relflow.cli.config import Run
 
 
-@pytest.mark.parametrize("command", [None, "inspect", "check", "train", "predict", "serve"])
-def test_typer_generates_help_for_every_command(command):
-    result = CliRunner().invoke(app, [command, "--help"] if command else ["--help"])
+@pytest.mark.parametrize("command", [None, "inspect", "check", "predict", "serve"])
+@pytest.mark.parametrize("color", [False, True])
+def test_typer_generates_help_for_every_command(command, color):
+    result = CliRunner().invoke(app, [command, "--help"] if command else ["--help"], color=color)
     assert result.exit_code == 0, result.output
-    assert "Usage:" in result.output
+    output = Text.from_ansi(result.output).plain
+    assert "Usage:" in output
     if command:
-        assert "--json" in result.output
-        assert "--config" in result.output
+        assert "--json" in output
+        assert "--config" in output
     else:
-        assert all(name in result.output for name in ("inspect", "check", "train", "predict", "serve"))
-        assert "--show-completion" in result.output
+        assert all(name in output for name in ("inspect", "check", "predict", "serve"))
+        assert "--show-completion" in output
 
 
 def test_version_and_short_help_keep_standard_exit_codes(capsys):
     assert main(["--version"]) == 0
     assert capsys.readouterr().out.strip() == f"relflow {rf.__version__}"
-    assert main(["--version", "train"]) == 0
+    assert main(["--version", "predict"]) == 0
     assert capsys.readouterr().out.strip() == f"relflow {rf.__version__}"
     assert main(["-h"]) == 0
     assert "Usage:" in capsys.readouterr().out
@@ -66,8 +69,8 @@ def test_repeatable_options_keep_their_values_and_order(monkeypatch):
 @pytest.mark.parametrize(
     "arguments",
     [
-        ["train", "model.yaml", "--output", "new-run", "--batch-size", "0"],
-        ["train", "model.yaml", "--output", "new-run", "--max-epochs", "bad"],
+        ["predict", "model.rf", "--output", "new-run", "--batch-size", "0"],
+        ["predict", "model.rf", "--output", "new-run", "--batch-size", "bad"],
         ["predict", "model.rf", "--output", "new-run", "--format", "invalid"],
         ["check", "model.yaml", "--stage", "invalid"],
         ["serve", "model.rf", "--port", "65536"],
@@ -121,7 +124,7 @@ def test_native_completion_suggests_commands_without_starting_a_workflow(monkeyp
 @pytest.mark.parametrize(
     "arguments",
     [
-        ["train", "model.yaml", "--output", "unused", "--batch-size", "0", "--json"],
+        ["predict", "model.rf", "--output", "unused", "--batch-size", "0", "--json"],
         ["inspect", "missing.rf", "--unknown-option", "--json"],
     ],
 )
@@ -144,3 +147,9 @@ def test_workflow_exit_codes_are_preserved_by_the_typer_entry_point(monkeypatch,
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "failed"
     assert report["error"] == {"type": "ValueError", "message": "invalid checkpoint"}
+
+
+def test_train_is_not_a_cli_command():
+    result = CliRunner().invoke(app, ["train", "--help"])
+    assert result.exit_code == 2
+    assert "No such command" in result.output

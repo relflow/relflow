@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib
-import json
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Literal, Self, TypeVar
@@ -15,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from relflow.architecture.template import Loader
 from relflow.data.processors import Postprocessor, Preprocessor
 
-__all__ = ["Run", "read", "restore", "processor", "location"]
+__all__ = ["Run", "read", "processor", "location"]
 
 Positive = Annotated[int, Field(gt=0)]
 Nonnegative = Annotated[int, Field(ge=0)]
@@ -39,27 +38,7 @@ class LoaderOptions(Options):
     persistent_workers: bool = False
     pin_memory: bool = False
     prefetch_factor: Positive = 2
-    shuffle_rows: Positive | None = None
     epoch_size: Positive | None = None
-
-
-class Fit(Options):
-    batch_size: Positive | None = None
-    learning_rate: Annotated[float, Field(gt=0)] | None = None
-    weight_decay: Annotated[float, Field(ge=0)] | None = None
-    max_epochs: Positive | None = None
-    max_steps: Positive | None = None
-    accelerator: str = "auto"
-    precision: str | int | None = None
-    early_stopping: bool = True
-    rollback: bool = True
-    monitor: str = "loss/validate"
-    mode: Literal["min", "max"] = "min"
-    patience: Nonnegative = 10
-    min_delta: Annotated[float, Field(ge=0)] = 0.0
-    limit_train_batches: Positive | Annotated[float, Field(gt=0, le=1)] | None = None
-    limit_val_batches: Nonnegative | Annotated[float, Field(ge=0, le=1)] | None = None
-    num_sanity_val_steps: Nonnegative = 2
 
 
 class Predict(Options):
@@ -90,7 +69,6 @@ class Run(Options):
     postprocessor: str | None = None
     data: dict[Stage, str | list[str]] = Field(default_factory=dict)
     loader: LoaderOptions = Field(default_factory=LoaderOptions)
-    fit: Fit = Field(default_factory=Fit)
     predict: Predict = Field(default_factory=Predict)
     serve: Serve = Field(default_factory=Serve)
 
@@ -99,14 +77,6 @@ class Run(Options):
         self.imports.extend(imports or ())
         for module in self.imports:
             importlib.import_module(module)
-
-    def check_training(self) -> None:
-        """Check whether the configured selection policy can observe its monitor."""
-        if self.fit.monitor == "loss/validate" and (self.fit.early_stopping or self.fit.rollback):
-            if "validate" not in self.data or self.fit.limit_val_batches == 0:
-                raise ValueError(
-                    "training selection requires validation data; supply --validate or disable early_stopping and rollback"
-                )
 
 
 def location(value: str, base: Path) -> str:
@@ -140,18 +110,6 @@ def read(pathname: Path | None) -> Run:
         for split, value in run.data.items()
     }
     return run
-
-
-def restore(directory: Path) -> tuple[Run, Path]:
-    """Recover the configuration and last checkpoint of a recorded CLI run."""
-    directory = directory.resolve()
-    resolved = yaml.load((directory / "resolved.yaml").read_text(encoding="utf-8"), Loader=Loader)
-    report = json.loads((directory / "report.json").read_text(encoding="utf-8"))
-    checkpoint = report.get("last_checkpoint")
-    if not isinstance(checkpoint, str) or not Path(checkpoint).is_file():
-        raise ValueError(f"run {directory}: no full last checkpoint is available to resume")
-    run = Run.model_validate(resolved["run"])
-    return run, Path(checkpoint)
 
 
 def processor(reference: str | None, kind: type[P]) -> P | None:

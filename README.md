@@ -193,12 +193,12 @@ SQL queries and custom record generators connect through relflow's
 [data modules](https://www.relflow.ai/en/latest/guides/data-modules.html).
 
 The included [command line](https://www.relflow.ai/en/latest/guides/command-line.html)
-also runs file workflows from a model template and a separate run configuration:
+inspects models and runs prediction and serving workflows from a saved artifact:
 
 ```bash
-relflow train model.yaml --config train.yaml --output runs/payment
-relflow predict runs/payment/model.rf --input payments/requests --output predictions/payment
-relflow serve runs/payment/model.rf --host 127.0.0.1 --port 8080
+relflow inspect payment.rf
+relflow predict payment.rf --input payments/requests --output predictions/payment
+relflow serve payment.rf --host 127.0.0.1 --port 8080
 ```
 
 Use `relflow inspect` to describe a model and `relflow check` for preflight.

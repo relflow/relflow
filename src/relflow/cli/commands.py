@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import math
 import os
 from pathlib import Path
 from typing import Annotated
 
 import lightning.pytorch as lit
-import torch
 import typer
-from lightning.pytorch.callbacks import ModelCheckpoint
 
 from relflow._version import __version__
-from relflow.cli.config import Format, Level, Stage, location, processor, read, restore
+from relflow.cli.config import Format, Level, Stage, location, processor, read
 from relflow.cli.jobs import Job, digest, snapshot
 from relflow.cli.terminal import report
 from relflow.data.datasets.arrow import ArrowDataModule
@@ -29,7 +26,7 @@ __all__ = ["app"]
 
 app = typer.Typer(
     name="relflow",
-    help="Inspect, check, train, predict, and serve relflow models.",
+    help="Inspect, check, predict, and serve relflow models.",
     no_args_is_help=True,
     context_settings={"help_option_names": ["-h", "--help"]},
     pretty_exceptions_enable=False,
@@ -95,8 +92,6 @@ def check(
         run = read(config)
         if input is not None:
             run.data = {stage: location(input, Path.cwd())}
-        elif config is not None and "train" in run.data:
-            run.check_training()
         run.register(imports)
         result.update(
             check_model(
@@ -108,153 +103,6 @@ def check(
                 seed=run.seed,
             )
         )
-
-
-@app.command()
-def train(
-    output: Output,
-    model: Annotated[Path | None, typer.Argument(help="Architecture YAML or a learned artifact.")] = None,
-    config: Config = None,
-    imports: Imports = None,
-    resume: Annotated[Path | None, typer.Option(help="Resume the full last checkpoint of an existing CLI run.")] = None,
-    train: Annotated[str | None, typer.Option(help="Training files, overriding data.train.")] = None,
-    validate: Annotated[str | None, typer.Option(help="Validation files, overriding data.validate.")] = None,
-    batch_size: Batch = None,
-    accelerator: Accelerator = None,
-    precision: Precision = None,
-    learning_rate: Annotated[float | None, typer.Option(help="Positive AdamW learning rate.")] = None,
-    weight_decay: Annotated[float | None, typer.Option(min=0, help="AdamW weight decay.")] = None,
-    max_epochs: Annotated[int | None, typer.Option(min=1, help="Maximum training epochs.")] = None,
-    max_steps: Annotated[int | None, typer.Option(min=1, help="Maximum optimizer steps.")] = None,
-    early_stopping: Annotated[bool | None, typer.Option("--early-stopping/--no-early-stopping")] = None,
-    rollback: Annotated[bool | None, typer.Option("--rollback/--no-rollback")] = None,
-    monitor: Annotated[str | None, typer.Option(help="Metric used for stopping and model selection.")] = None,
-    patience: Annotated[int | None, typer.Option(min=0, help="Checks without improvement before stopping.")] = None,
-    seed: Annotated[int | None, typer.Option(min=0, max=4294967295, help="Model and data seed.")] = None,
-    json: Json = False,
-    debug: Debug = False,
-) -> None:
-    """Train from a template, adapt an artifact, or resume a full checkpoint."""
-    with report("train", json=json, debug=debug) as result:
-        checkpoint = None
-        if resume is not None:
-            replacements = (
-                model,
-                config,
-                imports,
-                train,
-                validate,
-                batch_size,
-                accelerator,
-                precision,
-                learning_rate,
-                weight_decay,
-                max_steps,
-                early_stopping,
-                rollback,
-                monitor,
-                patience,
-                seed,
-            )
-            if any(value is not None for value in replacements):
-                raise ValueError("resume cannot replace its model, data, or runtime settings")
-            run, model = restore(resume)
-            checkpoint = model
-        else:
-            if model is None:
-                raise ValueError("train requires a model template or artifact, or --resume RUN_DIRECTORY")
-            run = read(config)
-        run.fit = run.fit.override(
-            batch_size=batch_size,
-            accelerator=accelerator,
-            precision=precision,
-            learning_rate=learning_rate,
-            weight_decay=weight_decay,
-            max_epochs=max_epochs,
-            max_steps=max_steps,
-            early_stopping=early_stopping,
-            rollback=rollback,
-            monitor=monitor,
-            patience=patience,
-        )
-        if seed is not None:
-            run.seed = seed
-        if train is not None:
-            run.data["train"] = location(train, Path.cwd())
-        if validate is not None:
-            run.data["validate"] = location(validate, Path.cwd())
-        run.check_training()
-        if "train" not in run.data:
-            raise ValueError("train requires data.train in --config or an explicit --train")
-        run.register(imports)
-        sources = {
-            Strata.normalize(split): source(value)
-            for split, value in run.data.items()
-            if split in ("train", "validate")
-        }
-        files = snapshot(sources)
-        data = ArrowDataModule(
-            train=sources[Strata.train],
-            validate=sources.get(Strata.validate),
-            **run.loader.model_dump(),
-            seed=run.seed,
-            preprocessor=processor(run.preprocessor, Preprocessor),
-        )
-        artifact = Artifact.read(model)
-        if checkpoint is not None and not artifact.resumable:
-            raise ValueError(f"checkpoint {checkpoint}: resume requires optimizer and loop state")
-        configuration = {
-            "model": str(artifact.path),
-            "model_sha256": digest(artifact.path),
-            "run": run.model_dump(mode="json"),
-        }
-        with Job(output.resolve(), "train", configuration, result) as job:
-            job.write("sources.json", files)
-            result.update(
-                seed=run.seed, model_source=str(artifact.path), model_source_sha256=configuration["model_sha256"]
-            )
-            lit.seed_everything(run.seed, workers=True)
-            instance = artifact.build()
-            callbacks = (
-                []
-                if run.fit.rollback
-                else [ModelCheckpoint(dirpath=job.path / "checkpoints", save_last=True, save_top_k=0)]
-            )
-            result["last_checkpoint"] = str(job.path / "checkpoints" / "last.ckpt")
-            job.write("report.json", result)
-            instance.fit(
-                data,
-                **run.fit.model_dump(exclude_none=True),
-                devices=1,
-                enable_progress_bar=False,
-                checkpoint_dir=job.path / "checkpoints",
-                ckpt_path=checkpoint,
-                callbacks=callbacks,
-                default_root_dir=str(job.path),
-            )
-            trainer = instance.trainer
-            if trainer.interrupted:
-                raise KeyboardInterrupt
-            instance.save(job.path / "model.rf")
-            metrics = {}
-            for name, value in trainer.callback_metrics.items():
-                if isinstance(value, torch.Tensor) and value.numel() == 1:
-                    number = value.item()
-                    metrics[name] = number if math.isfinite(number) else None
-            checkpoints = [item for item in trainer.checkpoint_callbacks if isinstance(item, ModelCheckpoint)]
-            job.complete(
-                model=str(job.path / "model.rf"),
-                model_sha256=digest(job.path / "model.rf"),
-                last_checkpoint=next((item.last_model_path for item in checkpoints if item.last_model_path), None),
-                best_checkpoint=next((item.best_model_path for item in checkpoints if item.best_model_path), None),
-                parent_checkpoint=None if checkpoint is None else str(checkpoint),
-                global_step=trainer.global_step,
-                epoch=trainer.current_epoch,
-                metrics=metrics,
-                accelerator=type(trainer.accelerator).__name__,
-                precision=trainer.precision,
-                devices=1,
-            )
 
 
 @app.command()
@@ -306,7 +154,7 @@ def predict(
             "model_sha256": digest(artifact.path),
             "run": run.model_dump(mode="json"),
         }
-        with Job(output.resolve(), "predict", configuration, result) as job:
+        with Job(output.resolve(), configuration, result) as job:
             job.write("sources.json", files)
             result.update(
                 seed=run.seed, model_source=str(artifact.path), model_source_sha256=configuration["model_sha256"]
