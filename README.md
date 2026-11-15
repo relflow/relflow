@@ -1,69 +1,209 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/relflow/relflow/main/docs/assets/branding/banners/banner.dark.svg" />
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/relflow/relflow/main/docs/assets/branding/banners/banner.light.svg" />
-    <img alt="relflow" src="https://raw.githubusercontent.com/relflow/relflow/main/docs/assets/branding/banners/banner.light.svg" width="100%" />
+    <source media="(prefers-color-scheme: dark)" srcset="docs/starlight/src/assets/branding/header.dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/starlight/src/assets/branding/header.light.svg" />
+    <img alt="relflow" src="docs/starlight/src/assets/branding/header.light.svg" width="360" />
   </picture>
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/relflow/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/relflow?logo=pypi&amp;logoColor=white" /></a>
-  <a href="https://github.com/relflow/relflow/actions/workflows/ci.yml?query=branch%3Amain"><img alt="CI" src="https://github.com/relflow/relflow/actions/workflows/ci.yml/badge.svg?branch=main&amp;event=push" /></a>
-  <a href="https://github.com/relflow/relflow/actions/workflows/ci.yml?query=branch%3Amain"><img alt="Line coverage" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frelflow%2Frelflow%2Fbadges%2Fcoverage.json" /></a>
-  <a href="https://github.com/relflow/relflow/actions/workflows/compatibility.yml?query=branch%3Amain"><img alt="Dependency compatibility" src="https://github.com/relflow/relflow/actions/workflows/compatibility.yml/badge.svg?branch=main" /></a>
-  <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&amp;logoColor=white" />
-  <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-2E8B57" /></a>
-  <a href="https://www.relflow.ai/en/latest/"><img alt="Documentation build" src="https://app.readthedocs.org/projects/relflow/badge/?version=latest" /></a>
+  <a href="https://pypi.org/project/relflow/"><picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/pypi/relflow.svg?variant=outline&amp;size=sm&amp;mode=dark" />
+      <img alt="PyPI version" src="https://shieldcn.dev/pypi/relflow.svg?variant=outline&amp;size=sm&amp;mode=light" />
+    </picture></a>
+  <a href="https://github.com/relflow/relflow/actions/workflows/ci.yml?query=branch%3Amain"><picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/ci/relflow/relflow.svg?workflow=ci.yml&amp;branch=main&amp;variant=outline&amp;size=sm&amp;mode=dark" />
+      <img alt="CI on main" src="https://shieldcn.dev/github/ci/relflow/relflow.svg?workflow=ci.yml&amp;branch=main&amp;variant=outline&amp;size=sm&amp;mode=light" />
+    </picture></a>
+  <a href="https://github.com/relflow/relflow/actions/workflows/coverage.yml?query=branch%3Amain"><picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/dynamic/json.svg?url=https%3A%2F%2Fraw.githubusercontent.com%2Frelflow%2Frelflow%2Fbadges%2Fcoverage.json&amp;query=%24.message&amp;label=coverage&amp;variant=outline&amp;size=sm&amp;mode=dark" />
+      <img alt="Line coverage on main" src="https://shieldcn.dev/badge/dynamic/json.svg?url=https%3A%2F%2Fraw.githubusercontent.com%2Frelflow%2Frelflow%2Fbadges%2Fcoverage.json&amp;query=%24.message&amp;label=coverage&amp;variant=outline&amp;size=sm&amp;mode=light" />
+    </picture></a>
+  <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/pypi/python/relflow.svg?variant=outline&amp;size=sm&amp;mode=dark" />
+      <img alt="Required Python version" src="https://shieldcn.dev/pypi/python/relflow.svg?variant=outline&amp;size=sm&amp;mode=light" />
+    </picture>
+  <a href="LICENSE"><picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/license/relflow/relflow.svg?variant=outline&amp;size=sm&amp;mode=dark" />
+      <img alt="Apache 2.0 license" src="https://shieldcn.dev/github/license/relflow/relflow.svg?variant=outline&amp;size=sm&amp;mode=light" />
+    </picture></a>
   <!-- discord-invite:start -->
-  <a href="https://discord.gg/DVyZUkvTFA"><img alt="Discord channel invite" src="https://img.shields.io/badge/discord-join%20the%20channel-5865F2?logo=discord&amp;logoColor=white" /></a>
+  <a href="https://discord.gg/DVyZUkvTFA"><picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/Discord-Join-68b78a.svg?logo=discord&amp;variant=outline&amp;size=sm&amp;mode=dark" />
+      <img alt="Discord community" src="https://shieldcn.dev/badge/Discord-Join-185a3c.svg?logo=discord&amp;variant=outline&amp;size=sm&amp;mode=light" />
+    </picture></a>
   <!-- discord-invite:end -->
 </p>
 
-**Build and adapt foundation models for your own structured data.**
+<p align="center">
+  <a href="https://www.relflow.ai/en/latest/">User Guide</a> ·
+  <a href="https://www.relflow.ai/en/latest/benchmarks/">Benchmarks</a> ·
+  <a href="https://www.relflow.ai/en/latest/api-map/">API map</a> ·
+  <a href="https://discord.gg/DVyZUkvTFA">Community</a>
+</p>
 
-Relflow is an open source model factory for typed, nested data. Describe your records and
-prediction targets, and it generates a custom neural architecture, trains
-the model, and serves predictions and learned representations.
+# Predictive modeling, shaped by your data
 
-Suppose your dataset contains purchases with line items, accounts with
-transaction histories, and several types of values inside each record. relflow lets you keep those relationships in the model
-instead of hand-designing a fixed set of aggregate features. Describe the
-records and the fields to predict; the schema defines the architecture.
-One declaration gives you field encodings, attention over related records,
-prediction heads, and training objectives, with growing vocabularies and
-reusable embeddings built in.
+relflow is an open-source Python framework for building predictive models from
+structured data. You describe your records, their relationships, and the outcomes
+you want to predict using a typed schema. relflow builds a model from that schema,
+then learns features and predictions together during training.
 
-## How it works
+A customer has usage history and support tickets. An asset has sensor readings
+and maintenance records. An insurance claim has invoices and line items. Keep
+those records and their relationships in the model, without first turning every
+history into a hand-crafted table of counts and averages.
 
-1. **Fields represent values.** Tensorfields such as `Number`, `Category`, and
-   `Text` convert typed inputs into embeddings. Learned state, including
-   numeric normalization and categorical vocabularies, stays with the model. relflow supports nearly dozen different data types, and you can build and register your own.
-2. **Branches build context.** Branches describe arbitrarily nested records
-   and variable-length collections. Attention combines their fields and
-   repeated records; nested branches pass learned context toward the root.
-3. **Targets read that context.** Each target has a decoder and a loss suited
-   to its datatype. Decoders read context along their schema paths, so targets
-   can live at the root or inside repeated records.
+## Why relflow?
 
-Train from data wherever it lives: stream files from disk or cloud storage,
-read database queries, or connect custom record generators. Use Polars when
-data is already in memory. PyTorch Lightning runs training. Your
-application prepares the observations; relflow builds their encoders,
-decoders, and objectives. Built-in and custom field types use the same
-extension protocol, so new representations and objectives plug into the
-model factory.
+- **Featureless.** Learn features from typed values and nested records inside the
+  model, without a separate feature engineering pipeline.
+- **Modular.** Compose models from fields and branches. Extend them with your own
+  custom leaf types and connect to your own custom data sources.
+- **Scalable.** Stream massive datasets from disk or cloud storage through batched
+  training and inference.
+- **Flexible.** Predict probabilities, numbers, or several outcomes together.
+  Targets can live at the root or inside nested collections of records.
+- **Deployable.** Use the trained model for batch prediction and real-time serving,
+  with its learned vocabularies and normalizers included.
+- **State of the art.** Competitive predictive quality on large structured-data
+  tasks, backed by [published RelArena comparisons](https://www.relflow.ai/en/latest/benchmarks/).
 
-## Measured results
+## Install
 
-**1.18 million predictions per second on one NVIDIA A10G.** In a synthetic
-Arrow IPC serving benchmark, a tiny, attention-free XS model processed
-**50.3 million rows with zero failed requests**, including client encoding,
-HTTPS, and response decoding. The setup and three measured passes are below.
+Requires Python 3.12 or newer. With [uv](https://docs.astral.sh/uv/):
 
-The [evidence catalog](https://www.relflow.ai/en/latest/evidence/) adds **79 controlled
-learning experiments** with code, comparisons, seeds, and recorded results.
-Examples from the recorded 0.4.2 snapshot; each version's documentation uses
-the evidence assets frozen for that release:
+```sh
+uv add relflow
+uv run relflow --version
+```
+
+With pip, use `python -m pip install relflow`. Add optional capabilities with
+`uv add "relflow[text,serving]"` for text encoders and HTTP serving. See
+[Installation](https://www.relflow.ai/en/latest/installation/) for the full list.
+
+## Describe your data. Define your predictions.
+
+Suppose you want to predict whether a subscriber will cancel within 90 days.
+The model can use their current plan, monthly usage, and support history:
+
+```python
+import relflow as rf
+
+
+class MonthlyUsage(rf.Branch):
+    """One month of a subscriber's product usage."""
+
+    month = rf.Period("month_of_year")
+    minutes = rf.Number
+    data_gb = rf.Number
+    overage_fee = rf.Number
+
+
+class SupportTicket(rf.Branch):
+    """One support ticket in a subscriber's history."""
+
+    channel = rf.Category
+    resolved = rf.Boolean
+    days_open = rf.Number
+
+
+class ChurnModel(rf.Model):
+    """A subscriber with usage and support histories."""
+
+    plan = rf.Category
+    tenure_months = rf.Number
+    monthly_usage = MonthlyUsage(length=12, overflow="tail")
+    support_tickets = SupportTicket(length=32, overflow="tail")
+    churn_90d = rf.Boolean(mask=True)
+
+
+if __name__ == "__main__":
+    model = ChurnModel(preset="small")
+    data = rf.ArrowDataModule(
+        train="customers/train/*.parquet",
+        validate="customers/validation/*.parquet",
+    )
+    model.fit(data, preset="small")
+    model.save("churn.rf")
+```
+
+**The schema is the architecture.** Fields describe individual values; branches
+keep related records together. relflow uses that structure to build its
+representations, context encoders, prediction heads, and learning objectives.
+Class declarations describe the contract; constructing `ChurnModel(...)` creates
+a new, untrained model.
+
+`mask=True` makes `churn_90d` a supervised target: the historical answer trains
+the model without becoming an input. Each history is supplied oldest to newest;
+`overflow="tail"` retains the most recent records up to the declared cap.
+
+The Parquet files contain one subscriber observation per row, with nested usage
+and ticket records and the historical `churn_90d` answer. Your application owns
+the decision cutoff, labels, and evaluation split. Training streams those files;
+the complete dataset does not need to fit in memory. Cloud storage paths use
+the same data-module interface.
+
+### Predict for new records
+
+Load the saved model and pass a Polars DataFrame. New request records contain the
+same known inputs and a `customer_id` to retain, with the future answer omitted:
+
+```python
+import polars as pl
+import relflow as rf
+
+model = rf.Model.load("churn.rf")
+requests = pl.read_parquet("customers/requests.parquet")
+result = model.predict(requests, batch_size=256, retain=("customer_id",))
+
+print(result.select("inputs", "predictions"))
+```
+
+The result is an eager Polars DataFrame. Each row retains its customer identifier
+under `inputs`; `predictions.churn_90d.content.probability` holds the estimated
+probability of cancellation. For larger prediction jobs, stream output to files
+with [batch inference](https://www.relflow.ai/en/latest/advanced/inference-and-deployment/#stream-a-prediction-job-to-files).
+Use `rf.PolarsDataModule` when training and validation data are already in memory.
+
+## What can you build with relflow?
+
+The User Guide follows six examples through their schemas, datasets, and Core Concepts:
+
+| Use case | Available context | Predictions |
+| --- | --- | --- |
+| [Support tickets](https://www.relflow.ai/en/latest/?case=tickets#case-tickets) | Product details and a conversation | Escalation probability and time to resolution |
+| [Customer churn](https://www.relflow.ai/en/latest/?case=churn#case-churn) | Subscriber details, usage, and support histories | Cancellation within 90 days |
+| [Demand forecasting](https://www.relflow.ai/en/latest/?case=demand#case-demand) | Sales history and planned promotions | Units sold for each supplied future week |
+| [Credit risk](https://www.relflow.ai/en/latest/?case=credit#case-credit) | An application, credit accounts, and inquiries | Default within 12 months |
+| [Predictive maintenance](https://www.relflow.ai/en/latest/?case=maintenance#case-maintenance) | Sensor readings and completed work orders | Failure within 30 days |
+| [Insurance claims](https://www.relflow.ai/en/latest/?case=claims#case-claims) | Policies, claims, invoices, and line items | Payout and fraud probability for each claim |
+
+These illustrate the same modeling contract across different data structures,
+leaf types, and prediction targets. [Explore the data and model ERDs](https://www.relflow.ai/en/latest/featureless/#example)
+and [learn about leaf types](https://www.relflow.ai/en/latest/concepts/data-types/).
+
+## Results you can inspect
+
+**On the nine published RelArena tasks with more than one million training
+observations, relflow beats TabPFN-3 on 9 of 9 and TabPFN-3.5 on 6 of 9.**
+This is the recorded comparison checked November 10, 2026; the
+[benchmark page](https://www.relflow.ai/en/latest/benchmarks/) includes individual
+scores, task sizes, comparison rules, and source records.
+
+A retained Amazon item-lifetime-value model has **926,554 task-trained
+parameters**, about **0.42%** of the approximately **220 million** in the
+TabPFN-3.5 base checkpoint. Including its shared frozen text encoder, the relflow
+model has **23,640,282 parameters**. See the
+[model-size comparison](https://www.relflow.ai/en/latest/benchmarks/#count-the-whole-model)
+for exactly what is counted.
+
+The [Evidence library](https://www.relflow.ai/en/latest/evidence/) explores
+individual learning capabilities with controlled comparisons, source code,
+measurements, and execution provenance.
+
+<details>
+<summary>Selected historical learning checks · relflow 0.4.2</summary>
 
 <!-- evidence-results:start -->
 
@@ -75,307 +215,22 @@ the evidence assets frozen for that release:
 
 <!-- evidence-results:end -->
 
-These are controlled synthetic tasks. Each page includes its protocol,
-comparisons, limitations, and complete run report.
-
-<details>
-<summary>Serving benchmark setup and recorded runs</summary>
-
-Recorded 2026-10-06: one NVIDIA A10G replica with 2 CPUs and 8 GiB host memory;
-an untrained, 3,142-parameter `xs` model with attention disabled and mean
-pooling. Each input contains four numeric/Boolean records generated from
-seeded Gaussian numbers and random Booleans. This measures serving throughput,
-not prediction quality or the default attention model.
-
-The client sent 131,072 rows per request with four concurrent requests,
-Zstandard Arrow IPC, and gzip responses. Each pass completed 128 requests
-(16,777,216 rows). Input generation was outside the timer; Arrow validation,
-encoding on every request, HTTPS, and response decoding were inside it.
-
-| Pass | Rows/second | p95 request latency | Failed requests |
-| --- | ---: | ---: | ---: |
-| 1 | 1,179,732 | 923.3 ms | 0 |
-| 2 | 1,234,752 | 611.9 ms | 0 |
-| 3 | 1,122,590 | 749.2 ms | 0 |
-
-The headline is the median of these three passes.
+These are recorded synthetic tasks, with their original controls and revision.
+Each linked page explains the setup, limitations, and retained results.
 
 </details>
 
-## Install
+## Go further
 
-Requires Python 3.12 or newer:
+- [Models and schemas](https://www.relflow.ai/en/latest/concepts/models/): how typed declarations shape the model.
+- [Runtime](https://www.relflow.ai/en/latest/concepts/runtime/): fit, validate, test, and predict with presets.
+- [Data modules](https://www.relflow.ai/en/latest/advanced/data-modules/): streaming files, queries, and custom readers.
+- [Custom leaf types](https://www.relflow.ai/en/latest/advanced/custom-data-types/): extend the same registration system used by built-in fields.
+- [Inference and deployment](https://www.relflow.ai/en/latest/advanced/inference-and-deployment/): batch output and HTTP serving.
+- [API map](https://www.relflow.ai/en/latest/api-map/): find public classes and methods with links to their source.
 
-```bash
-uv add relflow
-```
+Join the [Discord community](https://discord.gg/DVyZUkvTFA), contribute through
+[CONTRIBUTING.md](CONTRIBUTING.md), or work on the site using the
+[documentation guide](docs/README.md).
 
-With pip, use `python -m pip install relflow`.
-Optional extras include
-`relflow[text]` for Hugging Face text encoders and `relflow[serving]` for HTTP
-serving.
-
-## Define a model
-
-Suppose you have historical payment records and want to decide which new
-payments deserve review just after booking. Each row contains `amount`,
-`merchant`, and whether a dispute was reported in the following 30 days.
-Declare the two inputs and that observed outcome in a reusable class:
-
-```python
-import relflow as rf
-
-
-class PaymentModel(rf.Model):
-    amount = rf.Number
-    merchant = rf.Category
-    disputed = rf.Boolean(mask=True)
-
-
-if __name__ == "__main__":
-    model = PaymentModel(preset="small")
-```
-
-Class attributes match the keys in your records: `amount = rf.Number` reads
-the `amount` column. This has the familiar shape of a Django or Pydantic data
-contract; relflow's declarations also determine the neural components to build.
-Use a bare field class for default options, or call it to configure
-the field. `mask=True` makes `disputed` a supervised target: its label trains
-the decoder but is never included in the inputs. Mark additional fields to
-train multiple targets in the same model.
-
-Importing the declarations defines the schema; the guarded constructor creates
-the neural model when the script runs. `PaymentModel(preset="small")` creates
-a fresh, untrained model. `small` supplies architecture defaults for the root,
-child branches, and field decoders. The bundled
-[presets](https://www.relflow.ai/en/latest/concepts/training/) are
-`small` and `medium`, derived from the frozen arena HPO recipes. Override
-constructor options such as `d_model`, `n_layers`, or `n_heads` when needed.
-Class declarations keep child names separate from those options. For generated
-schemas, the keyword and `fields={...}` mapping forms remain available.
-
-Training presets are selected independently with `model.fit(datamodule, preset="small")`.
-They supply optimizer, batch-size, EMA, and run-budget defaults; explicit fit arguments win.
-
-## Train and predict
-
-Stream your application's Parquet datasets from disk or cloud storage, with
-one payment per row. Training
-and validation contain `amount`, `merchant`, and the known `disputed` label;
-request rows contain the inputs and a `payment_id` for joining results.
-The following blocks continue from `model`; keep runtime steps under the
-same execution guard in a script, or construct the model directly in a notebook.
-
-```python
-data = rf.ArrowDataModule(
-    train="payments/train/*.parquet",
-    validate="payments/validation/*.parquet",
-)
-model.fit(data, batch_size=128, learning_rate=1e-4, max_epochs=30)
-
-requests = rf.ArrowDataModule(
-    predict="payments/requests/*.parquet",
-    retain=("payment_id",),
-)
-model.predict(
-    datamodule=requests,
-    batch_size=256,
-    callbacks=[rf.Writer("payment-predictions")],
-    return_predictions=False,
-)
-
-model.save("payment.rf")
-restored = rf.Model.load("payment.rf")
-```
-
-Datasets are scanned in Arrow batches with a bounded training shuffle buffer;
-the full inputs need not fit in memory. `Writer` streams output to
-`payment-predictions/rank-*.parquet`, and `return_predictions=False` avoids
-collecting the complete result in memory. File paths, globs, `rf.source(...)`,
-and restartable batch factories are also supported. Cloud paths such as
-`s3://your-data-bucket/payments/train/*.parquet` use the same interface.
-SQL queries and custom record generators connect through relflow's
-[data modules](https://www.relflow.ai/en/latest/concepts/data-modules/).
-
-The included [command line](https://www.relflow.ai/en/latest/advanced/command-line/)
-inspects models and runs prediction and serving workflows from a saved artifact:
-
-```bash
-relflow inspect payment.rf
-relflow predict payment.rf --input payments/requests --output predictions/payment
-relflow serve payment.rf --host 127.0.0.1 --port 8080
-```
-
-Use `relflow inspect` to describe a model and `relflow check` for preflight.
-Serving requires `relflow[serving]`.
-
-To collect predictions in memory, call
-`result = model.predict(datamodule=requests, batch_size=256, devices=1)`.
-The result is an eager Polars DataFrame with nested `predictions`, optional
-`representations`, and retained `inputs` columns. Use `result.to_dicts()` for
-Python records or `result.to_arrow()` when integrating with Arrow consumers.
-
-For observations already loaded into memory, pass an eager Polars DataFrame
-directly:
-
-```python
-import polars as pl
-
-requests = pl.read_parquet("payments/requests.parquet")
-result = model.predict(requests, batch_size=256, retain=("payment_id",))
-```
-
-When training and validation frames are already in memory, use
-`rf.PolarsDataModule(train=train_frame, validate=validation_frame)` with the
-same `model.fit(...)` call. `model.encode(frame)` and
-`model.write(raw_predictions, source=frame)` also accept Polars frames for
-custom inference workflows.
-
-`fit` configures AdamW, early stopping, and restoration of the best validation
-checkpoint. Supply hardware, logging, and other Lightning options through
-`fit`. Saved models include the schema, weights, and learned field state.
-
-Prediction files contain a `predictions.disputed` record with state
-probabilities, content (the probability of `True`), and an `inferred` flag.
-Retained identifiers appear under `inputs`. Scan completed output lazily with
-`pl.scan_parquet("payment-predictions/rank-*.parquet")` and use Polars expressions
-to select the columns needed downstream.
-
-## Add nested context
-
-To use an account's previous transactions alongside the current payment,
-include a `history` list of records in each observation. Declare its fields
-in a reusable branch, then place that branch in the model:
-
-```python
-class Transaction(rf.Branch):
-    amount = rf.Number
-    merchant = rf.Category
-
-
-class HistoryPaymentModel(rf.Model):
-    amount = rf.Number
-    merchant = rf.Category
-    history = Transaction(length=32, overflow="tail")
-    disputed = rf.Boolean(mask=True)
-
-
-if __name__ == "__main__":
-    history_model = HistoryPaymentModel(preset="small")
-```
-
-`history` reads the same-named collection, and its fields read each child
-record's keys. With history ordered oldest to newest, this branch retains the
-most recent 32 records. `length` is a cap; shorter histories need no manual
-padding. Branches can nest further, and `mask=True` on a child field requests
-a prediction for each retained record.
-
-Set `embed=True` on the model, a branch, or a field to export contextual
-embeddings under a separate `representations` column. This requests output;
-it does not add a training objective.
-
-## Pretrain, adapt, and reuse
-
-The foundation-model workflow is to pretrain on a broad collection of your
-structured records using reconstruction objectives, then adapt the learned
-model to downstream prediction tasks. Fine-tuning updates the learned encoders
-and task heads. Exporting representations lets separate predictors use that
-context while the exporting model stays fixed.
-
-A supervised model can also start from fresh initialization. Evaluate reuse
-on the intended downstream tasks and populations. See
-[Pretraining and fine-tuning](https://www.relflow.ai/en/latest/advanced/masking-and-pretraining/)
-and [Reusable representations](https://www.relflow.ai/en/latest/advanced/embeddings/).
-
-[Schema mutation](https://www.relflow.ai/en/latest/advanced/mutations/) can add targets
-or change the input tree while retaining compatible learned state. New or
-incompatible components initialize as the schema changes.
-
-## Extensible field types
-
-Numbers, categories, booleans, sets, dates, text, vectors, hashes, quantiles,
-and latent clusters have their own representations and objectives. They use
-the same extension registry available to your application.
-
-Define a custom tensorfield with `rf.Extension`: declare its accepted Arrow
-types and validated Pydantic options, then register its tensorization,
-embedder, decoder, loss, and output writer by `rf.Component` role. The shared
-engine handles nesting, masking, batching, and device transfer. Your datatype
-owns its semantics without adding special cases to the model or data loader.
-See [Custom data types](https://www.relflow.ai/en/latest/advanced/custom-data-types/)
-for the full contract.
-
-## Serve the trained model
-
-With `relflow[serving]` installed, save this module as `serve_payments.py` beside
-the `payment.rf` artifact produced above:
-
-```python
-import relflow as rf
-
-app = rf.Deployment(checkpoint="payment.rf").app()
-```
-
-From that directory, start the HTTP server:
-
-```bash
-uvicorn serve_payments:app --host 127.0.0.1 --port 8000
-```
-
-The application chooses the hosting infrastructure and can attach shared
-preprocessors and postprocessors. Batch prediction and HTTP serving use the
-saved schema and learned state. See [Serving](https://www.relflow.ai/en/latest/advanced/inference-and-deployment/#serve-the-trained-artifact)
-for requests, validation, and resource controls, and
-[Performance](https://www.relflow.ai/en/latest/advanced/inference-and-deployment/#tune-the-whole-request-path) for measuring throughput
-with the workload, record shape, hardware, and requested outputs stated.
-
-## Learn more
-
-- [Installation](https://www.relflow.ai/en/latest/installation/)
-- [Example datasets](https://www.relflow.ai/en/latest/datasets/)
-- [Pretraining and fine-tuning](https://www.relflow.ai/en/latest/advanced/masking-and-pretraining/)
-- [Reusable representations](https://www.relflow.ai/en/latest/advanced/embeddings/)
-- [Model structure and configuration](https://www.relflow.ai/en/latest/concepts/models/)
-- [Data types](https://www.relflow.ai/en/latest/data-types/)
-- [Arrow data loading](https://www.relflow.ai/en/latest/concepts/data-modules/)
-- [Streaming batch inference](https://www.relflow.ai/en/latest/advanced/inference-and-deployment/#stream-a-prediction-job-to-files)
-- [Prediction output](https://www.relflow.ai/en/latest/concepts/predictions/)
-
-Tutorials and guides live in [docs/](docs/README.md); canonical learning
-experiments and recorded results live in [evidence/](evidence/README.md).
-For package development, see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-[Community](https://discord.gg/DVyZUkvTFA) · [Apache 2.0 license](LICENSE)
-
-## Continuous Integration
-
-`ci.yml` is the entry point for PRs to main, merge groups, main pushes, and
-manual validation. Each run builds one package wheel and source distribution;
-the full Python/platform test matrix installs that same wheel. Documentation
-checks and complete Evidence validation run alongside the matrix. Evidence
-runs the full suite freshly for baseline and candidate, preserving every
-experiment's original seeds, budgets, and checks.
-`CI / required` rejects errors, cancellations,
-and missing required jobs. Evidence runs across twelve GitHub-hosted CPU shards
-through the pinned trusted executor, with both roles for each proof on one
-runner and a separate full-catalog collector. Dependency caches accelerate setup;
-learning results execute freshly. The candidate commit supplies the suite from
-this repository. See the [hosted guide](evidence/hosted.md).
-
-Main pushes compare against the pre-push revision. Successful main CI also
-publishes coverage. Version releases retain verified evidence reports and
-publication JSON assets in this repository before publishing the package tag.
-Hosted documentation reads those versioned assets; ordinary CI creates no
-publication commits or follow-up PRs. Nightly
-dependency compatibility and configured accelerator checks remain independent.
-Local pre-commit continues to run formatting, lint, types, and fast tests.
-Release publication consumes the shared distributions, verifies existing tag
-targets and published bytes, and repairs incomplete publication using its
-original checked build. It never overwrites a different published artifact.
-The reusable documentation workflow validates and renders the static site using its
-isolated environment; see [the documentation guide](docs/README.md) for preview
-and build commands. Read the Docs builds the hosted versions and pull request
-previews from [.readthedocs.yaml](.readthedocs.yaml), with `latest` following
-`main` and verified release versions activated separately. Public pages and
-assets use `https://www.relflow.ai/en/<version>/`; the root redirects to
-`latest`. That guide describes hosted settings, Gold, and apex HTTPS forwarding.
+relflow is free and open source under the [Apache License 2.0](LICENSE).
