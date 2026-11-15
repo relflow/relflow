@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, cast
 import torch
 from tensordict import TensorDict
 
+from relflow.architecture.anchor import anchor
 from relflow.architecture.attention import RotaryMultiheadAttention
 from relflow.architecture.blocks import feed_forward, norm
 from relflow.architecture.contrastive import hierarchical
@@ -468,7 +469,7 @@ class BranchEncoder(torch.nn.Module):
             )
             mixed = mixed.index_copy(0, indices, chosen.masked_fill(~live.unsqueeze(-1), 0.0).to(dtype=mixed.dtype))
         elif torch.is_grad_enabled():
-            mixed = mixed + sum(parameter.sum() * 0.0 for parameter in self.parameters())
+            mixed = mixed + anchor(self)
         first, second, aligned = pairs(mixed, views=cut)
         return hierarchical(first, second, present=aligned)
 
@@ -495,7 +496,7 @@ class BranchEncoder(torch.nn.Module):
         if shares is not None:
             return spread.index_copy(0, indices, shares.to(dtype=spread.dtype))
         if torch.is_grad_enabled():
-            return spread + sum(parameter.sum() * 0.0 for parameter in self.parameters())
+            return spread + anchor(self)
         return spread
 
     def reduce(
@@ -642,8 +643,7 @@ class BranchEncoder(torch.nn.Module):
                 reduced = reduced.index_copy(0, indices, selected_output)
                 reduced_present = reduced_present.index_copy(0, indices, selected_output_present)
             elif torch.is_grad_enabled():
-                for parameter in self.parameters():
-                    reduced = reduced + parameter.sum() * 0.0
+                reduced = reduced + anchor(self)
 
         reduced = reduced.reshape(N, *dims, output_width, C)
         reduced_present = reduced_present.reshape(N, *dims, output_width)

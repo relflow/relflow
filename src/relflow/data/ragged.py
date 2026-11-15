@@ -8,7 +8,7 @@ import json
 import math
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import cache
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
@@ -329,7 +329,7 @@ class Coalesced:
 
     fields: dict[Address, Projection]
     layouts: dict[Address, Layout]
-    times: dict[Address, np.ndarray] = field(default_factory=dict)
+    times: Mapping[Address, np.ndarray] = MappingProxyType({})
 
 
 def head(expression: str) -> str:
@@ -1107,11 +1107,12 @@ def extend(
     counts = np.bincount(parent[future], minlength=parents)
     if (counts > horizon).any():
         index = int(np.flatnonzero(counts > horizon)[0])
-        raise ValueError(
+        message = (
             f"branch '{branch.address}' record {index} has {counts[index]} trailing future rows with every "
             f"Forecast target null, more than Forecast horizon {horizon}; supply at most {horizon} future rows "
             "or raise the horizon"
         )
+        raise ValueError(message)
 
     lengths = layout.lengths.reshape(-1)
     first = lengths.copy()
@@ -1121,11 +1122,12 @@ def extend(
     added = np.where((counts == 0) & (np.bincount(parent, minlength=parents) > 0), horizon, 0)
     if forecast.known and added.any():
         index = int(np.flatnonzero(added)[0])
-        raise ValueError(
+        message = (
             f"branch '{branch.address}' record {index} has no future rows, but Forecast declares known "
             f"covariates {list(forecast.known)}; automatic slots cannot carry them, so append up to {horizon} "
             f"future rows with null targets that carry {list(forecast.known)}"
         )
+        raise ValueError(message)
 
     new_lengths = lengths - cut + added
     new_extent = int(new_lengths.max(initial=0))
@@ -1257,7 +1259,7 @@ def coalesce(
     decisions = resolve(layout, schema.fields, seed=seed, epoch=epoch, ordinal=ordinal, strata=strata)
     visit(schema.fields, layout, decisions, (), MappingProxyType({}))
 
-    return Coalesced(fields=fields, layouts=layouts, times=times)
+    return Coalesced(fields=fields, layouts=layouts, times=MappingProxyType(times))
 
 
 __all__ = [

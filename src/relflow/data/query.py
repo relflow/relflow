@@ -721,10 +721,11 @@ def channels(values: list[pa.Array], *, expressions: tuple[str, ...], address: s
     if not any(nested):
         return leaves(values, expressions=expressions, address=address)
     if not all(nested):
-        raise ValueError(
+        message = (
             f"tuple query {expressions!r} at {address!r} selects values at different nesting: "
             f"{[str(item.type) for item in values]}; select the same list depth for every source"
         )
+        raise ValueError(message)
     return lists(values, expressions=expressions, address=address)
 
 
