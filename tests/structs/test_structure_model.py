@@ -585,3 +585,22 @@ def test_forecast_branch_round_trips_through_yaml_schema():
     restored = rf.Schema.model_validate_json(schema.model_dump_json())
     assert restored.branches["/events"].mask == (FORECAST,)
     assert restored.branches["/events"].capacity == 5
+
+
+@pytest.mark.parametrize(
+    ("options", "problem"),
+    [
+        ({"time_index": "missing"}, "no child named 'missing'"),
+        ({"time_step": 1.0}, "requires time_index"),
+        ({"mixer": rf.Conv()}, "requires grain=Steps()"),
+        (
+            {"mask": rf.Mask(select=rf.Forecast(horizon=2, targets=("gone",)), reconstruct=True)},
+            "set direction=rf.Direction.causal",
+        ),
+    ],
+    ids=["time_index", "time_step", "conv", "forecast"],
+)
+def test_unbound_branch_errors_never_name_none(options, problem):
+    with pytest.raises(ValueError, match=problem) as caught:
+        rf.Branch(length=4, x=rf.Number, **options)
+    assert "None" not in str(caught.value)
