@@ -427,6 +427,7 @@ class BranchEncoder(torch.nn.Module):
         steps: torch.Tensor,
         views: torch.Tensor | None,
         extent: int,
+        hidden: torch.Tensor | None = None,
     ) -> torch.Tensor | None:
         """Encode two crops of every record with the branch mixer and contrast them.
 
@@ -440,6 +441,7 @@ class BranchEncoder(torch.nn.Module):
             steps: Row index of each token, shape ``(rows, L)``.
             views: First row of each crop, shape ``(rows, 2)``, or ``None`` outside training.
             extent: Rows of the branch axis.
+            hidden: Source rows each crop hides, shape ``(rows, 2, extent)``, or ``None`` to hide nothing.
 
         Returns:
             Per-record shares of the loss, shape ``(rows,)``, or ``None`` when there are no views.
@@ -454,6 +456,7 @@ class BranchEncoder(torch.nn.Module):
             starts=views,
             extent=extent,
             width=self.contrastive.views.width,
+            hidden=hidden,
         )
         # Dense attention over a row without a live token returns NaN, so only live crops are mixed.
         indices = cut.present.any(dim=1).nonzero(as_tuple=False).reshape(-1)
@@ -572,6 +575,7 @@ class BranchEncoder(torch.nn.Module):
             flat_positions = timeline(structural=flat_positions, steps=flat_steps, times=self.clock(geometry))
         flat_gaps = self.lapse(geometry, steps=flat_steps)
         starts = self.starts(geometry, rows=rows)
+        drawn = self.drawn(geometry, rows=rows)
         shares: torch.Tensor | None = None
         active = present.any(dim=1)
         indices = active.nonzero(as_tuple=False).reshape(-1)
@@ -601,6 +605,7 @@ class BranchEncoder(torch.nn.Module):
                 positions=selected_positions if positioned else None,
                 steps=cast(torch.Tensor, selected_steps),
                 views=None if starts is None else starts if complete else starts.index_select(0, indices),
+                hidden=None if drawn is None else drawn if complete else drawn.index_select(0, indices),
                 extent=0
                 if starts is None
                 else cast("Geometry", cast(TensorDict, geometry)[self.origin]).slots.shape[-1],
@@ -797,6 +802,12 @@ class BranchEncoder(torch.nn.Module):
         entry = None if geometry is None else geometry.get(self.origin, None)
         views = getattr(entry, "views", None)
         return None if self.contrastive is None or views is None else views.reshape(rows, 2)
+
+    def drawn(self, geometry: TensorDict | None, *, rows: int) -> torch.Tensor | None:
+        """Return the rows each crop hides, shape ``(rows, 2, extent)``, or ``None`` when none are drawn."""
+        entry = None if geometry is None else geometry.get(self.origin, None)
+        hidden = getattr(entry, "hidden", None)
+        return None if self.contrastive is None or hidden is None else hidden.reshape(rows, 2, -1)
 
     def condition(self, context: list[Parcel], rows: int) -> torch.Tensor:
         """Project the mean of the parent's present leaf embeddings at each instance of this branch."""

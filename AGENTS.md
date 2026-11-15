@@ -236,7 +236,9 @@ model = rf.Model(
 - `contrastive=rf.Contrastive(views=rf.Crops(...), loss=rf.Hierarchical())` is
   training-only, costs about 3x branch memory and compute, rejects a child
   branch with `reduction=None`, and compares records within each device batch
-  under DDP. A contrastive-only model logs no `loss/validate`; pass
+  under DDP. `Crops(mask=0.5)` zeroes a random share of steps in each crop
+  independently, before the mixer, so matching rows cannot be found by input
+  identity; `mask=0.0` keeps every step. A contrastive-only model logs no `loss/validate`; pass
   `early_stopping=False, rollback=False` or add a reconstruction target.
 - `Text` caches automatically: workers send stable IDs; a bounded device
   table and shared Rust Moka RAM cache retain hot entries, with SQLite as the

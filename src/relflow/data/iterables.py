@@ -14,7 +14,7 @@ import torch
 from tensordict import TensorDict
 
 from relflow.data.arrow import Encoded, Geometry, Retain
-from relflow.data.crops import starts
+from relflow.data.crops import hidden, starts
 from relflow.data.datasets.base import EncodedInput, InterprocessEncodingContext
 from relflow.data.ragged import Layout, RaggedField, coalesce
 from relflow.structs.enums import Component, Strata, Tokens
@@ -31,6 +31,7 @@ def geometry(
     rows: int,
     times: Mapping[Address, np.ndarray] = NO_TIMES,
     views: Mapping[Address, np.ndarray] = NO_TIMES,
+    hidden: Mapping[Address, np.ndarray] = NO_TIMES,
 ) -> TensorDict:
     """Move shared Arrow structural coordinates into the Torch batch plane."""
 
@@ -45,6 +46,7 @@ def geometry(
             slots=torch.from_numpy(slots),
             times=torch.from_numpy(times[address]) if address in times else None,
             views=torch.from_numpy(views[address]) if address in views else None,
+            hidden=torch.from_numpy(hidden[address]) if address in hidden else None,
             batch_size=[rows],
         )
     return TensorDict(source=cast(Any, axes), batch_size=[rows])
@@ -158,7 +160,22 @@ def encode(
         for address, branch in schema.branches.items()
         if strata == Strata.train and branch.contrastive is not None and address in coalesced.layouts
     }
-    inputs[Address()] = geometry(coalesced.layouts, rows=batch.num_rows, times=coalesced.times, views=views)
+    masked = {
+        address: hidden(
+            coalesced.layouts[address].lengths,
+            extent=coalesced.layouts[address].shape[-1],
+            crops=branch.contrastive.views,
+            seed=seed,
+            epoch=epoch,
+            ordinal=ordinal,
+            address=address,
+        )
+        for address, branch in schema.branches.items()
+        if address in views and branch.contrastive is not None and branch.contrastive.views.mask > 0.0
+    }
+    inputs[Address()] = geometry(
+        coalesced.layouts, rows=batch.num_rows, times=coalesced.times, views=views, hidden=masked
+    )
     return Encoded(tensors=inputs, source=batch, retain=retain, observations=observations, bindings=bindings)
 
 

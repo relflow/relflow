@@ -369,7 +369,7 @@ causal default, the vector of row `t` depends on rows up to `t` only. Under
 ```python
 rows = rf.Branch.chronological(
     length=336,
-    contrastive=rf.Contrastive(views=rf.Crops(width=128, overlap=0.5), loss=rf.Hierarchical(), weight=1.0),
+    contrastive=rf.Contrastive(views=rf.Crops(width=128, overlap=0.5, mask=0.5), loss=rf.Hierarchical(), weight=1.0),
     HUFL=rf.Number,
     OT=rf.Number,
 )
@@ -379,6 +379,13 @@ Each record yields two crops of `width` rows that share a fraction `overlap`.
 The loss pulls matching rows of the two crops together, pushes apart rows of
 other records and other rows of the same record, and repeats at coarser time
 scales. Records shorter than `width` are masked, not padded with data.
+
+Each crop also hides a random share of its steps before the mixer. `mask` is the
+probability that a step is hidden, `0.5` by default, and each crop draws its own
+steps. Without it the two crops hold identical inputs on the rows they share, and
+the branch can match rows by recognizing the input instead of learning
+structure. A hidden step keeps its place and position and its token is zeroed.
+Set `mask=0.0` to keep every step. Masks apply to the crops in training only.
 
 - It runs in training only. The decoders and the parent still see the full
   record.

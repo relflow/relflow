@@ -862,3 +862,41 @@ def test_time_index_survives_variable_width_unreduced_child(options):
     row = {"events": [{"t": 0.0, "x": 1.0, "inner": [{"z": 1.0}]}, {"t": 1.0, "x": 2.0, "inner": []}]}
     other = {"events": [{"t": 0.0, "x": 1.0, "inner": [{"z": 1.0}, {"z": 2.0}, {"z": 3.0}]}]}
     assert len(model.predict([row, other])) == 2
+
+
+def contrastive_model(mask: float) -> rf.Model:
+    return rf.Model.xs(
+        d_model=8,
+        dropout=0.0,
+        ett=rf.Branch.chronological(
+            length=8,
+            reduction=rf.Mean(),
+            embed=True,
+            x=rf.Number,
+            contrastive=rf.Contrastive(views=rf.Crops(width=4, mask=mask)),
+        ),
+    )
+
+
+def objective(model: rf.Model, table: pa.Table, *, seed: int) -> torch.Tensor:
+    parcels = model(model.encode(table, strata="train", seed=seed), strata=Strata.train)
+    return torch.cat(
+        [p.payload[TensorKey.objective].flatten() for p in parcels if TensorKey.objective in p.payload.keys()]
+    )
+
+
+def test_prediction_does_not_depend_on_the_crop_mask():
+    table = pa.Table.from_pylist([{"ett": [{"x": float(i)} for i in range(8)]}])
+    torch.manual_seed(0)
+    plain, masked = contrastive_model(0.0), contrastive_model(0.9)
+    masked.load_state_dict(plain.state_dict())
+    assert plain.predict(table).equals(masked.predict(table))
+
+
+def test_crop_mask_changes_the_contrastive_objective_and_replays_for_one_seed():
+    table = pa.Table.from_pylist([{"ett": [{"x": float(i * j)} for i in range(8)]} for j in range(1, 5)])
+    torch.manual_seed(0)
+    plain, masked = contrastive_model(0.0), contrastive_model(0.9)
+    masked.load_state_dict(plain.state_dict())
+    assert torch.equal(objective(masked, table, seed=1), objective(masked, table, seed=1))
+    assert not torch.equal(objective(masked, table, seed=1), objective(plain, table, seed=1))

@@ -3,7 +3,7 @@ import pyarrow as pa
 import torch
 
 import relflow as rf
-from relflow.data.crops import starts
+from relflow.data.crops import hidden, starts
 
 CROPS = rf.Crops(width=4, overlap=0.5)
 
@@ -71,3 +71,47 @@ def test_views_survive_shipping():
         shipped.tensors[rf.Address()][rf.Address("/ett")].views,
         encoded.tensors[rf.Address()][rf.Address("/ett")].views,
     )
+
+
+MASKED = rf.Crops(width=4, overlap=0.5, mask=0.5)
+ADDRESS = rf.Address("/ett")
+
+
+def test_hidden_marks_about_the_mask_share_with_independent_views():
+    drawn = hidden(np.full(400, 8), extent=8, crops=MASKED, seed=1, epoch=0, ordinal=0, address=ADDRESS)
+    assert drawn.dtype == np.bool_ and drawn.shape == (400, 2, 8)
+    assert abs(drawn.mean() - 0.5) < 0.05
+    assert not np.array_equal(drawn[:, 0], drawn[:, 1])
+
+
+def test_hidden_replays_for_one_seed_and_varies_with_seed_and_ordinal():
+    def draw(**changes):
+        options = {"seed": 7, "epoch": 2, "ordinal": 3, "address": ADDRESS} | changes
+        return hidden(np.full(64, 8), extent=8, crops=MASKED, **options)
+
+    assert np.array_equal(draw(), draw())
+    assert not np.array_equal(draw(), draw(ordinal=4))
+    assert not np.array_equal(draw(), draw(seed=8))
+    assert not np.array_equal(draw(), draw(address=rf.Address("/other")))
+
+
+def test_hidden_keeps_the_parent_shape():
+    drawn = hidden(np.full((3, 2), 5), extent=5, crops=MASKED, seed=0, epoch=0, ordinal=0, address=rf.Address("/a/b"))
+    assert drawn.shape == (3, 2, 2, 5)
+
+
+def test_hidden_draws_nothing_without_a_mask():
+    drawn = hidden(
+        np.full(8, 8), extent=8, crops=rf.Crops(width=4, mask=0.0), seed=0, epoch=0, ordinal=0, address=ADDRESS
+    )
+    assert not drawn.any()
+
+
+def test_training_geometry_carries_hidden_only_for_a_positive_mask():
+    masked = model().encode(table(), strata="train", seed=5)[rf.Address()][ADDRESS]
+    assert masked.hidden.shape == (4, 1, 2, 8) and masked.hidden.dtype == torch.bool
+    plain = rf.Model.xs(
+        d_model=8, ett=rf.Branch(length=8, x=rf.Number, contrastive=rf.Contrastive(views=rf.Crops(width=4, mask=0.0)))
+    )
+    assert plain.encode(table(), strata="train", seed=5)[rf.Address()][ADDRESS].hidden is None
+    assert model().encode(table(), strata="predict")[rf.Address()][ADDRESS].hidden is None

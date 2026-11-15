@@ -309,6 +309,16 @@ def require_geometry(module: "Model", inputs: TensorDict) -> dict[Address, tuple
                 f"got {geometry.views.dtype} with shape {tuple(geometry.views.shape)}"
             )
             raise ForwardContractError(message)
+        if geometry.hidden is not None and (
+            geometry.hidden.dtype != torch.bool
+            or tuple(geometry.hidden.shape) != (*parent_shape, 2, geometry.slots.shape[-1])
+        ):
+            message = (
+                f"forward branch geometry '{address}' hidden must be bool with shape "
+                f"{(*parent_shape, 2, geometry.slots.shape[-1])}, "
+                f"got {geometry.hidden.dtype} with shape {tuple(geometry.hidden.shape)}"
+            )
+            raise ForwardContractError(message)
         extent = geometry.slots.shape[-1]
         if (address == Address() and extent != 1) or (branch.capacity is not None and extent > branch.capacity):
             raise ForwardContractError(
