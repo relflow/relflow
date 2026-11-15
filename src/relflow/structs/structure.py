@@ -60,7 +60,7 @@ def check_forecast_children(
     Raises:
         ValueError: A name repeats, is unknown, is claimed, or is a child branch.
     """
-    where = f"branch '{branch.address or branch.name}'"
+    where = label(branch)
     children = {field.name: field for field in branch.fields}
     repeated = sorted({name for name in names if names.count(name) > 1})
     if repeated:
@@ -102,15 +102,19 @@ def check_contrastive(branch: Branch) -> None:
     raise ValueError(message)
 
 
+def label(branch: Branch) -> str:
+    """Name a branch in messages: its address or name once bound, else ``a branch``."""
+    name = branch.address or branch.name
+    return f"branch '{name}'" if name else "a branch"
+
+
 def bounds(branch: Branch) -> None:
     """Keep a collection cap and its overflow policy as one configuration."""
 
     if branch.length is not None and (
         not isinstance(branch.length, int) or isinstance(branch.length, bool) or branch.length < 1
     ):
-        message = (
-            f"branch '{branch.address or branch.name}' length must be a positive integer or None, got {branch.length!r}"
-        )
+        message = f"{label(branch)} length must be a positive integer or None, got {branch.length!r}"
         raise ValueError(message)
     if branch.length is None and branch.overflow is not None:
         location = f" '{branch.address or branch.name}'" if branch.address or branch.name else ""
@@ -341,7 +345,7 @@ class Branch(Node):
         if self.time_index is None:
             return self
         child = next((field for field in self.fields if field.name == self.time_index), None)
-        where = f"branch '{self.address or self.name}'"
+        where = label(self)
         if child is None:
             message = (
                 f"{where} sets time_index={self.time_index!r}, but has no child named {self.time_index!r}; "
@@ -360,7 +364,7 @@ class Branch(Node):
     def check_time_step(self) -> Self:
         if self.time_step is None:
             return self
-        where = f"branch '{self.address or self.name}'"
+        where = label(self)
         if self.time_index is None:
             message = f"{where} sets time_step={self.time_step!r}, which requires time_index; name the time child"
             raise ValueError(message)
@@ -376,7 +380,7 @@ class Branch(Node):
         forecasts = [mask.select for mask in self.mask if isinstance(mask.select, Forecast)]
         if not forecasts:
             return self
-        where = f"branch '{self.address or self.name}'"
+        where = label(self)
         if len(forecasts) > 1:
             message = f"{where} has {len(forecasts)} Forecast masks; use at most one Forecast per branch"
             raise ValueError(message)
@@ -445,7 +449,7 @@ class Branch(Node):
         if unreduced is None:
             return self
         message = (
-            f"branch '{self.address or self.name}' sets grain=Steps(), so rows pool to one token, but child branch "
+            f"{label(self)} sets grain=Steps(), so rows pool to one token, but child branch "
             f"'{unreduced.name}' needs a reduction; set reduction=rf.Attention() or rf.Mean() on it"
         )
         raise ValueError(message)
@@ -455,7 +459,7 @@ class Branch(Node):
         if not isinstance(self.mixer, Conv) or isinstance(self.grain, Steps):
             return self
         message = (
-            f"branch '{self.address or self.name}' sets mixer=Conv(), which convolves over rows and "
+            f"{label(self)} sets mixer=Conv(), which convolves over rows and "
             "requires grain=Steps(); set grain=rf.Steps() or mixer=rf.Transformer()"
         )
         raise ValueError(message)
