@@ -7,39 +7,18 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/relflow/"><picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/pypi/relflow.svg?variant=outline&amp;size=sm&amp;mode=dark" />
-      <img alt="PyPI version" src="https://shieldcn.dev/pypi/relflow.svg?variant=outline&amp;size=sm&amp;mode=light" />
-    </picture></a>
-  <a href="https://www.relflow.ai/en/latest/"><picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/docs-read%20online-68b78a.svg?logo=readthedocs&amp;variant=outline&amp;size=sm&amp;mode=dark" />
-      <img alt="Read the documentation" src="https://shieldcn.dev/badge/docs-read%20online-185a3c.svg?logo=readthedocs&amp;variant=outline&amp;size=sm&amp;mode=light" />
-    </picture></a>
-  <a href="https://github.com/relflow/relflow/actions/workflows/ci.yml?query=branch%3Amain"><picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/ci/relflow/relflow.svg?workflow=ci.yml&amp;branch=main&amp;variant=outline&amp;size=sm&amp;mode=dark" />
-      <img alt="CI on main" src="https://shieldcn.dev/github/ci/relflow/relflow.svg?workflow=ci.yml&amp;branch=main&amp;variant=outline&amp;size=sm&amp;mode=light" />
-    </picture></a>
-  <a href="https://github.com/relflow/relflow/actions/workflows/compatibility.yml?query=branch%3Amain"><picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/ci/relflow/relflow.svg?workflow=compatibility.yml&amp;branch=main&amp;label=compatibility&amp;variant=outline&amp;size=sm&amp;mode=dark" />
-      <img alt="Dependency compatibility on main" src="https://shieldcn.dev/github/ci/relflow/relflow.svg?workflow=compatibility.yml&amp;branch=main&amp;label=compatibility&amp;variant=outline&amp;size=sm&amp;mode=light" />
-    </picture></a>
-  <a href="https://github.com/relflow/relflow/actions/workflows/coverage.yml?query=branch%3Amain"><picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/dynamic/json.svg?url=https%3A%2F%2Fraw.githubusercontent.com%2Frelflow%2Frelflow%2Fbadges%2Fcoverage.json&amp;query=%24.message&amp;label=coverage&amp;variant=outline&amp;size=sm&amp;mode=dark" />
-      <img alt="Line coverage on main" src="https://shieldcn.dev/badge/dynamic/json.svg?url=https%3A%2F%2Fraw.githubusercontent.com%2Frelflow%2Frelflow%2Fbadges%2Fcoverage.json&amp;query=%24.message&amp;label=coverage&amp;variant=outline&amp;size=sm&amp;mode=light" />
-    </picture></a>
+  <a href="https://pypi.org/project/relflow/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/pypi/relflow.svg?variant=outline&amp;size=sm&amp;mode=dark" /><img alt="PyPI version" src="https://shieldcn.dev/pypi/relflow.svg?variant=outline&amp;size=sm&amp;mode=light" /></picture></a>
+  <a href="https://www.relflow.ai/en/latest/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/docs-read%20online-68b78a.svg?logo=readthedocs&amp;variant=outline&amp;size=sm&amp;mode=dark" /><img alt="Read the documentation" src="https://shieldcn.dev/badge/docs-read%20online-185a3c.svg?logo=readthedocs&amp;variant=outline&amp;size=sm&amp;mode=light" /></picture></a>
+  <a href="https://github.com/relflow/relflow/actions/workflows/ci.yml?query=branch%3Amain"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/ci/relflow/relflow.svg?workflow=ci.yml&amp;branch=main&amp;variant=outline&amp;size=sm&amp;mode=dark" /><img alt="CI on main" src="https://shieldcn.dev/github/ci/relflow/relflow.svg?workflow=ci.yml&amp;branch=main&amp;variant=outline&amp;size=sm&amp;mode=light" /></picture></a>
+  <a href="https://github.com/relflow/relflow/actions/workflows/compatibility.yml?query=branch%3Amain"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/ci/relflow/relflow.svg?workflow=compatibility.yml&amp;branch=main&amp;label=compatibility&amp;variant=outline&amp;size=sm&amp;mode=dark" /><img alt="Dependency compatibility on main" src="https://shieldcn.dev/github/ci/relflow/relflow.svg?workflow=compatibility.yml&amp;branch=main&amp;label=compatibility&amp;variant=outline&amp;size=sm&amp;mode=light" /></picture></a>
+  <a href="https://github.com/relflow/relflow/actions/workflows/coverage.yml?query=branch%3Amain"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/dynamic/json.svg?url=https%3A%2F%2Fraw.githubusercontent.com%2Frelflow%2Frelflow%2Fbadges%2Fcoverage.json&amp;query=%24.message&amp;label=coverage&amp;variant=outline&amp;size=sm&amp;mode=dark" /><img alt="Line coverage on main" src="https://shieldcn.dev/badge/dynamic/json.svg?url=https%3A%2F%2Fraw.githubusercontent.com%2Frelflow%2Frelflow%2Fbadges%2Fcoverage.json&amp;query=%24.message&amp;label=coverage&amp;variant=outline&amp;size=sm&amp;mode=light" /></picture></a>
   <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/pypi/python/relflow.svg?variant=outline&amp;size=sm&amp;mode=dark" />
       <img alt="Required Python version" src="https://shieldcn.dev/pypi/python/relflow.svg?variant=outline&amp;size=sm&amp;mode=light" />
     </picture>
-  <a href="LICENSE"><picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/license/relflow/relflow.svg?variant=outline&amp;size=sm&amp;mode=dark" />
-      <img alt="Apache 2.0 license" src="https://shieldcn.dev/github/license/relflow/relflow.svg?variant=outline&amp;size=sm&amp;mode=light" />
-    </picture></a>
+  <a href="LICENSE"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/license/relflow/relflow.svg?variant=outline&amp;size=sm&amp;mode=dark" /><img alt="Apache 2.0 license" src="https://shieldcn.dev/github/license/relflow/relflow.svg?variant=outline&amp;size=sm&amp;mode=light" /></picture></a>
   <!-- discord-invite:start -->
-  <a href="https://discord.gg/DVyZUkvTFA"><picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/Discord-Join-68b78a.svg?logo=discord&amp;variant=outline&amp;size=sm&amp;mode=dark" />
-      <img alt="Discord community" src="https://shieldcn.dev/badge/Discord-Join-185a3c.svg?logo=discord&amp;variant=outline&amp;size=sm&amp;mode=light" />
-    </picture></a>
+  <a href="https://discord.gg/DVyZUkvTFA"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/Discord-Join-68b78a.svg?logo=discord&amp;variant=outline&amp;size=sm&amp;mode=dark" /><img alt="Discord community" src="https://shieldcn.dev/badge/Discord-Join-185a3c.svg?logo=discord&amp;variant=outline&amp;size=sm&amp;mode=light" /></picture></a>
   <!-- discord-invite:end -->
 </p>
 
