@@ -643,7 +643,8 @@ class BranchEncoder(torch.nn.Module):
                 reduced = reduced.index_copy(0, indices, selected_output)
                 reduced_present = reduced_present.index_copy(0, indices, selected_output_present)
             elif torch.is_grad_enabled():
-                reduced = reduced + anchor(self)
+                for parameter in self.parameters():
+                    reduced = reduced + parameter.sum() * 0.0
 
         reduced = reduced.reshape(N, *dims, output_width, C)
         reduced_present = reduced_present.reshape(N, *dims, output_width)

@@ -114,7 +114,9 @@ def bounds(branch: Branch) -> None:
     if branch.length is not None and (
         not isinstance(branch.length, int) or isinstance(branch.length, bool) or branch.length < 1
     ):
-        message = f"{label(branch)} length must be a positive integer or None, got {branch.length!r}"
+        message = (
+            f"branch '{branch.address or branch.name}' length must be a positive integer or None, got {branch.length!r}"
+        )
         raise ValueError(message)
     if branch.length is None and branch.overflow is not None:
         location = f" '{branch.address or branch.name}'" if branch.address or branch.name else ""
