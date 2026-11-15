@@ -20,12 +20,14 @@ def width(data: object) -> object:
         return data
     query = tuple(data["query"])
     if not query:
-        raise ValueError("tuple query names no source; name at least one source or use a single query")
+        message = "tuple query names no source; name at least one source or use a single query"
+        raise ValueError(message)
     n_dim = data.get("n_dim", len(query))
     if n_dim != len(query):
-        raise ValueError(
+        message = (
             f"n_dim={n_dim} differs from the {len(query)} sources in query {query!r}; remove n_dim or make it match"
         )
+        raise ValueError(message)
     return {**data, "n_dim": len(query)}
 
 

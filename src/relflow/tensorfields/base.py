@@ -627,10 +627,11 @@ class DecoderBase(torch.nn.Module):
             else:
                 pooled = self.pool(stacked, present=present)
                 if pooled.shape[1] != count and isinstance(self.pool, RowReadout):
-                    raise ValueError(
+                    message = (
                         f"decoder '{self.address}' reads {pooled.shape[1]} row tokens for {count} target coordinates; "
                         "its branch must hold one row token per target row"
                     )
+                    raise ValueError(message)
                 if pooled.shape[1] != count:
                     pooled = pooled[:, :1].expand(batch_size, count, self.d_model)
             if context is not None:
