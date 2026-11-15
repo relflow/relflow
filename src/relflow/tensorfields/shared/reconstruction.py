@@ -69,11 +69,19 @@ class Errors(Totals):
         return {"mae.content": absolute / valued, "rmse.content": (squared / valued).sqrt()}
 
 
-def errors(predicted: torch.Tensor, observed: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """Coordinate count with absolute and squared error sums for ``Errors``, in the targets' precision."""
+def errors(
+    predicted: torch.Tensor, observed: torch.Tensor, weight: torch.Tensor | None = None
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Coordinate count with absolute and squared error sums for ``Errors``, in the targets' precision.
+
+    ``weight`` marks the coordinates that count with ones and skips the others with zeros.
+    """
     difference = predicted.detach().to(observed.dtype) - observed.detach()
-    counts = torch.full((1,), difference.numel(), dtype=torch.int64, device=difference.device)
-    return counts, torch.stack((difference.abs().sum(), difference.square().sum()))
+    if weight is None:
+        counts = torch.full((1,), difference.numel(), dtype=torch.int64, device=difference.device)
+        return counts, torch.stack((difference.abs().sum(), difference.square().sum()))
+    difference = difference * weight.to(difference.dtype)
+    return weight.sum(dtype=torch.int64).reshape(1), torch.stack((difference.abs().sum(), difference.square().sum()))
 
 
 class Scores(torch.nn.ModuleDict):
