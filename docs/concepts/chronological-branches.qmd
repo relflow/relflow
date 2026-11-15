@@ -118,10 +118,18 @@ well. A branch without `time_index` adds no parameters for time.
 ::: {.callout-warning}
 ## Classification needs `direction=rf.Direction.bidirectional`
 
-The causal default lets each step see only the steps at or before it. That is
-right for forecasting and for per-step representations, and it discards the
-future context a classifier should use. Causal is measured by step, not by
-token: tokens of one step still see each other.
+The causal default restricts the row tokens inside the branch: each row token
+sees only the rows at or before it, so an early row never learns from a later
+one. That is right for forecasting and per-row representations. It is
+measured by step, not by token: tokens of one step still see each other.
+
+The reduction that summarizes the branch for its parent is not restricted. It
+reads every row token, so a causal classifier still uses the whole series, but
+only through row tokens that each saw their own past. Bidirectional lets every
+row token read the whole series before the reduction, which is why it stays the
+recommendation for classification and other whole-series targets. The gap can
+be small: on a synthetic two-class task a causal branch scored 0.995 against
+1.000 bidirectional.
 :::
 
 UCR [GunPoint](https://timeseriesclassification.com/description.php?Dataset=GunPoint)
@@ -136,9 +144,9 @@ import relflow as rf
 
 def gunpoint(path: str) -> pl.DataFrame:
     wide = pl.read_csv(path, separator="\t", has_header=False)
-    steps = wide.columns[1:]
+    label, *steps = wide.columns
     return wide.select(
-        pl.col("column_0").cast(pl.String).alias("label"),
+        pl.col(label).cast(pl.String).alias("label"),
         pl.concat_list(
             *(pl.struct(pl.col(name).alias("value")) for name in steps)
         ).alias("signal"),
@@ -190,6 +198,26 @@ decides how those tokens mix.
 | `mixer` | `rf.Transformer()` | Rotary self-attention layers. |
 | `mixer` | `rf.Conv(n_blocks=6)` | Dilated convolution blocks. Each step feature sees `1 + 4*(2^n_blocks - 1)` steps: 253 at the default of six. |
 | `mixer` | `None` | No sequence mixing; coordinate attention remains. |
+
+Set them on any branch:
+
+```python
+# One token per leaf coordinate of every row: the standard grain.
+tokens = rf.Branch(length=336, grain=rf.Coordinates(), HUFL=rf.Number, OT=rf.Number)
+
+# One token per row, mixed by four dilated convolution blocks.
+rows = rf.Branch(
+    length=336,
+    overflow="tail",
+    grain=rf.Steps(pooling="mean"),
+    mixer=rf.Conv(n_blocks=4),
+    direction=rf.Direction.causal,
+    HUFL=rf.Number,
+    OT=rf.Number,
+)
+```
+
+`Conv` is causal when `direction` is causal and looks both ways otherwise.
 
 For 336 rows and 7 channels, `Coordinates` gives the sequence encoder 2352
 tokens and `Steps` gives 336. The test

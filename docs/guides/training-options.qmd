@@ -243,6 +243,10 @@ trainer.validate(model, datamodule=datamodule)
 predictions = trainer.predict(model, datamodule=datamodule)
 ```
 
+`rf.adamw` uses Torch's fused AdamW by default. On a device or Torch build
+without a fused kernel, pass `fused=False`, or `fused=None` to let Torch
+choose, as in `rf.adamw(learning_rate=1e-3, fused=None)`.
+
 Training logs the validation loss as `loss/validate`; monitor it from your own
 callbacks. Prediction is deterministic: two `trainer.predict` runs on the same
 data return equal tables, and each batch is an Arrow table.
