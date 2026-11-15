@@ -198,7 +198,7 @@ def fit(
 def mae(model: rf.Model, history: np.ndarray, future: np.ndarray) -> float:
     """Mean absolute forecast error in source units over every step and channel."""
     predicted = model.predict(pa.table({"history": history.tolist()}), batch_size=256)
-    content = predicted.column("predictions").combine_chunks().field("future").field("content").to_pylist()
+    content = predicted["predictions"].struct.field("future").struct.field("content").to_list()
     return float(np.abs(np.asarray(content) - future).mean())
 
 
