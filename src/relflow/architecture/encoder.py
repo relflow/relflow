@@ -59,7 +59,7 @@ def stepwise(parcels: list[Parcel], *, order: dict[Address, int] | None = None) 
         order: Field order by origin, as for ``sequence``.
 
     Returns:
-        An int64 tensor of shape ``(*instance dims, L)``.
+        An int64 tensor of shape ``(*instance dims, L)``; padding tokens take the last row.
     """
     if order is not None:
         parcels = sorted(parcels, key=lambda parcel: order[parcel.origin])
@@ -68,7 +68,9 @@ def stepwise(parcels: list[Parcel], *, order: dict[Address, int] | None = None) 
     for parcel, width in zip(parcels, widths, strict=True):
         count = parcel.payload.shape[-2]
         tokens = torch.arange(count, device=width.device).expand(*width.shape[:-1], count).contiguous()
-        steps.append(torch.searchsorted(width.cumsum(dim=-1).contiguous(), tokens, right=True))
+        rows = torch.searchsorted(width.cumsum(dim=-1).contiguous(), tokens, right=True)
+        # Padding tokens lie past the last item and would index beyond the rows; they join the last row.
+        steps.append(rows.clamp_max(max(width.shape[-1] - 1, 0)))
     return torch.cat(steps, dim=-1)
 
 

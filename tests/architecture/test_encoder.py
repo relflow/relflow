@@ -839,3 +839,26 @@ def test_contrastive_keeps_the_full_record_for_parent_and_decoders():
     for address in left:
         for key, value in right[address].payload.items(include_nested=True, leaves_only=True):
             torch.testing.assert_close(left[address].payload[key], value, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [{}, {"direction": rf.Direction.causal}, {"grain": rf.Steps(), "inner": rf.Branch(length=3, z=rf.Number)}],
+    ids=["default", "causal", "steps"],
+)
+def test_time_index_survives_variable_width_unreduced_child(options):
+    torch.manual_seed(0)
+    model = rf.Model.xs(
+        d_model=8,
+        embed=True,
+        events=rf.Branch(
+            length=4,
+            time_index="t",
+            t=rf.Number,
+            x=rf.Number,
+            **{"inner": rf.Branch(length=3, reduction=None, z=rf.Number)} | options,
+        ),
+    )
+    row = {"events": [{"t": 0.0, "x": 1.0, "inner": [{"z": 1.0}]}, {"t": 1.0, "x": 2.0, "inner": []}]}
+    other = {"events": [{"t": 0.0, "x": 1.0, "inner": [{"z": 1.0}, {"z": 2.0}, {"z": 3.0}]}]}
+    assert len(model.predict([row, other])) == 2
