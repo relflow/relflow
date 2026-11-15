@@ -182,6 +182,11 @@ The validation rows come only from the official training split. Keep the officia
 test split for final scoring. `accuracy` compares predicted labels with those
 held-out answers.
 
+When the classes differ only in the order of the rows, the label loss can stay at
+chance for a few hundred optimizer steps before it falls. Judge such a model on a
+budget of optimizer steps, not epochs: with a small dataset, use a smaller
+`batch_size` or more epochs.
+
 `direction=` is accepted on child branches only; the generated root has no
 direction. Use `rf.Direction.causal` with forecasting.
 
