@@ -60,4 +60,7 @@ rules: Mapping[Direction, Rule] = MappingProxyType({Direction.bidirectional: bid
 # Whether a rule reads step ids; the encoder computes them only when one does.
 stepped: Mapping[Direction, bool] = MappingProxyType({Direction.bidirectional: False, Direction.causal: True})
 
-__all__ = ["Rule", "bidirectional", "causal", "rules", "stepped"]
+# Whether a rule on one token per row is the lower-triangular mask that SDPA builds with ``is_causal``.
+triangular: Mapping[Direction, bool] = MappingProxyType({Direction.bidirectional: False, Direction.causal: True})
+
+__all__ = ["Rule", "bidirectional", "causal", "rules", "stepped", "triangular"]

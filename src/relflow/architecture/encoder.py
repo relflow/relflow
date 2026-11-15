@@ -169,6 +169,8 @@ class RotaryTransformerEncoderLayer(torch.nn.Module):
         packing: Packed | None = None,
         positions: torch.Tensor | None = None,
         allowed: torch.Tensor | None = None,
+        mask: torch.Tensor | None = None,
+        causal: bool = False,
     ) -> torch.Tensor:
         if packing is not None:
             return block(self, inputs, packing)
@@ -186,6 +188,8 @@ class RotaryTransformerEncoderLayer(torch.nn.Module):
             normed,
             key_padding_mask=None if present is None else ~present,
             allowed=allowed,
+            mask=mask,
+            causal=causal,
             query_positions=positions,
             key_positions=positions,
         )

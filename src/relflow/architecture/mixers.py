@@ -10,8 +10,10 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, override
 import torch
 
 from relflow.architecture.convolution import ConvMixer
-from relflow.architecture.direction import Rule, bidirectional
+from relflow.architecture.attention import merge
+from relflow.architecture.direction import Rule, bidirectional, triangular
 from relflow.architecture.packed import Packed
+from relflow.structs.grain import Steps
 from relflow.structs.mixer import Conv, Transformer
 
 if TYPE_CHECKING:
@@ -54,11 +56,15 @@ class TransformerMixer(torch.nn.ModuleList):
 
     Attributes:
         rule: Direction rule fixed when the branch is built.
+        triangular: Whether the rule on one token per row is a plain causal mask, which SDPA builds itself.
     """
 
-    def __init__(self, layers: Iterable[torch.nn.Module] = (), *, rule: Rule = bidirectional) -> None:
+    def __init__(
+        self, layers: Iterable[torch.nn.Module] = (), *, rule: Rule = bidirectional, triangular: bool = False
+    ) -> None:
         super().__init__(layers)
         self.rule = rule
+        self.triangular = triangular
 
     @override
     def forward(
@@ -84,10 +90,17 @@ class TransformerMixer(torch.nn.ModuleList):
         Returns:
             Mixed tokens shaped like ``tokens``.
         """
-        allowed = None if packing is not None else self.rule(steps=steps)
+        extra: dict[str, Any] = {}
+        # Padding-free rows need no explicit mask; the check is one host sync per forward.
+        if packing is None and self.triangular and present is not None and bool(present.all()):
+            present, extra = None, {"causal": True}
+        elif packing is None:
+            allowed = self.rule(steps=steps)
+            # Built once here: every layer would otherwise rebuild the same (rows, L, L) mask.
+            extra = {} if allowed is None else {"mask": merge(allowed, present=cast(torch.Tensor, present))}
         for layer in cast("Iterable[RotaryTransformerEncoderLayer]", self):
-            # Layers see the keyword only when it applies, so replaced layers keep their arity.
-            apply = layer if allowed is None else partial(layer, allowed=allowed)
+            # Layers see the keywords only when they apply, so replaced layers keep their arity.
+            apply = partial(layer, **extra) if extra else layer
             if packing is not None:
                 tokens = layer(tokens, present=present, packing=packing)
             elif positions is not None:
@@ -125,7 +138,9 @@ def transformer(mixer: Transformer, *, branch: Branch, schema: Schema, dropout: 
         )
         for _ in range(branch.n_layers)
     ]
-    return TransformerMixer(layers, rule=rule)
+    return TransformerMixer(
+        layers, rule=rule, triangular=triangular[branch.direction] and isinstance(branch.grain, Steps)
+    )
 
 
 def idle(mixer: None, *, branch: Branch, schema: Schema, dropout: float, rule: Rule) -> TransformerMixer:
