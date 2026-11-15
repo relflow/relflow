@@ -877,3 +877,48 @@ def test_missing_covariate_column_still_raises_at_prediction():
     records = pa.array([[{"value": 1.0}]], type=pa.list_(pa.struct([("value", pa.float64())])))
     with pytest.raises(MissingFieldError):
         predicted(records)
+
+
+def pristine_calls(monkeypatch) -> list[str]:
+    from relflow.data import ragged
+
+    calls: list[str] = []
+    original = ragged.pristine
+
+    def counted(layout, request, **kwargs):
+        calls.append(str(request.address))
+        return original(layout, request, **kwargs)
+
+    monkeypatch.setattr(ragged, "pristine", counted)
+    return calls
+
+
+@pytest.mark.parametrize("future", [0, 2], ids=["slots", "cropped-future"])
+def test_forecast_prediction_tensorizes_each_leaf_once_and_matches_a_direct_read(monkeypatch, future):
+    from relflow.data.ragged import pristine
+
+    known = ("temperature",) if future else ()
+    context = rows(4)
+    trailing = [{"value": None, "load": 1.0, "temperature": 5.0}] * future
+    records = pa.array([[*context, *trailing]], type=pa.list_(ITEM))
+    calls = pristine_calls(monkeypatch)
+    forecast = rf.Forecast(horizon=2, targets=("value",), known=known)
+    branch = rf.Branch(
+        length=3,
+        overflow="tail",
+        direction=rf.Direction.causal,
+        mask=rf.Mask(select=forecast, reconstruct=True),
+        value=rf.Number,
+        load=rf.Number,
+        temperature=rf.Number,
+    )
+    schema = Schema.from_tree(d_model=8, n_layers=1, n_heads=2, events=branch)
+    resolved = coalesce(pa.table({"events": records}), schema, rf.Strata.predict)
+    assert sorted(calls) == ["/events/load", "/events/temperature", "/events/value"]
+    layout = resolved.layouts["/events"]
+    for name in ("value", "temperature"):
+        address = Address(f"/events/{name}")
+        direct = pristine(layout, schema.requests[address], ancestors=(resolved.layouts["/"],))
+        carried = resolved.fields[address].pristine
+        assert carried.state.equals(direct.state) and carried.placement.equals(direct.placement)
+        assert carried.values.equals(direct.values) and carried.shape == direct.shape

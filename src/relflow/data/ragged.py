@@ -7,7 +7,7 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import cache
 from types import MappingProxyType
@@ -881,8 +881,12 @@ def project(
     *,
     strata: Strata,
     ancestors: tuple[Layout, ...],
+    carried: Mapping[Address, RaggedField] = MappingProxyType({}),
 ) -> Projection:
-    """Build pristine values and resolved input/objective routing for one leaf."""
+    """Build pristine values and resolved input/objective routing for one leaf.
+
+    ``carried`` holds fields already read for this layout, which are not read again.
+    """
 
     allow_vacancy = strata == Strata.predict and any(
         decision.mask.reconstruct and decision.target and decision.mask.query is None and decision.mask.rate is None
@@ -899,7 +903,11 @@ def project(
         field = vacancy(layout)
     else:
         try:
-            field = pristine(layout, request, ancestors=ancestors)
+            field = (
+                carried[request.address]
+                if request.address in carried
+                else pristine(layout, request, ancestors=ancestors)
+            )
         except MissingFieldError:
             from relflow.tensorfields.base import TENSORFIELDS
 
@@ -973,7 +981,7 @@ def moments(layout: Layout, branch: Branch, *, ancestors: tuple[Layout, ...]) ->
     )
 
 
-def observations(layout: Layout, *, branch: Branch, ancestors: tuple[Layout, ...]) -> np.ndarray:
+def observations(layout: Layout, *, branch: Branch, fetch: Callable[[Leaf], RaggedField]) -> np.ndarray:
     """Mark the records of a Forecast branch where some target child holds a value.
 
     Covariates and the ``time_index`` child are never read, so a row whose targets are
@@ -986,7 +994,7 @@ def observations(layout: Layout, *, branch: Branch, ancestors: tuple[Layout, ...
         if child.name not in forecast.targets:
             continue
         try:
-            field = pristine(layout, cast(Leaf, child), ancestors=ancestors)
+            field = fetch(cast(Leaf, child))
         except MissingFieldError:
             continue
         observed |= field.state.to_numpy(zero_copy_only=False)[layout.placement] == Tokens.valued.value
@@ -997,7 +1005,7 @@ def check_known_future(
     layout: Layout,
     *,
     branch: Branch,
-    ancestors: tuple[Layout, ...],
+    fetch: Callable[[Leaf], RaggedField],
     future: np.ndarray,
 ) -> None:
     """Reject future rows whose declared known covariates are null."""
@@ -1006,7 +1014,7 @@ def check_known_future(
     positions = layout.placement[future]
     children = {cast(Leaf, child).name: cast(Leaf, child) for child in branch.fields if isinstance(child, Leaf)}
     for name in cast(Forecast, branch.forecast).known:
-        field = pristine(layout, children[name], ancestors=ancestors)
+        field = fetch(children[name])
         missing = field.state.to_numpy(zero_copy_only=False)[positions] == Tokens.null.value
         if not missing.any():
             continue
@@ -1019,13 +1027,54 @@ def check_known_future(
         raise ValueError(message)
 
 
-def extend(layout: Layout, *, branch: Branch, strata: Strata, ancestors: tuple[Layout, ...]) -> Layout:
+def carry(
+    field: RaggedField,
+    *,
+    layout: Layout,
+    kept: np.ndarray,
+    moved: np.ndarray,
+    slots: np.ndarray,
+    shape: tuple[int, ...],
+) -> RaggedField:
+    """Move a field read from ``layout`` onto the rows ``extend`` kept, with null states in the added slots.
+
+    Args:
+        field: Field of ``layout``.
+        layout: Layout the field was read from.
+        kept: Boolean per record of ``layout`` that survives.
+        moved: New placement of every kept record.
+        slots: Placement of the added slots.
+        shape: Shape of the extended layout.
+
+    Returns:
+        The field a direct read of the extended layout would produce.
+    """
+    before = field.state.to_numpy(zero_copy_only=False)
+    valued = before[layout.placement] == Tokens.valued.value
+    state = np.full(math.prod(shape), Tokens.padded.value, dtype=np.int8)
+    state[moved] = before[layout.placement[kept]]
+    state[slots] = Tokens.null.value
+    return RaggedField(
+        values=retain(field.values, kept[valued]),
+        state=pa.array(state, type=pa.int8()),
+        placement=pa.array(moved[valued[kept]], type=pa.int64()),
+        shape=shape,
+    )
+
+
+def extend(
+    layout: Layout, *, branch: Branch, strata: Strata, ancestors: tuple[Layout, ...]
+) -> tuple[Layout, Mapping[Address, RaggedField]]:
     """Add the forecast rows a Forecast branch predicts, at prediction only.
 
     A future row is a trailing row whose targets are all null. A record with future
     rows keeps at most ``length`` context rows before them; any other non-empty record
     keeps its last ``length`` rows and gains ``horizon`` slots that carry only the
     ``time_index`` value.
+
+    Returns:
+        The extended layout and the target and known covariate fields already read for it,
+        so the caller does not tensorize them again.
 
     Raises:
         ValueError: A record has more future rows than the horizon, or needs slots
@@ -1034,10 +1083,17 @@ def extend(layout: Layout, *, branch: Branch, strata: Strata, ancestors: tuple[L
 
     forecast = branch.forecast
     if strata != Strata.predict or forecast is None:
-        return layout
+        return layout, MappingProxyType({})
     extent = layout.shape[-1]
     if not len(layout.placement):
-        return dataclasses.replace(layout, future=np.zeros(0, dtype=bool))
+        return dataclasses.replace(layout, future=np.zeros(0, dtype=bool)), MappingProxyType({})
+
+    fetched: dict[Address, RaggedField] = {}
+
+    def fetch(leaf: Leaf) -> RaggedField:
+        if leaf.address not in fetched:
+            fetched[leaf.address] = pristine(layout, leaf, ancestors=ancestors)
+        return fetched[leaf.address]
 
     horizon = forecast.horizon
     parents = math.prod(layout.shape[:-1])
@@ -1045,9 +1101,9 @@ def extend(layout: Layout, *, branch: Branch, strata: Strata, ancestors: tuple[L
     future = trailing(
         layout.placement,
         extent=extent,
-        observed=observations(layout, branch=branch, ancestors=ancestors),
+        observed=observations(layout, branch=branch, fetch=fetch),
     )
-    check_known_future(layout, branch=branch, ancestors=ancestors, future=future)
+    check_known_future(layout, branch=branch, fetch=fetch, future=future)
     counts = np.bincount(parent[future], minlength=parents)
     if (counts > horizon).any():
         index = int(np.flatnonzero(counts > horizon)[0])
@@ -1098,15 +1154,20 @@ def extend(layout: Layout, *, branch: Branch, strata: Strata, ancestors: tuple[L
     placement = np.concatenate((kept_placement, slot_placement))
     order = np.argsort(placement, kind="stable")
     combined = pa.concat_arrays([pc.filter(records, pa.array(kept)), slots])
+    shape = (*layout.shape[:-1], new_extent)
+    carried = {
+        address: carry(field, layout=layout, kept=kept, moved=kept_placement, slots=slot_placement, shape=shape)
+        for address, field in fetched.items()
+    }
     return Layout(
         records=pc.take(combined, pa.array(order, type=pa.int64())),
         placement=placement[order],
-        shape=(*layout.shape[:-1], new_extent),
+        shape=shape,
         lengths=new_lengths.reshape(layout.lengths.shape),
         present=layout.present,
         valid=layout.valid,
         future=np.concatenate((future[kept], np.ones(len(slot_placement), dtype=bool)))[order],
-    )
+    ), MappingProxyType(carried)
 
 
 def coalesce(
@@ -1149,6 +1210,7 @@ def coalesce(
         layout: Layout,
         inherited: tuple[Decision, ...],
         ancestors: tuple[Layout, ...],
+        carried: Mapping[Address, RaggedField],
     ) -> None:
         layouts[branch.address] = layout
         if branch.time_index is not None:
@@ -1158,7 +1220,7 @@ def coalesce(
                 child = cast("Branch", child)
                 active = descendants.get(child.address, [])
                 if active:
-                    child_layout = extend(
+                    child_layout, child_carried = extend(
                         descend(layout, child, active[0], strata=strata, seed=seed, epoch=epoch, ordinal=ordinal),
                         branch=child,
                         strata=strata,
@@ -1172,7 +1234,7 @@ def coalesce(
                         ordinal=ordinal,
                         strata=strata,
                     )
-                    visit(child, child_layout, (*inherited, *decisions), (*ancestors, layout))
+                    visit(child, child_layout, (*inherited, *decisions), (*ancestors, layout), child_carried)
             elif child.address in schema.active_requests:
                 decisions = resolve(
                     layout,
@@ -1187,11 +1249,13 @@ def coalesce(
                     for decision in (*inherited, *decisions)
                     if decision.hides(child.address)
                 )
-                fields[child.address] = project(layout, child, scoped, strata=strata, ancestors=ancestors)
+                fields[child.address] = project(
+                    layout, child, scoped, strata=strata, ancestors=ancestors, carried=carried
+                )
 
     layout = root(values, schema.fields)
     decisions = resolve(layout, schema.fields, seed=seed, epoch=epoch, ordinal=ordinal, strata=strata)
-    visit(schema.fields, layout, decisions, ())
+    visit(schema.fields, layout, decisions, (), MappingProxyType({}))
 
     return Coalesced(fields=fields, layouts=layouts, times=times)
 
