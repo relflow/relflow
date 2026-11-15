@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 import torch
 import torch.nn.functional as F
 
-from relflow.architecture.anchor import anchor
 from relflow.architecture.blocks import norm
 from relflow.architecture.packed import Packed, attend
 from relflow.architecture.rotary import RotaryEmbedding
@@ -124,7 +123,8 @@ class RotaryMultiheadAttention(torch.nn.Module):
             if key.shape[1] == 0:
                 output = query.new_zeros(query.shape)
                 if torch.is_grad_enabled():
-                    output = output + anchor(self)
+                    for parameter in self.parameters():
+                        output = output + parameter.sum() * 0.0
                 return output
 
             # Give an empty row one safe placeholder key for SDPA, then erase its
