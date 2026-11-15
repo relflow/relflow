@@ -193,22 +193,18 @@ def dense(values: pa.Array, *, request: Request, address: Address) -> np.ndarray
     if not (
         pa.types.is_list(values.type) or pa.types.is_large_list(values.type) or pa.types.is_fixed_size_list(values.type)
     ):
-        message = f"vector field at '{address}' expects an Arrow list, got {values.type}"
-        raise ValueError(message)
+        raise ValueError(f"vector field at '{address}' expects an Arrow list, got {values.type}")
     lengths = pc.list_value_length(values)
     # pyarrow-stubs incorrectly decorates not_equal as an overload.
     if pc.any(pc.not_equal(lengths, request.n_dim)).as_py():  # pyrefly: ignore [no-matching-overload]
-        message = f"vector field at '{address}' expects every value to have length {request.n_dim}"
-        raise ValueError(message)
+        raise ValueError(f"vector field at '{address}' expects every value to have length {request.n_dim}")
     flattened = pc.list_flatten(values)
     if flattened.null_count and request.readout.strict:
-        message = f"vector field at '{address}' expects non-null numeric elements"
-        raise ValueError(message)
+        raise ValueError(f"vector field at '{address}' expects non-null numeric elements")
     try:
         flattened = pc.cast(flattened, pa.float32(), safe=True)
     except pa.ArrowException as error:
-        message = f"vector field at '{address}' could not be converted to float32"
-        raise ValueError(message) from error
+        raise ValueError(f"vector field at '{address}' could not be converted to float32") from error
     return flattened.to_numpy(zero_copy_only=False).reshape(-1, request.n_dim).copy()
 
 
