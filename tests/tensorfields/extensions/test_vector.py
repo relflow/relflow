@@ -1,3 +1,4 @@
+import math
 from types import SimpleNamespace
 
 import pyarrow as pa
@@ -533,3 +534,42 @@ def test_vector_tuple_loss_counts_only_observed_channels():
     prediction = Prediction(address=ADDRESS, payload=payload)
     output = loss(module=DummyModule(schema), prediction=prediction, batch=field, strata=Strata.train)
     assert torch.isclose(output, torch.tensor(4.0, dtype=output.dtype))  # l2 of +2 over 3 observed channels
+
+
+def test_channels_select_keeps_vectors_two_dimensional_with_observed_weights():
+    predicted = torch.zeros(2, 2)
+    observed = torch.tensor([[1.0, math.nan], [3.0, 4.0]])
+    selected = rf.Vector(query=("a", "b")).readout.select(predicted, observed)
+    assert selected.predicted.shape == selected.observed.shape == (2, 2)
+    assert selected.weight is not None and selected.weight.tolist() == [[1.0, 0.0], [1.0, 1.0]]
+    assert torch.isfinite(selected.observed).all()
+
+
+@pytest.mark.parametrize("objective", ["l1", "l2"])
+def test_fully_valid_tuple_query_loss_matches_the_single_query_loss(objective):
+    losses = []
+    for options in ({"n_dim": 2}, {"query": ("a", "b")}):
+        schema = rf.Schema.from_tree(
+            d_model=16,
+            n_layers=1,
+            n_heads=4,
+            items=rf.Branch(length=2, embedding=rf.Vector(objective=objective, mask=True, **options)),
+        )
+        rows = arrow_table([{"items": [{"a": 1.0, "b": 2.0}, {"a": 3.0, "b": 5.0}]}])
+        if "n_dim" in options:
+            rows = arrow_table([{"items": [{"embedding": [1.0, 2.0]}, {"embedding": [3.0, 5.0]}]}])
+        field = tensorize(
+            TensorField,
+            coalesce(rows, schema=schema, strata=Strata.train).fields[ADDRESS],
+            TENSORFIELDS["vector"],
+            address=ADDRESS,
+            schema=schema,
+            strata=Strata.train,
+        )
+        logits = torch.full((*field.state.shape, len(Tokens)), -50.0)
+        logits.scatter_(-1, field.targets[TensorKey.state].unsqueeze(-1), 50.0)
+        predicted = field.targets[TensorKey.content] + torch.tensor([1.0, 3.0])
+        payload = TensorDict({TensorKey.state: logits, TensorKey.content: predicted}, batch_size=field.state.shape[:1])
+        prediction = Prediction(address=ADDRESS, payload=payload)
+        losses.append(loss(module=DummyModule(schema), prediction=prediction, batch=field, strata=Strata.train))
+    torch.testing.assert_close(losses[0], losses[1])

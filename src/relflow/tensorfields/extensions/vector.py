@@ -5,7 +5,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import InitVar
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Unpack, cast, override
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, NamedTuple, Unpack, cast, override
 
 import numpy as np
 import pyarrow as pa
@@ -47,12 +47,20 @@ class Objective(enum.StrEnum):
     l1 = "l1"
     l2 = "l2"
 
-    def loss(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        """Mean error over every coordinate of the selected vectors."""
-        if self == Objective.l1:
-            return torch.nn.functional.l1_loss(input=inputs, target=targets)
+    def loss(self, inputs: torch.Tensor, targets: torch.Tensor, weight: torch.Tensor | None = None) -> torch.Tensor:
+        """Mean error over every coordinate of the selected vectors, or over those with weight one."""
+        error = torch.nn.functional.l1_loss if self == Objective.l1 else torch.nn.functional.mse_loss
+        if weight is None:
+            return error(input=inputs, target=targets)
+        return (error(input=inputs, target=targets, reduction="none") * weight).sum() / weight.sum()
 
-        return torch.nn.functional.mse_loss(input=inputs, target=targets)
+
+class Selected(NamedTuple):
+    """Coordinates that enter the loss, shaped ``(vectors, n_dim)``, with an optional 0/1 weight per coordinate."""
+
+    predicted: torch.Tensor
+    observed: torch.Tensor
+    weight: torch.Tensor | None = None
 
 
 class Joint:
@@ -72,9 +80,9 @@ class Joint:
         """Embedder input for the coordinates."""
         return content
 
-    def select(self, predicted: torch.Tensor, observed: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def select(self, predicted: torch.Tensor, observed: torch.Tensor) -> Selected:
         """Coordinates that enter the loss."""
-        return predicted, observed
+        return Selected(predicted, observed)
 
 
 class Channels(Joint):
@@ -97,9 +105,9 @@ class Channels(Joint):
         return torch.cat([content.masked_fill(~observed, 0.0), observed.to(content.dtype)], dim=-1)
 
     @override
-    def select(self, predicted: torch.Tensor, observed: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def select(self, predicted: torch.Tensor, observed: torch.Tensor) -> Selected:
         finite = torch.isfinite(observed)
-        return predicted[finite], observed[finite]
+        return Selected(predicted, observed.masked_fill(~finite, 0.0), finite.to(predicted.dtype))
 
 
 READOUTS: Mapping[bool, Joint] = MappingProxyType({False: Joint(), True: Channels()})
@@ -375,14 +383,14 @@ def loss(
     valued = trainable & state_targets.eq(Tokens.valued.value)
     inputs = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(-1, request.n_dim)
     targets = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(-1, request.n_dim)
-    predicted, observed = request.readout.select(inputs[valued], targets[valued])
-    if predicted.numel():
+    predicted, observed, weight = request.readout.select(inputs[valued], targets[valued])
+    if predicted.numel() and (weight is None or weight.any()):
         output += module.track(
             (address, strata, Metric.loss, TensorKey.content),
-            value=request.objective.loss(inputs=predicted, targets=observed),
+            value=request.objective.loss(inputs=predicted, targets=observed, weight=weight),
         )
 
-    decoder.metrics.record(module, strata, *errors(predicted, observed))
+    decoder.metrics.record(module, strata, *errors(predicted, observed, weight))
 
     return output
 

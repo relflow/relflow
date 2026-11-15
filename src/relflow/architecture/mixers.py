@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, override
 
 import torch
 
-from relflow.architecture.convolution import ConvMixer
 from relflow.architecture.attention import merge
+from relflow.architecture.convolution import ConvMixer
 from relflow.architecture.direction import Rule, bidirectional, triangular
 from relflow.architecture.packed import Packed
 from relflow.structs.grain import Steps
