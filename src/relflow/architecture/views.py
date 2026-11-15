@@ -37,12 +37,15 @@ def crops(
     starts: torch.Tensor,
     extent: int,
     width: int,
+    hidden: torch.Tensor | None = None,
 ) -> Views:
     """Gather two crops of `width` rows from every record.
 
     Every row owns the same number of tokens, padding included, so a crop has a
     fixed shape whatever the record length. Slots past the end of the record
-    repeat the last token and are marked absent.
+    repeat the last token and are marked absent. A hidden source row has its
+    tokens zeroed in that crop only; the tokens stay present, so the crop keeps
+    its shape and the row still pairs with the other crop.
 
     Args:
         tokens: Branch tokens, `(rows, L, d_model)`.
@@ -52,6 +55,7 @@ def crops(
         starts: First row of each crop, `(rows, 2)`.
         extent: Rows of the branch axis.
         width: Rows per crop.
+        hidden: Source rows each crop hides, `(rows, 2, extent)`, or `None` to hide nothing.
 
     Returns:
         The stacked crops.
@@ -77,11 +81,17 @@ def crops(
     def take(values: torch.Tensor) -> torch.Tensor:
         return values.repeat(2, *[1] * (values.ndim - 1)).gather(1, source)
 
+    gathered = tokens.repeat(2, 1, 1).gather(1, source.unsqueeze(-1).expand(-1, -1, depth))
+    cut_steps = take(steps)
+    if hidden is not None:
+        drawn = hidden.transpose(0, 1).reshape(2 * rows, extent)
+        gathered = gathered.masked_fill(drawn.gather(1, cut_steps.clamp(max=extent - 1)).unsqueeze(-1), 0.0)
+
     return Views(
-        tokens=tokens.repeat(2, 1, 1).gather(1, source.unsqueeze(-1).expand(-1, -1, depth)),
+        tokens=gathered,
         present=take(present) & inside,
         positions=None if positions is None else take(positions),
-        steps=take(steps),
+        steps=cut_steps,
         shift=starts[:, 1] - starts[:, 0],
         width=width,
     )

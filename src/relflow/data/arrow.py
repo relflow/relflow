@@ -25,6 +25,9 @@ class Geometry(TensorClass):
     instance, and is ``None`` for a branch without ``time_index``. ``views``
     holds the first row of the two contrastive crops of every instance, as int64
     of shape ``(*parent shape, 2)``, and is ``None`` outside contrastive training.
+    ``hidden`` marks the source rows each crop hides, as bool of shape
+    ``(*parent shape, 2, extent)``, and is ``None`` outside contrastive training
+    or when the crops hide nothing.
     """
 
     lengths: torch.Tensor
@@ -33,6 +36,7 @@ class Geometry(TensorClass):
     slots: torch.Tensor
     times: torch.Tensor | None = None
     views: torch.Tensor | None = None
+    hidden: torch.Tensor | None = None
 
 
 def retention(names: Retain, *, context: str = "retain") -> Retain:

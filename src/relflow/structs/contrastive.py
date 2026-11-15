@@ -17,6 +17,12 @@ class Crops(pydantic.BaseModel):
     ``overlap`` is the fraction of rows the two windows share. A record shorter
     than ``width`` is masked instead of padded with data, so every window has
     the same shape.
+
+    ``mask`` is the probability that a step is hidden in a view. Each view draws
+    its own steps, so the two views differ even on the rows they share and
+    matching rows cannot be found by comparing raw inputs. A hidden step keeps
+    its place and position but its token is zeroed, before the mixer. Use ``0.0``
+    to keep every step.
     """
 
     model_config = pydantic.ConfigDict(extra="forbid", frozen=True)
@@ -24,6 +30,16 @@ class Crops(pydantic.BaseModel):
     type: Literal["crops"] = "crops"
     width: StrictPositiveInt = 128
     overlap: Annotated[float, pydantic.Field(gt=0.0, lt=1.0)] = 0.5
+    mask: float = 0.5
+
+    @pydantic.field_validator("mask")
+    @classmethod
+    def check_mask(cls, value: float) -> float:
+        """Require a hiding probability in ``[0, 1)``."""
+        if not 0.0 <= value < 1.0:
+            message = f"Crops mask must be in [0, 1), got {value}; use 0.0 to keep every step"
+            raise ValueError(message)
+        return value
 
 
 class Hierarchical(pydantic.BaseModel):
