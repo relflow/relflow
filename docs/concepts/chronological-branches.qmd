@@ -127,9 +127,8 @@ The reduction that summarizes the branch for its parent is not restricted. It
 reads every row token, so a causal classifier still uses the whole series, but
 only through row tokens that each saw their own past. Bidirectional lets every
 row token read the whole series before the reduction, which is why it stays the
-recommendation for classification and other whole-series targets. The gap can
-be small: on a synthetic two-class task a causal branch scored 0.995 against
-1.000 bidirectional.
+recommendation for classification and other whole-series targets. On easy
+tasks the gap can be small.
 :::
 
 UCR [GunPoint](https://timeseriesclassification.com/description.php?Dataset=GunPoint)
