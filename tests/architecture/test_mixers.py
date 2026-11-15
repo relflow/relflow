@@ -62,3 +62,68 @@ def test_transformer_mixer_matches_layer_by_layer_application():
         expected = layer(expected, present=present)
     actual = mixer(tokens, present=present, positions=None, steps=None, packing=None)
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+
+def causal_stack(*, steps_grain: bool) -> TransformerMixer:
+    torch.manual_seed(0)
+    schema = rf.Schema.from_tree(
+        d_model=8,
+        n_layers=3,
+        n_heads=2,
+        events=rf.Branch(
+            length=4,
+            n_layers=3,
+            grain=Steps() if steps_grain else rf.Coordinates(),
+            direction=rf.Direction.causal,
+            a=rf.Number,
+        ),
+    )
+    branch = schema.branches["/events"]
+    built = mixers[type(branch.mixer)](
+        branch.mixer, branch=branch, schema=schema, dropout=0.0, rule=rules[branch.direction]
+    )
+    assert len(built) == 3
+    return typing.cast(TransformerMixer, built).eval()
+
+
+def test_causal_stack_builds_the_visibility_mask_once_for_all_layers(monkeypatch):
+    from relflow.architecture import attention
+
+    calls = []
+    original = attention.visible
+    monkeypatch.setattr(attention, "visible", lambda *args, **kwargs: calls.append(1) or original(*args, **kwargs))
+    stack = causal_stack(steps_grain=False)
+    tokens = torch.randn(2, 6, 8)
+    present = torch.ones(2, 6, dtype=torch.bool)
+    stack(tokens, present=present, positions=None, steps=torch.tensor([0, 0, 1, 1, 2, 2]).expand(2, 6), packing=None)
+    assert len(calls) == 1
+
+
+def test_causal_steps_fast_path_matches_the_explicit_mask(monkeypatch):
+    from relflow.architecture import attention
+
+    explicit = causal_stack(steps_grain=False)
+    fast = causal_stack(steps_grain=True)
+    fast.load_state_dict(explicit.state_dict())
+    calls = []
+    original = attention.visible
+    monkeypatch.setattr(attention, "visible", lambda *args, **kwargs: calls.append(1) or original(*args, **kwargs))
+    tokens = torch.randn(2, 5, 8, generator=torch.Generator().manual_seed(1))
+    present = torch.ones(2, 5, dtype=torch.bool)
+    steps = torch.arange(5).expand(2, 5)
+    kwargs = {"present": present, "positions": None, "steps": steps, "packing": None}
+    expected = explicit(tokens, **kwargs)
+    calls.clear()
+    actual = fast(tokens, **kwargs)
+    torch.testing.assert_close(actual, expected, atol=1e-5, rtol=1e-5)
+    assert not calls
+
+
+def test_causal_steps_with_padding_keeps_the_explicit_mask():
+    explicit = causal_stack(steps_grain=False)
+    fast = causal_stack(steps_grain=True)
+    fast.load_state_dict(explicit.state_dict())
+    tokens = torch.randn(2, 5, 8, generator=torch.Generator().manual_seed(2))
+    present = torch.tensor([[True] * 5, [True, True, False, True, False]])
+    kwargs = {"present": present, "positions": None, "steps": torch.arange(5).expand(2, 5), "packing": None}
+    torch.testing.assert_close(fast(tokens, **kwargs), explicit(tokens, **kwargs), atol=1e-5, rtol=1e-5)

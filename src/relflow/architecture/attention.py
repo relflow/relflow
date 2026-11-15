@@ -21,6 +21,21 @@ def visible(allowed: torch.Tensor, *, padding: torch.Tensor | None) -> torch.Ten
     return mask | (~mask.any(dim=-1, keepdim=True) & torch.eye(size, dtype=torch.bool, device=mask.device))
 
 
+def merge(allowed: torch.Tensor, *, present: torch.Tensor) -> torch.Tensor:
+    """Build the ``(B, 1, L, L)`` attention mask of ``allowed`` and token presence once for every layer.
+
+    Args:
+        allowed: Boolean ``(B, L, L)`` visibility from a direction rule.
+        present: Boolean ``(B, L)`` token presence.
+
+    Returns:
+        The mask ``forward`` would build itself; an empty row keeps its first key visible.
+    """
+    live = present.clone()
+    live[:, 0] |= ~present.any(dim=1)
+    return visible(allowed, padding=live[:, None, None, :])
+
+
 class RotaryMultiheadAttention(torch.nn.Module):
     """Project and attend dense sequences or preselected live tokens."""
 
@@ -85,6 +100,8 @@ class RotaryMultiheadAttention(torch.nn.Module):
         key_padding_mask: torch.Tensor | None = None,
         *,
         allowed: torch.Tensor | None = None,
+        mask: torch.Tensor | None = None,
+        causal: bool = False,
         packing: Packed | None = None,
         query_positions: torch.Tensor | None = None,
         key_positions: torch.Tensor | None = None,
@@ -119,7 +136,9 @@ class RotaryMultiheadAttention(torch.nn.Module):
             attn_mask[:, 0] |= ~active
             attn_mask = attn_mask[:, None, None, :]
 
-        if allowed is not None:
+        if mask is not None:
+            attn_mask = mask
+        elif allowed is not None:
             attn_mask = visible(allowed, padding=attn_mask)
 
         q, k, v = self.project(query, key, value)
@@ -134,6 +153,7 @@ class RotaryMultiheadAttention(torch.nn.Module):
             attn_mask=attn_mask,
             dropout_p=self.dropout_p if self.training else 0.0,
             enable_gqa=self.n_kv_heads != self.nhead,
+            **({"is_causal": True} if causal else {}),
         )
         context = context.transpose(1, 2).reshape(query.shape[0], query.shape[1], self.d_model)
 
