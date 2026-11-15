@@ -39,10 +39,11 @@ def test_advance_adds_steps_in_the_column_type():
     assert advance(pa.array([7.0, 7.0]), steps=np.array([1, 2]), step=0.5).to_pylist() == [7.5, 8.0]
     start = datetime(2026, 1, 1, tzinfo=UTC)
     stamps = pa.array([start, start], type=pa.timestamp("us", tz="UTC"))
-    assert advance(stamps, steps=np.array([1, 2]), step=timedelta(hours=1)).to_pylist() == [
-        start + timedelta(hours=1),
-        start + timedelta(hours=2),
-    ]
+    moved = advance(stamps, steps=np.array([1, 2]), step=timedelta(hours=1))
+    # Compare epoch microseconds: zone-aware to_pylist needs tzdata, which Windows lacks.
+    hour = 3_600_000_000
+    assert moved.type == stamps.type
+    assert moved.cast(pa.int64()).to_pylist() == (stamps.cast(pa.int64()).to_numpy() + [hour, 2 * hour]).tolist()
     with pytest.raises(pa.ArrowInvalid):
         advance(pa.array([1, 2], type=pa.int64()), steps=np.array([1, 1]), step=0.5)
 
