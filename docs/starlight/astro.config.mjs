@@ -46,6 +46,7 @@ export default defineConfig({
             { label: 'What is relflow?', slug: '' },
             { label: 'Featureless modeling', slug: 'featureless' },
             { label: 'Modular modeling', slug: 'modular' },
+            { label: 'Model Scaling', slug: 'scaling' },
             { label: 'Installation', slug: 'installation' },
           ],
         },

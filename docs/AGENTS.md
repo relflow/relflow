@@ -18,7 +18,7 @@ experiments, their protocol, runtime tests, and recorded results live in
 - Pages live in `starlight/src/content/docs/`; reusable components and example
   contracts live beside them under `src/`. The Starlight guide owns the six-case
   selector, dataset explorer, prediction tree, contextual code notes, consistent
-  datatype sections, Pine Needle palette, spacing, and accessible interactions.
+  leaf type sections, Pine Needle palette, spacing, and accessible interactions.
 - Use Node 24 (minimum 22.23.4) for the locked Astro/Starlight environment.
   `make prepare` installs both static tool environments. `make check` validates
   source contracts, types, formatting, and static publisher/Evidence tooling.

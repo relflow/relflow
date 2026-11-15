@@ -1,0 +1,12 @@
+---
+title: Model Scaling
+description: Scale across your data, during training, and deployed at inference.
+---
+
+relflow models are built for scale. We scale across your data, during training, and deployed at inference.
+
+relflow models, internally, are fully backed by pyArrow with [distributed data loaders](/advanced/distributed-data/) for parallelized ingestion and data transformations. Additionally, the extensible contract relflow supports for [data loaders](/advanced/custom-data-modules/) allows for users to bring their own cloud storage connections to avoid streaming data from disk during training.
+
+relflow model training runtimes are incredibly parameter efficient as a result of dynamic and targeted model architecture. SOTA Relflow models on RelArena use approximately one million trainable parameters - [less than 1% of competing models](/benchmarks/#count-the-whole-model). Further, with native support for [DDP strategies](/advanced/distributed-data/), relflow models are able to maximize throughput across several GPUs in parallel during model training.
+
+Finally, relflow models scale at inference in 3 key ways. Horizontal scaling of relflow models with perfectly deterministic behavior at inference. Batch inference with, again, incredibly parameter-efficient models and no gradient accumulation enables massive batch handling at lightning fast speeds. Stillmore, minibatch & Apache IPC support for [real time inference](/advanced/inference-and-deployment/) has empirically proven 50K observations per second on a humble L4 GPU even with multiple branches.

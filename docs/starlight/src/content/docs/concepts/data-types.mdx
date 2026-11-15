@@ -4,54 +4,49 @@ description: Understand how typed leaves bind to source data, represent values, 
 ---
 
 import ConceptPage from '../../../components/ConceptPage.astro';
+import RegistryContracts from '../../../components/RegistryContracts.astro';
+import StateToken from '../../../components/StateToken.astro';
 import { dataTypes } from '../../../data/concepts/data-types';
 
-Values enter a relflow model through the leaves of its tree. Each leaf type
-defines how those values are read and represented. For supported
-targets, the type defines its learning objective and any returned prediction.
+All input data for relflow models is represented as the leaf of a model tree. As mentioned under [Modular Modeling](/modular/), relflow defines a plug-in registry for each data leaf; this registry enforces fulfillment of a contract in which:
 
-relflow provides built-in types for numbers, labels, text, sets, vectors, and
-other values. A leaf can represent a collection such as a set or vector;
-[branches](/concepts/branches/) organize collections of related records.
+- Raw data, in its nominal state, is passed to the leaf
+- A vector of standard dimensionality (as determined by the model’s initialization) is emitted by the leaf and passed along the leaf’s heritage path.
 
-## Binding data to leaves
+## State vs Content
 
-By default, a leaf reads the key with its name from the enclosing record.
-A `balance` leaf inside an `accounts` branch reads `balance` from each account.
-The branch reads the collection named `accounts` from its parent record.
+Every leaf promises to emit one vector per observation, an embedding which is learned to best represent the ingressed data. The standard relflow data leafs draw a distinction between two aspects of the observed data: state, and content.
 
-For a different source structure, supply an explicit `query`. A path such as
-`query="statement.balance"` selects the balance within that account's statement.
-The path is relative to the enclosing record; the leaf keeps its declared name
-in the model schema.
+The state of a data observation must be one of five distinct values, given in the below table:
 
-Your data source or [preprocessor](/advanced/data-modules/) prepares the records,
-including any joins, filters, sorting, and application-specific derived values.
-The schema describes how the resulting values bind to model fields.
-
-## What a leaf type provides
-
-| Part | Role |
+| State | Meaning |
 | --- | --- |
-| **Parameters** | Declare the field's type, configuration, source query, and input or target role. Find public options and extension contracts in the [API map](/api-map/). |
-| **Embedder** | Represents input values as vectors that the model can combine with context from related fields and records. |
-| **Decoder and writer** | Turn model context into the type's supported predictions and write their corresponding output fields. A Boolean target returns a probability; a Number target returns a numeric estimate. |
-| **Loss** | Measures the difference between a reconstruction and its known training answer, using the objective defined by the type. |
+| <StateToken state="valued" /> | The data observed does exist, and is available for modeling purposes |
+| <StateToken state="null" /> | The data observed does not exist (is an instance of `None`) due to missingness |
+| <StateToken state="padded" /> | The data observed does not exist. |
+| <StateToken state="masked" /> | The data observed does exist, but is intentionally hidden for model training / reconstruction |
+| <StateToken state="other" /> | The data observed is not `None`, but it also is not of a usable value for modeling (this may be a `np.NaN` value for numerical representation, or a Vector with infinite values) |
 
-Declaring a type describes how to handle a value. Configure `mask=True` to make
-a field a supervised target. Each type's reference page describes its supported
-objectives and returned outputs.
+This state value is incorporated into the same embedding which a relflow leaf emits as the data observation’s representation. The decoder of each leaf, unless otherwise stated, will decode the learned embedding into
 
-## Extend the built-in types
+1. A discrete `state` value, penalized by cross-entropy
+2. A representation of the original content, penalized with unique loss functions for each leaf.
 
-Leaf types are registered as self-contained plugins. Each extension defines its
-data contract and the representations, objectives, and outputs it supports.
-You can define your own types for use within your organization or contribute
-them to the open-source library.
+## Registry Contracts
 
-[Custom leaf types](/advanced/custom-data-types/) explains the registration
-protocol. The individual **Leaf Types** reference pages cover accepted inputs,
-returned outputs, options, and limitations for the built-in types.
+The registry defines the following components. Output and Write are optional.
+
+<RegistryContracts />
+
+These signatures show the underlying interfaces. Implementations use relflow’s extension base classes and registration decorators.
+
+We defer discussion on how users may hook into, overwrite certain components for existing data types, and even create unique data types with custom handling, to the [BYOD section](/advanced/custom-data-types/).
+
+## Leaf Addresses
+
+The heritage path of a data leaf describes where each leaf exists in relation to all, if any, parent branches. This heritage path is represented in a 1:1 manner with standard file-path addresses, where the root directory of a file-path represents a model object.
+
+Critically, the default heritage path for a leaf is the assumed query path under which the leaf’s data exists, relative to the tensordict in which data is passed from a data loader (and optional pre-processor) into the model.
 
 ## Continuous data
 

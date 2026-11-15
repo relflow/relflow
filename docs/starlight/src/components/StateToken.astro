@@ -1,0 +1,72 @@
+---
+interface Props {
+  state: 'valued' | 'null' | 'padded' | 'masked' | 'other';
+}
+
+const { state } = Astro.props;
+const label = state[0].toUpperCase() + state.slice(1);
+---
+
+<span class="state-token" data-state={state}>{label}</span>
+
+<style>
+  .state-token {
+    --token-ink: var(--sl-color-text-accent);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45em;
+    padding: 0.24em 0.7em;
+    border: 1px solid color-mix(in srgb, var(--token-ink) 30%, var(--rf-border));
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--token-ink) 8%, var(--sl-color-bg));
+    color: var(--token-ink);
+    font-family: var(--sl-font-mono);
+    font-size: 0.8rem;
+    font-weight: 600;
+    line-height: 1.4;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+
+  .state-token::before {
+    content: '';
+    box-sizing: border-box;
+    width: 0.45em;
+    height: 0.45em;
+    flex: 0 0 auto;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  [data-state='null'],
+  [data-state='padded'] {
+    --token-ink: var(--rf-muted);
+  }
+
+  [data-state='null']::before,
+  [data-state='padded']::before {
+    background: transparent;
+  }
+
+  [data-state='padded'] {
+    border-style: dashed;
+    background: transparent;
+  }
+
+  [data-state='masked'] {
+    --token-ink: #e4b85f;
+  }
+
+  [data-state='other'] {
+    --token-ink: #e9a28c;
+  }
+
+  :global(:root[data-theme='light']) [data-state='masked'] {
+    --token-ink: #855414;
+  }
+
+  :global(:root[data-theme='light']) [data-state='other'] {
+    --token-ink: #9e4935;
+  }
+</style>
