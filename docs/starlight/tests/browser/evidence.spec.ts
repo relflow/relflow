@@ -121,22 +121,35 @@ test('leaf tags filter the catalog, preserve shareable URLs, and reveal linked p
 test('the primary chart and nested investigation disclosures work without JavaScript', async ({
   browser,
   baseURL,
+  request,
 }) => {
+  const response = await request.get('/evidence/selected.json');
+  expect(response.ok()).toBe(true);
+  const publication = await response.json();
   const context = await browser.newContext({ javaScriptEnabled: false });
   try {
     const page = await context.newPage();
     await page.goto(`${baseURL}/evidence/P021/`);
-    await expect(page.locator('[data-primary-comparison] [data-value]')).toHaveCount(2);
-    await expect(page.locator('.report-details')).not.toHaveAttribute('open');
-    await page.locator('.report-details > summary').click();
-    await page.locator('.raw-record > summary').click();
-    const raw = JSON.parse((await page.locator('[data-json-record] code').textContent())!);
-    const values = await page
-      .locator('[data-primary-comparison] [data-value]')
-      .evaluateAll((elements) =>
-        elements.map((element) => Number(element.getAttribute('data-value'))),
+    if (publication.results.P021) {
+      await expect(page.locator('[data-primary-comparison] [data-value]')).toHaveCount(2);
+      await expect(page.locator('.report-details')).not.toHaveAttribute('open');
+      await page.locator('.report-details > summary').click();
+      await page.locator('.raw-record > summary').click();
+      const raw = JSON.parse((await page.locator('[data-json-record] code').textContent())!);
+      const values = await page
+        .locator('[data-primary-comparison] [data-value]')
+        .evaluateAll((elements) =>
+          elements.map((element) => Number(element.getAttribute('data-value'))),
+        );
+      expect(values).toEqual([raw.metrics.category_oov_auc, raw.metrics.hash_auc]);
+    } else {
+      await expect(page.locator('.run-status')).toHaveText('No selected run');
+      await expect(page.locator('[data-primary-comparison]')).toContainText(
+        'No measured comparison',
       );
-    expect(values).toEqual([raw.metrics.category_oov_auc, raw.metrics.hash_auc]);
+      await expect(page.locator('[data-primary-comparison] [data-value]')).toHaveCount(0);
+      await expect(page.locator('[data-json-record]')).toHaveCount(0);
+    }
     await page.goto(`${baseURL}/evidence/`);
     expect(await page.locator('[data-evidence-entry]').count()).toBeGreaterThan(0);
     await expect(page.locator('.library-controls')).toBeHidden();

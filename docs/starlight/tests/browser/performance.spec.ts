@@ -176,21 +176,35 @@ test('compact Evidence JSON remains complete, copyable, and readable without Jav
   baseURL,
 }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const publication = await context.request.get('/evidence/selected.json');
+  expect(publication.ok()).toBe(true);
+  const selected = await publication.json();
+  const expected = selected.results.P047;
   const response = await context.request.get('/evidence/records/P047.json');
-  expect(response.ok()).toBe(true);
-  const expected = await response.json();
+  expect(response.status()).toBe(expected ? 200 : 404);
   await page.goto('/evidence/P047/');
-  await page.locator('.report-details > summary').click();
-  await page.locator('.raw-record > summary').click();
-  const record = page.locator('[data-json-record]');
-  expect(JSON.parse((await record.locator('code').textContent())!)).toEqual(expected);
-  expect(await record.locator('*').count()).toBeLessThan(12);
-  await record.getByRole('button', { name: 'Copy JSON', exact: true }).click();
-  expect(JSON.parse(await page.evaluate(() => navigator.clipboard.readText()))).toEqual(expected);
+  if (expected) {
+    expect(await response.json()).toEqual(expected);
+    await page.locator('.report-details > summary').click();
+    await page.locator('.raw-record > summary').click();
+    const record = page.locator('[data-json-record]');
+    expect(JSON.parse((await record.locator('code').textContent())!)).toEqual(expected);
+    expect(await record.locator('*').count()).toBeLessThan(12);
+    await record.getByRole('button', { name: 'Copy JSON', exact: true }).click();
+    expect(JSON.parse(await page.evaluate(() => navigator.clipboard.readText()))).toEqual(expected);
+  } else {
+    await expect(page.locator('.run-status')).toHaveText('No selected run');
+    await expect(page.locator('[data-json-record]')).toHaveCount(0);
+  }
   const withoutScripts = await browser.newContext({ javaScriptEnabled: false });
   try {
     const fallback = await withoutScripts.newPage();
     await fallback.goto(`${baseURL}/evidence/P047/`);
+    if (!expected) {
+      await expect(fallback.locator('.run-status')).toHaveText('No selected run');
+      await expect(fallback.locator('[data-json-record]')).toHaveCount(0);
+      return;
+    }
     await fallback.locator('.report-details > summary').click();
     await fallback.locator('.raw-record > summary').click();
     await expect(fallback.locator('[data-json-record] pre')).toBeVisible();
