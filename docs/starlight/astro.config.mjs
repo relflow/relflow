@@ -27,9 +27,11 @@ export default defineConfig({
         alt: '',
       },
       components: {
+        PageFrame: './src/components/PageFrame.astro',
         Sidebar: './src/components/Sidebar.astro',
         EditLink: './src/components/SourceLink.astro',
       },
+      head: [{ tag: 'meta', attrs: { name: 'readthedocs-addons-api-version', content: '1' } }],
       ...(revision
         ? {
             editLink: {

@@ -63,8 +63,13 @@ Use full version URLs when linking publicly, such as
 provided. GitHub's reusable `docs.yml` validates the same site and uploads a
 review artifact; it does not deploy production.
 
-Manage the repository connection, active versions, pull request builds, native
-version flyout, and Addons in the
+The searchable version dialog reads active versions and their URLs from the
+[Read the Docs Addons event](https://docs.readthedocs.com/platform/latest/flyout-menu.html#custom-event-integration).
+There is no release list to maintain in the site. The native flyout stays available
+until the custom dialog receives usable host data. The local development server
+uses clearly labeled illustrative versions; the hosted dialog waits for Read the Docs data.
+
+Manage the repository connection, active versions, pull request builds, and Addons in the
 [Read the Docs project settings](https://app.readthedocs.org/dashboard/relflow/edit/).
 Release activation and the default version are hosting settings, separate from
 the repository configuration. Gold ad-free assignment is managed through the

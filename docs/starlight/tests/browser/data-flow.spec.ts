@@ -36,19 +36,17 @@ async function phase(root: Locator, caseId: string, mode: FlowMode, id: FlowStag
   );
 }
 
-test('all six cases expose seven ordered stages per path and navigate forward, backward, and into another batch', async ({
-  page,
-}) => {
-  test.setTimeout(90_000);
-  await page.goto('/concepts/data-flow/?case=tickets&mode=predict#flow-tickets-load');
-  const root = page.locator('[data-data-flow]');
-  await expect(root).toHaveAttribute('data-flow-ready', '');
-  expect(caseIds).toHaveLength(6);
-  await expect(root.locator('[data-case-select]')).toHaveCount(6);
-
-  for (const caseId of caseIds) {
-    await root.locator(`[data-case-select="${caseId}"]`).click();
-    for (const mode of ['predict', 'train'] as const) {
+for (const caseId of caseIds) {
+  for (const mode of ['predict', 'train'] as const) {
+    test(`${caseId} ${mode}: seven ordered stages navigate forward, backward, and into another batch`, async ({
+      page,
+    }) => {
+      await page.goto('/concepts/data-flow/?case=tickets&mode=predict#flow-tickets-load');
+      const root = page.locator('[data-data-flow]');
+      await expect(root).toHaveAttribute('data-flow-ready', '');
+      expect(caseIds).toHaveLength(6);
+      await expect(root.locator('[data-case-select]')).toHaveCount(6);
+      await root.locator(`[data-case-select="${caseId}"]`).click();
       const path = flowPaths[mode];
       await root.locator(`[data-flow-mode-select="${mode}"]`).click();
       await phase(root, caseId, mode, 'load');
@@ -87,9 +85,9 @@ test('all six cases expose seven ordered stages per path and navigate forward, b
       await restart.click();
       await phase(root, caseId, mode, 'load');
       await expect(stage(root, caseId, 'load')).toHaveJSProperty('open', true);
-    }
+    });
   }
-});
+}
 
 test('deep links, browser history, mode changes, and case changes preserve the requested flow position', async ({
   page,

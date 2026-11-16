@@ -1,0 +1,68 @@
+---
+import { versions } from '../versions/sample';
+import '../versions/style.css';
+
+// Only the local development server supplies illustrative versions.
+const sample = import.meta.env.DEV
+  ? {
+      current: 'preview',
+      versions: versions.map((version) => ({
+        id: version.id,
+        label: version.label,
+        detail: version.detail,
+        badge: version.badge,
+        url: `?version=${version.id}`,
+      })),
+    }
+  : undefined;
+---
+
+<aside
+  class="rf-versions not-content"
+  aria-label="Documentation version"
+  data-version-switcher
+  data-version-sample={sample && JSON.stringify(sample)}
+  hidden
+>
+  <button
+    type="button"
+    class="rf-versions-trigger"
+    data-version-launch
+    aria-haspopup="dialog"
+    aria-controls="rf-versions-dialog"
+  >
+    <span aria-hidden="true">⌘</span>
+    <span data-version-current>Documentation version</span>
+    <span aria-hidden="true">⌄</span>
+  </button>
+  <dialog id="rf-versions-dialog" aria-labelledby="rf-versions-title">
+    <header class="rf-versions-heading">
+      <div>
+        <h2 id="rf-versions-title">Switch documentation</h2>
+        <p>Choose the release you are working with.</p>
+      </div>
+      <form method="dialog"><button aria-label="Close version picker">×</button></form>
+    </header>
+    <label class="rf-versions-search">
+      <span class="sr-only">Find a version</span>
+      <input type="search" placeholder="Find a version…" autocomplete="off" data-version-search />
+    </label>
+    <nav aria-label="Documentation versions" data-version-list></nav>
+    <p class="rf-versions-empty" data-version-empty hidden>No versions match your search.</p>
+    <footer>
+      <span data-version-provider>Hosted on Read the Docs</span>
+      <span><kbd>Esc</kbd> to close</span>
+    </footer>
+  </dialog>
+  <template data-version-row>
+    <a>
+      <span class="rf-versions-copy"><strong></strong><small></small></span>
+      <span class="rf-versions-badge" data-version-badge></span>
+      <span class="rf-versions-check" aria-hidden="true">✓</span>
+    </a>
+  </template>
+</aside>
+
+<script>
+  import '../versions/client';
+</script>
