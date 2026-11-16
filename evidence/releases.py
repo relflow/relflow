@@ -8,7 +8,7 @@ from pathlib import Path
 
 VERSION = re.compile(r"[0-9]+(?:\.[0-9]+)*(?:(?:a|b|rc)[0-9]+)?(?:\.post[0-9]+)?(?:\.dev[0-9]+)?")
 MINIMUM = (0, 5)
-BASELINE = "db4b9c14bed7921cde9bf3c8ddfeb828745b106b"
+BASELINE = "b868c450249de1c68c843506dca512bce7a6b333"
 LEGACY = {
     "publication": "publication.json",
     "reports": "evidence-reports.tar.gz",
