@@ -39,7 +39,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
-          ref: '9251126e0059a0da30539778a382cfab7793142f'
+          ref: 'de18256bbbe034c7ab9c05640fb10fec167da4eb'
           path: executor
           fetch-depth: 0
           persist-credentials: false
@@ -116,7 +116,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/evidence-build-cache
-          key: evidence-runtime-${{ runner.os }}-${{ runner.arch }}-9251126e0059a0da30539778a382cfab7793142f-${{ hashFiles('inputs/requirements.txt') }}
+          key: evidence-runtime-${{ runner.os }}-${{ runner.arch }}-de18256bbbe034c7ab9c05640fb10fec167da4eb-${{ hashFiles('inputs/requirements.txt') }}
       - name: Build the shared CPU dependency image
         id: runtime
         run: |
@@ -205,7 +205,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
-          ref: '9251126e0059a0da30539778a382cfab7793142f'
+          ref: 'de18256bbbe034c7ab9c05640fb10fec167da4eb'
           path: executor
           fetch-depth: 0
           persist-credentials: false
@@ -276,7 +276,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
-          ref: '9251126e0059a0da30539778a382cfab7793142f'
+          ref: 'de18256bbbe034c7ab9c05640fb10fec167da4eb'
           path: executor
           fetch-depth: 0
           persist-credentials: false
@@ -337,7 +337,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
-          ref: '9251126e0059a0da30539778a382cfab7793142f'
+          ref: 'de18256bbbe034c7ab9c05640fb10fec167da4eb'
           path: executor
           fetch-depth: 0
           persist-credentials: false
