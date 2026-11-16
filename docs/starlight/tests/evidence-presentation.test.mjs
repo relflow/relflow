@@ -1,10 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { evidenceEntries } from '../src/evidence/data.ts';
+import { fileURLToPath } from 'node:url';
 import { comparison } from '../src/evidence/comparison.ts';
 import { metricAt } from '../src/evidence/metrics.ts';
 import { experimentsForType, leafTypes, question, typesFor } from '../src/evidence/catalog.ts';
 import { status } from '../src/evidence/presentation.ts';
+
+// These unit fixtures exercise known measurements independently of a host's
+// selected (possibly pending) publication. Adapter tests cover that selection.
+const selectedPublication = process.env.RELFLOW_EVIDENCE_PUBLICATION;
+process.env.RELFLOW_EVIDENCE_PUBLICATION = fileURLToPath(
+  new URL('../../../evidence/results.json', import.meta.url),
+);
+const { evidenceEntries } = await import('../src/evidence/data.ts');
+if (selectedPublication === undefined) delete process.env.RELFLOW_EVIDENCE_PUBLICATION;
+else process.env.RELFLOW_EVIDENCE_PUBLICATION = selectedPublication;
 
 const entry = (id) => {
   const result = evidenceEntries.find((candidate) => candidate.id === id);
